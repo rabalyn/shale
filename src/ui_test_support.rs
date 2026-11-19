@@ -10,14 +10,19 @@ pub(crate) struct Headless {
     t: f64,
     /// the text painted in the last frame, and where
     pub text: Vec<(String, Pos2)>,
+    /// the filled rectangles painted in the last frame, with their fill
+    pub rects: Vec<(Rect, egui::Color32)>,
     /// the mouse cursor the last frame asked for
     pub cursor: egui::CursorIcon,
+    /// the size of the window, 1500 x 900 unless a test asks for another
+    size: Vec2,
 }
 
-fn collect_text(shape: &egui::Shape, out: &mut Vec<(String, Pos2)>) {
+fn collect_text(shape: &egui::Shape, out: &mut Vec<(String, Pos2)>, rects: &mut Vec<(Rect, egui::Color32)>) {
     match shape {
         egui::Shape::Text(t) => out.push((t.galley.text().to_string(), t.pos)),
-        egui::Shape::Vec(v) => v.iter().for_each(|s| collect_text(s, out)),
+        egui::Shape::Rect(r) if r.fill != egui::Color32::TRANSPARENT => rects.push((r.rect, r.fill)),
+        egui::Shape::Vec(v) => v.iter().for_each(|s| collect_text(s, out, rects)),
         _ => {}
     }
 }
@@ -26,7 +31,7 @@ impl Headless {
     pub fn new() -> Headless {
         let ctx = egui::Context::default();
         crate::theme::apply(&ctx);
-        Headless { ctx, t: 0.0, text: vec![], cursor: egui::CursorIcon::Default }
+        Headless { ctx, t: 0.0, text: vec![], rects: vec![], cursor: egui::CursorIcon::Default, size: Vec2::new(1500.0, 900.0) }
     }
 
     /// The egui context the frames run in (to set a drag-and-drop payload or a text selection the way a view does).
@@ -34,7 +39,12 @@ impl Headless {
         &self.ctx
     }
 
-    /// Run one frame of a 1500 x 900 window with these events.
+    /// A window of this size from the next frame on (a page that is longer than 900 points).
+    pub fn set_size(&mut self, size: Vec2) {
+        self.size = size;
+    }
+
+    /// Run one frame of the window (1500 x 900 unless `set_size` says otherwise) with these events.
     pub fn frame(&mut self, app: &mut ShaleApp, events: Vec<Event>) -> egui::FullOutput {
         self.frame_with(app, events, |_, _| {})
     }
@@ -43,13 +53,14 @@ impl Headless {
     /// window system, a scripted step) before it runs.
     pub fn frame_with(&mut self, app: &mut ShaleApp, events: Vec<Event>, adjust: impl FnOnce(&mut ShaleApp, &mut RawInput)) -> egui::FullOutput {
         self.t += 0.05;
-        let mut raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1500.0, 900.0))), time: Some(self.t), events, ..Default::default() };
+        let mut raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size)), time: Some(self.t), events, ..Default::default() };
         adjust(app, &mut raw);
         let mut out = self.ctx.run_ui(raw, |ui| app.run_frame(ui));
         out.textures_delta.clear();
         self.cursor = out.platform_output.cursor_icon;
         self.text.clear();
-        out.shapes.iter().for_each(|c| collect_text(&c.shape, &mut self.text));
+        self.rects.clear();
+        out.shapes.iter().for_each(|c| collect_text(&c.shape, &mut self.text, &mut self.rects));
         out
     }
 

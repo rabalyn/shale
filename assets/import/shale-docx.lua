@@ -24,6 +24,46 @@ local function span(s)
   return s.content
 end
 local function div(d) return d.content end
+-- a Word table of contents (IMP-043): pandoc flattens it to a short title paragraph followed by one paragraph per
+-- entry, each only a link to a `#` target (a heading's id or a `_Toc…` bookmark), optionally with the page number
+-- after it. Both exports make their own contents, so the run and its title go; this runs before `link` strips the links
+local function toc_entry(b, ids)
+  if b.t ~= 'Para' then return false end
+  local first = b.content[1]
+  if not first or first.t ~= 'Link' or first.target:sub(1, 1) ~= '#' then return false end
+  local target = first.target:sub(2)
+  if not (ids[target] or target:match('^_Toc')) then return false end
+  for i = 2, #b.content do
+    local t = b.content[i].t
+    if t ~= 'Str' and t ~= 'Space' and t ~= 'SoftBreak' then return false end
+  end
+  return true
+end
+-- the title of a contents: a short paragraph of plain words
+local function toc_title(b)
+  if b.t ~= 'Para' or #pandoc.utils.stringify(b) > 60 then return false end
+  for _, i in ipairs(b.content) do
+    if i.t ~= 'Str' and i.t ~= 'Space' then return false end
+  end
+  return true
+end
+local function toc(doc)
+  local ids = {}
+  doc:walk({Header = function(h) if h.identifier ~= '' then ids[h.identifier] = true end end})
+  local blocks, out, n = doc.blocks, pandoc.Blocks({}), 1
+  while n <= #blocks do
+    if toc_entry(blocks[n], ids) then
+      local stop = n
+      while blocks[stop + 1] and toc_entry(blocks[stop + 1], ids) do stop = stop + 1 end
+      if stop > n then
+        if #out > 0 and toc_title(out[#out]) then out:remove(#out) end
+        n = stop + 1
+      else out:insert(blocks[n]); n = n + 1 end
+    else out:insert(blocks[n]); n = n + 1 end
+  end
+  doc.blocks = out
+  return doc
+end
 -- links to places inside the Word file (table of contents, bookmarks) → their text
 local function link(l) if l.target:sub(1, 1) == '#' then return l.content end end
 -- math in Obsidian's form
@@ -91,8 +131,25 @@ local function deflist(dl)
   end
   return out
 end
+-- Word's Title and Subtitle styles end up in the metadata, which Markdown without a header drops:
+-- the title becomes a `#` heading and the subtitle an italic paragraph below it (author and date are left out)
+local function title(doc)
+  local front = pandoc.Blocks({})
+  local function inlines(m)
+    if pandoc.utils.type(m) == 'Inlines' then return m end
+    return pandoc.Inlines({pandoc.Str(pandoc.utils.stringify(m))})
+  end
+  if doc.meta.title then front:insert(pandoc.Header(1, inlines(doc.meta.title))) end
+  if doc.meta.subtitle then front:insert(pandoc.Para({pandoc.Emph(inlines(doc.meta.subtitle))})) end
+  if #front == 0 then return nil end
+  front:extend(doc.blocks)
+  doc.blocks = front
+  return doc
+end
 return {
   {Meta = function(m) if m['shale-media'] then media = pandoc.utils.stringify(m['shale-media']) end end},
+  {Pandoc = toc},
   {Figure = figure, Table = tbl, DefinitionList = deflist},
   {Image = image, Header = header, Span = span, SmallCaps = smallcaps, Div = div, Link = link, Math = math, LineBreak = linebreak},
+  {Pandoc = title},
 }

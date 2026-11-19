@@ -407,7 +407,7 @@ fn dialogs_export_writes_the_pdf_where_asked_and_says_when_it_cannot() {
     assert!(p.app.modal.is_none() && !p.dir.join("in-the-way/out.pdf").exists());
 }
 
-// spec: IMP-002
+// spec: IMP-002, IMP-056
 #[test]
 fn dialogs_import_makes_the_notes_and_stays_open_on_a_wrong_folder() {
     let mut p = P::new("import", &[]);
@@ -436,6 +436,10 @@ fn dialogs_import_makes_the_notes_and_stays_open_on_a_wrong_folder() {
     fill(&mut p, "folder", "Imported/Inbox");
     fill(&mut p, "tags", "from-outside");
     p.click(Show::Modals, "Import 2 items");
+    // two notes: the summary says what was made (IMP-056); Close ends it
+    assert!(matches!(&p.app.modal, Some(Modal::ImportSummary(s)) if s.notes.len() == 2));
+    assert!(p.shows(Show::Modals, "Imported 2 notes"));
+    p.click(Show::Modals, "Close");
     assert!(p.app.modal.is_none());
     let a = p.dir.join("Imported/Inbox");
     let mut made: Vec<String> = std::fs::read_dir(&a).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
@@ -453,7 +457,7 @@ fn dialogs_import_makes_the_notes_and_stays_open_on_a_wrong_folder() {
     assert!(p.app.tree.expanded.contains(Path::new("Imported/Inbox")) && p.app.tree.expanded.contains(Path::new("Imported")));
     let acts = p.actions();
     assert!(acts.iter().any(|a| matches!(a, Action::Rescan)));
-    assert_eq!(opened(&acts).len(), 1);
+    assert!(opened(&acts).is_empty(), "the summary opens nothing by itself");
     // Cancel makes nothing
     let (items, notes) = crate::import::items_from_paths(&[outside.join("More.md")]);
     p.app.open_import(items, notes, None);
@@ -759,6 +763,11 @@ fn nav_028_export_to_pdf_keeps_export_and_cancel_in_view_in_a_short_window() {
     assert!(p.app.modal.is_none() && !p.dir.join("exports/Ideas.pdf").exists());
 }
 
+/// The most that may lie between the last line of a dialog's content and its footer's buttons:
+/// the separator with an item gap (NAV-042) on each side, and the line gap of the last line. It
+/// was 20 points before the raster (4-point item gaps, no line gap).
+const FOOTER_GAP_MAX: f32 = 30.0;
+
 // spec: NAV-028
 #[test]
 fn nav_028_import_has_no_empty_band_between_its_content_and_its_footer() {
@@ -776,7 +785,7 @@ fn nav_028_import_has_no_empty_band_between_its_content_and_its_footer() {
         let last = p.find(Show::Modals, None, "Drag messages from your mail program, events from a calendar (also Shale's own), or any files onto the window to add more.");
         let import = p.find(Show::Modals, Some(Role::Button), "Import 1 item");
         let gap = import.top() - last.bottom();
-        assert!(gap < 20.0, "frame {n}: {gap} px between the last line {last:?} and the buttons {import:?}");
+        assert!(gap < FOOTER_GAP_MAX, "frame {n}: {gap} px between the last line {last:?} and the buttons {import:?}");
     }
     // and the content is not a pixel taller than the room it has, so it does not scroll (and
     // shows no scroll bar): a turn of the wheel moves nothing
@@ -825,7 +834,7 @@ fn nav_028_import_opened_again_with_one_item_has_no_empty_band_left_from_many() 
         let last = p.find(Show::Modals, None, last_line);
         let import = p.find(Show::Modals, Some(Role::Button), "Import 1 item");
         let gap = import.top() - last.bottom();
-        assert!(gap < 20.0, "frame {n}: {gap} px between the last line {last:?} and the buttons {import:?} (the dialog was {tall:?} with many lines)");
+        assert!(gap < FOOTER_GAP_MAX, "frame {n}: {gap} px between the last line {last:?} and the buttons {import:?} (the dialog was {tall:?} with many lines)");
     }
     let short = p.dialog_area("import");
     assert!(short.height() < tall.height() - 100.0, "{tall:?} with many lines, {short:?} with one");

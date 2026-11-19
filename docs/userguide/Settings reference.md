@@ -80,6 +80,8 @@ Inside each of these tables: `family` and `size`. The old `font_size` of earlier
 size of the two editor areas when you updated.
 | `line_numbers` | on | Editor, "Show line numbers in the editor" |
 | `date_prefix_new_notes` | on | Editor, "Date prefix for new notes": a note Shale makes (new note, red link, quick switcher, new drawing) is named `YYMMDD_name.md` with today's date; the title line shows the name without the prefix (see [[Editor]]) |
+| `properties_in_editor` | Folded | Appearance, "Properties in the editor": how the properties (the lines between the two `---` at the top of a note) show: `Folded` (one line), `Card` or `Raw` (all lines). In the editor `Folded` and `Card` start a note with its properties folded to a summary line, `Raw` opens it unfolded (see [[Editor]]) |
+| `properties_in_reader` | Card | Appearance, "Properties in the reading view": the same choice for the reading view; a card is made for the type of the note (see [[Reading view]]) |
 | `numbered_headings` | on | Editor, "Number headings": `#` and deeper show 1, 1.1, 1.2 before their text; a note's front matter `numbered-headings: true` or `false` overrides it for that note (see [[Notes and links]]) |
 | `format_toolbar` | on | Settings → Editor → Editing, "Show formatting toolbar above the text of a note" |
 | `toolbar_size` | 110 | Editing, "Toolbar button size": the size of the toolbar's buttons in percent, 80 to 200 in steps of 10 |
@@ -95,7 +97,7 @@ size of the two editor areas when you updated.
 | `normal_cursor_shape` | `block` (the same four words) | Vim, "Cursor in normal mode"; used only with Vim-style editing |
 | `cursor_blink` | on | Editor, "Blinking cursor"; off keeps the cursor steady |
 | `esc_cursor` | `stay` (`stay` or `step_back`; another word is `stay`) | Vim, "Esc from insert mode": where the cursor lands when Esc leaves insert mode, on the character after the typing or one back like Vim; used only with Vim-style editing |
-| `keybindings` | empty (the defaults of [[Keyboard shortcuts]]) | Settings → Keybindings; only the actions you changed are stored |
+| `keybindings` | empty (the defaults of [[Keyboard shortcuts]]; macOS has other defaults for some actions) | Settings → Keybindings; only the actions you changed are stored |
 
 ### Window and vault
 
@@ -131,6 +133,8 @@ size of the two editor areas when you updated.
 | `mail_mark_read_secs` | 2 (0 = at once) | Settings → Mail, and Accounts… |
 | `mail_undo_secs` | 10 (0 = send at once) | Accounts…, Sending, "Undo send" |
 | `mail_encryption_consent` | none (nothing is decrypted); the date you typed the consent sentence | Accounts…, Encryption |
+
+How long GnuPG keeps a passphrase is not a Shale setting: it is `default-cache-ttl` (default 600 seconds) and `max-cache-ttl` (default 7200) in GnuPG's `gpg-agent.conf`. Accounts…, Encryption, "Keeping the key unlocked" shows them and can change them with `gpgconf` (see Mail, "Keep the key unlocked").
 
 Fields of each entry of `mail_accounts`, all in Accounts… (passwords and secrets are in the
 system keyring, never in this file):
@@ -172,6 +176,7 @@ system keyring, never in this file):
 | Key | Default | Where |
 |---|---|---|
 | `docx_import` | off | Settings → Import, "Import Word files as notes (needs pandoc)"; global config |
+| `import_header_list` | off | Settings → Import, "Header list in the note body"; the start value of the box of the same name in the Import dialog |
 | `pandoc_path` | empty (search `PATH`, then `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, and on Windows `%LOCALAPPDATA%\Pandoc` and `%ProgramFiles%\Pandoc`) | Settings → Import, "pandoc program" |
 
 To set it up: install pandoc (Linux `sudo pacman -S pandoc-cli` or `sudo apt install pandoc`, macOS `brew install pandoc`,
@@ -196,6 +201,7 @@ The template sets of the vault ([[PDF]], "LaTeX export: template sets") have a s
 | `department` | empty (used when a note gives no department) | `settings.toml` of the set, the guided setup (Settings → LaTeX → Set up LaTeX export…) |
 | `author` | empty (used for the author field when a note gives none) | `settings.toml` of the set, the guided setup |
 | `logo` | none, set by Settings → LaTeX → Template sets → Choose logo… | `settings.toml` of the set |
+| `department_logo` | none, set by Settings → LaTeX → Template sets → Choose department logo… (cleared by Remove department logo); the logo of your department, shown under the TU logo | `settings.toml` of the set, the guided setup (logo step) |
 
 ### Data and troubleshooting ([[Data usage and caches]])
 
@@ -211,6 +217,14 @@ The template sets of the vault ([[PDF]], "LaTeX export: template sets") have a s
 | `caches.broken_days` | forever (damaged mail index copies) | same |
 | `caches.debug_log_mb` | 10 | same |
 | `caches.undo_days` | 30 (undo steps of notes, days) | same |
+
+## Properties of a note
+
+Some behaviour is decided by a note's own properties (front matter) instead of a setting; they are not stored in any settings file.
+`numbered-headings` (`true` or `false`) overrides the setting `numbered_headings` for the note ([[Notes and links]]). The PDF export reads
+`print-paper`, `print-margins`, `print-font`, `print-font-size`, `print-line-spacing`, `print-paragraph-spacing`, `print-align`,
+`print-heading-color`, `print-heading-weight`, `print-heading-sizes`, `print-break-before`, `print-title` and `print-toc` (any of them also switches on the plain paper look of the PDF); each has its values, default and effect in the table of
+[[PDF#Print properties of a note]]. Every one is optional, and a value that cannot be read is ignored.
 
 ## Vault settings (`<vault>/.shale/settings.json`)
 
@@ -237,9 +251,10 @@ Kept by Shale as you work, so a vault opens as you left it ([[Tabs]], [[Import]]
 | Key | Default | Meaning |
 |---|---|---|
 | `version` | 2 | format version |
-| `tabs` | empty | the open tabs in order; each has `tabs[].file` (a note or drawing, relative to the vault) or `tabs[].feed` (a Feeds tab) and `tabs[].pinned` |
+| `tabs` | empty | the open tabs in order; each has `tabs[].file` (a note or drawing, relative to the vault) or `tabs[].feed` (a Feeds tab) and `tabs[].pinned`; a note tab also has `tabs[].cursor` (the selection as two character positions, the moving end first), `tabs[].scroll` (the scroll offset in points) and `tabs[].reading` (true in the reading view), all left out when not set |
 | `panes` | empty | the panes side by side, left to right ([[Tabs]]); each has `panes[].tabs` (as `tabs`), `panes[].active` (the open tab, an index into its tabs) and `panes[].weight` (its share of the width, 1); a file without `panes` loads as one pane made of `tabs`. `tabs` is also written as the tabs of the first pane |
 | `focused_pane` | 0 | the index of the pane that had the focus |
+| `highlight_colour`, `font_colour` | not written until a colour is picked (neon yellow `#FFFF00`, red `#E53E3E`) | the current colour of the highlight and font colour buttons of the toolbar as `#RRGGBB` ([[Editor]]); an unreadable value gives the default |
 | `last_import_folder` | empty | the folder of the last import |
 | `last_social_folder` | empty (the first save asks for `Social`) | the folder of the last saved post |
 | `recent_tags` | empty | tags used for imports, most recent first |

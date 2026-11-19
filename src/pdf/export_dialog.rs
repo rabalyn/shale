@@ -67,6 +67,29 @@ impl ExportDialog {
     }
 }
 
+/// A size in millimetres without a needless `.0`.
+fn trim_mm(v: f32) -> String {
+    format!("{:.1}", v).trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// The box "Start each # heading on a new page" (PDF-021): on when the note or the dialog has a
+/// level, which it then shows (`#` for 1, `##` for 2, …) as a small field to change; ticking it
+/// on takes level 1. `enabled` false: shown off and greyed (a kind of document without them).
+pub(crate) fn break_before_box(ui: &mut Ui, opts: &mut ExportOptions, enabled: bool, rec: &mut dyn FnMut(&str, egui::Response) -> egui::Response) {
+    ui.horizontal(|ui| {
+        ui.add_enabled_ui(enabled, |ui| {
+            let mut on = enabled && opts.break_before > 0;
+            if rec("break-before", ui.checkbox(&mut on, "Start each # heading on a new page")).on_disabled_hover_text("This kind of document has no pages for headings to start").changed() {
+                opts.break_before = u8::from(on);
+            }
+            if on {
+                let level = egui::DragValue::new(&mut opts.break_before).range(1..=6).speed(0.05).custom_formatter(|n, _| format!("to {}", "#".repeat(n as usize)));
+                rec("break-before-level", ui.add(level)).on_hover_text("The deepest heading level that starts a page: # is 1, ## is 2, …");
+            }
+        });
+    });
+}
+
 pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
     d.rects.clear();
     let mut rects: Vec<(String, Rect)> = Vec::new();
@@ -110,10 +133,17 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
     egui::Grid::new("export-grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
         ui.label(muted("Paper"));
         let choices: &[Paper] = if d.drawing { &Paper::DRAWING } else { &Paper::NOTE };
-        let combo = egui::ComboBox::from_id_salt("export-paper").width(250.0).selected_text(d.opts.paper.label()).show_ui(ui, |ui| {
+        // a note can bring a paper size of its own (`print-paper: 215.9x279.4mm`, PDF-018)
+        let custom = d.opts.custom_mm.map(|[w, h]| format!("Custom ({} × {} mm)", trim_mm(w), trim_mm(h)));
+        let shown = custom.clone().unwrap_or_else(|| d.opts.paper.label().to_string());
+        let combo = egui::ComboBox::from_id_salt("export-paper").width(250.0).selected_text(shown).show_ui(ui, |ui| {
+            if let Some(label) = &custom {
+                rec("paper:custom", ui.selectable_label(true, label));
+            }
             for p in choices {
-                if rec(&format!("paper:{}", p.label()), ui.selectable_label(d.opts.paper == *p, p.label())).clicked() {
+                if rec(&format!("paper:{}", p.label()), ui.selectable_label(custom.is_none() && d.opts.paper == *p, p.label())).clicked() {
                     d.opts.paper = *p;
+                    d.opts.custom_mm = None;
                 }
             }
         });
@@ -135,7 +165,20 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
         ui.end_row();
 
         ui.label(muted(if fit { "Border" } else { "Margins" }));
-        rec("margin", ui.add(egui::Slider::new(&mut d.opts.margin_mm, 0.0..=40.0).suffix(" mm").step_by(1.0)));
+        if d.drawing {
+            let mut all = d.opts.margins_mm[0];
+            if rec("margin", ui.add(egui::Slider::new(&mut all, 0.0..=40.0).suffix(" mm").step_by(1.0))).changed() {
+                d.opts.margins_mm = [all; 4];
+            }
+        } else {
+            // top, right, bottom, left (PDF-018)
+            ui.horizontal(|ui| {
+                for (side, (key, name)) in ["top", "right", "bottom", "left"].iter().zip(["↑", "→", "↓", "←"]).enumerate().map(|(i, (k, n))| (i, (*k, n))) {
+                    ui.label(muted(name));
+                    rec(&format!("margin:{key}"), ui.add(egui::DragValue::new(&mut d.opts.margins_mm[side]).range(0.0..=100.0).speed(0.5).suffix(" mm")).on_hover_text(key));
+                }
+            });
+        }
         ui.end_row();
 
         if d.drawing {
@@ -162,14 +205,23 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
             ui.end_row();
         } else {
             ui.label(muted("Text size"));
-            rec("font", ui.add(egui::Slider::new(&mut d.opts.font_pt, 8.0..=18.0).suffix(" pt").step_by(0.5)));
+            rec("font", ui.add(egui::Slider::new(&mut d.opts.font_pt, 4.0..=72.0).suffix(" pt").step_by(0.5)));
             ui.end_row();
+            // what the note sets for itself and the export reads from it (PDF-013)
+            if let Some(label) = d.opts.text_properties_label().filter(|_| d.book.is_none()) {
+                ui.label(muted("From the note"));
+                ui.label(muted(&label));
+                ui.end_row();
+            }
             ui.label(muted("Include"));
             ui.vertical(|ui| {
                 rec("title", ui.checkbox(&mut d.opts.title, if d.book.is_some() { "Title page" } else { "The note's name as a title" }));
                 rec("toc", ui.checkbox(&mut d.opts.toc, "Table of contents"));
                 if d.book.is_some() {
                     rec("new-page-each", ui.checkbox(&mut d.opts.new_page_each, "Each note on a new page"));
+                }
+                if d.book.is_none() {
+                    break_before_box(ui, &mut d.opts, true, &mut rec);
                 }
                 rec("pagenumbers", ui.checkbox(&mut d.opts.page_numbers, "Page numbers"));
                 rec("embeds", ui.checkbox(&mut d.opts.embeds, "Embedded pictures, drawings, PDFs, videos and sounds"));
@@ -196,7 +248,7 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
 pub fn footer(ui: &mut Ui, d: &mut ExportDialog) -> DialogResult {
     let mut result = DialogResult::Open;
     if let Some(e) = &d.error {
-        ui.colored_label(theme::LINK_MISSING, e);
+        crate::theme::problem(ui, e);
     }
     ui.add_space(4.0);
     // LaTeX needs a TeX, a kind and no export running (TEX-016)
@@ -282,9 +334,9 @@ mod tests {
         assert!(d.opts.landscape);
         h.click(&mut d, "portrait");
         assert!(!d.opts.landscape);
-        let m = d.rects.iter().find(|r| r.0 == "margin").unwrap().1;
-        h.click_at(&mut d, Pos2::new(m.min.x + 3.0, m.center().y));
-        assert!(d.opts.margin_mm < 5.0, "margin slider: {}", d.opts.margin_mm);
+        for side in ["top", "right", "bottom", "left"] {
+            assert!(d.rects.iter().any(|r| r.0 == format!("margin:{side}")), "a margin field for the {side}");
+        }
         let f = d.rects.iter().find(|r| r.0 == "font").unwrap().1;
         h.click_at(&mut d, Pos2::new(f.min.x + 3.0, f.center().y));
         assert!(d.opts.font_pt < 9.0, "text size slider: {}", d.opts.font_pt);
@@ -324,7 +376,57 @@ mod tests {
         assert!(!d.opts.landscape);
         h.click(&mut d, "landscape");
         assert!(d.opts.landscape);
+        let m = d.rects.iter().find(|r| r.0 == "margin").unwrap().1;
+        h.click_at(&mut d, Pos2::new(m.min.x + 3.0, m.center().y));
+        assert!(d.opts.margins_mm.iter().all(|m| *m < 5.0), "border slider: {:?}", d.opts.margins_mm);
         h.click(&mut d, "export");
         assert_eq!(h.last, DialogResult::Export);
+    }
+
+    // spec: PDF-018, PDF-019
+    #[test]
+    fn the_dialog_shows_the_notes_paper_margins_size_and_contents_and_what_the_note_sets_for_itself_pdf_019() {
+        let text = "---\nprint-paper: 215.9x279.4mm\nprint-margins: 25.4 20 25.4 20\nprint-font-size: 12\nprint-toc: false\nprint-font: serif\nprint-align: justify\nprint-line-spacing: 1.15\n---\nx";
+        let opts = ExportOptions::for_note().with_note_properties(text);
+        let mut d = ExportDialog::new(PathBuf::from("x.md"), false, "X".into(), opts, PathBuf::from("/tmp/x.pdf"));
+        let mut h = H { ctx: egui::Context::default(), t: 0.0, last: DialogResult::Open };
+        h.frame(&mut d, vec![]);
+        h.frame(&mut d, vec![]);
+        assert!(!d.opts.toc && d.opts.font_pt == 12.0 && d.opts.margins_mm == [25.4, 20.0, 25.4, 20.0]);
+        assert_eq!(d.opts.custom_mm, Some([215.9, 279.4]));
+        // the custom paper is a choice of the list, and any other paper takes its place
+        h.click(&mut d, "paper");
+        assert!(d.rects.iter().any(|r| r.0 == "paper:custom"), "the custom size is listed");
+        h.click(&mut d, &format!("paper:{}", Paper::A5.label()));
+        assert_eq!((d.opts.paper, d.opts.custom_mm), (Paper::A5, None));
+        assert_eq!(d.opts.text_properties_label().as_deref(), Some("serif, justified, line spacing 1.15"));
+    }
+
+    // spec: PDF-021
+    #[test]
+    fn the_dialog_has_a_box_for_starting_headings_on_new_pages_filled_from_the_note_pdf_021() {
+        let has = |d: &ExportDialog, key: &str| d.rects.iter().any(|r| r.0 == key);
+        // a note without the property: off, no level shown; ticking it takes level 1
+        let (mut h, mut d) = setup(false);
+        assert_eq!(d.opts.break_before, 0);
+        assert!(has(&d, "break-before") && !has(&d, "break-before-level"));
+        h.click(&mut d, "break-before");
+        assert_eq!(d.opts.break_before, 1);
+        assert!(has(&d, "break-before-level"), "the level can be changed once it is on");
+        h.click(&mut d, "break-before");
+        assert_eq!(d.opts.break_before, 0);
+        // a note that says 2: the box is on with the level it says
+        let opts = ExportOptions::for_note().with_note_properties("---\nprint-break-before: 2\n---\nx");
+        let mut d = ExportDialog::new(PathBuf::from("x.md"), false, "X".into(), opts, PathBuf::from("/tmp/x.pdf"));
+        let mut h = H { ctx: egui::Context::default(), t: 0.0, last: DialogResult::Open };
+        h.frame(&mut d, vec![]);
+        h.frame(&mut d, vec![]);
+        assert_eq!(d.opts.break_before, 2);
+        assert!(has(&d, "break-before-level"));
+        h.click(&mut d, "break-before");
+        assert_eq!(d.opts.break_before, 0, "unticked: none");
+        // a drawing has no headings, a folder as a book has its own page rules (BOOK-005)
+        let (_, d) = setup(true);
+        assert!(!has(&d, "break-before"));
     }
 }

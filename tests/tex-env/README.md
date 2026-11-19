@@ -21,6 +21,10 @@ cargo test -- --ignored tex_import  # downloads tuda-ci from GitHub and CTAN (a 
 cargo test -- --ignored tex_install # not this image: installs TeX Live for real from the default repository (network, minutes)
 ```
 
+The `tex_env` tests share nothing (own work folders, a fresh container per compile), so they can run in parallel:
+`.forgejo/scripts/env-tests.sh run` (and so `scripts/land.sh`) uses four test threads, `SHALE_ENV_TESTS_TEX_THREADS`
+sets the number (the demos test starts four compiles itself; #370). `tex_import` and `tex_install` run with one thread.
+
 `exec` is how `src/pdf/tex/compile_tests.rs` runs Shale's compile code against the real LuaLaTeX: the test's `Engine`
 has a command prefix `sh tex-env.sh exec <work folder> --`, so `lualatex`, `biber` and `kpsewhich` run in the
 container with the work folder mounted at the same path (the program runs in the folder `exec` was started in when that is inside the mounted one, which docstrip in the template import tests needs); `TEXINPUTS`, `BIBINPUTS`, `openout_any` and

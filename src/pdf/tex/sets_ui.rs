@@ -8,7 +8,6 @@ use super::engine::{Engine, TexConfig};
 use super::import::{self, Request, What};
 use super::sets::{self, SetEntry, SetInfo, Source};
 use super::settings_ui::{Notice, TaskKind, TexState};
-use crate::app::muted;
 use crate::gitsync::TreeLock;
 use crate::theme;
 use eframe::egui::{self, Context, Ui};
@@ -32,13 +31,23 @@ pub enum Form {
     },
     /// A zip, a `.tar.gz` or a folder.
     File(String),
-    /// A logo file for this set.
+    /// A logo file for this set: the university's or the department's (TEX-035).
     Logo {
         set: String,
+        slot: Slot,
         path: String,
     },
     /// Asking before a set goes to the trash.
     Remove(String),
+}
+
+/// Which of a set's two logo slots a logo goes to (TEX-007, TEX-035).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Slot {
+    /// The university's logo, which some classes need (`logo_file`).
+    University,
+    /// The optional department logo every set has.
+    Department,
 }
 
 /// The state of the template sets part of the page.
@@ -88,11 +97,20 @@ impl SetsState {
         std::mem::take(&mut self.rescan)
     }
 
-    /// Copy a logo file into a set and read the sets and the vault again (also for a logo that
-    /// was dropped on the window, TEX-007).
-    pub(super) fn copy_logo_to(&mut self, set: &str, from: &Path) -> Notice {
+    /// Copy a logo file into a slot of a set and read the sets and the vault again (also for a logo
+    /// that was dropped on the window, TEX-007, TEX-035).
+    pub(super) fn copy_logo_to(&mut self, set: &str, slot: Slot, from: &Path) -> Notice {
         let entries = self.sets.clone().unwrap_or_default();
-        let notice = copy_logo(self, &entries, set, from);
+        let notice = copy_logo(self, &entries, set, slot, from);
+        self.dirty = true;
+        self.rescan = true;
+        notice
+    }
+
+    /// Move a set's department logo to the vault's trash and clear the setting (TEX-035).
+    pub(super) fn remove_department_logo_of(&mut self, set: &str) -> Notice {
+        let entries = self.sets.clone().unwrap_or_default();
+        let notice = remove_department_logo(self, &entries, set);
         self.dirty = true;
         self.rescan = true;
         notice
@@ -130,7 +148,7 @@ fn test_page_notice(engine: &Engine, set: &SetInfo) -> Notice {
     let Some((id, kind)) = sets::test_kind(set) else {
         return fail(format!("“{}” has no article kind to make a test page of (see its README)", set.meta.name), None);
     };
-    let source = sets::sample_document(kind, &set.settings);
+    let source = sets::sample_document(kind, &set.settings, set.department_logo.is_some());
     match sets::compile_with_set(engine, set, "test-page.tex", &source, &[], Options::default()) {
         Ok(out) => {
             let logo = if out.placeholder_logo { " It has a placeholder logo, so it is not CI-conformant." } else { "" };
@@ -158,7 +176,7 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig) {
     st.sets.refresh();
     ui.add_space(6.0);
     ui.label(egui::RichText::new("Template sets").color(theme::MUTED));
-    ui.label(muted("The templates a PDF is made with live in your vault, in templates/tex, so they are synced and backed up with your notes. TeX Live supplies only the engine and the generic packages.").size(12.0));
+    crate::theme::hint(ui, "The templates a PDF is made with live in your vault, in templates/tex, so they are synced and backed up with your notes. TeX Live supplies only the engine and the generic packages.");
     if st.sets.vault.is_none() {
         ui.label("Open a vault to import template sets.");
         return;
@@ -185,7 +203,7 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig) {
     let idle = st.task.is_none();
     let entries = st.sets.sets.clone().unwrap_or_default();
     if entries.is_empty() {
-        ui.label("There are no template sets in this vault yet.");
+        crate::theme::paragraph(ui, "There are no template sets in this vault yet.");
     }
     let mut action: Option<(String, SetAction)> = None;
     for e in &entries {
@@ -203,6 +221,8 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig) {
 enum SetAction {
     Update,
     ChooseLogo,
+    ChooseDepartmentLogo,
+    RemoveDepartmentLogo,
     TestPage,
     Remove,
 }
@@ -211,7 +231,7 @@ fn set_row(ui: &mut Ui, e: &SetEntry, idle: bool, action: &mut Option<(String, S
     match &e.info {
         Err(why) => {
             ui.label(egui::RichText::new(format!("templates/tex/{}", e.id)).strong());
-            ui.colored_label(theme::LINK_MISSING, format!("This folder cannot be read as a set: {why}"));
+            crate::theme::problem(ui, format!("This folder cannot be read as a set: {why}"));
             if ui.add_enabled(idle, egui::Button::new("Remove set…")).clicked() {
                 *action = Some((e.id.clone(), SetAction::Remove));
             }
@@ -219,7 +239,7 @@ fn set_row(ui: &mut Ui, e: &SetEntry, idle: bool, action: &mut Option<(String, S
         Ok(s) => {
             let version = s.meta.version.as_ref().map(|v| format!("  {v}")).unwrap_or_default();
             ui.label(egui::RichText::new(format!("{}{version}", s.meta.name)).strong());
-            ui.label(muted(format!("{} · imported {} · templates/tex/{}", s.meta.source.describe(), s.meta.imported_at, s.id)).size(12.0));
+            crate::theme::hint(ui, format!("{} · imported {} · templates/tex/{}", s.meta.source.describe(), s.meta.imported_at, s.id));
             let kinds = match s.kinds.len() {
                 0 => "no document kinds".to_string(),
                 1 => "1 document kind".to_string(),
@@ -227,25 +247,35 @@ fn set_row(ui: &mut Ui, e: &SetEntry, idle: bool, action: &mut Option<(String, S
             };
             ui.label(kinds);
             if s.kinds.is_empty() {
-                ui.label(muted("Shale has no document kinds for these templates: add them by hand in the folder kinds (see README.md in the set's folder).").size(12.0));
+                crate::theme::hint(ui, "Shale has no document kinds for these templates: add them by hand in the folder kinds (see README.md in the set's folder).");
             }
             let logo = s.logo.text();
             if s.logo == sets::LogoStatus::Missing {
-                ui.colored_label(theme::LINK_MISSING, logo);
+                crate::theme::problem(ui, logo);
             } else {
                 ui.label(logo);
             }
-            for p in &s.problems {
-                ui.colored_label(theme::LINK_MISSING, p);
+            if let Some(text) = s.department_logo_text() {
+                ui.label(text);
             }
-            ui.horizontal(|ui| {
+            for p in &s.problems {
+                crate::theme::problem(ui, p);
+            }
+            ui.horizontal_wrapped(|ui| {
                 for (label, tip, a) in [
                     ("Update set", "Download the templates again; your settings and logo are kept", SetAction::Update),
                     ("Choose logo…", "Copy the logo file (PDF or PNG) into the set", SetAction::ChooseLogo),
+                    ("Choose department logo…", "Copy the logo of your department or institution (PDF or PNG) into the set: documents show it under the university's logo", SetAction::ChooseDepartmentLogo),
+                    ("Remove department logo", "Move the department logo to the vault's trash", SetAction::RemoveDepartmentLogo),
                     ("Test page", "Compile a small document of the set and open the PDF", SetAction::TestPage),
                     ("Remove set…", "Move the set to the vault's trash", SetAction::Remove),
                 ] {
-                    let enabled = idle && !(matches!(a, SetAction::ChooseLogo) && s.meta.logo_file.is_none());
+                    let enabled = idle
+                        && match a {
+                            SetAction::ChooseLogo => s.meta.logo_file.is_some(),
+                            SetAction::RemoveDepartmentLogo => s.department_logo.is_some(),
+                            _ => true,
+                        };
                     if ui.add_enabled(enabled, egui::Button::new(label)).on_hover_text(tip).clicked() {
                         *action = Some((s.id.clone(), a));
                     }
@@ -263,7 +293,9 @@ fn apply(st: &mut TexState, ctx: &Context, cfg: &TexConfig, entries: &[SetEntry]
                 st.start_import(ctx, cfg, what_for(&s.meta.source));
             }
         }
-        SetAction::ChooseLogo => st.sets.form = Form::Logo { set: id.to_string(), path: String::new() },
+        SetAction::ChooseLogo => st.sets.form = Form::Logo { set: id.to_string(), slot: Slot::University, path: String::new() },
+        SetAction::ChooseDepartmentLogo => st.sets.form = Form::Logo { set: id.to_string(), slot: Slot::Department, path: String::new() },
+        SetAction::RemoveDepartmentLogo => st.notice = Some(st.sets.remove_department_logo_of(id)),
         SetAction::Remove => st.sets.form = Form::Remove(id.to_string()),
         SetAction::TestPage => {
             let Some(set) = info.cloned() else { return };
@@ -295,7 +327,7 @@ fn import_buttons(ui: &mut Ui, st: &mut TexState, ctx: &Context, cfg: &TexConfig
         if ui.add_enabled(idle, egui::Button::new("Newest TU Darmstadt templates from CTAN")).clicked() {
             st.start_import(ctx, cfg, What::Ctan);
         }
-        ui.label(muted("Not pinned and without a checksum: whatever CTAN has today, which Shale was not tested with.").size(12.0));
+        crate::theme::hint(ui, "Not pinned and without a checksum: whatever CTAN has today, which Shale was not tested with.");
     });
 }
 
@@ -308,7 +340,7 @@ fn forms(ui: &mut Ui, st: &mut TexState, ctx: &Context, cfg: &TexConfig, entries
                 ui.add(egui::TextEdit::singleline(&mut url).hint_text("https://github.com/owner/repository").desired_width(380.0));
                 ui.label("Branch, tag or commit (empty: the default branch)");
                 ui.add(egui::TextEdit::singleline(&mut reference).desired_width(380.0));
-                ui.label(muted("Sets Shale does not know get no document kinds: add them by hand (see the README of the set).").size(12.0));
+                crate::theme::hint(ui, "Sets Shale does not know get no document kinds: add them by hand (see the README of the set).");
                 let (go, cancel) = form_buttons(ui, "Import set");
                 if go {
                     st.start_import(ctx, cfg, What::Github { url: url.clone(), reference: reference.clone() });
@@ -333,25 +365,29 @@ fn forms(ui: &mut Ui, st: &mut TexState, ctx: &Context, cfg: &TexConfig, entries
                 }
             });
         }
-        Form::Logo { set, mut path } => {
+        Form::Logo { set, slot, mut path } => {
             ui.group(|ui| {
-                ui.label("Path of the logo file (PDF or PNG)");
-                ui.add(egui::TextEdit::singleline(&mut path).hint_text("~/Downloads/tuda_logo.pdf").desired_width(380.0));
+                let (what, hint) = match slot {
+                    Slot::University => ("Path of the logo file (PDF or PNG)", "~/Downloads/tuda_logo.pdf"),
+                    Slot::Department => ("Path of the department logo file (PDF or PNG)", "~/Downloads/hrz_logo.png"),
+                };
+                ui.label(what);
+                ui.add(egui::TextEdit::singleline(&mut path).hint_text(hint).desired_width(380.0));
                 let (go, cancel) = form_buttons(ui, "Copy logo into the set");
                 if go {
                     st.sets.form = Form::None;
-                    st.notice = Some(st.sets.copy_logo_to(&set, &expand_home(&path)));
+                    st.notice = Some(st.sets.copy_logo_to(&set, slot, &expand_home(&path)));
                 } else if cancel {
                     st.sets.form = Form::None;
                 } else {
-                    st.sets.form = Form::Logo { set, path };
+                    st.sets.form = Form::Logo { set, slot, path };
                 }
             });
         }
         Form::Remove(id) => {
             let name = entries.iter().find(|e| e.id == id).and_then(|e| e.info.as_ref().ok()).map_or(id.clone(), |s| s.meta.name.clone());
             ui.group(|ui| {
-                ui.label(format!("Move the set “{name}” (templates/tex/{id}) to the vault's .trash folder? Its settings and logo go with it. You can restore it from there."));
+                crate::theme::paragraph(ui, format!("Move the set “{name}” (templates/tex/{id}) to the vault's .trash folder? Its settings and logo go with it. You can restore it from there."));
                 ui.horizontal(|ui| {
                     if ui.button("Move set to trash").clicked() {
                         st.sets.trash = Some(Path::new(sets::SETS_DIR).join(&id));
@@ -380,16 +416,43 @@ pub(super) fn expand_home(text: &str) -> PathBuf {
     }
 }
 
-/// Copy the chosen logo into the set (a few milliseconds, so in the frame), holding the vault's tree lock.
-fn copy_logo(sets_state: &SetsState, entries: &[SetEntry], set: &str, from: &Path) -> Notice {
+/// The set of the page that a button of a logo asks for, and the vault's tree lock held for the write.
+fn locked_set<'a>(sets_state: &'a SetsState, entries: &'a [SetEntry], set: &str) -> Result<(&'a VaultRef, &'a SetInfo, crate::gitsync::TreeGuard), Notice> {
     let (Some(vault), Some(info)) = (&sets_state.vault, entries.iter().find(|e| e.id == set).and_then(|e| e.info.as_ref().ok())) else {
-        return Notice::new("The set is not there any more.", false);
+        return Err(Notice::new("The set is not there any more.", false));
     };
-    let Some(_lock) = vault.tree.hold_for(std::time::Duration::from_secs(5)) else {
-        return Notice::new("The sync is still changing files in the vault: try again in a moment.", false);
+    match vault.tree.hold_for(std::time::Duration::from_secs(5)) {
+        Some(lock) => Ok((vault, info, lock)),
+        None => Err(Notice::new("The sync is still changing files in the vault: try again in a moment.", false)),
+    }
+}
+
+/// Copy the chosen logo into the set (a few milliseconds, so in the frame), holding the vault's tree lock.
+fn copy_logo(sets_state: &SetsState, entries: &[SetEntry], set: &str, slot: Slot, from: &Path) -> Notice {
+    let (vault, info, _lock) = match locked_set(sets_state, entries, set) {
+        Ok(found) => found,
+        Err(notice) => return notice,
     };
-    match sets::choose_logo(&vault.root, info, from) {
-        Ok(name) => Notice::new(format!("The logo {name} is in the set “{}” now.", info.meta.name), true),
-        Err(e) => Notice::new(format!("The logo was not copied: {e}"), false),
+    match slot {
+        Slot::University => match sets::choose_logo(&vault.root, info, from) {
+            Ok(name) => Notice::new(format!("The logo {name} is in the set “{}” now.", info.meta.name), true),
+            Err(e) => Notice::new(format!("The logo was not copied: {e}"), false),
+        },
+        Slot::Department => match sets::choose_department_logo(&vault.root, info, from) {
+            Ok(name) => Notice::new(format!("The department logo {name} is in the set “{}” now.", info.meta.name), true),
+            Err(e) => Notice::new(format!("The department logo was not copied: {e}"), false),
+        },
+    }
+}
+
+/// Move the department logo of the set to the vault's trash, holding the vault's tree lock.
+fn remove_department_logo(sets_state: &SetsState, entries: &[SetEntry], set: &str) -> Notice {
+    let (vault, info, _lock) = match locked_set(sets_state, entries, set) {
+        Ok(found) => found,
+        Err(notice) => return notice,
+    };
+    match sets::remove_department_logo(&vault.root, info) {
+        Ok(()) => Notice::new(format!("The department logo of the set “{}” is in the vault's trash now.", info.meta.name), true),
+        Err(e) => Notice::new(format!("The department logo was not removed: {e}"), false),
     }
 }

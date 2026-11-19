@@ -11,7 +11,10 @@
 # Cargo.lock, turns `## [Unreleased]` and docs/changelog-pending/*.md into the section
 # `## [X.Y.Z] - <date>`, runs the release check (BUILD-013), commits naming the issue
 # "Release X.Y.Z" (made with gh when there is none; --issue N names another), lands it with
-# `scripts/land.sh --release`, tags the landed merge and pushes the tag to `origin`.
+# `scripts/land.sh --release`, checks the landed merge (BUILD-013, and docs/changelog-pending/
+# empty), tags it and pushes the tag to `origin`. The landing lock is held for the whole run (a
+# landing meanwhile waits). When the check of the landed merge fails nothing is tagged: add the
+# missing entry in a branch, land it, and run `make-release.sh X.Y.Z` again, which tags `origin/main`.
 # Before the commit it runs scripts/bench-release.sh (BUILD-034): the full and the worst benchmark
 # profiles, stored under docs/perf/ with their comparison against the last release; a regression
 # stops the release unless --allow-perf-regression; --skip-bench leaves the step out.
@@ -38,6 +41,8 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+# the landing lock for the whole run, before `origin/main` is read (#348); a dry run changes nothing
+[ "$DRY" = yes ] || take_land_lock
 preflight
 CUR=$(version_at "refs/remotes/$REMOTE/main")
 LAST=$(last_release)

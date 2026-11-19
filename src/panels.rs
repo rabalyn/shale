@@ -778,7 +778,7 @@ impl ShaleApp {
                     if create && ui.selectable_label(*sel == items.len(), egui::RichText::new(format!("＋ Create “{}”", query.trim())).color(theme::LINK_MISSING)).clicked() {
                         pick = Some(items.len());
                     }
-                    ui.label(muted("↑↓ to move · Enter to open · Esc to close").size(11.5));
+                    crate::theme::prose(ui, muted("↑↓ to move · Enter to open · Esc to close").size(11.5));
                     if let Some(p) = pick {
                         if p < items.len() {
                             self.actions.push(Action::Open { rel: items[p].1.clone(), new_tab: false });
@@ -800,10 +800,10 @@ impl ShaleApp {
                     let r = ui.add(egui::TextEdit::singleline(name).desired_width(f32::INFINITY));
                     r.request_focus();
                     if self.cfg.update_links_on_rename {
-                        ui.label(muted("Links in other notes will be updated.").size(12.0));
+                        crate::theme::hint(ui, "Links in other notes will be updated.");
                     }
                     if let Some(e) = error {
-                        ui.colored_label(theme::LINK_MISSING, e.as_str());
+                        crate::theme::problem(ui, e.as_str());
                     }
                     let enter = ui.input(|i| i.key_pressed(Key::Enter));
                     ui.horizontal(|ui| {
@@ -854,7 +854,7 @@ impl ShaleApp {
             }
             Modal::ConfirmTrash { rel } => {
                 let resp = crate::dialog::Dialog::new("trash", "Move to trash?").width(400.0).show(&ctx, |ui| {
-                    ui.label(format!("“{}” will be moved to the .trash folder inside your vault. You can get it back from there.", rel_to_string(rel)));
+                    crate::theme::paragraph(ui, format!("“{}” will be moved to the .trash folder inside your vault. You can get it back from there.", rel_to_string(rel)));
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         if ui.button(egui::RichText::new("Move to trash").color(theme::LINK_MISSING)).clicked() {
@@ -873,7 +873,7 @@ impl ShaleApp {
             }
             Modal::LiftPaste { text } => {
                 let resp = crate::dialog::Dialog::new("lift-paste", "Lift headings?").width(440.0).show(&ctx, |ui| {
-                    ui.label("The pasted text has no # heading. Lift its headings?");
+                    crate::theme::paragraph(ui, "The pasted text has no # heading. Lift its headings?");
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         if ui.button(egui::RichText::new("Lift").strong()).on_hover_text("## becomes #, ### becomes ##, and so on").clicked() {
@@ -892,14 +892,16 @@ impl ShaleApp {
                     keep = false;
                 }
             }
-            Modal::TexSetup | Modal::Export(_) | Modal::Calendars(_) | Modal::Event(_) | Modal::Import(_) | Modal::MailAccounts(_) | Modal::Social(_) | Modal::DataUsage => {}
+            Modal::TexSetup | Modal::Export(_) | Modal::Calendars(_) | Modal::Event(_) | Modal::Import(_) | Modal::ImportSummary(_) | Modal::MailAccounts(_) | Modal::Social(_) | Modal::DataUsage => {}
             Modal::ConvertCanvas { rel, new_tab, always, existing } => {
                 let resp = crate::dialog::Dialog::new("convert-canvas", "Convert to an editable drawing?").width(460.0).show(&ctx, |ui| {
                     let name = rel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                    ui.label(format!("“{name}” is an Obsidian Canvas. Shale shows canvases read-only."));
+                    crate::theme::paragraph(ui, format!("“{name}” is an Obsidian Canvas. Shale shows canvases read-only."));
                     match existing.as_ref() {
                         Some(copy) => ui.label(format!("It was converted before: “{}”.", rel_to_string(copy))),
-                        None => ui.label(format!("Converting makes the drawing “{}” next to it (Obsidian opens it with the Excalidraw plugin). The canvas file is not changed.", crate::drawing::canvas::drawing_name_for(rel))),
+                        None => {
+                            crate::theme::paragraph(ui, format!("Converting makes the drawing “{}” next to it (Obsidian opens it with the Excalidraw plugin). The canvas file is not changed.", crate::drawing::canvas::drawing_name_for(rel)))
+                        }
                     };
                     ui.add_space(6.0);
                     ui.checkbox(always, "Always convert canvases when opening them").on_hover_text("Also in Settings → Drawings");
@@ -1091,6 +1093,22 @@ impl ShaleApp {
                 }
             }
             if close_asked {
+                keep = false;
+            }
+        }
+        if let Modal::ImportSummary(s) = &modal {
+            let mut asked = None;
+            let resp = crate::dialog::Dialog::new("import-summary", "Import summary").width(560.0).show(&ctx, |ui| asked = crate::import::summary::show(ui, s));
+            match asked {
+                Some(crate::import::summary::SummaryAction::Open(rel)) => self.actions.push(Action::Open { rel, new_tab: true }),
+                Some(crate::import::summary::SummaryAction::OpenAll) => {
+                    self.actions.extend(s.notes.iter().map(|e| Action::Open { rel: e.rel.clone(), new_tab: true }));
+                    keep = false;
+                }
+                Some(crate::import::summary::SummaryAction::Close) => keep = false,
+                None => {}
+            }
+            if resp.should_close() {
                 keep = false;
             }
         }

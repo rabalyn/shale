@@ -1,11 +1,11 @@
-//! Word files (.docx) become notes through pandoc (IMP-035 to IMP-038). Pandoc is a program of the
+//! Word files (.docx) become notes through pandoc (IMP-035 to IMP-042). Pandoc is a program of the
 //! user's (BUILD-018), run like the other programs: an argument list, no shell, stdin closed, no
 //! console window on Windows, a time limit. Shale's Lua filter (`assets/import/shale-docx.lua`)
 //! shapes its Markdown. Nothing reaches the vault before pandoc has ended with success: the
 //! pictures are extracted into a hidden folder next to the import folder, which is then renamed
 //! into place; a run that fails or is cancelled leaves nothing behind.
 
-use super::{front, yaml, Item, Options, Source};
+use super::{docx_look, front, yaml, Item, Options, Source};
 use crate::pdf::tex::proc::{self, Ending};
 use crate::vault::{rel_to_string, Vault};
 use std::collections::HashSet;
@@ -111,6 +111,8 @@ pub fn args(docx: &Path, filter: &Path, media: &str, out: &Path) -> Vec<OsString
 pub struct Prepared {
     /// pandoc's Markdown
     pub text: String,
+    /// the look of the file as properties (`print-*`, IMP-040)
+    pub look: Vec<(&'static str, String)>,
     /// the import folder (vault-relative), when there is a file for it
     pub folder: Option<PathBuf>,
     /// the kept original inside it
@@ -213,20 +215,33 @@ pub fn prepare(c: &Convert, reserved: &mut HashSet<String>) -> Result<Prepared, 
     let filter = dir.join("filter.lua");
     crate::fsutil::create_new(&filter, FILTER.as_bytes()).map_err(|e| format!("could not write the filter: {e}"))?;
     let out = dir.join("note.md");
-    let input = std::path::absolute(c.docx).unwrap_or_else(|_| c.docx.to_path_buf());
-    let mut cmd = Command::new(c.pandoc);
-    cmd.args(args(&input, &filter, &rel_to_string(&folder), &out)).current_dir(&files);
-    let run = proc::run(cmd, c.timeout, Some(c.cancel), |_| {}).map_err(|e| format!("pandoc could not be started: {e}"))?;
-    match run.ending {
-        Ending::Exited(Some(0)) => {}
-        Ending::TimedOut => return Err(format!("pandoc needed more than {} seconds for “{file}” and was stopped", c.timeout.as_secs_f64())),
-        Ending::Cancelled => return Err("stopped".into()),
-        Ending::Exited(_) => {
-            let line = run.tail.iter().find(|l| !l.trim().is_empty()).map(|l| l.trim().to_string()).unwrap_or_else(|| "it stopped without a message".into());
-            return Err(format!("pandoc could not read “{file}”: {line}"));
+    // pandoc runs on a copy with the colours tagged (IMP-041), and on the original when there is none or it fails
+    let analysis = docx_look::analyse(c.docx, &dir.join("look"));
+    let absolute = |p: &Path| std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
+    let mut inputs = vec![absolute(c.docx)];
+    if let Some(t) = &analysis.tagged {
+        inputs.insert(0, absolute(t));
+    }
+    let mut last = None;
+    for input in &inputs {
+        let mut cmd = Command::new(c.pandoc);
+        cmd.args(args(input, &filter, &rel_to_string(&folder), &out)).current_dir(&files);
+        let run = proc::run(cmd, c.timeout, Some(c.cancel), |_| {}).map_err(|e| format!("pandoc could not be started: {e}"))?;
+        match run.ending {
+            Ending::Exited(Some(0)) => {
+                last = None;
+                break;
+            }
+            Ending::TimedOut => return Err(format!("pandoc needed more than {} seconds for “{file}” and was stopped", c.timeout.as_secs_f64())),
+            Ending::Cancelled => return Err("stopped".into()),
+            Ending::Exited(_) => last = Some(run.tail.iter().find(|l| !l.trim().is_empty()).map(|l| l.trim().to_string()).unwrap_or_else(|| "it stopped without a message".into())),
         }
     }
+    if let Some(line) = last {
+        return Err(format!("pandoc could not read “{file}”: {line}"));
+    }
     let text = crate::fsutil::read_to_string(&out).map_err(|e| format!("pandoc made no text for “{file}”: {e}"))?;
+    let text = docx_look::colours_to_html(&docx_look::breaks_to_html(&text));
     let kept = format!("{stem}.docx");
     let kept = crate::fsutil::portable_name(&crate::markdown::link_safe_name(&kept), MAX_NAME);
     let kept = if kept.is_empty() || kept.starts_with('.') { "document.docx".to_string() } else { kept };
@@ -236,18 +251,20 @@ pub fn prepare(c: &Convert, reserved: &mut HashSet<String>) -> Result<Prepared, 
     let any = std::fs::read_dir(&files).map(|mut d| d.next().is_some()).unwrap_or(false);
     reserved.insert(name);
     let folder_used = any.then_some(folder);
-    Ok(Prepared { text, original: folder_used.as_ref().filter(|_| c.keep_original).map(|f| f.join(&kept)), folder: folder_used, temp: Mutex::new(Some(temp.release())) })
+    Ok(Prepared { text, look: analysis.look.props(), original: folder_used.as_ref().filter(|_| c.keep_original).map(|f| f.join(&kept)), folder: folder_used, temp: Mutex::new(Some(temp.release())) })
 }
 
-/// The text of the note: the original named in the properties, the headings lifted when asked
-/// (IMP-034, only when the document has no `#` heading) and pandoc's Markdown.
+/// The text of the note: the properties (the original, when kept, then the look of the file,
+/// IMP-038, IMP-040, then the tags), the headings lifted when asked (IMP-034, only when the
+/// document has no `#` heading) and pandoc's Markdown.
 pub fn note_text(p: &Prepared, lift: bool, tags: &[String]) -> String {
     let body = crate::markdown::lift_headings(&p.text).filter(|_| lift).unwrap_or_else(|| p.text.clone());
     let source = p.original.as_ref().map(|o| ("source", yaml(&format!("[[{}]]", rel_to_string(o)))));
-    if source.is_none() && tags.is_empty() {
+    let mut props: Vec<(&str, String)> = source.into_iter().collect();
+    props.extend(p.look.iter().map(|(k, v)| (*k, v.clone())));
+    if props.is_empty() && tags.is_empty() {
         return body;
     }
-    let props: Vec<(&str, String)> = source.into_iter().collect();
     format!("{}\n{body}", front(&props, tags))
 }
 

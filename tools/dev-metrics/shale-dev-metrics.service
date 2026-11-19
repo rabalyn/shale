@@ -1,0 +1,7 @@
+[Unit]
+Description=Shale development metrics for node_exporter (FORGE-016)
+
+[Service]
+Type=oneshot
+ExecStart="%h/Documents/Craft Anything/obsidian/app/scripts/dev-metrics.sh"
+Nice=10

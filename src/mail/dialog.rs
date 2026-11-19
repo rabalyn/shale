@@ -42,6 +42,8 @@ pub struct MailDialog {
     pub error: Option<String>,
     /// Is there a system keyring to keep passwords in?
     pub keyring: bool,
+    /// The choice and the plan of "Keep the key unlocked" (MAIL-236).
+    pub agent: crate::mail::agent_cache::AgentDialog,
     pub rects: Vec<(String, Rect)>,
 }
 
@@ -57,6 +59,8 @@ pub enum MailDialogAction {
     CancelSignIn(usize),
     /// Look again for GnuPG and its keys (MAIL-191).
     DetectGnupg,
+    /// "Write with gpgconf": change the agent's cache times (MAIL-236).
+    WriteAgentCache(crate::mail::agent_cache::Choice),
     /// Tick or untick a folder.
     ToggleFolder {
         folder: i64,
@@ -89,6 +93,7 @@ impl MailDialog {
             scroll_keys: false,
             error: None,
             keyring,
+            agent: Default::default(),
             rects: vec![],
         }
     }
@@ -263,7 +268,8 @@ impl MailDialog {
 pub fn show(ui: &mut Ui, d: &mut MailDialog, mail: &MailView) -> Option<MailDialogAction> {
     let mut rects: Vec<(String, Rect)> = Vec::new();
     let mut out = None;
-    ui.label(
+    crate::theme::prose(
+        ui,
         muted(
             "Shale reads your mail over IMAP and keeps a local copy. Syncing never changes anything on the server; only what you do yourself does (mark read, flag, move, delete). The local copy is not encrypted: use full-disk encryption.",
         )
@@ -466,14 +472,21 @@ fn account_form(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rect
         rects.push(("md:server-stores".into(), r.rect));
         let r = ui.checkbox(&mut d.accounts[i].user_agent_header, "Add a User-Agent header (tells the recipient this was written with Shale; off for privacy)");
         rects.push(("md:user-agent".into(), r.rect));
-        ui.label(muted("Sending always uses an encrypted connection and the sign-in above (the same password, or the same OAuth2 sign-in). “Test connection” also signs in to the SMTP server; it never sends a mail.").size(12.0));
+        crate::theme::prose(
+            ui,
+            muted("Sending always uses an encrypted connection and the sign-in above (the same password, or the same OAuth2 sign-in). “Test connection” also signs in to the SMTP server; it never sends a mail.").size(12.0),
+        );
     });
     rects.push(("md:smtp-header".into(), head.header_response.rect));
     if d.accounts[i].auth == MailAuth::OAuth2 {
-        ui.label(muted("Shale needs an OAuth2 client ID that you register yourself with Google or Microsoft (see the README). Shale opens your browser for the sign-in and keeps only a refresh token, in the system keyring.").size(12.0));
+        crate::theme::prose(
+            ui,
+            muted("Shale needs an OAuth2 client ID that you register yourself with Google or Microsoft (see the README). Shale opens your browser for the sign-in and keeps only a refresh token, in the system keyring.").size(12.0),
+        );
         sign_in_row(ui, i, &id, mail, rects, out);
     }
-    ui.label(
+    crate::theme::prose(
+        ui,
         muted(if d.keyring {
             "Passwords, client secrets and sign-in tokens are kept in the system keyring, never in the settings file."
         } else {
@@ -519,7 +532,7 @@ fn account_form(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rect
     ui.add_space(6.0);
     ui.label(RichText::new("Folders to sync").color(theme::TEXT));
     if folders.is_empty() {
-        ui.label(muted("The folders appear after “Test connection” or the first sync.").size(12.0));
+        crate::theme::prose(ui, muted("The folders appear after “Test connection” or the first sync.").size(12.0));
         return;
     }
     egui::ScrollArea::vertical().id_salt(("mail-folder-boxes", i)).max_height(170.0).auto_shrink([false, true]).show(ui, |ui| {
@@ -537,10 +550,10 @@ fn account_form(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rect
                 }
                 match kind {
                     FolderKind::Trash | FolderKind::Junk => {
-                        ui.label(muted("never synced automatically; loaded when you open it").size(12.0));
+                        crate::theme::prose(ui, muted("never synced automatically; loaded when you open it").size(12.0));
                     }
                     FolderKind::All => {
-                        ui.label(muted("every message again: off by default; loaded when you open it").size(12.0));
+                        crate::theme::prose(ui, muted("every message again: off by default; loaded when you open it").size(12.0));
                     }
                     FolderKind::Normal => {}
                 }
@@ -602,7 +615,7 @@ fn sign_in_row(ui: &mut Ui, i: usize, id: &str, mail: &MailView, rects: &mut Vec
         }
         match state {
             Some(SignInState::Waiting { url, .. }) => {
-                ui.label(muted("Waiting for the browser… (it is given up after 5 minutes)"));
+                crate::theme::prose(ui, muted("Waiting for the browser… (it is given up after 5 minutes)"));
                 let r = ui.button("Cancel");
                 rects.push(("md:signin-cancel".into(), r.rect));
                 if r.clicked() {
@@ -628,7 +641,7 @@ fn sign_in_row(ui: &mut Ui, i: usize, id: &str, mail: &MailView, rects: &mut Vec
             }
             None => match mail.signed_in.get(id) {
                 Some(true) => {
-                    ui.label(muted("Signed in. The refresh token is in the keyring."));
+                    crate::theme::prose(ui, muted("Signed in. The refresh token is in the keyring."));
                 }
                 Some(false) => {
                     ui.label(muted("Not signed in."));
@@ -645,7 +658,7 @@ fn sign_in_row(ui: &mut Ui, i: usize, id: &str, mail: &MailView, rects: &mut Vec
 fn encryption_section(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &mut Vec<(String, Rect)>, out: &mut Option<MailDialogAction>) {
     use crate::config::CryptoStandard;
     let head = egui::CollapsingHeader::new(RichText::new("Encryption (OpenPGP and S/MIME)").color(theme::TEXT)).id_salt("mail-encryption").default_open(d.consent.is_some()).show(ui, |ui| {
-        ui.label(muted("Shale signs, verifies, encrypts and decrypts with the GnuPG on this computer (gpg for OpenPGP, gpgsm for S/MIME). It never sees your keys or passphrases: GnuPG and its passphrase dialog do that. Verifying a signature needs no setting; decrypting does.").size(12.0));
+        crate::theme::prose(ui, muted("Shale signs, verifies, encrypts and decrypts with the GnuPG on this computer (gpg for OpenPGP, gpgsm for S/MIME). It never sees your keys or passphrases: GnuPG and its passphrase dialog do that. Verifying a signature needs no setting; decrypting does.").size(12.0));
         ui.add_space(4.0);
         // the red warning, always visible when the section is open
         let red = egui::Color32::from_rgb(200, 40, 40);
@@ -663,7 +676,7 @@ fn encryption_section(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &
             if r.clicked() {
                 d.withdraw_consent();
             }
-            ui.label(muted("Withdrawing stops decrypting new mails. It deletes nothing: mails that were already decrypted keep their decrypted copies and search text on this computer, and are still shown. Click Done to save.").size(12.0));
+            crate::theme::prose(ui, muted("Withdrawing stops decrypting new mails. It deletes nothing: mails that were already decrypted keep their decrypted copies and search text on this computer, and are still shown. Click Done to save.").size(12.0));
         } else {
             ui.label("To switch encryption on, type exactly:");
             ui.label(RichText::new(crate::config::CONSENT_PHRASE).strong().color(theme::TEXT_STRONG));
@@ -677,7 +690,7 @@ fn encryption_section(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &
                     d.give_consent(crate::calendar::time::now());
                 }
             });
-            ui.label(muted("Without it, encrypted mail shows “Encrypted — enable encryption in the settings” and nothing is decrypted or stored. Click Done to save.").size(12.0));
+            crate::theme::prose(ui, muted("Without it, encrypted mail shows “Encrypted — enable encryption in the settings” and nothing is decrypted or stored. Click Done to save.").size(12.0));
         }
         ui.add_space(6.0);
         ui.horizontal(|ui| {
@@ -703,11 +716,11 @@ fn encryption_section(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &
                                 ui.label(RichText::new(format!("{} ({}): {v}", std.label(), std.program())).color(theme::TEXT).size(12.5));
                                 let keys = info.keys(std);
                                 if keys.is_empty() {
-                                    ui.label(muted("  no secret keys found: signing and decrypting need one; see below to import yours").size(12.0));
+                                    crate::theme::prose(ui, muted("  no secret keys found: signing and decrypting need one; see below to import yours").size(12.0));
                                 }
                                 for k in keys {
                                     let note = if k.usable() { "" } else { " (expired, revoked or disabled)" };
-                                    ui.label(muted(format!("  {} · {}{note}", k.label(), crate::mail::ui::short_fingerprint(&k.fingerprint))).size(12.0));
+                                    crate::theme::prose(ui, muted(format!("  {} · {}{note}", k.label(), crate::mail::ui::short_fingerprint(&k.fingerprint))).size(12.0));
                                 }
                             }
                             Some(Err(e)) => {
@@ -720,8 +733,11 @@ fn encryption_section(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &
             }
         });
         ui.add_space(6.0);
+        agent_block(ui, d, mail, rects, out);
+        ui.add_space(6.0);
         ui.label(RichText::new("Bringing your keys here").color(theme::TEXT));
-        ui.label(
+        crate::theme::prose(
+            ui,
             muted(
                 "Thunderbird keeps its OpenPGP keys in its own store, not in GnuPG's. To use the same keys: in Thunderbird open Account settings → End-to-End Encryption, choose your key, “Backup secret key to file”, then run   gpg --import backup.asc   (and import the public keys of your correspondents the same way). S/MIME certificates: Thunderbird → Settings → Privacy & Security → Manage S/MIME Certificates → Backup, then   gpgsm --import backup.p12   and add the issuer's fingerprint to ~/.gnupg/trustlist.txt. Shale never fetches keys from the network by itself; to look one up by hand use   gpg --locate-keys name@example.org   (WKD).",
             )
@@ -732,12 +748,102 @@ fn encryption_section(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &
     if head.header_response.clicked() {
         d.scroll_enc = true;
     }
-    if let (true, Some(body)) = (d.scroll_enc, &head.body_response) {
+    // only when the section is fully open: its body grows while it opens, and a scroll to a short body is cut off
+    if let (true, Some(body), true) = (d.scroll_enc, &head.body_response, head.openness >= 1.0) {
         // the form scrolls; bring the opened section to the top of what is visible
         ui.scroll_to_rect(body.rect, Some(egui::Align::Min));
         d.scroll_enc = false;
     }
 }
+
+/// "Keep the key unlocked" (MAIL-235, MAIL-236, MAIL-237): how long the agent keeps a passphrase, a change with gpgconf that
+/// is shown first and written only by the second click, the same by hand, and the keyring tip. Shale never sees a passphrase.
+fn agent_block(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &mut Vec<(String, Rect)>, out: &mut Option<MailDialogAction>) {
+    use crate::mail::agent_cache::{keyring_tip, manual_lines, Choice, Os, Plan, RELOAD_COMMAND};
+    ui.label(RichText::new("Keeping the key unlocked").color(theme::TEXT));
+    ui.label(muted("GnuPG's agent asks for the passphrase again after a while, and always after it is restarted. Shale never sees the passphrase: the times are GnuPG's own setting.").size(12.0));
+    // fixed height like the answer above, so nothing moves when the times arrive
+    let room = AGENT_STATUS_LINES * (ui.text_style_height(&egui::TextStyle::Body) + ui.spacing().item_spacing.y);
+    egui::ScrollArea::vertical().id_salt("agent-status").max_height(room).min_scrolled_height(room).auto_shrink([false, false]).show(ui, |ui| match &mail.agent.info {
+        None => {
+            ui.label(muted("Looking…"));
+        }
+        Some(Err(e)) => {
+            ui.label(RichText::new(format!("The cache times could not be read: {e}")).color(theme::LINK_MISSING).size(12.5));
+        }
+        Some(Ok(info)) => {
+            ui.label(RichText::new(info.words()).color(theme::TEXT).size(12.5));
+            if let Some(note) = info.external_cache_note() {
+                ui.label(RichText::new(note).color(theme::LINK_MISSING).size(12.0));
+            }
+        }
+    });
+    let info = mail.agent.info.as_ref().and_then(|i| i.as_ref().ok());
+    ui.horizontal(|ui| {
+        ui.label("Ask for the passphrase again after:");
+        let r = egui::ComboBox::from_id_salt("agent-choice").selected_text(d.agent.choice.label()).show_ui(ui, |ui| {
+            for c in Choice::ALL {
+                let r = ui.selectable_label(d.agent.choice == c, c.label());
+                rects.push((format!("md:agent-choice:{}", c.key()), r.rect));
+                if r.clicked() {
+                    d.agent.choice = c;
+                }
+            }
+        });
+        rects.push(("md:agent-choice".into(), r.response.rect));
+        let r = ui.add_enabled(info.is_some() && !mail.agent.writing && !d.agent.plan_open, egui::Button::new("Change with gpgconf…"));
+        rects.push(("md:agent-change".into(), r.rect));
+        if r.clicked() {
+            d.agent.plan_open = true;
+        }
+    });
+    if let (true, Some(info)) = (d.agent.plan_open, info) {
+        let plan = Plan::new(&info.homedir, d.agent.choice);
+        let r = egui::Frame::new().stroke(egui::Stroke::new(1.0, theme::TEXT)).corner_radius(egui::CornerRadius::same(4)).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new(plan.describe()).color(theme::TEXT).size(12.5));
+            ui.horizontal(|ui| {
+                let r = ui.button("Write with gpgconf");
+                rects.push(("md:agent-write".into(), r.rect));
+                if r.clicked() {
+                    d.agent.plan_open = false;
+                    *out = Some(MailDialogAction::WriteAgentCache(d.agent.choice));
+                }
+                let r = ui.button("Cancel");
+                rects.push(("md:agent-cancel".into(), r.rect));
+                if r.clicked() {
+                    d.agent.plan_open = false;
+                }
+            });
+        });
+        rects.push(("md:agent-plan".into(), r.response.rect));
+    }
+    if mail.agent.writing {
+        ui.label(muted("Writing…").size(12.0));
+    }
+    match &mail.agent.written {
+        Some(Ok(())) => {
+            ui.label(RichText::new("Written, and the agent was told to reload. The times above are read again from GnuPG.").color(theme::TAG).size(12.5));
+        }
+        Some(Err(e)) => {
+            ui.label(RichText::new(format!("Not changed: {e}")).color(theme::LINK_MISSING).size(12.5));
+        }
+        None => {}
+    }
+    ui.label(RichText::new("The same by hand").color(theme::TEXT).size(12.5));
+    let file = info.map(|i| i.homedir.join("gpg-agent.conf").display().to_string()).unwrap_or_else(|| "gpg-agent.conf in GnuPG's home folder (gpgconf --list-dirs)".into());
+    let lines = manual_lines(d.agent.choice.seconds());
+    ui.label(muted(format!("Put these lines into {file}, then run   {RELOAD_COMMAND}")).size(12.0));
+    ui.label(RichText::new(lines.trim_end()).monospace().size(12.0).color(theme::TEXT));
+    let r = ui.small_button("Copy lines");
+    rects.push(("md:agent-copy".into(), r.rect));
+    if r.clicked() {
+        ui.ctx().copy_text(lines);
+    }
+    ui.label(muted(format!("Keep it in the keyring instead: {}", keyring_tip(Os::current()))).size(12.0));
+}
+
+const AGENT_STATUS_LINES: f32 = 3.0;
 
 /// Lines of height of GnuPG's answer in the Encryption section: the two versions and a few keys; more scroll.
 const GNUPG_RESULT_LINES: f32 = 5.0;
@@ -746,7 +852,7 @@ const GNUPG_RESULT_LINES: f32 = 5.0;
 fn key_rows(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rects: &mut Vec<(String, Rect)>) {
     use crate::config::CryptoStandard;
     let Some(info) = &mail.gnupg_info else {
-        ui.label(muted("Looking for GnuPG…").size(12.0));
+        crate::theme::prose(ui, muted("Looking for GnuPG…").size(12.0));
         return;
     };
     for std in [CryptoStandard::OpenPgp, CryptoStandard::Smime] {
@@ -793,7 +899,7 @@ fn key_rows(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rects: &
                     ui.label(RichText::new(e.as_str()).color(theme::LINK_MISSING).size(12.5));
                 }
                 None => {
-                    ui.label(muted("Looking…").size(12.0));
+                    crate::theme::prose(ui, muted("Looking…").size(12.0));
                 }
             }
         });
@@ -810,7 +916,7 @@ fn key_rows(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rects: &
             }
         }
     });
-    ui.label(muted("Shale uses the key from your GnuPG; the passphrase is asked by GnuPG's own dialog. Encrypted mail is always also encrypted to this key, so the copy in Sent stays readable. Import keys with gpg --import / gpgsm --import (see Encryption below).").size(12.0));
+    crate::theme::prose(ui, muted("Shale uses the key from your GnuPG; the passphrase is asked by GnuPG's own dialog. Encrypted mail is always also encrypted to this key, so the copy in Sent stays readable. Import keys with gpg --import / gpgsm --import (see Encryption below).").size(12.0));
 }
 
 #[cfg(test)]

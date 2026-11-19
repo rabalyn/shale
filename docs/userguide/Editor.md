@@ -15,6 +15,67 @@ How you write in Shale. Back to [[Start here]]; the links and embeds are in [[No
   cursor (the default), a bar after it, a block or an underline. With vim-style editing the cursor in
   normal mode has its own choice (Settings → Vim, default: block). "Blinking cursor" turns the blinking off.
 
+## Folding
+
+Headings, quotes and lists can be folded away so that a long note is short again:
+
+- a **heading** folds everything up to the next heading of the same or a higher level (so folding `##` keeps its
+  `###` inside, and folding `#` takes all of them);
+- a **quote** folds its second and later `>` lines;
+- a **list item** folds its nested items and continued lines, and a **list** with two or more items folds all of
+  them (fold the first item once for the item, once more for the whole list);
+- a **code block** (see [[#Code blocks]]) folds from its opening fence to the closing one;
+- the **properties** at the top of the note (the front matter) fold to one line, see [[#Properties]];
+- a **signature**, a line that is exactly `-- ` (also `--`), folds up to the next heading or the end of the note.
+
+A folded block shows its first line and a muted badge such as `… 4 lines`; the hidden lines have no line number.
+Hover a line that starts such a block: a small ▾ appears left of the text (in the gutter, or left of the text without
+line numbers). Click it to fold; a folded block always shows ▸, and clicking it or the badge unfolds it.
+
+| Keys | What it does |
+|---|---|
+| Ctrl+Shift+K | fold the block at the cursor (on a line inside a block: that block, and the cursor goes to its first line; on an already folded line: the block around it) |
+| Ctrl+Shift+J | unfold the block at the cursor (folds inside it stay folded) |
+| Ctrl+Shift+O, Ctrl+Shift+I | fold all, unfold all |
+| `za` `zc` `zo`, `zM` `zR` | vim-style editing, normal mode: toggle, fold, unfold, fold all, unfold all |
+
+The keys can be changed in Settings → Keybindings (Note view), see [[Keyboard shortcuts]]. The text is never
+changed by folding, and undo, selection and copy work as always. The cursor never stays in hidden text: if you move into a folded block
+with the arrow keys, or a link or a search result jumps there, it opens. Select all (Ctrl+A) leaves folds alone.
+Folds are remembered while Shale runs and are never written into the note. The [[Reading view]] folds the same blocks, with the same folds: what you fold in one is folded in the other.
+
+### Properties
+
+A note whose first line is `---` has properties (the front matter, see [[Notes and links]]). When you open it, the
+editor folds them to one muted line, `▸ Properties · email · Anna Müller · 2026-11-12 · #work`, so that an imported mail
+or a Word import starts with its text, not with a block of YAML. Click the line, or move the cursor into it (arrow
+keys, `gg`, Ctrl+Home), and the properties open as raw, editable lines; when the cursor leaves them again they fold
+again. If you opened them with the ▸ marker, the badge or a fold key, they stay open. **Settings → Appearance →
+Properties in the editor** is `Folded` (the default; `Card` looks the same in the editor, the card is for the reading
+view) or `Raw`, which opens a note with its properties unfolded.
+
+### Mail notes
+
+A note imported from a mail (its properties say `type: email`, see [[Import]]) also starts with its quoted replies
+(`> …` lines, shown as `… 12 quoted lines`) and its signature folded. Click the badge to read them.
+
+### Code blocks
+
+With the Markdown preview on, a fenced code block (three backticks or `~~~`) is drawn as a box: a rounded
+rectangle on the code colour with a thin border, and a small badge at its top right with the language you wrote
+after the fence (`code` when there is none). The fence lines themselves are hidden; put the cursor in the block and
+they show again. A code block folds like the other blocks: a folded one shows its opening row with the badge and
+`… n lines`. With the preview off the code is shown raw, without a box, but still folds. The reading view draws
+the same box.
+
+To copy the code, point at the box: a small copy icon shows at its top right, left of the badge (also while the cursor
+is in the block, and always on a folded block). A click copies the code inside the block, without the fence lines and
+without a newline at the end, so a command you paste does not run at once; the icon turns into a tick and "Copied" for
+a moment. The click does not move the cursor or unfold the block. **Ctrl+Shift+C** copies the code block at the cursor;
+when the cursor is in no code block nothing happens.
+
+![[editor-code-box.png]]
+
 ## The title line and pasting
 
 Above the first line a note shows its **title line**: the file name without `.md` and without a
@@ -34,8 +95,9 @@ the text unchanged. Text without headings, or with a `#`, is pasted at once.
 
 A row of buttons centred above the text of a note (not in the reading view): **B**old, *I*talic,
 ~~S~~trikethrough, `==` highlight, `<>` inline code; the highlight colour and font colour
-palettes; a **H** menu for headings (Normal text, Heading 1 to 6); bullet list, numbered list,
-task, quote; code block, horizontal rule, table; `[[ ]]` note link, `[ ]( )` web link, `![[ ]]`
+split buttons (apply the current colour, ▾ for the palette); a **H** menu for headings (Normal text, Heading 1 to 6); bullet list, numbered list,
+task, quote; code block, horizontal rule, page break (a dashed rule in the preview and the reading
+view, a new page in the PDF, see [[PDF]]), table; `[[ ]]` note link, `[ ]( )` web link, `![[ ]]`
 embed (it opens the `[!` file picker of [[Notes and links]]); and "Clear formatting".
 
 - With text selected, an inline button wraps it in the markers; click it again and they come
@@ -55,8 +117,12 @@ embed (it opens the `[!` file picker of [[Notes and links]]); and "Clear formatt
 
 ## Colours
 
-The **highlight colour** button opens a palette of four neon colours (yellow, green, cyan, magenta),
-"No highlight", and "Custom colour…" with a colour picker. The **font colour** button does the same
+The **highlight colour** and **font colour** buttons are split buttons. A click on the coloured part
+applies the colour it shows (neon yellow and red at first, then the last colour you picked, which Shale remembers in the vault, also after a restart) to the
+selection at once. The small ▾ beside it opens a palette; a colour picked there is applied and becomes
+the button's colour. The highlight palette has four neon colours (yellow, green, cyan, magenta),
+"No highlight", and "Custom colour…" with a colour picker; "No highlight" and "Default colour" take the
+colour off and keep the button's colour. The **font colour** palette does the same
 with your own preset colours: edit them under "Font colours" in Settings → Editor → Editing (the
 highlight presets are there too). A new colour on text that already has one replaces it.
 
@@ -245,6 +311,7 @@ typing; "Esc from insert mode" can make it step back one character like Vim does
 | dd | delete the line (onto the clipboard; p puts it back below) |
 | u, Ctrl+R | undo, redo: up to 200 steps per note, an insert session is one step; kept in the vault for 30 days, so it works after a restart ([[Data usage and caches]]) |
 | gt | follow the link under the cursor like a click (a note link or a web address) |
+| za, zc, zo, zM, zR | toggle, fold, unfold, fold all, unfold all (see Folding above) |
 | Shift+K | preview the link under the cursor (see below) |
 
 **Link preview.** With the cursor on a link, **Shift+K** shows a floating window (640 x 480 points at first) below
@@ -276,7 +343,7 @@ again to return. **Space f f** and **Space f g** open the pickers of [[Search an
 
 ![[keybindings.png]]
 
-Ctrl+H puts the keyboard one place to the left (with split panes: into the pane on the left,
+Ctrl+H (macOS: Cmd+Shift+H) puts the keyboard one place to the left (with split panes: into the pane on the left,
 from the first pane into the left sidebar), Ctrl+L one place to the right (from the sidebar into
 the first pane, then pane by pane; it stays in the last one). Ctrl+Shift+B opens
 the file list with the open note selected: j / k go from file to file, Ctrl+J / Ctrl+K from

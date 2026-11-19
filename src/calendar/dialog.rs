@@ -152,7 +152,7 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
     let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
     // ---- the list
     if d.sources.is_empty() {
-        ui.label(muted("No calendars yet. Add a local one to try things out, or connect a CalDAV account."));
+        crate::theme::prose(ui, muted("No calendars yet. Add a local one to try things out, or connect a CalDAV account."));
     }
     let mut remove = None;
     let mut sample = None;
@@ -222,7 +222,7 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
             rec("edit-pass".into(), crate::secrets::password_edit(ui, &mut f.pass, "leave empty to keep the saved one", 220.0));
             ui.end_row();
         });
-        ui.label(muted("A changed user name or password also goes to the other calendars on the same server with this user name."));
+        crate::theme::prose(ui, muted("A changed user name or password also goes to the other calendars on the same server with this user name."));
         ui.horizontal(|ui| {
             if rec("edit-save".into(), ui.button("Save")).clicked() {
                 save_edit = true;
@@ -260,7 +260,7 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
             action = Some(CalDialogAction::FillSample(id));
         }
     });
-    ui.label(muted("Local calendars are .ics files in your settings folder."));
+    crate::theme::prose(ui, muted("Local calendars are .ics files in your settings folder."));
     ui.separator();
     // ---- CalDAV
     ui.label(egui::RichText::new("Add CalDAV calendars").strong());
@@ -322,10 +322,10 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
         }
     }
     if let Some(m) = &d.message {
-        ui.label(muted(m));
+        crate::theme::prose(ui, muted(m));
     }
-    ui.label(muted(&format!("New CalDAV calendars sync every {DEFAULT_SYNC_MINUTES} minutes; change it per calendar above. Saving an event syncs its calendar right away.")));
-    ui.label(muted(&format!("Only https:// addresses are accepted (http:// only for a server on this computer). {}", crate::secrets::where_stored())));
+    crate::theme::prose(ui, muted(&format!("New CalDAV calendars sync every {DEFAULT_SYNC_MINUTES} minutes; change it per calendar above. Saving an event syncs its calendar right away.")));
+    crate::theme::prose(ui, muted(&format!("Only https:// addresses are accepted (http:// only for a server on this computer). {}", crate::secrets::where_stored())));
     ui.separator();
     rec("week-monday".into(), ui.checkbox(&mut d.week_monday, "Weeks start on Monday"));
     d.rects = rects;
@@ -1048,7 +1048,7 @@ pub fn show_event(ui: &mut Ui, d: &mut EventDialog, store: &mut CalendarStore) -
             ui.end_row();
             ui.label(muted("Repeats"));
             if d.is_occurrence() {
-                ui.label(muted("One date of a repeating event: only this date changes."));
+                crate::theme::prose(ui, muted("One date of a repeating event: only this date changes."));
             } else {
                 ui.horizontal(|ui| {
                     let combo = egui::ComboBox::from_id_salt("event-repeat").width(150.0).selected_text(d.repeat.label()).show_ui(ui, |ui| {
@@ -1081,7 +1081,7 @@ pub fn show_event(ui: &mut Ui, d: &mut EventDialog, store: &mut CalendarStore) -
             if !d.is_occurrence() && d.repeat == RepeatMode::Custom {
                 ui.label(muted(""));
                 let rule = d.original.as_ref().and_then(|(_, e)| e.rrule.clone()).unwrap_or_default();
-                ui.add(egui::Label::new(muted(&format!("{rule} — kept as it is. Choose another repeat above to replace it."))).wrap());
+                ui.add(egui::Label::new(crate::theme::spaced(ui, muted(&format!("{rule} — kept as it is. Choose another repeat above to replace it.")))).wrap());
                 ui.end_row();
             }
             if !d.is_occurrence() && d.repeat == RepeatMode::Every(Freq::Weekly) {
@@ -1156,7 +1156,7 @@ pub fn show_event(ui: &mut Ui, d: &mut EventDialog, store: &mut CalendarStore) -
                 for (i, row) in d.reminders.iter_mut().enumerate() {
                     ui.horizontal(|ui| {
                         if row.other {
-                            ui.label(muted("A reminder set in another program (kept as it is)"));
+                            crate::theme::prose(ui, muted("A reminder set in another program (kept as it is)"));
                         } else {
                             rec(&format!("rem-amount:{i}"), ui.add(egui::TextEdit::singleline(&mut row.amount).desired_width(36.0)));
                             let combo = egui::ComboBox::from_id_salt(("event-rem", i)).width(80.0).selected_text(row.unit.label()).show_ui(ui, |ui| {
@@ -1219,7 +1219,7 @@ pub fn show_event(ui: &mut Ui, d: &mut EventDialog, store: &mut CalendarStore) -
     d.follow_start();
     if let Some((_, e)) = &d.original {
         if e.rrule.is_some() {
-            ui.label(muted("This event repeats: changes apply to every repeat. To change one date only, close this and choose “Edit this date”."));
+            crate::theme::prose(ui, muted("This event repeats: changes apply to every repeat. To change one date only, close this and choose “Edit this date”."));
         }
     }
     rects.extend(picks);

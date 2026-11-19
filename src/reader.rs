@@ -4,11 +4,14 @@
 use crate::colour_tags;
 use crate::drawing::{self, Scene};
 use crate::editor::{char_under, heading_scale, FOOTNOTE_TEXT, SCRIPT_SCALE};
+use crate::fold::{FoldCmd, FoldKind};
+use crate::fold_ui::{FoldUi, Frame, ReaderFolds, Widget};
 use crate::markdown::{self, LinkSpan};
 use crate::syntax;
 use crate::theme;
 use crate::vault::{FileKind, Vault};
 use eframe::egui::{self, text::LayoutJob, Color32, CornerRadius, FontFamily, FontId, Galley, Pos2, Sense, Stroke, TextFormat, Ui, Vec2};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -30,12 +33,16 @@ pub enum ReaderAction {
 /// What the reading view shows besides the text: the numbers of the headings by line (LINK-014)
 /// and the line of a heading to scroll to (LINK-015).
 #[derive(Default)]
-pub struct Extras {
+pub struct Extras<'a> {
     pub numbers: HashMap<usize, String>,
     pub scroll_to: Option<usize>,
+    /// how the front matter is drawn (CFG-050)
+    pub properties: crate::config::PropertiesView,
+    /// the folds of the note, shared with its editor (EDIT-095)
+    pub folds: Option<RefCell<ReaderFolds<'a>>>,
 }
 
-impl Extras {
+impl Extras<'_> {
     /// The numbers of the headings of `text` by line; none when numbering is off for the note
     /// (`vault_default` is the setting, the front matter can override it, CFG-040).
     pub fn numbers_of(text: &str, vault_default: bool) -> HashMap<usize, String> {
@@ -558,13 +565,50 @@ fn jump_target(ctx: &egui::Context, notes: &markdown::Footnotes) -> Option<usize
     }
 }
 
+/// The thin dashed rule of a page-break marker with the small label "Page break" in its middle,
+/// from `x0` to `x1` at height `y` (EDIT-065); the reading view and the editor's preview draw it.
+pub(crate) fn paint_page_break(painter: &egui::Painter, x0: f32, x1: f32, y: f32) {
+    let label = painter.layout_no_wrap("Page break".to_string(), egui::FontId::proportional(11.0), theme::MUTED);
+    let (mid, gap) = ((x0 + x1) / 2.0, label.size().x / 2.0 + 8.0);
+    let stroke = egui::Stroke::new(1.0, theme::BORDER);
+    for (a, b) in [(x0, mid - gap), (mid + gap, x1)] {
+        if b > a {
+            painter.extend(egui::Shape::dashed_line(&[Pos2::new(a, y), Pos2::new(b, y)], stroke, 5.0, 4.0));
+        }
+    }
+    painter.galley(Pos2::new(mid - label.size().x / 2.0, y - label.size().y / 2.0), label, theme::MUTED);
+}
+
 /// Draw a note. `look` is the text size and whether drawings get a dark canvas.
+///
+/// With `extras.folds` (EDIT-095) the blocks that are folded are drawn as their first line and a badge and
+/// every foldable block has its marker; without, nothing is folded and no marker is drawn.
 pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Caches, look: (f32, bool), extras: &Extras) -> Option<ReaderAction> {
+    let mut folds = extras.folds.as_ref().map(|f| f.borrow_mut());
     let (base, dark_canvas) = look;
     let mut out = None;
     let notes = markdown::find_footnotes(text);
     let _defined = markdown::DefinedFootnotes::set(notes.defined());
     let target = jump_target(ui.ctx(), &notes);
+    // the folds: fold all / unfold all by key first, then whatever hides a line that is asked for (a footnote
+    // jump, a heading of the outline) is unfolded (EDIT-097)
+    let summary = folds.as_ref().is_some_and(|f| f.summary);
+    let mut frame = folds.as_mut().map(|f| {
+        f.ui.widgets.clear();
+        f.ui.begin(rel, text, summary)
+    });
+    if let (Some(f), Some(fr)) = (folds.as_mut(), frame.as_mut()) {
+        if let Some(cmd) = f.ui.request.filter(|c| matches!(c, FoldCmd::FoldAll | FoldCmd::UnfoldAll)) {
+            f.ui.request = None;
+            f.ui.apply(rel, fr, cmd, 0);
+            *fr = f.ui.begin(rel, text, summary);
+        }
+        for line in target.into_iter().chain(extras.scroll_to) {
+            if f.ui.reveal_line(rel, fr, line) {
+                *fr = f.ui.begin(rel, text, summary);
+            }
+        }
+    }
     let hint = |t: &str| vault.link_hint(t, Some(rel));
     let all_links: Vec<(LinkSpan, bool)> = markdown::find_links(text)
         .into_iter()
@@ -579,156 +623,311 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
     // front matter
     if lines.first().map(|(_, l)| l.trim() == "---").unwrap_or(false) {
         if let Some(end) = lines.iter().skip(1).position(|(_, l)| l.trim() == "---") {
-            egui::Frame::new().fill(theme::BG_SECONDARY).corner_radius(CornerRadius::same(6)).inner_margin(8).show(ui, |ui| {
-                ui.label(egui::RichText::new("Properties").small().color(theme::MUTED));
-                for (_, l) in &lines[1..end + 1] {
-                    ui.label(egui::RichText::new(*l).monospace().color(theme::TEXT));
-                }
-            });
+            let raw: Vec<&str> = lines[1..end + 1].iter().map(|(_, l)| *l).collect();
+            crate::properties_ui::show(ui, text, &raw, extras.properties, vault, rel, &mut out);
             ui.add_space(8.0);
             i = end + 2;
         }
     }
     let tables = crate::table::find_tables(text);
     let formulas = markdown::find_math(text);
-    while i < lines.len() {
-        let span = tables.iter().find(|b| b.lines.start == i).map_or(i + 1, |b| b.lines.end);
-        if target.is_some_and(|t| (i..span).contains(&t)) {
-            // the end of a footnote jump (EDIT-050): this is the line
-            ui.scroll_to_rect(egui::Rect::from_min_size(ui.cursor().min, Vec2::new(1.0, base * 1.5)), Some(egui::Align::TOP));
-        }
-        if let Some(b) = tables.iter().find(|b| b.lines.start == i) {
-            table_block(ui, b, vault, rel, base, &hint, &mut out);
-            i = b.lines.end;
-            continue;
-        }
-        // a formula on lines of its own: `$$` lines, a `math` fence, `$$…$$` alone (EDIT-046)
-        if let Some(m) = formulas.iter().find(|m| m.block && m.lines.start == i) {
-            math_block(ui, &text[m.tex.clone()], base);
-            i = m.lines.end;
-            continue;
-        }
-        let (off, line) = lines[i];
-        let line_links: Vec<(LinkSpan, bool)> = all_links
-            .iter()
-            .filter(|(l, _)| l.range.start >= off && l.range.end <= off + line.len())
-            .map(|(l, ok)| {
-                let mut l = l.clone();
-                l.range = l.range.start - off..l.range.end - off;
-                (l, *ok)
-            })
-            .collect();
-        // fenced code block
-        if fenced.get(i).copied().unwrap_or(false) {
-            let mut code = String::new();
-            let lang = line.trim().trim_start_matches(['`', '~']).to_string();
-            let word = syntax::fence_language(line);
-            i += 1;
-            while i < lines.len() && !(lines[i].1.trim_start().starts_with("```") || lines[i].1.trim_start().starts_with("~~~")) {
-                code.push_str(lines[i].1);
-                code.push('\n');
-                i += 1;
+    let page_breaks = markdown::page_break_lines(text);
+    // a very large note: what is far from the visible part is not drawn, a space of the height it had is left (EDIT-102)
+    let heights = (lines.len() >= CULL_LINES).then(|| {
+        let key = HeightsKey { text: crate::fold_ui::hash_of(text), width: ui.available_width().to_bits(), base: base.to_bits(), badges: frame.as_ref().map(|f| f.view.badges.clone()).unwrap_or_default() };
+        let id = ui.scope_id().with(("reader-heights", rel));
+        let shared = ui.data_mut(|d| d.get_temp::<std::sync::Arc<std::sync::Mutex<Heights>>>(id)).unwrap_or_default();
+        {
+            let mut h = shared.lock().unwrap_or_else(|e| e.into_inner());
+            if h.key.as_ref() != Some(&key) {
+                *h = Heights { key: Some(key), segs: HashMap::new() };
             }
-            i += 1;
-            egui::Frame::new().fill(theme::CODE_BG).corner_radius(CornerRadius::same(6)).inner_margin(10).show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                if !lang.is_empty() {
-                    ui.label(egui::RichText::new(lang).small().color(theme::MUTED));
-                }
-                ui.label(code_job(&word, code.trim_end(), base * 0.9));
-            });
-            ui.add_space(6.0);
+        }
+        ui.data_mut(|d| d.insert_temp(id, shared.clone()));
+        shared
+    });
+    let wanted: Vec<usize> = target.into_iter().chain(extras.scroll_to).collect();
+    while i < lines.len() {
+        if let Some(h) = frame.as_ref().and_then(|f| f.view.hidden_at(i)) {
+            // what a fold hides is not drawn (EDIT-095)
+            i = h.end;
             continue;
         }
-        let trimmed = line.trim();
-        let indent = (line.len() - line.trim_start().len()) as f32 * 7.0;
-        // embed on its own line
-        if line_links.len() == 1 && line_links[0].0.embed && trimmed.len() == line_links[0].0.range.len() {
-            let (l, ok) = &line_links[0];
-            if *ok {
-                if let Some(target) = vault.resolve(&l.target, Some(rel)) {
-                    if crate::media::is_media(&target) {
-                        // a sound is a player of its own, without the frame (MEDIA-001)
-                        crate::media::widget::show(ui, caches.media, &vault.abs(&target), rel, l.embed_width());
-                        ui.add_space(6.0);
-                    } else {
-                        embed(ui, vault, &target, l.embed_width(), caches, (base, dark_canvas), &mut out);
-                    }
-                    i += 1;
+        let (start, top) = (i, ui.cursor().min.y);
+        if let Some(h) = &heights {
+            let known = h.lock().unwrap_or_else(|e| e.into_inner()).segs.get(&i).copied();
+            if let Some((end, height)) = known {
+                let clip = ui.clip_rect();
+                let far = top + height < clip.min.y - clip.height() || top > clip.max.y + clip.height();
+                if far && !wanted.iter().any(|t| (i..end).contains(t)) {
+                    ui.add_space((height - ui.spacing().item_spacing.y).max(0.0));
+                    i = end;
                     continue;
                 }
             }
         }
-        if trimmed.is_empty() {
-            ui.add_space(base * 0.6);
-        } else if trimmed == "---" || trimmed == "***" || trimmed == "___" {
-            ui.add_space(4.0);
-            ui.separator();
-            ui.add_space(4.0);
-        } else if let Some(def) = notes.def_at(i) {
-            // a footnote definition: its label raised, its text a little smaller (EDIT-050)
-            let (job, spans, _, maths) = footnote_def_painted(line, &def.label, &def.marker, &line_links, base, theme::TEXT);
-            inline_block(ui, job, &spans, &maths, &hint, &mut out);
-        } else if notes.is_continuation(i) {
-            let (job, spans, _, maths) = footnote_text_painted(line, &line_links, base, theme::TEXT);
-            ui.horizontal_top(|ui| {
-                ui.add_space(base * 1.2);
-                inline_block(ui, job, &spans, &maths, &hint, &mut out);
-            });
-        } else if let Some(level) = markdown::heading_level(line) {
-            ui.add_space(base * 0.5);
-            let size = base * heading_scale(level as u8);
-            let (job, spans, maths) = inline_job(line[level..].trim_start(), &shift(&line_links, level + (line[level..].len() - line[level..].trim_start().len())), size, theme::HEADING, false);
-            let shown = ui.horizontal_top(|ui| {
-                if let Some(n) = extras.numbers.get(&i) {
-                    ui.label(egui::RichText::new(n).size(size).color(theme::MUTED));
-                }
-                inline_block(ui, job, &spans, &maths, &hint, &mut out)
-            });
-            if extras.scroll_to == Some(i) {
-                shown.response.scroll_to_me(Some(egui::Align::TOP));
+        // the badge of a folded code block, drawn in its box (EDIT-098): where it is and whether it was clicked
+        let mut in_box: Option<(egui::Rect, bool)> = None;
+        'line: {
+            let span = tables.iter().find(|b| b.lines.start == i).map_or(i + 1, |b| b.lines.end);
+            if target.is_some_and(|t| (i..span).contains(&t)) {
+                // the end of a footnote jump (EDIT-050): this is the line
+                ui.scroll_to_rect(egui::Rect::from_min_size(ui.cursor().min, Vec2::new(1.0, base * 1.5)), Some(egui::Align::TOP));
             }
-            ui.add_space(base * 0.2);
-        } else if let Some((check, done, rest, _)) = markdown::parse_task_line(line) {
-            let rest_off = line.len() - rest.len();
-            ui.horizontal_top(|ui| {
-                ui.add_space(indent);
-                let t = line.trim_start();
-                let digits = t.bytes().take_while(|c| c.is_ascii_digit()).count();
-                if digits > 0 {
-                    ui.label(egui::RichText::new(format!("{}.", &t[..digits])).size(base).color(theme::ACCENT));
+            if let Some(b) = tables.iter().find(|b| b.lines.start == i) {
+                table_block(ui, b, vault, rel, base, &hint, &mut out);
+                i = b.lines.end;
+                break 'line;
+            }
+            // a formula on lines of its own: `$$` lines, a `math` fence, `$$…$$` alone (EDIT-046)
+            if let Some(m) = formulas.iter().find(|m| m.block && m.lines.start == i) {
+                math_block(ui, &text[m.tex.clone()], base);
+                i = m.lines.end;
+                break 'line;
+            }
+            let (off, line) = lines[i];
+            // the links are in the order of the text: only the ones from this line on
+            let line_links: Vec<(LinkSpan, bool)> = all_links[all_links.partition_point(|(l, _)| l.range.start < off)..]
+                .iter()
+                .take_while(|(l, _)| l.range.start <= off + line.len())
+                .filter(|(l, _)| l.range.start >= off && l.range.end <= off + line.len())
+                .map(|(l, ok)| {
+                    let mut l = l.clone();
+                    l.range = l.range.start - off..l.range.end - off;
+                    (l, *ok)
+                })
+                .collect();
+            // fenced code block
+            if fenced.get(i).copied().unwrap_or(false) {
+                let mut code = String::new();
+                let word = syntax::fence_language(line);
+                let open = i;
+                i += 1;
+                while i < lines.len() && !(lines[i].1.trim_start().starts_with("```") || lines[i].1.trim_start().starts_with("~~~")) {
+                    code.push_str(lines[i].1);
+                    code.push('\n');
+                    i += 1;
                 }
-                let mut d = done;
-                if ui.checkbox(&mut d, "").clicked() {
-                    out = Some(ReaderAction::ToggleTask(off + check));
+                i += 1;
+                // the box of EDIT-080: a border, and the language (or "code") in a badge at the top right
+                let folded = frame.as_ref().and_then(|f| f.view.badges.binary_search_by_key(&open, |b| b.0).ok().map(|k| (f.view.badges[k].1, f.mail)));
+                egui::Frame::new().fill(theme::CODE_BG).stroke(egui::Stroke::new(1.0, theme::BORDER)).corner_radius(CornerRadius::same(6)).inner_margin(10).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    let badge = syntax::badge_language(&word).unwrap_or_else(|| "code".to_string());
+                    let box_rect = ui.max_rect();
+                    let row_y = ui
+                        .with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                            let badge = ui.label(egui::RichText::new(badge).monospace().size((base * 0.75).max(9.0)).color(theme::FAINT));
+                            // the copy button (EDIT-093): left of the badge, while the pointer is over the box
+                            let id = crate::code_box::copy_id(ui.scope_id(), rel, open);
+                            let shown = ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| box_rect.expand(10.0).contains(p));
+                            crate::code_box::copy_button(ui, id, badge.rect.left() - 6.0, badge.rect.center().y, shown, || {
+                                let all: Vec<&str> = lines.iter().map(|l| l.1).collect();
+                                crate::code_box::code_of(&all, open).unwrap_or_default()
+                            });
+                            badge.rect.center().y
+                        })
+                        .inner;
+                    match folded {
+                        // a folded block is its first line in the box: the badge in the row, no body (EDIT-095, EDIT-098)
+                        Some((n, mail)) => {
+                            let g = ui.painter().layout_no_wrap(crate::fold::badge_label(FoldKind::Code, mail, n), FontId::proportional((base * 0.8).max(9.0)), theme::MUTED);
+                            let rect = egui::Rect::from_min_size(Pos2::new(box_rect.left(), row_y - (g.size().y + 2.0) / 2.0), g.size() + Vec2::new(10.0, 2.0));
+                            let resp = ui.interact(rect, ui.scope_id().with(("fold-badge-in-box", rel, open)), Sense::click());
+                            ui.painter().rect_filled(rect, 4.0, if resp.hovered() { theme::BG_ACTIVE } else { theme::BG_SECONDARY });
+                            ui.painter().galley(rect.center() - g.size() / 2.0, g, theme::MUTED);
+                            if resp.hovered() {
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                            }
+                            in_box = Some((rect, resp.on_hover_text("Unfold").clicked()));
+                        }
+                        None => {
+                            ui.label(code_job(&word, code.trim_end(), base * 0.9));
+                        }
+                    }
+                });
+                ui.add_space(6.0);
+                break 'line;
+            }
+            let trimmed = line.trim();
+            let indent = (line.len() - line.trim_start().len()) as f32 * 7.0;
+            // embed on its own line
+            if line_links.len() == 1 && line_links[0].0.embed && trimmed.len() == line_links[0].0.range.len() {
+                let (l, ok) = &line_links[0];
+                if *ok {
+                    if let Some(target) = vault.resolve(&l.target, Some(rel)) {
+                        if crate::media::is_media(&target) {
+                            // a sound is a player of its own, without the frame (MEDIA-001)
+                            crate::media::widget::show(ui, caches.media, &vault.abs(&target), rel, l.embed_width());
+                            ui.add_space(6.0);
+                        } else {
+                            embed(ui, vault, &target, l.embed_width(), caches, (base, dark_canvas), &mut out);
+                        }
+                        i += 1;
+                        break 'line;
+                    }
                 }
-                let (job, spans, maths) = inline_job(rest, &shift(&line_links, rest_off), base, theme::TEXT, done);
+            }
+            if trimmed.is_empty() {
+                ui.add_space(base * 0.6);
+            } else if page_breaks.contains(&i) {
+                // a page-break marker: a dashed rule with its label (EDIT-065)
+                let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), base * 1.6), egui::Sense::hover());
+                paint_page_break(ui.painter(), rect.left(), rect.right(), rect.center().y);
+            } else if trimmed == "---" || trimmed == "***" || trimmed == "___" {
+                ui.add_space(4.0);
+                ui.separator();
+                ui.add_space(4.0);
+            } else if let Some(def) = notes.def_at(i) {
+                // a footnote definition: its label raised, its text a little smaller (EDIT-050)
+                let (job, spans, _, maths) = footnote_def_painted(line, &def.label, &def.marker, &line_links, base, theme::TEXT);
                 inline_block(ui, job, &spans, &maths, &hint, &mut out);
-            });
-        } else if let Some((marker, rest_off)) = list_marker(line) {
-            ui.horizontal_top(|ui| {
-                ui.add_space(indent + 4.0);
-                ui.label(egui::RichText::new(marker).size(base).color(theme::ACCENT));
-                let (job, spans, maths) = inline_job(&line[rest_off..], &shift(&line_links, rest_off), base, theme::TEXT, false);
+            } else if notes.is_continuation(i) {
+                let (job, spans, _, maths) = footnote_text_painted(line, &line_links, base, theme::TEXT);
+                ui.horizontal_top(|ui| {
+                    ui.add_space(base * 1.2);
+                    inline_block(ui, job, &spans, &maths, &hint, &mut out);
+                });
+            } else if let Some(level) = markdown::heading_level(line) {
+                ui.add_space(base * 0.5);
+                let size = base * heading_scale(level as u8);
+                let (job, spans, maths) = inline_job(line[level..].trim_start(), &shift(&line_links, level + (line[level..].len() - line[level..].trim_start().len())), size, theme::HEADING, false);
+                let shown = ui.horizontal_top(|ui| {
+                    if let Some(n) = extras.numbers.get(&i) {
+                        ui.label(egui::RichText::new(n).size(size).color(theme::MUTED));
+                    }
+                    inline_block(ui, job, &spans, &maths, &hint, &mut out)
+                });
+                if extras.scroll_to == Some(i) {
+                    shown.response.scroll_to_me(Some(egui::Align::TOP));
+                }
+                ui.add_space(base * 0.2);
+            } else if let Some((check, done, rest, _)) = markdown::parse_task_line(line) {
+                let rest_off = line.len() - rest.len();
+                ui.horizontal_top(|ui| {
+                    ui.add_space(indent);
+                    let t = line.trim_start();
+                    let digits = t.bytes().take_while(|c| c.is_ascii_digit()).count();
+                    if digits > 0 {
+                        ui.label(egui::RichText::new(format!("{}.", &t[..digits])).size(base).color(theme::ACCENT));
+                    }
+                    let mut d = done;
+                    if ui.checkbox(&mut d, "").clicked() {
+                        out = Some(ReaderAction::ToggleTask(off + check));
+                    }
+                    let (job, spans, maths) = inline_job(rest, &shift(&line_links, rest_off), base, theme::TEXT, done);
+                    inline_block(ui, job, &spans, &maths, &hint, &mut out);
+                });
+            } else if let Some((marker, rest_off)) = list_marker(line) {
+                ui.horizontal_top(|ui| {
+                    ui.add_space(indent + 4.0);
+                    ui.label(egui::RichText::new(marker).size(base).color(theme::ACCENT));
+                    let (job, spans, maths) = inline_job(&line[rest_off..], &shift(&line_links, rest_off), base, theme::TEXT, false);
+                    inline_block(ui, job, &spans, &maths, &hint, &mut out);
+                });
+            } else if trimmed.starts_with('>') {
+                let content_off = line.find('>').unwrap() + 1;
+                let content = &line[content_off..];
+                let lead = content.len() - content.trim_start().len();
+                egui::Frame::new().inner_margin(egui::Margin { left: 12, right: 4, top: 2, bottom: 2 }).show(ui, |ui| {
+                    let (job, spans, maths) = inline_job(content.trim_start(), &shift(&line_links, content_off + lead), base, theme::QUOTE, false);
+                    inline_block(ui, job, &spans, &maths, &hint, &mut out);
+                    let r = ui.min_rect();
+                    ui.painter().line_segment([r.left_top() - Vec2::new(10.0, 0.0), r.left_bottom() - Vec2::new(10.0, 0.0)], Stroke::new(3.0, theme::ACCENT.gamma_multiply(0.7)));
+                });
+            } else {
+                let (job, spans, maths) = inline_job(line, &line_links, base, theme::TEXT, false);
                 inline_block(ui, job, &spans, &maths, &hint, &mut out);
-            });
-        } else if trimmed.starts_with('>') {
-            let content_off = line.find('>').unwrap() + 1;
-            let content = &line[content_off..];
-            let lead = content.len() - content.trim_start().len();
-            egui::Frame::new().inner_margin(egui::Margin { left: 12, right: 4, top: 2, bottom: 2 }).show(ui, |ui| {
-                let (job, spans, maths) = inline_job(content.trim_start(), &shift(&line_links, content_off + lead), base, theme::QUOTE, false);
-                inline_block(ui, job, &spans, &maths, &hint, &mut out);
-                let r = ui.min_rect();
-                ui.painter().line_segment([r.left_top() - Vec2::new(10.0, 0.0), r.left_bottom() - Vec2::new(10.0, 0.0)], Stroke::new(3.0, theme::ACCENT.gamma_multiply(0.7)));
-            });
-        } else {
-            let (job, spans, maths) = inline_job(line, &line_links, base, theme::TEXT, false);
-            inline_block(ui, job, &spans, &maths, &hint, &mut out);
+            }
+            i += 1;
         }
-        i += 1;
+        if let (Some(f), Some(fr)) = (folds.as_mut(), frame.as_ref()) {
+            fold_widgets(ui, f.ui, rel, fr, (start, top), base, in_box);
+        }
+        if let Some(h) = &heights {
+            h.lock().unwrap_or_else(|e| e.into_inner()).segs.insert(start, (i, ui.cursor().min.y - top));
+        }
     }
     out
+}
+
+/// From this many lines on, the reading view does not draw what is far from the visible part (EDIT-102).
+const CULL_LINES: usize = 2000;
+
+/// What the heights of a note's parts were drawn for: they are valid for the same text, width, size and folds.
+#[derive(Clone, PartialEq)]
+struct HeightsKey {
+    text: u64,
+    width: u32,
+    base: u32,
+    badges: Vec<(usize, usize)>,
+}
+
+/// The height of each part of the reading view (a line, a table, a code block...) by the line it starts at,
+/// and the line after it.
+#[derive(Default)]
+struct Heights {
+    key: Option<HeightsKey>,
+    segs: HashMap<usize, (usize, f32)>,
+}
+
+/// The marker and the badge of the foldable blocks that start at `line` of the reading view (EDIT-096), drawn
+/// after the line: `at` is the line and `top`, where it began. The front matter is the properties card, with its own toggle
+/// (EDIT-063), and has none. A folded code block drew its badge in its box (`in_box`, EDIT-098).
+fn fold_widgets(ui: &mut Ui, folds: &mut FoldUi, rel: &Path, frame: &Frame, at: (usize, f32), base: f32, in_box: Option<(egui::Rect, bool)>) {
+    let (line, top) = at;
+    // the blocks are in the order of their headers
+    let first = frame.blocks.partition_point(|b| b.header < line);
+    let here: Vec<usize> = (first..frame.blocks.len()).take_while(|&i| frame.blocks[i].header == line).filter(|&i| frame.blocks[i].kind != FoldKind::Front).collect();
+    if here.is_empty() {
+        return;
+    }
+    let col = ui.max_rect();
+    let bottom = ui.cursor().min.y;
+    let folded = here.iter().any(|i| frame.folded.binary_search(i).is_ok());
+    let hover = ui.input(|i| i.pointer.hover_pos());
+    let hot = hover.is_some_and(|p| p.y >= top && p.y <= bottom && p.x >= col.left() - 24.0 && p.x <= col.right());
+    let mut clicked = None;
+    let mut widget = Widget { line, marker: None, badge: None, copy: None };
+    let clip = ui.clip_rect();
+    if (folded || hot) && bottom >= clip.min.y && top <= clip.max.y {
+        let first = &frame.blocks[here[0]];
+        let y = match (first.kind, markdown::heading_level(&first.title)) {
+            (FoldKind::Heading, Some(level)) => top + base * 0.5 + base * heading_scale(level as u8) * 0.65,
+            (FoldKind::Code, _) => top + 10.0 + base * 0.55,
+            _ => top + base * 0.7,
+        };
+        let rect = egui::Rect::from_center_size(Pos2::new(col.left() - crate::fold_ui::MARKER / 2.0 - 4.0, y), Vec2::splat(crate::fold_ui::MARKER));
+        if crate::fold_ui::marker_button(ui, ui.scope_id().with(("reader-fold-marker", rel, line)), rect, folded) {
+            clicked = Some(FoldCmd::Toggle);
+        }
+        widget.marker = Some(rect);
+    }
+    if let Some(&(_, n)) = frame.view.badges.binary_search_by_key(&line, |b| b.0).ok().map(|i| &frame.view.badges[i]) {
+        let (rect, clicked_badge) = match in_box {
+            Some(drawn) => drawn,
+            None => {
+                let kind = frame.folded.iter().map(|&i| &frame.blocks[i]).filter(|b| b.header == line).max_by_key(|b| b.end).map_or(FoldKind::Heading, |b| b.kind);
+                let g = ui.painter().layout_no_wrap(crate::fold::badge_label(kind, frame.mail, n), FontId::proportional((base * 0.8).max(9.0)), theme::MUTED);
+                let (rect, resp) = ui.allocate_exact_size(g.size() + Vec2::new(10.0, 2.0), Sense::click());
+                ui.painter().rect_filled(rect, 4.0, if resp.hovered() { theme::BG_ACTIVE } else { theme::BG_SECONDARY });
+                ui.painter().galley(rect.center() - g.size() / 2.0, g, theme::MUTED);
+                if resp.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                (rect, resp.on_hover_text("Unfold").clicked())
+            }
+        };
+        if clicked_badge {
+            clicked = Some(FoldCmd::Unfold);
+        }
+        widget.badge = Some(rect);
+    }
+    folds.widgets.push(widget);
+    if let Some(cmd) = clicked {
+        folds.apply(rel, frame, cmd, line);
+        ui.ctx().request_repaint();
+    }
 }
 
 /// A table drawn as a grid (EDIT-024); links in its cells work as everywhere in the reading view.
@@ -973,7 +1172,7 @@ mod tests {
             let mut out = ctx.run_ui(raw, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     // the target is asked for in the first frame only, as the app does
-                    let e = Extras { numbers: extras.numbers.clone(), scroll_to: extras.scroll_to.filter(|_| n == 0) };
+                    let e = Extras { numbers: extras.numbers.clone(), scroll_to: extras.scroll_to.filter(|_| n == 0), properties: extras.properties, folds: None };
                     action = show(ui, text, v, Path::new("Welcome.md"), &mut Caches { scenes: &mut scenes, media: &media }, (15.0, true), &e);
                 });
             });
@@ -991,14 +1190,14 @@ mod tests {
         crate::vault::write_sample_vault(&d).unwrap();
         let v = Vault::open(&d).unwrap();
         let text = "# Title\n## Plan\n### Step\n## Next\n";
-        let (_, painted) = read(&v, text, &Extras { numbers: Extras::numbers_of(text, true), scroll_to: None }, vec![vec![]]);
+        let (_, painted) = read(&v, text, &Extras { numbers: Extras::numbers_of(text, true), scroll_to: None, ..Default::default() }, vec![vec![]]);
         for (n, title) in [("1", "Title"), ("1.1", "Plan"), ("1.1.1", "Step"), ("1.2", "Next")] {
             let number = painted.iter().find(|(t, _)| t == n).unwrap_or_else(|| panic!("{n} is painted: {painted:?}")).1;
             let title = painted.iter().find(|(t, _)| t == title).unwrap().1;
             assert!(number.max.x <= title.min.x + 0.5 && (number.center().y - title.center().y).abs() < 6.0, "{n} is left of {title:?} on its row: {number:?}");
         }
         assert!(!painted.iter().any(|(t, _)| t == "0"), "no heading is numbered 0");
-        let (_, painted) = read(&v, text, &Extras { numbers: Extras::numbers_of(text, false), scroll_to: None }, vec![vec![]]);
+        let (_, painted) = read(&v, text, &Extras { numbers: Extras::numbers_of(text, false), scroll_to: None, ..Default::default() }, vec![vec![]]);
         assert!(!painted.iter().any(|(t, _)| t == "1" || t == "1.1"), "numbering off: {painted:?}");
         let on = "---\nnumbered-headings: yes\n---\n## Plan\n";
         assert_eq!(Extras::numbers_of(on, false).get(&3).map(String::as_str), Some("1"), "front matter turns it on (line 3, after the properties)");
@@ -1026,7 +1225,7 @@ mod tests {
         let line = text.lines().position(|l| l == "## Down here").unwrap();
         let (_, before) = read(&v, &text, &Extras::default(), vec![vec![]]);
         assert!(before.iter().find(|(t, _)| t == "Down here").unwrap().1.min.y > 1000.0, "far below the window");
-        let (_, after) = read(&v, &text, &Extras { numbers: Default::default(), scroll_to: Some(line) }, vec![vec![]]);
+        let (_, after) = read(&v, &text, &Extras { numbers: Default::default(), scroll_to: Some(line), ..Default::default() }, vec![vec![]]);
         let y = after.iter().find(|(t, _)| t == "Down here").unwrap().1.min.y;
         assert!((0.0..40.0).contains(&y), "the heading is at the top of the view: {y}");
         let _ = std::fs::remove_dir_all(&d);

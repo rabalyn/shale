@@ -84,7 +84,7 @@ impl BookExport {
         let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
         match &self.plan {
             Err(e) => {
-                rec("no-book", ui.colored_label(theme::LINK_MISSING, e));
+                rec("no-book", crate::theme::problem(ui, e));
             }
             Ok(plan) => {
                 let head = egui::CollapsingHeader::new("Reading order").id_salt("book-order").default_open(false).show(ui, |ui| {

@@ -65,9 +65,22 @@ pub struct Tab {
     pub reader_line: Option<usize>,
     /// Pinned tabs sit left of all others (NAV-016).
     pub pinned: bool,
+    /// Where the cursor and the scroll of the note are (NAV-038).
+    pub place: NotePlace,
     pub editor: NoteEditor,
     pub title_buf: String,
     pub title_for: Option<PathBuf>,
+}
+
+/// Where a note tab is looked at: the selection (char indices) and the scroll offset of the last frame
+/// it was shown, which are saved with the tab (NAV-038), and what a restored tab still has to put
+/// into its view when it is first shown (a tab that is never shown keeps what it was given).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct NotePlace {
+    pub cursor: Option<(usize, usize)>,
+    pub scroll: Option<f32>,
+    pub restore_cursor: Option<(usize, usize)>,
+    pub restore_scroll: Option<f32>,
 }
 
 /// What the tab bar drew last frame besides the tabs themselves.
@@ -196,6 +209,8 @@ pub enum Modal {
     Calendars(Box<crate::calendar::dialog::CalendarDialog>),
     Event(Box<crate::calendar::dialog::EventDialog>),
     Import(Box<crate::import::dialog::ImportDialog>),
+    /// what an import of two or more items made (IMP-056)
+    ImportSummary(Box<crate::import::summary::ImportSummary>),
     MailAccounts(Box<crate::mail::dialog::MailDialog>),
     Social(Box<crate::social::accounts_ui::SocialDialog>),
     /// pasted text with headings, none of them `#`: lift them? (EDIT-038)
@@ -337,6 +352,8 @@ pub struct ShaleApp {
     pub calendar: crate::calendar::store::CalendarStore,
     /// The mail view (ADR-0007 phase 1b).
     pub mail: crate::mail::ui::MailView,
+    /// the counts of the status bar, kept for a note and a vault that did not change (EDIT-107)
+    pub status: crate::editor_cache::StatusCache,
     /// the calendar views, the jobs of their popups and the default calendar for new events
     pub cal: crate::calendar::ui::CalendarUi,
     /// the feed view (Mastodon / Bluesky)
@@ -370,6 +387,9 @@ pub struct ShaleApp {
     /// What this session moved to the trash, newest last: where it is in `.trash/` (VAULT-020).
     pub trashed: Vec<PathBuf>,
     last_scan: Instant,
+    /// When the session state was last looked at for a change to write, and what the file was
+    /// then (NAV-041).
+    pub(crate) state_tick: (Instant, Option<crate::vault_state::VaultState>),
     pub welcome_path: String,
     /// screenshot mode: where the picture goes and whether it was saved
     shot: screenshot::ScreenshotRun,
@@ -549,6 +569,7 @@ impl ShaleApp {
                 c
             },
             mail: crate::mail::ui::MailView::new(mail_root),
+            status: Default::default(),
             cal: crate::calendar::ui::CalendarUi::new(),
             social: {
                 let mut s = crate::social::state::SocialState::new(social_dir);
@@ -567,6 +588,7 @@ impl ShaleApp {
             toasts: vec![],
             trashed: vec![],
             last_scan: Instant::now(),
+            state_tick: (Instant::now(), None),
             welcome_path: default_welcome.to_string_lossy().into_owned(),
             shot: screenshot::ScreenshotRun::new(screenshot),
             frames: 0,
@@ -827,7 +849,14 @@ impl ShaleApp {
                 }
             }
             if self.tabbar.tabs.len() > before {
-                self.tabbar.tabs[self.tabbar.active].pinned = st.pinned;
+                let tab = &mut self.tabbar.tabs[self.tabbar.active];
+                tab.pinned = st.pinned;
+                // the reading view, the cursor and the scroll as they were, put into the view when it is first shown (NAV-038, NAV-039)
+                if matches!(tab.view, View::Note(_)) {
+                    tab.reading = st.reading;
+                    let (cursor, scroll) = (st.cursor.map(|[a, b]| (a, b)), st.scroll.map(|y| y as f32));
+                    tab.place = NotePlace { cursor, scroll, restore_cursor: cursor, restore_scroll: scroll };
+                }
             }
             if k == sp.active && self.tabbar.tabs.len() > before {
                 open_id = self.tabbar.tabs.get(self.tabbar.active).map(|t| t.id);
@@ -985,6 +1014,21 @@ impl ShaleApp {
         self.vdata.state.focused_pane = self.panes.focused;
         // (the tabs of the first pane stay where a Shale without panes reads them)
         self.vdata.state.tabs = self.vdata.state.panes.first().map(|p| p.tabs.clone()).unwrap_or_default();
+    }
+
+    /// The session state is written when something in it changed, looked at every 5 seconds: the
+    /// cursor and scroll of a note change all the time and are not written at every frame (NAV-041).
+    /// A failed write is not told here (it is, at the next save of the config).
+    fn state_tick(&mut self) {
+        if self.vault.is_none() || !self.persist_config || self.state_tick.0.elapsed() < Duration::from_secs(5) {
+            return;
+        }
+        self.state_tick.0 = Instant::now();
+        self.remember_open_files();
+        if self.state_tick.1.as_ref() != Some(&self.vdata.state) {
+            let _ = self.vdata.save();
+            self.state_tick.1 = Some(self.vdata.state.clone());
+        }
     }
 
     pub fn current_path(&self) -> Option<PathBuf> {
@@ -1722,6 +1766,16 @@ impl ShaleApp {
                 ctx.data_mut(|d| d.insert_temp(egui::Id::unique(("note-menu-key", tab_id)), true));
                 ctx.request_repaint();
             }
+            // fold all and unfold all work in the reading view too; the others act on the cursor, which it has not (EDIT-098)
+            KeyAction::NoteFoldAll | KeyAction::NoteUnfoldAll => {
+                use crate::fold::FoldCmd;
+                self.tabbar.tabs[active].editor.key_fold(if a == KeyAction::NoteFoldAll { FoldCmd::FoldAll } else { FoldCmd::UnfoldAll });
+            }
+            KeyAction::NoteFold | KeyAction::NoteUnfold if !reading => {
+                use crate::fold::FoldCmd;
+                self.tabbar.tabs[active].editor.key_fold(if a == KeyAction::NoteFold { FoldCmd::Fold } else { FoldCmd::Unfold });
+            }
+            KeyAction::NoteCopyCode if !reading => self.tabbar.tabs[active].editor.key_copy_code(),
             KeyAction::NoteHighlightColour if bar => self.tabbar.tabs[active].editor.key_menu(crate::format_bar::Menu::Highlight),
             KeyAction::NoteFontColour if bar => self.tabbar.tabs[active].editor.key_menu(crate::format_bar::Menu::Font),
             KeyAction::NoteHeading if bar => self.tabbar.tabs[active].editor.key_menu(crate::format_bar::Menu::Heading),
@@ -1862,7 +1916,8 @@ impl ShaleApp {
             let scene = self.drawings.get(rel).map(|d| d.scene.clone()).or_else(|| crate::drawing::Scene::read_file(&v.abs(rel)).ok()).unwrap_or_default();
             crate::pdf::export::ExportOptions::for_drawing(&scene)
         } else {
-            crate::pdf::export::ExportOptions { numbered_headings: self.cfg.numbered_headings, ..crate::pdf::export::ExportOptions::for_note() }
+            // the dialog starts with what the note's `print-*` properties say (PDF-013, PDF-019)
+            crate::pdf::export::ExportOptions { numbered_headings: self.cfg.numbered_headings, ..crate::pdf::export::ExportOptions::for_note() }.with_note_properties(&self.note_text(rel))
         };
         let path = v.root.join("exports").join(format!("{name}.pdf"));
         let mut dialog = crate::pdf::export_dialog::ExportDialog::new(rel.to_path_buf(), drawing, name, opts, path);
@@ -2676,6 +2731,7 @@ impl ShaleApp {
         self.keyboard_guard(ui.ctx());
         self.shortcuts(ui);
         self.autosave();
+        self.state_tick();
         self.settings_file_tick(ui.ctx());
         if let Some(m) = self.fonts.sync(ui.ctx(), &self.cfg.fonts) {
             self.toast(m);
@@ -3420,6 +3476,29 @@ mod export_tests {
         assert!((a / b - 2.0).abs() < 0.05, "half a 600 column is twice a quarter of a 1200 one: {a} {b}");
         let none = page_w(&mut app, None);
         assert!((none / a - 600.0 / 720.0).abs() < 0.05, "no column known: 720 is used: {none} {a}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-013, PDF-019
+    #[test]
+    fn the_export_dialog_opens_with_the_print_properties_of_the_note_and_what_it_holds_is_exported() {
+        let (mut app, d) = test_app("print-props");
+        let note = d.join("Printed.md");
+        std::fs::write(&note, "---\nprint-paper: Letter\nprint-margins: 30 10 25 15\nprint-font-size: 12\nprint-title: false\nprint-toc: false\n---\n# Head\n\nBody text.\n").unwrap();
+        app.vault.as_mut().unwrap().rescan();
+        app.open_export_dialog(Path::new("Printed.md"));
+        let Some(Modal::Export(mut dialog)) = app.modal.take() else { panic!("the export dialog opens") };
+        let o = &dialog.opts;
+        assert_eq!((o.paper, o.margins_mm, o.font_pt, o.title, o.toc), (crate::pdf::export::Paper::Letter, [30.0, 10.0, 25.0, 15.0], 12.0, false, false));
+        // a note without properties gets the usual dialog
+        app.open_export_dialog(Path::new("Ideas.md"));
+        let Some(Modal::Export(plain)) = app.modal.take() else { panic!() };
+        assert_eq!((plain.opts.paper, plain.opts.margins_mm, plain.opts.title, plain.opts.toc), (crate::pdf::export::Paper::A4, [20.0; 4], true, true));
+        // what the dialog holds is what is exported: A4 chosen in it wins over the note's Letter
+        dialog.opts.paper = crate::pdf::export::Paper::A4;
+        let out = app.run_export(&dialog).unwrap();
+        let bytes = std::fs::read(out).unwrap();
+        assert!(String::from_utf8_lossy(&bytes).contains("/MediaBox [0 0 595.00 842.00]"));
         let _ = std::fs::remove_dir_all(&d);
     }
 

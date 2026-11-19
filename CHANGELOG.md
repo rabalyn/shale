@@ -10,6 +10,236 @@ its section from this file.
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-11-19
+
+### Added
+
+- **A note says how its PDF is printed** (#339). The properties `print-paper` (`A4`, `A5`, `Letter`,
+  `Legal` or `<W>x<H>mm`), `print-margins` (four numbers in mm), `print-font` (`serif`, `sans`,
+  `mono`), `print-font-size`, `print-line-spacing`, `print-paragraph-spacing`, `print-align` (`left`
+  or `justify`), `print-heading-color` (`#RRGGBB`), `print-title` and `print-toc` are read by the PDF
+  export; each is optional and a bad value is ignored. The export dialog opens with the note's paper,
+  margins, text size, title and contents filled in; the other keys are read from the note when you
+  export. The serif font is the bundled Liberation Serif (Times-compatible). The user guide lists
+  every key in the PDF note.
+- **A department logo beside the university's** (#341). Departments and institutions (the HRZ, the
+  faculties, …) have a logo of their own, and documents show it with the TU logo. Every template set has
+  an optional second logo slot: **Choose department logo…** and **Remove department logo** in Settings →
+  LaTeX → Template sets, a drop while that form is open, and a second field "Department logo" on the logo
+  step of the guided setup (a dropped file is the university's logo while that is missing, else the
+  department's, and a message says which). Documents show it **below** the TU logo, right-aligned and as
+  high, as the TU's rule for a second logo says: publication, report, thesis, doctoral thesis, leaflet,
+  poster, scientific poster, slides and letter. Exercise sheets and announcements have no room for it and
+  do not show it. The export dialog has a **Department logo** box when the set has one (on by default,
+  greyed out for those two kinds); the test page shows it too. A kind says where its class puts the logo
+  with the new `department_logo` key of its manifest.
+- **Properties as a card in the reading view** (#351). The front matter of a note is no longer a wall of
+  YAML: an imported mail opens with a mail header (sender, date, to / cc, subject, tag chips), an event
+  with its time, place, attendees and a repeats badge, a Word import with one chip for its page
+  (`A4 · 2.5 cm margins · 11 pt`), any other note with key and value rows. Ids (`message-id`,
+  `event-uid`, `source`) and the `print-*` settings are left out; a ▸ toggle shows every property. A
+  person with a contact note is a link. New setting **Properties in the editor / in the reading view**
+  (Settings → Appearance: folded, card or raw; folded in the editor and card in the reading view by
+  default). In the editor a note opens with its properties folded to one summary line (`▸ Properties · email · Anna Müller · …`); the cursor moving into it opens the raw YAML and folds it again when it leaves, and the setting `Raw` leaves it open.
+- **Option "Header list in the note body"** in the Import dialog and Settings → Import (off by default)
+  brings the list back for programs that do not show properties (#352).
+- **Mail notes fold their noise** (#353). An imported mail (`type: email`) opens with its quoted replies
+  (`… 12 quoted lines`) and its signature folded; a line `-- ` up to the next heading or the end is a
+  foldable signature in any note. Click a badge to read the text; the folds are never written into the note.
+- **A summary after an import of two or more items** (#354). The window "Import summary" lists the new
+  notes, each with its name, a line about it (an e-mail: sender and date; an event: time and place;
+  other notes: their first line) and an **Open** button, the files that were saved in the media folder
+  and anything that went wrong. **Open all in tabs** opens every new note in a tab of its own. One item
+  is opened as before.
+- **Fold quotes, lists and heading sections in the editor** (#355). A heading section, a quote, a list
+  item and a whole list can be folded: the block shows its first line and a muted `… n lines` badge, the
+  rest is hidden (no line numbers for it), with the Markdown preview on and off. A ▾ / ▸ marker left of
+  the first line (shown on hover, always for a folded block) and the badge fold and unfold with the mouse;
+  **Ctrl+Shift+K** folds, **Ctrl+Shift+J** unfolds, **Ctrl+Shift+O** / **Ctrl+Shift+I** fold or unfold all
+  (Settings → Keybindings → Note view), and vim-style editing has `za` `zc` `zo` `zM` `zR`. The cursor never
+  stays in hidden text (moving into a fold, a link or a search hit opens it). Folds are kept for the session,
+  never written into the note.
+- **Code blocks as boxes** (#356). With the Markdown preview on, a fenced code block is a rounded box on the
+  code background with a thin border, the ``` lines hidden (they show again when the cursor is in the block)
+  and a small badge at its top right with the language (`code` when there is none). The reading view draws
+  the same box. A code block folds like a quote or a list (`… n lines`, the marker, **Ctrl+Shift+K**, vim's
+  `za`), also with the preview off.
+- **Page breaks in the PDF and TeX export** (#359). A line `<div style="page-break-after: always;"></div>`
+  (the form Obsidian writes; `page-break-before: always`, `break-after: page` and `break-before: page`
+  work too) starts a new page in the built-in PDF export and writes `\newpage` in the LaTeX export, with
+  no empty page at the top of a page or at the end of the note. The editor's Markdown preview and the
+  reading view show it as a dashed rule labelled "Page break"; the new toolbar button "Page break"
+  (Alt+J) inserts the line.
+- **`print-break-before`** (#359): a note property with a heading level from 1 to 6; every heading up to
+  that level starts a new page in the PDF and in the LaTeX export of an article or book. The export
+  dialog has a box "Start each # heading on a new page", filled from the property, with the level next to it.
+- **Word import keeps page breaks** (#360). A manual page break, a paragraph with "page break before"
+  and a section break that starts a new page become a line `<div style="page-break-after: always;"></div>`
+  in the note, so the PDF export breaks the pages where Word did. When Heading 1 (or Heading 2 …) starts
+  a page in Word, the note gets the property `print-break-before: <level>` instead of a line before each
+  heading.
+- **Keep the signing key unlocked** (#363). Accounts…, Encryption shows how long GnuPG keeps a passphrase
+  (10 minutes after the last use and 2 hours at the latest, unless set otherwise) and, with "Ask for the
+  passphrase again after" (8 hours, 1 day, 1 week) and "Change with gpgconf…", can make that longer through
+  GnuPG's own `gpgconf --change-options gpg-agent`. It shows the file and the two lines first and writes only
+  after "Write with gpgconf". The same lines and the reload command are shown for doing it by hand, with the
+  keyring tip of your system ("Save in password manager" on Linux, "Save in Keychain" on macOS). Shale still
+  never handles a passphrase.
+- **Fold in the reading view** (#364). The reading view folds heading sections, quotes, list items and lists,
+  code blocks and signatures like the editor, with the same folds: fold a block in one and it is folded in the
+  other (while Shale runs; never written into the note). A ▾ / ▸ marker left of the first line (on hover, always
+  for a folded block) and the `… n lines` badge under a folded block fold and unfold with a click; **Ctrl+Shift+O**
+  and **Ctrl+Shift+I** fold and unfold all there. A footnote jump or a click on a heading in the outline opens a
+  fold that hides its target; tables, formulas and embeds inside a fold are not drawn. The properties card keeps
+  its own toggle. The timing of the block finder on a large note is measured by an ignored test
+  (`large_note_timing`).
+- **A copy button on code blocks** (#365). A code box has a small copy icon at its top right, left of the language
+  badge, in the editor (Markdown preview on) and in the reading view: it shows while you point at the box (in
+  the editor also while the cursor is in the block, and always on a folded block's row). A click copies the code
+  inside the block, without the fences and without a newline at the end, so a pasted command does not run at
+  once; the icon turns into a tick and "Copied" for a moment. It does not move the cursor or unfold the block.
+  The key **Ctrl+Shift+C** (`note.copy_code`, Keybindings, Note view) copies the block at the cursor.
+- **A plain paper look for the PDF of a note with `print-*` properties** (#367). A note with any of the
+  `print-*` properties is exported like a document on paper: list bullets and numbers in the text
+  colour, a quote indented without a bar, inline code in the mono font without a dark box, code blocks
+  on light grey with dark text and no syntax colours, and tables with thin black lines and a bold
+  header without a fill. New properties `print-heading-weight` (`normal` or `bold`) and
+  `print-heading-sizes` (six sizes in pt for the heading levels, such as `"16 13 12 11 11 11"`). Notes
+  without `print-*` properties print as before.
+- **Landing and development metrics for Prometheus and Grafana** (#368). `scripts/land.sh` now records
+  every landing (result, failing step, duration of each step, load) in the git folder, and
+  `scripts/dev-metrics.sh` writes them, with the build processes, agents, GitHub issues, releases and
+  the Forgejo run of each tag, as a text file for node_exporter's textfile collector. A systemd user
+  timer and a setup guide are in `tools/dev-metrics/` and `docs/dev-metrics.md`.
+
+### Changed
+
+- **Word import drops the table of contents** (#346). A Word table of contents (its title and the run of
+  entry lines such as `Einleitung 2`) is no longer imported as plain paragraphs, because the PDF and
+  LaTeX exports make their own contents page and showed both. Notes imported earlier keep the lines
+  until they are imported again.
+- **Word import keeps more text colours** (#347). Colours that come from a character style, a paragraph
+  style (also through the styles they are based on) or a table style become `<span style="color: …">`
+  like direct colours, and theme colours (`accent1`, `text2`, …) with their tint and shade are resolved
+  to their hex value, also for `print-heading-color`. The colour of the body text, of headings (Heading
+  1 to 9, Title, Subtitle) and of links is not tagged.
+- **The colour buttons of the toolbar are split buttons** (#350). A click on the highlight or font
+  colour applies the colour it shows at once (neon yellow and red at start, then the last colour
+  picked); the ▾ beside it opens the palette as before. Alt+Y and Alt+F still open the palette.
+- **Imported e-mails and events write their header once** (#352). The sender, recipients, date, place,
+  organizer and the rest are in the note's properties only; below them the note goes straight to the
+  title, the attachments and the message (an event: the title and its notes), instead of repeating
+  them as a list of `**From:**`, `**To:**`, `**Date:**` lines. What the list held and had no property
+  gets one: `people`, `original` and an unreadable `date` for e-mails; `repeats`, `organizer`,
+  `attendees`, `status`, `url`, `people` and `original` for events. Notes imported before stay as they are.
+- **Imported mail text is tidied** (#353). What an HTML mail leaves behind is cleaned on import: three or
+  more blank lines in a row become one, trailing spaces go, and a long tracking link (a very long address
+  with a query string) becomes a short Markdown link showing the host, `[example.org](https://…)`. Short
+  links and links that are Markdown already stay.
+- **Pictures among a mail's attachments are small embeds** (`![[file.jpg|200]]`, 200 points wide) instead of
+  full-size embeds; other attachments stay links.
+- **The signature stays recognisable.** It starts at a line that is exactly `-- ` (a bare `--` is made
+  into that, with a blank line before it), and a quoted reply stays a run of `>` lines, so the editor can
+  fold both (#353).
+- **More room between the lines in Settings and the dialogs** (#357). Wrapped text has 4 points more between its
+  lines, a new setting, paragraph or step is set apart by 8 points (more than the gap inside one item), and a new
+  section of Settings by 24 points. The spacing is on a 4-point raster and applies to Settings and every dialog; the
+  sidebar, the editor and the main window keep their spacing.
+- **Word import: closer to Word** (#366). Highlights are written in Word's real colour, yellow too
+  (`<mark style="background: #FFFF00;">`), not as `==text==`, which prints a paler yellow. The note's
+  properties now also hold `print-heading-weight` (`normal` or `bold`) and `print-heading-sizes` (the pt
+  of Heading 1 to 6) from the heading styles, and `numbered-headings: false` unless Word numbers
+  Heading 1, so headings are not numbered where Word does not number them.
+- **Folding is cheap on very large notes** (#369). Finding the blocks of a 20 000-line note took 20 ms on every
+  frame (mostly counting equal titles) and is now 1 ms, and is skipped while the text is unchanged;
+  looking up many folded blocks is linear. The reading view of a note of 2 000 lines or more draws only what is near the
+  visible part (about 8 ms per frame instead of 120 ms for 20 000 lines); jumps to footnotes and headings still work.
+- A folded code block in the reading view is one row: the `… n lines` badge sits in its box next to the language
+  badge instead of under an empty box.
+- **Faster real-server checks before a landing** (#370). The LuaLaTeX suite (`tex_env`) of
+  `scripts/land.sh` runs with four test threads instead of one (about 36 minutes before);
+  `SHALE_ENV_TESTS_TEX_THREADS` sets the number. The CalDAV, mail, install and import suites stay at one thread.
+- **The editor is fast on very large notes** (#372). A frame of a 20 000-line note took 180 to 260 ms and
+  now takes a few milliseconds while nothing changes (the cursor blinking, the pointer moving): the laid-out note, the
+  tables and footnotes, the counts of the status bar and the places of the fold markers, code boxes and heading
+  numbers are kept until the text, the line the cursor is in (in the Markdown preview) or the view changes. Typing
+  a key takes about 60 to 70 ms on such a note (before: 250 ms or more); ordinary notes are not affected.
+- **The macOS download is a dmg** (#373). `shale-<version>-macos-arm64.dmg` opens to `Shale.app` and an
+  `Applications` link to drag it onto, with a full-size icon (a 1024 pixel picture was added to the set) and a bundle that is signed ad hoc, so macOS offers
+  "Open Anyway" (right-click, Open) instead of calling it damaged; it is still not notarised, and the
+  Keychain may ask again after an update. An app started from Finder or the Dock now also finds the
+  programs Homebrew installs (`git-lfs`, `ffmpeg`, `gpg`, `pandoc`): `/opt/homebrew/bin`,
+  `/opt/homebrew/sbin` and `/usr/local/bin` are added to its search path.
+- **The editor comes back as you left it** (#374). After a restart each note opens with its cursor or
+  selection and scrolled where it was, in every pane, and a note in the reading view stays in it. The
+  current colours of the toolbar's highlight and font colour buttons are remembered in the vault too.
+  The session state is written every few seconds when something changed, and at exit.
+
+### Fixed
+
+- **Default keys that the system or the desktop takes for itself** (#345). No default key is one
+  that macOS, Windows or the Linux desktops reserve (KEY-019). On Linux and Windows: previous / next
+  tab are **Ctrl+PageUp / Ctrl+PageDown** (were Ctrl+Alt+H / L), next / previous pane **F6 /
+  Shift+F6** (were Ctrl+Alt+→ / ←, which switch workspaces on most desktops) and close pane
+  **Ctrl+Shift+W** (was Ctrl+Alt+W, which closes a pane on Hungarian and Czech keyboards where
+  AltGr+W is `|`). On macOS the keys that move the keyboard one place left / right are **Cmd+Shift+H / Cmd+Shift+L**
+  (Cmd+H hides the app), back / forward **Cmd+[ / Cmd+]** (Option+← / → move by word) and previous /
+  next tab **Cmd+Opt+← / Cmd+Opt+→** (Cmd+Opt+H hides the other apps). The Alt keys of the open mail's
+  buttons have no default on macOS, like those of the note buttons. A key you set yourself is not
+  refused for being reserved, and a key you changed keeps working. The Back and Forward buttons show
+  the key that is set.
+- **A release or check tag can no longer lose its notes to a landing that comes meanwhile** (#348).
+  `scripts/make-release.sh` and `scripts/make-tag.sh` hold the landing lock from before they read
+  `origin/main` until the tag is pushed, so a branch landed by someone else waits and lands after
+  the tag (FORGE-011, FORGE-013, FORGE-014). Before tagging they run the release check on the landed
+  merge and, for a release, require `docs/changelog-pending/` to be empty there; if that fails nothing
+  is tagged, the missing issue is named, and running the script again for the same version, after the
+  entry landed, tags `origin/main`.
+
+## [0.6.2] - 2026-11-18
+
+### Added
+
+- **Word import keeps the look** (#338). A Word file's page setup, body font family and size, line and
+  paragraph spacing, alignment and the colour of Heading 1 are written into the note's properties
+  (`print-paper`, `print-margins`, `print-font`, `print-font-size`, `print-line-spacing`,
+  `print-paragraph-spacing`, `print-align`, `print-heading-color`, `print-title`, `print-toc`), so the
+  PDF export looks like the Word document. Text colours and highlight colours (other than yellow)
+  become `<span style="color: …">` and `<mark style="background: …">`. Centred and right-aligned
+  paragraphs are not kept yet (#340).
+
+### Changed
+
+- **A Word import writes a properties block every time**, not only when the original is kept
+  (`source` is still there only with the original). A Word file's Title and Subtitle now become a
+  `#` heading and an italic line instead of being dropped.
+
+## [0.6.1] - 2026-11-18
+
+### Added
+
+- **Install script for Linux** (#330). The Linux download now has `shale/install.sh`, which works on
+  any distribution: `./install.sh` installs the program to `~/.local/bin` and the app menu entry and
+  icons (all sizes) to `~/.local/share`, `--prefix /usr/local` installs for all users,
+  `--uninstall` removes exactly what it installed. It runs again to upgrade, warns when the program's
+  folder is not on `PATH` and names missing libraries with the package names for Arch, Debian and
+  Fedora (BUILD-025). There is no AppImage (it needs FUSE 2 and has no menu entry) and no Flatpak
+  (its sandbox would block vault folders and the programs Shale starts).
+- **Arch Linux package** (#337). `packaging/aur/shale-bin/` has a PKGBUILD for the AUR package
+  `shale-bin`, built from the Linux download of a release: the program, the app menu entry, the
+  icons, the licence and the documentation are installed system-wide, and the optional programs
+  (git, git-lfs, curl, ffmpeg, gnupg, pandoc) are named as optional dependencies. `scripts/aur-update.sh`
+  moves it to a new release (version, checksum, `.SRCINFO`) (BUILD-026).
+
+### Security
+
+- **lettre updated to 0.11.24** (#331 to #336, RUSTSEC-2026-0560 to 0565): STARTTLS response
+  injection (#331), missing dot-stuffing after a bare CR or LF (#332), a panic on a white-space EHLO
+  line (#333), a quoted local part sent to a different address (#334), a panic on a CR or LF in a
+  display name (#335) and unbounded buffering of SMTP replies (#336). Shale sends through its own
+  SMTP client, which already refuses bare line breaks and dot-stuffs, so only the message builder
+  fixes (#334, #335) touched Shale's path; both are now covered by tests (MAIL-125).
+
 ## [0.6.0] - 2026-11-18
 
 ### Added
@@ -1342,7 +1572,10 @@ First public version (published before releases were tagged).
 - Ctrl+Shift+F always focuses the search box and selects the previous search.
 - File names with `#` work in links.
 
-[Unreleased]: https://github.com/rabalyn/shale/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/rabalyn/shale/compare/v0.6.3...HEAD
+[0.6.3]: https://github.com/rabalyn/shale/compare/v0.6.2...v0.6.3
+[0.6.2]: https://github.com/rabalyn/shale/compare/v0.6.1...v0.6.2
+[0.6.1]: https://github.com/rabalyn/shale/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/rabalyn/shale/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/rabalyn/shale/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/rabalyn/shale/compare/v0.4.0...v0.5.0

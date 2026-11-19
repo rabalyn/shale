@@ -336,6 +336,20 @@ fn cfg_042_number_headings_is_a_setting_of_the_editor_tab_and_on_by_default() {
     assert!(p.app.cfg.numbered_headings);
 }
 
+// spec: CFG-051
+#[test]
+fn cfg_051_the_appearance_tab_chooses_how_properties_show_in_the_editor_and_the_reading_view() {
+    use crate::config::PropertiesView;
+    let mut p = P::new("properties-setting", &[]);
+    p.app.open_settings(SettingsTab::Appearance);
+    assert!(p.shows(Show::Modals, "Properties in the editor") && p.shows(Show::Modals, "Properties in the reading view"));
+    assert_eq!((p.app.cfg.properties_in_editor, p.app.cfg.properties_in_reader), (PropertiesView::Folded, PropertiesView::Card), "defaults");
+    p.click(Show::Modals, "Card");
+    p.click(Show::Modals, "Raw (all lines)");
+    assert_eq!(p.app.cfg.properties_in_reader, PropertiesView::Raw);
+    assert_eq!(p.app.cfg.properties_in_editor, PropertiesView::Folded, "the other setting is untouched");
+}
+
 // spec: EDIT-038
 #[test]
 fn edit_038_the_lift_dialog_pastes_lifted_or_as_it_is_and_esc_pastes_as_it_is() {
@@ -589,6 +603,18 @@ fn imp_036_the_import_tab_has_the_word_setting_and_says_where_pandoc_is_or_how_t
     }
 }
 
+// spec: CFG-060
+#[test]
+fn cfg_060_the_import_tab_has_the_header_list_setting() {
+    let mut p = P::new("settings-header-list", &[]);
+    assert!(!p.app.cfg.import_header_list, "off by default");
+    p.app.open_settings(SettingsTab::Import);
+    p.click(Show::Modals, "Header list in the note body");
+    assert!(p.app.cfg.import_header_list);
+    p.click(Show::Modals, "Header list in the note body");
+    assert!(!p.app.cfg.import_header_list);
+}
+
 // spec: CFG-021
 #[test]
 fn set_002_settings_open_on_a_short_page() {
@@ -600,7 +626,8 @@ fn set_002_settings_open_on_a_short_page() {
     }
     let rect = |l: &str| shown.iter().find(|(_, t, _)| t.starts_with(l)).map(|x| x.2).unwrap_or_else(|| panic!("no {l:?}"));
     let height = rect("Type [[p followed").bottom() - rect("Vault folder").top();
-    assert!(height < 200.0, "the first page is {height} points high");
+    // 200 points before the raster of NAV-042 (more room between the lines and the items)
+    assert!(height < 240.0, "the first page is {height} points high");
     p.app.open_settings(SettingsTab::Editor);
     let shown = p.look(Show::Modals);
     let rect = |l: &str| shown.iter().find(|(_, t, _)| t.starts_with(l)).map(|x| x.2).unwrap_or_else(|| panic!("no {l:?}"));

@@ -13,6 +13,9 @@ use crate::table::Col;
 use crate::vault::FileKind;
 use eframe::egui::{Color32, Vec2};
 
+/// A new page (TEX-037, TEX-038).
+pub const NEW_PAGE: &str = "\\newpage\n\n";
+
 /// The most pages of an embedded PDF that are included (as in the native export).
 const MAX_PDF_PAGES: usize = 40;
 
@@ -50,6 +53,7 @@ impl<'a> Body<'a> {
             Block::Math(tex) => format!("\\[\n{}\n\\]\n\n", one_line(tex)),
             Block::Embed(link) => self.embed(link),
             Block::Rule => "\\par\\medskip\\noindent\\hrulefill\\par\\medskip\n\n".into(),
+            Block::PageBreak => NEW_PAGE.into(),
         }
     }
 
@@ -242,7 +246,7 @@ impl<'a> Body<'a> {
             let name = match named {
                 Some(n) => n,
                 None => {
-                    let opts = ExportOptions { margin_mm: 20.0 * 25.4 / 72.0, background: crate::pdf::export::Background::None, ..ExportOptions::for_drawing(&scene) };
+                    let opts = ExportOptions { margins_mm: [20.0 * 25.4 / 72.0; 4], background: crate::pdf::export::Background::None, ..ExportOptions::for_drawing(&scene) };
                     let pdf = crate::pdf::export::export_drawing(&scene, &link.target, &opts, &crate::drawing::pictures::images(&scene, vault, &rel));
                     let Ok(pdf) = pdf else { return self.placeholder(&format!("not readable: {}", link.target)) };
                     self.keep(&rel, "drawing", "pdf", pdf)

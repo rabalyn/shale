@@ -12,7 +12,9 @@
 # did not change since the previous tag. It bumps Cargo.toml and Cargo.lock on a branch
 # `release/vX.Y.Z-rc.N`, merges docs/changelog-pending/ into [Unreleased], commits naming the issue
 # "Release X.Y.Z" (made with gh when there is none; --issue N names another), lands it with
-# `scripts/land.sh --release`, tags the landed merge and pushes only the tag to `origin`.
+# `scripts/land.sh --release`, checks the landed merge (BUILD-013), tags it and pushes only the tag
+# to `origin`. The landing lock is held for the whole run (a landing meanwhile waits); an
+# `X.Y.Z-rc.N` that is on `origin/main` already without a tag (the check failed) is tagged by a rerun.
 # --dry-run prints the tag and stops. A release is scripts/make-release.sh.
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/release-lib.sh"
@@ -31,6 +33,8 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+# the landing lock for the whole run, before `origin/main` is read (#348); a dry run changes nothing
+[ "$DRY" = yes ] || take_land_lock
 preflight
 CUR=$(version_at "refs/remotes/$REMOTE/main")
 LAST=$(last_release)

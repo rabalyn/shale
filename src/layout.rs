@@ -629,10 +629,12 @@ impl ShaleApp {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.add_space(8.0);
-            if icon_button(ui, Icon::Back, 26.0, false, "Back (Alt+←)").clicked() && can_back {
+            let tip = |name: &str, action| self.keymap.hint(action).map_or_else(|| name.to_string(), |k| format!("{name} ({k})"));
+            let (back_tip, fwd_tip) = (tip("Back", crate::keys::Action::Back), tip("Forward", crate::keys::Action::Forward));
+            if icon_button(ui, Icon::Back, 26.0, false, &back_tip).clicked() && can_back {
                 self.go_back();
             }
-            if icon_button(ui, Icon::Forward, 26.0, false, "Forward (Alt+→)").clicked() && can_fwd {
+            if icon_button(ui, Icon::Forward, 26.0, false, &fwd_tip).clicked() && can_fwd {
                 self.go_forward();
             }
             ui.add_space(6.0);
@@ -826,11 +828,18 @@ impl ShaleApp {
                 let badges = self.key_badges(ui);
                 let palettes = crate::format_bar::Palettes { badges: &badges, highlight: &self.cfg.highlight_colours, font: &self.cfg.font_colours, scale: self.cfg.toolbar_size.clamp(80, 200) as f32 / 100.0 };
                 ui.add_space(4.0);
-                self.tabbar.tabs[active].editor.toolbar(ui, &doc.text, &palettes);
+                let mut colours = self.vdata.state.toolbar_colours();
+                self.tabbar.tabs[active].editor.toolbar(ui, &doc.text, &palettes, &mut colours);
+                self.vdata.state.set_toolbar_colours(colours);
                 ui.add_space(2.0);
             }
         }
-        egui::ScrollArea::vertical().id_salt(("note-scroll", self.tabbar.tabs[active].id)).auto_shrink([false, false]).show(ui, |ui| {
+        let mut area = egui::ScrollArea::vertical().id_salt(("note-scroll", self.tabbar.tabs[active].id)).auto_shrink([false, false]);
+        // a restored tab is scrolled where it was left, when it is first shown (NAV-038)
+        if let Some(y) = self.tabbar.tabs[active].place.restore_scroll.take() {
+            area = area.vertical_scroll_offset(y);
+        }
+        let scrolled = area.show(ui, |ui| {
             let full = ui.available_width();
             let col = if readable { full.min(760.0) } else { full - 40.0 };
             let pad = ((full - col) / 2.0).max(20.0);
@@ -867,7 +876,12 @@ impl ShaleApp {
                     }
                     if reading {
                         let text = doc.text.clone();
-                        let extras = reader::Extras { numbers: reader::Extras::numbers_of(&text, self.cfg.numbered_headings), scroll_to: tab.reader_line.take() };
+                        let extras = reader::Extras {
+                            numbers: reader::Extras::numbers_of(&text, self.cfg.numbered_headings),
+                            scroll_to: tab.reader_line.take(),
+                            properties: self.cfg.properties_in_reader,
+                            folds: Some(std::cell::RefCell::new(crate::fold_ui::ReaderFolds { ui: &mut tab.editor.fold, summary: self.cfg.properties_in_editor != crate::config::PropertiesView::Raw })),
+                        };
                         let shown = crate::fonts::with_area(ui, &fonts.rendered, |ui| reader::show(ui, &text, vault, &rel, &mut reader::Caches { scenes: &mut self.scenes, media: &self.media }, (base, dark), &extras));
                         if let Some(a) = shown {
                             handle_reader_action(&mut self.actions, a, &rel);
@@ -878,6 +892,7 @@ impl ShaleApp {
                         tab.editor.numbered_headings = self.cfg.numbered_headings;
                         tab.editor.live_preview = self.cfg.live_preview;
                         tab.editor.preview_raw_lines = self.cfg.preview_raw_lines;
+                        tab.editor.properties_summary = self.cfg.properties_in_editor != crate::config::PropertiesView::Raw;
                         tab.editor.table_cell_edit = self.cfg.table_cell_edit;
                         tab.editor.vim_enabled = self.cfg.vim_mode;
                         tab.editor.cursor_style = crate::cursor_style::CursorStyle { shape: self.cfg.cursor_shape, normal_shape: self.cfg.normal_cursor_shape, blink: self.cfg.cursor_blink };
@@ -886,7 +901,11 @@ impl ShaleApp {
                         tab.editor.assist.numbered_headings = self.cfg.numbered_headings;
                         tab.editor.dark_canvas = self.cfg.dark_canvas;
                         tab.editor.media = self.media.clone();
+                        if let Some(sel) = tab.place.restore_cursor.take() {
+                            tab.editor.restore_selection_chars(ui.ctx(), &doc.text, sel);
+                        }
                         let (changed, action) = crate::fonts::with_family(&fonts.rendered, || tab.editor.show(ui, &mut doc.text, vault, crate::editor::Note { rel: &rel, undo: &mut self.undo }, &fonts, ctrl));
+                        tab.place.cursor = tab.editor.selection_chars(ui.ctx()).or(tab.place.cursor);
                         if changed {
                             doc.dirty = true;
                             doc.last_edit = std::time::Instant::now();
@@ -900,6 +919,7 @@ impl ShaleApp {
                 });
             });
         });
+        self.tabbar.tabs[active].place.scroll = Some(scrolled.state.clamped_offset().y.max(0.0).floor());
         if let Some(name) = rename_to {
             if let Err(e) = self.rename(&rel, &name) {
                 self.toast(e);
@@ -925,11 +945,10 @@ impl ShaleApp {
             }
             if let (Some(rel), Some(v)) = (self.current_path(), &self.vault) {
                 if let Some(doc) = self.notes.get(&rel) {
-                    let words = doc.text.split_whitespace().count();
-                    let chars = doc.text.chars().count();
+                    let (chars, words) = self.status.counts(&rel, &doc.text);
                     ui.label(small(format!("{chars} characters")));
                     ui.label(small(format!("{words} words")));
-                    let bl = v.backlinks(&rel).len();
+                    let bl = self.status.backlinks(v, &rel);
                     ui.label(small(format!("{bl} backlink{}", if bl == 1 { "" } else { "s" })));
                     if doc.unreadable.is_some() {
                         ui.label(egui::RichText::new("Read-only: could not be read").size(11.5).color(theme::LINK_MISSING));
@@ -948,7 +967,7 @@ impl ShaleApp {
                 }
             }
             if let Some(v) = &self.vault {
-                let open = v.all_tasks().iter().filter(|(_, t)| !t.done).count();
+                let open = self.status.open_tasks(v);
                 ui.label(small(format!("{open} open tasks")));
             }
             if let Some(t) = self.mail.status(&self.cfg) {

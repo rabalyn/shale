@@ -200,6 +200,11 @@ impl TexExport {
         self.current_kind().is_some_and(|k| matches!(k.mapping, Mapping::Article | Mapping::Book))
     }
 
+    /// Whether the kind has a place for the set's department logo (TEX-035).
+    pub fn kind_shows_department_logo(&self) -> bool {
+        self.current_kind().is_some_and(|k| !k.department_logo.is_empty())
+    }
+
     pub fn working(&self) -> bool {
         self.job.is_some()
     }
@@ -238,14 +243,14 @@ impl TexExport {
         let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
         if self.sets.is_empty() {
             ui.horizontal_wrapped(|ui| {
-                rec("no-sets", ui.colored_label(theme::LINK_MISSING, "This vault has no template sets yet: import one in Settings → LaTeX → Template sets."));
+                rec("no-sets", crate::theme::problem(ui, "This vault has no template sets yet: import one in Settings → LaTeX → Template sets."));
                 if rec("setup:sets", ui.button("Set up…")).on_hover_text("The guided setup imports the templates").clicked() {
                     self.setup_requested = Some(Step::Templates);
                 }
             });
         }
         if let Some(w) = &self.template_warning {
-            rec("template-warning", ui.colored_label(theme::LINK_MISSING, w));
+            rec("template-warning", crate::theme::problem(ui, w));
         }
         let busy = self.working();
         egui::Grid::new("export-tex-grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
@@ -307,7 +312,17 @@ impl TexExport {
                         let on = if toc { &mut opts.toc } else { &mut off };
                         rec("toc", ui.checkbox(on, "Table of contents")).on_disabled_hover_text("This kind of document has no table of contents");
                     });
+                    crate::pdf::export_dialog::break_before_box(ui, opts, toc, rec);
                     rec("embeds", ui.checkbox(&mut opts.embeds, "Embedded pictures, drawings and PDFs"));
+                    // the set's department logo (TEX-035): off and greyed for a kind that has no place for it
+                    if self.current_set().is_some_and(|s| s.department_logo.is_some()) {
+                        let shows = self.kind_shows_department_logo();
+                        ui.add_enabled_ui(shows, |ui| {
+                            let mut off = false;
+                            let on = if shows { &mut opts.department_logo } else { &mut off };
+                            rec("department-logo", ui.checkbox(on, "Department logo")).on_disabled_hover_text("This kind does not show a department logo");
+                        });
+                    }
                 });
                 ui.end_row();
             }
@@ -321,22 +336,22 @@ impl TexExport {
                 rec("tex-status", ui.label(muted("Looking for a TeX…")));
             }
             TexStatus::Ready(t) => {
-                rec("tex-status", ui.label(muted(t)));
+                rec("tex-status", crate::theme::prose(ui, muted(t)));
             }
             TexStatus::Missing(why) => {
                 ui.horizontal_wrapped(|ui| {
-                    rec("tex-status", ui.colored_label(theme::LINK_MISSING, "No TeX: install it in Settings → LaTeX"));
+                    rec("tex-status", crate::theme::problem(ui, "No TeX: install it in Settings → LaTeX"));
                     if rec("setup:tex", ui.button("Set up…")).on_hover_text("The guided setup installs TeX for you").clicked() {
                         self.setup_requested = Some(Step::Tex);
                     }
                 });
-                ui.label(muted(why));
+                crate::theme::prose(ui, muted(why));
             }
         }
         if let (Some(set), Some(kind)) = (self.current_set(), self.current_kind()) {
             if kind.logo && set.logo == LogoStatus::Missing {
                 ui.horizontal_wrapped(|ui| {
-                    rec("logo-warning", ui.colored_label(theme::LINK_MISSING, "The set's logo is missing: the PDF gets a grey placeholder and is not CI-conformant. Choose the logo in Settings → LaTeX → Template sets."));
+                    rec("logo-warning", crate::theme::problem(ui, "The set's logo is missing: the PDF gets a grey placeholder and is not CI-conformant. Choose the logo in Settings → LaTeX → Template sets."));
                     if rec("setup:logo", ui.button("Set up…")).on_hover_text("The guided setup asks for the logo").clicked() {
                         self.setup_requested = Some(Step::Logo);
                     }
@@ -351,7 +366,7 @@ impl TexExport {
         }
         if let Some(f) = &self.failure {
             ui.add_space(4.0);
-            ui.colored_label(theme::LINK_MISSING, &f.headline);
+            crate::theme::problem(ui, &f.headline);
             for p in f.problems.iter().take(6) {
                 rec("problem", ui.label(egui::RichText::new(p).monospace().size(12.0)));
             }

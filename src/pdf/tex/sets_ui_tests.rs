@@ -4,7 +4,7 @@
 
 use super::install::{Handle, Progress, Stage};
 use super::sets::{sets_root, Source};
-use super::sets_tests::{make_set, meta_from_local, META};
+use super::sets_tests::{make_set, meta_from_local, META, PNG};
 use super::sets_ui::*;
 use super::settings_ui::{Task, TaskKind};
 use super::settings_ui_tests::{nothing_found, T};
@@ -175,7 +175,7 @@ fn choose_logo_asks_for_the_file_copies_it_and_the_status_follows() {
     // a file that is no logo is refused and the slot stays empty
     let text = t.dir.join("note.txt");
     std::fs::write(&text, "no logo").unwrap();
-    t.app.tex.sets.form = Form::Logo { set: "mine".into(), path: text.to_string_lossy().into_owned() };
+    t.app.tex.sets.form = Form::Logo { set: "mine".into(), slot: Slot::University, path: text.to_string_lossy().into_owned() };
     t.click("Copy logo into the set");
     assert!(t.shows("The logo was not copied: the logo must be a PDF or a PNG file") && t.shows("logo missing"), "{:?}", t.painted());
     assert!(!dir.join("logo/mylogo.pdf").exists());
@@ -183,7 +183,7 @@ fn choose_logo_asks_for_the_file_copies_it_and_the_status_follows() {
     let pdf = t.dir.join("any.pdf");
     std::fs::write(&pdf, super::sets::placeholder_logo_pdf()).unwrap();
     t.click("Choose logo…");
-    t.app.tex.sets.form = Form::Logo { set: "mine".into(), path: pdf.to_string_lossy().into_owned() };
+    t.app.tex.sets.form = Form::Logo { set: "mine".into(), slot: Slot::University, path: pdf.to_string_lossy().into_owned() };
     t.click("Copy logo into the set");
     assert!(t.shows("The logo mylogo.pdf is in the set “Test set” now.") && t.shows("logo: mylogo.pdf") && !t.shows("logo missing"), "{:?}", t.painted());
     assert!(dir.join("logo/mylogo.pdf").is_file());
@@ -191,6 +191,46 @@ fn choose_logo_asks_for_the_file_copies_it_and_the_status_follows() {
     t.click("Choose logo…");
     t.click("Cancel");
     assert_eq!(t.app.tex.sets.form, Form::None);
+}
+
+// spec: TEX-024, TEX-035
+#[test]
+fn choose_department_logo_copies_it_the_status_says_so_and_remove_department_logo_trashes_it() {
+    let (mut t, dir) = with_set("sets-dept", &[("article", KIND)]);
+    // an empty slot is no warning, and there is nothing to remove
+    assert!(t.shows("Choose department logo…") && t.shows("Remove department logo") && !t.shows("department logo:"), "{:?}", t.painted());
+    t.click("Remove department logo");
+    assert!(t.app.tex.notice.is_none(), "a disabled button does nothing");
+    t.click("Choose department logo…");
+    assert!(t.shows("Path of the department logo file (PDF or PNG)") && t.shows("Copy logo into the set"), "{:?}", t.painted());
+    // a file that is no logo is refused
+    let text = t.dir.join("note.txt");
+    std::fs::write(&text, "no logo").unwrap();
+    t.app.tex.sets.form = Form::Logo { set: "mine".into(), slot: Slot::Department, path: text.to_string_lossy().into_owned() };
+    t.click("Copy logo into the set");
+    assert!(t.shows("The department logo was not copied: the logo must be a PDF or a PNG file") && !t.shows("department logo:"), "{:?}", t.painted());
+    // a PNG is copied; the university's logo is untouched and still missing
+    let png = t.dir.join("hrz.png");
+    std::fs::write(&png, PNG).unwrap();
+    t.click("Choose department logo…");
+    t.app.tex.sets.form = Form::Logo { set: "mine".into(), slot: Slot::Department, path: png.to_string_lossy().into_owned() };
+    t.click("Copy logo into the set");
+    assert!(t.shows("The department logo department_logo.png is in the set “Test set” now.") && t.shows("department logo: department_logo.png") && t.shows("logo missing"), "{:?}", t.painted());
+    assert_eq!(std::fs::read(dir.join("logo/department_logo.png")).unwrap(), PNG);
+    assert!(t.app.vault.as_ref().unwrap().files.iter().any(|f| f.rel == Path::new("templates/tex/mine/logo/department_logo.png")), "the vault knows the new file");
+    t.click("Choose department logo…");
+    t.click("Cancel");
+    assert_eq!(t.app.tex.sets.form, Form::None);
+    // removed: to the vault's trash, the setting cleared, the status gone
+    t.click("Remove department logo");
+    assert!(t.shows("The department logo of the set “Test set” is in the vault's trash now.") && !t.shows("department logo: department_logo.png"), "{:?}", t.painted());
+    assert!(!dir.join("logo/department_logo.png").exists() && super::sets::load_settings(&dir).unwrap().department_logo.is_none());
+    let day = std::fs::read_dir(t.dir.join(".trash")).unwrap().next().unwrap().unwrap().path();
+    assert_eq!(std::fs::read(day.join("templates/tex/mine/logo/department_logo.png")).unwrap(), PNG);
+    // a set that needs no university logo has the slot too
+    make_set(&t.dir, "plain", &META.replace("logo_file = \"mylogo\"\n", ""), &[("article", KIND)]);
+    t.app.tex.sets.dirty = true;
+    assert!(t.shows("no logo needed"));
 }
 
 // spec: TEX-024, TEX-007
@@ -284,6 +324,29 @@ mod fake {
         t.wait_for_job();
         let n = t.app.tex.notice.clone().unwrap();
         assert!(!n.ok && n.text.contains("did not compile") && n.text.contains("class my is missing") && n.details.as_deref().is_some_and(|d| d.contains("my.cls")), "{n:?}");
+    }
+
+    // spec: TEX-024, TEX-035
+    #[test]
+    fn the_test_page_shows_the_department_logo_when_the_set_has_one() {
+        use crate::pdf::tex::compile_tests::fake::script;
+        let _opener = crate::opener::FakeXdgOpen::install();
+        let f = Fake::new("sets-test-page-dept");
+        let keep = f.state();
+        script(&f.dir.join("bin"), "lualatex", &format!("cp test-page.tex '{0}/page.tex'; echo ok > test-page.log; echo '%PDF-1.5 fake' > test-page.pdf", keep.display()));
+        let mut t = T::new("sets-page-dept", found(Ok(f.engine()), Err("not installed"), None));
+        let dir = make_set(&t.dir, "mine", META, &[("pub", &format!("{KIND}department_logo = [\"\\\\x{{department_logo}}\"]\n"))]);
+        t.app.tex.sets.dirty = true;
+        t.click("Test page");
+        t.wait_for_job();
+        assert!(!std::fs::read_to_string(keep.join("page.tex")).unwrap().contains("department_logo"), "an empty slot: no department logo");
+        std::fs::create_dir_all(dir.join("logo")).unwrap();
+        std::fs::write(dir.join("logo/department_logo.png"), PNG).unwrap();
+        t.app.tex.sets.dirty = true;
+        t.click("Test page");
+        t.wait_for_job();
+        let page = std::fs::read_to_string(keep.join("page.tex")).unwrap();
+        assert!(page.contains("\\xdepartment_logo\n") && page.find("\\xdepartment_logo").unwrap() < page.find("\\begin{document}").unwrap(), "{page}");
     }
 
     // spec: TEX-024

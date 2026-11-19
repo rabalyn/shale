@@ -27,12 +27,44 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   on the same dark code background (PDF-007).
 - Line numbers are shown left of the text (Settings → Editor, on by default); a wrapped
   line keeps one number.
+- **Folding.** Headings (up to the next heading of the same or a higher level), quotes, list items and whole lists can be
+  folded away: a folded block shows its first line and a muted `… n lines` badge; the rest is hidden (no line
+  numbers for it), with the Markdown preview on and off. Hover a line that starts a block and click the ▾ marker left of
+  it (a folded block always shows ▸) to fold it; click the marker or the badge to unfold. Keys (Settings →
+  Keybindings → Note view): **Ctrl+Shift+K** fold, **Ctrl+Shift+J** unfold, **Ctrl+Shift+O** fold all,
+  **Ctrl+Shift+I** unfold all; with Vim-style editing `za` `zc` `zo` `zM` `zR`. The cursor never stays in hidden
+  text: moving into a fold (or a link or search jumping there) opens it. Folds are kept for the session only and
+  are never written into the file. Also foldable (EDIT-080 to EDIT-085): **code blocks**, the **front matter** and a
+  **signature** (a line `-- ` up to the next heading). A note's front matter starts folded to one muted line
+  `▸ Properties · email · Anna Müller · 2026-11-12` (the setting "Properties in the editor": folded or card; raw leaves it
+  open); the cursor moving into it opens the YAML and folds it again when it leaves. In a **mail note**
+  (`type: email`) the quotes (`… n quoted lines`) and the signature start folded too.
+- **Folding in the reading view** (EDIT-095 to EDIT-099, rabalyn/shale#364): the reading view folds the same blocks with
+  the same folds as the editor of the note (fold in one, it is folded in the other; session only, never written).
+  Hover a block's first line and click the ▾ marker left of it, or the `… n lines` badge under a folded block (a folded code block is one row with its badge in the box, EDIT-103);
+  **Ctrl+Shift+O** / **Ctrl+Shift+I** fold and unfold all there (fold and unfold at the cursor are editor keys). A footnote
+  jump or a click in the outline on a heading that a fold hides opens the fold. The front matter card keeps its own toggle.
+  Large notes stay quick (EDIT-099 to EDIT-102, rabalyn/shale#369): the folds of an unchanged text are not found again, and
+  from 2 000 lines on the reading view draws only what is near the visible part. The editor keeps the laid-out note, the
+  parsed tables and footnotes and the counts of the status bar while nothing changes (EDIT-104 to EDIT-107, rabalyn/shale#372),
+  so a frame of a 20 000-line note takes a few milliseconds.
+
+![Folded code blocks, quote and signature in the reading view](userguide/z_media/screenshots/reading-folds.png)
+- **Code blocks as boxes** (EDIT-080, EDIT-086, rabalyn/shale#356): with the Markdown preview on, a fenced code block is a
+  rounded box on the code background with a thin border and a badge at its top right with the language (`code` when there is
+  none); the ``` lines are hidden and show again when the cursor is in the block. The reading view draws the same box.
+  A small **copy button** (EDIT-090 to EDIT-094, rabalyn/shale#365) at its top right, left of the badge, copies the code
+  without the fences and the last newline; it shows on hover (in the editor also with the cursor in the block, and on a
+  folded block), in the editor and the reading view. **Ctrl+Shift+C** copies the block at the cursor.
+
+![Code boxes, folded properties, quote and signature](userguide/z_media/screenshots/editor-code-box.png)
+
 - The **text cursor** (Settings → Editor → Cursor) is one of four shapes: a bar before the character (default), a bar after it,
   a block or an underline; with Vim-style editing the cursor of normal mode has its own choice (default: block).
   "Blinking cursor" (on by default) makes it steady when off. The Vim tab (listed under Editor) holds the Vim settings: the switch, the cursor of normal mode, "Esc from insert mode" (the cursor stays after the typing by default, or steps back like Vim) and the link preview size. Exactly one cursor is drawn in every mode.
 - A **formatting toolbar** above the text (Settings → Editor, on by default, button size 80–200 %) has a button for
   everything Shale draws: bold, italic, strikethrough, highlight, inline code, headings (a menu from
-  Normal text to H6), bullet and numbered lists, tasks, quotes, code blocks, rules, tables, `[[note]]`
+  Normal text to H6), bullet and numbered lists, tasks, quotes, code blocks, rules, page breaks, tables, `[[note]]`
   and `[text](url)` links, embeds (it opens the `[!` file picker) and "Clear formatting". With a
   selection a button wraps it (or takes the markers off again); with none it puts the markers in and the
   cursor between them; a line button works on every line the selection touches. Each click is one undo
@@ -41,7 +73,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   and the ribbon has an Alt key (Alt+B bold, Alt+V reading view, Alt+1 … Alt+0 ribbon items, Alt+, and Alt+.
   sidebars, see Keyboard below), shown as a badge at the button while Alt is held; after a button or key that
   only changes the view, the editor has the keyboard again with the cursor and selection unchanged.
-- **Colours.** The toolbar's highlight and font colour buttons open a palette (four neon highlights, a
+- **Colours.** The toolbar's highlight and font colour buttons are split buttons: a click on the colour applies the
+  current colour at once (the colours are remembered in the vault, also after a restart), the ▾ beside it opens a palette (four neon highlights, a
   "No highlight" entry and a colour picker; font colours you set in Settings → Editor) and write plain
   HTML that other markdown apps understand: `<mark style="background: #FFFF00;">text</mark>` and
   `<span style="color: #E53E3E;">text</span>`. They show in the editor (the tags dimmed, or hidden by
@@ -74,7 +107,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 ![Moving a note into a folder](userguide/z_media/screenshots/tree-drag.png)
 
-- Back and forward with the mouse side buttons or Alt+←/→. You can sort the file list by name,
+- Back and forward with the mouse side buttons or Alt+←/→ (macOS: Cmd+[ / Cmd+]). You can sort the file list by name,
   date modified or date created.
 
 ![Suggestions while typing](userguide/z_media/screenshots/link-suggestions.png)
@@ -125,13 +158,45 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   its definition), underline, sub and superscript, `<br>` in table cells and math (vector outlines); a **Contents** page after the title lists the
   `#`–`###` headings with their numbers and the pages they start on, each a link, with a checkbox to leave it
   out, and the PDF has bookmarks for its `#`–`######` headings; the title is printed once: when the note's first
-  heading is a `#` that says the same as the title, the separate title is left out, PDF-008), insert a
+  heading is a `#` that says the same as the title, the separate title is left out, PDF-008; a note's
+  properties set how it is printed, see below), insert a
   new drawing, rename the note (links in other notes are updated), or move it to the trash. The
   trash keeps the original folder (`.trash/<date>/<path>`) and nothing in it is replaced or
   emptied; right-click the empty space of the file list and choose "Restore last deleted" to put
   the last item you trashed back.
 
   ![The PDF export dialog](userguide/z_media/screenshots/pdf-export-dialog.png)
+
+- **Print properties of a note** (#339): the front matter of a note can say how its PDF is printed; all
+  keys are optional and a bad value is ignored. The export dialog opens with the note's paper, margins,
+  text size, title and contents filled in (and they can be changed there); the font, the spacing, the
+  alignment, the heading colour, weight and sizes are read from the note at export time. Word imports write them.
+  - `print-paper`: `A4`, `A5`, `Letter`, `Legal` or `<W>x<H>mm` (a width larger than the height is landscape)
+  - `print-margins`: four numbers in mm, `top right bottom left`
+  - `print-font`: `serif` (Liberation Serif, Times-compatible), `sans` (Ubuntu Light) or `mono` (Hack)
+  - `print-font-size`: the body text in points
+  - `print-line-spacing`: a factor, 1.0 being the font's own single line height
+  - `print-paragraph-spacing`: the space after a body paragraph in points
+  - `print-align`: `left` or `justify`
+  - `print-heading-color`: `#RRGGBB`
+  - `print-heading-weight`: `normal` or `bold` (the default), the weight of headings
+  - `print-heading-sizes`: six sizes in pt for the heading levels 1 to 6, such as `"16 13 12 11 11 11"` (4 to 72
+    each; anything else is ignored); they replace the usual proportions
+  - `print-title`: `true` or `false`, the note's name as a title
+  - `print-toc`: `true` or `false`, the contents page
+  - `print-break-before`: a heading level 1 to 6; every heading up to that level starts a new page
+    (`1`: every `#`; the dialog has a box "Start each # heading on a new page" for it)
+  - **Paper look** (#367): a note with any of these keys is printed plainly: list marks and quotes in the text
+    colour (a quote indented, without a bar), inline code and code blocks in the mono font without the app's
+    colours (a code block on light grey), tables with thin black lines and a bold header without fill. A
+    note without any of the keys prints as before.
+
+- **Page breaks** (#359): a line `<div style="page-break-after: always;"></div>` (the form Obsidian writes;
+  `page-break-before: always`, `break-after: page` and `break-before: page` work too) is a page break:
+  the built-in PDF export and the LaTeX export (`\newpage`) start a new page there, without an empty
+  page when the page is empty already or the break is the last thing of the note. The editor's Markdown
+  preview and the reading view draw it as a thin dashed rule labelled "Page break" (the line with the
+  cursor shows the HTML). The toolbar button "Page break" (Alt+J) inserts the line.
 
 - **A folder as one PDF, a book** (BOOK, #306): **Export to PDF…** in the menu of a folder in the file list,
   or of the vault (right-click the empty space under the tree), writes the notes of the folder and its
@@ -176,7 +241,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   **Test page** compiles a small document of the set and opens the PDF; **Remove set…** moves it to the
   trash. The university's logo may not be redistributed: **Choose logo…** copies yours into the set, and
   until then exports use a placeholder and the set says "logo missing: exports are not CI-conformant"
-  (TEX-005 to TEX-007, TEX-024 to TEX-027).
+  (TEX-005 to TEX-007, TEX-024 to TEX-027). A **department logo** (**Choose department logo…**, **Remove
+  department logo**) is an optional second slot: documents show it below the TU logo, right-aligned and
+  as high, where the class has room for it (not on exercise sheets and announcements), and the export
+  dialog has a **Department logo** box for it (TEX-035).
 
   ![Template sets in Settings → LaTeX](userguide/z_media/screenshots/settings-latex-sets.png)
 
@@ -188,7 +256,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   download and 330 MB on disk, with progress and Cancel; the built-in export needs nothing of this),
   **Templates** (TU Darmstadt, the tested version, the newest from CTAN, a file, a folder or GitHub, or a set
   you have), **Logo** (the university's logo may not be shipped: the step says where members get it; give it
-  by **dropping the file onto the window** or by its path, or choose Later and exports carry a placeholder),
+  by **dropping the file onto the window** or by its path, or choose Later and exports carry a placeholder; an
+  optional second field takes your department's logo),
   **Your details** (the accent colour as swatches `0a` to `11d`, the language, your department and name, kept in
   the set's `settings.toml`) and a **Test page** that is made with your choices and opened, or, if it fails,
   explained in words with **Save the .tex**. While the setup or Settings → LaTeX is open, files dropped on the
@@ -243,14 +312,15 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - The middle area splits into any number of **panes** side by side, each with its own tab bar,
   tabs, open tab and back / forward history. **Ctrl+\** (or **Open in split right** in the
   right-click menu of a tab) opens the tab in a new pane to the right of the focused one.
-- One pane has the focus: click into it (tab bar or content) or press **Ctrl+Alt+→ / Ctrl+Alt+←**.
+- One pane has the focus: click into it (tab bar or content) or press **F6 / Shift+F6**.
   Its tab bar has an accent line. Opening notes and links, the quick switcher, new notes, closing
   and switching tabs, back / forward and the reading view all work on the focused pane; renaming,
   moving or deleting a file updates its tabs in every pane.
 - Drag the border between two panes to resize them (neither gets narrower than 240 points).
-  Closing the last tab of a pane (or **Ctrl+Alt+W**) removes the pane; the last pane stays.
+  Closing the last tab of a pane (or **Ctrl+Shift+W**) removes the pane; the last pane stays.
 - The panes, their tabs, the open tab of each, the focused pane and the widths come back at the
-  next start. All the keys can be changed in Settings, Keybindings.
+  next start, and each note with its cursor or selection, its scroll position and its reading view; the
+  state is written every few seconds when something changed, and at exit. All the keys can be changed in Settings, Keybindings.
 
 ## Fonts and text sizes
 
@@ -275,7 +345,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 ![The Keybindings tab of the settings](userguide/z_media/screenshots/keybindings.png)
 
-- Ctrl+H puts the keyboard one place to the left (with split panes: into the pane on the left,
+- Ctrl+H (macOS: Cmd+Shift+H) puts the keyboard one place to the left (with split panes: into the pane on the left,
   from the first pane into the left sidebar), Ctrl+L one place to the right (from the sidebar into
   the first pane, then pane by pane; it stays in the last one). Ctrl+Shift+B opens
   the file list with the open note selected: j / k go from file to file, Ctrl+J / Ctrl+K from
@@ -284,7 +354,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   action already uses asks “Overwrite it?” (Yes takes it from that action and leaves it without a key, No
   changes nothing; Enter answers No), and a binding can be a sequence of keys. While you record, a note
   under the keys says which action they would clash with.
-- Ctrl+Alt+H / Ctrl+Alt+L switch to the previous / next tab, also from the file list and from
+- Ctrl+PageUp / Ctrl+PageDown (macOS: Cmd+Opt+← / Cmd+Opt+→) switch to the previous / next tab, also from the file list and from
   mail, calendar and Feeds; after the last tab comes the first.
 - In the search results j / k go from hit to hit and Ctrl+J / Ctrl+K from file to file.
 - **Markdown preview** (Settings → Editor, or the eye icon in the top right of the editor;
@@ -393,6 +463,11 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   the text (below), not a heading, so a `#` is numbered like the others. The numbers are only drawn (muted), never written into the file: in the editor, the Markdown preview, the reading view, the outline, the link preview and
   the PDF. Settings → Editor → "Number headings" (on by default) switches it for every note; a note's front matter
   `numbered-headings: true` or `false` (also `yes` / `no`) overrides it for that note.
+- **Properties as a summary and a card** (EDIT-060 to EDIT-064, CFG-050 to CFG-053): the reading view draws the front matter as a card by the type of the note instead of raw
+  lines: an e-mail as a mail header (sender, date, to / cc, subject, tag chips), an event with its time, place, attendees and a repeats badge, a Word import as one page chip
+  (`A4 · 2.5 cm margins · 11 pt`), any other note as key and value rows. Ids and `print-*` settings are left out, a ▸ toggle shows every property, and people with a contact
+  note are links. `properties::summary` gives the one line for a folded view (`email · Anna Müller · 2026-11-12 · #work #mail`). Settings → Appearance → "Properties in the editor"
+  / "Properties in the reading view": folded, card or raw (defaults: folded in the editor, card in the reading view). In the editor a note's front matter starts folded to its summary line unless the setting is raw (EDIT-081, EDIT-084). Dates are not links yet: the calendar has no entry point for a day.
 - **Title line and date prefix** (VAULT-025, CFG-043): above line 1 a note shows its title line, its file name without `.md` and without a
   leading date prefix `YYMMDD_` (`261117_Plan.md` shows `Plan`); editing it renames the file and keeps the prefix. Tabs and the PDF title show the name without the prefix; the file
   list, the quick switcher and links keep the full name, so the list sorts by date. Settings → Editor → "Date prefix for new notes" (on by default) names a note made by Shale
@@ -562,7 +637,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   recognised, and nothing is written until you press Import. Mark several mails (Space or
   Ctrl+click) to import them together.
 - **Keyboard first.** One of the three panes has the keyboard and is framed in the accent
-  colour; Ctrl+H / Ctrl+L (the keys that go between the file list and the editor) move it between
+  colour; Ctrl+H / Ctrl+L (Cmd+Shift+H / Cmd+Shift+L on macOS; the keys that go between the file list and the editor) move it between
   folders, list and message, and from the folders on into the left sidebar. The three panes keep
   a least width (170, 220 and 280 points): in a window too narrow for them the panes scroll
   sideways and the pane that has the keyboard is scrolled into view. j / k act in that pane
@@ -595,7 +670,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 ### Writing and sending (phase 3)
 
 - **Compose** with `c` (or the Compose button), **Reply** `r`, **Reply all** `Shift+R`, **Forward**
-  `Shift+F` (also buttons under the message, which also answer to Alt+R, Alt+A, Alt+F and, for the others, Alt+I, Alt+C, Alt+U, Alt+G, Alt+M, Alt+D; hold Alt to see the letter underlined; `f` is still the flag key). Mail is plain text. To, Cc
+  `Shift+F` (also buttons under the message, which also answer to Alt+R, Alt+A, Alt+F and, for the others, Alt+I, Alt+C, Alt+U, Alt+G, Alt+M, Alt+D (not on macOS, where you can bind them); hold Alt to see the letter underlined; `f` is still the flag key). Mail is plain text. To, Cc
   and Bcc complete from the addresses in your people notes and in the mail you already have (↑ ↓,
   Tab or a click); the subject, the text and the attachments are below. Attach a file by its path,
   a file of the vault (also from the media folder) or a **note** (its markdown, as a `.md`
@@ -672,6 +747,15 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   `gpg --import backup.asc`; the keys of others the same way, or by hand with `gpg --locate-keys name@example.org`
   (also WKD). S/MIME: Thunderbird's certificate manager, Backup, then `gpgsm --import backup.p12` and the
   issuer's fingerprint in `~/.gnupg/trustlist.txt`. The Encryption settings say all this too.
+- **Keeping the key unlocked.** Without a `gpg-agent.conf`, GnuPG forgets a passphrase after 10 minutes
+  without use and after 2 hours at the latest. Accounts…, Encryption, "Keeping the key unlocked" shows the
+  agent's times in words (read with `gpgconf --list-options gpg-agent`, in the background) and warns when
+  `no-allow-external-cache` blocks the keyring. The choice "Ask for the passphrase again after" (8 hours, 1 day,
+  1 week) and "Change with gpgconf…" show exactly what would be written (`gpg-agent.conf`, the two lines, the
+  marked block gpgconf makes, nothing else) and write only after "Write with gpgconf" (then the agent is
+  reloaded); Cancel writes nothing. The same lines and the reload command are shown for doing it by hand, with a
+  Copy button, plus the keyring tip of the platform ("Save in password manager" on Linux, "Save in Keychain" on
+  macOS; Gpg4win has none). Shale still never handles a passphrase.
 
 ## Importing e-mails, events and files (for project tracking)
 
@@ -696,7 +780,12 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   highlights and pictures with their captions come through (IMP-037). Everything one file brings
   goes into one folder, `z_media/YYYY/MM/import_docx_<name>/`: the pictures in `media/` and, when
   "Keep the original .docx" is ticked, the original, which the note names in its properties
-  (IMP-038). A file pandoc cannot read leaves nothing behind and the toast says why. Off, or
+  (IMP-038). Word's look comes along: text colours (direct, from character, paragraph and table styles, and theme colours with tint and shade) and highlight colours (yellow too) become `<span>` and `<mark>`
+  colours (IMP-041), page breaks (manual, "page break before", section breaks; IMP-044), a Title and Subtitle become a heading and an italic line (IMP-042), and the
+  note's properties hold the page setup (`print-paper`, `print-margins`), the body font, size,
+  line and paragraph spacing, alignment, the colour, weight and sizes of the headings and, unless Heading 1 is numbered in Word, `numbered-headings: false` (`print-*`, IMP-040, IMP-045), which
+  the PDF export uses (rabalyn/shale#338). Centred and right-aligned paragraphs are not kept
+  (rabalyn/shale#340). A Word table of contents is left out (the export makes its own, IMP-043). A file pandoc cannot read leaves nothing behind and the toast says why. Off, or
   without pandoc, a `.docx` is an attachment as before; the dialog says when pandoc is missing.
 
   ![The Import tab of Settings](userguide/z_media/screenshots/settings-import.png)
@@ -705,6 +794,13 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   left out by default, and each attachment can be ticked on or off.
 - Drop onto a folder in the file list to import into that folder, or onto a note to also add
   links to the new notes there.
+- After an import of two or more items a window, **Import summary**, says what was made: the new
+  notes, each with its name, a line about it (an e-mail: the sender and the date; an event: the start
+  and the place; any other note: its first line) and an **Open** button, the files saved in the media
+  folder, and the errors. **Open all in tabs** opens every new note in a tab of its own; Close leaves
+  them closed. One item is opened right away as before (IMP-056, IMP-057).
+
+  ![The summary after an import](userguide/z_media/screenshots/import-summary.png)
 - Messages that were already imported are recognised and left out unless you tick them again.
 - On Wayland, Shale reads what Thunderbird hands over. When that is only a link to the message,
   Shale finds the message in Thunderbird's local copy (for IMAP accounts this needs "Keep
@@ -714,9 +810,19 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 ![An imported e-mail](userguide/z_media/screenshots/imported-note.png)
 
-- Each e-mail becomes a note named "date subject" with the sender, recipients and date, the tags
-  in its properties, links to the attachments and the original message, and the text of the
-  message. The tag list counts these tags too.
+- Each e-mail becomes a note named "date subject". The sender, recipients, date, the people (as
+  links to their contact notes), a link to the original message and the tags are its properties; the
+  text starts with the subject as a heading, then the attachments and the message. The header is
+  written once, as properties (IMP-050, IMP-051). An event is the same: start, end, place, calendar,
+  repeat rule, organizer, attendees, status and link are properties, the text is its title and notes.
+  The tag list counts the tags too. For programs that do not show properties, the box **Header list
+  in the note body** (Import dialog; its start value is in Settings → Import) also writes the old list
+  of From / To / Date / When / Where … below the title (IMP-052).
+- The text of an imported e-mail is tidied: runs of three or more blank lines become one, trailing
+  spaces go, and a long tracking URL (more than 80 characters, with a query string) becomes a short
+  link `[host](url)` (IMP-053). A picture among the attachments is an embed 200 points wide
+  (`![[file.jpg|200]]`), other attachments stay links (IMP-054). The signature starts at a line that
+  is exactly `-- ` and quoted replies are runs of `>` lines (IMP-055).
 
 ## Feeds: read Mastodon and Bluesky, save posts to the vault
 
@@ -781,7 +887,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 - When importing, the sender, recipients, organizer and attendees are found and matched to
   contact notes (by e-mail address anywhere in the note, else by name; "Müller, Hans" = "Hans
   Müller"). Known contacts and new senders are ticked; for ticked people without a note one is
-  made. The imported note gets a "People" line with links, so each contact note's backlinks show
+  made. The imported note gets a `people` property with links, so each contact note's backlinks show
   every mail and meeting with that person. Automatic senders like "noreply" are left out.
 
 ![Import with people and tags](userguide/z_media/screenshots/people-import.png)
@@ -878,7 +984,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 ## Keyboard
 
-The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings** (Change replaces the keys of an action, Add gives it one more, Clear leaves it without a key)
+Ctrl is Cmd on macOS. No default key is one that the system reserves (the app menu's Cmd+H, AltGr on Windows, the workspace keys of the Linux desktops), so macOS has other keys for six actions, named in the rows below; a key you set yourself is never refused for that reason. The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings** (Change replaces the keys of an action, Add gives it one more, Clear leaves it without a key)
 (everywhere, file list, search results, mail view, note view, vim normal mode; a key that another action uses asks whether to overwrite it: Yes takes it from that action, No changes nothing).
 Text editing keys and vim keys are fixed.
 
@@ -893,20 +999,23 @@ Text editing keys and vim keys are fixed.
 | Ctrl+S | Save now (notes also save automatically) |
 | Ctrl+W | Close tab |
 | Ctrl+Shift+F | Search all notes |
-| Ctrl+H / Ctrl+L | Keyboard one place left / right: through the split panes in screen order, left of the first pane into the left sidebar, from there into the first pane |
-| Ctrl+Alt+H / Ctrl+Alt+L | Previous / next tab (from the last tab on to the first), wherever the keyboard is |
+| Ctrl+H / Ctrl+L | Keyboard one place left / right: through the split panes in screen order, left of the first pane into the left sidebar, from there into the first pane (macOS: Cmd+Shift+H / Cmd+Shift+L, because Cmd+H hides the app) |
+| Ctrl+PageUp / Ctrl+PageDown | Previous / next tab (from the last tab on to the first), wherever the keyboard is (macOS: Cmd+Opt+← / Cmd+Opt+→) |
 | Ctrl+\ | Split right: open this tab in a new pane to the right (panes sit side by side, each with its own tabs) |
-| Ctrl+Alt+→ / Ctrl+Alt+← | Focus the next / previous pane |
-| Ctrl+Alt+W | Close the pane with all its tabs |
+| F6 / Shift+F6 | Focus the next / previous pane |
+| Ctrl+Shift+W | Close the pane with all its tabs (macOS: Cmd+Shift+W) |
 | Ctrl+Shift+B | File list with the keyboard in it: j / k (or ↓ / ↑) next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
 | ↓ or Enter in the search box | Browse the results: j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
 | Ctrl+Shift+M | Mail view (its keys are listed below) |
-| Alt+← / Alt+→ | Back / forward |
-| Alt+B, Alt+I, Alt+S, Alt+H, Alt+C, Alt+Y, Alt+F, Alt+E, Alt+U, Alt+O, Alt+T, Alt+Q, Alt+K, Alt+R, Alt+A, Alt+L, Alt+W, Alt+M, Alt+X | The buttons of the formatting toolbar of a note, each doing what a click on it does (the keyboard stays in the text and nothing is typed): Bold, Italic, Strikethrough, Highlight, Inline code, Highlight colour and Font colour (open their palette), Heading level (opens its menu), Bullet list, Numbered list, Task, Quote, Code block, Horizontal rule, Table, Link to a note, Web link, Embed, Clear formatting. A key whose button is not there (reading view) or is greyed out (in a table cell) does nothing |
+| Alt+← / Alt+→ | Back / forward (macOS: Cmd+[ / Cmd+], because Option+← / → move by word in text) |
+| Alt+B, Alt+I, Alt+S, Alt+H, Alt+C, Alt+Y, Alt+F, Alt+E, Alt+U, Alt+O, Alt+T, Alt+Q, Alt+K, Alt+R, Alt+J, Alt+A, Alt+L, Alt+W, Alt+M, Alt+X | The buttons of the formatting toolbar of a note, each doing what a click on it does (the keyboard stays in the text and nothing is typed): Bold, Italic, Strikethrough, Highlight, Inline code, Highlight colour and Font colour (open their palette, the ▾ part of the split button), Heading level (opens its menu), Bullet list, Numbered list, Task, Quote, Code block, Horizontal rule, Table, Link to a note, Web link, Embed, Clear formatting. A key whose button is not there (reading view) or is greyed out (in a table cell) does nothing |
+| Ctrl+Shift+K / Ctrl+Shift+J | Fold / unfold the block at the cursor (a heading section, quote, list item or list; again on a folded line folds the block around it); the cursor then goes to the block's first line |
+| Ctrl+Shift+O / Ctrl+Shift+I | Fold all / unfold all blocks of the note (also in the reading view) |
+| Ctrl+Shift+C | Copy the code of the code block at the cursor (no fences, no newline at the end) |
 | Alt+V, Alt+P, Alt+D, Alt+N | The buttons of the view header and tab bar of a note: edit / reading view, Markdown preview, the ⋯ menu (opens it), New tab |
 | Alt+1, Alt+2, Alt+3, Alt+4, Alt+5, Alt+6, Alt+7, Alt+8, Alt+9, Alt+0 | The ribbon items by position: the first ten icons of the ribbon, as shown (also after you reordered or removed some) |
 | Alt+, / Alt+. | Show or hide the left / right sidebar |
-| Hold Alt | A small badge with its key appears at the corner of each of these buttons that has an Alt key (it follows a key you changed). On macOS, where Option+letter types characters, these actions have no key until you give them one in Settings → Keybindings (scope Note view and Everywhere) |
+| Hold Alt | A small badge with its key appears at the corner of each of these buttons that has an Alt key (it follows a key you changed). On macOS, where Option+letter types characters, these actions, and the Alt keys of the open mail, have no key until you give them one in Settings → Keybindings (scope Note view, Mail view and Everywhere) |
 | Ctrl+6 | Alternate view, in every view (also mail and drawings, where Space is taken): swap with the view this tab showed just before; again: back |
 | Space Tab | Vim-style editing, normal mode: back to the view this tab showed just before (note, calendar, Feeds, …); again: forward to this one |
 | Space … | A started key sequence (e.g. `Space f`) shows in the status bar and is dropped after 1.5 s without a key |
@@ -920,7 +1029,7 @@ Text editing keys and vim keys are fixed.
 ### Mail view keys
 
 In the mail view (Ctrl+Shift+M) one of the three panes (folders, message list, message) has the
-keyboard; it has an accent-coloured frame. **Ctrl+H / Ctrl+L** move it one pane left / right (from
+keyboard; it has an accent-coloured frame. **Ctrl+H / Ctrl+L** (macOS: Cmd+Shift+H / Cmd+Shift+L) move it one pane left / right (from
 the folder pane Ctrl+H goes on into the pane on the left, or the left sidebar, from there Ctrl+L comes back). Letters work
 only while no text field has the keyboard. Every key can be changed in Settings → Keybindings
 (scope Mail view); Enter and Esc are fixed.
@@ -940,7 +1049,7 @@ only while no text field has the keyboard. Every key can be changed in Settings 
 | m | Move to a folder |
 | c | Write a new mail |
 | r, Shift+R, Shift+F | Reply, reply all, forward |
-| Alt+I, Alt+C, Alt+R, Alt+A, Alt+F, Alt+U, Alt+G, Alt+M, Alt+D | The buttons of the open mail: Import to vault, Close, Reply, Reply all, Forward, Mark read / unread, Flag, Move…, Delete (the letter is underlined on the button while Alt is held) |
+| Alt+I, Alt+C, Alt+R, Alt+A, Alt+F, Alt+U, Alt+G, Alt+M, Alt+D | The buttons of the open mail: Import to vault, Close, Reply, Reply all, Forward, Mark read / unread, Flag, Move…, Delete (the letter is underlined on the button while Alt is held; not on macOS, where Option+letter types characters: bind them in Settings → Keybindings) |
 | Ctrl+R | Sync, or cancel the sync |
 | a | Account settings |
 | Shift+L | Load the open message (or the list of a folder that is not synced) from the server |

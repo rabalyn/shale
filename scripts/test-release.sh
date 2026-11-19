@@ -24,7 +24,11 @@ cat > "$TMP/bin/gh" <<'GH'
 #!/bin/sh
 echo "$*" >> "$GH_LOG"
 case "$1 $2" in
-  "issue list") [ -f "$GH_LOG.made" ] && echo 77; exit 0 ;;
+  "issue list")
+    # a test hook, run once: what happens while the release runs (#348)
+    if [ -n "${GH_HOOK:-}" ] && [ -x "$GH_HOOK" ]; then "$GH_HOOK" < /dev/null; rm -f "$GH_HOOK"; fi
+    [ -f "$GH_LOG.made" ] && echo 77
+    exit 0 ;;
   "issue create") touch "$GH_LOG.made"; echo "https://github.com/rabalyn/shale/issues/77" ;;
 esac
 exit 0
@@ -195,22 +199,72 @@ check "the tag message names the version" '[ "$(git tag -l --format="%(contents:
 check "the release stored the full and the worst result and the report" 'git show origin/main:docs/perf/results/v0.4.0.json | grep -Fq "\"describe\":\"v0.4.0\"" && git show origin/main:docs/perf/results-worst/v0.4.0.json | grep -Fq "\"run\":\"worst\"" && git show origin/main:docs/perf/index.html | grep -Fq html'
 check "the full profile ran with its name and the worst one too" 'grep -Fq -- "--profile full" "$BENCH_LOG" && grep -Fq -- "--profile worst" "$BENCH_LOG"'
 check "without an earlier release nothing is compared" '! grep -Fq -- "--bench-compare" "$BENCH_LOG" && [ -z "$(git ls-tree origin/main docs/perf/compare/)" ]'
-land perf1 docs/changelog-pending/I20.md $'### Fixed\n\n- Twenty (#20).'
-FAKE_COMPARE_EXIT=1 expect "a performance regression stops the release" 1 "performance regression" make-release.sh patch
-check "nothing was landed or tagged after the regression" '! remote_tag v0.4.1 && [ "$(version_on_main)" = 0.4.0 ] && ! git rev-parse -q --verify refs/heads/release/v0.4.1 >/dev/null'
-FAKE_COMPARE_EXIT=1 expect "--allow-perf-regression lets a regression pass and says so" 0 "allowed by --allow-perf-regression" make-release.sh --allow-perf-regression patch
-check "the release compared with the last one and stored the comparison" 'remote_tag v0.4.1 && grep -Fq -- "--bench-compare docs/perf/results/v0.4.0.json docs/perf/results/v0.4.1.json" "$BENCH_LOG" && git show origin/main:docs/perf/compare/v0.4.1.md | grep -Fq compare && git show origin/main:docs/perf/compare/v0.4.1-worst.json | grep -Fq regressions'
-land perf2 docs/changelog-pending/I21.md $'### Fixed\n\n- Twenty-one (#21).'
-expect "--skip-bench leaves the performance step out" 0 "not measured" make-release.sh --skip-bench patch
-check "a skipped release has no result" 'remote_tag v0.4.2 && ! git cat-file -e origin/main:docs/perf/results/v0.4.2.json 2>/dev/null'
-land perf3 docs/changelog-pending/I22.md $'### Fixed\n\n- Twenty-two (#22).'
-FAKE_COMPARE_EXIT=2 expect "a failing comparison stops the release too" 1 "the performance step failed" make-release.sh patch
-expect "the next release goes on" 0 "tagged" make-release.sh patch
-check "it compares with the last release that has a result" 'grep -Fq -- "--bench-compare docs/perf/results/v0.4.1.json docs/perf/results/v0.4.3.json" "$BENCH_LOG"'
 expect "a release needs changelog entries" 1 "the changelog needs an update first" make-release.sh patch
 land stray docs/changelog-pending/I11.md "- not under a heading"
 expect "a changelog line outside a heading is refused and named" 1 "outside a ### heading in docs/changelog-pending/I11.md" make-release.sh patch
 check "no release worktree is left behind" '! git worktree list | grep -Fq release/worktree'
+
+# a landing during a release (FORGE-014, #348)
+git checkout -q -b unstray origin/main && git rm -q docs/changelog-pending/I11.md && git commit -q -m "unstray (Refs #1)" && git checkout -q main
+bash scripts/land.sh unstray >/dev/null 2>&1 || echo "setup: landing unstray failed"
+land pend20 docs/changelog-pending/I20.md $'### Fixed\n\n- Twenty (#20).' "Twenty (Closes #20)"
+git checkout -q -b racer origin/main
+mkdir -p docs/changelog-pending && printf '### Fixed\n\n- Twelve (#12).\n' > docs/changelog-pending/I12.md
+git add -A && git commit -q -m "Twelve (Closes #12)" && git checkout -q main
+# the hook starts a landing while the release holds the lock (it runs after the lock is taken)
+cat > "$TMP/hook-racer" <<HOOK
+#!/bin/sh
+cd "$TMP/work" || exit 1
+( bash scripts/land.sh racer; echo \$? > "$TMP/racer.rc" ) > "$TMP/racer.out" 2>&1 < /dev/null 8>&- &
+i=0
+while ! grep -Fq "waiting" "$TMP/racer.out" && [ \$i -lt 100 ]; do sleep 0.1; i=\$((i + 1)); done
+HOOK
+chmod +x "$TMP/hook-racer"
+GH_HOOK="$TMP/hook-racer" expect "a release holds the landing lock until its tag" 0 "pushed the tag to origin" make-release.sh patch
+i=0; while [ ! -f "$TMP/racer.rc" ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i + 1)); done
+check "the landing that came meanwhile waited and then landed" 'grep -Fq "waiting" "$TMP/racer.out" && [ "$(cat "$TMP/racer.rc")" = 0 ] && git fetch -q origin && git show origin/main:docs/changelog-pending/I12.md >/dev/null'
+check "it landed after the tag, not inside it" 'remote_tag v0.4.1 && git merge-base --is-ancestor "v0.4.1^{commit}" origin/main && [ "$(git rev-parse "v0.4.1^{commit}")" != "$(git rev-parse origin/main)" ] && ! git cat-file -e "v0.4.1^{commit}:docs/changelog-pending/I12.md" 2>/dev/null'
+git worktree add -q --detach "$TMP/chk" v0.4.1
+check "the tagged release passes the release check" '(cd "$TMP/chk" && sh .github/check-release.sh 0.4.1 >/dev/null 2>&1)'
+git worktree remove --force "$TMP/chk"
+
+# a push by hand that bypasses the lock lands in the release; the check refuses to tag it
+cat > "$TMP/hook-hand" <<HOOK
+#!/bin/sh
+rm -rf "$TMP/other"
+git clone -q "$TMP/remote.git" "$TMP/other" 2>/dev/null
+cd "$TMP/other" || exit 1
+mkdir -p docs/changelog-pending
+printf '### Fixed\n\n- Thirteen (#13).\n' > docs/changelog-pending/I13.md
+git add -A && git commit -q -m "Thirteen (Closes #13)" && git push -q origin main
+HOOK
+chmod +x "$TMP/hook-hand"
+GH_HOOK="$TMP/hook-hand" expect "a landed merge that fails the check is not tagged, and the message names the issue" 1 "#13" make-release.sh patch
+check "the message says what to do, nothing was tagged and main has the version" 'printf "%s" "$OUT" | grep -Fq "run make-release.sh 0.4.2 again" && ! remote_tag v0.4.2 && ! git rev-parse -q --verify refs/tags/v0.4.2 >/dev/null && [ "$(version_on_main)" = 0.4.2 ]'
+check "no check worktree is left behind" '! git worktree list | grep -Fq release/check'
+# the recovery of the message: the entry in a branch, landed, then the same version again
+git checkout -q -b fix13 origin/main
+git rm -q docs/changelog-pending/I13.md
+awk '{ print } /^## \[0.4.2\]/ { print ""; print "### Fixed"; print ""; print "- Thirteen (#13)." }' CHANGELOG.md > CHANGELOG.md.new && mv CHANGELOG.md.new CHANGELOG.md
+git add -A && git commit -q -m "Thirteen in the notes (Refs #13)" && git checkout -q main
+bash scripts/land.sh fix13 >/dev/null 2>&1 || echo "setup: landing fix13 failed"
+expect "a dry run of the rerun says it tags main" 0 "on origin/main already" make-release.sh --dry-run 0.4.2
+expect "the same version again tags the landed main" 0 "pushed the tag to origin" make-release.sh 0.4.2
+check "the recovery tag points at main and passes" 'remote_tag v0.4.2 && [ "$(git rev-parse "v0.4.2^{commit}")" = "$(git rev-parse origin/main)" ]'
+
+# the performance step of later releases (BUILD-034)
+land perf1 docs/changelog-pending/I30.md $'### Fixed\n\n- Thirty (#30).'
+FAKE_COMPARE_EXIT=1 expect "a performance regression stops the release" 1 "performance regression" make-release.sh patch
+check "nothing was landed or tagged after the regression" '! remote_tag v0.4.3 && [ "$(version_on_main)" = 0.4.2 ] && ! git rev-parse -q --verify refs/heads/release/v0.4.3 >/dev/null'
+FAKE_COMPARE_EXIT=1 expect "--allow-perf-regression lets a regression pass and says so" 0 "allowed by --allow-perf-regression" make-release.sh --allow-perf-regression patch
+check "the release compared with the last one and stored the comparison" 'remote_tag v0.4.3 && grep -Fq -- "--bench-compare docs/perf/results/v0.4.2.json docs/perf/results/v0.4.3.json" "$BENCH_LOG" && git show origin/main:docs/perf/compare/v0.4.3.md | grep -Fq compare && git show origin/main:docs/perf/compare/v0.4.3-worst.json | grep -Fq regressions'
+land perf2 docs/changelog-pending/I31.md $'### Fixed\n\n- Thirty-one (#31).'
+expect "--skip-bench leaves the performance step out" 0 "not measured" make-release.sh --skip-bench patch
+check "a skipped release has no result" 'remote_tag v0.4.4 && ! git cat-file -e origin/main:docs/perf/results/v0.4.4.json 2>/dev/null'
+land perf3 docs/changelog-pending/I32.md $'### Fixed\n\n- Thirty-two (#32).'
+FAKE_COMPARE_EXIT=2 expect "a failing comparison stops the release too" 1 "the performance step failed" make-release.sh patch
+expect "the next release goes on" 0 "tagged" make-release.sh patch
+check "it compares with the last release that has a result" 'grep -Fq -- "--bench-compare docs/perf/results/v0.4.3.json docs/perf/results/v0.4.5.json" "$BENCH_LOG"'
 
 [ "$FAILED" = 0 ] && echo "all $N checks passed"
 exit "$FAILED"

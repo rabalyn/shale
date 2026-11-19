@@ -9,6 +9,8 @@ impl ShaleApp {
         let mut changed = false;
         changed |= ui.checkbox(&mut self.cfg.readable_width, "Readable line length").changed();
         changed |= ui.checkbox(&mut self.cfg.dark_canvas, "Dark drawing canvas").changed();
+        changed |= properties_combo(ui, "Properties in the editor", "properties-editor", &mut self.cfg.properties_in_editor);
+        changed |= properties_combo(ui, "Properties in the reading view", "properties-reader", &mut self.cfg.properties_in_reader);
         changed |= ui.checkbox(&mut self.cfg.inline_images, "Show embedded images and players inside the editor (the link text appears while the cursor is on it)").changed();
         ui.horizontal(|ui| {
             ui.label("Play button over the artwork of a sound or video");
@@ -28,4 +30,22 @@ impl ShaleApp {
         };
         changed
     }
+}
+
+/// A choice of how the properties of a note are shown (CFG-050, CFG-051).
+fn properties_combo(ui: &mut Ui, label: &str, id: &str, view: &mut crate::config::PropertiesView) -> bool {
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.label(label);
+        egui::ComboBox::from_id_salt(id).selected_text(view.label()).show_ui(ui, |ui| {
+            for v in crate::config::PropertiesView::ALL {
+                changed |= ui.selectable_value(view, v, v.label()).changed();
+            }
+        });
+    })
+    .response
+    .on_hover_text(
+        "The properties are the lines between the two --- at the top of a note. Folded: one line with the type, the most telling values and the tags. Card: a header made for the type of the note (mail, event, Word file). Raw: every line.",
+    );
+    changed
 }

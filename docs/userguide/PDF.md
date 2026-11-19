@@ -48,6 +48,64 @@ the dialog opens, so nothing is stored in the settings.
 
 ![[pdf-export-dialog.png]]
 
+## Print properties of a note
+
+A note can say how it is printed, in its properties (front matter, see [[Notes and links]]). The export dialog opens with the note's
+paper, margins, text size, title and contents already filled in, and you can still change them there; the keys that
+the dialog has no box for (the font, the line and paragraph spacing, the alignment and the heading colour) are read from the note
+when you export. Every key is optional, and a value Shale cannot read is ignored, so the default stays. Any note can carry these keys; a Word file imported with
+[[Import]] gets them from the document's page setup and styles.
+
+| Key | Values | Default | Effect |
+| --- | --- | --- | --- |
+| `print-paper` | `A4`, `A5`, `Letter`, `Legal`, or `<W>x<H>mm` such as `148x210mm`; a width larger than the height is landscape | `A4` | The paper size, and so its orientation. |
+| `print-margins` | four numbers in mm: `top right bottom left` | `20 20 20 20` | The white space around the text. |
+| `print-font` | `serif`, `sans`, `mono` | `sans` | The body font: `serif` is Liberation Serif (metric-compatible with Times New Roman), `sans` is Ubuntu Light, `mono` is Hack. |
+| `print-font-size` | the body size in points, such as `12` | `11` | The size of the body text; headings and code keep their proportion to it. |
+| `print-line-spacing` | a factor, such as `1.3` | built-in (1.45 of the text size) | The distance between lines; `1.0` is the font's own single line height. |
+| `print-paragraph-spacing` | points, such as `8` | the built-in gap | The space after a body paragraph. |
+| `print-align` | `left`, `justify` | `left` | Ragged right, or justified text. |
+| `print-heading-color` | `#RRGGBB`, such as `#1F4E79` | black | The colour of the headings. |
+| `print-heading-weight` | `normal`, `bold` | `bold` | `normal` prints the headings not bold. |
+| `print-heading-sizes` | six sizes in points for the levels 1 to 6, such as `"16 13 12 11 11 11"` (each 4 to 72; spaces or commas) | the usual proportions of the body size | The size of each heading level. Fewer or more than six numbers, or one out of range, and the whole value is ignored. |
+| `print-title` | `true`, `false` | `true` | Whether the note's name is printed as a title. |
+| `print-toc` | `true`, `false` | `true` | Whether a *Contents* page is printed. |
+| `print-break-before` | a heading level, `1` to `6` | none | Every heading up to that level starts a new page: `1` is every `#` heading, `2` every `#` and `##`. The export dialog shows it as the box "Start each # heading on a new page" with the level next to it. |
+
+```
+---
+print-paper: A5
+print-margins: 25 20 25 20
+print-font: serif
+print-font-size: 12
+print-line-spacing: 1.3
+print-align: justify
+print-heading-color: "#1F4E79"
+---
+```
+
+**The paper look.** A note with any of these keys is printed like a document on paper, not in the app's colours: the bullets and
+numbers of lists are in the text colour, a quote is indented without a bar, inline code is in the mono font without a dark box, a code block is on a light
+grey box with dark text and no syntax colours, and a table has thin black lines and a bold header row without a fill. A note without any of the keys
+prints as before. A key that Shale does not know (a typo such as `print-colour`) does not count. The LaTeX export has its own styling and ignores this.
+
+The properties apply to the export of a single note; a book ([[PDF#A folder as one PDF]]) uses the dialog's choices for all its notes.
+
+## Page breaks
+
+A line of its own with `<div style="page-break-after: always;"></div>` is a **page break**: the PDF
+goes on at the top of a new page there. This is the line Obsidian writes, and an imported Word
+document gets one wherever Word had a page break (`page-break-before: always`, `break-after: page`
+and `break-before: page` are read the same). It is no page break inside a code block or the
+properties. The toolbar button **Page break** (Alt+J, see [[Editor]]) puts the line in after the line the cursor
+is in. In the editor with the Markdown preview on, and in the reading view, the line is drawn as a thin dashed rule with the
+label "Page break"; the line with the cursor shows the HTML. A page break at the top of a page, or at the end of the note,
+adds no empty page. The LaTeX export writes `\newpage`.
+
+The property `print-break-before` and the box "Start each # heading on a new page" in the export dialog do the same
+before the headings: with `1` every `#` heading starts a new page, but the first thing of the first page does not
+move. It is the same for the LaTeX export of an article or a book (slides, letters and posters have their own pages).
+
 ## A folder as one PDF
 
 A folder of the vault, up to the vault itself, is exported as **one PDF**, a book: right-click the
@@ -170,6 +228,11 @@ Settings → LaTeX.
    a PNG), or type or paste where it is. **Later** skips the step: exports then carry a grey
    placeholder and are not CI-conformant, and you can add the logo any time in Settings → LaTeX.
 
+   Below it is an optional second field, **Department logo**: if your department or institution (the
+   HRZ, a faculty, …) has a logo of its own, give it the same way (**Use this department logo**). A file
+   dropped on this step is the university's logo while that is still missing, and the department logo
+   after that; a message says which. See "The department logo" below.
+
    ![[setup-logo.png]]
 
    ![[setup-logo-drop.webm]]
@@ -195,10 +258,10 @@ Settings → LaTeX.
    ![[setup-test-failed.png]]
 
 The files you drop on the window while the setup is open belong to it: on the logo step a PDF or PNG
-becomes the logo, on the templates step a `.zip`, a `.tar.gz` or a folder is imported as the templates; they
+becomes the university's logo (the department logo once that is there), on the templates step a `.zip`, a `.tar.gz` or a folder is imported as the templates; they
 are never imported into the vault as notes. The same works in Settings → LaTeX: a dropped archive or
 folder is imported, a dropped PDF or PNG becomes the logo of the only set that has a logo slot (or of the
-set whose **Choose logo…** is open).
+set whose **Choose logo…** or **Choose department logo…** is open, for that logo).
 
 The setup opens by itself only once per vault (finishing or cancelling it both count); run it again from
 Settings → LaTeX whenever you like. The steps are the buttons of Settings → LaTeX (below), put in order.
@@ -258,15 +321,16 @@ the generic packages. A set looks like this:
 ```
 templates/tex/tuda/
   set.toml            what the set is: name, version, where it came from and when
-  settings.toml       your choices: accent colour, language, department, logo (kept when you update)
+  settings.toml       your choices: accent colour, language, department, logo, department logo (kept when you update)
   tex/                the class and package files (tudapub.cls, tudabeamer.cls, ...)
   kinds/pub.toml      one file per document kind (publication, thesis, slides, letter, ...)
-  logo/               the logo you supply (kept when you update)
+  logo/               the logos you supply: tuda_logo.pdf and department_logo.png (kept when you update)
   README.md           a note for people browsing the vault
 ```
 
 **Settings → LaTeX → Template sets** lists the sets of the open vault with their name, version,
-source, number of document kinds and the state of the logo, and has these buttons:
+source, number of document kinds and the state of the logo (and "department logo: department_logo.png"
+when there is one), and has these buttons:
 
 - **Import TU Darmstadt templates** imports the corporate design of the TU Darmstadt
   ([tuda-ci](https://github.com/tudace/tuda_latex_templates), 11 kinds: publication, report,
@@ -285,7 +349,9 @@ source, number of document kinds and the state of the logo, and has these button
   whole archive.
 - **Update set** imports the set again from where it came from. The old folder of the set is
   moved to the vault's `.trash` (so changes you made by hand to a class or a kind are not lost),
-  the new files are put in place, and your `settings.toml` and your logo are kept.
+  the new files are put in place, and your `settings.toml` and your logos are kept.
+- **Choose department logo…** and **Remove department logo** are for the optional logo of your department
+  (see "The department logo").
 - **Test page** compiles a small document of the set's publication kind (`pub`) with your TeX and
   opens the PDF, or shows the readable errors ("package x is missing", `file:line` and the message)
   and the end of the log.
@@ -306,6 +372,33 @@ logo step) does the same; you can also put `tuda_logo.pdf` there yourself. Until
 slides, letters and posters still compile; the placeholder lives only in the temporary folder of the
 compile, never in your vault. Documents with the placeholder must not be used as official documents.
 
+### The department logo
+
+Departments and institutions have a logo of their own, which documents show together with the
+university's. Every set has an optional second slot for it, `logo/department_logo.pdf` or `.png`.
+**Choose department logo…** (Settings → LaTeX → Template sets) takes the path of a PDF or PNG of at most
+5 MB and copies it there (a PDF or PNG dropped on the window while its form is open does the same, and so
+does the second field of the logo step of the guided setup); a logo that was there goes to the vault's
+trash. **Remove department logo** moves it to the trash and clears the setting. The set's status says
+**department logo: department_logo.png** when there is one; an empty slot is no warning and gets no placeholder.
+Like the university's logo it is not redistributable by Shale, so it is yours to supply.
+
+The placement follows the TU Darmstadt rule for a second logo (the HRZ's "Howto – HRZ-Logo"): **below**
+the TU logo, right-aligned with it, as high as the TU logo (the clear space is part of the logo files),
+about 5 mm apart. Where the class puts it:
+
+| Kind | The department logo |
+|---|---|
+| publication, report, thesis, doctoral thesis, leaflet | in the title box under the TU logo |
+| letter | in the letter head, under the TU logo, on the first page |
+| poster | in the title's info box under the TU logo |
+| scientific poster | as the class's title graphic, under the TU logo |
+| slides | as the class's sublogo, under the TU logo on every slide |
+| exercise sheet, announcement | not shown: the class has no room for a second logo under the TU logo |
+
+In the export dialog a **Department logo** box appears when the set has a department logo: it is on by
+default and greyed out (off) for a kind that does not show it. The test page of the set shows it too.
+
 ### Your choices: `settings.toml`
 
 Each set has its own `settings.toml`, which a re-import keeps:
@@ -317,6 +410,7 @@ Each set has its own `settings.toml`, which a re-import keeps:
 | `department` | used for the `department` field of a kind when a note and the dialog give none |
 | `author` | used for the `author` field of a kind when a note and the dialog give none |
 | `logo` | the logo file in `logo/`, set by **Choose logo…** |
+| `department_logo` | the department logo file in `logo/` (`department_logo.pdf` or `.png`), set by **Choose department logo…** |
 
 ### Adding or changing a document kind: `kinds/<kind>.toml`
 
@@ -333,6 +427,7 @@ does not know you write them yourself (the README of the set has an example):
 | `options` | the class options; `{accent}` and `{language}` are filled in from `settings.toml`, and an option whose `{accent}` is empty is left out |
 | `preamble` | lines of LaTeX after `\documentclass` (`{language}` and `{lang}` are filled in too) |
 | `logo` | `true` when the kind needs the set's logo |
+| `department_logo` | lines of LaTeX written after the preamble, only when the set has a department logo and the export dialog's **Department logo** box is on; `{department_logo}` stands for the file's name without extension (`logo/` is searched). Without the key the kind does not show a department logo |
 | `columns` | `poster` kinds: the text of the note in this many columns (the poster has 2) |
 | `[[fields]]` | one table per value: `key` (the property of the note), `label`, `command` (the LaTeX command that gets it, `title` for `\title{…}`) or `komavar` (`\setkomavar{…}` of a letter), `required`, `default` (LaTeX code used when the note has none) |
 
@@ -354,7 +449,8 @@ always exported with the built-in engine.
   with a star must have a value. The page size, margins, text size, title and page numbers are not
   in the dialog: the template decides them. **Table of contents** is there for the kinds that have
   one (publication, report, exercise sheet, thesis, doctoral thesis) and greyed out for the others;
-  the box for embedded pictures stays.
+  the box for embedded pictures stays. **Department logo** appears when the set has one (see "The
+  department logo"): on by default, greyed out for a kind that does not show it.
 - A line under the fields says which TeX is used, or **No TeX: install it in Settings → LaTeX**
   (**Export** is off then). A red warning says that the set's logo is missing: the PDF then has a grey
   placeholder where the logo goes and is not CI-conformant (see "The logo"). Next to the hints for a

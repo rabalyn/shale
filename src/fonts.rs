@@ -305,6 +305,20 @@ impl EditorFonts {
     }
 }
 
+/// Set the fonts of egui and remember in which pass, for what is laid out with them and kept ([`settled`]).
+pub fn set_fonts(ctx: &egui::Context, definitions: egui::FontDefinitions) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|d| d.insert_temp(egui::Id::NULL.with("fonts-set-in-pass"), pass));
+    ctx.set_fonts(definitions);
+}
+
+/// Which fonts egui lays out with in this pass, as a number that changes with them; `None` in the
+/// pass that sets them, when some text may still be laid out with the old ones (EDIT-106).
+pub fn settled(ctx: &egui::Context) -> Option<u64> {
+    let set = ctx.data(|d| d.get_temp::<u64>(egui::Id::NULL.with("fonts-set-in-pass"))).unwrap_or(0);
+    (ctx.cumulative_pass_nr() > set).then_some(set)
+}
+
 /// The name of the egui family (and font data) that holds the face `v` of the system font `name`.
 fn key_of(name: &str, v: Variant) -> String {
     format!("system:{name}{}", v.suffix())
@@ -612,7 +626,7 @@ impl FontState {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
         if now != self.installed {
-            ctx.set_fonts(theme::font_definitions(families_for_egui(loaded)));
+            set_fonts(ctx, theme::font_definitions(families_for_egui(loaded)));
             self.installed = now;
             self.pending = Some((resolved, usable, ctx.cumulative_pass_nr()));
             ctx.request_repaint();

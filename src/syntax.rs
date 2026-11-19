@@ -71,6 +71,44 @@ pub fn fenced_blocks(text: &str) -> Vec<Block> {
     out
 }
 
+/// A fenced code block by lines (EDIT-080): from its opening fence line to the line after the closing one.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Fence {
+    /// the line of the opening fence (from 0)
+    pub open: usize,
+    /// the line after the closing fence; an unclosed block runs to the end (`lines.len()`)
+    pub end: usize,
+    pub closed: bool,
+    /// the language word of the opening fence ([`fence_language`])
+    pub lang: String,
+}
+
+/// The fenced blocks of these lines, by the same rule as `markdown::fenced_code_lines`.
+pub fn fences(lines: &[&str]) -> Vec<Fence> {
+    let mut out = Vec::new();
+    let mut open: Option<usize> = None;
+    for (i, line) in lines.iter().enumerate() {
+        let t = line.trim_start();
+        if t.starts_with("```") || t.starts_with("~~~") {
+            match open.take() {
+                Some(o) => out.push(Fence { open: o, end: i + 1, closed: true, lang: fence_language(lines[o]) }),
+                None => open = Some(i),
+            }
+        }
+    }
+    if let Some(o) = open {
+        out.push(Fence { open: o, end: lines.len(), closed: false, lang: fence_language(lines[o]) });
+    }
+    out
+}
+
+/// What a code block's badge says (EDIT-080): the language as written (lower case); `None` when there
+/// is none or it only means plain text (`text`, `txt`, `none`, the names the highlighter takes for no language).
+pub fn badge_language(lang: &str) -> Option<String> {
+    let word = lang.trim();
+    (!word.is_empty() && !alias(word).is_empty()).then(|| word.to_string())
+}
+
 fn syntaxes() -> &'static SyntaxSet {
     static SET: OnceLock<SyntaxSet> = OnceLock::new();
     SET.get_or_init(two_face::syntax::extra_newlines)
@@ -361,5 +399,23 @@ mod tests {
         assert!(highlight_inline("plain words").is_empty());
         assert!(highlight_inline("it's é").is_empty(), "a lone quote is no string");
         assert!(highlight_inline("x1 = a2").is_empty(), "digits inside a name are not a number");
+    }
+
+    // spec: EDIT-080
+    #[test]
+    fn fences_are_found_by_line_with_their_language_and_an_unclosed_one_runs_to_the_end() {
+        let lines = ["a", "```rust", "x", "```", "~~~", "y", "z"];
+        assert_eq!(fences(&lines), vec![Fence { open: 1, end: 4, closed: true, lang: "rust".into() }, Fence { open: 4, end: 7, closed: false, lang: String::new() }]);
+        assert!(fences(&["no", "code"]).is_empty());
+    }
+
+    // spec: EDIT-080
+    #[test]
+    fn the_badge_names_the_language_as_written_and_nothing_for_plain_text() {
+        assert_eq!(badge_language("rust").as_deref(), Some("rust"));
+        assert_eq!(badge_language("python").as_deref(), Some("python"));
+        for none in ["", "text", "txt", "plaintext", "none"] {
+            assert_eq!(badge_language(none), None, "{none:?}");
+        }
     }
 }

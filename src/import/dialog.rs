@@ -20,6 +20,8 @@ pub struct ImportDialog {
     pub keep_original: bool,
     /// keep the original .docx of a Word file in its import folder (IMP-038)
     pub keep_docx: bool,
+    /// also write the header of an e-mail / event as a list in the note (IMP-052)
+    pub header_list: bool,
     /// pandoc runs for the Word files that are going on in a job (IMP-035)
     pub converting: Option<Receiver<Result<Vec<Converted>, String>>>,
     /// set when the dialog is let go: a pandoc run that is still going stops
@@ -57,6 +59,7 @@ impl ImportDialog {
             tags,
             keep_original: true,
             keep_docx: true,
+            header_list: false,
             converting: None,
             cancel: Arc::new(AtomicBool::new(false)),
             link_into,
@@ -183,7 +186,7 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
     let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
     // ---- what
     if d.items.is_empty() {
-        ui.label(muted("Nothing to import yet. Drop e-mails, calendar events, pictures or other files on the window, or add a file below."));
+        crate::theme::prose(ui, muted("Nothing to import yet. Drop e-mails, calendar events, pictures or other files on the window, or add a file below."));
     }
     for (i, it) in d.items.iter_mut().enumerate() {
         egui::Frame::new().fill(theme::BG_SECONDARY).corner_radius(6).inner_margin(8).show(ui, |ui| {
@@ -317,6 +320,8 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
     });
     if d.items.iter().any(|i| matches!(i.source, Source::Email { .. } | Source::Event { .. })) {
         rec("keep".into(), ui.checkbox(&mut d.keep_original, "Keep the original message / calendar file with the attachments"));
+        rec("header-list".into(), ui.checkbox(&mut d.header_list, "Header list in the note body"))
+            .on_hover_text("From, To, Date, When, Where … are always in the note's properties; this also writes them as a list below the title, for programs that do not show properties");
     }
     if d.items.iter().any(|i| matches!(i.source, Source::Docx { pandoc: Some(_), .. })) {
         rec("keep-docx".into(), ui.checkbox(&mut d.keep_docx, "Keep the original .docx")).on_hover_text("Copies each Word file into its import folder and names it in the note's properties");
@@ -346,7 +351,7 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
         };
         rec("link".into(), ui.checkbox(&mut d.link_on, format!("Add links to the new {new} in “{name}”")));
     }
-    ui.label(muted("Drag messages from your mail program, events from a calendar (also Shale's own), or any files onto the window to add more."));
+    crate::theme::prose(ui, muted("Drag messages from your mail program, events from a calendar (also Shale's own), or any files onto the window to add more."));
     d.rects = rects;
     action
 }
@@ -462,6 +467,22 @@ mod tests {
         assert_eq!(h.click("add", &mut d, &folders, &tags), Some(ImportAction::AddPath));
         assert_eq!(h.click("import", &mut d, &folders, &tags), Some(ImportAction::Import));
         assert_eq!(h.click("cancel", &mut d, &folders, &tags), Some(ImportAction::Cancel));
+    }
+
+    // spec: IMP-052
+    #[test]
+    fn the_header_list_box_is_off_and_only_there_for_messages_and_events() {
+        let mut d = ImportDialog::new(vec![import::eml_item(crate::mail::tests::sample_eml(), None)], vec![], String::new(), String::new(), None, false);
+        let mut h = H { ctx: egui::Context::default(), t: 0.0 };
+        h.frame(vec![], &mut d, &[], &[]);
+        assert!(!d.header_list, "off at first");
+        h.click("header-list", &mut d, &[], &[]);
+        assert!(d.header_list);
+        h.click("header-list", &mut d, &[], &[]);
+        assert!(!d.header_list);
+        let mut d = ImportDialog::new(vec![import::markdown_item("Top.md".into(), "# A\n".into())], vec![], String::new(), String::new(), None, false);
+        h.frame(vec![], &mut d, &[], &[]);
+        assert!(!d.rects.iter().any(|r| r.0 == "header-list"), "nothing to list for a Markdown note");
     }
 
     // spec: IMP-034

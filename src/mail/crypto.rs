@@ -1079,7 +1079,7 @@ mod tests {
     #[test]
     fn without_consent_nothing_is_decrypted_and_gnupg_is_not_even_called_for_it() {
         // a gpg that cannot run: if anything tried to call it, the answer would be "not installed"
-        let g = Gnupg { gpg: "/nonexistent/gpg".into(), gpgsm: "/nonexistent/gpgsm".into(), home: None };
+        let g = Gnupg { gpg: "/nonexistent/gpg".into(), gpgsm: "/nonexistent/gpgsm".into(), gpgconf: "/nonexistent/gpgconf".into(), home: None };
         let enc = pgp_encrypted(b"-----BEGIN PGP MESSAGE-----\r\n\r\nxx\r\n-----END PGP MESSAGE-----");
         let o = run(&g, &enc, false);
         assert_eq!(o.security.encryption, Encryption::NeedsConsent);

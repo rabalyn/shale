@@ -226,12 +226,12 @@ actions! {
     Settings => "global.settings", "Settings", Global, ["Ctrl+Comma"];
     DataUsage => "global.data_usage", "Data usage (what Shale keeps on disk, its caches)", Global, ["Ctrl+Shift+D"];
     UserGuide => "global.user_guide", "Open the user guide", Global, ["F1"];
-    PrevTab => "global.prev_tab", "Previous tab", Global, ["Ctrl+Alt+H"];
-    NextTab => "global.next_tab", "Next tab", Global, ["Ctrl+Alt+L"];
+    PrevTab => "global.prev_tab", "Previous tab", Global, ["Ctrl+PageUp"];
+    NextTab => "global.next_tab", "Next tab", Global, ["Ctrl+PageDown"];
     SplitRight => "global.split_right", "Split right: open this tab in a new pane to the right", Global, ["Ctrl+Backslash"];
-    NextPane => "global.next_pane", "Focus the next pane", Global, ["Ctrl+Alt+Right"];
-    PrevPane => "global.prev_pane", "Focus the previous pane", Global, ["Ctrl+Alt+Left"];
-    ClosePane => "global.close_pane", "Close the pane (with its tabs)", Global, ["Ctrl+Alt+W"];
+    NextPane => "global.next_pane", "Focus the next pane", Global, ["F6"];
+    PrevPane => "global.prev_pane", "Focus the previous pane", Global, ["Shift+F6"];
+    ClosePane => "global.close_pane", "Close the pane (with its tabs)", Global, ["Ctrl+Shift+W"];
     AlternateView => "global.alternate_view", "Alternate view: swap with the previous view of this tab (again: back)", Global, ["Ctrl+6"];
     // The ribbon (KEY-015): its first ten shown items by position, and the sidebar toggles; no default on macOS
     RibbonSlot1 => "global.ribbon_1", "Ribbon: 1st item", Global, ["Alt+1"];
@@ -261,6 +261,7 @@ actions! {
     NoteQuote => "note.quote", "Note: Quote button", NoteView, ["Alt+Q"];
     NoteCodeBlock => "note.code_block", "Note: Code block button", NoteView, ["Alt+K"];
     NoteRule => "note.rule", "Note: Horizontal rule button", NoteView, ["Alt+R"];
+    NotePageBreak => "note.page_break", "Note: Page break button", NoteView, ["Alt+J"];
     NoteTable => "note.table", "Note: Table button", NoteView, ["Alt+A"];
     NoteWikiLink => "note.wiki_link", "Note: Link to a note button", NoteView, ["Alt+L"];
     NoteWebLink => "note.web_link", "Note: Web link button", NoteView, ["Alt+W"];
@@ -270,6 +271,13 @@ actions! {
     NotePreview => "note.preview", "Note: Markdown preview button", NoteView, ["Alt+P"];
     NoteMenu => "note.menu", "Note: ⋯ menu button (opens its menu)", NoteView, ["Alt+D"];
     NoteNewTab => "note.new_tab", "Note: New tab button", NoteView, ["Alt+N"];
+    // Folding (KEY-030…KEY-034): bound with Ctrl and Shift, so macOS has the same keys
+    NoteFold => "note.fold", "Fold the block at the cursor (again: the block around it)", NoteView, ["Ctrl+Shift+K"];
+    NoteUnfold => "note.unfold", "Unfold the block at the cursor", NoteView, ["Ctrl+Shift+J"];
+    NoteFoldAll => "note.fold_all", "Fold every block of the note", NoteView, ["Ctrl+Shift+O"];
+    NoteUnfoldAll => "note.unfold_all", "Unfold every block of the note", NoteView, ["Ctrl+Shift+I"];
+    // KEY-035…KEY-037
+    NoteCopyCode => "note.copy_code", "Copy the code of the code block at the cursor", NoteView, ["Ctrl+Shift+C"];
     NormalAlternate => "normal.alternate_view", "Back to the previous view of this tab (again: forward)", EditorNormal, ["Space Tab"];
     NormalFindFile => "normal.find_file", "Find a file by name", EditorNormal, ["Space F F"];
     NormalSearchAll => "normal.search_all", "Search notes, mail and posts", EditorNormal, ["Space F G"];
@@ -333,14 +341,29 @@ impl Action {
         if mac && self.is_alt_key() {
             return vec![];
         }
-        self.def().defaults.iter().map(|d| Binding::parse(d).expect("the defaults in DEFS are valid")).collect()
+        let texts = if mac { self.mac_defaults().unwrap_or(self.def().defaults) } else { self.def().defaults };
+        texts.iter().map(|d| Binding::parse(d).expect("the defaults in DEFS are valid")).collect()
     }
 
-    /// The Alt keys of the buttons of a note and of the ribbon (KEY-015): on macOS, where Option+letter
+    /// The defaults of macOS where they differ from the table, because the app menu or the system
+    /// keeps the key of Linux and Windows (KEY-019): Cmd+H hides the app, Option+arrows move in text.
+    fn mac_defaults(self) -> Option<&'static [&'static str]> {
+        Some(match self {
+            Action::FocusSidebar => &["Ctrl+Shift+H"],
+            Action::FocusEditor => &["Ctrl+Shift+L"],
+            Action::Back => &["Ctrl+OpenBracket"],
+            Action::Forward => &["Ctrl+CloseBracket"],
+            Action::PrevTab => &["Ctrl+Alt+Left"],
+            Action::NextTab => &["Ctrl+Alt+Right"],
+            _ => return None,
+        })
+    }
+
+    /// The Alt keys of the buttons of a note, of the open mail (MAIL-229) and of the ribbon (KEY-015): on macOS, where Option+letter
     /// types characters, they have no default key.
     pub fn is_alt_key(self) -> bool {
         let d = self.def();
-        d.scope == Scope::NoteView || d.id.starts_with("global.ribbon_") || d.id.starts_with("global.sidebar_")
+        (d.scope == Scope::NoteView && d.defaults.iter().all(|k| k.starts_with("Alt+"))) || d.id.starts_with("global.ribbon_") || d.id.starts_with("global.sidebar_") || d.id.starts_with("mail.button_")
     }
 
     /// The place (0 to 9) of the ribbon item a `RibbonSlot` action opens.
@@ -647,7 +670,7 @@ mod tests {
         for d in DEFS {
             assert!(ids.insert(d.id), "double id {}", d.id);
             assert!(!d.defaults.is_empty(), "{} has no default", d.id);
-            for text in d.defaults {
+            for text in d.defaults.iter().chain(d.action.mac_defaults().unwrap_or(&[])) {
                 let bind = Binding::parse(text).unwrap_or_else(|e| panic!("{}: {e}", d.id));
                 assert_eq!(bind.to_text(), *text, "defaults are written the way they are stored");
                 for k in &keymaps {
@@ -666,12 +689,16 @@ mod tests {
         for d in DEFS.iter().filter(|d| d.scope == Scope::Global) {
             let shown = k.display(d.action);
             assert!(row.contains(&shown), "KEY-002 does not name {shown} ({})", d.id);
-            // macOS shows the same, except that the Alt keys of the ribbon and the sidebars are not set
-            let on_mac = if d.action.is_alt_key() { "not set".to_string() } else { shown };
+            // macOS shows the same, except the Alt keys of the ribbon and the sidebars (not set) and the keys of KEY-019
+            let on_mac = match d.action.mac_defaults() {
+                _ if d.action.is_alt_key() => "not set".to_string(),
+                Some(keys) => keys.iter().map(|t| b(t).display()).collect::<Vec<_>>().join(" / "),
+                None => shown,
+            };
             assert_eq!(mac.display(d.action), on_mac, "{}", d.id);
         }
-        assert_eq!(DEFS.iter().filter(|d| d.scope == Scope::NoteView).count(), 23);
-        assert_eq!(DEFS.len(), 29 + 36 + 6 + 12 + 23);
+        assert_eq!(DEFS.iter().filter(|d| d.scope == Scope::NoteView).count(), 24 + 5);
+        assert_eq!(DEFS.len(), 29 + 36 + 6 + 12 + 24 + 5);
     }
 
     // spec: KEY-014
@@ -719,14 +746,14 @@ mod tests {
     fn the_alt_keys_of_the_buttons_have_defaults_on_linux_and_windows_but_none_on_macos() {
         let (linux, mac) = (Keymap::for_os(false), Keymap::for_os(true));
         let alt: Vec<&Def> = DEFS.iter().filter(|d| d.action.is_alt_key()).collect();
-        assert_eq!(alt.len(), 23 + 12);
+        assert_eq!(alt.len(), 24 + 12 + 9);
         for d in &alt {
             assert!(!linux.bindings(d.action).is_empty(), "{} has a default on Linux", d.id);
             assert!(mac.bindings(d.action).is_empty(), "{} has none on macOS", d.id);
-            assert!(d.scope == Scope::NoteView || d.scope == Scope::Global);
+            assert!(matches!(d.scope, Scope::NoteView | Scope::Global | Scope::MailView));
         }
-        // everything else has the same keys on both
-        for d in DEFS.iter().filter(|d| !d.action.is_alt_key()) {
+        // everything else has the same keys on both, except the six actions of KEY-019
+        for d in DEFS.iter().filter(|d| !d.action.is_alt_key() && d.action.mac_defaults().is_none()) {
             assert_eq!(linux.bindings(d.action), mac.bindings(d.action), "{}", d.id);
         }
         assert_eq!(linux.bindings(Action::NoteBold), vec![b("Alt+B")]);
@@ -754,6 +781,31 @@ mod tests {
         assert_eq!(linux.alt_badge(Action::SidebarLeft).as_deref(), Some(","));
         assert_eq!(linux.alt_badge(Action::Save), None, "Ctrl+S is no Alt key");
         assert_eq!(mac.alt_badge(Action::NoteBold), None);
+    }
+
+    // spec: KEY-030, KEY-031, KEY-032, KEY-033, KEY-034
+    #[test]
+    fn the_fold_keys_have_the_same_defaults_on_every_system_and_clash_with_nothing() {
+        let (linux, mac) = (Keymap::for_os(false), Keymap::for_os(true));
+        for (a, key) in [(Action::NoteFold, "Ctrl+Shift+K"), (Action::NoteUnfold, "Ctrl+Shift+J"), (Action::NoteFoldAll, "Ctrl+Shift+O"), (Action::NoteUnfoldAll, "Ctrl+Shift+I")] {
+            assert!(!a.is_alt_key(), "{key} is no Alt key");
+            for k in [&linux, &mac] {
+                assert_eq!(k.bindings(a), vec![b(key)]);
+                assert_eq!(k.check(a, &b(key)), Ok(()));
+            }
+        }
+        assert_eq!(linux.check(Action::NoteFold, &b("Ctrl+Shift+F")), Err("Ctrl+Shift+F is already used by “Search all notes”".to_string()));
+    }
+
+    // spec: KEY-035, KEY-036
+    #[test]
+    fn the_copy_code_key_is_the_same_on_every_system_and_clashes_with_nothing() {
+        let (linux, mac) = (Keymap::for_os(false), Keymap::for_os(true));
+        assert!(!Action::NoteCopyCode.is_alt_key());
+        for k in [&linux, &mac] {
+            assert_eq!(k.bindings(Action::NoteCopyCode), vec![b("Ctrl+Shift+C")]);
+            assert_eq!(k.check(Action::NoteCopyCode, &b("Ctrl+Shift+C")), Ok(()));
+        }
     }
 
     // spec: KEY-017
@@ -1176,6 +1228,161 @@ mod tests {
                     assert!(found, "{file}: the Keyboard table does not list {shown} ({})", d.label);
                 }
             }
+            // the keys macOS has instead (KEY-019), written the Mac way: Cmd and Opt for Ctrl and Alt
+            for d in DEFS.iter().filter(|d| d.action.mac_defaults().is_some()) {
+                for bind in Keymap::for_os(true).bindings(d.action) {
+                    let shown = bind.display().replace("Ctrl+", "Cmd+").replace("Alt+", "Opt+");
+                    assert!(table.contains(&shown), "{file}: the Keyboard table does not list {shown} for macOS ({})", d.label);
+                }
+            }
         }
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum Os {
+        Linux,
+        Windows,
+        Mac,
+    }
+
+    /// Why the chord is no default key on this system (KEY-019): what the system, the desktop or the
+    /// app menu keeps for itself, or `None` when it is free. `Chord.ctrl` is Cmd on a Mac. For Linux
+    /// it is the union of GNOME, KDE, XFCE, Cinnamon and MATE; Super is never a modifier of Shale.
+    fn os_reserved(os: Os, scope: Scope, c: Chord) -> Option<&'static str> {
+        let (ctrl, alt, shift, key) = (c.ctrl, c.alt, c.shift, c.key);
+        let arrow = matches!(key, Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp | Key::ArrowDown);
+        let function = (Key::F1..=Key::F12).contains(&key);
+        match os {
+            Os::Mac => match (ctrl, alt, shift, key) {
+                (true, false, false, Key::H) => Some("Hide (app menu)"),
+                (true, true, false, Key::H) => Some("Hide Others (app menu)"),
+                (true, false, false, Key::Q) => Some("Quit (app menu)"),
+                (true, false, true, Key::Q) => Some("Log out"),
+                (true, false, false, Key::M) => Some("Minimise"),
+                (true, false, false, Key::Tab) => Some("Switch app"),
+                (true, false, false, Key::Space) => Some("Spotlight"),
+                (true, true, false, Key::Space) => Some("Finder search"),
+                (true, false, true, Key::Num3 | Key::Num4 | Key::Num5) => Some("Screenshot"),
+                (true, false, false, Key::Backtick) => Some("Next window of the app"),
+                (true, true, false, Key::Escape) => Some("Force Quit"),
+                (true, true, false, Key::D) => Some("Dock"),
+                (true, false, true, Key::Slash) => Some("Help menu"),
+                // word and paragraph moves in text, which a shortcut runs before
+                (false, true, false, _) if arrow && matches!(scope, Scope::Global | Scope::NoteView) => Some("Option+arrow moves in text"),
+                _ => None,
+            },
+            Os::Windows => match (ctrl, alt, shift, key) {
+                (false, true, false, Key::F4) => Some("close window"),
+                (false, true, false, Key::Tab) => Some("switch window"),
+                (false, true, false, Key::Space) => Some("window menu"),
+                (false, true, false, Key::Escape) => Some("next window"),
+                (true, false, false, Key::Escape) => Some("Start menu"),
+                (true, false, true, Key::Escape) => Some("Task Manager"),
+                (true, true, false, Key::Delete) => Some("security screen"),
+                // AltGr arrives as Ctrl+Alt and types a character on many layouts
+                (true, true, _, k) if k.symbol_or_name().chars().count() == 1 && !arrow => Some("AltGr + character"),
+                _ => None,
+            },
+            Os::Linux => match (ctrl, alt, shift, key) {
+                (true, true, false, _) if arrow => Some("switch workspace"),
+                (true, true, false, Key::L) => Some("lock screen"),
+                (true, true, false, Key::T) => Some("terminal"),
+                (true, true, false, Key::D) => Some("show desktop"),
+                (true, true, false, Key::Delete) => Some("log out"),
+                (true, false, true, Key::U) => Some("Unicode input of IBus and GTK"),
+                (true, true, false, Key::Backspace) => Some("kill the X server"),
+                (true, true, false, Key::Escape) => Some("kill a window"),
+                (false, true, false, _) if function => Some("Alt+F1…F12 of the desktops"),
+                (false, true, false, Key::Tab) => Some("switch window"),
+                (false, true, false, Key::Space) => Some("window menu"),
+                (false, true, false, Key::Escape) => Some("next window"),
+                (false, true, false, Key::Backtick) => Some("next window of the app"),
+                _ => None,
+            },
+        }
+    }
+
+    // spec: KEY-019
+    #[test]
+    fn no_default_key_is_one_the_system_reserves_on_linux_windows_or_macos() {
+        for (os, mac) in [(Os::Linux, false), (Os::Windows, false), (Os::Mac, true)] {
+            let k = Keymap::for_os(mac);
+            let mut checked = 0;
+            for d in DEFS {
+                for bind in k.bindings(d.action) {
+                    checked += 1;
+                    let first = bind.0[0];
+                    assert_eq!(os_reserved(os, d.scope, first), None, "{os:?}: the default {} of {} is reserved", bind.display(), d.id);
+                }
+            }
+            assert!(checked > 60, "{os:?}: {checked} defaults checked");
+        }
+    }
+
+    // spec: KEY-019
+    #[test]
+    fn the_lists_of_reserved_keys_catch_the_old_defaults_and_not_the_new_ones() {
+        let c = |t: &str| Chord::parse(t).unwrap();
+        // what these defaults were: each is reserved on the system it was reported for
+        for (os, scope, old) in [
+            (Os::Mac, Scope::Global, "Ctrl+H"),
+            (Os::Mac, Scope::Global, "Ctrl+Alt+H"),
+            (Os::Mac, Scope::Global, "Alt+Left"),
+            (Os::Windows, Scope::Global, "Ctrl+Alt+W"),
+            (Os::Windows, Scope::Global, "Ctrl+Alt+L"),
+            (Os::Linux, Scope::Global, "Ctrl+Alt+Left"),
+            (Os::Linux, Scope::Global, "Ctrl+Alt+Right"),
+            (Os::Linux, Scope::Global, "Ctrl+Alt+L"),
+            (Os::Linux, Scope::NoteView, "Ctrl+Shift+U"),
+        ] {
+            assert!(os_reserved(os, scope, c(old)).is_some(), "{os:?} {old}");
+        }
+        // Alt+Left is the Back key on Linux and Windows, and Option+arrow only matters on a Mac
+        assert_eq!(os_reserved(Os::Linux, Scope::Global, c("Alt+Left")), None);
+        assert_eq!(os_reserved(Os::Windows, Scope::Global, c("Alt+Left")), None);
+        assert_eq!(os_reserved(Os::Mac, Scope::FileList, c("Alt+Left")), None);
+        // Ctrl+Alt+arrows are no AltGr keys on Windows; Ctrl+Shift+W is free everywhere
+        assert_eq!(os_reserved(Os::Windows, Scope::Global, c("Ctrl+Alt+Left")), None);
+        for os in [Os::Linux, Os::Windows, Os::Mac] {
+            assert_eq!(os_reserved(os, Scope::Global, c("Ctrl+Shift+W")), None);
+        }
+    }
+
+    // spec: KEY-019
+    #[test]
+    fn macos_has_its_own_defaults_for_six_actions_and_linux_and_windows_keep_theirs() {
+        let (linux, mac) = (Keymap::for_os(false), Keymap::for_os(true));
+        for (action, on_linux, on_mac) in [
+            (Action::FocusSidebar, "Ctrl+H", "Ctrl+Shift+H"),
+            (Action::FocusEditor, "Ctrl+L", "Ctrl+Shift+L"),
+            (Action::Back, "Alt+Left", "Ctrl+OpenBracket"),
+            (Action::Forward, "Alt+Right", "Ctrl+CloseBracket"),
+            (Action::PrevTab, "Ctrl+PageUp", "Ctrl+Alt+Left"),
+            (Action::NextTab, "Ctrl+PageDown", "Ctrl+Alt+Right"),
+        ] {
+            assert_eq!(linux.bindings(action), vec![b(on_linux)], "{action:?} on Linux");
+            assert_eq!(mac.bindings(action), vec![b(on_mac)], "{action:?} on macOS");
+            assert!(linux.is_default(action) && mac.is_default(action));
+        }
+        // the pane keys are the same on both, and close pane only differs in what Ctrl means
+        assert_eq!(linux.bindings(Action::PrevPane), vec![b("Shift+F6")]);
+        assert_eq!(linux.bindings(Action::NextPane), vec![b("F6")]);
+        assert_eq!(mac.bindings(Action::PrevPane), vec![b("Shift+F6")]);
+        assert_eq!(mac.bindings(Action::NextPane), vec![b("F6")]);
+        assert_eq!(linux.bindings(Action::ClosePane), vec![b("Ctrl+Shift+W")]);
+        assert_eq!(mac.bindings(Action::ClosePane), vec![b("Ctrl+Shift+W")]);
+        assert_eq!(mac.display(Action::Back), "Ctrl+[", "Chord.ctrl is Cmd on a Mac, the docs say Cmd+[");
+        // the new keys pass the rules of KEY-005 (Shift+F6 is a function key)
+        for action in [Action::PrevPane, Action::NextPane, Action::PrevTab, Action::NextTab, Action::ClosePane] {
+            for k in [&linux, &mac] {
+                for bind in k.bindings(action) {
+                    assert_eq!(k.check_rules(action, &bind), Ok(()), "{action:?} {}", bind.display());
+                }
+            }
+        }
+        // the user's own binding is not refused for being reserved (KEY-019): Ctrl+Alt+Left works on KDE
+        let mut l = Keymap::for_os(false);
+        assert_eq!(l.set(Action::PrevPane, b("Ctrl+Alt+Left")), Ok(()));
+        assert_eq!(l.overrides().get("global.prev_pane"), Some(&vec!["Ctrl+Alt+Left".to_string()]));
     }
 }

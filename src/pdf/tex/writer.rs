@@ -5,7 +5,7 @@
 //! by block (`body.rs`). The front matter is never printed.
 
 use super::blocks::{self, Block};
-use super::body::Body;
+use super::body::{Body, NEW_PAGE};
 use super::inline::{anchor, Files, Look};
 use super::sets::{class_and_preamble, tex_escape, Field, KindManifest, Mapping, SetInfo, SetSettings};
 use crate::markdown;
@@ -220,9 +220,10 @@ pub(super) fn drop_title_heading(blocks: &mut Vec<Block>, title: &str) {
 }
 
 /// The whole document around `main` (what is between `\begin{document}` and `\end{document}`): the
-/// kind's lines, the writer's helpers, the depth of the contents when there are any, the fields.
-pub(super) fn document(kind: &KindManifest, settings: &SetSettings, long_tables: bool, columns: bool, toc_depth: Option<usize>, values: &[(&Field, Option<String>)], main: &str) -> String {
-    let mut tex = class_and_preamble(kind, settings);
+/// kind's lines (`head`, from `class_and_preamble`), the writer's helpers, the depth of the
+/// contents when there are any, the fields.
+pub(super) fn document(head: String, long_tables: bool, columns: bool, toc_depth: Option<usize>, values: &[(&Field, Option<String>)], main: &str) -> String {
+    let mut tex = head;
     tex.push_str(&helpers(long_tables, columns));
     if let Some(depth) = toc_depth {
         tex.push_str(&format!("\\setcounter{{tocdepth}}{{{depth}}}\n"));
@@ -262,6 +263,10 @@ pub fn write(req: &Request) -> Result<Document, String> {
     // the blocks, without the heading that only says the title again (PDF-008)
     let mut blocks = blocks::parse(req.text);
     drop_title_heading(&mut blocks, &title);
+    // a page break means nothing in slides and boxes, where the frames and boxes are the pages (TEX-037)
+    if matches!(family, Family::Beamer | Family::Boxes) {
+        blocks.retain(|b| *b != Block::PageBreak);
+    }
     let numbered = markdown::headings_numbered(req.text, req.opts.numbered_headings);
     let has_headings = blocks.iter().any(|b| matches!(b, Block::Heading { .. }));
     let toc = req.opts.toc && matches!(family, Family::Article | Family::Book) && has_headings;
@@ -286,8 +291,14 @@ pub fn write(req: &Request) -> Result<Document, String> {
             if family == Family::Poster && kind.columns > 1 {
                 main.push_str(&format!("\\begin{{multicols}}{{{}}}\n", kind.columns));
             }
-            for b in &blocks {
+            for (n, b) in blocks.iter().enumerate() {
+                // a heading of the level asked for starts a page, but not the first thing of the note (TEX-038)
+                let breaks = matches!(b, Block::Heading { level, .. } if family != Family::Poster && (1..=req.opts.break_before as usize).contains(level)) && n > 0;
+                if (breaks || *b == Block::PageBreak) && !main.ends_with(NEW_PAGE) {
+                    main.push_str(NEW_PAGE);
+                }
                 match b {
+                    Block::PageBreak => {}
                     Block::Heading { text, line, .. } => {
                         let level = nested.next().unwrap_or(1);
                         main.push_str(&match family {
@@ -323,7 +334,8 @@ pub fn write(req: &Request) -> Result<Document, String> {
         }
     }
 
-    let tex = document(kind, &req.set.settings, long_tables, family == Family::Poster && kind.columns > 1, toc.then(|| toc_depth(family == Family::Book)), &values, &main);
+    let head = class_and_preamble(kind, &req.set.settings, kind.shows_department_logo(req.set, req.opts.department_logo));
+    let tex = document(head, long_tables, family == Family::Poster && kind.columns > 1, toc.then(|| toc_depth(family == Family::Book)), &values, &main);
     drop(body);
     let files = files.into_inner();
     Ok(Document { tex, files: files.list, warnings: files.warnings })

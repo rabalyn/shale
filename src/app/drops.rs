@@ -139,6 +139,7 @@ impl ShaleApp {
         };
         let mut d = Box::new(ImportDialog::new(items, notes, folder, String::new(), link_into, link_on));
         d.people_dir = self.vdata.settings.people_dir.clone();
+        d.header_list = self.cfg.import_header_list;
         self.suggest_tags(&mut d);
         self.modal = Some(Modal::Import(d));
     }
@@ -212,7 +213,7 @@ impl ShaleApp {
                 };
                 let tags = import::parse_tags(&d.tags);
                 let social_only = d.items.iter().filter(|i| i.include).all(|i| matches!(i.source, import::Source::Social { .. }));
-                let opts = import::Options { folder: folder.clone(), tags: tags.clone(), keep_original: d.keep_original, keep_docx: d.keep_docx, people_dir: self.vdata.settings.people_dir.clone() };
+                let opts = import::Options { folder: folder.clone(), tags: tags.clone(), keep_original: d.keep_original, keep_docx: d.keep_docx, people_dir: self.vdata.settings.people_dir.clone(), header_list: d.header_list };
                 let Some(v) = &mut self.vault else { return true };
                 // pandoc takes its time: the Word files are converted in a job first (IMP-035), and
                 // the dialog calls this again when it is done
@@ -267,8 +268,13 @@ impl ShaleApp {
                     n => format!("Saved {n} files to the media folder"),
                 };
                 self.toast([note_text, file_text].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join(". "));
-                for e in errors {
-                    self.toast(e);
+                // two or more results: a window says what was made (IMP-056); else the one is opened
+                let summary = made.len() + files.len() >= 2;
+                let mut errors = errors;
+                if !summary {
+                    for e in errors.drain(..) {
+                        self.toast(e);
+                    }
                 }
                 // the folder of the notes, or the folder of the first file
                 let shown = if made.is_empty() { files[0].parent().unwrap_or(Path::new("")).to_path_buf() } else { folder.clone() };
@@ -281,7 +287,13 @@ impl ShaleApp {
                     p = x.parent();
                 }
                 self.actions.push(Action::Rescan);
-                self.actions.push(Action::Open { rel: made.first().or(files.first()).cloned().unwrap_or_default(), new_tab: false });
+                if summary {
+                    if let Some(v) = &self.vault {
+                        self.modal = Some(Modal::ImportSummary(Box::new(crate::import::summary::ImportSummary::new(v, &made, &files, errors, place))));
+                    }
+                } else {
+                    self.actions.push(Action::Open { rel: made.first().or(files.first()).cloned().unwrap_or_default(), new_tab: false });
+                }
                 true
             }
         }

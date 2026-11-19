@@ -163,8 +163,8 @@ jobs:
       - name: Test
         run: cargo test --release --locked
 
-      # BUILD-024: the download, packed like the Linux one (same files, no desktop file) after the
-      # tests passed; not signed (the arm64 linker only ad-hoc-signs the binary)
+      # BUILD-024: the download, a dmg with Shale.app and a link to Applications, after the tests
+      # passed; ad-hoc signed (so Gatekeeper offers "Open Anyway", not "damaged"), not notarised
       - name: Package
         shell: bash
         run: |
@@ -172,20 +172,27 @@ jobs:
             refs/tags/v*) LABEL="${GITHUB_REF_NAME#v}" ;;
             *) LABEL="dev-${GITHUB_SHA::7}" ;;
           esac
-          mkdir -p dist/shale release
-          cp target/release/shale LICENSE README.md CHANGELOG.md dist/shale/
-          mkdir -p dist/shale/assets/icon
-          cp assets/icon/shale.svg assets/icon/shale-512.png dist/shale/assets/icon/
-          cp -r docs dist/shale/
-          # DEV-020: the guide is in the archive once, as docs/userguide, without what Shale writes into a vault
-          rm -rf dist/shale/docs/userguide
-          scripts/userguide-dist.sh dist/shale/docs/userguide
-          ASSET="shale-${LABEL}-macos-arm64.tar.gz"
-          tar -C dist -czf "release/$ASSET" shale
+          VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+          mkdir -p dist release
+          # the icon is made from assets/icon by iconutil; the script fails here when it cannot
+          sh scripts/macos-app.sh target/release/shale dist "$VERSION"
+          test -s dist/Shale.app/Contents/Resources/shale.icns
+          codesign --force --deep --sign - dist/Shale.app
+          codesign --verify --deep --strict --verbose=2 dist/Shale.app
+          mkdir -p dist/dmg
+          mv dist/Shale.app dist/dmg/
+          ln -s /Applications dist/dmg/Applications
+          ASSET="shale-${LABEL}-macos-arm64.dmg"
+          hdiutil create -volname "Shale $VERSION" -srcfolder dist/dmg -ov -format UDZO "release/$ASSET"
+          hdiutil verify "release/$ASSET"
+          MOUNT="$(mktemp -d)"
+          hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT" "release/$ASSET"
+          test -x "$MOUNT/Shale.app/Contents/MacOS/shale"
+          test -L "$MOUNT/Applications"
+          hdiutil detach "$MOUNT"
           cd release
           shasum -a 256 "$ASSET" > "$ASSET.sha256"
           shasum -a 256 -c "$ASSET.sha256"
-          tar -tzf "$ASSET" > /dev/null
           ls -l
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -282,7 +289,7 @@ jobs:
           esac
           echo "label=$LABEL" >> "$GITHUB_OUTPUT"
           echo "linux=shale-${LABEL}-linux-x86_64.tar.gz" >> "$GITHUB_OUTPUT"
-          echo "macos=shale-${LABEL}-macos-arm64.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "macos=shale-${LABEL}-macos-arm64.dmg" >> "$GITHUB_OUTPUT"
           echo "windows=shale-${LABEL}-windows-x86_64.zip" >> "$GITHUB_OUTPUT"
           echo "guide=shale-userguide-${LABEL}.zip" >> "$GITHUB_OUTPUT"
           echo "pdf=shale-userguide-${LABEL}.pdf" >> "$GITHUB_OUTPUT"
@@ -358,7 +365,7 @@ jobs:
             printf '\n## Downloads\n\n'
             printf -- '- Linux (x86_64): `%s`\n- macOS (Apple silicon, arm64): `%s`\n- Windows (x86_64): `%s`\n\n' "$ASSET" "$MACOS" "$WINDOWS"
             printf '## Unsigned builds\n\n'
-            printf 'The macOS and Windows downloads are not signed or notarised, so the system warns before the first start. macOS (Gatekeeper) blocks a downloaded unsigned program: run `xattr -dr com.apple.quarantine shale/` once in the unpacked folder (or `xattr -d com.apple.quarantine shale/shale` for the program only), or allow it in System Settings, Privacy & Security. Windows (SmartScreen) shows "Windows protected your PC": choose More info, then Run anyway.\n\n'
+            printf 'The macOS and Windows downloads are not notarised or signed with a developer certificate, so the system warns before the first start. macOS: open the dmg and drag Shale to Applications; the app is only signed ad hoc, so Gatekeeper says it is from an unidentified developer. Right-click Shale in Applications and choose Open (once), or choose Open Anyway in System Settings, Privacy & Security, or run `xattr -dr com.apple.quarantine /Applications/Shale.app`. The Keychain may ask for access again after an update, because the ad-hoc signature changes. Windows (SmartScreen) shows "Windows protected your PC": choose More info, then Run anyway.\n\n'
             printf '## Checking the download\n\n'
             printf 'Against damage, with the file and its .sha256 file in one folder. Linux: `sha256sum -c %s.sha256`. macOS: `shasum -a 256 -c %s.sha256`. Windows: `certutil -hashfile %s SHA256` (or PowerShell `Get-FileHash %s`) and compare the hash with the one in `%s.sha256`. The user guide files `%s` and `%s` are checked like the Linux file.\n\n' "$ASSET" "$MACOS" "$WINDOWS" "$WINDOWS" "$WINDOWS" "$GUIDE" "$PDF"
             printf 'That it was built from the tag `%s` by this repository'"'"'s release workflow on GitHub (needs the GitHub CLI; add `--bundle %s.sigstore.json` to use the attestation file from this page):\n\n' "$GITHUB_REF_NAME" "$ASSET"

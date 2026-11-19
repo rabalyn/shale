@@ -71,6 +71,8 @@ pub struct Effects {
     pub moved: bool,
     /// `gt`: follow the link under the cursor, as a click on it would
     pub follow_link: bool,
+    /// `za` `zc` `zo` `zM` `zR`: do this to the folds (EDIT-078)
+    pub fold: Option<crate::fold::FoldCmd>,
 }
 
 #[derive(Clone, Debug)]
@@ -86,6 +88,8 @@ pub struct Vim {
     pending_g: bool,
     /// a `d` waiting for the second `d`
     pending_d: bool,
+    /// a `z` waiting for its fold command (EDIT-078)
+    pending_z: bool,
     /// a command being typed: `:` or `/`, and its text
     cmdline: Option<(char, String)>,
     last_search: Option<String>,
@@ -97,7 +101,7 @@ pub struct Vim {
 
 impl Default for Vim {
     fn default() -> Self {
-        Vim { mode: Mode::Normal, cursor: 0, anchor: 0, want_col: None, pending_g: false, pending_d: false, cmdline: None, last_search: None, message: None, paste_pending: false }
+        Vim { mode: Mode::Normal, cursor: 0, anchor: 0, want_col: None, pending_g: false, pending_d: false, pending_z: false, cmdline: None, last_search: None, message: None, paste_pending: false }
     }
 }
 
@@ -237,6 +241,8 @@ impl Vim {
             format!("{mode}  g")
         } else if self.pending_d {
             format!("{mode}  d")
+        } else if self.pending_z {
+            format!("{mode}  z")
         } else {
             mode.to_string()
         }
@@ -304,6 +310,7 @@ impl Vim {
         let before = pos;
         let g = std::mem::take(&mut self.pending_g);
         let d = std::mem::take(&mut self.pending_d);
+        let z = std::mem::take(&mut self.pending_z);
         let mut keep_col = false;
         let ch = match k {
             VimKey::Char(ch) => ch,
@@ -353,6 +360,14 @@ impl Vim {
             'g' if g => new = 0,
             't' if g && !self.visual() => fx.follow_link = true,
             'g' => self.pending_g = true,
+            'a' if z => fx.fold = Some(crate::fold::FoldCmd::Toggle),
+            'c' if z => fx.fold = Some(crate::fold::FoldCmd::Fold),
+            'o' if z => fx.fold = Some(crate::fold::FoldCmd::Unfold),
+            'M' if z => fx.fold = Some(crate::fold::FoldCmd::FoldAll),
+            'R' if z => fx.fold = Some(crate::fold::FoldCmd::UnfoldAll),
+            // a z that no fold command follows is dropped with its key, as in vim
+            _ if z => {}
+            'z' if !self.visual() => self.pending_z = true,
             'G' => new = line_start(&c, c.len()),
             'n' | 'N' => new = self.search_step(text, pos, ch == 'n'),
             ':' | '/' => self.cmdline = Some((ch, String::new())),
@@ -679,6 +694,24 @@ mod tests {
         assert!(!run(T, 5, "gg").2.follow_link);
         assert_eq!(at(T, 30, "gg"), 0);
         assert_eq!(at(T, 30, "gtgg"), 0, "gt then gg");
+    }
+
+    // spec: EDIT-078
+    #[test]
+    fn z_commands_ask_for_folds_and_leave_the_text_and_the_cursor_alone() {
+        use crate::fold::FoldCmd;
+        for (keys, cmd) in [("za", FoldCmd::Toggle), ("zc", FoldCmd::Fold), ("zo", FoldCmd::Unfold), ("zM", FoldCmd::FoldAll), ("zR", FoldCmd::UnfoldAll)] {
+            let (v, t, fx) = run(T, 5, keys);
+            assert_eq!(fx.fold, Some(cmd), "{keys}");
+            assert_eq!((v.cursor, t.as_str(), v.status().as_str()), (5, T, "NORMAL"), "{keys} changes nothing else and leaves no pending z");
+        }
+        assert_eq!(run(T, 5, "z").0.status(), "NORMAL  z", "a z waits for its command");
+        // another key cancels the z with itself: not an append (a) or a delete (x)
+        let (v, t, fx) = run(T, 5, "zx");
+        assert_eq!((fx.fold, t.as_str(), v.status().as_str()), (None, T, "NORMAL"));
+        assert_eq!(run(T, 5, "z<esc>a").0.mode, Mode::Insert, "after Esc the a appends again");
+        assert_eq!(run(T, 5, "a").2.fold, None);
+        assert_eq!(run(T, 5, "vza").2.fold, None, "not in visual mode");
     }
 
     // spec: EDIT-012
