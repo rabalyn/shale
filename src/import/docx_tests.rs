@@ -36,7 +36,7 @@ fn real_pandoc() -> Option<PathBuf> {
 }
 
 fn options(keep_docx: bool) -> Options {
-    Options { folder: PathBuf::from("In"), tags: vec![], keep_original: false, keep_docx, people_dir: "Adressbuch".into() }
+    Options { folder: PathBuf::from("In"), tags: vec![], keep_original: false, keep_docx, people_dir: "Adressbuch".into(), header_list: false }
 }
 
 fn month_dir() -> String {

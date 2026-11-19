@@ -762,6 +762,13 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   left out by default, and each attachment can be ticked on or off.
 - Drop onto a folder in the file list to import into that folder, or onto a note to also add
   links to the new notes there.
+- After an import of two or more items a window, **Import summary**, says what was made: the new
+  notes, each with its name, a line about it (an e-mail: the sender and the date; an event: the start
+  and the place; any other note: its first line) and an **Open** button, the files saved in the media
+  folder, and the errors. **Open all in tabs** opens every new note in a tab of its own; Close leaves
+  them closed. One item is opened right away as before (IMP-056, IMP-057).
+
+  ![The summary after an import](userguide/z_media/screenshots/import-summary.png)
 - Messages that were already imported are recognised and left out unless you tick them again.
 - On Wayland, Shale reads what Thunderbird hands over. When that is only a link to the message,
   Shale finds the message in Thunderbird's local copy (for IMAP accounts this needs "Keep
@@ -771,9 +778,19 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 ![An imported e-mail](userguide/z_media/screenshots/imported-note.png)
 
-- Each e-mail becomes a note named "date subject" with the sender, recipients and date, the tags
-  in its properties, links to the attachments and the original message, and the text of the
-  message. The tag list counts these tags too.
+- Each e-mail becomes a note named "date subject". The sender, recipients, date, the people (as
+  links to their contact notes), a link to the original message and the tags are its properties; the
+  text starts with the subject as a heading, then the attachments and the message. The header is
+  written once, as properties (IMP-050, IMP-051). An event is the same: start, end, place, calendar,
+  repeat rule, organizer, attendees, status and link are properties, the text is its title and notes.
+  The tag list counts the tags too. For programs that do not show properties, the box **Header list
+  in the note body** (Import dialog; its start value is in Settings → Import) also writes the old list
+  of From / To / Date / When / Where … below the title (IMP-052).
+- The text of an imported e-mail is tidied: runs of three or more blank lines become one, trailing
+  spaces go, and a long tracking URL (more than 80 characters, with a query string) becomes a short
+  link `[host](url)` (IMP-053). A picture among the attachments is an embed 200 points wide
+  (`![[file.jpg|200]]`), other attachments stay links (IMP-054). The signature starts at a line that
+  is exactly `-- ` and quoted replies are runs of `>` lines (IMP-055).
 
 ## Feeds: read Mastodon and Bluesky, save posts to the vault
 
@@ -838,7 +855,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 - When importing, the sender, recipients, organizer and attendees are found and matched to
   contact notes (by e-mail address anywhere in the note, else by name; "Müller, Hans" = "Hans
   Müller"). Known contacts and new senders are ticked; for ticked people without a note one is
-  made. The imported note gets a "People" line with links, so each contact note's backlinks show
+  made. The imported note gets a `people` property with links, so each contact note's backlinks show
   every mail and meeting with that person. Automatic senders like "noreply" are left out.
 
 ![Import with people and tags](userguide/z_media/screenshots/people-import.png)
