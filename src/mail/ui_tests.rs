@@ -2322,6 +2322,17 @@ fn encrypted_mail_needs_the_typed_consent_then_is_decrypted_stored_and_searchabl
     w.frame(vec![]);
     assert!(w.shows("OpenPGP (gpg): gpg (GnuPG)") && w.shows("S/MIME (gpgsm): gpgsm (GnuPG)"), "{:?}", w.texts.iter().map(|t| t.0.clone()).collect::<Vec<_>>());
     assert!(w.shows("Bob <bob@example.org>"), "the secret key of the test home is listed");
+    // with the room between the items of dialogs (NAV-038) the paragraph about bringing keys over
+    // is below the visible part: scroll the dialog down to it, as a reader would
+    let over = Pos2::new(w.rect("md:enc-header").center().x, w.size.y / 2.0);
+    w.frame(vec![Event::PointerMoved(over)]);
+    for _ in 0..10 {
+        if w.shows("gpg --import") {
+            break;
+        }
+        w.frame(vec![Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: Vec2::new(0.0, -80.0), modifiers: Modifiers::NONE, phase: egui::TouchPhase::Move, source: egui::MouseWheelSource::Wheel }]);
+        w.frame(vec![]);
+    }
     assert!(w.shows("gpg --import") && w.shows("Thunderbird") && w.shows("gpgsm --import") && w.shows("gpg --locate-keys"));
     let consent = |w: &W| match &w.app.modal {
         Some(Modal::MailAccounts(d)) => d.consent.clone(),
