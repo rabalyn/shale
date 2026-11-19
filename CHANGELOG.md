@@ -10,6 +10,19 @@ its section from this file.
 
 ## [Unreleased]
 
+## [0.6.9] - 2026-11-19
+
+### Added
+
+- **The tests the spec names are checked** (#435). A test in `tests/spec_refs.rs` reads the Test column of every
+  `IS NOW` row and fails when a named test, file or script is gone, or when a row names none and does not start
+  with `process`, `CI` or `untested`. Rows that pointed at renamed or moved tests were corrected. Nothing changes
+  in the app itself.
+
+### Fixed
+
+- Test only: `scripts/install.sh`, the installer in the Linux download, no longer uses `install -D` (it makes the folders with `mkdir -p`), so its tests also run on macOS, whose BSD `install` has no `-D` (#439).
+
 ## [0.6.8] - 2026-11-19
 
 ### Added
@@ -1770,7 +1783,8 @@ First public version (published before releases were tagged).
 - Ctrl+Shift+F always focuses the search box and selects the previous search.
 - File names with `#` work in links.
 
-[Unreleased]: https://github.com/rabalyn/shale/compare/v0.6.8...HEAD
+[Unreleased]: https://github.com/rabalyn/shale/compare/v0.6.9...HEAD
+[0.6.9]: https://github.com/rabalyn/shale/compare/v0.6.8...v0.6.9
 [0.6.8]: https://github.com/rabalyn/shale/compare/v0.6.7...v0.6.8
 [0.6.7]: https://github.com/rabalyn/shale/compare/v0.6.6...v0.6.7
 [0.6.6]: https://github.com/rabalyn/shale/compare/v0.6.5...v0.6.6
