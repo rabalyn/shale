@@ -8,6 +8,7 @@ pub(crate) mod blocks;
 mod body;
 pub mod book;
 pub mod compile;
+mod ctan;
 pub mod dialog;
 pub mod engine;
 pub mod import;
@@ -31,6 +32,8 @@ mod book_env_tests;
 mod book_tests;
 #[cfg(test)]
 mod compile_tests;
+#[cfg(test)]
+mod ctan_tests;
 #[cfg(test)]
 mod engine_tests;
 #[cfg(test)]

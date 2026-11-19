@@ -377,6 +377,8 @@ when there is one), and has these buttons:
   **Cancel import** stops it; a cancelled or failed import leaves the vault as it was.
 - **Newest TU Darmstadt templates from CTAN** does the same with whatever version CTAN has today. It
   is not pinned and has no checksum, and the kinds were tested with 4.06 only; the page says so.
+  CTAN hands the download to one of its mirrors; when that mirror is down or sends a broken file,
+  Shale tries two other mirrors before it gives up, and the error names the mirrors it tried.
 - **Import from GitHub…** takes a repository address (`https://github.com/owner/repository`) and
   optionally a branch, tag or commit. **Import from file or folder…** takes the path of a `.zip` or
   `.tar.gz` file or of a folder. Shale does not know the document kinds of such a set: it imports the
