@@ -78,6 +78,8 @@ pub struct ExportOptions {
     pub page_numbers: bool,
     /// notes: include embedded pictures, drawings and PDF pages
     pub embeds: bool,
+    /// notes, LaTeX template: show the set's department logo (TEX-035)
+    pub department_logo: bool,
     /// notes: print tables as plain text lines instead of a grid (EDIT-024)
     pub plain_tables: bool,
     /// notes: a *Contents* page with the `#`–`###` headings and the pages they start on (PDF-008)
@@ -100,6 +102,9 @@ pub struct ExportOptions {
     pub justify: bool,
     /// notes: the colour of headings (`print-heading-color`, PDF-017); None: black
     pub heading_color: Option<Rgba>,
+    /// notes: the deepest heading level that starts a new page (`print-break-before`, PDF-021):
+    /// 1 is every `#`, 2 every `#` and `##`, …; 0 none
+    pub break_before: u8,
     /// a book (BOOK-005): every part and chapter starts on a new page
     pub new_page_each: bool,
     /// drawings
@@ -119,6 +124,7 @@ impl ExportOptions {
             title: true,
             page_numbers: true,
             embeds: true,
+            department_logo: true,
             plain_tables: false,
             toc: true,
             numbered_headings: true,
@@ -128,6 +134,7 @@ impl ExportOptions {
             paragraph_spacing: None,
             justify: false,
             heading_color: None,
+            break_before: 0,
             new_page_each: true,
             background: Background::White,
             fill_page: true,
@@ -144,6 +151,7 @@ impl ExportOptions {
             title: false,
             page_numbers: false,
             embeds: true,
+            department_logo: false,
             plain_tables: false,
             toc: false,
             numbered_headings: false,
@@ -153,6 +161,7 @@ impl ExportOptions {
             paragraph_spacing: None,
             justify: false,
             heading_color: None,
+            break_before: 0,
             new_page_each: false,
             background: Background::White,
             fill_page: true,
@@ -183,7 +192,7 @@ impl ExportOptions {
 
     /// These options with what the note's front matter says (PDF-013): the paper (`print-paper`,
     /// also a size of its own, wider than high meaning landscape), `print-margins`,
-    /// `print-font-size`, `print-title`, `print-toc` and the properties of
+    /// `print-font-size`, `print-title`, `print-toc`, `print-break-before` and the properties of
     /// [`ExportOptions::with_note_text_properties`]. A property that is missing or has a bad value
     /// leaves the option as it was. The export dialog starts from this; what the dialog then holds
     /// is what is exported.
@@ -213,6 +222,9 @@ impl ExportOptions {
         }
         if let Some(b) = props.get("print-toc").and_then(|v| parse_bool(v)) {
             o.toc = b;
+        }
+        if let Some(level) = props.get("print-break-before").and_then(|v| v.trim().parse::<u8>().ok()).filter(|l| *l <= 6) {
+            o.break_before = level;
         }
         o
     }
@@ -823,6 +835,11 @@ impl<'a> Writer<'a> {
         let _defined = markdown::DefinedFootnotes::set(notes.defined());
         let mut footnote_places: HashMap<String, Dest> = HashMap::new();
         let first_jump = self.jumps.len();
+        // the page-break markers (PDF-020)
+        let breaks = markdown::page_break_lines(text);
+        // a page break asked for and not yet made: it is made where the next thing is printed, so
+        // a marker at the end of the note or at the top of a page makes no empty page (PDF-022)
+        let mut pending = false;
         // a line that goes on the paragraph above it (PDF-009): text, no blank, heading, rule, list or
         // task marker, quote, table, fence or embed of its own
         let continues = |j: usize| -> bool {
@@ -835,7 +852,7 @@ impl<'a> Writer<'a> {
             if notes.def_at(j).is_some() || notes.is_continuation(j) || formulas.iter().any(|m| m.block && m.lines.contains(&j)) {
                 return false;
             }
-            if matches!(t, "---" | "***" | "___") || markdown::heading_level(l).is_some() || markdown::parse_task_line(l).is_some() || list_marker(l).is_some() || t.starts_with('>') {
+            if matches!(t, "---" | "***" | "___") || breaks.contains(&j) || markdown::heading_level(l).is_some() || markdown::parse_task_line(l).is_some() || list_marker(l).is_some() || t.starts_with('>') {
                 return false;
             }
             let links = markdown::find_links(l);
@@ -856,6 +873,19 @@ impl<'a> Writer<'a> {
         let mut extra;
         while i < lines.len() {
             extra = 0;
+            if breaks.contains(&i) {
+                pending |= self.y > self.top + 0.5;
+                i += 1;
+                continue;
+            }
+            if pending {
+                if lines[i].1.trim().is_empty() {
+                    i += 1;
+                    continue;
+                }
+                self.new_page();
+                pending = false;
+            }
             if let Some(b) = tables.iter().find(|b| b.lines.start == i) {
                 self.table(vault, rel, &b.table, &b.meta.sizes, ink);
                 i = b.lines.end;
@@ -958,6 +988,10 @@ impl<'a> Writer<'a> {
                 let ps = self.pieces_from(vault, rel, crate::reader::footnote_text_painted(line, &links, base, ink), base);
                 self.paragraph(&ps, x0 + base * 1.2, cw - base * 1.2);
             } else if let Some(level) = markdown::heading_level(line) {
+                // a heading of the level the note or the dialog asks for starts a page (PDF-021)
+                if (1..=opts.break_before as usize).contains(&level) && self.y > self.top + 0.5 {
+                    self.new_page();
+                }
                 self.y += base * 0.5;
                 let scale = match levels.and_then(|l| l.get(&i)) {
                     Some(printed) => book_scale(*printed),
@@ -2680,6 +2714,10 @@ pub(crate) mod tests {
             "print-heading-color: #12345g",
             "print-title: maybe",
             "print-toc: 2",
+            "print-break-before: 7",
+            "print-break-before: x",
+            "print-break-before: -1",
+            "print-break-before: 1.5",
         ] {
             let o = ExportOptions::for_note().with_note_properties(&front(bad, "x"));
             assert_eq!(format!("{o:?}"), base, "{bad} is ignored like a missing value");
@@ -2876,6 +2914,109 @@ pub(crate) mod tests {
         let last = after.len() - 2;
         assert!((step(&after, last) - (11.0 * natural + 8.0)).abs() < 0.02, "{}", step(&after, last));
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    const MARK: &str = "<div style=\"page-break-after: always;\"></div>";
+
+    /// The text of each page of an export of `text`, and the page count, which must be the number
+    /// of pages that have text (no page is empty).
+    fn pages_of(text: &str, opts: &ExportOptions) -> Vec<String> {
+        let (v, d) = vault();
+        let bytes = export_note(&v, Path::new("Welcome.md"), text, opts).unwrap();
+        let _ = std::fs::remove_dir_all(&d);
+        let streams = page_streams(&bytes);
+        assert_eq!(render(&bytes).len(), streams.len(), "no page is empty");
+        streams
+    }
+
+    fn page_with(pages: &[String], word: &str) -> usize {
+        pages.iter().position(|p| p.contains(&hex(word))).unwrap_or_else(|| panic!("{word} is on no page"))
+    }
+
+    // spec: PDF-020, PDF-022
+    #[test]
+    fn a_page_break_marker_starts_a_new_page_and_is_not_printed_pdf_020() {
+        let pages = pages_of(&format!("before\n\n{MARK}\n\nafter\n"), &plain_options());
+        assert_eq!(pages.len(), 2);
+        assert_eq!((page_with(&pages, "before"), page_with(&pages, "after")), (0, 1));
+        assert!(pages.iter().all(|p| !p.contains(&hex("div")) && !p.contains(&hex("page-break"))), "the HTML is not printed");
+        // it ends a paragraph like a rule: the lines are not joined and flow onto the pages apart
+        let pages = pages_of(&format!("line one\n{MARK}\nline two\n"), &plain_options());
+        assert_eq!((pages.len(), page_with(&pages, "one"), page_with(&pages, "two")), (2, 0, 1));
+        // the other forms and a marker with other spelling
+        for form in ["<div style=\"page-break-before: always\"></div>", "<div style='break-after: page;'></div>", "  <DIV STYLE=\"Break-Before:Page\" ></DIV>"] {
+            assert_eq!(pages_of(&format!("a\n{form}\nb\n"), &plain_options()).len(), 2, "{form}");
+        }
+        // near misses are text, and a marker in a code fence is code
+        assert_eq!(pages_of("a\n<div style=\"page-break-after: avoid;\"></div>\nb\n", &plain_options()).len(), 1);
+        assert_eq!(pages_of(&format!("a\n```\n{MARK}\n```\nb\n"), &plain_options()).len(), 1);
+        // not in the front matter
+        assert_eq!(pages_of(&format!("---\ntitle: x\nnote: {MARK}\n---\na\n"), &plain_options()).len(), 1);
+    }
+
+    // spec: PDF-022
+    #[test]
+    fn a_page_break_at_the_top_of_a_page_or_at_the_end_makes_no_empty_page_pdf_022() {
+        let o = plain_options();
+        assert_eq!(pages_of(&format!("{MARK}\nfirst\n"), &o).len(), 1, "at the top of the first page");
+        assert_eq!(pages_of(&format!("a\n{MARK}\n"), &o).len(), 1, "as the last thing");
+        assert_eq!(pages_of(&format!("a\n{MARK}\n\n\n"), &o).len(), 1, "with blank lines after it");
+        assert_eq!(pages_of(&format!("a\n{MARK}\n{MARK}\n\n{MARK}\nb\n"), &o).len(), 2, "one after the other make one page break");
+        // the text after a break starts at the top of its page, where the first text of the note was
+        let pages = pages_of(&format!("a\n\n{MARK}\n\n\n{MARK}\nb\n"), &o);
+        assert_eq!(pages.len(), 2);
+        assert_eq!(drawn(&pages[1])[0].1, drawn(&pages[0])[0].1, "the second page starts at the top");
+        // the contents page and the title page are followed by the text on a new page, and a marker first in the text adds none
+        let pages = pages_of(&format!("# One\n\ntext\n{MARK}\n# Two\n"), &ExportOptions { numbered_headings: false, page_numbers: false, ..ExportOptions::for_note() });
+        assert_eq!(pages.len(), 3, "title and contents, One, Two");
+        let pages = pages_of(&format!("{MARK}\n# One\n\ntext\n"), &ExportOptions { numbered_headings: false, page_numbers: false, ..ExportOptions::for_note() });
+        assert_eq!(pages.len(), 2, "title and contents, then the text");
+    }
+
+    // spec: PDF-021
+    #[test]
+    fn print_break_before_starts_the_headings_up_to_its_level_on_new_pages_pdf_021() {
+        let text = "# One\n\nfirstbody\n\n## Sub\n\ntext sub\n\n### Deep\n\n# Two\n\nsecondbody\n";
+        let at = |level: u8| pages_of(text, &ExportOptions { break_before: level, ..plain_options() });
+        assert_eq!(at(0).len(), 1);
+        let one = at(1);
+        assert_eq!(one.len(), 2, "every # heading, none before the first");
+        assert_eq!((page_with(&one, "One"), page_with(&one, "Sub"), page_with(&one, "Deep"), page_with(&one, "Two")), (0, 0, 0, 1));
+        let two = at(2);
+        assert_eq!(two.len(), 3);
+        assert_eq!((page_with(&two, "One"), page_with(&two, "Sub"), page_with(&two, "Deep"), page_with(&two, "Two")), (0, 1, 1, 2));
+        assert_eq!(at(3).len(), 4);
+        // a heading that follows a marker, or starts the note, makes no empty page
+        let pages = pages_of(&format!("a\n{MARK}\n# H\nb\n"), &ExportOptions { break_before: 1, ..plain_options() });
+        assert_eq!(pages.len(), 2);
+        // headings of a note with a title and a contents page: the contents page is followed by the text, which starts a page
+        let o = ExportOptions { break_before: 1, numbered_headings: false, page_numbers: false, ..ExportOptions::for_note() };
+        let pages = pages_of(text, &o);
+        assert_eq!(pages.len(), 3, "title and contents, then the two # headings' pages");
+        assert_eq!((page_with(&pages, "firstbody"), page_with(&pages, "secondbody")), (1, 2));
+        // a title without a contents page: the first # starts a page after it
+        let pages = pages_of("# One\n\ntext\n", &ExportOptions { toc: false, ..o.clone() });
+        assert_eq!((pages.len(), page_with(&pages, "One")), (2, 1));
+        // the title that the first heading says again is not printed: the heading is on the first page
+        let pages = pages_of("# Welcome\n\ntext\n# Two\n", &ExportOptions { toc: false, ..o });
+        assert_eq!((pages.len(), page_with(&pages, "Welcome"), page_with(&pages, "Two")), (2, 0, 1));
+    }
+
+    // spec: PDF-021
+    #[test]
+    fn print_break_before_is_read_from_the_note_and_the_dialogs_value_wins_pdf_021() {
+        let read = |v: &str| ExportOptions::for_note().with_note_properties(&front(&format!("print-break-before: {v}"), "x")).break_before;
+        assert_eq!((read("1"), read("2"), read("6"), read("0")), (1, 2, 6, 0));
+        for bad in ["7", "x", "-1", "1.5", "", "yes"] {
+            assert_eq!(read(bad), 0, "{bad:?} is ignored");
+        }
+        assert_eq!(ExportOptions::for_note().break_before, 0, "none unless the note asks");
+        let text = front("print-break-before: 1", "# One\n\ntext\n\n## Sub\n\n# Two\n");
+        let from_note = ExportOptions { numbered_headings: false, ..plain_options() }.with_note_properties(&text);
+        assert_eq!(pages_of(&text, &from_note).len(), 2, "the note's level");
+        // the dialog's value is what is exported: off, or another level
+        assert_eq!(pages_of(&text, &ExportOptions { break_before: 0, ..from_note.clone() }).len(), 1);
+        assert_eq!(pages_of(&text, &ExportOptions { break_before: 2, ..from_note }).len(), 3);
     }
 
     // spec: PDF-017

@@ -33,7 +33,7 @@ set in its `.shale/settings.json`; change it in Settings → Vault → People). 
   (e-mail, phone, organization, notes).
 - When importing ([[Import]]), the sender, recipients, organizer and attendees are matched to
   contact notes (by e-mail address, else by name; "Müller, Hans" is "Hans Müller"). For ticked
-  people without a note one is made, and the imported note gets a People line, so each contact
+  people without a note one is made, and the imported note gets a `people` property, so each contact
   note's backlinks show every mail and meeting with that person.
 
 ![[people-import.png]]

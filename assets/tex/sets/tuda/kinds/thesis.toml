@@ -2,6 +2,7 @@
 # the note's title; the writer maps the headings by nesting: # to \chapter, ## to \section,
 # ### to \subsection, #### to \subsubsection (mapping "book").
 # type=bachelor can be master, diplom, ... (see the tuda-ci documentation).
+# The department logo (Settings → LaTeX) goes into the title box, under the TU logo (\addTitleBoxLogo*).
 name = "Thesis"
 description = "Bachelor's and Master's theses (class tudapub, thesis)"
 mapping = "book"
@@ -10,6 +11,7 @@ before_class = ["\\RequirePackage{pdfmanagement}", "\\SetKeys[document/metadata]
 options = ["{language}", "accentcolor={accent}", "ruledheaders=section", "class=report", "thesis={type=bachelor}", "fontsize=11pt", "parskip=half-", "custommargins=true", "marginpar=false"]
 preamble = ["\\usepackage[{language}]{babel}", "\\usepackage[autostyle]{csquotes}"]
 logo = true
+department_logo = ["\\ExplSyntaxOn", "\\addTitleBoxLogo*{\\includegraphics[height=\\c_ptxcd_logoheight_dim]{{department_logo}}}", "\\ExplSyntaxOff"]
 
 [[fields]]
 key = "title"

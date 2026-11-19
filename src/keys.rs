@@ -261,6 +261,7 @@ actions! {
     NoteQuote => "note.quote", "Note: Quote button", NoteView, ["Alt+Q"];
     NoteCodeBlock => "note.code_block", "Note: Code block button", NoteView, ["Alt+K"];
     NoteRule => "note.rule", "Note: Horizontal rule button", NoteView, ["Alt+R"];
+    NotePageBreak => "note.page_break", "Note: Page break button", NoteView, ["Alt+J"];
     NoteTable => "note.table", "Note: Table button", NoteView, ["Alt+A"];
     NoteWikiLink => "note.wiki_link", "Note: Link to a note button", NoteView, ["Alt+L"];
     NoteWebLink => "note.web_link", "Note: Web link button", NoteView, ["Alt+W"];
@@ -696,8 +697,8 @@ mod tests {
             };
             assert_eq!(mac.display(d.action), on_mac, "{}", d.id);
         }
-        assert_eq!(DEFS.iter().filter(|d| d.scope == Scope::NoteView).count(), 23 + 5);
-        assert_eq!(DEFS.len(), 29 + 36 + 6 + 12 + 23 + 5);
+        assert_eq!(DEFS.iter().filter(|d| d.scope == Scope::NoteView).count(), 24 + 5);
+        assert_eq!(DEFS.len(), 29 + 36 + 6 + 12 + 24 + 5);
     }
 
     // spec: KEY-014
@@ -745,7 +746,7 @@ mod tests {
     fn the_alt_keys_of_the_buttons_have_defaults_on_linux_and_windows_but_none_on_macos() {
         let (linux, mac) = (Keymap::for_os(false), Keymap::for_os(true));
         let alt: Vec<&Def> = DEFS.iter().filter(|d| d.action.is_alt_key()).collect();
-        assert_eq!(alt.len(), 23 + 12 + 9);
+        assert_eq!(alt.len(), 24 + 12 + 9);
         for d in &alt {
             assert!(!linux.bindings(d.action).is_empty(), "{} has a default on Linux", d.id);
             assert!(mac.bindings(d.action).is_empty(), "{} has none on macOS", d.id);

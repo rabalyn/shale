@@ -134,6 +134,8 @@ size of the two editor areas when you updated.
 | `mail_undo_secs` | 10 (0 = send at once) | Accounts…, Sending, "Undo send" |
 | `mail_encryption_consent` | none (nothing is decrypted); the date you typed the consent sentence | Accounts…, Encryption |
 
+How long GnuPG keeps a passphrase is not a Shale setting: it is `default-cache-ttl` (default 600 seconds) and `max-cache-ttl` (default 7200) in GnuPG's `gpg-agent.conf`. Accounts…, Encryption, "Keeping the key unlocked" shows them and can change them with `gpgconf` (see Mail, "Keep the key unlocked").
+
 Fields of each entry of `mail_accounts`, all in Accounts… (passwords and secrets are in the
 system keyring, never in this file):
 
@@ -174,6 +176,7 @@ system keyring, never in this file):
 | Key | Default | Where |
 |---|---|---|
 | `docx_import` | off | Settings → Import, "Import Word files as notes (needs pandoc)"; global config |
+| `import_header_list` | off | Settings → Import, "Header list in the note body"; the start value of the box of the same name in the Import dialog |
 | `pandoc_path` | empty (search `PATH`, then `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, and on Windows `%LOCALAPPDATA%\Pandoc` and `%ProgramFiles%\Pandoc`) | Settings → Import, "pandoc program" |
 
 To set it up: install pandoc (Linux `sudo pacman -S pandoc-cli` or `sudo apt install pandoc`, macOS `brew install pandoc`,
@@ -198,6 +201,7 @@ The template sets of the vault ([[PDF]], "LaTeX export: template sets") have a s
 | `department` | empty (used when a note gives no department) | `settings.toml` of the set, the guided setup (Settings → LaTeX → Set up LaTeX export…) |
 | `author` | empty (used for the author field when a note gives none) | `settings.toml` of the set, the guided setup |
 | `logo` | none, set by Settings → LaTeX → Template sets → Choose logo… | `settings.toml` of the set |
+| `department_logo` | none, set by Settings → LaTeX → Template sets → Choose department logo… (cleared by Remove department logo); the logo of your department, shown under the TU logo | `settings.toml` of the set, the guided setup (logo step) |
 
 ### Data and troubleshooting ([[Data usage and caches]])
 
@@ -247,9 +251,10 @@ Kept by Shale as you work, so a vault opens as you left it ([[Tabs]], [[Import]]
 | Key | Default | Meaning |
 |---|---|---|
 | `version` | 2 | format version |
-| `tabs` | empty | the open tabs in order; each has `tabs[].file` (a note or drawing, relative to the vault) or `tabs[].feed` (a Feeds tab) and `tabs[].pinned` |
+| `tabs` | empty | the open tabs in order; each has `tabs[].file` (a note or drawing, relative to the vault) or `tabs[].feed` (a Feeds tab) and `tabs[].pinned`; a note tab also has `tabs[].cursor` (the selection as two character positions, the moving end first), `tabs[].scroll` (the scroll offset in points) and `tabs[].reading` (true in the reading view), all left out when not set |
 | `panes` | empty | the panes side by side, left to right ([[Tabs]]); each has `panes[].tabs` (as `tabs`), `panes[].active` (the open tab, an index into its tabs) and `panes[].weight` (its share of the width, 1); a file without `panes` loads as one pane made of `tabs`. `tabs` is also written as the tabs of the first pane |
 | `focused_pane` | 0 | the index of the pane that had the focus |
+| `highlight_colour`, `font_colour` | not written until a colour is picked (neon yellow `#FFFF00`, red `#E53E3E`) | the current colour of the highlight and font colour buttons of the toolbar as `#RRGGBB` ([[Editor]]); an unreadable value gives the default |
 | `last_import_folder` | empty | the folder of the last import |
 | `last_social_folder` | empty (the first save asks for `Social`) | the folder of the last saved post |
 | `recent_tags` | empty | tags used for imports, most recent first |

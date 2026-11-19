@@ -78,7 +78,7 @@ The `env-tests` job of `.forgejo/workflows/ci.yml` (DEV-011, CALENV-004, MAIL-09
 suite and the mail suite (`tests/mail-env/`) with `.forgejo/scripts/env-tests.sh run`: on pushes to
 `main`, on pull requests that touch `src/calendar/`, `src/imap*`, `src/mail*`,
 `src/smtp*` or `tests/{caldav,mail}-env/`, and weekly. It starts both stacks, runs both ignored
-suites (`--test-threads=1`, and fails if a suite ran no test) and always takes the stacks down.
+suites (one test thread each, except the TeX compiles of `tex_env`, which run with four, `SHALE_ENV_TESTS_TEX_THREADS`; it fails if a suite ran no test) and always takes the stacks down.
 
 The job runs in the `rust` container like the other jobs, so it needs a container engine **inside**
 that container. It installs `podman` with apt and `podman-compose` 1.2.0 with pip (bookworm's 1.0.3 lacks

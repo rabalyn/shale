@@ -1,5 +1,6 @@
 # TU Darmstadt, leaflet (class tudaleaflet, based on the leaflet class). The note is text with
 # \section*, \subsection*, ... by nesting (mapping "poster": no numbers, no contents).
+# The department logo (Settings → LaTeX) goes into the title box, under the TU logo (\addTitleBoxLogo*).
 name = "Leaflet"
 description = "Folded leaflets (class tudaleaflet)"
 mapping = "poster"
@@ -7,6 +8,7 @@ class = "tudaleaflet"
 options = ["{language}", "accentcolor={accent}"]
 preamble = ["\\usepackage[{language}]{babel}", "\\usepackage[autostyle]{csquotes}"]
 logo = true
+department_logo = ["\\ExplSyntaxOn", "\\addTitleBoxLogo*{\\includegraphics[height=\\c_ptxcd_logoheight_dim]{{department_logo}}}", "\\ExplSyntaxOff"]
 
 [[fields]]
 key = "title"

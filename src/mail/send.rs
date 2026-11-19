@@ -500,7 +500,7 @@ pub mod tests {
         assert!(err.contains("No OpenPGP key is chosen"), "{err}");
         // a plain draft never touches GnuPG
         let plain = draft("acct1", "Plain", "nothing secret");
-        let nope = crate::mail::gpg::Gnupg { gpg: "/nonexistent/gpg".into(), gpgsm: "/nonexistent/gpgsm".into(), home: None };
+        let nope = crate::mail::gpg::Gnupg { gpg: "/nonexistent/gpg".into(), gpgsm: "/nonexistent/gpgsm".into(), gpgconf: "/nonexistent/gpgconf".into(), home: None };
         assert!(queue_with(&ob, &nope, &account(), &plain, SendTiming { undo_secs: 0, now: NOW, date: DATE }, &no_cancel()).is_ok());
     }
 

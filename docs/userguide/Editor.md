@@ -95,8 +95,9 @@ the text unchanged. Text without headings, or with a `#`, is pasted at once.
 
 A row of buttons centred above the text of a note (not in the reading view): **B**old, *I*talic,
 ~~S~~trikethrough, `==` highlight, `<>` inline code; the highlight colour and font colour
-palettes; a **H** menu for headings (Normal text, Heading 1 to 6); bullet list, numbered list,
-task, quote; code block, horizontal rule, table; `[[ ]]` note link, `[ ]( )` web link, `![[ ]]`
+split buttons (apply the current colour, ▾ for the palette); a **H** menu for headings (Normal text, Heading 1 to 6); bullet list, numbered list,
+task, quote; code block, horizontal rule, page break (a dashed rule in the preview and the reading
+view, a new page in the PDF, see [[PDF]]), table; `[[ ]]` note link, `[ ]( )` web link, `![[ ]]`
 embed (it opens the `[!` file picker of [[Notes and links]]); and "Clear formatting".
 
 - With text selected, an inline button wraps it in the markers; click it again and they come
@@ -116,8 +117,12 @@ embed (it opens the `[!` file picker of [[Notes and links]]); and "Clear formatt
 
 ## Colours
 
-The **highlight colour** button opens a palette of four neon colours (yellow, green, cyan, magenta),
-"No highlight", and "Custom colour…" with a colour picker. The **font colour** button does the same
+The **highlight colour** and **font colour** buttons are split buttons. A click on the coloured part
+applies the colour it shows (neon yellow and red at first, then the last colour you picked, which Shale remembers in the vault, also after a restart) to the
+selection at once. The small ▾ beside it opens a palette; a colour picked there is applied and becomes
+the button's colour. The highlight palette has four neon colours (yellow, green, cyan, magenta),
+"No highlight", and "Custom colour…" with a colour picker; "No highlight" and "Default colour" take the
+colour off and keep the button's colour. The **font colour** palette does the same
 with your own preset colours: edit them under "Font colours" in Settings → Editor → Editing (the
 highlight presets are there too). A new colour on text that already has one replaces it.
 

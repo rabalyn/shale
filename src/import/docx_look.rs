@@ -5,7 +5,8 @@
 //! through a tagged copy of the file: pandoc's reader drops direct run formatting and a Lua filter
 //! cannot read the file, so each coloured run gets private-use sentinels around its text in
 //! `word/document.xml`, which survive pandoc as plain characters and become HTML afterwards
-//! ([`colours_to_html`]). Nothing here fails the import: a file that cannot be read gives no look
+//! ([`colours_to_html`]). Page breaks (IMP-044) go the same way with a sentinel paragraph at the
+//! place of each break ([`mark_breaks`], [`breaks_to_html`]). Nothing here fails the import: a file that cannot be read gives no look
 //! and no colours.
 
 use crate::pdf::tex::archive;
@@ -23,6 +24,11 @@ const CLOSE_COLOUR: char = '\u{E002}';
 /// Ends a highlight.
 const CLOSE_MARK: char = '\u{E003}';
 
+/// Stands for a page break (IMP-044): in a paragraph of its own, or where a manual break was.
+const BREAK: char = '\u{E004}';
+/// What a break becomes in the note (the contract with the PDF export).
+const BREAK_HTML: &str = "<div style=\"page-break-after: always;\"></div>";
+
 /// Paper sizes in twips (portrait) and how close a page must be to match (IMP-040).
 const PAPERS: [(&str, u32, u32); 4] = [("A4", 11906, 16838), ("A5", 8391, 11906), ("Letter", 12240, 15840), ("Legal", 12240, 20160)];
 const PAPER_TOLERANCE: u32 = 20;
@@ -38,6 +44,8 @@ pub struct Look {
     paragraph_spacing: Option<String>,
     align: Option<&'static str>,
     heading_color: Option<String>,
+    /// the lowest level of a Heading style that starts a page (IMP-044)
+    break_before: Option<u8>,
     /// the document part was read: a Word import never prints a title of its own, and has a table of contents or not
     title_off: bool,
     toc: bool,
@@ -57,6 +65,7 @@ impl Look {
         put("print-align", self.align.map(String::from));
         // a colour starts with `#`, which YAML reads as a comment unless it is quoted
         put("print-heading-color", self.heading_color.as_deref().map(super::yaml));
+        put("print-break-before", self.break_before.map(|n| n.to_string()));
         put("print-title", self.title_off.then(|| "false".to_string()));
         put("print-toc", (self.title_off && !self.toc).then(|| "false".to_string()));
         out
@@ -124,8 +133,66 @@ fn theme_colour(theme: &Document, name: &str) -> Option<String> {
     let scheme = theme.descendants().find(|n| n.is_element() && n.tag_name().name() == "clrScheme")?;
     let entry = scheme.children().find(|n| n.is_element() && n.tag_name().name() == slot)?;
     let c = entry.children().find(|n| n.is_element())?;
-    let hex = c.attribute("val").or_else(|| c.attribute("lastClr"))?;
+    // a system colour (`sysClr`) has a name in `val` and its colour in `lastClr`
+    let hex = c.attribute("lastClr").or_else(|| c.attribute("val"))?;
     hex6(hex)
+}
+
+/// `hex` (`RRGGBB`) as hue, saturation and lightness, each in 0..=1.
+fn to_hsl(hex: &str) -> (f64, f64, f64) {
+    let ch = |i: usize| f64::from(u8::from_str_radix(&hex[i..i + 2], 16).unwrap_or(0)) / 255.0;
+    let (r, g, b) = (ch(0), ch(2), ch(4));
+    let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+    let l = (max + min) / 2.0;
+    let d = max - min;
+    if d == 0.0 {
+        return (0.0, 0.0, l);
+    }
+    let s = d / (1.0 - (2.0 * l - 1.0).abs());
+    let h = if max == r {
+        ((g - b) / d).rem_euclid(6.0)
+    } else if max == g {
+        (b - r) / d + 2.0
+    } else {
+        (r - g) / d + 4.0
+    };
+    (h / 6.0, s, l)
+}
+
+/// Hue, saturation and lightness (0..=1) as `RRGGBB`; a channel is cut down to its whole value,
+/// which is how Word's own values come out (accent1 `156082` with shade `BF` is `0F4761`).
+fn from_hsl(h: f64, s: f64, l: f64) -> String {
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let x = c * (1.0 - ((h * 6.0).rem_euclid(2.0) - 1.0).abs());
+    let m = l - c / 2.0;
+    let (r, g, b) = match (h * 6.0).floor() as i32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let byte = |v: f64| ((v + m) * 255.0 + 1e-6).floor().clamp(0.0, 255.0) as u8;
+    format!("{:02X}{:02X}{:02X}", byte(r), byte(g), byte(b))
+}
+
+/// A theme colour lightened or darkened as Word does (IMP-041): in HSL, `w:themeTint` (`t`, a hex
+/// byte, `t / 255` of the colour is kept) lifts the lightness towards white, `L = L * t + (1 - t)`,
+/// and `w:themeShade` (`s`) pulls it towards black, `L = L * s`; hue and saturation stay.
+fn tint_shade(hex: &str, tint: Option<u8>, shade: Option<u8>) -> String {
+    if tint.is_none() && shade.is_none() {
+        return hex.to_string();
+    }
+    let (h, s, mut l) = to_hsl(hex);
+    if let Some(t) = tint {
+        let t = f64::from(t) / 255.0;
+        l = l * t + (1.0 - t);
+    }
+    if let Some(sh) = shade {
+        l *= f64::from(sh) / 255.0;
+    }
+    from_hsl(h, s, l)
 }
 
 /// `hex` as upper case `RRGGBB` when it is six hex digits.
@@ -270,11 +337,10 @@ pub fn read(document: &str, styles: Option<&str>, theme: Option<&str>) -> Look {
     };
     look.paragraph_spacing = base.after.map(|a| trim_num(a / 20.0));
     look.align = Some(if matches!(base.jc.as_deref(), Some("both" | "distribute")) { "justify" } else { "left" });
-    look.heading_color = style("Heading1").and_then(|h| child(h, "rPr")).and_then(|r| child(r, "color")).and_then(|c| {
-        let by_val = val(c, "val").and_then(hex6);
-        by_val.or_else(|| val(c, "themeColor").and_then(|t| theme.as_ref().and_then(|th| theme_colour(th, t))))
-    });
-    look.heading_color = look.heading_color.filter(|c| c != "000000").map(|c| format!("#{c}"));
+    let palette = Palette { styles: Some(&styles), theme: theme.as_ref() };
+    look.heading_color = palette.of_style("Heading1").and_then(|(c, _)| c);
+    look.heading_color = look.heading_color.map(|c| format!("#{c}"));
+    look.break_before = (1..=9).find(|n| styles.descendants().any(|s| is_w(s, "style") && heading_level(s) == Some(*n) && style_page_break(&styles, s) == Some(true)));
     look
 }
 
@@ -322,18 +388,114 @@ struct Edit {
     with: String,
 }
 
-/// The text of `document` with sentinels around the text of every run that has its own text colour
-/// or a highlight other than plain yellow (which pandoc keeps as `==`), and that highlight's
+/// The colours of a file: its styles and its theme (either may be missing).
+struct Palette<'a, 'i> {
+    styles: Option<&'a Document<'i>>,
+    theme: Option<&'a Document<'i>>,
+}
+
+/// The style chain is followed at most this far (a loop in `w:basedOn` ends there).
+const CHAIN: usize = 24;
+
+/// Heading 1 to 9, Title and Subtitle: their colour is the look of the heading (IMP-040), not a span.
+fn is_heading_like(style: Node) -> bool {
+    let named = |s: &str| {
+        let n = s.to_lowercase().replace(' ', "");
+        n == "title" || n == "subtitle" || n.strip_prefix("heading").is_some_and(|d| d.len() == 1 && d.chars().all(|c| ('1'..='9').contains(&c)))
+    };
+    val(style, "styleId").is_some_and(named) || child(style, "name").and_then(|n| val(n, "val")).is_some_and(named)
+}
+
+/// The style Hyperlink, which the app styles itself.
+fn is_hyperlink(style: Node) -> bool {
+    val(style, "styleId").is_some_and(|i| i.eq_ignore_ascii_case("hyperlink")) || child(style, "name").and_then(|n| val(n, "val")).is_some_and(|n| n.eq_ignore_ascii_case("hyperlink"))
+}
+
+/// `w:val` of the child `tag` of `holder`.
+fn style_of<'a>(holder: Option<Node<'a, '_>>, tag: &str) -> Option<&'a str> {
+    holder.and_then(|h| child(h, tag)).and_then(|s| val(s, "val"))
+}
+
+impl<'a, 'i> Palette<'a, 'i> {
+    fn style(&self, id: &str) -> Option<Node<'a, 'i>> {
+        self.styles?.descendants().find(|n| is_w(*n, "style") && val(*n, "styleId") == Some(id))
+    }
+
+    /// The colour of a `w:color` as `RRGGBB`: `w:themeColor`, when it is there and the theme has
+    /// it, wins over `w:val` (as in Word), with `w:themeTint` and `w:themeShade` applied
+    /// ([`tint_shade`]); else `w:val`. `auto`, black and what cannot be read are `None`.
+    fn resolve(&self, c: Node) -> Option<String> {
+        let byte = |a: &str| val(c, a).and_then(|v| u8::from_str_radix(v, 16).ok());
+        let themed = val(c, "themeColor").and_then(|t| theme_colour(self.theme?, t)).map(|hex| tint_shade(&hex, byte("themeTint"), byte("themeShade")));
+        themed.or_else(|| val(c, "val").and_then(hex6)).filter(|c| c != "000000")
+    }
+
+    /// The colour a `w:rPr` sets: `None` when it sets none, `Some(None)` when it sets auto or black.
+    fn of_rpr(&self, rpr: Node) -> Option<Option<String>> {
+        child(rpr, "color").map(|c| self.resolve(c))
+    }
+
+    /// The colour of a style or the nearest style it is based on that sets one, and that style.
+    fn of_style(&self, id: &str) -> Option<(Option<String>, Node<'a, 'i>)> {
+        let mut at = id.to_string();
+        for _ in 0..CHAIN {
+            let style = self.style(&at)?;
+            if let Some(c) = child(style, "rPr").and_then(|r| self.of_rpr(r)) {
+                return Some((c, style));
+            }
+            at = child(style, "basedOn").and_then(|b| val(b, "val"))?.to_string();
+        }
+        None
+    }
+
+    /// The colour of the body text: the document defaults with the style Normal over them.
+    fn body(&self) -> Option<String> {
+        let defaults = self.styles?.descendants().find(|n| is_w(*n, "rPrDefault")).and_then(|d| child(d, "rPr")).and_then(|r| self.of_rpr(r)).flatten();
+        match self.of_style("Normal") {
+            Some((c, _)) => c,
+            None => defaults,
+        }
+    }
+
+    /// The colour a run gets, to be written as a span (IMP-041): its own, else that of its
+    /// character style, else that of its paragraph's style, else that of its table's style; each
+    /// style with the styles it is based on. Not the colour of the body, not a colour that a
+    /// heading style or the style Hyperlink gives, and not a colour a heading's text has by itself.
+    fn of_run(&self, run: Node) -> Option<String> {
+        let para = run.ancestors().find(|n| is_w(*n, "p"));
+        let para_style = style_of(para.and_then(|p| child(p, "pPr")), "pStyle").and_then(|id| self.of_style(id));
+        let direct = child(run, "rPr").and_then(|r| self.of_rpr(r));
+        let colour = if let Some(own) = direct {
+            let in_heading = para_style.as_ref().filter(|(_, s)| is_heading_like(*s));
+            own.filter(|c| in_heading.is_none_or(|(h, _)| h.as_ref() != Some(c)))
+        } else if let Some((c, s)) = style_of(child(run, "rPr"), "rStyle").and_then(|id| self.of_style(id)) {
+            c.filter(|_| !is_hyperlink(s))
+        } else if let Some((c, s)) = para_style {
+            c.filter(|_| !is_heading_like(s))
+        } else {
+            let table = run.ancestors().find(|n| is_w(*n, "tbl"));
+            style_of(table.and_then(|t| child(t, "tblPr")), "tblStyle").and_then(|id| self.of_style(id)).and_then(|(c, _)| c)
+        };
+        colour.filter(|c| self.body().as_ref() != Some(c))
+    }
+}
+
+/// The text of `document` with sentinels around the text of every run that has a text colour of
+/// its own, from a style or from a table (`styles` and `theme` are the text of `word/styles.xml`
+/// and `word/theme/theme1.xml`, when there are such parts), or a highlight other than plain
+/// yellow (which pandoc keeps as `==`), and that highlight's
 /// element taken out so that pandoc does not also mark it. Whitespace at the ends of a text stays
 /// outside, so that Markdown emphasis still works. `None` when there is nothing to tag or the text
 /// does not parse.
-pub fn tag_runs(document: &str) -> Option<String> {
+pub fn tag_runs(document: &str, styles: Option<&str>, theme: Option<&str>) -> Option<String> {
     let doc = Document::parse(document).ok()?;
+    let (styles, theme) = (styles.and_then(|s| Document::parse(s).ok()), theme.and_then(|t| Document::parse(t).ok()));
+    let palette = Palette { styles: styles.as_ref(), theme: theme.as_ref() };
     let mut edits: Vec<Edit> = Vec::new();
     for run in doc.descendants().filter(|n| is_w(*n, "r")) {
-        let Some(pr) = child(run, "rPr") else { continue };
-        let colour = child(pr, "color").and_then(|c| val(c, "val")).and_then(hex6).filter(|c| c != "000000");
-        let named = child(pr, "highlight").and_then(|h| val(h, "val").map(|v| (h, v)));
+        let pr = child(run, "rPr");
+        let colour = palette.of_run(run);
+        let named = pr.and_then(|p| child(p, "highlight")).and_then(|h| val(h, "val").map(|v| (h, v)));
         let highlight = match named {
             // plain yellow stays pandoc's own `==`
             Some((_, "yellow")) => None,
@@ -341,7 +503,7 @@ pub fn tag_runs(document: &str) -> Option<String> {
                 edits.push(Edit { start: h.range().start, end: h.range().end, with: String::new() });
                 highlight_hex(name).map(String::from)
             }
-            _ => child(pr, "shd").and_then(|s| val(s, "fill")).and_then(hex6),
+            _ => pr.and_then(|p| child(p, "shd")).and_then(|s| val(s, "fill")).and_then(hex6),
         };
         let (mut open, mut close) = (String::new(), String::new());
         if let Some(c) = &colour {
@@ -368,6 +530,11 @@ pub fn tag_runs(document: &str) -> Option<String> {
             edits.push(Edit { start: from, end: from + body.len(), with: format!("{open}{body}{close}") });
         }
     }
+    apply(document, edits)
+}
+
+/// `document` with the edits made, `None` when there are none.
+fn apply(document: &str, mut edits: Vec<Edit>) -> Option<String> {
     if edits.is_empty() {
         return None;
     }
@@ -377,6 +544,102 @@ pub fn tag_runs(document: &str) -> Option<String> {
         out.replace_range(e.start..e.end, &e.with);
     }
     Some(out)
+}
+
+/// The paragraph that stands for a break in the tagged copy.
+fn break_paragraph() -> String {
+    format!("<w:p><w:r><w:t>{BREAK}</w:t></w:r></w:p>")
+}
+
+/// Whether a `w:pageBreakBefore`-like toggle is on: no `w:val` means on.
+fn flag(n: Node) -> bool {
+    !matches!(val(n, "val"), Some("0" | "false" | "off"))
+}
+
+/// `Heading1` … `Heading9`, or `heading 1` … as a name: the level.
+fn level_of(s: &str) -> Option<u8> {
+    let rest = s.to_lowercase().strip_prefix("heading")?.trim().to_string();
+    rest.parse::<u8>().ok().filter(|n| (1..=9).contains(n) && rest.len() == 1)
+}
+
+/// The level of a style that is one of Word's Heading styles, by its id or its name.
+fn heading_level(style: Node) -> Option<u8> {
+    let named = child(style, "name").and_then(|n| val(n, "val")).and_then(level_of);
+    val(style, "styleId").and_then(level_of).or(named)
+}
+
+/// Whether a paragraph style has `pageBreakBefore`, itself or through `basedOn` (the nearest
+/// statement wins); `None` when no style on the way says.
+fn style_page_break(styles: &Document, style: Node) -> Option<bool> {
+    let mut at = style;
+    for _ in 0..16 {
+        if let Some(f) = child(at, "pPr").and_then(|p| child(p, "pageBreakBefore")) {
+            return Some(flag(f));
+        }
+        let parent = child(at, "basedOn").and_then(|b| val(b, "val"))?;
+        at = styles.descendants().find(|n| is_w(*n, "style") && val(*n, "styleId") == Some(parent))?;
+    }
+    None
+}
+
+/// The text of `document` with a sentinel paragraph at each place that starts a new page (IMP-044):
+/// a `w:br` of type page (the run is split so that the sentinel stands between two runs and keeps
+/// out of any emphasis), a paragraph with `w:pageBreakBefore` (directly or through its style, except
+/// a Heading style, which `print-break-before` covers) and a paragraph whose `w:pPr` holds the
+/// `w:sectPr` of a section that begins on a new page. Not in tables, text boxes and deleted text,
+/// which have no page of their own. `None` when there is none or the text does not parse.
+pub fn mark_breaks(document: &str, styles: Option<&str>) -> Option<String> {
+    let doc = Document::parse(document).ok()?;
+    let styles = styles.and_then(|s| Document::parse(s).ok());
+    let nested = |n: Node| n.ancestors().any(|a| is_w(a, "tc") || is_w(a, "txbxContent") || is_w(a, "del"));
+    let mut edits: Vec<Edit> = Vec::new();
+    for n in doc.descendants().filter(|n| is_w(*n, "br") && val(*n, "type") == Some("page")) {
+        let Some(run) = n.parent().filter(|r| is_w(*r, "r")) else { continue };
+        if nested(n) {
+            continue;
+        }
+        let rpr = child(run, "rPr").map(|p| document[p.range()].to_string()).unwrap_or_default();
+        edits.push(Edit { start: n.range().start, end: n.range().end, with: format!("</w:r>{}<w:r>{rpr}", break_paragraph_run()) });
+    }
+    for p in doc.descendants().filter(|n| is_w(*n, "p")) {
+        if nested(p) {
+            continue;
+        }
+        let ppr = child(p, "pPr");
+        let style = ppr.and_then(|pr| child(pr, "pStyle")).and_then(|s| val(s, "val")).and_then(|id| styles.as_ref()?.descendants().find(|n| is_w(*n, "style") && val(*n, "styleId") == Some(id)));
+        let from_style = style.and_then(|s| style_page_break(styles.as_ref()?, s));
+        let direct = ppr.and_then(|pr| child(pr, "pageBreakBefore")).map(flag);
+        // a Heading style that starts a page is the property `print-break-before`, not a marker each
+        let covered = from_style == Some(true) && style.and_then(heading_level).is_some();
+        if !covered && direct.or(from_style).unwrap_or(false) {
+            edits.push(Edit { start: p.range().start, end: p.range().start, with: break_paragraph() });
+        }
+        let new_page = ppr.and_then(|pr| child(pr, "sectPr")).is_some_and(|s| matches!(child(s, "type").and_then(|t| val(t, "val")), None | Some("nextPage" | "oddPage" | "evenPage")));
+        if new_page {
+            edits.push(Edit { start: p.range().end, end: p.range().end, with: break_paragraph() });
+        }
+    }
+    apply(document, edits)
+}
+
+/// The sentinel as a run of its own, for the middle of a paragraph.
+fn break_paragraph_run() -> String {
+    format!("<w:r><w:t>{BREAK}</w:t></w:r>")
+}
+
+/// The Markdown that pandoc made from a tagged copy with every sentinel of [`mark_breaks`] turned
+/// into a line `<div style="page-break-after: always;"></div>` of its own with a blank line before
+/// and after. Breaks side by side become one, and one at the very start or end is dropped.
+pub fn breaks_to_html(text: &str) -> String {
+    if !text.contains(BREAK) {
+        return text.to_string();
+    }
+    let parts: Vec<&str> = text.split(BREAK).map(str::trim).filter(|p| !p.is_empty()).collect();
+    let mut out = parts.join(&format!("\n\n{BREAK_HTML}\n\n"));
+    if text.ends_with('\n') {
+        out.push('\n');
+    }
+    out
 }
 
 /// One piece of text with sentinels.
@@ -555,7 +818,7 @@ pub struct Analysis {
     pub tagged: Option<PathBuf>,
 }
 
-/// Read the look of `docx` and, when it has coloured runs, write the tagged copy `tagged.docx`
+/// Read the look of `docx` and, when it has coloured runs or page breaks, write the tagged copy `tagged.docx`
 /// in `work` (an existing folder). The original is not touched. Never fails: what cannot be done
 /// is left out.
 pub fn analyse(docx: &Path, work: &Path) -> Analysis {
@@ -567,8 +830,10 @@ pub fn analyse(docx: &Path, work: &Path) -> Analysis {
     }
     let part = |p: &str| crate::fsutil::read_to_string(dir.join(p)).ok();
     let Some(document) = part("word/document.xml") else { return none };
-    let look = read(&document, part("word/styles.xml").as_deref(), part("word/theme/theme1.xml").as_deref());
-    let tagged = tag_runs(&document).and_then(|tagged| {
+    let (styles, theme) = (part("word/styles.xml"), part("word/theme/theme1.xml"));
+    let look = read(&document, styles.as_deref(), theme.as_deref());
+    let marked = mark_breaks(&document, styles.as_deref());
+    let tagged = tag_runs(marked.as_deref().unwrap_or(&document), styles.as_deref(), theme.as_deref()).or(marked).and_then(|tagged| {
         crate::fsutil::write_atomic(&dir.join("word/document.xml"), tagged.as_bytes()).ok()?;
         let to = work.join("tagged.docx");
         write_zip(&dir, &to).ok()?;

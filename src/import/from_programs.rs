@@ -283,7 +283,7 @@ mod tests {
         let mut v = Vault::open(&d).unwrap();
         let (items, _) = items_from_drop("text/plain", "Beamer tauschen\nim Hörsaal".as_bytes());
         assert_eq!(items.len(), 1);
-        let o = Options { folder: PathBuf::from("Projekte"), tags: vec!["status".into()], keep_original: true, keep_docx: true, people_dir: "Adressbuch".into() };
+        let o = Options { folder: PathBuf::from("Projekte"), tags: vec!["status".into()], keep_original: true, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false };
         let Imported { notes: made, errors: errs, .. } = import(&mut v, &items, &o);
         assert!(errs.is_empty(), "{errs:?}");
         assert_eq!(made.len(), 1);

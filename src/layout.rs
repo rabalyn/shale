@@ -828,11 +828,18 @@ impl ShaleApp {
                 let badges = self.key_badges(ui);
                 let palettes = crate::format_bar::Palettes { badges: &badges, highlight: &self.cfg.highlight_colours, font: &self.cfg.font_colours, scale: self.cfg.toolbar_size.clamp(80, 200) as f32 / 100.0 };
                 ui.add_space(4.0);
-                self.tabbar.tabs[active].editor.toolbar(ui, &doc.text, &palettes);
+                let mut colours = self.vdata.state.toolbar_colours();
+                self.tabbar.tabs[active].editor.toolbar(ui, &doc.text, &palettes, &mut colours);
+                self.vdata.state.set_toolbar_colours(colours);
                 ui.add_space(2.0);
             }
         }
-        egui::ScrollArea::vertical().id_salt(("note-scroll", self.tabbar.tabs[active].id)).auto_shrink([false, false]).show(ui, |ui| {
+        let mut area = egui::ScrollArea::vertical().id_salt(("note-scroll", self.tabbar.tabs[active].id)).auto_shrink([false, false]);
+        // a restored tab is scrolled where it was left, when it is first shown (NAV-038)
+        if let Some(y) = self.tabbar.tabs[active].place.restore_scroll.take() {
+            area = area.vertical_scroll_offset(y);
+        }
+        let scrolled = area.show(ui, |ui| {
             let full = ui.available_width();
             let col = if readable { full.min(760.0) } else { full - 40.0 };
             let pad = ((full - col) / 2.0).max(20.0);
@@ -894,7 +901,11 @@ impl ShaleApp {
                         tab.editor.assist.numbered_headings = self.cfg.numbered_headings;
                         tab.editor.dark_canvas = self.cfg.dark_canvas;
                         tab.editor.media = self.media.clone();
+                        if let Some(sel) = tab.place.restore_cursor.take() {
+                            tab.editor.restore_selection_chars(ui.ctx(), &doc.text, sel);
+                        }
                         let (changed, action) = crate::fonts::with_family(&fonts.rendered, || tab.editor.show(ui, &mut doc.text, vault, crate::editor::Note { rel: &rel, undo: &mut self.undo }, &fonts, ctrl));
+                        tab.place.cursor = tab.editor.selection_chars(ui.ctx()).or(tab.place.cursor);
                         if changed {
                             doc.dirty = true;
                             doc.last_edit = std::time::Instant::now();
@@ -908,6 +919,7 @@ impl ShaleApp {
                 });
             });
         });
+        self.tabbar.tabs[active].place.scroll = Some(scrolled.state.clamped_offset().y.max(0.0).floor());
         if let Some(name) = rename_to {
             if let Err(e) = self.rename(&rel, &name) {
                 self.toast(e);
