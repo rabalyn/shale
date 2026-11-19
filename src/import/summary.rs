@@ -102,7 +102,6 @@ pub fn show(ui: &mut Ui, s: &ImportSummary) -> Option<SummaryAction> {
     if !s.notes.is_empty() {
         ui.label(muted(format!("The notes are in {}.", s.place)));
     }
-    ui.add_space(6.0);
     egui::ScrollArea::vertical().max_height(360.0).auto_shrink([false, true]).show(ui, |ui| {
         for e in &s.notes {
             ui.horizontal(|ui| {
@@ -116,24 +115,20 @@ pub fn show(ui: &mut Ui, s: &ImportSummary) -> Option<SummaryAction> {
                     }
                 });
             });
-            ui.add_space(4.0);
         }
         if !s.files.is_empty() {
-            ui.add_space(4.0);
-            ui.label(muted("Saved in the media folder"));
+            theme::section(ui, "Saved in the media folder");
             for f in &s.files {
                 ui.add(egui::Label::new(egui::RichText::new(file_name(f)).size(12.5)).wrap()).on_hover_text(rel_to_string(f));
             }
         }
         if !s.errors.is_empty() {
-            ui.add_space(6.0);
-            ui.label(muted("Went wrong"));
+            theme::section(ui, "Went wrong");
             for e in &s.errors {
                 ui.add(egui::Label::new(egui::RichText::new(e).color(theme::LINK_MISSING).size(12.5)).wrap());
             }
         }
     });
-    ui.add_space(8.0);
     ui.horizontal(|ui| {
         if ui.add_enabled(!s.notes.is_empty(), egui::Button::new(egui::RichText::new("Open all in tabs").strong())).clicked() {
             action = Some(SummaryAction::OpenAll);

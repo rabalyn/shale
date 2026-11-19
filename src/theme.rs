@@ -131,6 +131,31 @@ pub fn spaced(ui: &egui::Ui, rich: egui::RichText) -> egui::RichText {
     rich.line_height(Some(row + LINE_GAP))
 }
 
+/// A grey heading that starts a new section of a page or a dialog: [`SECTION_GAP`] above it
+/// (the item gap before it is already there), so it reads as new and sits closer to its own
+/// items, which follow at [`ITEM_GAP`]. The first heading at the top of a page or a dialog gets
+/// no gap, so there is no empty band above it. Every heading in Settings and in dialogs goes
+/// through this (NAV-044).
+pub fn section(ui: &mut egui::Ui, title: impl Into<String>) -> egui::Response {
+    if !at_top(ui) {
+        ui.add_space(SECTION_GAP - ITEM_GAP);
+    }
+    ui.label(egui::RichText::new(title).color(MUTED))
+}
+
+/// A gap that starts a new block of items (a section without a heading of its own, a step): like
+/// the one above a [`section`] heading, none at the top of the `ui`.
+pub fn section_break(ui: &mut egui::Ui) {
+    if !at_top(ui) {
+        ui.add_space(SECTION_GAP - ITEM_GAP);
+    }
+}
+
+/// Whether nothing has been laid out in `ui` yet.
+fn at_top(ui: &egui::Ui) -> bool {
+    ui.cursor().min.y <= ui.max_rect().min.y + 0.5
+}
+
 /// A paragraph of styled text with [`LINE_GAP`] between its lines.
 pub fn prose(ui: &mut egui::Ui, rich: egui::RichText) -> egui::Response {
     let rich = spaced(ui, rich);
@@ -229,6 +254,30 @@ mod tests {
                 assert_eq!((ui.spacing().item_spacing.y, ui.spacing().extra_text_line_spacing), (ITEM_GAP, LINE_GAP));
             });
             assert_eq!((ui.spacing().item_spacing.y, ui.spacing().extra_text_line_spacing), before, "outside the scope nothing changed");
+        });
+    }
+
+    // spec: NAV-044
+    #[test]
+    fn nav_044_a_section_heading_has_the_section_gap_above_it_and_none_at_the_top() {
+        in_ui(300.0, |ui| {
+            dialog_spacing(ui);
+            let first = section(ui, "First");
+            assert!(first.rect.top() - ui.max_rect().top() < 0.6, "no empty band above the first heading: {}", first.rect.top() - ui.max_rect().top());
+            let item = ui.label("An item");
+            let heading = section(ui, "Second");
+            let gap = heading.rect.top() - item.rect.bottom();
+            assert!((gap - SECTION_GAP).abs() < 0.6, "the gap above a later heading: {gap} of {SECTION_GAP}");
+            let next = ui.label("Its item");
+            assert!((next.rect.top() - heading.rect.bottom() - ITEM_GAP).abs() < 0.6, "the heading is ITEM_GAP above its own items");
+            let before = ui.cursor().min.y;
+            section_break(ui);
+            assert!((ui.cursor().min.y - before - (SECTION_GAP - ITEM_GAP)).abs() < 0.6);
+            ui.scope(|ui| {
+                let at = ui.cursor().min.y;
+                section_break(ui);
+                assert_eq!(ui.cursor().min.y, at, "none at the top of a new ui");
+            });
         });
     }
 

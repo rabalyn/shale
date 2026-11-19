@@ -2,7 +2,7 @@
 //! modes and the link preview of Shift+K (EDIT-044).
 
 use super::editor::cursor_combo;
-use super::{section, SettingsTab};
+use super::SettingsTab;
 use crate::app::ShaleApp;
 use crate::link_preview::{DEFAULT_HEIGHT, DEFAULT_WIDTH, MIN_HEIGHT, MIN_WIDTH};
 use crate::vim::EscCursor;
@@ -13,7 +13,7 @@ impl ShaleApp {
         let mut changed = false;
         changed |= ui.checkbox(&mut self.cfg.vim_mode, "Vim-style editing").changed();
         crate::theme::hint(ui, "Notes open in normal mode (h j k l w b, :line, /search, v / V, d y p); i a o to type, Esc back.");
-        section(ui, "Cursor");
+        crate::theme::section(ui, "Cursor");
         ui.add_enabled_ui(self.cfg.vim_mode, |ui| {
             changed |= cursor_combo(ui, "Cursor in normal mode", "normal-cursor-shape", &mut self.cfg.normal_cursor_shape);
             ui.horizontal(|ui| {
@@ -25,7 +25,7 @@ impl ShaleApp {
                 });
             });
         });
-        section(ui, "Link preview (Shift+K)");
+        crate::theme::section(ui, "Link preview (Shift+K)");
         ui.horizontal(|ui| {
             ui.label("Link preview size");
             changed |= ui.add(egui::DragValue::new(&mut self.cfg.link_preview_width).range(MIN_WIDTH as u32..=4000).suffix(" wide")).changed();
@@ -36,7 +36,7 @@ impl ShaleApp {
                 changed = true;
             }
         });
-        ui.add_space(crate::theme::SECTION_GAP - crate::theme::ITEM_GAP);
+        crate::theme::section_break(ui);
         ui.horizontal(|ui| {
             crate::theme::hint(ui, "The keys of normal mode (Space Tab, Space f f, Space f g, Shift+K) are set in the");
             if ui.link("Keybindings tab").clicked() {

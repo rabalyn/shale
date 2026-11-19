@@ -209,8 +209,7 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
     let mut save_edit = false;
     if let Some(f) = &mut d.edit {
         let name = d.sources.iter().find(|s| s.id == f.id).map(|s| s.name.clone()).unwrap_or_default();
-        ui.separator();
-        ui.label(egui::RichText::new(format!("Edit “{name}”")).strong());
+        theme::section(ui, format!("Edit “{name}”"));
         egui::Grid::new("cal-edit").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
             ui.label(muted("Address"));
             rec("edit-url".into(), ui.add(egui::TextEdit::singleline(&mut f.url).desired_width(380.0)));
@@ -241,9 +240,8 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
     if let Some(id) = sync_now {
         action = Some(CalDialogAction::SyncNow(id));
     }
-    ui.separator();
     // ---- local
-    ui.label(egui::RichText::new("Add a local calendar").strong());
+    theme::section(ui, "Add a local calendar");
     ui.horizontal(|ui| {
         rec("local-name".into(), ui.add(egui::TextEdit::singleline(&mut d.new_local_name).hint_text("Name, e.g. Test").desired_width(220.0)));
         if rec("add-local".into(), ui.button("Add")).clicked() {
@@ -261,9 +259,8 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
         }
     });
     crate::theme::prose(ui, muted("Local calendars are .ics files in your settings folder."));
-    ui.separator();
     // ---- CalDAV
-    ui.label(egui::RichText::new("Add CalDAV calendars").strong());
+    theme::section(ui, "Add CalDAV calendars");
     egui::Grid::new("cal-dav").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
         ui.label(muted("Address"));
         rec("dav-url".into(), ui.add(egui::TextEdit::singleline(&mut d.dav_url).hint_text("https://cloud.example.com/remote.php/dav/").desired_width(380.0)));
@@ -326,7 +323,7 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
     }
     crate::theme::prose(ui, muted(&format!("New CalDAV calendars sync every {DEFAULT_SYNC_MINUTES} minutes; change it per calendar above. Saving an event syncs its calendar right away.")));
     crate::theme::prose(ui, muted(&format!("Only https:// addresses are accepted (http:// only for a server on this computer). {}", crate::secrets::where_stored())));
-    ui.separator();
+    theme::section_break(ui);
     rec("week-monday".into(), ui.checkbox(&mut d.week_monday, "Weeks start on Monday"));
     d.rects = rects;
     action
@@ -1238,7 +1235,6 @@ pub fn event_footer(ui: &mut Ui, d: &mut EventDialog, store: &CalendarStore) -> 
     if let Some(e) = &d.error {
         ui.add(egui::Label::new(egui::RichText::new(e).color(theme::LINK_MISSING)).wrap());
     }
-    ui.add_space(4.0);
     ui.horizontal(|ui| {
         let label = if d.original.as_ref().map(|(s, _)| *s != d.calendar).unwrap_or(false) { "Move here" } else { "Save" };
         let mut rec = |k: &str, r: egui::Response| -> egui::Response {

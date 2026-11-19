@@ -110,21 +110,17 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
                 }
             });
         });
-        ui.add_space(4.0);
     }
     if let (ExportEngine::Latex, Some(tex)) = (d.engine, d.tex.as_deref_mut()) {
         tex.show(ui, &mut d.opts, &mut rec);
-        ui.add_space(4.0);
         egui::Grid::new("export-save-grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
             ui.label(muted("Save as"));
             rec("path", ui.add(egui::TextEdit::singleline(&mut d.path).desired_width(250.0)));
             ui.end_row();
         });
-        ui.add_space(4.0);
         // a folder's reading order is the same through LaTeX (BOOK-013)
         if let Some(book) = d.book.as_deref_mut() {
             book.show(ui, &mut rec);
-            ui.add_space(4.0);
         }
         rec("open-after", ui.checkbox(&mut d.open_after, "Open the PDF after exporting"));
         d.rects = rects;
@@ -234,10 +230,8 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
         rec("path", ui.add(egui::TextEdit::singleline(&mut d.path).desired_width(250.0)));
         ui.end_row();
     });
-    ui.add_space(4.0);
     if let Some(book) = d.book.as_deref_mut() {
         book.show(ui, &mut rec);
-        ui.add_space(4.0);
     }
     rec("open-after", ui.checkbox(&mut d.open_after, "Open the PDF after exporting"));
     d.rects = rects;
@@ -250,7 +244,6 @@ pub fn footer(ui: &mut Ui, d: &mut ExportDialog) -> DialogResult {
     if let Some(e) = &d.error {
         crate::theme::problem(ui, e);
     }
-    ui.add_space(4.0);
     // LaTeX needs a TeX, a kind and no export running (TEX-016)
     let ready = (!d.latex() || d.tex.as_ref().is_some_and(|t| t.can_export())) && d.book.as_ref().is_none_or(|b| b.can_export());
     ui.horizontal(|ui| {

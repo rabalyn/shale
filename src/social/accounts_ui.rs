@@ -261,7 +261,7 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
     if let Some(a) = start_edit {
         d.start_edit(&a);
     }
-    ui.separator();
+    theme::section_break(ui);
     ui.horizontal(|ui| {
         ui.label(muted("Look for new posts every"));
         let mut m = check_minutes;
@@ -269,10 +269,9 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
             action = Some(DialogAction::CheckMinutes(m));
         }
     });
-    ui.separator();
     // ---- add
     if let Some(a) = &d.editing {
-        ui.label(egui::RichText::new(format!("Sign in again as @{}", a.handle)).size(14.0).color(theme::TEXT));
+        theme::section(ui, format!("Sign in again as @{}", a.handle));
         ui.add(
             egui::Label::new(crate::theme::spaced(
                 ui,
@@ -285,7 +284,7 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
             .wrap(),
         );
     } else {
-        ui.label(egui::RichText::new("Add an account").size(14.0).color(theme::TEXT));
+        theme::section(ui, "Add an account");
     }
     let (fixed, current) = (d.editing.is_some(), d.network);
     ui.horizontal(|ui| {
@@ -298,7 +297,6 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
             }
         }
     });
-    ui.add_space(2.0);
     let busy = d.busy();
     match d.network {
         Network::Mastodon => {
@@ -370,7 +368,6 @@ pub fn footer(ui: &mut Ui, d: &mut SocialDialog) -> Option<DialogAction> {
     if let Some(e) = &d.error {
         ui.add(egui::Label::new(egui::RichText::new(e).color(theme::LINK_MISSING)).wrap());
     }
-    ui.add_space(4.0);
     ui.horizontal(|ui| {
         let mut rec = |k: &str, r: egui::Response| -> egui::Response {
             d.rects.push((k.to_string(), r.rect));

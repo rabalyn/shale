@@ -673,7 +673,6 @@ impl MailView {
             let resp = crate::dialog::Dialog::new("compose-ask", title).width(420.0).non_modal().show(ctx, |ui| match &ask {
                 Ask::Close => {
                     crate::theme::prose(ui, muted("You have written something that is not sent. A kept draft is saved and can be opened from Drafts; a discarded one is moved to the mail trash folder (nothing is deleted)."));
-                    ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         let r = ui.button(RichText::new("Keep draft").strong());
                         rec(rects, "mail:compose:keep", &r);
@@ -695,7 +694,6 @@ impl MailView {
                 Ask::Confirm(list) => {
                     let q = list.first().map(|q| q.question()).unwrap_or("");
                     ui.label(q);
-                    ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         let r = ui.button("Send anyway");
                         rec(rects, "mail:compose:confirm-yes", &r);

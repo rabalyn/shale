@@ -18,7 +18,6 @@ mod vim;
 
 use crate::app::ShaleApp;
 use crate::keys_ui::KeyDialog;
-use crate::theme;
 use eframe::egui::{self, Context, Id, Ui};
 
 /// The tabs of the Settings dialog (CFG-020, KEY-006).
@@ -260,16 +259,10 @@ impl ShaleApp {
     }
 }
 
-/// A grey section heading inside a page.
-pub(crate) fn section(ui: &mut Ui, title: &str) {
-    // the item gap before it is already there: SECTION_GAP in all
-    ui.add_space(theme::SECTION_GAP - theme::ITEM_GAP);
-    ui.label(egui::RichText::new(title).color(theme::MUTED));
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme;
     use eframe::egui::{RawInput, TextStyle};
 
     /// The automatic width with the tab buttons' font at this size, and the widest names' width.
@@ -294,7 +287,7 @@ mod tests {
         let mut out = ctx.run_ui(RawInput::default(), |ui| {
             theme::dialog_spacing(ui);
             let item = ui.label("An item");
-            section(ui, "A section");
+            theme::section(ui, "A section");
             let next = ui.label("Its first item");
             let heading_height = ui.label(egui::RichText::new("A section").color(theme::MUTED)).rect.height();
             // item, SECTION_GAP, heading, ITEM_GAP, next item

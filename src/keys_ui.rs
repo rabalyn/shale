@@ -178,14 +178,11 @@ pub fn show(ui: &mut Ui, d: &mut KeyDialog, keys: &mut Keymap) -> bool {
     });
     crate::theme::prose(ui, muted("Press Change (replaces the keys) or Add (one more), then the keys: one key or chord, or several in a row (a sequence). Enter saves, Esc cancels."));
     if let Some(n) = note {
-        ui.add_space(4.0);
         crate::theme::prose(ui, muted(n));
     }
     if let Some(e) = &d.error {
-        ui.add_space(4.0);
         ui.label(RichText::new(e.as_str()).color(theme::LINK_MISSING));
     }
-    ui.add_space(6.0);
     let r = ui.button("Reset all");
     d.rects.push(("reset-all".into(), r.rect));
     if r.clicked() {
