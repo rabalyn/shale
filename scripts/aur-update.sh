@@ -61,7 +61,10 @@ if [ "${#sum}" -ne 64 ]; then
   exit 1
 fi
 
-sed -i -e "s/^pkgver=.*/pkgver=$ver/" -e "s/^pkgrel=.*/pkgrel=1/" -e "s/^sha256sums=.*/sha256sums=('$sum')/" "$dir/PKGBUILD"
+# No `sed -i`: BSD sed (macOS) takes the next word as a backup suffix. The edit goes through a temp
+# file and `cat >` writes it back, which keeps the mode of PKGBUILD; on a sed failure nothing is written.
+sed -e "s/^pkgver=.*/pkgver=$ver/" -e "s/^pkgrel=.*/pkgrel=1/" -e "s/^sha256sums=.*/sha256sums=('$sum')/" "$dir/PKGBUILD" >"$tmp/PKGBUILD.new"
+cat "$tmp/PKGBUILD.new" >"$dir/PKGBUILD"
 (cd "$dir" && makepkg --printsrcinfo >.SRCINFO)
 
 echo "shale-bin is now $ver-1 (sha256 $sum)."

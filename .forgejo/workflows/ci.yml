@@ -400,7 +400,25 @@ jobs:
           SHALE_ENV_TESTS_TEX_IMPORT: ${{ (github.event_name == 'schedule' || (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-'))) && 'yes' || 'no' }}
           # and the TeX image built again from the current TeX Live, so upstream breakage shows up within a week (ADR-0020):
           SHALE_ENV_TESTS_TEX_REFRESH: ${{ (github.event_name == 'schedule' || (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-'))) && 'yes' || 'no' }}
-        run: sh .forgejo/scripts/env-tests.sh run "${{ steps.engine.outputs.engine }}"
+        run: |
+          # Tags (release and check) take TeX Live from the homelab mirror next to the runner, as the public
+          # CTAN mirror answers the runner with 403 (#424); the address is the repository variable
+          # SHALE_TEX_MIRROR, never committed. The weekly run keeps the public default (DEV-011, DEV-025).
+          mirror="${{ startsWith(github.ref, 'refs/tags/v') && github.event_name != 'schedule' && vars.SHALE_TEX_MIRROR || '' }}"
+          mirror="${mirror%/}"
+          case "$mirror" in
+            '')
+              echo "TeX Live: the default public repository (weekly run, or no vars.SHALE_TEX_MIRROR)" ;;
+            https://*|http://*)
+              SHALE_TEX_ENV_REPOSITORY=$mirror
+              SHALE_TEX_INSTALL_REPOSITORY=$mirror
+              export SHALE_TEX_ENV_REPOSITORY SHALE_TEX_INSTALL_REPOSITORY
+              echo "TeX Live: the homelab mirror (vars.SHALE_TEX_MIRROR)" ;;
+            *)
+              echo "vars.SHALE_TEX_MIRROR must start with https:// or http://" >&2
+              exit 2 ;;
+          esac
+          sh .forgejo/scripts/env-tests.sh run "${{ steps.engine.outputs.engine }}"
 
       # the storage is kept between runs (ADR-0022): drop the images nothing is tagged as any more (the
       # TeX image a --refresh replaced, older test images), so it does not grow run by run
