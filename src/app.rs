@@ -844,6 +844,8 @@ impl ShaleApp {
                 } else {
                     self.open(&rel, new_tab);
                 }
+            } else if let Some(kind) = &st.view {
+                self.restore_view_tab(kind, st, new_tab);
             } else if let Some(f) = &st.feed {
                 // (the account must still exist)
                 if self.cfg.social_accounts.iter().any(|e| e.account.id == f.account) {
@@ -868,6 +870,48 @@ impl ShaleApp {
         let last_id = self.tabbar.tabs.get(self.tabbar.active).map(|t| t.id);
         self.tabbar.tabs.sort_by_key(|t| !t.pinned);
         self.tabbar.active = open_id.or(last_id).and_then(|id| self.tabbar.tabs.iter().position(|t| t.id == id)).unwrap_or(0);
+    }
+
+    /// Bring back a tab of a view that has no file (NAV-044): the view as it is shown when opened by
+    /// hand, with the place it was left at (NAV-045 to NAV-047). The mail view and the calendar
+    /// are one each in the window, so their place is the one of the first such tab. A kind that is
+    /// not known is skipped.
+    fn restore_view_tab(&mut self, kind: &str, st: &crate::vault_state::SavedTab, new_tab: bool) {
+        use crate::vault_state::SavedTab;
+        let view = match kind {
+            SavedTab::MAIL => {
+                if self.mail.restore.is_none() {
+                    self.mail.restore = st.mail.clone().filter(|m| !m.account.is_empty());
+                }
+                View::Mail
+            }
+            SavedTab::CALENDAR => {
+                if let Some(c) = st.calendar.as_ref().filter(|c| c.day != 0) {
+                    if let Some(mode) = crate::calendar::ui::Mode::from_name(&c.mode) {
+                        self.cal.main.mode = mode;
+                    }
+                    self.cal.main.anchor = c.day;
+                    self.cal.main.selected = c.day;
+                }
+                View::Calendar
+            }
+            SavedTab::TASKS => {
+                if let Some(t) = &st.tasks {
+                    self.tasks = TasksFilter { show_done: t.show_done, query: t.query.clone(), only_due: t.only_due };
+                }
+                View::Tasks
+            }
+            SavedTab::GRAPH => {
+                if let Some(g) = &st.graph {
+                    self.graphs.global.show_missing = !g.hide_missing;
+                    self.graphs.global.show_orphans = !g.hide_orphans;
+                }
+                View::Graph
+            }
+            SavedTab::SETTINGS_FILE => View::SettingsFile,
+            _ => return,
+        };
+        self.show_view(view, new_tab);
     }
 
     pub fn show_view(&mut self, view: View, new_tab: bool) {
@@ -935,6 +979,10 @@ impl ShaleApp {
                     }
                 }
                 self.show_view(View::Note(rel.to_path_buf()), new_tab);
+                // the folds it had when it was left (EDIT-079)
+                if let (Some(saved), Some(t)) = (self.vdata.state.folds.get(&rel_to_string(rel)), self.tabbar.tabs.get_mut(self.tabbar.active)) {
+                    t.editor.fold.restore(rel, saved);
+                }
             }
             FileKind::Drawing if crate::drawing::canvas::is_canvas_path(rel) && !self.drawings.contains_key(rel) => {
                 // a canvas: open the copy converted earlier, convert it, or ask
@@ -1013,9 +1061,25 @@ impl ShaleApp {
             return;
         }
         self.vdata.state.panes = self.saved_panes();
+        self.remember_folds();
         self.vdata.state.focused_pane = self.panes.focused;
         // (the tabs of the first pane stay where a Shale without panes reads them)
         self.vdata.state.tabs = self.vdata.state.panes.first().map(|p| p.tabs.clone()).unwrap_or_default();
+    }
+
+    /// Take the folds of the notes the editors showed into the vault state, and drop the ones of
+    /// notes that are gone (EDIT-079). A note kept as it starts has no entry.
+    fn remember_folds(&mut self) {
+        let shown: Vec<(PathBuf, Option<Vec<crate::fold::Key>>)> = self.all_tabs().flat_map(|t| t.editor.fold.snapshot()).collect();
+        for (rel, keys) in shown {
+            match keys {
+                Some(keys) => self.vdata.state.folds.insert(rel_to_string(&rel), keys),
+                None => self.vdata.state.folds.remove(&rel_to_string(&rel)),
+            };
+        }
+        if let Some(v) = &self.vault {
+            self.vdata.state.folds.retain(|k, _| v.file(Path::new(k)).is_some());
+        }
     }
 
     /// The session state is written when something in it changed, looked at every 5 seconds: the
@@ -1542,6 +1606,15 @@ impl ShaleApp {
             }
         };
         self.undo.moved(remap);
+        // the folds of the moved notes follow (EDIT-079)
+        for t in self.all_tabs_mut() {
+            t.editor.fold.moved(remap);
+        }
+        for k in self.vdata.state.folds.keys().cloned().collect::<Vec<_>>() {
+            if let (Some(nk), Some(v)) = (remap(Path::new(&k)), self.vdata.state.folds.remove(&k)) {
+                self.vdata.state.folds.insert(rel_to_string(&nk), v);
+            }
+        }
         let keys: Vec<PathBuf> = self.notes.keys().cloned().collect();
         for k in keys {
             if let Some(nk) = remap(&k) {
@@ -3306,7 +3379,7 @@ pub(crate) mod tests {
         assert!(app.vdata.state.last_import_folder.is_empty(), "posts have their own last folder");
         let rel = d.join("Social").read_dir().unwrap().flatten().find(|f| f.file_name().to_string_lossy().ends_with(".md")).unwrap().path();
         let text = std::fs::read_to_string(&rel).unwrap();
-        assert!(text.contains("## Thread") && text.contains("**Source:**") && text.contains("![[z_media/"), "{text}");
+        assert!(text.contains("## Thread") && text.contains("\nurl: ") && !text.contains("**Source:**") && text.contains("![[z_media/"), "{text}");
         assert!(app.actions.iter().any(|a| matches!(a, Action::Open { .. })), "the new note is opened");
         // the same post again: offered, but marked as imported before
         app.rescan();

@@ -328,6 +328,20 @@ impl ShaleApp {
         });
     }
 
+    /// Stores the width a sidebar was drawn at when a drag of its border ended (LAY-018).
+    fn keep_width(&mut self, ui: &Ui, drawn: f32, left: bool) {
+        let (stored, default) = if left { (self.cfg.left_sidebar_width, LEFT_WIDTH) } else { (self.cfg.right_sidebar_width, RIGHT_WIDTH) };
+        if ui.ctx().input(|i| i.pointer.any_released()) && (drawn - stored.map_or(default, |w| w as f32)).abs() >= 1.0 {
+            let width = Some(drawn.round() as u32);
+            if left {
+                self.cfg.left_sidebar_width = width;
+            } else {
+                self.cfg.right_sidebar_width = width;
+            }
+            self.save_config();
+        }
+    }
+
     pub fn layout(&mut self, ui: &mut Ui) {
         self.side.clear_geometry();
         // ribbon
@@ -339,20 +353,22 @@ impl ShaleApp {
             self.status_bar(ui);
         });
         if self.cfg.show_left {
-            egui::Panel::left("left-sidebar").default_size(260.0).size_range(170.0..=520.0).frame(egui::Frame::new().fill(theme::BG_SECONDARY).inner_margin(egui::Margin::symmetric(8, 8)).stroke(Stroke::new(1.0, theme::BORDER))).show(
-                ui,
-                |ui| {
-                    self.left_sidebar(ui);
-                },
-            );
+            let left = sidebar_width(self.cfg.left_sidebar_width, LEFT_WIDTH, LEFT_RANGE);
+            let panel = egui::Panel::left("left-sidebar").default_size(left).size_range(LEFT_RANGE);
+            let panel = if std::mem::take(&mut self.side.reset_widths[0]) { panel.exact_size(LEFT_WIDTH) } else { panel };
+            let shown = panel.frame(egui::Frame::new().fill(theme::BG_SECONDARY).inner_margin(egui::Margin::symmetric(8, 8)).stroke(Stroke::new(1.0, theme::BORDER))).show(ui, |ui| {
+                self.left_sidebar(ui);
+            });
+            self.keep_width(ui, shown.response.rect.width(), true);
         }
         if self.cfg.show_right {
-            egui::Panel::right("right-sidebar").default_size(290.0).size_range(200.0..=560.0).frame(egui::Frame::new().fill(theme::BG_SECONDARY).inner_margin(egui::Margin::symmetric(10, 8)).stroke(Stroke::new(1.0, theme::BORDER))).show(
-                ui,
-                |ui| {
-                    self.right_views(ui);
-                },
-            );
+            let right = sidebar_width(self.cfg.right_sidebar_width, RIGHT_WIDTH, RIGHT_RANGE);
+            let panel = egui::Panel::right("right-sidebar").default_size(right).size_range(RIGHT_RANGE);
+            let panel = if std::mem::take(&mut self.side.reset_widths[1]) { panel.exact_size(RIGHT_WIDTH) } else { panel };
+            let shown = panel.frame(egui::Frame::new().fill(theme::BG_SECONDARY).inner_margin(egui::Margin::symmetric(10, 8)).stroke(Stroke::new(1.0, theme::BORDER))).show(ui, |ui| {
+                self.right_views(ui);
+            });
+            self.keep_width(ui, shown.response.rect.width(), false);
         }
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::BG_PRIMARY)).show(ui, |ui| {
             self.panes_ui(ui);
@@ -1040,3 +1056,30 @@ pub fn shellexpand(p: &str) -> String {
 }
 
 pub fn _unused(_: &markdown::LinkSpan) {}
+
+/// The first width and the limits of the left and of the right sidebar, in points (LAY-018).
+const LEFT_WIDTH: f32 = 260.0;
+const LEFT_RANGE: std::ops::RangeInclusive<f32> = 170.0..=520.0;
+const RIGHT_WIDTH: f32 = 290.0;
+const RIGHT_RANGE: std::ops::RangeInclusive<f32> = 200.0..=560.0;
+
+/// The width a sidebar starts with: the stored one, within its limits, else the default (LAY-018).
+fn sidebar_width(stored: Option<u32>, default: f32, range: std::ops::RangeInclusive<f32>) -> f32 {
+    stored.map_or(default, |w| w as f32).clamp(*range.start(), *range.end())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // spec: LAY-018
+    #[test]
+    fn lay_018_a_stored_width_is_clamped_to_the_range_of_its_sidebar() {
+        assert_eq!(sidebar_width(None, LEFT_WIDTH, LEFT_RANGE), 260.0);
+        assert_eq!(sidebar_width(Some(333), LEFT_WIDTH, LEFT_RANGE), 333.0);
+        assert_eq!(sidebar_width(Some(5), LEFT_WIDTH, LEFT_RANGE), 170.0);
+        assert_eq!(sidebar_width(Some(4000), LEFT_WIDTH, LEFT_RANGE), 520.0);
+        assert_eq!(sidebar_width(Some(5), RIGHT_WIDTH, RIGHT_RANGE), 200.0);
+        assert_eq!(sidebar_width(Some(4000), RIGHT_WIDTH, RIGHT_RANGE), 560.0);
+    }
+}

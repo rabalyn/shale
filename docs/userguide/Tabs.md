@@ -25,11 +25,11 @@ features:
   points). Closing the last tab of a pane, or Ctrl+Shift+W (macOS: Cmd+Shift+W), closes the pane; the last pane stays.
   After closing a tab or a pane the keyboard goes into the editor of the open note of the focused
   pane, so no key is lost.
-- The panes and the order of all open tabs (notes, drawings and Feeds tabs) and which are pinned, the open tab of each pane, the focused pane and the widths come back at
+- The panes and the order of all open tabs (notes, drawings, Feeds, Mail, Calendar, Tasks, Graph and Settings-file tabs; an empty tab is not kept) and which are pinned, the open tab of each pane, the focused pane and the widths come back at
   the next start (they are kept in `.shale/state.json`, see [[Vault settings]]).
 - Each note also comes back as you left it: the cursor or selection, how far it was scrolled and whether it was in the
   reading view, in every pane and also for tabs that were not the open one (they get their place when
-  you switch to them). If the note got shorter in the meantime, the cursor goes to its end. Shale writes this every few
+  you switch to them). A Mail tab comes back on the folder and the message you had open (the default folder if it is gone), a Calendar tab on the mode and the day you looked at, a Tasks tab with its filter and a Graph tab with its switches. Nothing is asked when they come back: the mail view opens the way it does when you open it yourself. If the note got shorter in the meantime, the cursor goes to its end. Shale writes this every few
   seconds while you work and when it closes, so even a crash loses at most a few seconds.
 
 Back to [[Start here]]; Feeds tabs are in [[Feeds]].

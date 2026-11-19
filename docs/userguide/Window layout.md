@@ -27,6 +27,8 @@ of **views**.
   below the views) and back. Icons that are no panels (Files, Mail, …) cannot go there. Taking
   the last icon out of a view removes the view. Esc cancels a drag.
 - Drag the border between two views to change their heights.
+- Drag the border of the left or of the right sidebar to change its width; Shale keeps the widths
+  (`left_sidebar_width`, `right_sidebar_width`), and **Reset layout** goes back to the default widths.
 - The layout is kept in the settings (`sidebars`, `show_left`, `show_right`), see
   [[Settings reference]].
 
