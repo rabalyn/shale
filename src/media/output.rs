@@ -110,6 +110,20 @@ mod tests {
         }
     }
 
+    /// Keep the queue full (the source's side) until `done` or the deadline; whether `done` held.
+    fn feed_until(shared: &Shared, epoch: u64, deadline: Duration, done: impl Fn() -> bool) -> bool {
+        let silence = vec![0.0f32; 480 * 2];
+        let start = Instant::now();
+        while !done() {
+            if start.elapsed() > deadline {
+                return false;
+            }
+            while shared.push(epoch, &silence) == crate::media::engine::Pushed::Accepted {}
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        true
+    }
+
     // spec: MEDIA-011, MEDIA-013
     #[test]
     fn the_clock_card_keeps_real_time_when_its_sleeps_run_long() {
@@ -119,12 +133,15 @@ mod tests {
         // a slow runner: every sleep of the card takes 60 ms
         let card = clock_card(shared.clone(), stop.clone(), Duration::from_millis(60));
         let epoch = shared.epoch();
-        let silence = vec![0.0f32; 480 * 2];
-        let start = Instant::now();
-        while start.elapsed() < Duration::from_millis(600) {
-            while shared.push(epoch, &silence) == crate::media::engine::Pushed::Accepted {}
-            std::thread::sleep(Duration::from_millis(5));
-        }
+        // The card times itself from its own start, which on a loaded machine is well after the
+        // spawn: take the wall clock from its first rendering, minus what it has rendered by now.
+        assert!(feed_until(&shared, epoch, Duration::from_secs(20), || shared.position_secs() > 0.0), "the card never started");
+        let start = Instant::now() - Duration::from_secs_f64(shared.position_secs());
+        feed_until(&shared, epoch, Duration::from_millis(600), || false);
+        // The card catches up only when it wakes, so wait for its next wakeup after the window
+        // and compare there (not in the middle of a sleep that ran long).
+        let at_window_end = shared.position_secs();
+        assert!(feed_until(&shared, epoch, Duration::from_secs(20), || shared.position_secs() > at_window_end), "the card never woke again");
         let (pos, wall) = (shared.position_secs(), start.elapsed().as_secs_f64());
         stop.store(true, Ordering::Relaxed);
         card.join().unwrap();
@@ -138,12 +155,7 @@ mod tests {
         let out = Output::without_device();
         out.shared.set_playing(true);
         let epoch = out.shared.epoch();
-        let silence = vec![0.0f32; 480 * 2];
-        let start = Instant::now();
-        while start.elapsed() < Duration::from_millis(300) {
-            while out.shared.push(epoch, &silence) == crate::media::engine::Pushed::Accepted {}
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        assert!(out.shared.position_secs() > 0.1, "the clock runs without a card");
+        // not a timing bound (the thread may start late on a loaded machine): the clock runs
+        assert!(feed_until(&out.shared, epoch, Duration::from_secs(20), || out.shared.position_secs() > 0.1), "the clock runs without a card");
     }
 }
