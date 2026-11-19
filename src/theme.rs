@@ -135,7 +135,7 @@ pub fn spaced(ui: &egui::Ui, rich: egui::RichText) -> egui::RichText {
 /// (the item gap before it is already there), so it reads as new and sits closer to its own
 /// items, which follow at [`ITEM_GAP`]. The first heading at the top of a page or a dialog gets
 /// no gap, so there is no empty band above it. Every heading in Settings and in dialogs goes
-/// through this (NAV-044).
+/// through this (NAV-048).
 pub fn section(ui: &mut egui::Ui, title: impl Into<String>) -> egui::Response {
     if !at_top(ui) {
         ui.add_space(SECTION_GAP - ITEM_GAP);
@@ -257,9 +257,9 @@ mod tests {
         });
     }
 
-    // spec: NAV-044
+    // spec: NAV-048
     #[test]
-    fn nav_044_a_section_heading_has_the_section_gap_above_it_and_none_at_the_top() {
+    fn nav_048_a_section_heading_has_the_section_gap_above_it_and_none_at_the_top() {
         in_ui(300.0, |ui| {
             dialog_spacing(ui);
             let first = section(ui, "First");

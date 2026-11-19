@@ -128,9 +128,9 @@ fn the_latex_tab_has_its_controls_and_says_why_no_tex_can_be_used() {
     assert!(!t.shows("Remove…") && !t.shows("Update"), "nothing to remove or update while nothing is installed");
 }
 
-// spec: NAV-044
+// spec: NAV-048
 #[test]
-fn nav_044_the_sections_of_the_latex_page_have_the_section_gap_above_their_headings() {
+fn nav_048_the_sections_of_the_latex_page_have_the_section_gap_above_their_headings() {
     let mut t = T::new("sections", nothing_found());
     t.hl.frames(&mut t.app, 4);
     let at = |t: &T, text: &str| t.hl.text.iter().find(|(s, _)| s == text).map(|(_, p)| *p).unwrap_or_else(|| panic!("{text:?} missing in {:?}", t.painted()));

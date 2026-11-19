@@ -319,7 +319,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - Drag the border between two panes to resize them (neither gets narrower than 240 points).
   Closing the last tab of a pane (or **Ctrl+Shift+W**) removes the pane; the last pane stays.
 - The panes, their tabs, the open tab of each, the focused pane and the widths come back at the
-  next start, and each note with its cursor or selection, its scroll position and its reading view; the
+  next start, and each note with its cursor or selection, its scroll position and its reading view. Mail,
+  Calendar, Tasks, Graph and Settings-file tabs come back too: the mail view on its folder and open message,
+  the calendar on its mode and day, Tasks with its filter, the graph with its switches (an empty tab is
+  not kept); the
   state is written every few seconds when something changed, and at exit. All the keys can be changed in Settings, Keybindings.
 
 ## Fonts and text sizes
@@ -510,10 +513,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - A middle click on the **Mail**, **Feeds** or **Calendar** icon opens that view in a new tab.
 - Right-click an icon (in the ribbon or in a view's menubar) for a menu: **Remove from the
   ribbon** / **Remove from this view**, **Restore …** for every icon removed earlier, and
-  **Reset layout** (the default icons, order and heights). The last icon of the ribbon cannot
+  **Reset layout** (the default icons, order, heights and sidebar widths). The last icon of the ribbon cannot
   be removed. Panel shortcuts in the ribbon have their own glyphs, not those of the Graph and
   Calendar buttons.
-- The layout (icons, heights, removed icons) is kept in the settings.
+- The layout (icons, heights, removed icons) and the widths of the left and the right sidebar (drag their borders) are kept in the settings.
 - **F1** (or Settings → Help → **Open user guide**) opens the user guide, itself a Shale vault:
   The guide is built into the program, which unpacks it once per version into its data folder (a
   copy you edited is not overwritten) and opens it at "Start here". This works in every build on

@@ -37,6 +37,8 @@ impl W {
         let mut w = W::new(tag);
         w.app.cfg = cfg;
         w.app.side = crate::sidebar_ui::SideState::new(Layout::from_config(&w.app.cfg));
+        // a new window has no memory of the panels of the first one (LAY-018)
+        w.hl = Headless::new();
         w.frames(4);
         w
     }
@@ -595,4 +597,54 @@ fn the_outline_shows_the_numbers_and_a_click_scrolls_the_reading_view_to_the_hea
     let line = doc.text[..at].matches('\n').count();
     assert_eq!(doc.text.lines().nth(line), Some("## Down here"), "the cursor is on the heading line");
     assert!(!tab.reading);
+}
+
+// spec: LAY-018, LAY-014
+#[test]
+fn lay_018_the_sidebar_widths_are_kept_after_a_restart_and_reset_with_the_layout() {
+    // x of the first tab: it moves with the width of the left sidebar
+    let tab_x = |w: &W| w.hl.text.iter().filter(|(t, p)| t == "Welcome" && p.y < 40.0).map(|(_, p)| p.x).fold(f32::MAX, f32::min);
+    let mut w = W::new("widths");
+    assert_eq!((w.app.cfg.left_sidebar_width, w.app.cfg.right_sidebar_width), (None, None), "nothing is stored before a border is dragged");
+    let (tab0, right0) = (tab_x(&w), w.app.side.right_rect.unwrap());
+    // the left border: the ribbon is 44 wide, the sidebar 260
+    let left_edge = Pos2::new(w.app.side.ribbon_rect.unwrap().max.x + 260.0 - 2.0, right0.center().y);
+    w.drag_to(left_edge, left_edge + Vec2::new(60.0, 0.0));
+    assert_eq!(w.app.cfg.left_sidebar_width, None, "not written while the border is dragged");
+    w.release(left_edge + Vec2::new(60.0, 0.0));
+    w.frames(3);
+    let stored = w.app.cfg.left_sidebar_width.expect("written when the drag ends");
+    assert!((stored as f32 - 320.0).abs() < 12.0, "{stored}");
+    assert!((tab_x(&w) - (tab0 + 60.0)).abs() < 12.0, "{} -> {}", tab0, tab_x(&w));
+    let edge = Pos2::new(right0.min.x - 6.0, right0.center().y);
+    w.drag_and_drop(edge, edge - Vec2::new(80.0, 0.0));
+    w.frames(3);
+    let right = w.app.cfg.right_sidebar_width.expect("written when the drag ends");
+    assert!((right as f32 - (right0.width() + 80.0 + 20.0)).abs() < 14.0, "{right} for {}", right0.width());
+    assert_eq!(w.app.cfg.left_sidebar_width, Some(stored), "the left width did not change");
+    // a new window on this config draws the sidebars at these widths
+    let mut n = w.restarted("widths-2");
+    assert!((tab_x(&n) - tab_x(&w)).abs() < 1.5, "{} and {}", tab_x(&n), tab_x(&w));
+    assert!((n.app.side.right_rect.unwrap().width() - w.app.side.right_rect.unwrap().width()).abs() < 1.5);
+    assert_eq!((n.app.cfg.left_sidebar_width, n.app.cfg.right_sidebar_width), (Some(stored), Some(right)));
+    // a hidden sidebar keeps its width
+    n.app.cfg.show_left = false;
+    n.frames(3);
+    n.app.cfg.show_left = true;
+    n.frames(3);
+    assert!((tab_x(&n) - tab_x(&w)).abs() < 1.5, "the left sidebar came back as wide as before");
+    // a stored width out of range is clamped
+    let mut f = W::new("widths-3");
+    f.app.cfg.left_sidebar_width = Some(5000);
+    f.app.cfg.right_sidebar_width = Some(1);
+    let f = f.restarted("widths-4");
+    let narrow = f.app.side.right_rect.unwrap().width();
+    assert!(narrow > 150.0 && narrow < right0.width() - 60.0, "clamped up to 200 points outside, not 1: {narrow}");
+    // Reset layout (LAY-014) puts both back
+    w.right_click_at(w.ribbon_icon(Item::Files).center());
+    w.click_at(w.app.side.menu.reset.unwrap().center());
+    w.frames(3);
+    assert_eq!((w.app.cfg.left_sidebar_width, w.app.cfg.right_sidebar_width), (None, None));
+    assert!((tab_x(&w) - tab0).abs() < 1.5, "{} and {}", tab_x(&w), tab0);
+    assert!((w.app.side.right_rect.unwrap().width() - right0.width()).abs() < 1.5);
 }

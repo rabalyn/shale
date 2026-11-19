@@ -23,6 +23,9 @@ pub struct SideState {
     pub peek: Option<RightPanel>,
     /// the share of the height of that panel (not stored, LAY-012); 0: the equal share
     pub(crate) peek_weight: u32,
+    /// "Reset layout" (LAY-014): the left and the right sidebar take their default width at their
+    /// next frame (LAY-018)
+    pub(crate) reset_widths: [bool; 2],
     /// where things were drawn this frame (and the frame before the next one)
     pub(crate) ribbon_rect: Option<Rect>,
     pub(crate) ribbon_icons: Vec<(Item, Rect)>,
@@ -206,6 +209,9 @@ impl ShaleApp {
         if reset.clicked() {
             self.side.layout = Layout::default();
             self.side.peek = None;
+            self.cfg.left_sidebar_width = None;
+            self.cfg.right_sidebar_width = None;
+            self.side.reset_widths = [true, true];
             self.layout_changed();
             ui.close();
         }
