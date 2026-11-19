@@ -10,6 +10,7 @@
 
 use super::archive;
 use super::compile::WorkDir;
+use super::ctan;
 use super::engine::Engine;
 use super::install::{download, Handle, Stage};
 use super::proc::{self, Ending};
@@ -192,7 +193,8 @@ fn fetch(req: &Request, handle: &Handle, work: &WorkDir) -> Result<(PathBuf, Sou
             Ok((archive::single_root(&src), Source::Github { repo: PRESET_REPO.into(), reference: PRESET_COMMIT.into(), sha256: Some(PRESET_SHA256.into()) }, None))
         }
         What::Ctan => {
-            download_and_read(CTAN_URL, None)?;
+            handle.stage(Stage::Fetch);
+            ctan::fetch(handle, CTAN_URL, &archive_file, &src)?;
             Ok((archive::single_root(&src), Source::Ctan { url: CTAN_URL.into() }, None))
         }
         What::Github { url, reference } => {
