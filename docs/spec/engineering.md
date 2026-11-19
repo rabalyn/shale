@@ -111,5 +111,5 @@ From the owner's notes of 2026-11-15 ([ADR-0013](../decisions/0013-forgejo-and-i
 | ID | Rule | Status | Code | Test |
 |---|---|---|---|---|
 | PERF-001 | The task list, open-task count and backlinks of the open note are computed once per vault change, not every frame. ⚠ Today `all_tasks()` and `backlinks()` run every frame (`layout.rs:611, 620`). | SHOULD BE | `vault.generation` | — |
-| PERF-002 | A rescan of a vault with 10,000 files takes well under the 3 s scan interval. ⚠ Today the rescan has an O(n²) check (`vault.rs:120`) and `Vault::file` is a linear search. | SHOULD BE | `Vault::rescan` | — |
+| PERF-002 | A rescan of a vault with 10,000 files takes well under the 3 s scan interval: `Vault::file` is a hash lookup (`file_pos`, rebuilt with the name index), the rescan finds a new or missing file by comparing the sorted lists once, and every sort of paths makes its lower-case key once (`sort_by_cached_key`, `vault::sort_key`), not once per comparison. | IS NOW | `Vault::rescan`, `Vault::file`, `vault::sort_key` | `vault.rs::perf_002_file_finds_what_the_linear_search_finds_through_every_change`, `vault.rs::perf_002_the_file_list_and_the_lists_made_of_it_keep_their_order` |
 | PERF-003 | The graph view is usable up to a few hundred notes (O(n²) physics). | IS NOW | `graph.rs` | untested |
