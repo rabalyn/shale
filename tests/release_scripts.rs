@@ -31,3 +31,9 @@ fn forge_016_test_dev_metrics_script_passes() {
 fn forge_013_forge_014_test_release_script_passes() {
     run("scripts/test-release.sh");
 }
+
+// spec: DEV-011
+#[test]
+fn dev_011_test_env_tests_script_passes() {
+    run("scripts/test-env-tests.sh");
+}

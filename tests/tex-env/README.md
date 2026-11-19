@@ -25,6 +25,15 @@ The `tex_env` tests share nothing (own work folders, a fresh container per compi
 `.forgejo/scripts/env-tests.sh run` (and so `scripts/land.sh`) uses four test threads, `SHALE_ENV_TESTS_TEX_THREADS`
 sets the number (the demos test starts four compiles itself; #370). `tex_import` and `tex_install` run with one thread.
 
+**Failed compiles keep their log** (#327): `SHALE_TEX_FAILED_LOGS=<folder>` makes every failed compile of the tests (Shale's
+own `compile` and the demos of `tex_env`) copy its full `.log` into that folder as `<pid>-<n>-<name>.log` before its work
+folder is removed, so a failure that does not come again can still be read. `.forgejo/scripts/env-tests.sh run` (and so
+`scripts/land.sh`) sets it to `target/tex-failed-logs` (emptied at the start) and lists the kept logs at the end.
+When `tex_env` fails with a font that could not be loaded, `env-tests.sh` says it looks like a TeX environment problem,
+not a code error, prints `tex-env.sh status`, rebuilds the image with `build --refresh` (a freshly resolved mirror) and
+runs `tex_env` once more; the second run decides, and any other failure is not retried
+(`scripts/test-env-tests.sh` tests that).
+
 `exec` is how `src/pdf/tex/compile_tests.rs` runs Shale's compile code against the real LuaLaTeX: the test's `Engine`
 has a command prefix `sh tex-env.sh exec <work folder> --`, so `lualatex`, `biber` and `kpsewhich` run in the
 container with the work folder mounted at the same path (the program runs in the folder `exec` was started in when that is inside the mounted one, which docstrip in the template import tests needs); `TEXINPUTS`, `BIBINPUTS`, `openout_any` and
@@ -52,6 +61,14 @@ upstream `latexmkrc`).
 - **A stand-in logo**: the TU logo cannot be redistributed, and the classes look for
   `tuda_logo.pdf` while the theme loads, before the `demo` option takes effect. `build` makes a grey
   bar of that name in `cache/tuda-ci/tex/`.
+
+- **The font names database**, built once in the image: after the packages `install-texlive.sh` runs
+  `luaotfload-tool --update --force` and looks `lmroman10-regular`, `XCharter` and `Roboto` up in it. Without that, every
+  compile (a fresh `--rm` container each, up to 16 at once) would build the database itself in its first LuaLaTeX run,
+  slowly, and that is where the lookups of fonts failed once (#327, #362). When a font is not found, the font packages
+  (`lm lm-math xcharter roboto`) are installed again from a freshly resolved mirror and the database is built again; when
+  that does not help the build fails and names the mirrors. `/etc/shale-tex-build` (and `status`) says so. The
+  `tex_env` compile test asserts that no run builds the database.
 
 ## The first build
 

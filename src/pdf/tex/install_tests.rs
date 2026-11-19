@@ -270,10 +270,33 @@ mod fake {
         bytes
     }
 
+    /// The start of every pretend program: `R` is the root of the TeX tree it lives in (`bin/<platform>/..`), whatever the
+    /// folder is called now (the partial folder while `install-tl` runs, `texlive` afterwards).
+    const ROOT_SH: &str = "R=$(cd \"$(dirname \"$0\")/../..\" && pwd)\n";
+    const ROOT: &str = "#!/bin/sh\nR=$(cd \"$(dirname \"$0\")/../..\" && pwd)\n";
+
+    /// A pretend `lualatex`: records its run in `order`, makes a log and a PDF; fails with the error a font that cannot be
+    /// loaded gives (#362) while the number in `fontfail` is above 0 (counting it down on every run).
+    const LUALATEX_OK: &str = "echo lualatex >> $R/order\nfor a; do last=$a; done\nstem=${last%.tex}\nif [ -f $R/fontfail ] && [ $(cat $R/fontfail) -gt 0 ]; then\n  echo $(( $(cat $R/fontfail) - 1 )) > $R/fontfail\n  echo '! Font \\TU/lmr/m/n/10 not loadable: Metric (TFM) file or installed font not found.' > $stem.log\n  exit 1\nfi\necho ok > $stem.log\necho '%PDF-1.5 pretend' > $stem.pdf\n";
+
+    /// A pretend `lualatex` that fails with an error that is no font problem.
+    const LUALATEX_BROKEN: &str = "echo lualatex >> $R/order\nfor a; do last=$a; done\nstem=${last%.tex}\necho '! Undefined control sequence.' > $stem.log\nexit 1\n";
+
+    /// A pretend `luaotfload-tool`: records its arguments in `order` and `luaotfload.calls`.
+    const LUAOTFLOAD_OK: &str = "echo \"luaotfload-tool $*\" >> $R/order\necho \"$*\" >> $R/luaotfload.calls\n";
+
+    /// A pretend `luaotfload-tool` that fails.
+    const LUAOTFLOAD_BROKEN: &str = "echo \"luaotfload-tool $*\" >> $R/order\necho 'luaotfload | db : the database is broken' >&2\nexit 1\n";
+
     /// The perl of a pretend `install-tl`: reads TEXDIR and the platform from the profile, prints progress
-    /// lines, makes `bin/<platform>/` with a `tlmgr` (records its arguments, prints progress) and a
-    /// `lualatex` and `biber` that work. `middle` is perl run after the first progress line.
+    /// lines, makes `bin/<platform>/` with a `tlmgr` (records its arguments in `tlmgr.args` and every run in
+    /// `tlmgr.calls`, prints progress), a `luaotfload-tool`, a `lualatex` and a `biber`. `middle` is perl run
+    /// after the first progress line.
     fn install_tl(middle: &str, tlmgr: &str) -> String {
+        install_tl_with(middle, tlmgr, LUALATEX_OK, LUAOTFLOAD_OK)
+    }
+
+    fn install_tl_with(middle: &str, tlmgr: &str, lualatex: &str, luaotfload: &str) -> String {
         format!(
             r##"use strict; use File::Path qw(make_path);
 my ($profile, $repo, $dir, $plat);
@@ -282,13 +305,18 @@ open(my $p, '<', $profile) or die "no profile";
 while (<$p>) {{ chomp; $dir = $1 if /^TEXDIR (.*)$/; $plat = $1 if /^binary_(\S+) 1/; }}
 $| = 1;
 print "[ 1/2, ??:??/??:??] install: amsfonts [10k]\n";
+make_path($dir);
 {middle}
 print "[ 2/2, ??:??/??:??] install: babel [20k]\n";
 sub wr {{ my ($f, $t) = @_; open(my $h, '>', $f) or die; print $h $t; close $h; chmod 0755, $f; }}
 make_path("$dir/bin/$plat");
 open(my $a, '>', "$dir/install.args") or die; print $a "@ARGV\n"; close $a;
-wr("$dir/bin/$plat/tlmgr", "#!/bin/sh\necho \"\$@\" > '$dir/tlmgr.args'\n" . q~{tlmgr}~ . "\n");
-wr("$dir/bin/$plat/lualatex", "#!/bin/sh\nfor a; do last=\$a; done\nstem=\${{last%.tex}}\necho ok > \$stem.log\necho '%PDF-1.5 pretend' > \$stem.pdf\n");
+wr("$dir/bin/$plat/tlmgr", q~{ROOT}echo "$@" > $R/tlmgr.args
+echo "$@" >> $R/tlmgr.calls
+{tlmgr}
+~);
+wr("$dir/bin/$plat/luaotfload-tool", q~{ROOT}{luaotfload}~);
+wr("$dir/bin/$plat/lualatex", q~{ROOT}{lualatex}~);
 wr("$dir/bin/$plat/biber", "#!/bin/sh\nexit 0\n");
 "##
         )
@@ -311,7 +339,7 @@ wr("$dir/bin/$plat/biber", "#!/bin/sh\nexit 0\n");
             notified.fetch_add(1, Ordering::SeqCst);
         })
         .unwrap();
-        assert_eq!(done, Done { warning: None }, "the pretend TeX compiles the test document");
+        assert_eq!(done, Done { warning: None, mirrors: vec![repo.clone()] }, "the pretend TeX compiles the test document, and the one mirror is named");
         assert_eq!(paths(&asked), [format!("/tlnet/{MIRROR_PROBE}"), format!("/tlnet/{}", installer_archive())], "the mirror was resolved and the installer downloaded from it, nothing else");
         let root = managed_root(&data);
         assert!(root.join("bin").is_dir() && !partial_root(&data).exists(), "moved into place, no partial folder left");
@@ -320,7 +348,8 @@ wr("$dir/bin/$plat/biber", "#!/bin/sh\nexit 0\n");
         let tlmgr = std::fs::read_to_string(root.join("tlmgr.args")).unwrap();
         let expected: Vec<&str> = ["--repository", repo.as_str(), "install"].into_iter().chain(packages()).collect();
         assert_eq!(tlmgr.split_whitespace().collect::<Vec<_>>(), expected, "tlmgr installs the packages of the list");
-        assert_eq!(handle.progress().stage, Stage::Fonts, "the last stage is the first LuaLaTeX run");
+        assert_eq!(handle.progress().stage, Stage::Fonts, "the last stage is the font names database and the test document");
+        assert_eq!(order(&root), ["luaotfload-tool --update", "lualatex"], "the font names database is built before the test document is compiled");
         assert!(notified.load(Ordering::SeqCst) >= 4, "the window was told about the progress");
         assert!(root.read_dir().unwrap().all(|e| e.unwrap().file_name() != "texlive.profile"), "the profile stays in the temporary folder");
         // a second install refuses: remove it first
@@ -416,17 +445,110 @@ wr("$dir/bin/$plat/biber", "#!/bin/sh\nexit 0\n");
         let _ = std::fs::remove_dir_all(&data);
     }
 
+    /// What the pretend programs of the tree `root` ran, in order: `lualatex` and `luaotfload-tool <arguments>`.
+    fn order(root: &Path) -> Vec<String> {
+        std::fs::read_to_string(root.join("order")).unwrap_or_default().lines().map(str::to_string).collect()
+    }
+
+    /// The runs of the pretend `tlmgr` (its arguments, one line each).
+    fn tlmgr_calls(root: &Path) -> Vec<String> {
+        std::fs::read_to_string(root.join("tlmgr.calls")).unwrap_or_default().lines().map(str::to_string).collect()
+    }
+
+    /// The command line of the repair of the fonts on `mirror` (#362).
+    fn reinstall_line(mirror: &str) -> String {
+        format!("--repository {mirror} install --reinstall {}", FONT_PACKAGES.join(" "))
+    }
+
+    /// `middle` of a pretend `install-tl` that makes the first `n` runs of `lualatex` fail with a font error.
+    fn font_fails(n: u32) -> String {
+        format!("open(my $f, '>', \"$dir/fontfail\") or die; print $f \"{n}\\n\"; close $f;")
+    }
+
     // spec: TEX-002
     #[test]
-    fn an_install_whose_test_document_fails_is_installed_with_a_warning() {
+    fn an_install_whose_test_document_fails_is_installed_with_a_warning_that_names_the_mirror() {
         let data = temp("warning");
-        let broken = install_tl("", GOOD_TLMGR).replace("echo ok > \\$stem.log\\necho '%PDF-1.5 pretend' > \\$stem.pdf\\n", "exit 1\\n");
-        let (repo, _) = serve(installer("warning", &broken));
+        let (repo, _) = serve(installer("warning", &install_tl_with("", GOOD_TLMGR, LUALATEX_BROKEN, LUAOTFLOAD_OK)));
         let done = install(&env(&data, &repo), &Handle::default(), &|| {}).unwrap();
         let w = done.warning.expect("a warning");
-        assert!(w.contains("installed, but the test document did not compile"), "{w}");
+        assert!(w.contains(&format!("installed from the mirror {repo}, but the test document did not compile")) && w.contains("Undefined control sequence"), "{w}");
+        assert_eq!(done.mirrors, std::slice::from_ref(&repo));
         assert!(managed_root(&data).join("bin").is_dir(), "the TeX Live is there");
+        assert_eq!(order(&managed_root(&data)), ["luaotfload-tool --update", "lualatex"], "a failure that is no font problem is not repaired: no more runs");
+        assert_eq!(tlmgr_calls(&managed_root(&data)).len(), 1, "nothing was installed again");
         let _ = std::fs::remove_dir_all(&data);
+    }
+
+    // spec: TEX-002
+    #[test]
+    fn a_font_that_cannot_be_loaded_is_repaired_from_a_fresh_mirror_and_then_the_test_document_compiles() {
+        let data = temp("font-repair");
+        let body = installer("font-repair", &install_tl_with(&font_fails(1), GOOD_TLMGR, LUALATEX_OK, LUAOTFLOAD_OK));
+        let (a, _) = serve(body.clone());
+        let (b, asked_b) = serve(body);
+        // the redirector sends the install to the first mirror and the repair to the second
+        let (redirect, asked) = redirector(vec![a.clone(), b.clone()]);
+        let done = install(&env(&data, &redirect), &Handle::default(), &|| {}).unwrap();
+        assert_eq!(done, Done { warning: None, mirrors: vec![a.clone(), b.clone()] }, "no warning, and both mirrors are known");
+        assert_eq!(done.source_text(), format!("from the mirrors {a} and {b}"));
+        let root = managed_root(&data);
+        assert_eq!(order(&root), ["luaotfload-tool --update", "lualatex", "luaotfload-tool --update --force", "lualatex"], "the database, the failed test document, the database again from scratch, the test document");
+        assert_eq!(tlmgr_calls(&root).last().unwrap(), &reinstall_line(&b), "the font packages again, from the fresh mirror");
+        assert_eq!(tlmgr_calls(&root).len(), 2);
+        assert_eq!(paths(&asked).len(), 2, "the repository was resolved twice: for the install and for the repair");
+        assert_eq!(paths(&asked_b), [format!("/tlnet/{MIRROR_PROBE}")], "the second mirror was only asked for the probe");
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
+    // spec: TEX-002
+    #[test]
+    fn a_font_that_stays_unloadable_after_the_repair_is_a_warning_naming_both_mirrors_and_the_install_stays() {
+        let data = temp("font-stays");
+        let body = installer("font-stays", &install_tl_with(&font_fails(99), GOOD_TLMGR, LUALATEX_OK, LUAOTFLOAD_OK));
+        let (a, _) = serve(body.clone());
+        let (b, _) = serve(body);
+        let (redirect, _) = redirector(vec![a.clone(), b.clone()]);
+        let done = install(&env(&data, &redirect), &Handle::default(), &|| {}).unwrap();
+        let w = done.warning.expect("a warning");
+        assert!(w.contains(&format!("installed from the mirrors {a} and {b}, but the test document did not compile")) && w.contains("not loadable") && w.contains("font names database"), "{w}");
+        assert_eq!(order(&managed_root(&data)).iter().filter(|l| *l == "lualatex").count(), 2, "repaired once, not again and again");
+        assert!(managed_root(&data).join("bin").is_dir() && !partial_root(&data).exists(), "the install is complete, only its test failed");
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
+    // spec: TEX-002
+    #[test]
+    fn a_repair_that_fails_and_a_luaotfload_tool_that_fails_are_warnings_never_an_install_failure() {
+        let data = temp("repair-fails");
+        // tlmgr installs the packages and refuses to install them again
+        let tlmgr = format!("case \"$*\" in *--reinstall*) echo 'tlmgr: no network' >&2; exit 1 ;; esac\n{GOOD_TLMGR}");
+        let (repo, _) = serve(installer("repair-fails", &install_tl_with(&font_fails(99), &tlmgr, LUALATEX_OK, LUAOTFLOAD_OK)));
+        let done = install(&env(&data, &repo), &Handle::default(), &|| {}).unwrap();
+        let w = done.warning.expect("a warning");
+        assert!(w.contains("not loadable") && w.contains("could not be installed again") && w.contains("no network"), "{w}");
+        assert_eq!(order(&managed_root(&data)), ["luaotfload-tool --update", "lualatex"], "no database rebuild after a failed reinstall");
+        remove(&data).unwrap();
+        // a luaotfload-tool that fails: the first LuaLaTeX run builds the database as well, so a test document that compiles is no warning
+        let (repo, _) = serve(installer("tool-fails", &install_tl_with("", GOOD_TLMGR, LUALATEX_OK, LUAOTFLOAD_BROKEN)));
+        let done = install(&env(&data, &repo), &Handle::default(), &|| {}).unwrap();
+        assert_eq!(done.warning, None);
+        assert_eq!(order(&managed_root(&data)), ["luaotfload-tool --update", "lualatex"]);
+        remove(&data).unwrap();
+        // … and when the test document fails too, what the tool said is part of the warning
+        let (repo, _) = serve(installer("tool-fails2", &install_tl_with("", GOOD_TLMGR, LUALATEX_BROKEN, LUAOTFLOAD_BROKEN)));
+        let w = install(&env(&data, &repo), &Handle::default(), &|| {}).unwrap().warning.expect("a warning");
+        assert!(w.contains("Undefined control sequence") && w.contains("luaotfload-tool failed") && w.contains("the database is broken"), "{w}");
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
+    // spec: TEX-002
+    #[test]
+    fn the_font_packages_of_the_repair_are_in_the_package_list_and_in_the_script_of_the_test_image() {
+        let list = packages();
+        assert!(FONT_PACKAGES.iter().all(|p| list.contains(p)), "{FONT_PACKAGES:?}");
+        let script = include_str!("../../../tests/tex-env/install-texlive.sh");
+        assert!(script.contains(&format!("font_packages=\"{}\"", FONT_PACKAGES.join(" "))), "the image repairs the same packages");
     }
 
     // spec: TEX-003
@@ -441,7 +563,8 @@ wr("$dir/bin/$plat/biber", "#!/bin/sh\nexit 0\n");
         let handle = Handle::default();
         let (repo, _) = serve(vec![]);
         let done = update(&env(&data, &format!("{repo}/")), &handle, &|| {}).unwrap();
-        assert_eq!(done.warning, None);
+        assert_eq!(done.warning, None, "a TeX Live without luaotfload-tool (it could not be started) still tries the test document");
+        assert_eq!(done.mirrors, std::slice::from_ref(&repo));
         assert_eq!(std::fs::read_to_string(f.dir.join("tlmgr.args")).unwrap().trim(), format!("--repository {repo} update --self --all"));
         assert_eq!(handle.progress().stage, Stage::Fonts);
         // not installed: nothing to update
@@ -450,6 +573,48 @@ wr("$dir/bin/$plat/biber", "#!/bin/sh\nexit 0\n");
         script(&bin, "tlmgr", "echo 'tlmgr: remote repository is newer than local' >&2\nexit 1");
         let e = update(&env(&data, &repo), &Handle::default(), &|| {}).unwrap_err();
         assert!(e.contains("tlmgr failed") && e.contains("is newer than local"), "{e}");
+    }
+
+    // spec: TEX-003
+    #[test]
+    fn an_update_builds_the_font_database_first_and_repairs_a_font_that_cannot_be_loaded_like_an_install() {
+        let f = Fake::new("update-fonts");
+        let data = f.dir.join("data");
+        let root = managed_root(&data);
+        let bin = root.join("bin").join("x86_64-linux");
+        let tools = |lualatex: &str| {
+            script(&bin, "lualatex", &format!("{ROOT_SH}{lualatex}"));
+            script(&bin, "luaotfload-tool", &format!("{ROOT_SH}{LUAOTFLOAD_OK}"));
+            script(&bin, "biber", "exit 0");
+            script(&bin, "tlmgr", &format!("{ROOT_SH}echo \"$@\" >> $R/tlmgr.calls\n{GOOD_TLMGR}"));
+        };
+        // the root of the pretend tree is `$R`: script() puts its own shebang first, so the prelude has no shebang here
+        tools(LUALATEX_OK);
+        let (a, _) = serve(vec![]);
+        let (b, _) = serve(vec![]);
+        let (redirect, _) = redirector(vec![a.clone(), b.clone()]);
+        let done = update(&env(&data, &redirect), &Handle::default(), &|| {}).unwrap();
+        assert_eq!(done, Done { warning: None, mirrors: vec![a.clone()] });
+        assert_eq!(order(&root), ["luaotfload-tool --update", "lualatex"], "the database before the test document");
+        // a font that cannot be loaded: repaired from the next mirror
+        std::fs::remove_file(root.join("order")).unwrap();
+        std::fs::write(root.join("fontfail"), "1\n").unwrap();
+        let done = update(&env(&data, &redirect), &Handle::default(), &|| {}).unwrap();
+        assert_eq!(done.warning, None);
+        assert_eq!(done.mirrors.len(), 2, "{:?}", done.mirrors);
+        assert_eq!(order(&root), ["luaotfload-tool --update", "lualatex", "luaotfload-tool --update --force", "lualatex"]);
+        assert_eq!(tlmgr_calls(&root).last().unwrap(), &reinstall_line(done.mirrors.last().unwrap()));
+        // a font that stays unloadable: a warning that says "updated" and names the mirrors
+        std::fs::write(root.join("fontfail"), "99\n").unwrap();
+        let w = update(&env(&data, &redirect), &Handle::default(), &|| {}).unwrap().warning.expect("a warning");
+        assert!(w.starts_with("TeX Live is updated from the mirror") && w.contains("but the test document did not compile") && w.contains("not loadable"), "{w}");
+        // a failure that is no font problem is not repaired
+        tools(LUALATEX_BROKEN);
+        std::fs::remove_file(root.join("order")).unwrap();
+        let before = tlmgr_calls(&root).len();
+        let w = update(&env(&data, &redirect), &Handle::default(), &|| {}).unwrap().warning.expect("a warning");
+        assert!(w.contains("Undefined control sequence"), "{w}");
+        assert_eq!(tlmgr_calls(&root).len(), before + 1, "only the update itself");
     }
 
     /// What tlmgr says on a mirror older than the installation (Forgejo run #361, #320).
@@ -552,8 +717,9 @@ fn tex_install_the_managed_tex_live_installs_is_found_compiles_and_is_removed() 
     let started = std::time::Instant::now();
     let h = handle.clone();
     let done = install(&env, &h, &|| {}).unwrap_or_else(|e| panic!("the install failed: {e}"));
-    eprintln!("tex_install: installed in {:.0} s", started.elapsed().as_secs_f32());
-    assert_eq!(done.warning, None, "the test document compiled right after the install");
+    let mirrors = done.source_text();
+    eprintln!("tex_install: installed in {:.0} s, {mirrors}", started.elapsed().as_secs_f32());
+    assert_eq!(done.warning, None, "the test document compiled right after the install ({mirrors})");
     let root = managed_root(&data);
     let size: u64 = {
         fn walk(d: &Path) -> u64 {
@@ -577,9 +743,9 @@ fn tex_install_the_managed_tex_live_installs_is_found_compiles_and_is_removed() 
     assert!(e.missing.is_empty(), "missing: {:?}", e.missing);
     assert!(d.selected(super::engine::TexChoice::Auto).is_ok());
     // a small document compiles (the install already ran the test document once; this is the fast second run)
-    let out = super::compile::compile_test_document(e).unwrap_or_else(|e| panic!("{e}\n{}", e.log_tail));
-    assert!(out.pdf.starts_with(b"%PDF") && out.runs >= 2);
-    assert!(!out.font_cache_built, "the font cache was built by the install, not by this run");
+    let out = super::compile::compile_test_document(e).unwrap_or_else(|e| panic!("{e}\n{}\n({mirrors})", e.log_tail));
+    assert!(out.pdf.starts_with(b"%PDF") && out.runs >= 2, "{mirrors}");
+    assert!(!out.font_cache_built, "the font cache was built by the install, not by this run ({mirrors})");
     // and it is removed
     remove(&data).unwrap();
     assert!(!root.exists());

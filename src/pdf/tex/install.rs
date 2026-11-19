@@ -115,7 +115,8 @@ pub enum Stage {
     Packages,
     /// `tlmgr update`.
     Update,
-    /// The first LuaLaTeX run, which builds the font names database.
+    /// The font names database (`luaotfload-tool --update`), the test document, and when it fails
+    /// for a font, the font packages again from a fresh mirror (#362).
     Fonts,
     /// A template import (TEX-006): downloading the archive.
     Fetch,
@@ -167,7 +168,7 @@ impl Progress {
             Stage::Base => "Installing the base of TeX Live",
             Stage::Packages => "Installing the packages",
             Stage::Update => "Updating",
-            Stage::Fonts => "Building the font cache (the first LuaLaTeX run, this takes a moment)",
+            Stage::Fonts => "Building the font cache (this takes a moment)",
             Stage::Fetch => "Downloading the templates",
             Stage::Read => "Reading the templates",
             Stage::Generate => "Generating the class files with docstrip",
@@ -242,11 +243,37 @@ pub struct Env {
     pub repository: String,
 }
 
-/// What an install ended with.
+/// What an install or update ended with.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Done {
-    /// The install works, but the first test compile did not (what it said).
+    /// The install works, but the first test compile did not (what it said, naming the mirror).
     pub warning: Option<String>,
+    /// The mirror or mirrors the files came from, the first one first: the one the repository was
+    /// resolved to, a fresh one when `tlmgr` found it older than the installation (#320), and the
+    /// one the font packages were installed again from (#362).
+    pub mirrors: Vec<String>,
+}
+
+impl Done {
+    /// "from the mirror https://…" or "from the mirrors https://… and https://…".
+    pub fn source_text(&self) -> String {
+        match self.mirrors.as_slice() {
+            [] => String::new(),
+            [one] => format!("from the mirror {one}"),
+            many => format!("from the mirrors {}", many.join(" and ")),
+        }
+    }
+}
+
+/// The TeX Live packages the fonts of the templates and the test document stand on (Latin Modern
+/// for the LaTeX defaults, XCharter and Roboto for the templates); the ones installed again when a
+/// font cannot be loaded (#362).
+pub const FONT_PACKAGES: [&str; 4] = ["lm", "lm-math", "xcharter", "roboto"];
+
+fn add_mirror(mirrors: &mut Vec<String>, m: &str) {
+    if !mirrors.iter().any(|x| x == m) {
+        mirrors.push(m.to_string());
+    }
 }
 
 /// Run `cmd`, feeding its progress lines to the handle.
@@ -313,7 +340,8 @@ pub(super) fn resolve_mirror(handle: &Handle, repo: &str) -> Result<String, Stri
 
 /// Run `tlmgr` (made by `cmd` for a mirror) on `mirror`. When `tlmgr` finds that mirror older than
 /// the installation, a fresh mirror of `repo` is chosen and tried, [`MIRROR_TRIES`] runs at most (#320).
-fn tlmgr_on_mirror(handle: &Handle, notify: &dyn Fn(), stage: Stage, repo: &str, mut mirror: String, cmd: impl Fn(&str) -> Command) -> Result<(), String> {
+/// The mirror the run that worked used is given back.
+fn tlmgr_on_mirror(handle: &Handle, notify: &dyn Fn(), stage: Stage, repo: &str, mut mirror: String, cmd: impl Fn(&str) -> Command) -> Result<String, String> {
     let mut runs = 1;
     loop {
         match step(handle, notify, stage, "tlmgr", cmd(&mirror)) {
@@ -321,7 +349,7 @@ fn tlmgr_on_mirror(handle: &Handle, notify: &dyn Fn(), stage: Stage, repo: &str,
                 runs += 1;
                 mirror = resolve_mirror(handle, repo)?;
             }
-            result => return result,
+            result => return result.map(|()| mirror),
         }
     }
 }
@@ -375,23 +403,71 @@ pub fn install(env: &Env, handle: &Handle, notify: &dyn Fn()) -> Result<Done, St
     if result.is_err() {
         let _ = std::fs::remove_dir_all(&partial);
     }
-    result?;
+    let mut mirrors = result?;
     crate::fsutil::rename_noreplace(&partial, &root).map_err(|e| {
         let _ = std::fs::remove_dir_all(&partial);
         format!("the installed TeX Live could not be moved to {} ({e})", root.display())
     })?;
-    // the first run builds the font names database: here, with the paths it will have from now on
-    handle.stage(Stage::Fonts);
-    notify();
-    let warning = match managed_engine(&root).and_then(|e| compile_test_document(&e).map(|_| ()).map_err(|e| e.to_string())) {
-        Ok(()) => None,
-        Err(e) => Some(format!("TeX Live is installed, but the test document did not compile: {e}")),
+    // the font names database is built here, with the paths it will have from now on
+    let repo = check_repository(&env.repository).unwrap_or(&env.repository);
+    let warning = fonts_after(managed_engine(&root), handle, notify, repo, &mut mirrors, "installed");
+    Ok(Done { warning, mirrors })
+}
+
+/// The Fonts stage of an install or update, and the warning it ends with (none when the test
+/// document compiled): [`fonts`], with the mirrors named in what it says.
+fn fonts_after(engine: Result<Engine, String>, handle: &Handle, notify: &dyn Fn(), repo: &str, mirrors: &mut Vec<String>, what: &str) -> Option<String> {
+    let result = engine.and_then(|e| fonts(&e, handle, notify, repo, mirrors));
+    result.err().map(|e| {
+        let from = Done { warning: None, mirrors: mirrors.clone() }.source_text();
+        format!("TeX Live is {what}{}, but the test document did not compile: {e}", if from.is_empty() { String::new() } else { format!(" {from}") })
+    })
+}
+
+/// The fonts of a TeX Live that is installed or updated (#362): `luaotfload-tool --update` builds
+/// the font names database once, here, and not in the first LuaLaTeX run of every compile; then the
+/// test document is compiled. When that fails because a font cannot be loaded (a package that came
+/// incomplete from a mirror, a database that lacks it), the font packages are installed again from a
+/// freshly resolved mirror, the database is rebuilt and the test document is tried once more. The
+/// install itself is complete whatever happens here: every failure is only what the caller says.
+fn fonts(engine: &Engine, handle: &Handle, notify: &dyn Fn(), repo: &str, mirrors: &mut Vec<String>) -> Result<(), String> {
+    let mut update = engine.command("luaotfload-tool");
+    update.arg("--update");
+    // a failed update is not the end: the first LuaLaTeX run builds the database as well
+    let update_failed = step(handle, notify, Stage::Fonts, "luaotfload-tool", update).err();
+    let first = match compile_test_document(engine) {
+        Ok(_) => return Ok(()),
+        Err(e) => e,
     };
-    Ok(Done { warning })
+    if !first.font_problem() {
+        return Err(with_note(first.to_string(), update_failed));
+    }
+    let mut repair = || -> Result<(), String> {
+        let mirror = resolve_mirror(handle, repo)?;
+        add_mirror(mirrors, &mirror);
+        let mut tlmgr = engine.command(tlmgr_name());
+        tlmgr.args(["--repository", &mirror, "install", "--reinstall"]).args(FONT_PACKAGES);
+        step(handle, notify, Stage::Fonts, "tlmgr", tlmgr)?;
+        let mut rebuild = engine.command("luaotfload-tool");
+        rebuild.args(["--update", "--force"]);
+        step(handle, notify, Stage::Fonts, "luaotfload-tool", rebuild)
+    };
+    match repair() {
+        Ok(()) => compile_test_document(engine).map(|_| ()).map_err(|e| e.to_string()),
+        Err(why) => Err(format!("{first}\nThe fonts could not be installed again: {why}")),
+    }
+}
+
+/// `text`, and `note` (what an earlier step said) after it.
+fn with_note(text: String, note: Option<String>) -> String {
+    match note {
+        Some(n) => format!("{text}\n{n}"),
+        None => text,
+    }
 }
 
 /// Everything up to a complete tree in `partial`.
-fn install_into(env: &Env, partial: &Path, handle: &Handle, notify: &dyn Fn()) -> Result<(), String> {
+fn install_into(env: &Env, partial: &Path, handle: &Handle, notify: &dyn Fn()) -> Result<Vec<String>, String> {
     let repo = check_repository(&env.repository)?;
     let platform = platform().ok_or_else(|| format!("TeX Live has no installer for {} {}: install a TeX yourself and choose it in this page", std::env::consts::OS, std::env::consts::ARCH))?;
     check_perl()?;
@@ -405,6 +481,7 @@ fn install_into(env: &Env, partial: &Path, handle: &Handle, notify: &dyn Fn()) -
     notify();
     // one mirror for the installer, install-tl and tlmgr (#320)
     let mirror = resolve_mirror(handle, repo)?;
+    let mut mirrors = vec![mirror.clone()];
     download(handle, &format!("{mirror}/{}", installer_archive()), &archive)?;
     // the system's tar: bsdtar on Windows 10 and later reads the zip as well
     let mut tar = Command::new("tar");
@@ -424,15 +501,16 @@ fn install_into(env: &Env, partial: &Path, handle: &Handle, notify: &dyn Fn()) -
     install_tl.args(["-no-interaction", "-profile"]).arg(&profile_file).args(["-repository", &mirror]).current_dir(&inst);
     step(handle, notify, Stage::Base, "install-tl", install_tl)?;
     let bin = bin_dir_with(partial, tlmgr_name()).ok_or("install-tl made no tlmgr")?;
-    tlmgr_on_mirror(handle, notify, Stage::Packages, repo, mirror, |m| {
+    let used = tlmgr_on_mirror(handle, notify, Stage::Packages, repo, mirror, |m| {
         let mut tlmgr = Command::new(bin.join(tlmgr_name()));
         tlmgr.env("PATH", engine::path_with(&bin)).args(["--repository", m, "install"]).args(packages());
         tlmgr
     })?;
+    add_mirror(&mut mirrors, &used);
     if !bin.join(exe_name("lualatex")).is_file() || !bin.join(exe_name("biber")).is_file() {
         return Err("the install finished but lualatex or biber is missing".into());
     }
-    Ok(())
+    Ok(mirrors)
 }
 
 /// Update the managed TeX Live (TEX-003): `tlmgr update --self --all`, from one mirror of the
@@ -445,16 +523,16 @@ pub fn update(env: &Env, handle: &Handle, notify: &dyn Fn()) -> Result<Done, Str
     handle.stage(Stage::Update);
     notify();
     let mirror = resolve_mirror(handle, repo)?;
-    tlmgr_on_mirror(handle, notify, Stage::Update, repo, mirror, |m| {
+    let mut mirrors = vec![mirror.clone()];
+    let used = tlmgr_on_mirror(handle, notify, Stage::Update, repo, mirror, |m| {
         let mut tlmgr = engine.command(tlmgr_name());
         tlmgr.args(["--repository", m, "update", "--self", "--all"]);
         tlmgr
     })?;
-    // a new TeX Live may have new fonts and a new kernel: try it
-    handle.stage(Stage::Fonts);
-    notify();
-    let warning = compile_test_document(&engine).err().map(|e| format!("TeX Live is updated, but the test document did not compile: {e}"));
-    Ok(Done { warning })
+    add_mirror(&mut mirrors, &used);
+    // a new TeX Live may have new fonts and a new kernel: the database again, and the test document
+    let warning = fonts_after(Ok(engine), handle, notify, repo, &mut mirrors, "updated");
+    Ok(Done { warning, mirrors })
 }
 
 // ---------------------------------------------------------------- remove
