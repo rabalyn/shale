@@ -7,7 +7,7 @@ pkgrel=1
 pkgdesc='Native notes app: a vault is a plain folder of Markdown files (prebuilt release)'
 arch=('x86_64')
 url='https://github.com/rabalyn/shale'
-license=('MIT')
+license=('GPL-3.0-or-later')
 # linked: glibc, gcc-libs, alsa-lib; loaded when the window opens (winit/glutin/xkbcommon
 # dlopen them): Wayland, X11, xkbcommon and OpenGL through libglvnd
 depends=('glibc' 'gcc-libs' 'alsa-lib' 'libxkbcommon' 'wayland' 'libx11' 'libxcursor'

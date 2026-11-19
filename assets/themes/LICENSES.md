@@ -4,7 +4,7 @@ The built-in colour themes of Shale (CFG-062). Each `.toml` file here is a termi
 the Alacritty format (CFG-063), taken unchanged from the repository
 [alacritty/alacritty-theme](https://github.com/alacritty/alacritty-theme) (`themes/<file>.toml`,
 master, November 2026), with one exception named below. Only the colours are used. The theme
-**Shale** is made in code (`Palette::shale()`), not by a file, and is part of Shale (MIT).
+**Shale** is made in code (`Palette::shale()`), not by a file, and is part of Shale (GPL-3.0-or-later).
 
 The files of the alacritty-theme repository are licensed under the **Apache License 2.0**
 (<https://www.apache.org/licenses/LICENSE-2.0>), Copyright 2019-2023 indrajit, Copyright 2023- The

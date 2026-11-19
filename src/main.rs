@@ -1,4 +1,4 @@
-//! Shale — a native Rust notes vault (MIT licensed).
+//! Shale — a native Rust notes vault (GPL-3.0-or-later).
 //!
 //! Usage:
 //!   shale                       open the last vault (or the start screen)
