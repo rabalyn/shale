@@ -170,7 +170,7 @@ fn line_buttons_and_the_heading_menu_work_on_the_lines_of_the_selection() {
     assert_eq!(fx.text(), "- [ ] alpha\n- [ ] beta\n- [ ] gamma\n");
 }
 
-// spec: EDIT-109
+// spec: EDIT-111
 #[test]
 fn the_alignment_buttons_wrap_the_paragraph_under_the_cursor_and_take_the_wrapper_off_again() {
     let mut fx = Fx::new("align", "alpha\nbeta\n\ngamma\n");

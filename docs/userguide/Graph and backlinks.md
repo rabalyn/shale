@@ -16,4 +16,6 @@ Try it: this note is linked from [[Start here]], and it links to [[Tasks]], [[Dr
 
 How to arrange the panels: [[Window layout]].
 
+A Graph tab comes back after a restart with its switches (missing notes, orphans), see [[Tabs]].
+
 #userguide #graph

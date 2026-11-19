@@ -22,4 +22,6 @@ These are real tasks, they are in the list of this guide:
 
 Next: [[Graph and backlinks]].
 
+A Tasks tab comes back after a restart with its filter (text, Show done, Only with due date), see [[Tabs]].
+
 #userguide #tasks

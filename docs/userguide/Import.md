@@ -49,7 +49,7 @@ at a line that is exactly `-- ` and earlier messages stay quoted with `>`, as in
 
 If you read your notes in a program that does not show properties, tick **Header list in the note
 body** in the Import dialog: the list of From, To, Date (event: When, Where, Attendees, …) is then also
-written below the title. **Settings → Import → Header list in the note body** sets whether the box starts
+written below the title (a saved post: Author, Posted, Source, …). **Settings → Import → Header list in the note body** sets whether the box starts
 ticked.
 
 ![[imported-note.png]]

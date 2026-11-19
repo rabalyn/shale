@@ -148,9 +148,9 @@ fn a_video_that_is_damaged_says_so() {
     }
     let mut fx = Fx::new("v-bad", "![[bad.mp4]]\n", &["bad.mp4"]);
     fx.reading(true);
-    std::thread::sleep(Duration::from_millis(1000));
-    fx.hl.frames(&mut fx.app, 4);
-    assert!(texts(&fx).iter().any(|t| t.contains("damaged")), "{:?}", texts(&fx));
+    // the probe by ffmpeg is slower on a busy machine: wait for the words, not for a time
+    let shown = fx.until_text("damaged");
+    assert!(shown.iter().any(|t| t.contains("damaged")), "{shown:?}");
 }
 
 /// The files the pretend system player was asked to open.
@@ -167,9 +167,8 @@ fn without_ffmpeg_a_click_on_the_play_mark_or_the_tile_opens_the_system_player()
     let (_guard, opened) = pretend_player();
     let mut fx = Fx::new_with("v-none", VIDEO_NOTE, &["clip.mp4"], |a| a.media.use_ffmpeg(|| None));
     fx.reading(true);
-    std::thread::sleep(Duration::from_millis(300));
-    fx.hl.frames(&mut fx.app, 4);
-    assert!(texts(&fx).iter().any(|t| t.contains("ffmpeg is not installed")), "{:?}", texts(&fx));
+    let shown = fx.until_text("ffmpeg is not installed");
+    assert!(shown.iter().any(|t| t.contains("ffmpeg is not installed")), "{shown:?}");
     let button = fx.label("Play");
     fx.click_label("Play");
     fx.hl.frames(&mut fx.app, 3);

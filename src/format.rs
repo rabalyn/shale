@@ -22,7 +22,7 @@ pub enum Cmd {
     Rule,
     /// the page-break marker line (EDIT-066)
     PageBreak,
-    /// wrap the paragraphs under the selection in the alignment wrapper, or take it off (EDIT-109)
+    /// wrap the paragraphs under the selection in the alignment wrapper, or take it off (EDIT-111)
     Align(crate::markdown::Align),
     WikiLink,
     WebLink,
@@ -867,7 +867,7 @@ fn splice(text: &str, edits: &[Edit], sel: Range<usize>) -> Out {
     (out, map(sel.start)..map(sel.end))
 }
 
-/// The alignment buttons (EDIT-109): the paragraphs the selection touches (a paragraph is the
+/// The alignment buttons (EDIT-111): the paragraphs the selection touches (a paragraph is the
 /// lines up to the blank ones) go between `<div align="…">` and `</div>` lines, each with a blank
 /// line next to it (the form Obsidian renders as Markdown). Where the selection is in a wrapper
 /// already, the button changes its alignment, or takes the wrapper off when it is the same one
@@ -1253,7 +1253,7 @@ mod tests {
         assert!(!on(Cmd::Rule, "a|"));
     }
 
-    // spec: EDIT-109
+    // spec: EDIT-111
     #[test]
     fn an_align_button_wraps_the_paragraphs_under_the_selection_in_a_div() {
         use crate::markdown::Align::{Center, Left, Right};
@@ -1271,7 +1271,7 @@ mod tests {
         assert!(!works_in_a_cell(Cmd::Align(Center)));
     }
 
-    // spec: EDIT-109
+    // spec: EDIT-111
     #[test]
     fn in_a_wrapper_the_buttons_change_the_alignment_or_take_it_off() {
         use crate::markdown::Align::{Center, Left, Right};

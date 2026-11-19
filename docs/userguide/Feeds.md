@@ -45,6 +45,8 @@ bring along.
 ![[social-import.png]]
 
 "Include replies from others" adds a Replies section (off by default). The note has the author,
-the date, a **Source** link back to the post, the text and the pictures saved in `z_media/`.
+the date and the link back to the post as properties, then the text and the pictures saved in `z_media/`.
+Tick **Header list in the note body** in the Import dialog to also get them as a list (Author, Posted,
+Source, …) below the title; see [[Import]].
 
 #userguide #feeds

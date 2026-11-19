@@ -449,7 +449,7 @@ fn inline_block(ui: &mut Ui, job: LayoutJob, spans: &[(Range<usize>, LinkSpan, b
 }
 
 /// [`inline_block`] laid out centred, to the right or justified over the width of the column when
-/// `align` says so (PDF-028, EDIT-108).
+/// `align` says so (PDF-028, EDIT-110).
 fn inline_block_aligned(ui: &mut Ui, job: LayoutJob, spans: &[(Range<usize>, LinkSpan, bool)], maths: &[MathAt], hint: &dyn Fn(&str) -> Option<String>, align: Option<markdown::Align>, out: &mut Option<ReaderAction>) -> egui::Response {
     let mut job = job;
     job.wrap.max_width = ui.available_width();
@@ -792,12 +792,12 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
             // how the paragraph or heading on this line is laid out (PDF-028): the wrapper it is in
             let align = markdown::align_at(&wrappers, i);
             if trimmed.is_empty() {
-                // the blank line a wrapper has inside, next to its tag, makes no gap (EDIT-108)
+                // the blank line a wrapper has inside, next to its tag, makes no gap (EDIT-110)
                 if !wrappers.iter().any(|b| b.holds(i) && (i == b.open + 1 || i + 1 == b.close)) {
                     ui.add_space(base * 0.6);
                 }
             } else if markdown::is_align_edge(&wrappers, i) {
-                // the tag of a wrapper is not shown (EDIT-108)
+                // the tag of a wrapper is not shown (EDIT-110)
             } else if page_breaks.contains(&i) {
                 // a page-break marker: a dashed rule with its label (EDIT-065)
                 let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), base * 1.6), egui::Sense::hover());

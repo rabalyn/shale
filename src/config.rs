@@ -343,6 +343,12 @@ pub struct Config {
     /// longest name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub settings_tab_width: Option<u32>,
+    /// The width of the left sidebar in points (LAY-018); none: the default width.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub left_sidebar_width: Option<u32>,
+    /// The width of the right sidebar in points (LAY-018); none: the default width.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub right_sidebar_width: Option<u32>,
     /// The preset font colours of the toolbar's palette (EDIT-028), as RGB.
     pub font_colours: Vec<[u8; 3]>,
     /// The preset highlight colours of the toolbar's palette (EDIT-028), as RGB.
@@ -397,7 +403,7 @@ pub struct Config {
     pub docx_import: bool,
     /// The pandoc program for the Word import; empty: search `PATH` and the usual places.
     pub pandoc_path: String,
-    /// Imported e-mails and events also get their properties as a list below the title (IMP-052).
+    /// Imported e-mails, events and posts also get their properties as a list below the title (IMP-052).
     pub import_header_list: bool,
     /// Mastodon and Bluesky accounts for the feed view (secrets are in the keyring).
     pub social_accounts: Vec<crate::social::SocialAccountEntry>,
@@ -461,6 +467,8 @@ impl Default for Config {
             link_preview_width: crate::link_preview::DEFAULT_WIDTH,
             link_preview_height: crate::link_preview::DEFAULT_HEIGHT,
             settings_tab_width: None,
+            left_sidebar_width: None,
+            right_sidebar_width: None,
             font_colours: DEFAULT_FONT_COLOURS.to_vec(),
             highlight_colours: DEFAULT_HIGHLIGHT_COLOURS.to_vec(),
             live_preview: false,
@@ -856,6 +864,21 @@ mod tests {
         assert!(text.contains("settings_tab_width = 140"), "{text}");
         let (back, _) = Config::parse_text(&text).unwrap();
         assert_eq!(back.settings_tab_width, Some(140));
+    }
+
+    // spec: LAY-018, CFG-001
+    #[test]
+    fn lay_018_the_sidebar_widths_have_no_value_by_default_load_from_old_files_and_round_trip() {
+        let (c, _) = crate::vault_state::parse::<Config>(br#"{"toolbar_size": 120}"#).unwrap();
+        assert_eq!((c.left_sidebar_width, c.right_sidebar_width), (None, None), "an old file has no widths");
+        assert_eq!(c.version, 2, "a new field with a default needs no migration (CFG-001)");
+        let none = text::to_toml(&Config::default());
+        assert!(!none.contains("left_sidebar_width =") && !none.contains("right_sidebar_width ="), "no value: left out of the file");
+        let c = Config { left_sidebar_width: Some(300), right_sidebar_width: Some(350), ..Config::default() };
+        let text = text::to_toml(&c);
+        assert!(text.contains("left_sidebar_width = 300") && text.contains("right_sidebar_width = 350"), "{text}");
+        let (back, _) = Config::parse_text(&text).unwrap();
+        assert_eq!((back.left_sidebar_width, back.right_sidebar_width), (Some(300), Some(350)));
     }
 
     // spec: IMP-036, CFG-001

@@ -9,6 +9,8 @@ views in three sizes. Back to [[Start here]].
 
 ![[calendar-sidebar.png]]
 
+The calendar tab comes back after a restart in the mode (month, week or day) and on the day you left it ([[Tabs]]).
+
 ## Calendars
 
 Settings → Calendar → Calendars… adds local calendars (`.ics` files) or CalDAV accounts (for

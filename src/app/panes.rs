@@ -8,7 +8,7 @@
 
 use super::tabs::TabBar;
 use super::{rel_to_string, ShaleApp, Tab, View};
-use crate::vault_state::{SavedPane, SavedTab};
+use crate::vault_state::{SavedCalendar, SavedGraph, SavedPane, SavedTab, SavedTasks};
 use eframe::egui::Rect;
 
 /// No pane is drawn narrower than this many points (NAV-034).
@@ -279,6 +279,22 @@ impl ShaleApp {
                 for (k, t) in bar.tabs.iter().enumerate() {
                     let saved = match &t.view {
                         View::Social(Some(f)) if !f.feed.is_empty() => SavedTab { feed: Some(f.clone()), pinned: t.pinned, ..Default::default() },
+                        View::Mail => SavedTab { view: Some(SavedTab::MAIL.into()), mail: self.mail.saved_place(), pinned: t.pinned, ..Default::default() },
+                        View::Calendar => {
+                            let c = &self.cal.main;
+                            SavedTab { view: Some(SavedTab::CALENDAR.into()), calendar: Some(SavedCalendar { mode: c.mode.name().into(), day: c.anchor, ..Default::default() }), pinned: t.pinned, ..Default::default() }
+                        }
+                        View::Tasks => {
+                            let f = &self.tasks;
+                            let saved = SavedTasks { query: f.query.clone(), show_done: f.show_done, only_due: f.only_due, ..Default::default() };
+                            SavedTab { view: Some(SavedTab::TASKS.into()), tasks: Some(saved).filter(|s| *s != SavedTasks::default()), pinned: t.pinned, ..Default::default() }
+                        }
+                        View::Graph => {
+                            let g = &self.graphs.global;
+                            let saved = SavedGraph { hide_missing: !g.show_missing, hide_orphans: !g.show_orphans, ..Default::default() };
+                            SavedTab { view: Some(SavedTab::GRAPH.into()), graph: Some(saved).filter(|s| *s != SavedGraph::default()), pinned: t.pinned, ..Default::default() }
+                        }
+                        View::SettingsFile => SavedTab { view: Some(SavedTab::SETTINGS_FILE.into()), pinned: t.pinned, ..Default::default() },
                         v => match v.path() {
                             Some(p) if matches!(v, View::Note(_)) => {
                                 let place = &t.place;

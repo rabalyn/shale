@@ -66,6 +66,20 @@ impl Fx {
         panic!("timed out waiting for: {what}");
     }
 
+    /// Frames until a text on the screen contains `needle`, or a generous deadline passes (a look
+    /// by ffmpeg takes as long as the machine is busy); the texts of the last frame are returned.
+    fn until_text(&mut self, needle: &str) -> Vec<String> {
+        let start = std::time::Instant::now();
+        loop {
+            self.hl.frame(&mut self.app, vec![]);
+            let texts: Vec<String> = self.hl.text.iter().map(|(t, _)| t.clone()).collect();
+            if texts.iter().any(|t| t.contains(needle)) || start.elapsed() > Duration::from_secs(20) {
+                return texts;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     fn label(&mut self, label: &str) -> Rect {
         self.hl.find_label(&mut self.app, label)
     }
@@ -239,7 +253,9 @@ fn a_click_on_the_progress_bar_jumps_and_a_drag_seeks_once_on_release() {
     fx.hl.click(&mut fx.app, at(0.5), PointerButton::Primary);
     let p = fx.app.media.position().unwrap();
     assert!((0.4..0.65).contains(&p), "a click in the middle jumps to the middle of the one second: {p}");
-    // drag: nothing is sought while the mouse is down
+    // drag: nothing is sought while the mouse is down (the mixer takes up the click's seek first,
+    // which on a busy machine is not instant)
+    fx.until("the click's seek is taken up", |a| !a.media.seek_pending());
     let before = fx.app.media.position().unwrap();
     let path = Headless::steps(at(0.2), at(0.9), 6);
     fx.hl.press_and_move(&mut fx.app, at(0.2), &path);
@@ -331,9 +347,8 @@ fn the_state_stays_when_the_view_switches_and_the_window_repaints_only_while_pla
 fn a_damaged_file_says_so_and_a_machine_without_sound_output_keeps_the_player_working() {
     let mut fx = Fx::new("damaged", "![[bad.mp3]]\n", &["bad.mp3"]);
     fx.reading(true);
-    std::thread::sleep(Duration::from_millis(300));
-    fx.hl.frames(&mut fx.app, 3);
-    assert!(fx.hl.text.iter().any(|(t, _)| t.contains("damaged") || t.contains("can't")), "the player tells why: {:?}", fx.hl.text.iter().map(|(t, _)| t.clone()).collect::<Vec<_>>());
+    let shown = fx.until_text("damaged");
+    assert!(shown.iter().any(|t| t.contains("damaged") || t.contains("can't")), "the player tells why: {shown:?}");
 
     // no sound output: the message shows, nothing panics, the card still works
     let mut fx = Fx::new("nodevice", NOTE, &["tone-cover.mp3"]);
