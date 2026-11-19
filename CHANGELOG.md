@@ -10,6 +10,47 @@ its section from this file.
 
 ## [Unreleased]
 
+## [0.6.8] - 2026-11-19
+
+### Added
+
+- **Dataflow diagrams recorded from real runs** (#409). The steps of a flow are marked in the code, and a test records a
+  real run and draws it as a sequence diagram, so a diagram can no longer drift from what the code does. The first
+  one is the IMAP mail sync, in `docs/dataflow/mail-sync.md`. Nothing changes in the app itself.
+- **An index of the dataflow diagrams** (#410). `docs/dataflow/README.md` lists every recorded dataflow diagram with its
+  doc, its driving test and how its drift is checked, and a test keeps the index and the diagrams in step. Nothing
+  changes in the app itself.
+- **Dataflow diagrams of the flows that talk to real servers** (#411): mail OAuth sign-in and token renewal, sending,
+  flagging, moving and deleting, the IDLE watch, OpenPGP and S/MIME; CalDAV discovery, loading, editing and moving;
+  TeX export, book export and setup. Each is recorded from a real run of its container test (`docs/dataflow/`), so a
+  diagram can no longer drift from what the code does. Nothing changes in the app itself. A diagram now shows the steps of other flows that its code calls (the
+  book export shows the TeX compile, the IDLE watch the folder check), and a CalDAV conflict has its own diagram.
+- **Dataflow diagrams of the flows that need no containers** (#412). Git sync (first sync, pull, incremental, LFS
+  upload and on-demand download), Mastodon and Bluesky sign-in and timelines, and PDF and book export now have
+  diagrams in `docs/dataflow/`, recorded from real test runs, so they cannot drift from the code. Nothing changes in
+  the app itself.
+- **Dataflow diagrams of the import flows** (#413). The Word import, the Thunderbird store lookup, an imported e-mail and
+  a drop from another program each have a sequence diagram in `docs/dataflow/`, recorded from a real run of a test
+  that runs on every `cargo test`. Nothing changes in the app itself.
+- **Dataflow diagrams of the vault internals** (#414). Opening a vault, the vault check, the search across the
+  vault, the recovery of text that could not be saved, the data-usage scan and cleanup, and the link preview
+  fetch each have a diagram recorded from a real test run, in `docs/dataflow/`. Nothing changes in the app itself.
+- **Dataflow diagrams of the auto-update** (#425). The check for a new release, the download with its checksum and the
+  install into a portable folder or through `install.sh` are marked in the code, and tests record real runs against a
+  pretend GitHub and draw them in `docs/dataflow/update.md`. Nothing changes in the app itself.
+- The colour buttons of the formatting toolbar have keys for both parts: Alt+Y (highlight) and Alt+F (font colour) apply the button's current colour, like a click on its coloured part; the new Alt+Shift+Y and Alt+Shift+F open the palette, like the ▾. While Alt is held the badges show `Y` on the coloured part and `⇧Y` on the ▾. In an open palette the digit keys pick: 1 to 8 the swatches (each shows its digit), 0 "No highlight" / "Default colour" (#431).
+
+### Changed
+
+- Alt+Y and Alt+F (actions `note.highlight_colour` and `note.font_colour`) no longer open the palette but apply the current colour; the palettes have their own actions, `note.highlight_palette` and `note.font_palette` (#431).
+- Shale is now licensed under the GNU GPL, version 3 or later (before: MIT; releases up to 0.6.7 stay MIT) (#434).
+
+### Fixed
+
+- Importing the newest templates from CTAN no longer gives up when the mirror CTAN picked is down: it tries two other mirrors (three in all), and the error names every mirror tried (#428).
+- Test only: the clock-card media test is timed from the card's own start and its next wakeup, so it no longer fails on a loaded macOS runner (#430).
+- A click on the copy button of a code box, on a fold marker or badge, or on a player button no longer moves the text cursor of the editor while the button is held, and when the keyboard goes back to a selection the end that moves stays where it was (#432).
+
 ## [0.6.7] - 2026-11-19
 
 ### Added
@@ -1729,7 +1770,8 @@ First public version (published before releases were tagged).
 - Ctrl+Shift+F always focuses the search box and selects the previous search.
 - File names with `#` work in links.
 
-[Unreleased]: https://github.com/rabalyn/shale/compare/v0.6.7...HEAD
+[Unreleased]: https://github.com/rabalyn/shale/compare/v0.6.8...HEAD
+[0.6.8]: https://github.com/rabalyn/shale/compare/v0.6.7...v0.6.8
 [0.6.7]: https://github.com/rabalyn/shale/compare/v0.6.6...v0.6.7
 [0.6.6]: https://github.com/rabalyn/shale/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/rabalyn/shale/compare/v0.6.4...v0.6.5
