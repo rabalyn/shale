@@ -1,4 +1,4 @@
-//! The command line of the benchmark harness (BUILD-027): five modes of their own, chosen by the
+//! The command line of the benchmark harness (BUILD-038): five modes of their own, chosen by the
 //! first argument, so they never mix with the options of the window (BUILD-019 style: an unknown
 //! option or a missing value is an error, exit code 2).
 
@@ -109,7 +109,7 @@ mod tests {
         parse(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>())
     }
 
-    // spec: BUILD-027
+    // spec: BUILD-038
     #[test]
     fn only_the_bench_options_are_taken_and_the_rest_is_left_to_the_window() {
         assert!(p(&[]).is_none());
@@ -118,7 +118,7 @@ mod tests {
         assert!(p(&["/notes"]).is_none());
     }
 
-    // spec: BUILD-027
+    // spec: BUILD-038
     #[test]
     fn bench_takes_an_output_file_a_filter_and_a_count() {
         assert_eq!(p(&["--bench", "o.json"]), Some(Ok(Command::Run { out: "o.json".into(), filter: None, iters: None, min_ms: None, profile: Profile::Full })));
@@ -129,7 +129,7 @@ mod tests {
         assert_eq!(p(&["--bench", "--iters", "3", "o.json"]), Some(Ok(Command::Run { out: "o.json".into(), filter: None, iters: Some(3), min_ms: None, profile: Profile::Full })), "the order does not matter");
     }
 
-    // spec: BUILD-027
+    // spec: BUILD-038
     #[test]
     fn a_bad_bench_command_line_is_an_error_not_a_guess() {
         let bad = |a: &[&str]| p(a).unwrap().unwrap_err();

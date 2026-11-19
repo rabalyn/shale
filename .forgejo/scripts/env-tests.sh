@@ -24,8 +24,20 @@
 #       The suites run with one test thread (CalDAV, mail, `tex_install` and `tex_import` share one stack or
 #       one install); `tex_env` shares nothing and runs with ${SHALE_ENV_TESTS_TEX_THREADS:-4} test threads (a
 #       positive integer, else `run` fails at once with a message; DEV-011, #370)
+#       `run` sets SHALE_TEX_FAILED_LOGS (default target/tex-failed-logs, emptied first): the TeX suites keep the full
+#       log of every failed compile there, and `run` lists them at the end (#327)
+#   env-tests.sh tex-suite [threads]
+#       the `tex_env` suite as `run` runs it: when it fails with a font that could not be loaded (a mirror or
+#       image problem, not a code error, #327), it says so, prints `tex-env.sh status`, builds the image again with
+#       --refresh (a fresh mirror) and runs the suite once more; that second run decides. Any other failure is not
+#       retried. SHALE_TEX_ENV_SH is the script to use (default tests/tex-env/tex-env.sh; the script tests set it)
 set -eu
 cd "$(dirname "$0")/../.."
+
+# the cargo output of a suite shows that tests ran and passed (a filter that matches nothing "passes")
+passed() { grep -Eq '^test result: ok\. [1-9][0-9]* passed' "$1"; }
+# what TeX and luaotfload print when a font cannot be loaded: the image or its mirror, not the code (#327)
+font_signature='not loadable|metric data not found'
 
 case "${1:-}" in
   wanted)
@@ -71,6 +83,30 @@ case "${1:-}" in
     fi
     ;;
 
+  tex-suite)
+    threads=${2:-4}
+    texenv=${SHALE_TEX_ENV_SH:-tests/tex-env/tex-env.sh}
+    log=$(mktemp)
+    trap 'rm -f "$log"' EXIT
+    cargo test --locked -- --ignored tex_env --test-threads="$threads" 2>&1 | tee "$log" || true
+    if passed "$log"; then exit 0; fi
+    if grep -Eiq "$font_signature" "$log"; then
+      echo "The tex_env suite failed with a font that could not be loaded: this looks like a TeX environment problem, not a code error" >&2
+      echo "(the TeX Live of the image, or the mirror it came from). The image as it is:" >&2
+      sh "$texenv" status || true
+      echo "Building the TeX image again from a fresh mirror, then running tex_env once more." >&2
+      if sh "$texenv" build --refresh; then
+        cargo test --locked -- --ignored tex_env --test-threads="$threads" 2>&1 | tee "$log" || true
+        if passed "$log"; then exit 0; fi
+        echo "tex_env failed again on the fresh image." >&2
+      else
+        echo "the TeX image could not be built again" >&2
+      fi
+    fi
+    echo "no tex_env test passed" >&2
+    exit 1
+    ;;
+
   run)
     # checked first: a typo must not cost the start of the stacks
     tex_threads=${SHALE_ENV_TESTS_TEX_THREADS:-4}
@@ -93,6 +129,14 @@ case "${1:-}" in
       *) echo "no container engine is usable here" >&2; exit 1 ;;
     esac
     echo "Using $engine."
+
+    # the TeX suites keep the log of every failed compile here (#327): a failure that does not come again can still be read
+    failed_logs=${SHALE_TEX_FAILED_LOGS:-target/tex-failed-logs}
+    case $failed_logs in /*) ;; *) failed_logs=$PWD/$failed_logs ;; esac
+    rm -rf "$failed_logs"
+    mkdir -p "$failed_logs"
+    SHALE_TEX_FAILED_LOGS=$failed_logs
+    export SHALE_TEX_FAILED_LOGS
 
     down() {
       sh tests/caldav-env/caldav-env.sh reset >/dev/null 2>&1 || true
@@ -123,23 +167,31 @@ case "${1:-}" in
     # the real downloads of the template sets (GitHub, CTAN) need the network: only when asked for
     if [ "${SHALE_ENV_TESTS_TEX_IMPORT:-no}" = yes ]; then suites="$suites tex_import"; fi
     for suite in $suites; do
+      if [ "$suite" = tex_env ]; then
+        # shares nothing, so it runs with several threads; a font problem of the image is tried once more on a fresh mirror
+        sh "$0" tex-suite "$tex_threads" || status=1
+        continue
+      fi
       log=$(mktemp)
-      # one stack or one install per suite: one thread; the TeX compiles share nothing
-      threads=1
-      if [ "$suite" = tex_env ]; then threads=$tex_threads; fi
-      cargo test --locked -- --ignored "$suite" --test-threads="$threads" 2>&1 | tee "$log" || status=1
+      # one stack or one install per suite: one thread
+      cargo test --locked -- --ignored "$suite" --test-threads=1 2>&1 | tee "$log" || status=1
       # a filter that matches nothing "passes": make sure the suite really ran
-      if ! grep -Eq '^test result: ok\. [1-9][0-9]* passed' "$log"; then
+      if ! passed "$log"; then
         echo "no $suite test passed" >&2
         status=1
       fi
       rm -f "$log"
     done
+    kept=$(ls "$failed_logs" | wc -l)
+    if [ "$kept" -gt 0 ]; then
+      echo "The TeX logs of $kept failed compiles are kept in $failed_logs:"
+      ls -l "$failed_logs"
+    fi
     exit "$status"
     ;;
 
   *)
-    echo "usage: $0 wanted <base> <head> | install-wanted <base> <head> | import-wanted <base> <head> | detect | run [podman|docker]" >&2
+    echo "usage: $0 wanted <base> <head> | install-wanted <base> <head> | import-wanted <base> <head> | detect | tex-suite [threads] | run [podman|docker]" >&2
     exit 2
     ;;
 esac

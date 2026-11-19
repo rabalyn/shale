@@ -1,6 +1,6 @@
 //! The Vault tab: the folder, closing it and the people folder.
 
-use super::{section, Asks};
+use super::Asks;
 use crate::app::{Action, ShaleApp};
 use eframe::egui::{self, Ui};
 use std::path::PathBuf;
@@ -21,7 +21,7 @@ impl ShaleApp {
                 }
             }
         });
-        ui.add_space(crate::theme::SECTION_GAP - crate::theme::ITEM_GAP);
+        crate::theme::section_break(ui);
         if ui.button("Close this vault (back to the start screen)").clicked() {
             self.flush_all();
             self.remember_open_files();
@@ -33,7 +33,7 @@ impl ShaleApp {
             self.cfg.vault = None;
             asks.close = true;
         }
-        section(ui, "People");
+        crate::theme::section(ui, "People");
         ui.horizontal(|ui| {
             ui.label("People folder");
             changed |= ui
@@ -48,7 +48,7 @@ impl ShaleApp {
 
     /// "Check names for Windows and macOS…" and its list (VAULT-028).
     fn names_check_ui(&mut self, ui: &mut Ui) {
-        section(ui, "Names on other systems");
+        crate::theme::section(ui, "Names on other systems");
         if self.vault_check.poll() {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
         }

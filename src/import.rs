@@ -461,6 +461,12 @@ pub(crate) fn list(items: &[String]) -> String {
     items.iter().map(|i| format!("\n  - {}", yaml(i))).collect()
 }
 
+/// One line of the header list of IMP-052 (`- **From:** value`), the same for e-mails, events and
+/// posts.
+pub(crate) fn header_item(key: &str, value: &str) -> String {
+    format!("- **{key}:** {value}\n")
+}
+
 pub(crate) fn front(lines: &[(&str, String)], tags: &[String]) -> String {
     let mut s = String::from("---\n");
     for (k, v) in lines {
@@ -488,7 +494,7 @@ pub struct Options {
     pub keep_docx: bool,
     /// where contact notes are (and new ones are made)
     pub people_dir: String,
-    /// also write the properties of an e-mail / event as a list in the note's text (IMP-052)
+    /// also write the properties of an e-mail / event / post as a list in the note's text (IMP-052)
     pub header_list: bool,
 }
 
@@ -530,15 +536,15 @@ pub fn email_note(mail: &Mail, tags: &[String], attachments: &[PathBuf], origina
     );
     s.push_str(&format!("\n# {}\n\n", safe_title(subject)));
     if header_list {
-        s.push_str(&format!("- **From:** {}\n", mail.from));
+        s.push_str(&header_item("From", &mail.from));
         for (k, v) in [("To", &mail.to), ("Cc", &mail.cc)] {
             if !v.is_empty() {
-                s.push_str(&format!("- **{k}:** {v}\n"));
+                s.push_str(&header_item(k, v));
             }
         }
-        s.push_str(&format!("- **Date:** {}\n", if date.is_empty() { mail.date_raw.clone() } else { date }));
+        s.push_str(&header_item("Date", if date.is_empty() { &mail.date_raw } else { &date }));
         if !people.is_empty() {
-            s.push_str(&format!("- **People:** {}\n", people.join(", ")));
+            s.push_str(&header_item("People", &people.join(", ")));
         }
     }
     let original_line = original.filter(|_| header_list);
@@ -587,23 +593,23 @@ pub fn event_note(e: &Event, calendar: &str, tags: &[String], original: Option<&
     );
     s.push_str(&format!("\n# {}\n\n", safe_title(if e.summary.is_empty() { "Event" } else { &e.summary })));
     if header_list {
-        s.push_str(&format!("- **When:** {}\n", crate::calendar::ui::when_text(&occ_of(e))));
+        s.push_str(&header_item("When", &crate::calendar::ui::when_text(&occ_of(e))));
         if !people.is_empty() {
-            s.push_str(&format!("- **People:** {}\n", people.join(", ")));
+            s.push_str(&header_item("People", &people.join(", ")));
         }
         if let Some(r) = &e.rrule {
-            s.push_str(&format!("- **Repeats:** {}\n", crate::calendar::ui::rrule_text(r)));
+            s.push_str(&header_item("Repeats", &crate::calendar::ui::rrule_text(r)));
         }
         for (k, v) in [("Where", &e.location), ("Calendar", &calendar.to_string()), ("Organizer", &e.organizer), ("Status", &e.status.to_lowercase())] {
             if !v.is_empty() {
-                s.push_str(&format!("- **{k}:** {v}\n"));
+                s.push_str(&header_item(k, v));
             }
         }
         if !e.attendees.is_empty() {
-            s.push_str(&format!("- **Attendees:** {}\n", e.attendees.join(", ")));
+            s.push_str(&header_item("Attendees", &e.attendees.join(", ")));
         }
         if !e.url.is_empty() {
-            s.push_str(&format!("- **Link:** {}\n", e.url));
+            s.push_str(&header_item("Link", &e.url));
         }
         if let Some(o) = original {
             s.push_str(&format!("- Calendar file: [[{}]]\n", rel_to_string(o)));
@@ -746,7 +752,7 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
                             chosen.media.push(m.clone());
                         }
                     }
-                    crate::social::note::post_note(&chosen, &paths, &o.tags, &people)
+                    crate::social::note::post_note(&chosen, &paths, &o.tags, &people, o.header_list)
                 }
             })
         })();
@@ -985,8 +991,8 @@ mod tests {
         assert_eq!(made.len(), 2);
         let thread = std::fs::read_to_string(v.abs(&made[0])).unwrap();
         assert!(thread.contains("type: social-post\n") && thread.contains("post-id: \"demo-thread-1\"\n") && thread.contains("thread-ids: [\"demo-thread-1\", \"demo-thread-2\", \"demo-thread-3\"]\n"), "{thread}");
-        assert!(thread.contains("tags: [social, reading]\n") && thread.contains("- **Thread:** 3 posts by @grace@fosstodon.org\n"), "{thread}");
-        assert!(thread.contains("- **Source:** [https://demo.social/@grace/demo-thread-1](https://demo.social/@grace/demo-thread-1)\n"), "{thread}");
+        assert!(thread.contains("tags: [social, reading]\n") && thread.contains("thread: 3\n"), "{thread}");
+        assert!(thread.contains("url: \"https://demo.social/@grace/demo-thread-1\"\n") && !thread.contains("- **"), "properties only: {thread}");
         assert!(thread.contains("**3/3**") && thread.contains("![[z_media/"), "{thread}");
         let single = std::fs::read_to_string(v.abs(&made[1])).unwrap();
         assert_eq!(single.matches("![[z_media/").count(), 1, "the unticked picture is not saved: {single}");
@@ -1013,6 +1019,12 @@ mod tests {
         assert_eq!(again[1].already.as_deref(), Some(made[0].as_path()), "a post that is part of a saved thread");
         assert!(!again[0].include && !again[1].include);
         assert!(again[2].already.is_none() && again[2].include);
+        // spec: IMP-052 (the option writes the list into a post note too)
+        let listed = Options { folder: PathBuf::from("Listed"), tags: vec![], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into(), header_list: true };
+        let Imported { notes: m_l, errors: errs, .. } = import(&mut v, &[social_item(demo::saved(&posts[4]), "Mastodon", false)], &listed);
+        assert!(errs.is_empty(), "{errs:?}");
+        let t_l = std::fs::read_to_string(v.abs(&m_l[0])).unwrap();
+        assert!(t_l.contains("- **Thread:** 3 posts by @grace@fosstodon.org\n") && t_l.contains("- **Source:** [https://demo.social/@grace/demo-thread-1](https://demo.social/@grace/demo-thread-1)\n"), "{t_l}");
     }
 
     // spec: IMP-033, IMP-034

@@ -241,7 +241,7 @@ pub fn prepare(c: &Convert, reserved: &mut HashSet<String>) -> Result<Prepared, 
         return Err(format!("pandoc could not read “{file}”: {line}"));
     }
     let text = crate::fsutil::read_to_string(&out).map_err(|e| format!("pandoc made no text for “{file}”: {e}"))?;
-    let text = docx_look::colours_to_html(&docx_look::breaks_to_html(&text));
+    let text = docx_look::colours_to_html(&docx_look::breaks_to_html(&docx_look::aligns_to_html(&text)));
     let kept = format!("{stem}.docx");
     let kept = crate::fsutil::portable_name(&crate::markdown::link_safe_name(&kept), MAX_NAME);
     let kept = if kept.is_empty() || kept.starts_with('.') { "document.docx".to_string() } else { kept };

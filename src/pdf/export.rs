@@ -287,6 +287,9 @@ impl ExportOptions {
     /// ("serif, justified, line spacing 1.15"); none when the note sets nothing of it.
     pub fn text_properties_label(&self) -> Option<String> {
         let mut parts: Vec<String> = Vec::new();
+        if self.paper_look {
+            parts.push("paper look".into());
+        }
         match self.font {
             FontKind::Serif => parts.push("serif".into()),
             FontKind::Mono => parts.push("mono".into()),
@@ -303,6 +306,12 @@ impl ExportOptions {
         }
         if let Some(Rgba(r, g, b, _)) = self.heading_color {
             parts.push(format!("headings #{r:02x}{g:02x}{b:02x}"));
+        }
+        if !self.heading_bold {
+            parts.push("headings not bold".into());
+        }
+        if let Some(s) = self.heading_sizes {
+            parts.push(format!("heading sizes {}", s.map(|n| n.to_string()).join(" ")));
         }
         (!parts.is_empty()).then(|| parts.join(", "))
     }
@@ -410,14 +419,14 @@ fn rgba(c: Color32) -> Rgba {
 /// Screen (dark theme) colours → colours that print well on white paper.
 pub(crate) fn print_color(c: Color32) -> Rgba {
     let map = [
-        (theme::LINK, Rgba(26, 95, 180, 255)),
-        (theme::LINK_MISSING, Rgba(192, 28, 40, 255)),
-        (theme::TAG, Rgba(105, 65, 198, 255)),
-        (theme::CODE, Rgba(150, 70, 0, 255)),
-        (theme::DONE, Rgba(140, 140, 140, 255)),
-        (theme::QUOTE, Rgba(85, 85, 85, 255)),
-        (theme::MUTED, Rgba(100, 100, 100, 255)),
-        (theme::ACCENT, Rgba(105, 65, 198, 255)),
+        (theme::Palette::shale().link, Rgba(26, 95, 180, 255)),
+        (theme::Palette::shale().link_missing, Rgba(192, 28, 40, 255)),
+        (theme::Palette::shale().tag, Rgba(105, 65, 198, 255)),
+        (theme::Palette::shale().code, Rgba(150, 70, 0, 255)),
+        (theme::Palette::shale().done, Rgba(140, 140, 140, 255)),
+        (theme::Palette::shale().quote, Rgba(85, 85, 85, 255)),
+        (theme::Palette::shale().muted, Rgba(100, 100, 100, 255)),
+        (theme::Palette::shale().accent, Rgba(105, 65, 198, 255)),
     ];
     for (k, v) in map {
         if c == k {
@@ -441,7 +450,7 @@ pub(crate) fn over_white([r, g, b, a]: [u8; 4]) -> Rgba {
 pub(crate) fn print_bg(c: Color32) -> Option<Rgba> {
     if c == Color32::TRANSPARENT {
         None
-    } else if c == theme::TAG_BG {
+    } else if c == theme::Palette::shale().tag_bg {
         Some(Rgba(236, 232, 251, 255))
     } else {
         Some(Rgba(255, 241, 168, 255))
@@ -762,14 +771,27 @@ impl<'a> Writer<'a> {
     /// [`Writer::paragraph`], justified when `justify` and the note asks for it (PDF-016): the
     /// space left at the end of every line but the last is spread over the gaps between its words.
     pub(super) fn paragraph_aligned(&mut self, pieces: &[Piece], x0: f32, avail: f32, justify: bool) {
+        self.paragraph_in(pieces, x0, avail, justify, None);
+    }
+
+    /// [`Writer::paragraph_aligned`] for a paragraph in an alignment wrapper (PDF-029): each line
+    /// centred or flush right in `avail`, or justified whatever the note says.
+    fn paragraph_in(&mut self, pieces: &[Piece], x0: f32, avail: f32, justify: bool, align: Option<markdown::Align>) {
         let lines = wrap_pieces(pieces, avail);
         let last = lines.len().saturating_sub(1);
         for (n, line) in lines.iter().enumerate() {
             let lh = self.line_height(line);
             self.need(lh);
             let base = self.y + self.line_ascent(line);
-            let gap = if justify && self.opts.justify && n < last { justify_gap(line, avail) } else { 0.0 };
-            self.draw_line_spread(line, x0, base, gap);
+            let forced = align == Some(markdown::Align::Justify);
+            let gap = if (forced || (justify && self.opts.justify && align != Some(markdown::Align::Left))) && n < last { justify_gap(line, avail) } else { 0.0 };
+            let room = (avail - line.iter().map(piece_width).sum::<f32>() + line.last().map_or(0.0, |p| piece_width(p) - trimmed_width(p))).max(0.0);
+            let dx = match align {
+                Some(markdown::Align::Center) => room / 2.0,
+                Some(markdown::Align::Right) => room,
+                _ => 0.0,
+            };
+            self.draw_line_spread(line, x0 + dx, base, gap);
             self.y += lh;
         }
     }
@@ -810,10 +832,17 @@ impl<'a> Writer<'a> {
                 }
             }
         }
-        let text_w = match crate::table::stored_widths(&sizes.cols, ncols, self.cw()) {
+        let mut text_w: Vec<f32> = match crate::table::stored_widths(&sizes.cols, ncols, self.cw()) {
             Some(w) => w.iter().map(|w| (w - 2.0 * CELL_PAD_X).max(1.0)).collect(),
             None => crate::table::column_widths(&natural, &least, self.cw() - 2.0 * CELL_PAD_X * ncols as f32),
         };
+        // the paper look: a table spans the full text width like Word's, the columns scaled up in
+        // proportion when they are narrower (PDF-027)
+        let total: f32 = text_w.iter().map(|w| w + 2.0 * CELL_PAD_X).sum();
+        if self.opts.paper_look && total > 0.0 && total < self.cw() {
+            let k = self.cw() / total;
+            text_w.iter_mut().for_each(|w| *w = (*w + 2.0 * CELL_PAD_X) * k - 2.0 * CELL_PAD_X);
+        }
         let lines: Vec<Vec<Vec<Vec<Piece>>>> = rows.iter().map(|row| row.iter().enumerate().map(|(c, ps)| wrap_pieces(ps, text_w[c].max(1.0))).collect()).collect();
         let rows_fit = sizes.rows.len() == lines.len() && sizes.rows.iter().all(|h| h.is_finite());
         let heights: Vec<f32> = lines
@@ -844,9 +873,11 @@ impl<'a> Writer<'a> {
         let y = self.y;
         let mut x = x0;
         for (c, cell) in cells.iter().enumerate() {
-            // paper look: thin black lines and no fill (PDF-024)
-            let (fill, line) = if self.opts.paper_look { (None, (Rgba(0, 0, 0, 255), 0.5)) } else { (header.then_some(Rgba(236, 234, 246, 255)), (Rgba(150, 150, 150, 255), 0.6)) };
-            self.p().rect(x, y, widths[c], height, fill, Some(line));
+            // the paper look draws horizontal rules only, below (PDF-027)
+            if !self.opts.paper_look {
+                let fill = header.then_some(Rgba(236, 234, 246, 255));
+                self.p().rect(x, y, widths[c], height, fill, Some((Rgba(150, 150, 150, 255), 0.6)));
+            }
             let mut top = y + CELL_PAD_Y;
             for line in cell {
                 let size = self.line_size(line);
@@ -861,6 +892,14 @@ impl<'a> Writer<'a> {
                 top += self.line_height(line);
             }
             x += widths[c];
+        }
+        if self.opts.paper_look {
+            let rule = Rgba(0, 0, 0, 255);
+            let right = x0 + widths.iter().sum::<f32>();
+            if header {
+                self.p().line([x0, y], [right, y], rule, 0.5);
+            }
+            self.p().line([x0, y + height], [right, y + height], rule, 0.5);
         }
         self.y += height;
     }
@@ -892,6 +931,8 @@ impl<'a> Writer<'a> {
         let first_jump = self.jumps.len();
         // the page-break markers (PDF-020)
         let breaks = markdown::page_break_lines(text);
+        // the alignment wrappers (PDF-028): their lines are not printed, what they hold is aligned
+        let wrappers = markdown::align_blocks(text);
         // a page break asked for and not yet made: it is made where the next thing is printed, so
         // a marker at the end of the note or at the top of a page makes no empty page (PDF-022)
         let mut pending = false;
@@ -907,7 +948,14 @@ impl<'a> Writer<'a> {
             if notes.def_at(j).is_some() || notes.is_continuation(j) || formulas.iter().any(|m| m.block && m.lines.contains(&j)) {
                 return false;
             }
-            if matches!(t, "---" | "***" | "___") || breaks.contains(&j) || markdown::heading_level(l).is_some() || markdown::parse_task_line(l).is_some() || list_marker(l).is_some() || t.starts_with('>') {
+            if matches!(t, "---" | "***" | "___")
+                || breaks.contains(&j)
+                || markdown::is_align_edge(&wrappers, j)
+                || markdown::heading_level(l).is_some()
+                || markdown::parse_task_line(l).is_some()
+                || list_marker(l).is_some()
+                || t.starts_with('>')
+            {
                 return false;
             }
             let links = markdown::find_links(l);
@@ -930,6 +978,11 @@ impl<'a> Writer<'a> {
             extra = 0;
             if breaks.contains(&i) {
                 pending |= self.y > self.top + 0.5;
+                i += 1;
+                continue;
+            }
+            if markdown::is_align_edge(&wrappers, i) || (lines[i].1.trim().is_empty() && wrappers.iter().any(|b| b.holds(i) && (i == b.open + 1 || i + 1 == b.close))) {
+                // the tag of a wrapper, and the blank line next to it inside, are not printed
                 i += 1;
                 continue;
             }
@@ -1055,7 +1108,7 @@ impl<'a> Writer<'a> {
                         None => crate::editor::heading_scale(level as u8),
                     },
                 };
-                let mut ps = self.pieces(vault, rel, line[level..].trim_start(), base * scale, theme::HEADING, false);
+                let mut ps = self.pieces(vault, rel, line[level..].trim_start(), base * scale, theme::Palette::shale().heading, false);
                 for p in &mut ps {
                     p.bold = opts.heading_bold || p.bold;
                     p.color = opts.heading_color.unwrap_or(Rgba(0, 0, 0, 255));
@@ -1082,7 +1135,7 @@ impl<'a> Writer<'a> {
                 }
                 self.need(base * scale * 2.0);
                 places.insert(i, Dest { page: self.page, y: self.y });
-                self.paragraph(&ps, x0, cw);
+                self.paragraph_in(&ps, x0, cw, false, markdown::align_at(&wrappers, i));
                 self.y += base * 0.2;
             } else if let Some((_, done, rest, indent)) = markdown::parse_task_line(line) {
                 let ind = indent as f32 * 4.0;
@@ -1128,7 +1181,7 @@ impl<'a> Writer<'a> {
                 }
                 let start_y = self.y;
                 let start_page = self.page;
-                let ps = self.pieces(vault, rel, &content, base, if opts.paper_look { ink } else { theme::QUOTE }, false);
+                let ps = self.pieces(vault, rel, &content, base, if opts.paper_look { ink } else { theme::Palette::shale().quote }, false);
                 self.paragraph_aligned(&ps, x0 + 12.0, cw - 12.0, true);
                 let end_y = self.y;
                 if self.page == start_page && !opts.paper_look {
@@ -1138,7 +1191,7 @@ impl<'a> Writer<'a> {
                 let (text, n) = gather(i, line, false);
                 extra = n;
                 let ps = self.pieces(vault, rel, &text, base, ink, false);
-                self.paragraph_aligned(&ps, x0, cw, true);
+                self.paragraph_in(&ps, x0, cw, true, markdown::align_at(&wrappers, i));
             }
             let _ = off;
             i += 1 + extra;
@@ -1298,7 +1351,7 @@ impl<'a> Writer<'a> {
                 self.members.as_ref()?.contains(&target).then(|| Link::Book(target, l.heading.clone()))
             });
             // inline code keeps its screen colours on the code background (PDF-007)
-            let on_code = f.background == theme::CODE_BG;
+            let on_code = f.background == theme::Palette::shale().code_bg;
             // a bold or italic face of a chosen font has no imitation that says so (CFG-039)
             let (face_bold, face_italic) = crate::fonts::bold_italic_of(&f.font_id.family);
             out.push(Piece {
@@ -1315,7 +1368,7 @@ impl<'a> Writer<'a> {
                 bg: match paint.and_then(|p| p.1) {
                     Some([r, g, b, a]) => Some(over_white([r, g, b, a])),
                     None if on_code && self.opts.paper_look => None,
-                    None if on_code => Some(rgba(theme::CODE_BG)),
+                    None if on_code => Some(rgba(theme::Palette::shale().code_bg)),
                     None => print_bg(f.background),
                 },
                 italic: f.italics || face_italic,
@@ -1347,7 +1400,7 @@ impl<'a> Writer<'a> {
                 self.need(l.height() + base * 0.8);
                 let x = self.left + ((self.cw() - l.width) / 2.0).max(0.0);
                 let y = self.y + base * 0.4 + l.ascent;
-                let ink = print_color(theme::TEXT);
+                let ink = print_color(theme::Palette::shale().text);
                 self.p().math(l, x, y, ink);
                 self.y += l.height() + base * 0.8;
             }
@@ -1366,7 +1419,7 @@ impl<'a> Writer<'a> {
         let (x0, cw) = (self.left, self.cw());
         let lh = size * 1.4;
         let paper = self.opts.paper_look;
-        let plain = if paper { PAPER_INK } else { rgba(theme::CODE) };
+        let plain = if paper { PAPER_INK } else { rgba(theme::Palette::shale().code) };
         let text = lines.join("\n");
         let spans = if paper { Default::default() } else { crate::syntax::highlight(word, &text) };
         let mut span = spans.iter().peekable();
@@ -1377,7 +1430,7 @@ impl<'a> Writer<'a> {
             for (bi, c) in line.char_indices() {
                 let pos = at + bi;
                 while span.next_if(|(r, _)| r.end <= pos).is_some() {}
-                let colour = span.peek().filter(|(r, _)| r.start <= pos).map_or(plain, |(_, k)| rgba(theme::syntax_colour(*k)));
+                let colour = span.peek().filter(|(r, _)| r.start <= pos).map_or(plain, |(_, k)| rgba(theme::Palette::shale().syntax(*k)));
                 chars.extend(std::iter::repeat_n((if c == '\t' { ' ' } else { c }, colour), if c == '\t' { 4 } else { 1 }));
             }
             at += line.len() + 1;
@@ -1395,7 +1448,7 @@ impl<'a> Writer<'a> {
                 let (now, later) = rest.split_at(cut);
                 self.need(lh);
                 let y = self.y;
-                self.p().rect(x0, y, cw, lh, Some(if paper { PAPER_CODE_BG } else { rgba(theme::CODE_BG) }), None);
+                self.p().rect(x0, y, cw, lh, Some(if paper { PAPER_CODE_BG } else { rgba(theme::Palette::shale().code_bg) }), None);
                 let mut x = x0 + 6.0;
                 let mut n = 0;
                 while n < now.len() {
@@ -1522,6 +1575,11 @@ fn natural_size(w: u32, h: u32) -> Vec2 {
 /// and contents are the dialog's choices in `opts`, which start from the note's
 /// ([`ExportOptions::with_note_properties`]).
 pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) -> Result<Vec<u8>, String> {
+    // the paper always has Shale's colours, whatever the theme of the window (CFG-061, PDF-007)
+    theme::with_palette(theme::Palette::shale(), || export_note_in_shale(vault, rel, text, opts))
+}
+
+fn export_note_in_shale(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) -> Result<Vec<u8>, String> {
     let opts = &opts.clone().with_note_text_properties(text);
     // the title line's text: no `.md`, no date prefix (VAULT-025)
     let name = vault.file(rel).map(|f| f.title()).unwrap_or_else(|| crate::vault::title_of(&rel.to_string_lossy()).to_string());
@@ -2545,24 +2603,24 @@ pub(crate) mod tests {
         let o = ExportOptions { title: false, page_numbers: false, ..ExportOptions::for_note() };
         let js = export_note(&v, rel, "```js\nconst x = \"hi\"; // note\n```\n", &o).unwrap();
         let c = contents(&js);
-        assert!(c.contains(&rg(theme::CODE_BG)), "the lines are filled with the code background");
-        assert_eq!(colour_of(&c, "const"), rg(theme::syntax_colour(Kind::Keyword)));
-        assert_eq!(colour_of(&c, "\"hi\""), rg(theme::syntax_colour(Kind::String)));
-        assert_eq!(colour_of(&c, "// note"), rg(theme::syntax_colour(Kind::Comment)));
+        assert!(c.contains(&rg(theme::Palette::shale().code_bg)), "the lines are filled with the code background");
+        assert_eq!(colour_of(&c, "const"), rg(theme::Palette::shale().syntax(Kind::Keyword)));
+        assert_eq!(colour_of(&c, "\"hi\""), rg(theme::Palette::shale().syntax(Kind::String)));
+        assert_eq!(colour_of(&c, "// note"), rg(theme::Palette::shale().syntax(Kind::Comment)));
         let colours: std::collections::HashSet<String> = ["const", "\"hi\"", "// note"].iter().map(|w| colour_of(&c, w)).collect();
         assert!(colours.len() >= 3, "several distinct colours for the code text");
         // no language, an unknown one: plain code colour, still on the code background
         for fence in ["```", "```klingon"] {
             let plain = export_note(&v, rel, &format!("{fence}\nconst x = \"hi\";\n```\n"), &o).unwrap();
             let c = contents(&plain);
-            assert!(c.contains(&rg(theme::CODE_BG)), "{fence}: code background");
-            assert_eq!(colour_of(&c, "const x = \"hi\";"), rg(theme::CODE), "{fence}: one plain run in the code colour");
+            assert!(c.contains(&rg(theme::Palette::shale().code_bg)), "{fence}: code background");
+            assert_eq!(colour_of(&c, "const x = \"hi\";"), rg(theme::Palette::shale().code), "{fence}: one plain run in the code colour");
         }
         // a long line wraps and keeps its colours; a tab is four spaces
         let long = format!("```js\n\tconst s = \"{}\";\n```\n", "x".repeat(300));
         let c = contents(&export_note(&v, rel, &long, &o).unwrap());
         assert!(c.contains(&format!("<{}> Tj", hex("    "))), "the tab is four spaces");
-        assert!(c.matches(&rg(theme::syntax_colour(Kind::String))).count() >= 2, "the string goes on in its colour on the next row");
+        assert!(c.matches(&rg(theme::Palette::shale().syntax(Kind::String))).count() >= 2, "the string goes on in its colour on the next row");
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -2573,11 +2631,11 @@ pub(crate) mod tests {
         let (v, d) = vault();
         let o = ExportOptions { title: false, page_numbers: false, ..ExportOptions::for_note() };
         let c = contents(&export_note(&v, Path::new("Ideas.md"), "Call `log(\"hi\", 42)` now and `plain` too.\n", &o).unwrap());
-        assert!(c.contains(&rg(theme::CODE_BG)), "a code background behind the run");
-        assert_eq!(colour_of(&c, "log"), rg(theme::syntax_colour(Kind::Function)));
-        assert_eq!(colour_of(&c, "\"hi\""), rg(theme::syntax_colour(Kind::String)));
-        assert_eq!(colour_of(&c, "42"), rg(theme::syntax_colour(Kind::Number)));
-        assert_eq!(colour_of(&c, "plain"), rg(theme::CODE), "a span without such parts is code-coloured");
+        assert!(c.contains(&rg(theme::Palette::shale().code_bg)), "a code background behind the run");
+        assert_eq!(colour_of(&c, "log"), rg(theme::Palette::shale().syntax(Kind::Function)));
+        assert_eq!(colour_of(&c, "\"hi\""), rg(theme::Palette::shale().syntax(Kind::String)));
+        assert_eq!(colour_of(&c, "42"), rg(theme::Palette::shale().syntax(Kind::Number)));
+        assert_eq!(colour_of(&c, "plain"), rg(theme::Palette::shale().code), "a span without such parts is code-coloured");
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -2930,6 +2988,47 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: PDF-029
+    #[test]
+    fn a_wrapper_centres_or_right_aligns_its_paragraphs_and_prints_no_html_pdf_029() {
+        let (v, d) = vault();
+        let (left, right) = (20.0 * MM, 595.0 - 20.0 * MM);
+        let first_page = |text: &str| contents(&export_note(&v, Path::new("Welcome.md"), text, &plain_options()).unwrap());
+        let x_of = |c: &str, word: &str| drawn(c).into_iter().find(|(_, _, t)| t.trim() == word).unwrap_or_else(|| panic!("{word} is not drawn")).0;
+        let width = |word: &str| crate::pdf::write::text_width(FontKind::Sans, 11.0, word);
+        let c = first_page("Plain\n\n<div align=\"center\">\n\nMiddle\n\n</div>\n\n<div align=\"right\">\n\nFarther\n\n</div>\n\nPlain again\n");
+        let plains: Vec<f32> = drawn(&c).into_iter().filter(|(_, _, t)| t.trim() == "Plain").map(|d| d.0).collect();
+        assert!(plains.len() == 2 && plains.iter().all(|x| (x - left).abs() < 0.01), "outside a wrapper the text is at the left margin: {plains:?}");
+        assert!((x_of(&c, "Middle") - ((left + right) / 2.0 - width("Middle") / 2.0)).abs() < 0.5, "centred: {}", x_of(&c, "Middle"));
+        assert!((x_of(&c, "Farther") + width("Farther") - right).abs() < 0.5, "flush right");
+        assert!(!c.contains(&hex("div")) && !c.contains(&hex("align")), "the HTML is not printed");
+        // the lines of a long paragraph are each centred, and a heading is aligned too
+        let c = first_page(&format!("<div align=\"center\">\n\n# Title\n\n{}\n\n</div>\n", words(60)));
+        let lines = text_lines(&c);
+        assert!(lines.len() > 3);
+        let heading_x = lines[0][0].0;
+        assert!(heading_x > left + 40.0, "the heading is centred: {heading_x}");
+        let last = lines.last().unwrap();
+        assert!(last[0].0 > left + 1.0, "even the last line is centred, not at the margin: {}", last[0].0);
+        // justified in a note that is left: the lines fill the width
+        let c = first_page(&format!("<div align=\"justify\">\n\n{}\n\n</div>\n", words(120)));
+        let lines = text_lines(&c);
+        let end = |l: &Vec<(f32, f32, String)>| {
+            let (x, _, t) = l.last().unwrap();
+            x + width(t.trim_end())
+        };
+        for l in &lines[..lines.len() - 1] {
+            assert!((end(l) - right).abs() < 0.5, "a justified line ends at the margin: {}", end(l));
+        }
+        // and left in a justified note is ragged again
+        let text = front("print-align: justify", &format!("<div align=\"left\">\n\n{}\n\n</div>\n", words(120)));
+        let lines = text_lines(&first_page(&text));
+        assert!(lines[..lines.len() - 1].iter().any(|l| (end(l) - right).abs() > 2.0), "not justified");
+        // a wrapper without a closing line is text
+        assert!(first_page("<div align=\"center\">\n\nx\n").contains(&hex("align")));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     // spec: PDF-014
     #[test]
     fn the_note_picks_the_font_of_the_text_and_the_serif_is_embedded_only_when_asked_pdf_014() {
@@ -3202,7 +3301,7 @@ pub(crate) mod tests {
         // and it is the look of the app: purple marks, the dark code box, the screen palette
         let c = contents(&as_is);
         assert_eq!(colour_of(&c, "•"), PURPLE);
-        assert!(c.contains(&rg(theme::CODE_BG)) && !c.contains("0.961 0.961 0.961 rg"));
+        assert!(c.contains(&rg(theme::Palette::shale().code_bg)) && !c.contains("0.961 0.961 0.961 rg"));
         let on = export_note(&v, Path::new("Welcome.md"), &text, &ExportOptions { paper_look: true, ..o }).unwrap();
         assert_ne!(contents(&on), c, "forced on it differs");
         let _ = std::fs::remove_dir_all(&d);
@@ -3235,7 +3334,7 @@ pub(crate) mod tests {
         let c = paper_page(&front("print-font: sans", LOOK_BODY));
         // the block: light grey box, dark text, the mono font, one colour
         assert!(c.contains("0.961 0.961 0.961 rg"), "light grey box");
-        assert!(!c.contains(&rg(theme::CODE_BG)), "not the dark screen box");
+        assert!(!c.contains(&rg(theme::Palette::shale().code_bg)), "not the dark screen box");
         let w = "const codeword = \"s\";";
         assert_eq!(colour_of(&c, w), INK, "{w}: dark text in one run");
         assert!(run_of(&c, w).contains("/F2 "), "{w}: the mono font");
@@ -3245,16 +3344,16 @@ pub(crate) mod tests {
         assert!(run_of(&c, "Call ").contains("/F1 "), "the text around it is not mono");
         // the screen look of a note without print-* keys
         let plain = paper_page(LOOK_BODY);
-        assert!(plain.contains(&rg(theme::CODE_BG)) && !plain.contains("0.961 0.961 0.961 rg"));
+        assert!(plain.contains(&rg(theme::Palette::shale().code_bg)) && !plain.contains("0.961 0.961 0.961 rg"));
         assert_ne!(colour_of(&plain, "inlineword"), INK);
         // the inline box: the paper look has fewer filled rectangles
-        let boxes = |s: &str| s.matches(&rg(theme::CODE_BG)).count();
+        let boxes = |s: &str| s.matches(&rg(theme::Palette::shale().code_bg)).count();
         assert!(boxes(&plain) > boxes(&c));
         // a syntax-coloured inline span is plain too
         let hl = paper_page(&front("print-font: sans", "Call `log(\"hi\", 42)` now.\n"));
         assert_eq!(colour_of(&hl, "log"), INK);
         assert_eq!(colour_of(&hl, "42"), INK);
-        assert!(!hl.contains(&rg(theme::CODE_BG)));
+        assert!(!hl.contains(&rg(theme::Palette::shale().code_bg)));
     }
 
     // spec: PDF-027
@@ -3268,6 +3367,67 @@ pub(crate) mod tests {
         let plain = paper_page(LOOK_BODY);
         assert!(plain.contains("0.925 0.918 0.965 rg"), "the header fill of a note without print-* keys");
         assert!(plain.contains("0.588 0.588 0.588 RG 0.600 w") && !plain.contains("0.000 0.000 0.000 RG 0.500 w"));
+    }
+
+    // spec: PDF-024, PDF-023
+    #[test]
+    fn the_dialog_line_names_the_paper_look_and_the_heading_weight_and_sizes_pdf_024() {
+        let label = |props: &str| ExportOptions::for_note().with_note_properties(&front(props, "x")).text_properties_label();
+        assert_eq!(ExportOptions::for_note().with_note_properties("# Just a note\n").text_properties_label(), None);
+        assert_eq!(label("print-paper: A4").as_deref(), Some("paper look"));
+        assert_eq!(label("print-heading-weight: normal").as_deref(), Some("paper look, headings not bold"));
+        assert_eq!(label("print-heading-weight: bold").as_deref(), Some("paper look"));
+        assert_eq!(label("print-heading-sizes: \"16 13 12 11 11 11\"").as_deref(), Some("paper look, heading sizes 16 13 12 11 11 11"));
+        assert_eq!(label("print-heading-sizes: \"20 18 16 14 12.5 4\"").as_deref(), Some("paper look, heading sizes 20 18 16 14 12.5 4"));
+        assert_eq!(label("print-heading-sizes: 1 2 3").as_deref(), Some("paper look"), "a bad value is not shown");
+        assert_eq!(
+            label("print-font: serif\nprint-heading-color: \"#1F4E79\"\nprint-heading-weight: normal\nprint-heading-sizes: 16 13 12 11 11 11").as_deref(),
+            Some("paper look, serif, headings #1f4e79, headings not bold, heading sizes 16 13 12 11 11 11")
+        );
+    }
+
+    /// The straight two-point strokes of a page (`x y m x y l S`) as `[x1, y1, x2, y2]`.
+    fn strokes(c: &str) -> Vec<[f32; 4]> {
+        c.lines()
+            .filter(|l| l.ends_with(" l S Q"))
+            .filter_map(|l| {
+                let t: Vec<&str> = l.split_whitespace().collect();
+                let m = t.iter().position(|w| *w == "m")?;
+                let n: Vec<f32> = [t[m - 2], t[m - 1], t[m + 1], t[m + 2]].iter().filter_map(|w| w.parse().ok()).collect();
+                (n.len() == 4).then(|| [n[0], n[1], n[2], n[3]])
+            })
+            .collect()
+    }
+
+    fn text_width_of_page() -> f32 {
+        let o = ExportOptions::for_note();
+        o.page_size()[0] - (o.margins_mm[1] + o.margins_mm[3]) * 72.0 / 25.4
+    }
+
+    // spec: PDF-027
+    #[test]
+    fn a_table_spans_the_text_width_with_horizontal_rules_only_in_the_paper_look_pdf_027() {
+        let text_w = text_width_of_page();
+        let c = paper_page(&front("print-font: sans", "| Ha | Hb |\n|----|----|\n| ca | cb |\n| cc | cd |\n"));
+        let lines = strokes(&c);
+        assert_eq!(lines.len(), 4, "above, under the header, between the rows, at the bottom: {lines:?}");
+        assert!(lines.iter().all(|l| (l[1] - l[3]).abs() < 0.01), "no vertical line: {lines:?}");
+        assert!(lines.iter().all(|l| (l[2] - l[0] - text_w).abs() < 0.5 && (l[0] - lines[0][0]).abs() < 0.01), "full text width {text_w}: {lines:?}");
+        // without the paper look: a grid of boxes (closed paths), no rules
+        let plain = paper_page("| Ha | Hb |\n|----|----|\n| ca | cb |\n");
+        assert!(strokes(&plain).is_empty(), "the grid is boxes");
+        assert!(plain.contains("0.588 0.588 0.588 RG 0.600 w") && plain.contains("0.925 0.918 0.965 rg"));
+    }
+
+    // spec: PDF-027
+    #[test]
+    fn a_table_wider_than_the_text_keeps_its_width_in_the_paper_look_pdf_027() {
+        let text_w = text_width_of_page();
+        let long = words(60);
+        let c = paper_page(&front("print-font: sans", &format!("| Ha | Hb |\n|----|----|\n| {long} | {long} |\n")));
+        let rules = strokes(&c);
+        assert_eq!(rules.len(), 3);
+        assert!(rules.iter().all(|r| (r[2] - r[0] - text_w).abs() < 0.5), "{rules:?}");
     }
 }
 

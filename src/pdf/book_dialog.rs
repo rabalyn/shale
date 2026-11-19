@@ -81,7 +81,7 @@ impl BookExport {
 
     /// The collapsible *Reading order* and the state of the export.
     pub fn show(&mut self, ui: &mut Ui, rec: &mut dyn FnMut(&str, egui::Response) -> egui::Response) {
-        let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
+        let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::palette().muted);
         match &self.plan {
             Err(e) => {
                 rec("no-book", crate::theme::problem(ui, e));
@@ -97,7 +97,7 @@ impl BookExport {
                             };
                             let mut rich = egui::RichText::new(text).size(12.5);
                             rich = if l.left_out {
-                                rich.color(theme::MUTED)
+                                rich.color(theme::palette().muted)
                             } else if l.part {
                                 rich.strong()
                             } else {

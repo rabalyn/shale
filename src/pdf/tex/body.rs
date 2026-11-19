@@ -16,6 +16,16 @@ use eframe::egui::{Color32, Vec2};
 /// A new page (TEX-037, TEX-038).
 pub const NEW_PAGE: &str = "\\newpage\n\n";
 
+/// The environment an alignment wrapper becomes (TEX-039): `center` and `flushright`; justified
+/// text is what LaTeX sets anyway, and left is no wrapper.
+fn align_env(a: crate::markdown::Align) -> Option<&'static str> {
+    match a {
+        crate::markdown::Align::Center => Some("center"),
+        crate::markdown::Align::Right => Some("flushright"),
+        crate::markdown::Align::Left | crate::markdown::Align::Justify => None,
+    }
+}
+
 /// The most pages of an embedded PDF that are included (as in the native export).
 const MAX_PDF_PAGES: usize = 40;
 
@@ -54,6 +64,8 @@ impl<'a> Body<'a> {
             Block::Embed(link) => self.embed(link),
             Block::Rule => "\\par\\medskip\\noindent\\hrulefill\\par\\medskip\n\n".into(),
             Block::PageBreak => NEW_PAGE.into(),
+            Block::AlignStart(a) => align_env(*a).map_or(String::new(), |e| format!("\\begin{{{e}}}\n")),
+            Block::AlignEnd(a) => align_env(*a).map_or(String::new(), |e| format!("\\end{{{e}}}\n\n")),
         }
     }
 

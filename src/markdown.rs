@@ -775,7 +775,7 @@ pub fn lift_headings(text: &str) -> Option<String> {
 /// The title of a heading as it reads: no inline markup, links by their shown text.
 pub fn heading_plain(title: &str) -> String {
     let links: Vec<(LinkSpan, bool)> = find_links(title).into_iter().map(|l| (l, true)).collect();
-    let (job, _, _) = crate::reader::inline_job(title, &links, 14.0, crate::theme::TEXT, false);
+    let (job, _, _) = crate::reader::inline_job(title, &links, 14.0, crate::theme::palette().text, false);
     job.text.trim().to_string()
 }
 
@@ -881,6 +881,119 @@ pub fn page_break_lines(text: &str) -> Vec<usize> {
     let fenced = fenced_code_lines(text);
     let front = front_matter_lines(text);
     lines_with_offsets(text).iter().enumerate().filter(|(i, (_, l))| *i >= front && !fenced.get(*i).copied().unwrap_or(false) && page_break_line(l)).map(|(i, _)| i).collect()
+}
+
+/// How a paragraph is aligned (PDF-028). `Left` is no wrapper at all in what Shale writes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Align {
+    Left,
+    Center,
+    Right,
+    Justify,
+}
+
+impl Align {
+    /// The value of the `align` attribute of the wrapper that writes it.
+    pub fn word(self) -> &'static str {
+        match self {
+            Align::Left => "left",
+            Align::Center => "center",
+            Align::Right => "right",
+            Align::Justify => "justify",
+        }
+    }
+
+    /// The opening line of the wrapper that writes it: `<div align="center">`.
+    pub fn open_line(self) -> String {
+        format!("<div align=\"{}\">", self.word())
+    }
+}
+
+/// The alignment an opening wrapper line asks for (PDF-028): a line of its own that holds
+/// `<div align="center">` (also `right`, `justify` and `left`). Case, spaces around `=` and either
+/// quote kind do not matter; another attribute, another tag, another value or text before or after
+/// it on the line is no wrapper.
+pub fn align_open_line(line: &str) -> Option<Align> {
+    let t = line.trim().to_ascii_lowercase();
+    let rest = t.strip_prefix("<div")?.strip_prefix(char::is_whitespace)?.trim_start().strip_prefix("align")?.trim_start().strip_prefix('=')?.trim_start();
+    let quote = rest.chars().next().filter(|c| *c == '"' || *c == '\'')?;
+    let (value, rest) = rest[1..].split_once(quote)?;
+    if rest.trim() != ">" {
+        return None;
+    }
+    match value.trim() {
+        "left" => Some(Align::Left),
+        "center" => Some(Align::Center),
+        "right" => Some(Align::Right),
+        "justify" => Some(Align::Justify),
+        _ => None,
+    }
+}
+
+/// Whether `line` is the closing line of a wrapper: `</div>` alone.
+pub fn align_close_line(line: &str) -> bool {
+    line.trim().eq_ignore_ascii_case("</div>")
+}
+
+/// A wrapper that aligns the paragraphs and headings between its two lines (PDF-028): the lines
+/// (indices) of its opening and closing line.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AlignBlock {
+    pub open: usize,
+    pub close: usize,
+    pub align: Align,
+}
+
+impl AlignBlock {
+    /// Whether `line` is the opening or the closing line of the wrapper.
+    pub fn is_edge(&self, line: usize) -> bool {
+        line == self.open || line == self.close
+    }
+
+    /// Whether `line` is between the two lines of the wrapper.
+    pub fn holds(&self, line: usize) -> bool {
+        line > self.open && line < self.close
+    }
+}
+
+/// The wrappers of `text` (PDF-028), in order: an opening line with the next `</div>` line after
+/// it, as long as no other opening line comes first. An opening line without a closing one is
+/// text; so is anything in a code fence or the front matter.
+pub fn align_blocks(text: &str) -> Vec<AlignBlock> {
+    let fenced = fenced_code_lines(text);
+    let front = front_matter_lines(text);
+    let lines = lines_with_offsets(text);
+    let plain = |i: usize| i >= front && !fenced.get(i).copied().unwrap_or(false);
+    let mut out = Vec::new();
+    let mut i = front;
+    while i < lines.len() {
+        let Some(align) = align_open_line(lines[i].1).filter(|_| plain(i)) else {
+            i += 1;
+            continue;
+        };
+        let mut j = i + 1;
+        while j < lines.len() && !(plain(j) && (align_close_line(lines[j].1) || align_open_line(lines[j].1).is_some())) {
+            j += 1;
+        }
+        if j < lines.len() && align_close_line(lines[j].1) {
+            out.push(AlignBlock { open: i, close: j, align });
+            i = j + 1;
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+/// The alignment of line `line` of a note with these wrappers (PDF-028): that of the wrapper that
+/// holds it, `None` outside every wrapper (and on the wrapper lines).
+pub fn align_at(blocks: &[AlignBlock], line: usize) -> Option<Align> {
+    blocks.iter().find(|b| b.holds(line)).map(|b| b.align)
+}
+
+/// Whether `line` is the opening or closing line of a wrapper.
+pub fn is_align_edge(blocks: &[AlignBlock], line: usize) -> bool {
+    blocks.iter().any(|b| b.is_edge(line))
 }
 
 /// The link's target as written in the text: `Projects/Old.md`, `../Old` (percent-decoded,
@@ -1126,6 +1239,55 @@ a
 {m}"
         );
         assert_eq!(page_break_lines(&text), vec![5, 9]);
+    }
+
+    // spec: PDF-028
+    #[test]
+    fn the_align_wrapper_is_a_div_with_an_align_attribute_on_its_own_line() {
+        for (line, want) in [(r#"<div align="center">"#, Align::Center), ("  <DIV  Align = 'Right' >  ", Align::Right), (r#"<div align="justify">"#, Align::Justify), (r#"<div align="left">"#, Align::Left)] {
+            assert_eq!(align_open_line(line), Some(want), "{line}");
+        }
+        for no in [
+            r#"<div align="middle">"#,
+            r#"<div align="center" class="x">"#,
+            r#"<div>"#,
+            r#"text <div align="center">"#,
+            r#"<div align="center">text"#,
+            r#"<div align="center"></div>"#,
+            r#"<div style="text-align: center">"#,
+            r#"<p align="center">"#,
+            r#"<divalign="center">"#,
+        ] {
+            assert_eq!(align_open_line(no), None, "{no}");
+        }
+        assert!(align_close_line("</div>") && align_close_line("  </DIV> "));
+        assert!(!align_close_line("</div> x") && !align_close_line("</p>"));
+        assert_eq!(Align::Center.open_line(), r#"<div align="center">"#);
+    }
+
+    // spec: PDF-028
+    #[test]
+    fn a_wrapper_holds_the_lines_up_to_the_next_closing_line_and_is_none_without_one() {
+        let text = "a\n<div align=\"center\">\n\nb\n\n</div>\nc\n<div align=\"right\">\nd\n</div>\n<div align=\"center\">\nlost";
+        let blocks = align_blocks(text);
+        assert_eq!(blocks, vec![AlignBlock { open: 1, close: 5, align: Align::Center }, AlignBlock { open: 7, close: 9, align: Align::Right }]);
+        assert_eq!(align_at(&blocks, 3), Some(Align::Center));
+        assert_eq!(align_at(&blocks, 8), Some(Align::Right));
+        assert_eq!((align_at(&blocks, 0), align_at(&blocks, 1), align_at(&blocks, 6), align_at(&blocks, 11)), (None, None, None, None));
+        assert!(is_align_edge(&blocks, 1) && is_align_edge(&blocks, 9) && !is_align_edge(&blocks, 3));
+        // another opening line first: the first has no closing line
+        let nested = "<div align=\"center\">\n<div align=\"right\">\nx\n</div>";
+        assert_eq!(align_blocks(nested), vec![AlignBlock { open: 1, close: 3, align: Align::Right }]);
+    }
+
+    // spec: PDF-028
+    #[test]
+    fn wrappers_in_code_fences_and_front_matter_are_text() {
+        let o = r#"<div align="center">"#;
+        let text = format!("---\ntitle: x\n{o}\n</div>\n---\n```\n{o}\n</div>\n```\n{o}\nok\n</div>");
+        assert_eq!(align_blocks(&text), vec![AlignBlock { open: 9, close: 11, align: Align::Center }]);
+        // the page-break marker is not a wrapper
+        assert!(align_blocks(r#"<div style="page-break-after: always;"></div>"#).is_empty());
     }
 
     // spec: EDIT-052

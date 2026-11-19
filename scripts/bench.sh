@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs the benchmark harness (BUILD-027…BUILD-033, raba/shale#343) and, with --flamegraph, makes a
+# Runs the benchmark harness (BUILD-028…BUILD-038, raba/shale#343) and, with --flamegraph, makes a
 # flamegraph of every scenario. See docs/perf/README.md.
 #
 #   scripts/bench.sh [--profile quick|full|worst] [--filter IDS] [--iters N]

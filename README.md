@@ -21,6 +21,9 @@ markdown files. Notes link to each other with `[[wiki links]]`.
   tables and more, and coloured highlights and font colours stored as plain `<mark>` / `<span>` HTML.
 - **Math**: `$E = mc^2$` and `$$…$$` are typeset in the text, the reading view, tables and the PDF export,
   by Shale itself with the bundled font STIX Two Math (no TeX needed).
+- **Themes**: nine built-in light and dark colour themes (Shale, Dracula, Nord, Catppuccin, Gruvbox, Solarized,
+  GitHub), one that follows the system's light or dark mode, and any Alacritty terminal theme file you put into
+  the themes folder.
 - **Suggestions while you type**: type `[[` to get matching note names. Enter or a click picks one, and the
   last entry creates a new note.
 - **Drawings**: hand-drawn style sketches stored as standard `.excalidraw` JSON files.
@@ -372,6 +375,10 @@ The tests also run against a real vault if there is one: put notes, drawings and
 Each test works on a copy, so the vault itself is never changed. Without such a folder those
 tests pass with a note. On macOS and Linux the test of `scripts/report-advisories.sh` (BUILD-021) needs
 `sh`, `curl` and `jq` on the path and fails with a message that says so when one is missing.
+
+Debug setting of the TeX tests: `SHALE_TEX_FAILED_LOGS=<folder>` makes a failed LaTeX compile (Shale's own, and the
+demos of `tex_env`) copy its full `.log` into that folder before its work folder is removed. `scripts/land.sh` sets it
+(`target/tex-failed-logs`) and lists the kept logs (see `tests/tex-env/README.md`).
 
 CI also measures line coverage (`cargo llvm-cov`; gaps and the ratchet in
 [docs/coverage.md](docs/coverage.md)) and runs the real-server CalDAV and mail suites in podman

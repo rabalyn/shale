@@ -260,16 +260,16 @@ pub fn icon_button_sense(ui: &mut Ui, icon: Icon, size: f32, active: bool, tip: 
     let (r, resp) = ui.allocate_exact_size(Vec2::splat(size), sense);
     let hovered = resp.hovered();
     if active {
-        ui.painter().rect_filled(r, CornerRadius::same(5), theme::BG_ACTIVE);
+        ui.painter().rect_filled(r, CornerRadius::same(5), theme::palette().bg_active);
     } else if hovered {
-        ui.painter().rect_filled(r, CornerRadius::same(5), theme::BG_HOVER);
+        ui.painter().rect_filled(r, CornerRadius::same(5), theme::palette().bg_hover);
     }
     let c = if active {
-        theme::ACCENT
+        theme::palette().accent
     } else if hovered {
-        theme::TEXT_STRONG
+        theme::palette().text_strong
     } else {
-        theme::MUTED
+        theme::palette().muted
     };
     paint_icon(ui.painter(), r.shrink(size * 0.22), icon, c);
     crate::script::hint(tip, r);
@@ -279,15 +279,15 @@ pub fn icon_button_sense(ui: &mut Ui, icon: Icon, size: f32, active: bool, tip: 
 
 impl ShaleApp {
     pub fn welcome(&mut self, ui: &mut Ui) {
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::BG_PRIMARY)).show(ui, |ui| {
+        egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::palette().bg_primary)).show(ui, |ui| {
             ui.vertical_centered(|ui| {
                 ui.add_space(ui.available_height() * 0.18);
-                ui.label(egui::RichText::new("Shale").size(40.0).color(theme::TEXT_STRONG));
+                ui.label(egui::RichText::new("Shale").size(40.0).color(theme::palette().text_strong));
                 ui.label(muted("A native notes vault: plain markdown files, linked together."));
                 ui.add_space(28.0);
-                egui::Frame::new().fill(theme::BG_SECONDARY).corner_radius(CornerRadius::same(10)).inner_margin(20).show(ui, |ui| {
+                egui::Frame::new().fill(theme::palette().bg_secondary).corner_radius(CornerRadius::same(10)).inner_margin(20).show(ui, |ui| {
                     ui.set_width(520.0);
-                    ui.label(egui::RichText::new("Open a folder as vault").size(16.0).color(theme::TEXT));
+                    ui.label(egui::RichText::new("Open a folder as vault").size(16.0).color(theme::palette().text));
                     ui.label(muted("Any folder works, including an existing markdown vault. Type its path:"));
                     ui.add_space(6.0);
                     ui.add(egui::TextEdit::singleline(&mut self.welcome_path).desired_width(f32::INFINITY));
@@ -328,33 +328,52 @@ impl ShaleApp {
         });
     }
 
+    /// Stores the width a sidebar was drawn at when a drag of its border ended (LAY-018).
+    fn keep_width(&mut self, ui: &Ui, drawn: f32, left: bool) {
+        let (stored, default) = if left { (self.cfg.left_sidebar_width, LEFT_WIDTH) } else { (self.cfg.right_sidebar_width, RIGHT_WIDTH) };
+        if ui.ctx().input(|i| i.pointer.any_released()) && (drawn - stored.map_or(default, |w| w as f32)).abs() >= 1.0 {
+            let width = Some(drawn.round() as u32);
+            if left {
+                self.cfg.left_sidebar_width = width;
+            } else {
+                self.cfg.right_sidebar_width = width;
+            }
+            self.save_config();
+        }
+    }
+
     pub fn layout(&mut self, ui: &mut Ui) {
         self.side.clear_geometry();
         // ribbon
-        egui::Panel::left("ribbon").exact_size(44.0).resizable(false).frame(egui::Frame::new().fill(theme::BG_RIBBON).inner_margin(egui::Margin::symmetric(6, 8)).stroke(Stroke::new(1.0, theme::BORDER))).show(ui, |ui| {
+        egui::Panel::left("ribbon").exact_size(44.0).resizable(false).frame(egui::Frame::new().fill(theme::palette().bg_ribbon).inner_margin(egui::Margin::symmetric(6, 8)).stroke(Stroke::new(1.0, theme::palette().border))).show(ui, |ui| {
             self.ribbon(ui);
         });
         // status bar
-        egui::Panel::bottom("status").exact_size(24.0).resizable(false).frame(egui::Frame::new().fill(theme::BG_SECONDARY).inner_margin(egui::Margin::symmetric(10, 3)).stroke(Stroke::new(1.0, theme::BORDER))).show(ui, |ui| {
-            self.status_bar(ui);
-        });
+        egui::Panel::bottom("status").exact_size(24.0).resizable(false).frame(egui::Frame::new().fill(theme::palette().bg_secondary).inner_margin(egui::Margin::symmetric(10, 3)).stroke(Stroke::new(1.0, theme::palette().border))).show(
+            ui,
+            |ui| {
+                self.status_bar(ui);
+            },
+        );
         if self.cfg.show_left {
-            egui::Panel::left("left-sidebar").default_size(260.0).size_range(170.0..=520.0).frame(egui::Frame::new().fill(theme::BG_SECONDARY).inner_margin(egui::Margin::symmetric(8, 8)).stroke(Stroke::new(1.0, theme::BORDER))).show(
-                ui,
-                |ui| {
-                    self.left_sidebar(ui);
-                },
-            );
+            let left = sidebar_width(self.cfg.left_sidebar_width, LEFT_WIDTH, LEFT_RANGE);
+            let panel = egui::Panel::left("left-sidebar").default_size(left).size_range(LEFT_RANGE);
+            let panel = if std::mem::take(&mut self.side.reset_widths[0]) { panel.exact_size(LEFT_WIDTH) } else { panel };
+            let shown = panel.frame(egui::Frame::new().fill(theme::palette().bg_secondary).inner_margin(egui::Margin::symmetric(8, 8)).stroke(Stroke::new(1.0, theme::palette().border))).show(ui, |ui| {
+                self.left_sidebar(ui);
+            });
+            self.keep_width(ui, shown.response.rect.width(), true);
         }
         if self.cfg.show_right {
-            egui::Panel::right("right-sidebar").default_size(290.0).size_range(200.0..=560.0).frame(egui::Frame::new().fill(theme::BG_SECONDARY).inner_margin(egui::Margin::symmetric(10, 8)).stroke(Stroke::new(1.0, theme::BORDER))).show(
-                ui,
-                |ui| {
-                    self.right_views(ui);
-                },
-            );
+            let right = sidebar_width(self.cfg.right_sidebar_width, RIGHT_WIDTH, RIGHT_RANGE);
+            let panel = egui::Panel::right("right-sidebar").default_size(right).size_range(RIGHT_RANGE);
+            let panel = if std::mem::take(&mut self.side.reset_widths[1]) { panel.exact_size(RIGHT_WIDTH) } else { panel };
+            let shown = panel.frame(egui::Frame::new().fill(theme::palette().bg_secondary).inner_margin(egui::Margin::symmetric(10, 8)).stroke(Stroke::new(1.0, theme::palette().border))).show(ui, |ui| {
+                self.right_views(ui);
+            });
+            self.keep_width(ui, shown.response.rect.width(), false);
         }
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::BG_PRIMARY)).show(ui, |ui| {
+        egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::palette().bg_primary)).show(ui, |ui| {
             self.panes_ui(ui);
         });
         self.side_drag_tick(ui);
@@ -400,7 +419,7 @@ impl ShaleApp {
             let border = Rect::from_min_max(Pos2::new(self.panes.rects[i].min.x - BORDER_W, area.min.y), Pos2::new(self.panes.rects[i].min.x, area.max.y));
             self.panes.borders.push(border);
             let resp = ui.interact(border, ui.scope_id().with(("pane-border", i)), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
-            let line = if resp.hovered() || resp.dragged() { theme::ACCENT } else { theme::BORDER };
+            let line = if resp.hovered() || resp.dragged() { theme::palette().accent } else { theme::palette().border };
             ui.painter().rect_filled(Rect::from_center_size(border.center(), Vec2::new(1.0, border.height())), CornerRadius::ZERO, line);
             if resp.dragged() {
                 self.panes.weights = drag_weights(&self.panes.weights, i, resp.drag_delta().x, total, MIN_PANE_W);
@@ -500,8 +519,8 @@ impl ShaleApp {
     fn tab_bar(&mut self, ui: &mut Ui) {
         let h = 36.0;
         let (bar, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::hover());
-        ui.painter().rect_filled(bar, CornerRadius::ZERO, theme::BG_SECONDARY);
-        ui.painter().line_segment([bar.left_bottom(), bar.right_bottom()], Stroke::new(1.0, theme::BORDER));
+        ui.painter().rect_filled(bar, CornerRadius::ZERO, theme::palette().bg_secondary);
+        ui.painter().line_segment([bar.left_bottom(), bar.right_bottom()], Stroke::new(1.0, theme::palette().border));
         // the focused one of several panes has an accent line under its tab bar (NAV-032)
         let focus_line = (self.panes.len() > 1 && self.panes.drawn() == self.panes.focused).then(|| Rect::from_min_max(Pos2::new(bar.min.x, bar.max.y - 2.0), bar.max));
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(bar.shrink2(Vec2::new(6.0, 0.0))).layout(egui::Layout::left_to_right(egui::Align::Max)));
@@ -521,22 +540,22 @@ impl ShaleApp {
             let (r, resp) = child.allocate_exact_size(Vec2::new(tab_w, h - 6.0), Sense::click_and_drag());
             let active = i == self.tabbar.active;
             let fill = if active {
-                theme::BG_PRIMARY
+                theme::palette().bg_primary
             } else if resp.hovered() {
-                theme::BG_HOVER
+                theme::palette().bg_hover
             } else {
-                theme::BG_SECONDARY
+                theme::palette().bg_secondary
             };
             child.painter().rect_filled(r, CornerRadius { nw: 7, ne: 7, sw: 0, se: 0 }, fill);
             let mut text_rect = r.shrink2(Vec2::new(10.0, 0.0));
             if self.tabbar.tabs[i].pinned {
                 let pin = Rect::from_center_size(Pos2::new(text_rect.min.x + 5.0, r.center().y), Vec2::splat(12.0));
-                paint_icon(child.painter(), pin, Icon::Pin, if active { theme::TEXT_STRONG } else { theme::MUTED });
+                paint_icon(child.painter(), pin, Icon::Pin, if active { theme::palette().text_strong } else { theme::palette().muted });
                 text_rect.min.x += 14.0;
                 self.tabbar.tab_marks.pinned.push(i);
             }
-            let galley = child.painter().layout_no_wrap(title.clone(), FontId::proportional(13.0), if active { theme::TEXT_STRONG } else { theme::MUTED });
-            child.painter().with_clip_rect(Rect::from_min_max(text_rect.min, Pos2::new(text_rect.max.x - 18.0, text_rect.max.y))).galley(Pos2::new(text_rect.min.x, r.center().y - galley.size().y / 2.0), galley, theme::TEXT);
+            let galley = child.painter().layout_no_wrap(title.clone(), FontId::proportional(13.0), if active { theme::palette().text_strong } else { theme::palette().muted });
+            child.painter().with_clip_rect(Rect::from_min_max(text_rect.min, Pos2::new(text_rect.max.x - 18.0, text_rect.max.y))).galley(Pos2::new(text_rect.min.x, r.center().y - galley.size().y / 2.0), galley, theme::palette().text);
             let cr = Rect::from_center_size(Pos2::new(r.max.x - 14.0, r.center().y), Vec2::splat(16.0));
             let close_resp = child.interact(cr, child.scope_id().with(("tab-close", self.tabbar.tabs[i].id)), Sense::click());
             self.tabbar.tab_rects.push((r, cr));
@@ -544,14 +563,14 @@ impl ShaleApp {
             let failed = self.tabbar.tabs[i].view.path().map(|p| self.notes.get(p).map(|d| d.save_error.is_some()).unwrap_or(false) || self.drawings.get(p).map(|d| d.save_error.is_some()).unwrap_or(false)).unwrap_or(false);
             if failed && dirty && !close_resp.hovered() {
                 // not saved, and the save failed: a red mark instead of the grey dot (DATA-009)
-                child.painter().circle_filled(cr.center(), 4.5, theme::LINK_MISSING);
+                child.painter().circle_filled(cr.center(), 4.5, theme::palette().link_missing);
             } else if dirty && !close_resp.hovered() {
-                child.painter().circle_filled(cr.center(), 3.5, theme::MUTED);
+                child.painter().circle_filled(cr.center(), 3.5, theme::palette().muted);
             } else if resp.hovered() || active || close_resp.hovered() {
                 if close_resp.hovered() {
-                    child.painter().rect_filled(cr, CornerRadius::same(4), theme::BG_HOVER);
+                    child.painter().rect_filled(cr, CornerRadius::same(4), theme::palette().bg_hover);
                 }
-                paint_icon(child.painter(), cr.shrink(3.0), crate::layout::Icon::Close, theme::MUTED);
+                paint_icon(child.painter(), cr.shrink(3.0), crate::layout::Icon::Close, theme::palette().muted);
             }
             if close_resp.clicked() || resp.middle_clicked() {
                 close = Some(i);
@@ -591,7 +610,7 @@ impl ShaleApp {
                 } else {
                     let at = if slot < mids.len() { self.tabbar.tab_rects[slot].0.min.x - 1.0 } else { self.tabbar.tab_rects.last().map_or(bar.min.x, |t| t.0.max.x + 1.0) };
                     let marker = Rect::from_min_max(Pos2::new(at - 1.0, bar.min.y + 6.0), Pos2::new(at + 1.0, bar.max.y - 2.0));
-                    child.painter().rect_filled(marker, CornerRadius::same(1), theme::ACCENT);
+                    child.painter().rect_filled(marker, CornerRadius::same(1), theme::palette().accent);
                     self.tabbar.tab_marks.drop_marker = Some(marker);
                 }
             }
@@ -608,7 +627,7 @@ impl ShaleApp {
             self.tabbar.new_tab(View::Empty);
         }
         if let Some(line) = self.tabbar.tab_marks.focus_line {
-            ui.painter().rect_filled(line, CornerRadius::ZERO, theme::ACCENT);
+            ui.painter().rect_filled(line, CornerRadius::ZERO, theme::palette().accent);
         }
         if let Some(i) = close {
             self.actions.push(Action::CloseTab(i));
@@ -646,7 +665,7 @@ impl ShaleApp {
                 }
                 v => self.tab_title(v),
             };
-            ui.label(egui::RichText::new(crumbs).color(theme::MUTED).size(13.0));
+            ui.label(egui::RichText::new(crumbs).color(theme::palette().muted).size(13.0));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(8.0);
                 if let View::Note(p) = &view {
@@ -665,7 +684,7 @@ impl ShaleApp {
                         }
                     }
                     let p2 = p.clone();
-                    let menu = ui.menu_button(egui::RichText::new("⋯").size(16.0).color(theme::MUTED), |ui| {
+                    let menu = ui.menu_button(egui::RichText::new("⋯").size(16.0).color(theme::palette().muted), |ui| {
                         if ui.button("Export to PDF…").clicked() {
                             self.actions.push(Action::Export(p2.clone()));
                             ui.close();
@@ -696,7 +715,7 @@ impl ShaleApp {
                 }
                 if let View::Drawing(p) = &view {
                     let p2 = p.clone();
-                    ui.menu_button(egui::RichText::new("⋯").size(16.0).color(theme::MUTED), |ui| {
+                    ui.menu_button(egui::RichText::new("⋯").size(16.0).color(theme::palette().muted), |ui| {
                         if ui.button("Export to PDF…").clicked() {
                             self.actions.push(Action::Export(p2.clone()));
                             ui.close();
@@ -790,7 +809,7 @@ impl ShaleApp {
     fn empty_view(&mut self, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
             ui.add_space(ui.available_height() * 0.3);
-            ui.label(egui::RichText::new("No file is open").size(20.0).color(theme::TEXT));
+            ui.label(egui::RichText::new("No file is open").size(20.0).color(theme::palette().text));
             ui.add_space(10.0);
             let folder = self.current_folder();
             if ui.link("Create new note (Ctrl+N)").clicked() {
@@ -854,8 +873,12 @@ impl ShaleApp {
                         tab.title_for = Some(rel.clone());
                         tab.title_buf = display_name.clone();
                     }
-                    let title =
-                        egui::TextEdit::singleline(&mut tab.title_buf).font(FontId::proportional(base * 1.9)).text_color(theme::TEXT_STRONG).frame(egui::Frame::NONE).desired_width(f32::INFINITY).id(egui::Id::unique(("title", tab.id)));
+                    let title = egui::TextEdit::singleline(&mut tab.title_buf)
+                        .font(FontId::proportional(base * 1.9))
+                        .text_color(theme::palette().text_strong)
+                        .frame(egui::Frame::NONE)
+                        .desired_width(f32::INFINITY)
+                        .id(egui::Id::unique(("title", tab.id)));
                     let tr = ui.add(title);
                     if tr.lost_focus() && tab.title_buf.trim() != display_name && !tab.title_buf.trim().is_empty() {
                         rename_to = Some(format!("{kept_prefix}{}", tab.title_buf.trim()));
@@ -871,7 +894,7 @@ impl ShaleApp {
                     let Some(doc) = self.notes.get_mut(&rel) else { return };
                     if let Some(why) = &doc.unreadable {
                         // never shown as an empty note that the next keystroke would save over the file (DATA-008)
-                        ui.label(egui::RichText::new(format!("This note could not be read ({why}). It is shown read-only, and Shale will not change the file.")).color(theme::LINK_MISSING));
+                        ui.label(egui::RichText::new(format!("This note could not be read ({why}). It is shown read-only, and Shale will not change the file.")).color(theme::palette().link_missing));
                         return;
                     }
                     if reading {
@@ -933,15 +956,15 @@ impl ShaleApp {
     fn status_bar(&mut self, ui: &mut Ui) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 14.0;
-            let small = |t: String| egui::RichText::new(t).size(11.5).color(theme::MUTED);
+            let small = |t: String| egui::RichText::new(t).size(11.5).color(theme::palette().muted);
             // the keys of a sequence that waits for its next key (KEY-009)
             if let Some((keys, left)) = self.keymap.pending_text(ui.input(|i| i.time)) {
-                ui.label(egui::RichText::new(keys).size(11.5).monospace().color(theme::ACCENT));
+                ui.label(egui::RichText::new(keys).size(11.5).monospace().color(theme::palette().accent));
                 ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left));
             }
             // vim-lite mode (or the command being typed) of the open note
             if let Some(status) = self.tabbar.tabs.get(self.tabbar.active).and_then(|t| t.editor.vim_status()) {
-                ui.label(egui::RichText::new(status).size(11.5).monospace().color(theme::ACCENT));
+                ui.label(egui::RichText::new(status).size(11.5).monospace().color(theme::palette().accent));
             }
             if let (Some(rel), Some(v)) = (self.current_path(), &self.vault) {
                 if let Some(doc) = self.notes.get(&rel) {
@@ -951,16 +974,16 @@ impl ShaleApp {
                     let bl = self.vault_cache.backlinks(v, &rel).len();
                     ui.label(small(format!("{bl} backlink{}", if bl == 1 { "" } else { "s" })));
                     if doc.unreadable.is_some() {
-                        ui.label(egui::RichText::new("Read-only: could not be read").size(11.5).color(theme::LINK_MISSING));
+                        ui.label(egui::RichText::new("Read-only: could not be read").size(11.5).color(theme::palette().link_missing));
                     } else if let (true, Some(e)) = (doc.dirty, &doc.save_error) {
-                        ui.label(egui::RichText::new("Not saved").size(11.5).color(theme::LINK_MISSING)).on_hover_text(e);
+                        ui.label(egui::RichText::new("Not saved").size(11.5).color(theme::palette().link_missing)).on_hover_text(e);
                     } else {
                         ui.label(small(if doc.dirty { "Saving…".to_string() } else { "Saved".to_string() }));
                     }
                 } else if let Some(d) = self.drawings.get(&rel) {
                     ui.label(small(format!("{} elements", d.scene.live().count())));
                     if let (true, Some(e)) = (d.dirty, &d.save_error) {
-                        ui.label(egui::RichText::new("Not saved").size(11.5).color(theme::LINK_MISSING)).on_hover_text(e);
+                        ui.label(egui::RichText::new("Not saved").size(11.5).color(theme::palette().link_missing)).on_hover_text(e);
                     } else {
                         ui.label(small(if d.dirty { "Saving…".to_string() } else { "Saved".to_string() }));
                     }
@@ -974,7 +997,7 @@ impl ShaleApp {
                 ui.label(small(t));
             }
             if self.cfg.input_log {
-                ui.label(egui::RichText::new("● recording keys").size(11.5).color(theme::LINK_MISSING)).on_hover_text(crate::config::input_log_path().to_string_lossy());
+                ui.label(egui::RichText::new("● recording keys").size(11.5).color(theme::palette().link_missing)).on_hover_text(crate::config::input_log_path().to_string_lossy());
             }
             ui.label(small(format!("Shale {} · build {}", env!("CARGO_PKG_VERSION"), crate::config::build_stamp())));
         });
@@ -987,20 +1010,23 @@ impl ShaleApp {
         let screen = ui.ctx().content_rect();
         let mut dismissed = false;
         egui::Area::new(egui::Id::unique("recovery-notice")).order(egui::Order::Tooltip).fixed_pos(Pos2::new(screen.min.x + 60.0, screen.max.y - 120.0)).show(ui.ctx(), |ui| {
-            egui::Frame::new().fill(Color32::from_rgb(64, 44, 44)).stroke(Stroke::new(1.0, theme::LINK_MISSING.gamma_multiply(0.7))).corner_radius(CornerRadius::same(8)).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
-                ui.set_max_width(420.0);
-                ui.label(egui::RichText::new("Some changes could not be saved when Shale was closed last time. They were put aside so nothing is lost.").color(theme::TEXT));
-                ui.horizontal(|ui| {
-                    if ui.link("Open the folder").clicked() {
-                        if let Err(e) = crate::opener::open_recovery_folder(&first, &self.recovery.root) {
-                            self.toasts.push((e, std::time::Instant::now()));
+            egui::Frame::new().fill(theme::palette().banner_error_bg).stroke(Stroke::new(1.0, theme::palette().link_missing.gamma_multiply(0.7))).corner_radius(CornerRadius::same(8)).inner_margin(egui::Margin::symmetric(12, 8)).show(
+                ui,
+                |ui| {
+                    ui.set_max_width(420.0);
+                    ui.label(egui::RichText::new("Some changes could not be saved when Shale was closed last time. They were put aside so nothing is lost.").color(theme::palette().text));
+                    ui.horizontal(|ui| {
+                        if ui.link("Open the folder").clicked() {
+                            if let Err(e) = crate::opener::open_recovery_folder(&first, &self.recovery.root) {
+                                self.toasts.push((e, std::time::Instant::now()));
+                            }
                         }
-                    }
-                    if ui.link("Dismiss").clicked() {
-                        dismissed = true;
-                    }
-                });
-            });
+                        if ui.link("Dismiss").clicked() {
+                            dismissed = true;
+                        }
+                    });
+                },
+            );
         });
         if dismissed {
             crate::recovery::dismiss(&self.recovery.notice);
@@ -1018,10 +1044,13 @@ impl ShaleApp {
         let mut y = screen.max.y - 40.0;
         for (i, (msg, _)) in self.toasts.iter().enumerate().rev() {
             egui::Area::new(egui::Id::unique(("toast", i))).order(egui::Order::Tooltip).fixed_pos(Pos2::new(screen.max.x - 340.0, y - 34.0)).show(ui.ctx(), |ui| {
-                egui::Frame::new().fill(Color32::from_rgb(48, 46, 60)).stroke(Stroke::new(1.0, theme::ACCENT.gamma_multiply(0.6))).corner_radius(CornerRadius::same(8)).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
-                    ui.set_width(300.0);
-                    ui.label(egui::RichText::new(msg).color(theme::TEXT));
-                });
+                egui::Frame::new().fill(theme::palette().banner_notice_bg).stroke(Stroke::new(1.0, theme::palette().accent.gamma_multiply(0.6))).corner_radius(CornerRadius::same(8)).inner_margin(egui::Margin::symmetric(12, 8)).show(
+                    ui,
+                    |ui| {
+                        ui.set_width(300.0);
+                        ui.label(egui::RichText::new(msg).color(theme::palette().text));
+                    },
+                );
             });
             y -= 46.0;
         }
@@ -1040,3 +1069,30 @@ pub fn shellexpand(p: &str) -> String {
 }
 
 pub fn _unused(_: &markdown::LinkSpan) {}
+
+/// The first width and the limits of the left and of the right sidebar, in points (LAY-018).
+const LEFT_WIDTH: f32 = 260.0;
+const LEFT_RANGE: std::ops::RangeInclusive<f32> = 170.0..=520.0;
+const RIGHT_WIDTH: f32 = 290.0;
+const RIGHT_RANGE: std::ops::RangeInclusive<f32> = 200.0..=560.0;
+
+/// The width a sidebar starts with: the stored one, within its limits, else the default (LAY-018).
+fn sidebar_width(stored: Option<u32>, default: f32, range: std::ops::RangeInclusive<f32>) -> f32 {
+    stored.map_or(default, |w| w as f32).clamp(*range.start(), *range.end())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // spec: LAY-018
+    #[test]
+    fn lay_018_a_stored_width_is_clamped_to_the_range_of_its_sidebar() {
+        assert_eq!(sidebar_width(None, LEFT_WIDTH, LEFT_RANGE), 260.0);
+        assert_eq!(sidebar_width(Some(333), LEFT_WIDTH, LEFT_RANGE), 333.0);
+        assert_eq!(sidebar_width(Some(5), LEFT_WIDTH, LEFT_RANGE), 170.0);
+        assert_eq!(sidebar_width(Some(4000), LEFT_WIDTH, LEFT_RANGE), 520.0);
+        assert_eq!(sidebar_width(Some(5), RIGHT_WIDTH, RIGHT_RANGE), 200.0);
+        assert_eq!(sidebar_width(Some(4000), RIGHT_WIDTH, RIGHT_RANGE), 560.0);
+    }
+}

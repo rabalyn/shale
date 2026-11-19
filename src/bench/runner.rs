@@ -1,4 +1,4 @@
-//! Measuring a scenario and the shape of a result file (BUILD-027, BUILD-028).
+//! Measuring a scenario and the shape of a result file (BUILD-038, BUILD-028).
 
 use super::alloc;
 use serde::{Deserialize, Serialize};

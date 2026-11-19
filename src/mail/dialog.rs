@@ -275,7 +275,6 @@ pub fn show(ui: &mut Ui, d: &mut MailDialog, mail: &MailView) -> Option<MailDial
         )
         .size(12.5),
     );
-    ui.add_space(8.0);
     ui.horizontal_top(|ui| {
         // the list of accounts
         ui.vertical(|ui| {
@@ -295,7 +294,6 @@ pub fn show(ui: &mut Ui, d: &mut MailDialog, mail: &MailView) -> Option<MailDial
                     d.sel = Some(i);
                 }
             }
-            ui.add_space(4.0);
             let r = ui.button("Add account");
             rects.push(("md:add".into(), r.rect));
             if r.clicked() {
@@ -319,7 +317,7 @@ pub fn show(ui: &mut Ui, d: &mut MailDialog, mail: &MailView) -> Option<MailDial
             account_form(ui, d, i, mail, &mut rects, &mut out);
         });
     });
-    ui.add_space(8.0);
+    theme::section_break(ui);
     ui.horizontal(|ui| {
         ui.label("Fetch new mail every");
         let r = ui.add(egui::TextEdit::singleline(&mut d.minutes).desired_width(36.0));
@@ -339,7 +337,7 @@ pub fn show(ui: &mut Ui, d: &mut MailDialog, mail: &MailView) -> Option<MailDial
         rects.push(("md:undo-secs".into(), r.rect));
         ui.label("seconds in the outbox, where you can take it back (0 = send at once)");
     });
-    ui.add_space(6.0);
+    theme::section_break(ui);
     encryption_section(ui, d, mail, &mut rects, &mut out);
     d.rects = rects;
     out
@@ -350,10 +348,8 @@ pub fn show(ui: &mut Ui, d: &mut MailDialog, mail: &MailView) -> Option<MailDial
 pub fn footer(ui: &mut Ui, d: &mut MailDialog) -> Option<MailDialogAction> {
     let mut out = None;
     if let Some(e) = &d.error {
-        ui.add_space(4.0);
-        ui.label(RichText::new(e.as_str()).color(theme::LINK_MISSING));
+        ui.label(RichText::new(e.as_str()).color(theme::palette().link_missing));
     }
-    ui.add_space(8.0);
     ui.horizontal(|ui| {
         let r = ui.button("Done");
         d.rects.push(("md:done".into(), r.rect));
@@ -429,9 +425,9 @@ fn account_form(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rect
         }
     });
     // sending (MAIL-120): folded away until it is needed, so the form stays short
-    ui.add_space(8.0);
+    theme::section_break(ui);
     let open_now = !d.accounts[i].smtp_host.trim().is_empty();
-    let head = egui::CollapsingHeader::new(RichText::new("Sending (SMTP)").color(theme::TEXT)).id_salt(("mail-smtp", i)).default_open(open_now).show(ui, |ui| {
+    let head = egui::CollapsingHeader::new(RichText::new("Sending (SMTP)").color(theme::palette().text)).id_salt(("mail-smtp", i)).default_open(open_now).show(ui, |ui| {
         egui::Grid::new(("mail-smtp-form", i)).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
             ui.label("SMTP server");
             let r = ui.add(egui::TextEdit::singleline(&mut d.accounts[i].smtp_host).hint_text("smtp.example.com (empty: this account does not send)").desired_width(300.0));
@@ -494,7 +490,6 @@ fn account_form(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rect
         })
         .size(12.0),
     );
-    ui.add_space(6.0);
     ui.horizontal(|ui| {
         let running = matches!(mail.tests.get(&id), Some(TestState::Running));
         let r = ui.add_enabled(!running, egui::Button::new("Test connection"));
@@ -507,18 +502,18 @@ fn account_form(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rect
                 ui.label(muted("Connecting…"));
             }
             Some(TestState::Ok(t)) => {
-                ui.label(RichText::new(t.as_str()).color(theme::TAG));
+                ui.label(RichText::new(t.as_str()).color(theme::palette().tag));
             }
             Some(TestState::Failed(e)) => {
-                ui.label(RichText::new(e.as_str()).color(theme::LINK_MISSING));
+                ui.label(RichText::new(e.as_str()).color(theme::palette().link_missing));
             }
             None => {}
         }
     });
     // signing and encrypting (MAIL-190): which key of GnuPG belongs to this account
-    ui.add_space(4.0);
+    theme::section_break(ui);
     let have_key = !d.accounts[i].pgp_key.is_empty() || !d.accounts[i].smime_key.is_empty();
-    let head = egui::CollapsingHeader::new(RichText::new("Signing and encrypting").color(theme::TEXT)).id_salt(("mail-keys", i)).default_open(have_key).show(ui, |ui| key_rows(ui, d, i, mail, rects));
+    let head = egui::CollapsingHeader::new(RichText::new("Signing and encrypting").color(theme::palette().text)).id_salt(("mail-keys", i)).default_open(have_key).show(ui, |ui| key_rows(ui, d, i, mail, rects));
     rects.push(("md:keys-header".into(), head.header_response.rect));
     if head.header_response.clicked() {
         d.scroll_keys = true;
@@ -529,8 +524,7 @@ fn account_form(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rect
     }
     // which folders are synced
     let folders = mail.account_folders(&id);
-    ui.add_space(6.0);
-    ui.label(RichText::new("Folders to sync").color(theme::TEXT));
+    theme::section(ui, "Folders to sync");
     if folders.is_empty() {
         crate::theme::prose(ui, muted("The folders appear after “Test connection” or the first sync.").size(12.0));
         return;
@@ -603,7 +597,6 @@ fn oauth_rows(ui: &mut Ui, d: &mut MailDialog, i: usize, id: &str, rects: &mut V
 
 /// The sign-in button with its waiting note, Cancel and the result.
 fn sign_in_row(ui: &mut Ui, i: usize, id: &str, mail: &MailView, rects: &mut Vec<(String, Rect)>, out: &mut Option<MailDialogAction>) {
-    ui.add_space(4.0);
     ui.horizontal_wrapped(|ui| {
         let state = mail.signins.get(id);
         let waiting = matches!(state, Some(SignInState::Waiting { .. }));
@@ -631,13 +624,13 @@ fn sign_in_row(ui: &mut Ui, i: usize, id: &str, mail: &MailView, rects: &mut Vec
             }
             Some(SignInState::Done { user, kept }) => {
                 let who = user.as_ref().map(|u| format!(" as {u}")).unwrap_or_default();
-                ui.label(RichText::new(format!("Signed in{who}.")).color(theme::TAG));
+                ui.label(RichText::new(format!("Signed in{who}.")).color(theme::palette().tag));
                 if !kept {
                     ui.label(muted("(not saved: no keyring)"));
                 }
             }
             Some(SignInState::Failed(e)) => {
-                ui.label(RichText::new(e.as_str()).color(theme::LINK_MISSING));
+                ui.label(RichText::new(e.as_str()).color(theme::palette().link_missing));
             }
             None => match mail.signed_in.get(id) {
                 Some(true) => {
@@ -650,27 +643,24 @@ fn sign_in_row(ui: &mut Ui, i: usize, id: &str, mail: &MailView, rects: &mut Vec
             },
         }
     });
-    ui.add_space(4.0);
 }
 
 /// The Encryption section (MAIL-180, MAIL-184, MAIL-191): what GnuPG there is, the red warning and the consent
 /// field, the keys, and how to bring keys over from Thunderbird.
 fn encryption_section(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &mut Vec<(String, Rect)>, out: &mut Option<MailDialogAction>) {
     use crate::config::CryptoStandard;
-    let head = egui::CollapsingHeader::new(RichText::new("Encryption (OpenPGP and S/MIME)").color(theme::TEXT)).id_salt("mail-encryption").default_open(d.consent.is_some()).show(ui, |ui| {
+    let head = egui::CollapsingHeader::new(RichText::new("Encryption (OpenPGP and S/MIME)").color(theme::palette().text)).id_salt("mail-encryption").default_open(d.consent.is_some()).show(ui, |ui| {
         crate::theme::prose(ui, muted("Shale signs, verifies, encrypts and decrypts with the GnuPG on this computer (gpg for OpenPGP, gpgsm for S/MIME). It never sees your keys or passphrases: GnuPG and its passphrase dialog do that. Verifying a signature needs no setting; decrypting does.").size(12.0));
-        ui.add_space(4.0);
         // the red warning, always visible when the section is open
         let red = egui::Color32::from_rgb(200, 40, 40);
         let r = egui::Frame::new().fill(egui::Color32::from_rgb(90, 20, 20)).stroke(egui::Stroke::new(2.0, red)).corner_radius(egui::CornerRadius::same(4)).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.label(RichText::new("ENCRYPTED MAILS WILL ALWAYS BE STORED DECRYPTED LOCALLY").strong().size(15.0).color(egui::Color32::from_rgb(255, 150, 150)));
-            ui.label(RichText::new("Once a mail is decrypted, its decrypted copy and its text for the search are kept on this computer, unencrypted, in the mail folder (only you can enter it; full-disk encryption is what protects it). The encrypted original stays as it is. Mails are decrypted when you open them, not before.").color(theme::TEXT).size(12.5));
+            ui.label(RichText::new("Once a mail is decrypted, its decrypted copy and its text for the search are kept on this computer, unencrypted, in the mail folder (only you can enter it; full-disk encryption is what protects it). The encrypted original stays as it is. Mails are decrypted when you open them, not before.").color(theme::palette().text).size(12.5));
         });
         rects.push(("md:enc-banner".into(), r.response.rect));
-        ui.add_space(4.0);
         if let Some(when) = d.consent.clone() {
-            ui.label(RichText::new(format!("Encryption is on (agreed {when}).")).color(theme::TAG));
+            ui.label(RichText::new(format!("Encryption is on (agreed {when}).")).color(theme::palette().tag));
             let r = ui.button("Withdraw consent");
             rects.push(("md:enc-withdraw".into(), r.rect));
             if r.clicked() {
@@ -679,7 +669,7 @@ fn encryption_section(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &
             crate::theme::prose(ui, muted("Withdrawing stops decrypting new mails. It deletes nothing: mails that were already decrypted keep their decrypted copies and search text on this computer, and are still shown. Click Done to save.").size(12.0));
         } else {
             ui.label("To switch encryption on, type exactly:");
-            ui.label(RichText::new(crate::config::CONSENT_PHRASE).strong().color(theme::TEXT_STRONG));
+            ui.label(RichText::new(crate::config::CONSENT_PHRASE).strong().color(theme::palette().text_strong));
             ui.horizontal(|ui| {
                 let r = ui.add(egui::TextEdit::singleline(&mut d.consent_phrase).desired_width(300.0).hint_text("type the sentence above"));
                 rects.push(("md:enc-phrase".into(), r.rect));
@@ -692,9 +682,9 @@ fn encryption_section(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &
             });
             crate::theme::prose(ui, muted("Without it, encrypted mail shows “Encrypted — enable encryption in the settings” and nothing is decrypted or stored. Click Done to save.").size(12.0));
         }
-        ui.add_space(6.0);
+        theme::section_break(ui);
         ui.horizontal(|ui| {
-            ui.label(RichText::new("GnuPG on this computer").color(theme::TEXT));
+            ui.label(RichText::new("GnuPG on this computer").color(theme::palette().muted));
             let r = ui.small_button("Check again");
             rects.push(("md:enc-detect".into(), r.rect));
             if r.clicked() {
@@ -713,7 +703,7 @@ fn encryption_section(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &
                     for std in [CryptoStandard::OpenPgp, CryptoStandard::Smime] {
                         match info.version(std) {
                             Some(Ok(v)) => {
-                                ui.label(RichText::new(format!("{} ({}): {v}", std.label(), std.program())).color(theme::TEXT).size(12.5));
+                                ui.label(RichText::new(format!("{} ({}): {v}", std.label(), std.program())).color(theme::palette().text).size(12.5));
                                 let keys = info.keys(std);
                                 if keys.is_empty() {
                                     crate::theme::prose(ui, muted("  no secret keys found: signing and decrypting need one; see below to import yours").size(12.0));
@@ -724,7 +714,7 @@ fn encryption_section(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &
                                 }
                             }
                             Some(Err(e)) => {
-                                ui.label(RichText::new(format!("{}: {e}", std.label())).color(theme::LINK_MISSING).size(12.5));
+                                ui.label(RichText::new(format!("{}: {e}", std.label())).color(theme::palette().link_missing).size(12.5));
                             }
                             None => {}
                         }
@@ -732,10 +722,8 @@ fn encryption_section(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &
                 }
             }
         });
-        ui.add_space(6.0);
         agent_block(ui, d, mail, rects, out);
-        ui.add_space(6.0);
-        ui.label(RichText::new("Bringing your keys here").color(theme::TEXT));
+        theme::section(ui, "Bringing your keys here");
         crate::theme::prose(
             ui,
             muted(
@@ -760,7 +748,7 @@ fn encryption_section(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &
 /// is shown first and written only by the second click, the same by hand, and the keyring tip. Shale never sees a passphrase.
 fn agent_block(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &mut Vec<(String, Rect)>, out: &mut Option<MailDialogAction>) {
     use crate::mail::agent_cache::{keyring_tip, manual_lines, Choice, Os, Plan, RELOAD_COMMAND};
-    ui.label(RichText::new("Keeping the key unlocked").color(theme::TEXT));
+    theme::section(ui, "Keeping the key unlocked");
     ui.label(muted("GnuPG's agent asks for the passphrase again after a while, and always after it is restarted. Shale never sees the passphrase: the times are GnuPG's own setting.").size(12.0));
     // fixed height like the answer above, so nothing moves when the times arrive
     let room = AGENT_STATUS_LINES * (ui.text_style_height(&egui::TextStyle::Body) + ui.spacing().item_spacing.y);
@@ -769,12 +757,12 @@ fn agent_block(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &mut Vec
             ui.label(muted("Looking…"));
         }
         Some(Err(e)) => {
-            ui.label(RichText::new(format!("The cache times could not be read: {e}")).color(theme::LINK_MISSING).size(12.5));
+            ui.label(RichText::new(format!("The cache times could not be read: {e}")).color(theme::palette().link_missing).size(12.5));
         }
         Some(Ok(info)) => {
-            ui.label(RichText::new(info.words()).color(theme::TEXT).size(12.5));
+            ui.label(RichText::new(info.words()).color(theme::palette().text).size(12.5));
             if let Some(note) = info.external_cache_note() {
-                ui.label(RichText::new(note).color(theme::LINK_MISSING).size(12.0));
+                ui.label(RichText::new(note).color(theme::palette().link_missing).size(12.0));
             }
         }
     });
@@ -799,9 +787,9 @@ fn agent_block(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &mut Vec
     });
     if let (true, Some(info)) = (d.agent.plan_open, info) {
         let plan = Plan::new(&info.homedir, d.agent.choice);
-        let r = egui::Frame::new().stroke(egui::Stroke::new(1.0, theme::TEXT)).corner_radius(egui::CornerRadius::same(4)).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+        let r = egui::Frame::new().stroke(egui::Stroke::new(1.0, theme::palette().text)).corner_radius(egui::CornerRadius::same(4)).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new(plan.describe()).color(theme::TEXT).size(12.5));
+            ui.label(RichText::new(plan.describe()).color(theme::palette().text).size(12.5));
             ui.horizontal(|ui| {
                 let r = ui.button("Write with gpgconf");
                 rects.push(("md:agent-write".into(), r.rect));
@@ -823,18 +811,18 @@ fn agent_block(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &mut Vec
     }
     match &mail.agent.written {
         Some(Ok(())) => {
-            ui.label(RichText::new("Written, and the agent was told to reload. The times above are read again from GnuPG.").color(theme::TAG).size(12.5));
+            ui.label(RichText::new("Written, and the agent was told to reload. The times above are read again from GnuPG.").color(theme::palette().tag).size(12.5));
         }
         Some(Err(e)) => {
-            ui.label(RichText::new(format!("Not changed: {e}")).color(theme::LINK_MISSING).size(12.5));
+            ui.label(RichText::new(format!("Not changed: {e}")).color(theme::palette().link_missing).size(12.5));
         }
         None => {}
     }
-    ui.label(RichText::new("The same by hand").color(theme::TEXT).size(12.5));
+    theme::section(ui, "The same by hand");
     let file = info.map(|i| i.homedir.join("gpg-agent.conf").display().to_string()).unwrap_or_else(|| "gpg-agent.conf in GnuPG's home folder (gpgconf --list-dirs)".into());
     let lines = manual_lines(d.agent.choice.seconds());
     ui.label(muted(format!("Put these lines into {file}, then run   {RELOAD_COMMAND}")).size(12.0));
-    ui.label(RichText::new(lines.trim_end()).monospace().size(12.0).color(theme::TEXT));
+    ui.label(RichText::new(lines.trim_end()).monospace().size(12.0).color(theme::palette().text));
     let r = ui.small_button("Copy lines");
     rects.push(("md:agent-copy".into(), r.rect));
     if r.clicked() {
@@ -896,7 +884,7 @@ fn key_rows(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rects: &
                     }
                 }
                 Some(Err(e)) => {
-                    ui.label(RichText::new(e.as_str()).color(theme::LINK_MISSING).size(12.5));
+                    ui.label(RichText::new(e.as_str()).color(theme::palette().link_missing).size(12.5));
                 }
                 None => {
                     crate::theme::prose(ui, muted("Looking…").size(12.0));

@@ -47,7 +47,7 @@ impl CursorShape {
 
     /// Paint the cursor over the character whose box is `ch`.
     pub fn paint(self, painter: &Painter, ch: Rect) {
-        let colour = if self == CursorShape::Block { theme::ACCENT.gamma_multiply(0.45) } else { theme::ACCENT };
+        let colour = if self == CursorShape::Block { theme::palette().accent.gamma_multiply(0.45) } else { theme::palette().accent };
         painter.rect_filled(self.rect(ch), 1.0, colour);
     }
 }

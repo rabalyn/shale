@@ -35,7 +35,7 @@ toml = { version = "1", default-features = false, features = ["parse", "display"
 fontdb = { version = "0.24", default-features = false, features = ["fs", "memmap", "fontconfig"] }
 
 [features]
-# The benchmark harness (BUILD-027): `shale --bench`, scenarios, a counting allocator, comparison and
+# The benchmark harness (BUILD-038): `shale --bench`, scenarios, a counting allocator, comparison and
 # report. Off by default, so no shipped build contains any of it.
 bench = []
 
@@ -58,13 +58,16 @@ dbg_macro = "deny"
 todo = "deny"
 unimplemented = "deny"
 
+# BUILD-027: line tables only (backtraces keep file:line); keeps each worktree's target/ small
 [profile.dev]
 opt-level = 1
+debug = "line-tables-only"
 
 [profile.dev.package."*"]
 opt-level = 2
+debug = "line-tables-only"
 
-# What scripts/bench.sh builds (BUILD-027): the release profile with line tables, so a flamegraph
+# What scripts/bench.sh builds (BUILD-038): the release profile with line tables, so a flamegraph
 # names functions and lines. The shipped release profile is unchanged.
 [profile.bench-release]
 inherits = "release"

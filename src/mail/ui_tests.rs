@@ -381,6 +381,58 @@ impl Drop for W {
     }
 }
 
+impl W {
+    /// Start the app again on the same vault, mail store and account (a restart), with the mail view as the saved tabs make it.
+    /// `edit` changes the saved mail place first (a place that went stale).
+    fn restart(&mut self, edit: impl Fn(&mut crate::vault_state::SavedMail)) {
+        self.app.save_config();
+        for t in &mut self.app.vdata.state.panes[0].tabs {
+            edit(t.mail.as_mut().unwrap());
+        }
+        self.app.vdata.save().unwrap();
+        let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(self.dir.clone()), view: None, keys: None }, false);
+        app.mail.root = self.app.mail.root.clone();
+        app.cfg.mail_sync_minutes = 0;
+        app.mail.watch.enabled = false;
+        app.cfg.mail_mark_read = false;
+        app.mail.factory = factory(self.offline.clone());
+        app.mail.opts = self.app.mail.opts.clone();
+        app.cfg.mail_accounts = vec![self.account.clone()];
+        app.open_vault(&self.dir.clone());
+        self.app = app;
+    }
+}
+
+// spec: NAV-045
+#[test]
+fn the_folder_and_the_open_message_come_back_after_a_restart_and_a_gone_folder_falls_back_to_the_first() {
+    let mut w = W::new("restore", true);
+    w.sync_and_wait();
+    w.open_folder("Sent");
+    w.open_mail("Re: Invoice 2026");
+    let (sent, uid) = (w.folder_id("Sent"), w.app.mail.open.as_ref().unwrap().msg.uid);
+    w.restart(|_| {});
+    assert_eq!(w.app.tabbar.tabs.iter().map(|t| t.view.clone()).collect::<Vec<_>>(), vec![View::Mail], "the mail tab is back");
+    w.until("the place is found", |a| a.mail.open.is_some());
+    assert_eq!(w.app.mail.folder, Some(sent));
+    assert_eq!(w.app.mail.open.as_ref().map(|o| (o.msg.uid, o.msg.subject.clone())), Some((uid, "Re: Invoice 2026".to_string())));
+    let row = w.row_of("Re: Invoice 2026");
+    assert_eq!(w.app.mail.cursor, Some(row), "the cursor is on the message");
+    assert!(w.app.mail.restore.is_none() && w.app.mail.prompt.is_none(), "nothing is asked");
+    // a folder that is gone: the first folder, and no message
+    w.restart(|m| m.folder = "Gone".into());
+    w.until("the first folder is shown", |a| a.mail.folder.is_some());
+    assert_eq!(w.app.mail.folder, Some(w.folder_id("INBOX")));
+    assert!(w.app.mail.open.is_none() && w.app.mail.restore.is_none());
+    // a message that is gone: the folder only
+    w.open_folder("Sent");
+    w.open_mail("Re: Invoice 2026");
+    w.restart(|m| m.uid = Some(9_999));
+    w.until("the folder is shown", move |a| a.mail.folder == Some(sent));
+    w.frame(vec![]);
+    assert!(w.app.mail.open.is_none());
+}
+
 // spec: MAIL-040, MAIL-041, MAIL-042, MAIL-043
 #[test]
 fn an_account_is_added_in_the_dialog_tested_and_saved_with_its_password_in_the_keyring() {
@@ -479,6 +531,24 @@ fn without_a_keyring_the_password_stays_in_memory_and_the_dialog_says_so() {
     let id = acct.id.clone();
     w.until("the sync ends", move |a| a.mail.syncs.get(&id).is_some_and(|r| r.finished.is_some()));
     assert!(w.app.mail.syncs[&acct.id].errors.is_empty(), "{:?}", w.app.mail.syncs[&acct.id].errors);
+}
+
+// spec: NAV-048
+#[test]
+fn nav_048_the_mail_accounts_dialog_sets_its_sections_apart() {
+    let mut w = W::new("sections", true);
+    w.size = Vec2::new(1500.0, 1400.0);
+    w.app.open_mail_settings();
+    w.settle();
+    let gap = |w: &W, above: &str, below: &str| w.rect(below).top() - w.rect(above).bottom();
+    let want = crate::theme::SECTION_GAP - 0.6;
+    let (smtp, keys) = (gap(&w, "md:password", "md:smtp-header"), gap(&w, "md:test", "md:keys-header"));
+    assert!(smtp >= want, "the Sending part is {smtp} below the account form, the section gap is {}", crate::theme::SECTION_GAP);
+    assert!(keys >= want, "Signing and encrypting is {keys} below the test button, the section gap is {}", crate::theme::SECTION_GAP);
+    let settings = w.rect("md:minutes").top() - w.rect("md:remove").bottom();
+    assert!(settings >= want, "the settings under the account are {settings} below its list, the section gap is {}", crate::theme::SECTION_GAP);
+    let encryption = w.rect("md:enc-header").top() - w.rect("md:undo-secs").bottom();
+    assert!(encryption >= want, "Encryption is {encryption} below the last setting, the section gap is {}", crate::theme::SECTION_GAP);
 }
 
 // spec: MAIL-043
@@ -2284,6 +2354,8 @@ fn encrypted_mail_needs_the_typed_consent_then_is_decrypted_stored_and_searchabl
         with_subject(&testmail::pgp_encrypted(&alice.pgp_encrypt(&[&b_fpr], None, entity.as_bytes())), subject)
     };
     let mut w = W::new("enc-ui", true);
+    // the dialog has more room between its sections (NAV-048): a taller window keeps the banner in view
+    w.size = Vec2::new(1500.0, 1400.0);
     w.app.mail.gnupg = bob.g.clone();
     add_inbox_mail(&w, "Zebra plans", enc("Zebra plans", "the zebrafish plan"));
     add_inbox_mail(&w, "Okapi plans", enc("Okapi plans", "the okapi plan"));
@@ -2720,7 +2792,8 @@ fn mail_236_the_first_click_only_shows_what_gpgconf_will_write_cancel_writes_not
     assert!(!w.has("md:agent-write"), "the plan is closed after the write");
 
     // a failure is said in gpgconf's words and the times stay readable
-    std::fs::write(&conf, "this-is-not-an-option\n").unwrap();
+    // (a home that is not there: an unknown option in the file is accepted by GnuPG 2.2, the CI image's)
+    w.app.mail.gnupg.home = Some(home.dir.join("gone"));
     w.app.mail.write_agent(crate::mail::agent_cache::Choice::Day1);
     w.until("the second write ended", |a| a.mail.agent.written.as_ref().is_some_and(|r| r.is_err()));
     w.settle();
@@ -2972,7 +3045,7 @@ impl W {
     /// Is the cursor colour painted over this control?
     fn cursor_painted_on(&self, key: &str) -> bool {
         let r = self.rect(key);
-        let c = crate::theme::ACCENT.gamma_multiply(0.25);
+        let c = crate::theme::palette().accent.gamma_multiply(0.25);
         self.fills.iter().any(|(f, col)| *col == c && f.intersects(r))
     }
 

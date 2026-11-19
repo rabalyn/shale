@@ -1,7 +1,7 @@
 # Performance of Shale
 
-How fast Shale is, measured the same way on every release (raba/shale#343, spec rows BUILD-027
-to BUILD-035). This folder holds the stored results, the flamegraphs, the page
+How fast Shale is, measured the same way on every release (raba/shale#343, spec rows BUILD-028
+to BUILD-038). This folder holds the stored results, the flamegraphs, the page
 [`index.html`](index.html) that draws them, and below the how-to, the schemas and the **baseline
 analysis**: what was measured before any optimisation, and the weak spots it found (the work order
 for whoever fixes them).

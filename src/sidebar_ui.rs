@@ -23,6 +23,9 @@ pub struct SideState {
     pub peek: Option<RightPanel>,
     /// the share of the height of that panel (not stored, LAY-012); 0: the equal share
     pub(crate) peek_weight: u32,
+    /// "Reset layout" (LAY-014): the left and the right sidebar take their default width at their
+    /// next frame (LAY-018)
+    pub(crate) reset_widths: [bool; 2],
     /// where things were drawn this frame (and the frame before the next one)
     pub(crate) ribbon_rect: Option<Rect>,
     pub(crate) ribbon_icons: Vec<(Item, Rect)>,
@@ -206,6 +209,9 @@ impl ShaleApp {
         if reset.clicked() {
             self.side.layout = Layout::default();
             self.side.peek = None;
+            self.cfg.left_sidebar_width = None;
+            self.cfg.right_sidebar_width = None;
+            self.side.reset_widths = [true, true];
             self.layout_changed();
             ui.close();
         }
@@ -234,7 +240,7 @@ impl ShaleApp {
         for i in 0..n {
             let rect = Rect::from_min_max(Pos2::new(full.min.x, tops[i]), Pos2::new(full.max.x, tops[i + 1]));
             if i > 0 {
-                ui.painter().line_segment([rect.left_top(), rect.right_top()], Stroke::new(1.0, theme::BORDER));
+                ui.painter().line_segment([rect.left_top(), rect.right_top()], Stroke::new(1.0, theme::palette().border));
             }
             let top = if i > 0 { rect.min.y + 3.0 } else { rect.min.y };
             let bar = Rect::from_min_max(Pos2::new(rect.min.x, top), Pos2::new(rect.max.x, top + BAR_H));
@@ -342,24 +348,24 @@ impl ShaleApp {
         let painter = ctx.layer_painter(LayerId::new(Order::Tooltip, Id::unique("side-drag")));
         match self.side.cue {
             Cue::Ribbon { line, .. } | Cue::Bar { line, .. } => {
-                painter.line_segment(line, Stroke::new(2.0, theme::ACCENT));
+                painter.line_segment(line, Stroke::new(2.0, theme::palette().accent));
             }
             Cue::Zone { rect, .. } => {
-                painter.rect_filled(rect, CornerRadius::same(6), theme::ACCENT.gamma_multiply(0.22));
-                painter.rect_stroke(rect.shrink(2.0), CornerRadius::same(6), Stroke::new(2.0, theme::ACCENT), StrokeKind::Inside);
-                let galley = painter.layout("Drop to open this icon in a new view".into(), FontId::proportional(13.0), theme::TEXT_STRONG, rect.width() - 24.0);
-                painter.galley(rect.center() - galley.size() / 2.0, galley, theme::TEXT_STRONG);
+                painter.rect_filled(rect, CornerRadius::same(6), theme::palette().accent.gamma_multiply(0.22));
+                painter.rect_stroke(rect.shrink(2.0), CornerRadius::same(6), Stroke::new(2.0, theme::palette().accent), StrokeKind::Inside);
+                let galley = painter.layout("Drop to open this icon in a new view".into(), FontId::proportional(13.0), theme::palette().text_strong, rect.width() - 24.0);
+                painter.galley(rect.center() - galley.size() / 2.0, galley, theme::palette().text_strong);
             }
             Cue::Refused | Cue::None => {}
         }
         if let Some(p) = pos {
             let refused = self.side.cue == Cue::Refused;
             let r = Rect::from_center_size(p + Vec2::new(16.0, 16.0), Vec2::splat(26.0));
-            painter.rect_filled(r, CornerRadius::same(5), theme::BG_ACTIVE);
-            paint_icon(&painter, r.shrink(5.0), item.icon(), if refused { theme::LINK_MISSING } else { theme::ACCENT });
+            painter.rect_filled(r, CornerRadius::same(5), theme::palette().bg_active);
+            paint_icon(&painter, r.shrink(5.0), item.icon(), if refused { theme::palette().link_missing } else { theme::palette().accent });
             if refused {
-                painter.circle_stroke(r.center(), 13.0, Stroke::new(2.0, theme::LINK_MISSING));
-                painter.line_segment([r.center() + Vec2::new(-9.0, 9.0), r.center() + Vec2::new(9.0, -9.0)], Stroke::new(2.0, theme::LINK_MISSING));
+                painter.circle_stroke(r.center(), 13.0, Stroke::new(2.0, theme::palette().link_missing));
+                painter.line_segment([r.center() + Vec2::new(-9.0, 9.0), r.center() + Vec2::new(9.0, -9.0)], Stroke::new(2.0, theme::palette().link_missing));
             }
             ctx.set_cursor_icon(if refused { egui::CursorIcon::NoDrop } else { egui::CursorIcon::Grabbing });
         }

@@ -12,6 +12,8 @@
 //!
 //! An unknown option or a missing value is an error (exit code 2), never a vault folder.
 
+#[cfg(test)]
+mod align_ui_tests;
 mod app;
 #[cfg(feature = "bench")]
 mod bench;
@@ -108,6 +110,7 @@ mod table;
 mod table_grid;
 mod table_select;
 mod theme;
+mod themes;
 #[cfg(test)]
 mod ui_test_support;
 mod undo;
@@ -233,7 +236,7 @@ fn read_args(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
 }
 
 fn main() -> eframe::Result {
-    // the benchmark harness (BUILD-027): modes of their own, before the process is hardened (perf cannot attach to an undumpable one)
+    // the benchmark harness (BUILD-038): modes of their own, before the process is hardened (perf cannot attach to an undumpable one)
     #[cfg(feature = "bench")]
     if let Some(parsed) = bench::cli::parse(&std::env::args().skip(1).collect::<Vec<_>>()) {
         match parsed {

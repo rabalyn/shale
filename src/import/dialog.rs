@@ -20,7 +20,7 @@ pub struct ImportDialog {
     pub keep_original: bool,
     /// keep the original .docx of a Word file in its import folder (IMP-038)
     pub keep_docx: bool,
-    /// also write the header of an e-mail / event as a list in the note (IMP-052)
+    /// also write the header of an e-mail / event / post as a list in the note (IMP-052)
     pub header_list: bool,
     /// pandoc runs for the Word files that are going on in a job (IMP-035)
     pub converting: Option<Receiver<Result<Vec<Converted>, String>>>,
@@ -183,17 +183,17 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
         r
     };
     let mut action = None;
-    let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
+    let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::palette().muted);
     // ---- what
     if d.items.is_empty() {
         crate::theme::prose(ui, muted("Nothing to import yet. Drop e-mails, calendar events, pictures or other files on the window, or add a file below."));
     }
     for (i, it) in d.items.iter_mut().enumerate() {
-        egui::Frame::new().fill(theme::BG_SECONDARY).corner_radius(6).inner_margin(8).show(ui, |ui| {
+        egui::Frame::new().fill(theme::palette().bg_secondary).corner_radius(6).inner_margin(8).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 rec(format!("include:{i}"), ui.checkbox(&mut it.include, "")).on_hover_text("Import this one");
-                ui.label(egui::RichText::new(it.kind()).size(11.0).color(theme::ACCENT));
+                ui.label(egui::RichText::new(it.kind()).size(11.0).color(theme::palette().accent));
                 let tip = if matches!(it.source, Source::Media { .. }) { "File name in the media folder" } else { "Name of the new note" };
                 rec(format!("title:{i}"), ui.add(egui::TextEdit::singleline(&mut it.title).desired_width(470.0))).on_hover_text(tip);
             });
@@ -202,19 +202,19 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
                 ui.label(
                     egui::RichText::new(format!("Imported before as “{}”. Tick it to import it again.", crate::markdown::strip_md_ext(&p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())))
                         .size(12.0)
-                        .color(theme::LINK_MISSING),
+                        .color(theme::palette().link_missing),
                 );
             }
             if let Some(w) = it.warning() {
-                ui.add(egui::Label::new(egui::RichText::new(w).size(12.0).color(theme::LINK_MISSING)).wrap());
+                ui.add(egui::Label::new(egui::RichText::new(w).size(12.0).color(theme::palette().link_missing)).wrap());
             }
             if !it.people.is_empty() {
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(6.0, 2.0);
-                    ui.label(egui::RichText::new("People").size(12.0).color(theme::MUTED)).on_hover_text("Ticked people are linked from the note; those without a contact note get one in the people folder");
+                    ui.label(egui::RichText::new("People").size(12.0).color(theme::palette().muted)).on_hover_text("Ticked people are linked from the note; those without a contact note get one in the people folder");
                     for (k, p) in it.people.iter_mut().enumerate() {
                         let what = if p.existing.is_some() { "" } else { " (new)" };
-                        let label = egui::RichText::new(format!("{}{what}", p.name)).size(12.5).color(if p.existing.is_some() { theme::LINK } else { theme::TEXT });
+                        let label = egui::RichText::new(format!("{}{what}", p.name)).size(12.5).color(if p.existing.is_some() { theme::palette().link } else { theme::palette().text });
                         let tip = format!("{} · {}{}", p.role.label(), if p.email.is_empty() { "no address" } else { p.email.as_str() }, if p.existing.is_some() { " · has a contact note" } else { " · a contact note will be made" });
                         rec(format!("person:{i}:{k}"), ui.checkbox(&mut p.on, label)).on_hover_text(tip);
                     }
@@ -250,7 +250,7 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
         ui.add_space(4.0);
     }
     for n in &d.notes {
-        ui.add(egui::Label::new(egui::RichText::new(n).size(12.0).color(theme::LINK_MISSING)).wrap());
+        ui.add(egui::Label::new(egui::RichText::new(n).size(12.0).color(theme::palette().link_missing)).wrap());
     }
     ui.horizontal(|ui| {
         rec("add-path".into(), ui.add(egui::TextEdit::singleline(&mut d.add_path).hint_text("~/Downloads/message.eml").desired_width(420.0)));
@@ -298,7 +298,7 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
             ui.label(muted("Suggested"));
             ui.vertical(|ui| {
                 if !d.auto_tags.is_empty() {
-                    ui.label(egui::RichText::new(format!("Added because they appear in the text: {}", d.auto_tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" "))).size(11.5).color(theme::FAINT));
+                    ui.label(egui::RichText::new(format!("Added because they appear in the text: {}", d.auto_tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" "))).size(11.5).color(theme::palette().faint));
                 }
                 let current = import::parse_tags(&d.tags);
                 let mut add = None;
@@ -320,8 +320,10 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
     });
     if d.items.iter().any(|i| matches!(i.source, Source::Email { .. } | Source::Event { .. })) {
         rec("keep".into(), ui.checkbox(&mut d.keep_original, "Keep the original message / calendar file with the attachments"));
+    }
+    if d.items.iter().any(|i| matches!(i.source, Source::Email { .. } | Source::Event { .. } | Source::Social { .. })) {
         rec("header-list".into(), ui.checkbox(&mut d.header_list, "Header list in the note body"))
-            .on_hover_text("From, To, Date, When, Where … are always in the note's properties; this also writes them as a list below the title, for programs that do not show properties");
+            .on_hover_text("From, To, Date, When, Where, Author, Source … are always in the note's properties; this also writes them as a list below the title, for programs that do not show properties");
     }
     if d.items.iter().any(|i| matches!(i.source, Source::Docx { pandoc: Some(_), .. })) {
         rec("keep-docx".into(), ui.checkbox(&mut d.keep_docx, "Keep the original .docx")).on_hover_text("Copies each Word file into its import folder and names it in the note's properties");
@@ -361,7 +363,7 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
 pub fn footer(ui: &mut Ui, d: &mut ImportDialog) -> Option<ImportAction> {
     let mut action = None;
     if let Some(e) = &d.error {
-        ui.add(egui::Label::new(egui::RichText::new(e).color(theme::LINK_MISSING)).wrap());
+        ui.add(egui::Label::new(egui::RichText::new(e).color(theme::palette().link_missing)).wrap());
     }
     let n = d.count();
     let mut rec = |k: &str, r: egui::Response| -> egui::Response {
@@ -471,7 +473,7 @@ mod tests {
 
     // spec: IMP-052
     #[test]
-    fn the_header_list_box_is_off_and_only_there_for_messages_and_events() {
+    fn the_header_list_box_is_off_and_only_there_for_messages_events_and_posts() {
         let mut d = ImportDialog::new(vec![import::eml_item(crate::mail::tests::sample_eml(), None)], vec![], String::new(), String::new(), None, false);
         let mut h = H { ctx: egui::Context::default(), t: 0.0 };
         h.frame(vec![], &mut d, &[], &[]);
@@ -483,6 +485,11 @@ mod tests {
         let mut d = ImportDialog::new(vec![import::markdown_item("Top.md".into(), "# A\n".into())], vec![], String::new(), String::new(), None, false);
         h.frame(vec![], &mut d, &[], &[]);
         assert!(!d.rects.iter().any(|r| r.0 == "header-list"), "nothing to list for a Markdown note");
+        let post = crate::social::demo::saved(&crate::social::demo::posts()[0]);
+        let mut d = ImportDialog::new(vec![import::social_item(post, "Mastodon", false)], vec![], String::new(), String::new(), None, false);
+        h.frame(vec![], &mut d, &[], &[]);
+        assert!(d.rects.iter().any(|r| r.0 == "header-list"), "a post has a header list too");
+        assert!(!d.rects.iter().any(|r| r.0 == "keep"), "but no original file to keep");
     }
 
     // spec: IMP-034

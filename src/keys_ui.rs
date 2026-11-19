@@ -178,14 +178,11 @@ pub fn show(ui: &mut Ui, d: &mut KeyDialog, keys: &mut Keymap) -> bool {
     });
     crate::theme::prose(ui, muted("Press Change (replaces the keys) or Add (one more), then the keys: one key or chord, or several in a row (a sequence). Enter saves, Esc cancels."));
     if let Some(n) = note {
-        ui.add_space(4.0);
         crate::theme::prose(ui, muted(n));
     }
     if let Some(e) = &d.error {
-        ui.add_space(4.0);
-        ui.label(RichText::new(e.as_str()).color(theme::LINK_MISSING));
+        ui.label(RichText::new(e.as_str()).color(theme::palette().link_missing));
     }
-    ui.add_space(6.0);
     let r = ui.button("Reset all");
     d.rects.push(("reset-all".into(), r.rect));
     if r.clicked() {
@@ -213,11 +210,11 @@ pub fn show(ui: &mut Ui, d: &mut KeyDialog, keys: &mut Keymap) -> bool {
                 match &d.recording {
                     Some((a, chords)) if *a == def.action => {
                         let typed = Binding(chords.clone()).display();
-                        ui.label(RichText::new(if chords.is_empty() { "press the keys…".to_string() } else { typed }).color(theme::ACCENT));
+                        ui.label(RichText::new(if chords.is_empty() { "press the keys…".to_string() } else { typed }).color(theme::palette().accent));
                     }
                     _ => {
                         let text = keys.display(def.action);
-                        ui.label(if keys.is_default(def.action) { RichText::new(text) } else { RichText::new(format!("{text}  (changed)")).color(theme::ACCENT) });
+                        ui.label(if keys.is_default(def.action) { RichText::new(text) } else { RichText::new(format!("{text}  (changed)")).color(theme::palette().accent) });
                     }
                 }
                 ui.horizontal(|ui| {
@@ -267,7 +264,7 @@ pub fn show(ui: &mut Ui, d: &mut KeyDialog, keys: &mut Keymap) -> bool {
 }
 
 fn muted(t: impl Into<String>) -> RichText {
-    RichText::new(t).color(theme::MUTED)
+    RichText::new(t).color(theme::palette().muted)
 }
 
 #[cfg(test)]
@@ -305,7 +302,9 @@ mod tests {
             // these tests drive the Linux/Windows defaults; macOS has other keys for six actions (KEY-019)
             app.keymap = crate::keys::Keymap::from_overrides_for(&app.cfg.keybindings, false);
             app.open(Path::new("A.md"), false);
-            let mut w = W { app, ctx: egui::Context::default(), t: 0.0, dir, texts: vec![], text_pos: vec![], size: Vec2::new(900.0, 1600.0) };
+            let mut w = W { app, ctx: egui::Context::default(), t: 0.0, dir, texts: vec![], text_pos: vec![], size: Vec2::new(900.0, 2000.0) };
+            // the style of the app: the rows of the dialog are a little taller than egui's own
+            crate::theme::apply(&w.ctx);
             w.frame(vec![]);
             w
         }

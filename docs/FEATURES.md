@@ -33,21 +33,22 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   it (a folded block always shows ▸) to fold it; click the marker or the badge to unfold. Keys (Settings →
   Keybindings → Note view): **Ctrl+Shift+K** fold, **Ctrl+Shift+J** unfold, **Ctrl+Shift+O** fold all,
   **Ctrl+Shift+I** unfold all; with Vim-style editing `za` `zc` `zo` `zM` `zR`. The cursor never stays in hidden
-  text: moving into a fold (or a link or search jumping there) opens it. Folds are kept for the session only and
+  text: moving into a fold (or a link or search jumping there) opens it. Folds are kept per note across restarts (EDIT-079, in the vault's `.shale/state.json`; a fold whose block is gone and a note that is gone are dropped, a renamed or moved note keeps its folds) and
   are never written into the file. Also foldable (EDIT-080 to EDIT-085): **code blocks**, the **front matter** and a
   **signature** (a line `-- ` up to the next heading). A note's front matter starts folded to one muted line
   `▸ Properties · email · Anna Müller · 2026-11-12` (the setting "Properties in the editor": folded or card; raw leaves it
   open); the cursor moving into it opens the YAML and folds it again when it leaves. In a **mail note**
   (`type: email`) the quotes (`… n quoted lines`) and the signature start folded too.
 - **Folding in the reading view** (EDIT-095 to EDIT-099, rabalyn/shale#364): the reading view folds the same blocks with
-  the same folds as the editor of the note (fold in one, it is folded in the other; session only, never written).
+  the same folds as the editor of the note (fold in one, it is folded in the other; kept across restarts, never written into the note).
   Hover a block's first line and click the ▾ marker left of it, or the `… n lines` badge under a folded block (a folded code block is one row with its badge in the box, EDIT-103);
   **Ctrl+Shift+O** / **Ctrl+Shift+I** fold and unfold all there (fold and unfold at the cursor are editor keys). A footnote
   jump or a click in the outline on a heading that a fold hides opens the fold. The front matter card keeps its own toggle.
   Large notes stay quick (EDIT-099 to EDIT-102, rabalyn/shale#369): the folds of an unchanged text are not found again, and
   from 2 000 lines on the reading view draws only what is near the visible part. The editor keeps the laid-out note, the
   parsed tables and footnotes and the counts of the status bar while nothing changes (EDIT-104 to EDIT-107, rabalyn/shale#372),
-  so a frame of a 20 000-line note takes a few milliseconds.
+  so a frame of a 20 000-line note takes a few milliseconds, and the text is formatted block by block, so a typed key or a
+  move of the cursor to another line formats one or two blocks instead of the whole note (EDIT-109, rabalyn/shale#375).
 
 ![Folded code blocks, quote and signature in the reading view](userguide/z_media/screenshots/reading-folds.png)
 - **Code blocks as boxes** (EDIT-080, EDIT-086, rabalyn/shale#356): with the Markdown preview on, a fenced code block is a
@@ -64,7 +65,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   "Blinking cursor" (on by default) makes it steady when off. The Vim tab (listed under Editor) holds the Vim settings: the switch, the cursor of normal mode, "Esc from insert mode" (the cursor stays after the typing by default, or steps back like Vim) and the link preview size. Exactly one cursor is drawn in every mode.
 - A **formatting toolbar** above the text (Settings → Editor, on by default, button size 80–200 %) has a button for
   everything Shale draws: bold, italic, strikethrough, highlight, inline code, headings (a menu from
-  Normal text to H6), bullet and numbered lists, tasks, quotes, code blocks, rules, page breaks, tables, `[[note]]`
+  Normal text to H6), bullet and numbered lists, tasks, quotes, code blocks, rules, page breaks, alignment (left, centre, right), tables, `[[note]]`
   and `[text](url)` links, embeds (it opens the `[!` file picker) and "Clear formatting". With a
   selection a button wraps it (or takes the markers off again); with none it puts the markers in and the
   cursor between them; a line button works on every line the selection touches. Each click is one undo
@@ -198,6 +199,14 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   preview and the reading view draw it as a thin dashed rule labelled "Page break" (the line with the
   cursor shows the HTML). The toolbar button "Page break" (Alt+J) inserts the line.
 
+- **Centred, right-aligned and justified paragraphs** (#340): a paragraph or heading between a line
+  `<div align="center">` and a line `</div>` (also `align="right"` and `align="justify"`; the form Obsidian
+  shows too) is aligned that way. The reading view, the built-in PDF export and the LaTeX export
+  (`center` and `flushright`) lay it out so, and the outline still lists a heading in one; the editor shows
+  the two lines dimmed. Three toolbar buttons (left, centre, right) put the paragraphs under the cursor or
+  the selection into a wrapper, change it or take it off. The Word import writes the wrappers for the
+  paragraphs and headings whose alignment differs from the body's.
+
 - **A folder as one PDF, a book** (BOOK, #306): **Export to PDF…** in the menu of a folder in the file list,
   or of the vault (right-click the empty space under the tree), writes the notes of the folder and its
   subfolders as one PDF: a title page (the folder note's `title`, `subtitle`, `author`, `date`), one
@@ -225,7 +234,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   updates and removes the managed TeX Live. It shows the sizes (about 100 MB to download, 330 MB on
   disk) before anything is downloaded, shows the progress, and can be cancelled; the compile that
   the export will use runs LuaLaTeX and biber in a temporary folder with a timeout and turns the log
-  into readable errors (TEX-001 to TEX-004).
+  into readable errors (TEX-001 to TEX-004). After an install or update the font list of TeX is built once, a font that cannot be loaded is repaired by installing the font packages again from another mirror, and the result names the mirror (#362).
 
   ![The LaTeX tab of Settings with the question before the install](userguide/z_media/screenshots/settings-latex.png)
 
@@ -319,7 +328,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - Drag the border between two panes to resize them (neither gets narrower than 240 points).
   Closing the last tab of a pane (or **Ctrl+Shift+W**) removes the pane; the last pane stays.
 - The panes, their tabs, the open tab of each, the focused pane and the widths come back at the
-  next start, and each note with its cursor or selection, its scroll position and its reading view; the
+  next start, and each note with its cursor or selection, its scroll position and its reading view. Mail,
+  Calendar, Tasks, Graph and Settings-file tabs come back too: the mail view on its folder and open message,
+  the calendar on its mode and day, Tasks with its filter, the graph with its switches (an empty tab is
+  not kept); the
   state is written every few seconds when something changed, and at exit. All the keys can be changed in Settings, Keybindings.
 
 ## Fonts and text sizes
@@ -340,6 +352,30 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   setting became the size of the editor.
 
 ![The Fonts tab of Settings, one row per area](userguide/z_media/screenshots/settings-fonts.png)
+
+## Themes
+
+- Settings → Appearance → Theme sets the colours of the whole window. Nine themes come with Shale: the dark
+  **Shale** (the default, as the app always looked), **Dracula**, **Nord**, **Catppuccin Mocha** and
+  **Gruvbox Dark**, and the light **Catppuccin Latte**, **Solarized Light**, **GitHub Light** and
+  **Gruvbox Light**. A change shows at once, also when you edit `[theme]` in the settings file.
+- "Follow the system's light or dark mode" swaps the one list for two, a light theme and a dark theme,
+  and Shale uses the one that matches the system (the dark one when the mode is not known). The
+  settings are `[theme]` `name`, `follow_system`, `light` and `dark`.
+- A theme is a terminal colour scheme in the Alacritty TOML format, read as it is: put a `.toml` file
+  of the alacritty-theme collection (or your own) into the themes folder next to the settings file
+  ("Open themes folder"; "Reload themes") and it is listed by its file name. A file named like a
+  built-in theme replaces it. A file that cannot be read is skipped and the reason is listed.
+  Shale makes its greys, accent, links, code and status colours from the terminal colours and
+  keeps them readable (a contrast of 3 to 1, text 4.5 to 1); an optional `[shale]` table in the
+  file sets any colour of the window exactly (CFG-062 to CFG-065).
+- Colours set in a note (`<mark>`, `<span>`) are kept as written, the drawing canvas keeps its own
+  switch and the PDF export prints with Shale's colours. The bundled themes' authors and licences
+  are in `assets/themes/LICENSES.md`.
+
+![The Appearance tab of Settings with the theme list open](userguide/z_media/screenshots/settings-appearance.png)
+
+![The window in the light theme Catppuccin Latte](userguide/z_media/screenshots/theme-latte.png)
 
 ## Keyboard only: sidebar, file list and vim-style editing
 
@@ -510,10 +546,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - A middle click on the **Mail**, **Feeds** or **Calendar** icon opens that view in a new tab.
 - Right-click an icon (in the ribbon or in a view's menubar) for a menu: **Remove from the
   ribbon** / **Remove from this view**, **Restore …** for every icon removed earlier, and
-  **Reset layout** (the default icons, order and heights). The last icon of the ribbon cannot
+  **Reset layout** (the default icons, order, heights and sidebar widths). The last icon of the ribbon cannot
   be removed. Panel shortcuts in the ribbon have their own glyphs, not those of the Graph and
   Calendar buttons.
-- The layout (icons, heights, removed icons) is kept in the settings.
+- The layout (icons, heights, removed icons) and the widths of the left and the right sidebar (drag their borders) are kept in the settings.
 - **F1** (or Settings → Help → **Open user guide**) opens the user guide, itself a Shale vault:
   The guide is built into the program, which unpacks it once per version into its data folder (a
   copy you edited is not overwritten) and opens it at "Start here". This works in every build on
@@ -784,8 +820,8 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   colours (IMP-041), page breaks (manual, "page break before", section breaks; IMP-044), a Title and Subtitle become a heading and an italic line (IMP-042), and the
   note's properties hold the page setup (`print-paper`, `print-margins`), the body font, size,
   line and paragraph spacing, alignment, the colour, weight and sizes of the headings and, unless Heading 1 is numbered in Word, `numbered-headings: false` (`print-*`, IMP-040, IMP-045), which
-  the PDF export uses (rabalyn/shale#338). Centred and right-aligned paragraphs are not kept
-  (rabalyn/shale#340). A Word table of contents is left out (the export makes its own, IMP-043). A file pandoc cannot read leaves nothing behind and the toast says why. Off, or
+  the PDF export uses (rabalyn/shale#338). Centred, right-aligned and justified paragraphs become `<div align>`
+  wrappers (rabalyn/shale#340). A Word table of contents is left out (the export makes its own, IMP-043). A file pandoc cannot read leaves nothing behind and the toast says why. Off, or
   without pandoc, a `.docx` is an attachment as before; the dialog says when pandoc is missing.
 
   ![The Import tab of Settings](userguide/z_media/screenshots/settings-import.png)
@@ -817,7 +853,8 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   repeat rule, organizer, attendees, status and link are properties, the text is its title and notes.
   The tag list counts the tags too. For programs that do not show properties, the box **Header list
   in the note body** (Import dialog; its start value is in Settings → Import) also writes the old list
-  of From / To / Date / When / Where … below the title (IMP-052).
+  of From / To / Date / When / Where … below the title (IMP-052); a saved post gets Author / Posted /
+  Source … (IMP-058).
 - The text of an imported e-mail is tidied: runs of three or more blank lines become one, trailing
   spaces go, and a long tracking URL (more than 80 characters, with a query string) becomes a short
   link `[host](url)` (IMP-053). A picture among the attachments is an embed 200 points wide
@@ -871,8 +908,9 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 - Tick **Include replies from others (N)** to add a "Replies" section with other people's
   answers, nested like a conversation (off by default; Shale remembers your choice). Their
   pictures are linked, not downloaded.
-- The note has the author, the date, a **Source** link back to the post, the text (a thread:
-  every post in order, numbered), the pictures saved in `z_media/` and their descriptions. A post
+- The note has the author, the date and the link back to the post (**Source**) as properties,
+  and the text (a thread: every post in order, numbered); the box **Header list in the note
+  body** also writes them as a list below the title (IMP-058). The pictures are saved in `z_media/`, with their descriptions. A post
   that was saved before, also as part of a thread, is marked "Imported before".
 - Try it without an account: `shale --screenshot out.png --view social` shows made-up posts.
 

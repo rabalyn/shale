@@ -12,6 +12,7 @@
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// A JSON settings file with a format version and explicit migrations.
@@ -256,6 +257,11 @@ pub struct VaultState {
     pub recent_tags: Vec<String>,
     /// What the note export dialog had last: the engine and the LaTeX set and kind (TEX-016).
     pub latex_export: LatexExport,
+    /// The folded blocks of the notes (vault-relative path), kept across restarts (EDIT-079); an
+    /// entry that cannot be read is dropped, and an empty list is a note whose folds were all
+    /// opened (so that its start folds do not come back).
+    #[serde(deserialize_with = "folds_lenient", skip_serializing_if = "BTreeMap::is_empty")]
+    pub folds: BTreeMap<String, Vec<crate::fold::Key>>,
     /// The current colour of the toolbar's highlight and font colour buttons as `#RRGGBB`
     /// (EDIT-054, NAV-040); absent or unreadable: the default.
     #[serde(skip_serializing_if = "Option::is_none", deserialize_with = "text_or_none")]
@@ -271,6 +277,14 @@ fn text_or_none<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>
     Ok(match Value::deserialize(d)? {
         Value::String(s) => Some(s),
         _ => None,
+    })
+}
+
+/// The saved folds; a note whose entry is not a list of folds loses its folds, the state stays readable.
+fn folds_lenient<'de, D: serde::Deserializer<'de>>(d: D) -> Result<BTreeMap<String, Vec<crate::fold::Key>>, D::Error> {
+    Ok(match Value::deserialize(d)? {
+        Value::Object(m) => m.into_iter().filter_map(|(k, v)| serde_json::from_value(v).ok().map(|keys| (k, keys))).collect(),
+        _ => BTreeMap::new(),
     })
 }
 
@@ -326,6 +340,7 @@ impl Default for VaultState {
             last_social_folder: String::new(),
             recent_tags: vec![],
             latex_export: LatexExport::default(),
+            folds: BTreeMap::new(),
             highlight_colour: None,
             font_colour: None,
             other: Map::new(),
@@ -373,6 +388,79 @@ pub struct SavedTab {
     /// The note was shown in the reading view.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub reading: bool,
+    /// The kind of a tab that is neither a note, a drawing nor a Feeds tab (NAV-044): one of
+    /// [`SavedTab::MAIL`], [`SavedTab::CALENDAR`], [`SavedTab::TASKS`], [`SavedTab::GRAPH`],
+    /// [`SavedTab::SETTINGS_FILE`]. A value this version does not know is skipped on restore.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view: Option<String>,
+    /// Where the mail view was left (NAV-045), on a `mail` tab.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mail: Option<SavedMail>,
+    /// Where the calendar was left (NAV-046), on a `calendar` tab.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub calendar: Option<SavedCalendar>,
+    /// The filter of the Tasks view when it is not the default (NAV-047), on a `tasks` tab.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tasks: Option<SavedTasks>,
+    /// The switches of the graph when they are not the default (NAV-047), on a `graph` tab.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graph: Option<SavedGraph>,
+    #[serde(flatten)]
+    pub other: Map<String, Value>,
+}
+
+impl SavedTab {
+    pub const MAIL: &'static str = "mail";
+    pub const CALENDAR: &'static str = "calendar";
+    pub const TASKS: &'static str = "tasks";
+    pub const GRAPH: &'static str = "graph";
+    pub const SETTINGS_FILE: &'static str = "settings_file";
+}
+
+/// The place of the mail view: the folder of an account and the open message (NAV-045).
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct SavedMail {
+    /// The account id.
+    pub account: String,
+    /// The folder as the server spells it (what the index stores, not the row id, which a rebuilt
+    /// index numbers again).
+    pub folder: String,
+    /// The UID of the open message, when one was open.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uid: Option<u32>,
+    #[serde(flatten)]
+    pub other: Map<String, Value>,
+}
+
+/// The place of the calendar: the mode (`month`, `week` or `day`) and the shown day (NAV-046).
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct SavedCalendar {
+    pub mode: String,
+    /// The shown day as a number of days since 1970-01-01 (the local day number of the calendar).
+    pub day: i64,
+    #[serde(flatten)]
+    pub other: Map<String, Value>,
+}
+
+/// The filter of the Tasks view (NAV-047).
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct SavedTasks {
+    pub query: String,
+    pub show_done: bool,
+    pub only_due: bool,
+    #[serde(flatten)]
+    pub other: Map<String, Value>,
+}
+
+/// The switches of the graph of the whole vault (NAV-047): what it hides.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct SavedGraph {
+    pub hide_missing: bool,
+    pub hide_orphans: bool,
     #[serde(flatten)]
     pub other: Map<String, Value>,
 }
@@ -715,6 +803,35 @@ mod tests {
         assert_eq!(old.tabs[0].scroll, None);
         assert!(!old.tabs[0].reading);
         assert_eq!(old.version, VaultState::CURRENT);
+    }
+
+    // spec: NAV-044, NAV-045, NAV-046, NAV-047
+    #[test]
+    fn the_view_of_a_tab_round_trips_a_file_without_it_loads_and_an_unknown_view_is_kept() {
+        let view = |v: &str| SavedTab { view: Some(v.into()), ..SavedTab::default() };
+        let tabs = vec![
+            SavedTab { mail: Some(SavedMail { account: "a1".into(), folder: "INBOX".into(), uid: Some(7), ..Default::default() }), pinned: true, ..view(SavedTab::MAIL) },
+            SavedTab { calendar: Some(SavedCalendar { mode: "week".into(), day: 20_000, ..Default::default() }), ..view(SavedTab::CALENDAR) },
+            SavedTab { tasks: Some(SavedTasks { query: "#home".into(), show_done: true, only_due: false, ..Default::default() }), ..view(SavedTab::TASKS) },
+            SavedTab { graph: Some(SavedGraph { hide_missing: true, hide_orphans: false, ..Default::default() }), ..view(SavedTab::GRAPH) },
+            view(SavedTab::SETTINGS_FILE),
+            file_tab("a.md", false),
+        ];
+        let s = VaultState { tabs, ..VaultState::default() };
+        let text = String::from_utf8(to_bytes(&s)).unwrap();
+        assert_eq!(text.matches("\"view\"").count(), 5, "only the tabs of a view have one: {text}");
+        assert_eq!(text.matches("\"mail\": {").count(), 1);
+        let (back, newer) = parse::<VaultState>(text.as_bytes()).unwrap();
+        assert!(!newer);
+        assert_eq!(back, s);
+        // a file from before has none of them (no version change, CFG-007); a view from a newer Shale and its fields are kept
+        let (old, _) = parse::<VaultState>(br#"{"version": 2, "tabs": [{"file": "a.md"}]}"#).unwrap();
+        assert_eq!(old.tabs[0].view, None);
+        assert!(old.tabs[0].mail.is_none() && old.tabs[0].calendar.is_none());
+        let (odd, _) = parse::<VaultState>(br#"{"version": 2, "tabs": [{"view": "kanban", "zoom": 2}, {"view": "mail", "mail": {"account": "x", "folder": "F", "star": 1}}]}"#).unwrap();
+        assert_eq!(odd.tabs[0].view.as_deref(), Some("kanban"));
+        let again = String::from_utf8(to_bytes(&odd)).unwrap();
+        assert!(again.contains("\"zoom\"") && again.contains("\"star\""), "{again}");
     }
 
     // spec: NAV-040

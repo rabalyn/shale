@@ -350,6 +350,68 @@ fn cfg_051_the_appearance_tab_chooses_how_properties_show_in_the_editor_and_the_
     assert_eq!(p.app.cfg.properties_in_editor, PropertiesView::Folded, "the other setting is untouched");
 }
 
+// spec: CFG-062, CFG-065
+#[test]
+fn cfg_062_the_appearance_tab_chooses_the_theme_and_with_follow_system_a_light_and_a_dark_one() {
+    let mut p = P::new("theme-setting", &[]);
+    p.app.open_settings(SettingsTab::Appearance);
+    assert!(p.shows(Show::Modals, "Follow the system's light or dark mode"), "the checkbox is there");
+    assert!(p.shows(Show::Modals, "Open themes folder") && p.shows(Show::Modals, "Reload themes"));
+    assert!(p.shows(Show::Modals, "Theme") && !p.shows(Show::Modals, "Light theme"), "one combo to start with");
+    assert_eq!(p.app.cfg.theme.name, "Shale");
+    p.click(Show::Modals, "Shale");
+    assert!(p.shows(Show::Modals, "Dark") && p.shows(Show::Modals, "Light"), "the themes are grouped");
+    for name in ["Dracula", "Nord", "Catppuccin Mocha", "Gruvbox Dark", "Catppuccin Latte", "Solarized Light", "GitHub Light", "Gruvbox Light"] {
+        assert!(p.shows(Show::Modals, name), "{name} can be chosen");
+    }
+    p.click(Show::Modals, "Catppuccin Latte");
+    assert_eq!(p.app.cfg.theme.name, "Catppuccin Latte", "a choice is the setting");
+    assert!(!p.app.cfg.theme.follow_system);
+    // follow the system: two combos instead of the one
+    p.click(Show::Modals, "Follow the system's light or dark mode");
+    assert!(p.app.cfg.theme.follow_system);
+    assert!(p.shows(Show::Modals, "Light theme") && p.shows(Show::Modals, "Dark theme"), "a light and a dark theme");
+    assert_eq!((p.app.cfg.theme.light.as_str(), p.app.cfg.theme.dark.as_str()), ("Catppuccin Latte", "Shale"));
+    p.click(Show::Modals, "Shale");
+    p.click(Show::Modals, "Nord");
+    assert_eq!(p.app.cfg.theme.dark, "Nord");
+    assert_eq!(p.app.cfg.theme.name, "Catppuccin Latte", "the single choice is kept for later");
+    // a name that is no theme: a hint, and Shale's own is used
+    p.app.cfg.theme.dark = "Nope".into();
+    assert!(p.shows(Show::Modals, "There is no theme called \"Nope\""));
+    p.app.cfg.theme.dark = "Nord".into();
+    assert!(!p.shows(Show::Modals, "There is no theme called"));
+}
+
+// spec: CFG-065
+#[test]
+fn cfg_065_the_appearance_tab_lists_the_themes_folder_reports_a_broken_file_and_opens_the_folder() {
+    let mut p = P::new("theme-folder", &[]);
+    let dir = p.dir.join("themes-of-the-user");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("Broken.toml"), "[colors.primary]\nbackground = '#000000'\n").unwrap();
+    p.app.themes = crate::themes::ThemeState::in_folder(Some(dir.clone()));
+    p.app.open_settings(SettingsTab::Appearance);
+    assert!(p.shows(Show::Modals, "Theme file skipped: Broken.toml: [colors.primary] is missing `foreground`"), "the error is listed under the picker");
+    // a file added later is found by Reload themes, and a mended file stops being reported
+    std::fs::write(dir.join("Broken.toml"), "[colors.primary]\nbackground = '#000000'\nforeground = '#ffffff'\n[colors.normal]\nblack = '#000000'\nred = '#ff0000'\ngreen = '#00ff00'\nyellow = '#ffff00'\nblue = '#0000ff'\nmagenta = '#ff00ff'\ncyan = '#00ffff'\nwhite = '#ffffff'\n").unwrap();
+    assert!(p.app.themes.themes().get("Broken").is_none(), "not read before it is asked for");
+    p.click(Show::Modals, "Reload themes");
+    assert!(p.app.themes.themes().get("Broken").is_some_and(|t| t.user));
+    assert!(!p.shows(Show::Modals, "Theme file skipped"));
+    p.click(Show::Modals, "Shale");
+    assert!(p.shows(Show::Modals, "Broken (yours)"), "a theme of the user's says so");
+    // the folder is made when it is not there yet
+    let missing = p.dir.join("not-there-yet");
+    p.app.themes = crate::themes::ThemeState::in_folder(Some(missing.clone()));
+    p.click(Show::Modals, "Open themes folder");
+    if !missing.is_dir() {
+        // the first click closed the list of themes that is still open
+        p.click(Show::Modals, "Open themes folder");
+    }
+    assert!(missing.is_dir());
+}
+
 // spec: EDIT-038
 #[test]
 fn edit_038_the_lift_dialog_pastes_lifted_or_as_it_is_and_esc_pastes_as_it_is() {

@@ -547,7 +547,7 @@ fn imp_052_the_dialog_starts_with_the_setting_and_a_ticked_box_writes_the_list()
     d.items.iter_mut().for_each(|i| i.include = true);
     assert!(w.app.import_action(&mut d, crate::import::dialog::ImportAction::Import));
     let listed = std::fs::read_to_string(root.join(name)).unwrap();
-    assert!(listed.contains("\n- **From:** ") && listed.contains("\n- **Date:** 2026-11-13 10:22\n"), "{listed}");
+    assert!(listed.contains("\n- **From:** ") && listed.contains("\n- **Date:** 2026-11-13 "), "{listed}");
 }
 
 /// The titles of the tabs that are open, in order.

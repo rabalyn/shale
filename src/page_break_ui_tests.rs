@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 const MARK: &str = "<div style=\"page-break-after: always;\"></div>";
 
 /// The texts that were painted and where.
-fn texts(shapes: &[egui::epaint::ClippedShape]) -> Vec<(String, Rect)> {
+pub(crate) fn texts(shapes: &[egui::epaint::ClippedShape]) -> Vec<(String, Rect)> {
     fn walk(s: &Shape, out: &mut Vec<(String, Rect)>) {
         match s {
             Shape::Text(t) => out.push((t.galley.job.text.clone(), t.visual_bounding_rect())),
@@ -42,7 +42,7 @@ fn label_of(painted: &[(String, Rect)]) -> Option<Rect> {
 }
 
 /// The reading view of `text` in a 700 x 500 window: what the last frame painted.
-fn read(text: &str) -> (Vec<(String, Rect)>, usize) {
+pub(crate) fn read(text: &str) -> (Vec<(String, Rect)>, usize) {
     static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let d = std::env::temp_dir().join(format!("shale-pagebreak-reader-{}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
     let _ = std::fs::remove_dir_all(&d);

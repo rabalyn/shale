@@ -9,7 +9,7 @@ Shale keeps settings in two places:
 | Where | What | Travels with the vault? |
 |---|---|---|
 | `<vault>/.shale/settings.json` | people folder, git sync | yes (git sync commits it, [[Git sync]]) |
-| `<vault>/.shale/state.json` | open tabs with their cursor, scroll and view and which are pinned, the toolbar's colours, last import folder, recent tags, the last LaTeX export choices | yes, but it is only session state |
+| `<vault>/.shale/state.json` | open tabs with their cursor, scroll and view and which are pinned, the folded blocks of your notes, the toolbar's colours, last import folder, recent tags, the last LaTeX export choices | yes, but it is only session state |
 | `~/.config/shale/config.toml` | the program itself: appearance, calendars, mail and Feeds accounts, keybindings, recent vaults | no, this computer only |
 
 - The files carry a format version and are upgraded on load. A file that cannot be read is

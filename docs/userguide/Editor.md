@@ -42,7 +42,7 @@ line numbers). Click it to fold; a folded block always shows ▸, and clicking i
 The keys can be changed in Settings → Keybindings (Note view), see [[Keyboard shortcuts]]. The text is never
 changed by folding, and undo, selection and copy work as always. The cursor never stays in hidden text: if you move into a folded block
 with the arrow keys, or a link or a search result jumps there, it opens. Select all (Ctrl+A) leaves folds alone.
-Folds are remembered while Shale runs and are never written into the note. The [[Reading view]] folds the same blocks, with the same folds: what you fold in one is folded in the other.
+Folds are remembered per note, also after you quit and start Shale again (in the vault's `.shale/state.json`, see [[Vault settings]]), and are never written into the note; a fold whose block you deleted is forgotten, and a renamed or moved note keeps its folds. The [[Reading view]] folds the same blocks, with the same folds: what you fold in one is folded in the other.
 
 ### Properties
 
@@ -96,7 +96,7 @@ the text unchanged. Text without headings, or with a `#`, is pasted at once.
 A row of buttons centred above the text of a note (not in the reading view): **B**old, *I*talic,
 ~~S~~trikethrough, `==` highlight, `<>` inline code; the highlight colour and font colour
 split buttons (apply the current colour, ▾ for the palette); a **H** menu for headings (Normal text, Heading 1 to 6); bullet list, numbered list,
-task, quote; code block, horizontal rule, page break (a dashed rule in the preview and the reading
+task, quote; left, centre and right alignment of the paragraphs under the cursor (see [[PDF#Aligned paragraphs]]); code block, horizontal rule, page break (a dashed rule in the preview and the reading
 view, a new page in the PDF, see [[PDF]]), table; `[[ ]]` note link, `[ ]( )` web link, `![[ ]]`
 embed (it opens the `[!` file picker of [[Notes and links]]); and "Clear formatting".
 

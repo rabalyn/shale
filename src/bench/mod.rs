@@ -1,4 +1,4 @@
-//! The benchmark harness (BUILD-027…BUILD-033, raba/shale#343): only in a build with the cargo
+//! The benchmark harness (BUILD-028…BUILD-038, raba/shale#343): only in a build with the cargo
 //! feature `bench`, run as `shale --bench <out.json>`, headless. Scenarios measure the code
 //! paths that decide how Shale feels (opening a vault, searching it, the link index, the graph,
 //! frames of the window); every one reports time, allocations and peak memory, and

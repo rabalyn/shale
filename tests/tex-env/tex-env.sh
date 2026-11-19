@@ -11,14 +11,16 @@
 #            the working directory (the folder this script was started in, when that is inside <dir>);
 #            TEXINPUTS, BIBINPUTS, openout_any and shell_escape are passed on when set (Shale's compile tests put this in front of lualatex and biber)
 #   reset    remove the image and the cache (the next build starts again)
-# SHALE_TEX_ENV_ENGINE=docker selects Docker instead of Podman.
+#   SHALE_TEX_ENV_REPOSITORY=<url> makes `build` take TeX Live from that tlnet mirror (`--build-arg TL_REPO=<url>`) instead of the default repository; scripts/land.sh sets it from a local, uncommitted setting (DEV-025, #371)
+# SHALE_TEX_ENV_ENGINE=docker selects Docker instead of Podman; SHALE_TEX_ENV_IMAGE=<name> another image name than shale-tex-env.
 set -eu
 caller=$(pwd)
 cd "$(dirname "$0")"
 root=$(pwd)
 
 ENGINE=${SHALE_TEX_ENV_ENGINE:-podman}
-IMAGE=shale-tex-env
+# the image name is shared by every checkout of Shale on the machine: SHALE_TEX_ENV_IMAGE gives one checkout its own, so that a build in another one cannot replace the image under a running test
+IMAGE=${SHALE_TEX_ENV_IMAGE:-shale-tex-env}
 # the pinned fixture: tuda-ci 4.06 (there is no tag for it), git commit and the sha256 of GitHub's archive
 TUDA_COMMIT=e933be93b07008edc9ce77e33b877d15489a476f
 TUDA_SHA256=477060aeb6e459d661baac1942e83a2bd45e7dd9cdfdff9c3c24f72006b5c6d3
@@ -45,8 +47,10 @@ case "${1:-}" in
     cp ../../assets/tex/texlive.profile ../../assets/tex/packages.txt "$ctx/"
     nocache=""
     [ "${2:-}" = "--refresh" ] && nocache="--no-cache"
+    repo=""
+    [ -z "${SHALE_TEX_ENV_REPOSITORY:-}" ] || repo="--build-arg TL_REPO=$SHALE_TEX_ENV_REPOSITORY"
     # shellcheck disable=SC2086
-    "$ENGINE" build $nocache -t "$IMAGE" -f "$ctx/Containerfile" "$ctx"
+    "$ENGINE" build $nocache $repo -t "$IMAGE" -f "$ctx/Containerfile" "$ctx"
     if [ ! -f "$cache/tuda-ci/tex/tudapub.cls" ]; then
       rm -rf "$cache/tuda-ci"; mkdir -p "$cache/tuda-ci"
       tar xzf "$cache/tuda-ci.tar.gz" -C "$cache/tuda-ci" --strip-components=1

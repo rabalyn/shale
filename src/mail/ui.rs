@@ -343,6 +343,9 @@ pub struct MailView {
     last_refresh: Option<Instant>,
     /// Test aid: how many times the list or counts were read from the index.
     pub queries: u64,
+    /// Where the view was left when the vault was last closed, until the folders are read and the
+    /// place is found (or known to be gone) (NAV-045).
+    pub restore: Option<crate::vault_state::SavedMail>,
     // the list
     pub folder: Option<i64>,
     pub total: usize,
@@ -493,6 +496,7 @@ impl MailView {
             dirty: false,
             last_refresh: None,
             queries: 0,
+            restore: None,
             folder: None,
             total: 0,
             pages: HashMap::new(),
@@ -706,9 +710,12 @@ impl MailView {
         if self.dirty && self.last_refresh.is_none_or(|t| t.elapsed() >= REFRESH_EVERY || !self.any_sync_running()) {
             self.refresh();
         }
-        // the first folder (the Inbox) opens by itself once there is one
-        if self.folder.is_none() && !self.folders.is_empty() && self.reader.is_some() {
-            self.select_first_folder(cfg);
+        // the place the view was left at (NAV-045), else the first folder (the Inbox) opens by itself once there is one
+        if !self.folders.is_empty() && self.reader.is_some() {
+            self.restore_place(cfg);
+            if self.folder.is_none() {
+                self.select_first_folder(cfg);
+            }
         }
         self.busy()
     }
@@ -773,6 +780,7 @@ impl MailView {
                 self.store = StoreState::Ready(s);
                 self.start_recovery();
                 self.refresh();
+                self.restore_place(cfg);
                 if self.folder.is_none() {
                     self.select_first_folder(cfg);
                 }
@@ -1277,8 +1285,45 @@ impl MailView {
         }
     }
 
+    /// What is saved of the view for the next start (NAV-045): the folder and the open message;
+    /// a place not found yet stays as it is; nothing for the Drafts and the Outbox.
+    pub fn saved_place(&self) -> Option<crate::vault_state::SavedMail> {
+        if let Some(p) = &self.restore {
+            return Some(p.clone());
+        }
+        let f = self.folder.filter(|_| self.local_view.is_none()).and_then(|id| self.folder_row(id))?;
+        let uid = self.open.as_ref().filter(|o| o.msg.folder_id == f.id).map(|o| o.msg.uid);
+        Some(crate::vault_state::SavedMail { account: f.account.clone(), folder: f.name.clone(), uid, ..Default::default() })
+    }
+
+    /// Go to the place saved by the last run (NAV-045), once the folders are read: its folder, the
+    /// message when it is still there. The place is dropped when the account or the folder is gone;
+    /// it waits while the account has no folder yet (its first sync is still to come).
+    fn restore_place(&mut self, cfg: &Config) {
+        let Some(p) = self.restore.clone() else { return };
+        if !cfg.mail_accounts.iter().any(|a| a.id == p.account) {
+            self.restore = None;
+            return;
+        }
+        if !self.folders.iter().any(|f| f.account == p.account) {
+            return;
+        }
+        self.restore = None;
+        let Some(id) = self.folders.iter().find(|f| f.account == p.account && f.name == p.folder).map(|f| f.id) else { return };
+        self.select_folder(cfg, id);
+        let msg = p.uid.and_then(|uid| self.reader.as_ref().and_then(|r| r.message(id, uid).ok().flatten()));
+        if let Some(msg) = msg {
+            if let Some(pos) = self.reader.as_ref().and_then(|r| r.position_in_list(id, msg.date, msg.uid).ok()) {
+                self.cursor = Some(pos.max(0) as usize);
+                self.scroll_to_cursor = true;
+            }
+            self.open_message(msg);
+        }
+    }
+
     /// Show the folder `id` (MAIL-056: a folder that is not synced is listed on demand).
     pub fn select_folder(&mut self, cfg: &Config, id: i64) {
+        self.restore = None;
         self.clear_search();
         self.local_view = None;
         self.folder = Some(id);

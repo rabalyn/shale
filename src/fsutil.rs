@@ -1244,7 +1244,7 @@ mod tests {
             for e in fs::read_dir(&dir).unwrap().flatten() {
                 let p = e.path();
                 if p.is_dir() {
-                    // the benchmark harness (BUILD-027) writes generated data into temporary folders and its own result files: no user data
+                    // the benchmark harness (BUILD-038) writes generated data into temporary folders and its own result files: no user data
                     if p.file_name().is_some_and(|n| n != "bench") {
                         stack.push(p);
                     }

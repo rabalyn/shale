@@ -322,12 +322,12 @@ fn security_row(ui: &mut Ui, c: &mut Compose, acct: Option<&crate::config::MailA
         for (i, (addr, _bcc)) in crate::mail::crypto::recipients_of(&c.draft).into_iter().enumerate() {
             let found = c.keys.iter().find(|k| k.address == addr);
             let (text, color) = match (fresh, found) {
-                (_, Some(k)) if k.error.is_some() => (format!("{addr}: {}", k.error.clone().unwrap_or_default()), theme::LINK_MISSING),
+                (_, Some(k)) if k.error.is_some() => (format!("{addr}: {}", k.error.clone().unwrap_or_default()), theme::palette().link_missing),
                 (true, Some(k)) => match &k.key {
-                    Some(key) => (format!("{addr}: key found ({}; {}; {})", key.label(), key.trust_words(), crate::mail::ui::short_fingerprint(&key.fingerprint)), theme::TAG),
-                    None => (format!("{addr}: no key: this mail cannot be encrypted for them (import their key)"), theme::LINK_MISSING),
+                    Some(key) => (format!("{addr}: key found ({}; {}; {})", key.label(), key.trust_words(), crate::mail::ui::short_fingerprint(&key.fingerprint)), theme::palette().tag),
+                    None => (format!("{addr}: no key: this mail cannot be encrypted for them (import their key)"), theme::palette().link_missing),
                 },
-                _ => (format!("{addr}: looking for a key…"), theme::MUTED),
+                _ => (format!("{addr}: looking for a key…"), theme::palette().muted),
             };
             ui.horizontal(|ui| {
                 ui.add_space(label_w + 4.0);
@@ -380,7 +380,7 @@ impl MailView {
         let accounts: Vec<(String, String)> = cfg.mail_accounts.iter().map(|a| (a.id.clone(), if a.name.is_empty() { a.host.clone() } else { a.name.clone() })).collect();
         let have_vault = self.vault.is_some();
         let Some(c) = self.compose.as_mut() else { return out };
-        ui.painter().line_segment([body.left_top(), body.right_top()], egui::Stroke::new(1.0, theme::BORDER));
+        ui.painter().line_segment([body.left_top(), body.right_top()], egui::Stroke::new(1.0, theme::palette().border));
         ui.scope_builder(UiBuilder::new().max_rect(body.shrink2(Vec2::new(18.0, 10.0))), |ui| {
             ui.set_clip_rect(body.intersect(ui.clip_rect()));
             let mut touched = false;
@@ -402,7 +402,7 @@ impl MailView {
                 }
                 ui.add_space(8.0);
                 if crypting {
-                    ui.label(RichText::new("Signing / encrypting… (a passphrase or PIN dialog may open)").color(theme::TEXT));
+                    ui.label(RichText::new("Signing / encrypting… (a passphrase or PIN dialog may open)").color(theme::palette().text));
                     let r = ui.button("Cancel");
                     rec(rects, "mail:compose:crypt-cancel", &r);
                     if r.on_hover_text("Stop: the mail stays here, nothing is sent (Esc)").clicked() {
@@ -419,17 +419,17 @@ impl MailView {
                 crate::theme::hint(ui, status);
             });
             if let Some(e) = &c.error {
-                ui.label(RichText::new(e.as_str()).color(theme::LINK_MISSING));
+                ui.label(RichText::new(e.as_str()).color(theme::palette().link_missing));
             }
             for n in &c.notes {
-                ui.label(RichText::new(n.as_str()).size(12.5).color(theme::LINK_MISSING));
+                ui.label(RichText::new(n.as_str()).size(12.5).color(theme::palette().link_missing));
             }
             // an attachment that a cut-off replacement left missing (MAIL-216, MAIL-217)
             for (i, al) in c.att_alerts.iter().enumerate() {
                 if al.dismissed {
                     continue;
                 }
-                ui.label(RichText::new(al.alert.message()).size(12.5).color(theme::LINK_MISSING));
+                ui.label(RichText::new(al.alert.message()).size(12.5).color(theme::palette().link_missing));
                 ui.horizontal(|ui| {
                     if al.alert.trash_present {
                         let r = ui.small_button("Restore the old file");
@@ -476,7 +476,7 @@ impl MailView {
                             });
                             rec(rects, "mail:compose:from", &r.response);
                         } else {
-                            ui.label(RichText::new(from).color(theme::TEXT));
+                            ui.label(RichText::new(from).color(theme::palette().text));
                         }
                     });
                     for f in [Field::To, Field::Cc, Field::Bcc] {
@@ -531,7 +531,7 @@ impl MailView {
                         for (i, a) in c.draft.attachments.iter().enumerate() {
                             ui.horizontal(|ui| {
                                 ui.add_space(label_w + 4.0);
-                                ui.label(RichText::new(format!("📎 {}", a.name)).color(theme::TEXT));
+                                ui.label(RichText::new(format!("📎 {}", a.name)).color(theme::palette().text));
                                 crate::theme::hint(ui, crate::mail::ui::size_text(a.data.len() as u64));
                                 let r = ui.small_button("Remove");
                                 rec(rects, format!("mail:compose:att-remove:{i}"), &r);
@@ -673,7 +673,6 @@ impl MailView {
             let resp = crate::dialog::Dialog::new("compose-ask", title).width(420.0).non_modal().show(ctx, |ui| match &ask {
                 Ask::Close => {
                     crate::theme::prose(ui, muted("You have written something that is not sent. A kept draft is saved and can be opened from Drafts; a discarded one is moved to the mail trash folder (nothing is deleted)."));
-                    ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         let r = ui.button(RichText::new("Keep draft").strong());
                         rec(rects, "mail:compose:keep", &r);
@@ -695,7 +694,6 @@ impl MailView {
                 Ask::Confirm(list) => {
                     let q = list.first().map(|q| q.question()).unwrap_or("");
                     ui.label(q);
-                    ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         let r = ui.button("Send anyway");
                         rec(rects, "mail:compose:confirm-yes", &r);
@@ -790,7 +788,7 @@ impl MailView {
     /// has the focus (`Kbd::row_focus`).
     pub(crate) fn tab_focus(&mut self, ui: &Ui, r: &egui::Response, key: &str, i: usize, rects: &mut Vec<(String, Rect)>) {
         if r.has_focus() {
-            ui.painter().rect_stroke(r.rect.shrink(1.0), 0, egui::Stroke::new(2.0, theme::ACCENT), egui::StrokeKind::Inside);
+            ui.painter().rect_stroke(r.rect.shrink(1.0), 0, egui::Stroke::new(2.0, theme::palette().accent), egui::StrokeKind::Inside);
             rects.push((format!("{key}:{i}"), r.rect));
             self.kbd.row_focus = Some(r.id);
             if r.gained_focus() {
@@ -806,7 +804,7 @@ impl MailView {
             LocalView::Drafts(account) => {
                 ui.horizontal(|ui| {
                     ui.add_space(10.0);
-                    ui.label(RichText::new(format!("Drafts  ·  {}", self.account_title(&account))).size(13.0).color(theme::MUTED));
+                    ui.label(RichText::new(format!("Drafts  ·  {}", self.account_title(&account))).size(13.0).color(theme::palette().muted));
                 });
                 let list: Vec<DraftInfo> = self.local_drafts.iter().filter(|d| d.account == account).cloned().collect();
                 if list.is_empty() {
@@ -832,7 +830,7 @@ impl MailView {
                     rec(rects, format!("mail:draft:{i}"), &r);
                     self.tab_focus(ui, &r, "mail:draft-focus", i, rects);
                     if self.cursor == Some(i) {
-                        ui.painter().rect_filled(r.rect, 0, theme::ACCENT.gamma_multiply(0.25));
+                        ui.painter().rect_filled(r.rect, 0, theme::palette().accent.gamma_multiply(0.25));
                     }
                     if r.clicked() {
                         out.open_draft = Some((d.account.clone(), d.id.clone()));
@@ -845,7 +843,7 @@ impl MailView {
             LocalView::Outbox(account) => {
                 ui.horizontal(|ui| {
                     ui.add_space(10.0);
-                    ui.label(RichText::new(format!("Outbox  ·  {}", self.account_title(&account))).size(13.0).color(theme::MUTED));
+                    ui.label(RichText::new(format!("Outbox  ·  {}", self.account_title(&account))).size(13.0).color(theme::palette().muted));
                 });
                 let list: Vec<Item> = self.local_items.iter().filter(|i| i.account == account).cloned().collect();
                 if list.is_empty() {
@@ -861,8 +859,8 @@ impl MailView {
                         s => s.label().to_string(),
                     };
                     let color = match it.state {
-                        State::Failed | State::Unsure => theme::LINK_MISSING,
-                        _ => theme::TEXT,
+                        State::Failed | State::Unsure => theme::palette().link_missing,
+                        _ => theme::palette().text,
                     };
                     let r = ui.add(
                         egui::Button::selectable(selected, RichText::new(format!("{}\n{}  ·  {state}", if it.subject.trim().is_empty() { "(no subject)" } else { it.subject.as_str() }, it.recipients.join(", "))).size(13.0).color(color))
@@ -871,7 +869,7 @@ impl MailView {
                     rec(rects, format!("mail:outbox:{i}"), &r);
                     self.tab_focus(ui, &r, "mail:outbox-focus", i, rects);
                     if self.cursor == Some(i) {
-                        ui.painter().rect_filled(r.rect, 0, theme::ACCENT.gamma_multiply(0.25));
+                        ui.painter().rect_filled(r.rect, 0, theme::palette().accent.gamma_multiply(0.25));
                     }
                     if r.clicked() {
                         out.select = Some((it.account.clone(), it.id.clone()));
@@ -895,12 +893,12 @@ impl MailView {
         };
         egui::ScrollArea::vertical().id_salt("mail-outbox-detail").auto_shrink([false, false]).show(ui, |ui| {
             let key = (it.account.clone(), it.id.clone());
-            ui.label(RichText::new(if it.subject.trim().is_empty() { "(no subject)" } else { it.subject.as_str() }).size(19.0).color(theme::TEXT_STRONG));
+            ui.label(RichText::new(if it.subject.trim().is_empty() { "(no subject)" } else { it.subject.as_str() }).size(19.0).color(theme::palette().text_strong));
             crate::theme::prose(ui, muted(format!("From {}  ·  to {}", it.from, it.recipients.join(", "))));
             ui.add_space(6.0);
             match it.state {
                 State::Queued => {
-                    ui.label(RichText::new(format!("Waiting: {}.", wait_text(it.send_after, now))).color(theme::TEXT));
+                    ui.label(RichText::new(format!("Waiting: {}.", wait_text(it.send_after, now))).color(theme::palette().text));
                     let r = self.key_button(ui, "Undo send", KeyAction::MailUndoSend);
                     rec(rects, "mail:outbox:undo", &r);
                     if r.on_hover_text(self.tip("Take the mail back into the editor", KeyAction::MailUndoSend)).clicked() {
@@ -908,10 +906,10 @@ impl MailView {
                     }
                 }
                 State::Sending => {
-                    ui.label(RichText::new("Sending…").color(theme::TEXT));
+                    ui.label(RichText::new("Sending…").color(theme::palette().text));
                 }
                 State::Sent => {
-                    ui.label(RichText::new("Sent.").color(theme::TEXT));
+                    ui.label(RichText::new("Sent.").color(theme::palette().text));
                     let r = self.key_button(ui, "Dismiss", KeyAction::MailDelete);
                     rec(rects, "mail:outbox:discard", &r);
                     if r.on_hover_text(self.tip("Move this record to the mail trash folder; the mail itself is in Sent", KeyAction::MailDelete)).clicked() {
@@ -919,7 +917,7 @@ impl MailView {
                     }
                 }
                 State::Failed => {
-                    ui.label(RichText::new("This mail was not sent.").size(15.0).color(theme::LINK_MISSING));
+                    ui.label(RichText::new("This mail was not sent.").size(15.0).color(theme::palette().link_missing));
                     crate::theme::prose(ui, muted(it.error.clone().unwrap_or_default()));
                     ui.horizontal_wrapped(|ui| {
                         for (k, label, slot, action, tip) in [
@@ -940,8 +938,8 @@ impl MailView {
                     });
                 }
                 State::Unsure => {
-                    ui.label(RichText::new("This mail may have been sent.").size(15.0).color(theme::LINK_MISSING));
-                    ui.label(RichText::new("Shale does not know whether the server received it: the connection ended before the server answered. Check your Sent folder (on the server or in another program). If it is there, discard this entry; if it is not, send it again.").color(theme::TEXT));
+                    ui.label(RichText::new("This mail may have been sent.").size(15.0).color(theme::palette().link_missing));
+                    ui.label(RichText::new("Shale does not know whether the server received it: the connection ended before the server answered. Check your Sent folder (on the server or in another program). If it is there, discard this entry; if it is not, send it again.").color(theme::palette().text));
                     if let Some(e) = &it.error {
                         crate::theme::hint(ui, e.clone());
                     }

@@ -40,6 +40,6 @@ Shale's own font, you are told once, and the row says "not installed". The name 
 and is used again when the font is installed.
 
 Everything changes at once, also when you edit the `[fonts]` table of the settings file, see
-[[Settings reference]]. Back to [[Start here]]; the editor is in [[Editor]].
+[[Settings reference]]. Back to [[Start here]]; the editor is in [[Editor]]; the colours are in [[Themes]].
 
 #userguide #settings

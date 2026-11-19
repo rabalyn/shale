@@ -2,7 +2,6 @@
 //! a background job (`pandoc --version` is a program run), once when the page is first shown and
 //! again on **Check again**.
 
-use super::section;
 use crate::app::{muted, ShaleApp};
 use crate::import::docx;
 use crate::theme;
@@ -70,7 +69,7 @@ impl WordProbe {
 impl ShaleApp {
     pub(super) fn import_tab(&mut self, ui: &mut Ui) -> bool {
         let mut changed = false;
-        section(ui, "E-mails and events");
+        crate::theme::section(ui, "E-mails, events and posts");
         changed |= ui
             .checkbox(&mut self.cfg.import_header_list, "Header list in the note body")
             .on_hover_text("An imported e-mail or event always has its From, To, Date, When, Where … in the note's properties. Ticked: they are also written as a list below the title, for programs that do not show properties. The Import dialog starts with this choice")
@@ -79,7 +78,7 @@ impl ShaleApp {
         if self.word.result.is_none() && !self.word.running() {
             self.word.start(self.cfg.pandoc_path.clone());
         }
-        section(ui, "Word files (.docx)");
+        crate::theme::section(ui, "Word files (.docx)");
         changed |= ui
             .checkbox(&mut self.cfg.docx_import, "Import Word files as notes (needs pandoc)")
             .on_hover_text("A .docx file dropped on the window or added in the Import dialog becomes a note; pictures are saved next to it. Off: it is saved as an attachment")
@@ -93,10 +92,10 @@ impl ShaleApp {
                 crate::theme::prose(ui, muted(format!("{version}, found at {}", path.display())));
             }
             (Some(Probe::Broken { path, error }), false) => {
-                ui.add(egui::Label::new(egui::RichText::new(format!("{} does not work: {error}", path.display())).color(theme::LINK_MISSING)).wrap());
+                ui.add(egui::Label::new(egui::RichText::new(format!("{} does not work: {error}", path.display())).color(theme::palette().link_missing)).wrap());
             }
             _ => {
-                ui.add(egui::Label::new(egui::RichText::new("pandoc was not found. Install it, then press Check again:").color(theme::LINK_MISSING)).wrap());
+                ui.add(egui::Label::new(egui::RichText::new("pandoc was not found. Install it, then press Check again:").color(theme::palette().link_missing)).wrap());
             }
         }
         if !matches!(self.word.result, Some(Probe::Found { .. })) && !self.word.running() {

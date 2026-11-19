@@ -191,7 +191,7 @@ fn rich_text(ui: &mut Ui, md: &str, size: f32, color: Color32) -> Option<String>
     for (text, link) in &parts {
         let n = text.chars().count();
         let fmt = match link {
-            Some(_) => TextFormat { font_id: crate::fonts::font(size), color: theme::LINK, underline: Stroke::new(1.0, theme::LINK.gamma_multiply(0.6)), ..Default::default() },
+            Some(_) => TextFormat { font_id: crate::fonts::font(size), color: theme::palette().link, underline: Stroke::new(1.0, theme::palette().link.gamma_multiply(0.6)), ..Default::default() },
             None => TextFormat { font_id: crate::fonts::font(size), color, ..Default::default() },
         };
         job.append(text, 0.0, fmt);
@@ -244,9 +244,9 @@ fn avatar(ui: &mut Ui, cx: &Cx, url: &str, name: &str, size: f32) {
             egui::Image::from_texture(egui::load::SizedTexture::from_handle(&t)).fit_to_exact_size(Vec2::splat(size)).corner_radius(CornerRadius::same((size / 2.0) as u8)).paint_at(ui, r);
         }
         None => {
-            ui.painter().circle_filled(r.center(), size / 2.0, theme::BG_ACTIVE);
+            ui.painter().circle_filled(r.center(), size / 2.0, theme::palette().bg_active);
             let initial = name.chars().find(|c| c.is_alphanumeric()).map(|c| c.to_uppercase().to_string()).unwrap_or_default();
-            ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, initial, crate::fonts::font(size * 0.45), theme::MUTED);
+            ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, initial, crate::fonts::font(size * 0.45), theme::palette().muted);
         }
     }
 }
@@ -266,7 +266,7 @@ fn thumb(ui: &mut Ui, cx: &mut Cx, key: String, m: &super::Media, cell: Vec2, na
     };
     let (r, resp) = ui.allocate_exact_size(size, Sense::click());
     let radius = CornerRadius::same(6);
-    ui.painter().rect_filled(r, radius, theme::BG_PRIMARY);
+    ui.painter().rect_filled(r, radius, theme::palette().bg_primary);
     match &tex {
         Some(t) => {
             egui::Image::from_texture(egui::load::SizedTexture::from_handle(t)).fit_to_exact_size(size).corner_radius(radius).paint_at(ui, r);
@@ -279,7 +279,7 @@ fn thumb(ui: &mut Ui, cx: &mut Cx, key: String, m: &super::Media, cell: Vec2, na
             } else {
                 "loading…"
             };
-            ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, word, crate::fonts::font(12.0), theme::FAINT);
+            ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, word, crate::fonts::font(12.0), theme::palette().faint);
         }
     }
     if matches!(m.kind, MediaKind::Video | MediaKind::Gifv) {
@@ -335,8 +335,8 @@ fn media_block(ui: &mut Ui, cx: &mut Cx, p: &Post, idx: usize, width: f32) {
 /// A box with a lighter fill inside a post (quote, link card).
 fn inset(ui: &mut Ui, f: impl FnOnce(&mut Ui)) -> egui::Response {
     egui::Frame::new()
-        .fill(theme::BG_PRIMARY)
-        .stroke(Stroke::new(1.0, theme::BORDER))
+        .fill(theme::palette().bg_primary)
+        .stroke(Stroke::new(1.0, theme::palette().border))
         .corner_radius(6)
         .inner_margin(8)
         .show(ui, |ui| {
@@ -360,11 +360,11 @@ fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, idx: usize, width: f32) -> (boo
     let key = post_key(p);
     let mut save = false;
     let inner = width - 24.0;
-    let card = egui::Frame::new().fill(theme::BG_SECONDARY).corner_radius(8).inner_margin(12).show(ui, |ui| {
+    let card = egui::Frame::new().fill(theme::palette().bg_secondary).corner_radius(8).inner_margin(12).show(ui, |ui| {
         ui.set_width(inner);
         if let Some(b) = &p.reposted_by {
             let word = if p.network == Network::Mastodon { "boosted" } else { "reposted" };
-            ui.label(RichText::new(format!("🔁 {} {word}", b.name())).size(crate::fonts::px(12.0)).color(theme::MUTED));
+            ui.label(RichText::new(format!("🔁 {} {word}", b.name())).size(crate::fonts::px(12.0)).color(theme::palette().muted));
             ui.add_space(2.0);
         }
         ui.horizontal(|ui| {
@@ -373,7 +373,7 @@ fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, idx: usize, width: f32) -> (boo
                 ui.spacing_mut().item_spacing.y = 1.0;
                 ui.horizontal(|ui| {
                     if ui
-                        .add(egui::Label::new(RichText::new(p.author.name()).strong().size(crate::fonts::px(14.5)).color(theme::TEXT_STRONG)).sense(Sense::click()))
+                        .add(egui::Label::new(RichText::new(p.author.name()).strong().size(crate::fonts::px(14.5)).color(theme::palette().text_strong)).sense(Sense::click()))
                         .on_hover_cursor(egui::CursorIcon::PointingHand)
                         .on_hover_text("Open the profile")
                         .clicked()
@@ -382,13 +382,13 @@ fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, idx: usize, width: f32) -> (boo
                     }
                     let age = age_text(p.created_at, cx.now);
                     if !age.is_empty() {
-                        ui.label(RichText::new(format!("· {age}")).size(crate::fonts::px(12.5)).color(theme::MUTED)).on_hover_text(crate::import::local_stamp(p.created_at, false));
+                        ui.label(RichText::new(format!("· {age}")).size(crate::fonts::px(12.5)).color(theme::palette().muted)).on_hover_text(crate::import::local_stamp(p.created_at, false));
                     }
                     if p.reply_to.is_some() {
-                        ui.label(RichText::new("· reply").size(crate::fonts::px(12.5)).color(theme::FAINT));
+                        ui.label(RichText::new("· reply").size(crate::fonts::px(12.5)).color(theme::palette().faint));
                     }
                 });
-                ui.label(RichText::new(format!("@{}", p.author.handle)).size(crate::fonts::px(12.5)).color(theme::MUTED));
+                ui.label(RichText::new(format!("@{}", p.author.handle)).size(crate::fonts::px(12.5)).color(theme::palette().muted));
             });
         });
         ui.add_space(6.0);
@@ -398,7 +398,7 @@ fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, idx: usize, width: f32) -> (boo
             open_body = shown;
             inset(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.add(egui::Label::new(RichText::new(format!("Content warning: {cw}")).size(crate::fonts::px(13.5)).color(theme::TEXT)).wrap());
+                    ui.add(egui::Label::new(RichText::new(format!("Content warning: {cw}")).size(crate::fonts::px(13.5)).color(theme::palette().text)).wrap());
                 });
                 if cx.rec(format!("cw:{idx}"), ui.small_button(if shown { "Hide" } else { "Show" })).clicked() {
                     if shown {
@@ -412,7 +412,7 @@ fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, idx: usize, width: f32) -> (boo
         }
         if open_body {
             for para in p.text_markdown.split("\n\n").filter(|t| !t.trim().is_empty()) {
-                if let Some(url) = rich_text(ui, para.trim(), 14.5, theme::TEXT) {
+                if let Some(url) = rich_text(ui, para.trim(), 14.5, theme::palette().text) {
                     open_web(&url);
                 }
                 ui.add_space(4.0);
@@ -423,24 +423,24 @@ fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, idx: usize, width: f32) -> (boo
             }
             if let Some(q) = &p.quote {
                 inset(ui, |ui| {
-                    ui.label(RichText::new(format!("{} @{}", q.author.name(), q.author.handle)).size(crate::fonts::px(12.5)).color(theme::MUTED));
+                    ui.label(RichText::new(format!("{} @{}", q.author.name(), q.author.handle)).size(crate::fonts::px(12.5)).color(theme::palette().muted));
                     let text = super::markup::plain_text(&q.text_markdown);
                     if !text.is_empty() {
-                        ui.add(egui::Label::new(RichText::new(short(&text, 280)).size(crate::fonts::px(13.5)).color(theme::TEXT)).wrap());
+                        ui.add(egui::Label::new(RichText::new(short(&text, 280)).size(crate::fonts::px(13.5)).color(theme::palette().text)).wrap());
                     }
                     if !q.media.is_empty() {
-                        ui.label(RichText::new(format!("{} attachment{}", q.media.len(), if q.media.len() == 1 { "" } else { "s" })).size(crate::fonts::px(12.0)).color(theme::FAINT));
+                        ui.label(RichText::new(format!("{} attachment{}", q.media.len(), if q.media.len() == 1 { "" } else { "s" })).size(crate::fonts::px(12.0)).color(theme::palette().faint));
                     }
                 });
                 ui.add_space(4.0);
             }
             if let Some(c) = &p.link_card {
                 let r = inset(ui, |ui| {
-                    ui.add(egui::Label::new(RichText::new(short(if c.title.trim().is_empty() { &c.url } else { &c.title }, 120)).strong().size(crate::fonts::px(13.5)).color(theme::TEXT_STRONG)).wrap());
+                    ui.add(egui::Label::new(RichText::new(short(if c.title.trim().is_empty() { &c.url } else { &c.title }, 120)).strong().size(crate::fonts::px(13.5)).color(theme::palette().text_strong)).wrap());
                     if !c.description.trim().is_empty() {
-                        ui.add(egui::Label::new(RichText::new(short(&c.description, 200)).size(crate::fonts::px(12.5)).color(theme::MUTED)).wrap());
+                        ui.add(egui::Label::new(RichText::new(short(&c.description, 200)).size(crate::fonts::px(12.5)).color(theme::palette().muted)).wrap());
                     }
-                    ui.label(RichText::new(crate::calendar::dav::host_of(&c.url)).size(crate::fonts::px(11.5)).color(theme::FAINT));
+                    ui.label(RichText::new(crate::calendar::dav::host_of(&c.url)).size(crate::fonts::px(11.5)).color(theme::palette().faint));
                 });
                 if r.interact(Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(&c.url).clicked() {
                     open_web(&c.url);
@@ -451,8 +451,8 @@ fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, idx: usize, width: f32) -> (boo
         // counts and buttons
         ui.horizontal(|ui| {
             let busy = cx.saving.contains(&key);
-            let fill = theme::ACCENT.gamma_multiply(0.55);
-            let (b, spinner) = spinner_button(ui, RichText::new("Save to vault").strong().color(theme::TEXT_STRONG), Some(fill), true, busy);
+            let fill = theme::palette().accent.gamma_multiply(0.55);
+            let (b, spinner) = spinner_button(ui, RichText::new("Save to vault").strong().color(theme::palette().text_strong), Some(fill), true, busy);
             if let Some(at) = spinner {
                 cx.rects.push((format!("save-spinner:{idx}"), at));
             }
@@ -467,7 +467,7 @@ fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, idx: usize, width: f32) -> (boo
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let (a, b) = if p.network == Network::Mastodon { ("boosts", "favourites") } else { ("reposts", "likes") };
-                ui.label(RichText::new(format!("{} replies · {} {a} · {} {b}", p.reply_count, p.boost_count, p.like_count)).size(crate::fonts::px(11.5)).color(theme::FAINT));
+                ui.label(RichText::new(format!("{} replies · {} {a} · {} {b}", p.reply_count, p.boost_count, p.like_count)).size(crate::fonts::px(11.5)).color(theme::palette().faint));
             });
         });
     });
@@ -502,11 +502,11 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
         // no account yet
         ui.vertical_centered(|ui| {
             ui.add_space(ui.available_height() * 0.25);
-            ui.label(RichText::new("Read your feeds here").size(crate::fonts::px(24.0)).color(theme::TEXT_STRONG));
+            ui.label(RichText::new("Read your feeds here").size(crate::fonts::px(24.0)).color(theme::palette().text_strong));
             ui.add_space(6.0);
-            ui.label(RichText::new("Add a Mastodon or Bluesky account, scroll its timeline and\ncopy posts, threads and pictures into your vault as notes.").size(crate::fonts::px(14.0)).color(theme::MUTED));
+            ui.label(RichText::new("Add a Mastodon or Bluesky account, scroll its timeline and\ncopy posts, threads and pictures into your vault as notes.").size(crate::fonts::px(14.0)).color(theme::palette().muted));
             ui.add_space(14.0);
-            let r = ui.add(egui::Button::new(RichText::new("Add account").strong().size(crate::fonts::px(15.0))).fill(theme::ACCENT.gamma_multiply(0.55)).min_size(Vec2::new(150.0, 32.0)));
+            let r = ui.add(egui::Button::new(RichText::new("Add account").strong().size(crate::fonts::px(15.0))).fill(theme::palette().accent.gamma_multiply(0.55)).min_size(Vec2::new(150.0, 32.0)));
             st.rects.push(("add-account".into(), r.rect));
             if r.clicked() {
                 asks.push(Ask::Accounts);
@@ -604,7 +604,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
             });
         });
         if let Some(FeedsState::Failed(e)) = st.feeds.get(&aid) {
-            ui.add(egui::Label::new(RichText::new(format!("Could not load the feeds: {e}")).color(theme::LINK_MISSING)).wrap());
+            ui.add(egui::Label::new(RichText::new(format!("Could not load the feeds: {e}")).color(theme::palette().link_missing)).wrap());
         }
     });
     if let Some((feed, new_tab)) = pick {
@@ -636,25 +636,25 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
             ui.set_max_height(NEW_ROW_HEIGHT);
             if waiting > 0 {
                 let label = format!("{waiting} new post{} — show", if waiting == 1 { "" } else { "s" });
-                let r = ui.add(egui::Button::new(RichText::new(label).strong().color(theme::TEXT_STRONG)).fill(theme::ACCENT).corner_radius(12).min_size(Vec2::new(0.0, 24.0)));
+                let r = ui.add(egui::Button::new(RichText::new(label).strong().color(theme::palette().text_strong)).fill(theme::palette().accent).corner_radius(12).min_size(Vec2::new(0.0, 24.0)));
                 st.rects.push(("new-posts".into(), r.rect));
                 show_new |= r.on_hover_text("Put the new posts above the list (key: .). The view stays where it is.").clicked();
             } else {
                 ui.add_space(5.0);
                 if let Some(e) = &check_error {
-                    let r = ui.add(egui::Label::new(RichText::new(format!("Could not look for new posts: {e}")).size(crate::fonts::px(11.5)).color(theme::LINK_MISSING)).truncate());
+                    let r = ui.add(egui::Label::new(RichText::new(format!("Could not look for new posts: {e}")).size(crate::fonts::px(11.5)).color(theme::palette().link_missing)).truncate());
                     st.rects.push(("check-error".into(), r.rect));
                 } else if checking {
                     ui.horizontal(|ui| {
                         ui.add(egui::Spinner::new().size(12.0));
-                        ui.label(RichText::new("Checking…").size(crate::fonts::px(11.5)).color(theme::MUTED));
+                        ui.label(RichText::new("Checking…").size(crate::fonts::px(11.5)).color(theme::palette().muted));
                     });
                 } else {
                     let text = match last {
                         Some(t) => format!("Up to date · checked {}", checked_ago(t.elapsed().as_secs())),
                         None => "Up to date".to_string(),
                     };
-                    let r = ui.label(RichText::new(text).size(crate::fonts::px(11.5)).color(theme::MUTED));
+                    let r = ui.label(RichText::new(text).size(crate::fonts::px(11.5)).color(theme::palette().muted));
                     st.rects.push(("up-to-date".into(), r.rect));
                     ctx.request_repaint_after(std::time::Duration::from_secs(20));
                 }
@@ -741,7 +741,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
                 }
                 if let Some(e) = &error {
                     inset(ui, |ui| {
-                        ui.add(egui::Label::new(RichText::new(format!("Could not load posts: {e}")).color(theme::LINK_MISSING)).wrap());
+                        ui.add(egui::Label::new(RichText::new(format!("Could not load posts: {e}")).color(theme::palette().link_missing)).wrap());
                         let r = ui.button("Retry");
                         cx.rects.push(("retry".into(), r.rect));
                         retry = r.clicked();
@@ -751,10 +751,10 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
                         ui.spinner();
                     });
                 } else if loaded && posts.is_empty() {
-                    ui.label(RichText::new("Nothing here yet.").color(theme::MUTED));
+                    ui.label(RichText::new("Nothing here yet.").color(theme::palette().muted));
                 } else if loaded && !has_more {
                     ui.vertical_centered(|ui| {
-                        ui.label(RichText::new("That is all for now.").size(crate::fonts::px(12.5)).color(theme::FAINT));
+                        ui.label(RichText::new("That is all for now.").size(crate::fonts::px(12.5)).color(theme::palette().faint));
                     });
                 }
                 // the end of the list: when it is on screen, the next page is due

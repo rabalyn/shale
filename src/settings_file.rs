@@ -209,18 +209,18 @@ impl ShaleApp {
         let path = config::config_path().map(|p| p.display().to_string()).unwrap_or_default();
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(path).color(theme::MUTED).size(12.0));
+            ui.label(egui::RichText::new(path).color(theme::palette().muted).size(12.0));
             if ui.add_enabled(self.sf.dirty, egui::Button::new("Save")).on_hover_text("Save the file and use the settings (Ctrl+S)").clicked() {
                 self.save_settings_file(true);
             }
-            ui.label(egui::RichText::new(if self.sf.dirty { "Not saved yet" } else { "Saved" }).color(theme::MUTED).size(12.0));
+            ui.label(egui::RichText::new(if self.sf.dirty { "Not saved yet" } else { "Saved" }).color(theme::palette().muted).size(12.0));
         });
         if let Some(e) = &self.sf.error {
-            ui.label(egui::RichText::new(format!("This text is not valid settings, so it is not used: {e}")).color(theme::LINK_MISSING).size(12.0));
+            ui.label(egui::RichText::new(format!("This text is not valid settings, so it is not used: {e}")).color(theme::palette().link_missing).size(12.0));
         }
         if self.sf.disk_changed {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("The file was changed by another program. Saving here replaces its text.").color(theme::LINK_MISSING).size(12.0));
+                ui.label(egui::RichText::new("The file was changed by another program. Saving here replaces its text.").color(theme::palette().link_missing).size(12.0));
                 if ui.button("Load the file from disk").clicked() {
                     if let Some(p) = config::config_path() {
                         self.sf.load(&p, || self.cfg.file_text());

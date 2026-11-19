@@ -52,12 +52,19 @@ change within a second.
 
 | Key | Default | Where |
 |---|---|---|
+| `theme` | the table of the four keys below | The colours of the window: Appearance, "Theme" (see [[Themes]]) |
+| `theme.name` | `"Shale"` | Appearance, "Theme": the theme by name, one of the built-in themes or a file of the themes folder (see [[Themes]]); an unknown name gives Shale |
+| `theme.follow_system` | off | Appearance, "Follow the system's light or dark mode": with it on, `theme.light` or `theme.dark` is used instead of `theme.name`, by the mode of the system |
+| `theme.light` | `"Catppuccin Latte"` | Appearance, "Light theme" (with follow system on) |
+| `theme.dark` | `"Shale"` | Appearance, "Dark theme" (with follow system on) |
 | `readable_width` | on | Appearance, "Readable line length" |
 | `dark_canvas` | on | Appearance, "Dark drawing canvas" |
 | `inline_images` | on | Appearance, "Show embedded images and players inside the editor" |
 | `media_play_button_opacity` | 0.6 (range 0 to 1) | Settings → Appearance, "Play button over the artwork of a sound or video"; global config; the 100% and fullscreen buttons over pictures and videos use it too |
 | `media_volume` | 0.8 (range 0 to 1) | the volume slider of any sound player; one volume for all players; global config |
 | `settings_tab_width` | left out (as wide as the longest tab name; 60 points at least, half of the window at most) | the border between the tab list and the page of the Settings window: drag it to set the width, double-click it to go back to automatic |
+| `left_sidebar_width` | left out (260 points; 170 at least, 520 at most) | the border between the left sidebar and the notes: drag it to set the width; it is kept after a restart; "Reset layout" in the ribbon's menu goes back to the default |
+| `right_sidebar_width` | left out (290 points; 200 at least, 560 at most) | the border between the notes and the right sidebar: drag it to set the width; it is kept after a restart; "Reset layout" goes back to the default |
 
 ### Fonts
 
@@ -176,7 +183,7 @@ system keyring, never in this file):
 | Key | Default | Where |
 |---|---|---|
 | `docx_import` | off | Settings → Import, "Import Word files as notes (needs pandoc)"; global config |
-| `import_header_list` | off | Settings → Import, "Header list in the note body"; the start value of the box of the same name in the Import dialog |
+| `import_header_list` | off | Settings → Import, "Header list in the note body" (e-mails, events and saved posts); the start value of the box of the same name in the Import dialog |
 | `pandoc_path` | empty (search `PATH`, then `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, and on Windows `%LOCALAPPDATA%\Pandoc` and `%ProgramFiles%\Pandoc`) | Settings → Import, "pandoc program" |
 
 To set it up: install pandoc (Linux `sudo pacman -S pandoc-cli` or `sudo apt install pandoc`, macOS `brew install pandoc`,
@@ -251,10 +258,11 @@ Kept by Shale as you work, so a vault opens as you left it ([[Tabs]], [[Import]]
 | Key | Default | Meaning |
 |---|---|---|
 | `version` | 2 | format version |
-| `tabs` | empty | the open tabs in order; each has `tabs[].file` (a note or drawing, relative to the vault) or `tabs[].feed` (a Feeds tab) and `tabs[].pinned`; a note tab also has `tabs[].cursor` (the selection as two character positions, the moving end first), `tabs[].scroll` (the scroll offset in points) and `tabs[].reading` (true in the reading view), all left out when not set |
+| `tabs` | empty | the open tabs in order; each has `tabs[].file` (a note or drawing, relative to the vault) or `tabs[].feed` (a Feeds tab) and `tabs[].pinned`; a note tab also has `tabs[].cursor` (the selection as two character positions, the moving end first), `tabs[].scroll` (the scroll offset in points) and `tabs[].reading` (true in the reading view), all left out when not set; a tab of a view without a file has `tabs[].view` instead (`mail`, `calendar`, `tasks`, `graph` or `settings_file`) and, where there is something to keep, `tabs[].mail` (account, folder and the `uid` of the open message), `tabs[].calendar` (`mode` and `day`), `tabs[].tasks` (`query`, `show_done`, `only_due`) or `tabs[].graph` (`hide_missing`, `hide_orphans`), the last two only when they are not the default |
 | `panes` | empty | the panes side by side, left to right ([[Tabs]]); each has `panes[].tabs` (as `tabs`), `panes[].active` (the open tab, an index into its tabs) and `panes[].weight` (its share of the width, 1); a file without `panes` loads as one pane made of `tabs`. `tabs` is also written as the tabs of the first pane |
 | `focused_pane` | 0 | the index of the pane that had the focus |
 | `highlight_colour`, `font_colour` | not written until a colour is picked (neon yellow `#FFFF00`, red `#E53E3E`) | the current colour of the highlight and font colour buttons of the toolbar as `#RRGGBB` ([[Editor]]); an unreadable value gives the default |
+| `folds` | empty | the folded blocks of your notes ([[Editor]], "Folding"): a note's path relative to the vault, each with its folds (`kind`, `title`, `nth`, `line`: what the block is and where its header was); a note with no entry has the folds it starts with, an empty list is a note whose folds were all opened; the entry of a note that is gone is dropped |
 | `last_import_folder` | empty | the folder of the last import |
 | `last_social_folder` | empty (the first save asks for `Social`) | the folder of the last saved post |
 | `recent_tags` | empty | tags used for imports, most recent first |

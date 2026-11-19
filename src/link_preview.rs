@@ -625,54 +625,54 @@ impl LinkPreview {
             match &open.content {
                 Content::Note { rel, text, numbers } => {
                     if text.trim().is_empty() {
-                        ui.label(egui::RichText::new("The note is empty").color(theme::MUTED));
+                        ui.label(egui::RichText::new("The note is empty").color(theme::palette().muted));
                     } else if let Some(a) = reader::show(ui, text, vault, rel, caches, (base, dark), &reader::Extras { numbers: numbers.clone(), scroll_to: None, ..Default::default() }) {
                         action = Some((a, rel.clone()));
                     }
                 }
                 Content::Missing(name) => {
-                    ui.label(egui::RichText::new("Note does not exist yet").strong().color(theme::LINK_MISSING));
-                    ui.label(egui::RichText::new(format!("“{name}” is created when you press Enter")).color(theme::MUTED));
+                    ui.label(egui::RichText::new("Note does not exist yet").strong().color(theme::palette().link_missing));
+                    ui.label(egui::RichText::new(format!("“{name}” is created when you press Enter")).color(theme::palette().muted));
                 }
                 Content::Image { abs, rel } => match crate::media::image_widget(ui.ctx(), abs, room.x, room.y - 16.0) {
                     Some(img) => {
                         ui.add(img);
                     }
                     None => {
-                        ui.label(egui::RichText::new(rel.to_string_lossy()).color(theme::TEXT));
+                        ui.label(egui::RichText::new(rel.to_string_lossy()).color(theme::palette().text));
                     }
                 },
                 Content::File { rel, kind } => {
-                    ui.label(egui::RichText::new(rel.to_string_lossy()).strong().color(theme::TEXT));
-                    ui.label(egui::RichText::new(format!("{kind}. Enter opens it")).color(theme::MUTED));
+                    ui.label(egui::RichText::new(rel.to_string_lossy()).strong().color(theme::palette().text));
+                    ui.label(egui::RichText::new(format!("{kind}. Enter opens it")).color(theme::palette().muted));
                 }
                 Content::Plain(m) => {
-                    ui.label(egui::RichText::new(m.as_str()).color(theme::TEXT));
+                    ui.label(egui::RichText::new(m.as_str()).color(theme::palette().text));
                 }
                 Content::Web { url } => match self.pages.get(url) {
                     None => {
                         ui.horizontal(|ui| {
                             ui.spinner();
-                            ui.label(egui::RichText::new(format!("Loading {} …", dav::host_of(url))).color(theme::MUTED));
+                            ui.label(egui::RichText::new(format!("Loading {} …", dav::host_of(url))).color(theme::palette().muted));
                         });
                     }
                     Some(Err(why)) => {
-                        ui.label(egui::RichText::new("The page could not be loaded").strong().color(theme::LINK_MISSING));
-                        ui.label(egui::RichText::new(why.as_str()).color(theme::TEXT));
-                        ui.label(egui::RichText::new(url.as_str()).small().color(theme::MUTED));
+                        ui.label(egui::RichText::new("The page could not be loaded").strong().color(theme::palette().link_missing));
+                        ui.label(egui::RichText::new(why.as_str()).color(theme::palette().text));
+                        ui.label(egui::RichText::new(url.as_str()).small().color(theme::palette().muted));
                     }
                     Some(Ok(p)) => {
                         if !p.title.is_empty() {
-                            ui.label(egui::RichText::new(p.title.as_str()).strong().size(base * 1.15).color(theme::HEADING));
+                            ui.label(egui::RichText::new(p.title.as_str()).strong().size(base * 1.15).color(theme::palette().heading));
                         }
-                        ui.label(egui::RichText::new(url.as_str()).small().color(theme::LINK));
+                        ui.label(egui::RichText::new(url.as_str()).small().color(theme::palette().link));
                         if !p.description.is_empty() {
                             ui.add_space(4.0);
-                            ui.label(egui::RichText::new(p.description.as_str()).italics().color(theme::TEXT));
+                            ui.label(egui::RichText::new(p.description.as_str()).italics().color(theme::palette().text));
                         }
                         for para in p.text.lines() {
                             ui.add_space(4.0);
-                            ui.label(egui::RichText::new(para).color(theme::TEXT));
+                            ui.label(egui::RichText::new(para).color(theme::palette().text));
                         }
                     }
                 },

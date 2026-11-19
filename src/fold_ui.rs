@@ -3,7 +3,7 @@
 //! front matter, the folds a note starts with and the commands. The blocks and the commands
 //! themselves are in `fold.rs`.
 
-use crate::fold::{find_blocks, Block, FoldCmd, FoldKind, NoteFolds, View};
+use crate::fold::{find_blocks, Block, FoldCmd, FoldKind, Key, NoteFolds, View};
 use crate::theme;
 use eframe::egui::{self, text::CCursor, Galley, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2};
 use std::borrow::Cow;
@@ -121,6 +121,10 @@ pub struct FoldUi {
     pub copy_code: bool,
     /// the notes whose folds were set when they were first shown (EDIT-081, EDIT-082)
     seen: HashSet<PathBuf>,
+    /// the folds a note started with, to tell what the user changed (EDIT-079)
+    initial: HashMap<PathBuf, NoteFolds>,
+    /// the notes whose folds came from the vault state (EDIT-079): they are written back as they are
+    restored: HashSet<PathBuf>,
     /// the notes whose front matter the cursor opened and that fold it again when it leaves (EDIT-081)
     auto: HashSet<PathBuf>,
     /// per note: was the cursor in the front matter in the last frame that had the keyboard
@@ -146,7 +150,7 @@ pub struct ReaderFolds<'a> {
 pub fn marker_button(ui: &mut Ui, id: egui::Id, rect: Rect, folded: bool) -> bool {
     let painter = ui.painter().with_clip_rect(ui.clip_rect());
     let resp = ui.interact(rect, id, Sense::click());
-    let colour = if resp.hovered() { theme::TEXT } else { theme::MUTED };
+    let colour = if resp.hovered() { theme::palette().text } else { theme::palette().muted };
     let c = rect.center();
     let tri = if folded { vec![c + Vec2::new(-2.5, -4.0), c + Vec2::new(-2.5, 4.0), c + Vec2::new(3.5, 0.0)] } else { vec![c + Vec2::new(-4.0, -2.5), c + Vec2::new(4.0, -2.5), c + Vec2::new(0.0, 3.5)] };
     painter.add(Shape::convex_polygon(tri, colour, Stroke::NONE));
@@ -176,6 +180,7 @@ impl FoldUi {
             self.seen.insert(rel.to_path_buf());
             let start = NoteFolds::defaults(&blocks, crate::fold::is_mail(text), summary);
             if !start.is_empty() {
+                self.initial.insert(rel.to_path_buf(), start.clone());
                 self.notes.insert(rel.to_path_buf(), start);
             }
         }
@@ -205,6 +210,60 @@ impl FoldUi {
         }
         self.last.insert(rel.to_path_buf(), frame.clone());
         frame
+    }
+
+    /// Give the note `rel` the folds the vault state remembers (EDIT-079), instead of the ones it would
+    /// start with. Does nothing for a note that was shown or restored already.
+    pub fn restore(&mut self, rel: &Path, saved: &[Key]) {
+        if !self.seen.insert(rel.to_path_buf()) {
+            return;
+        }
+        self.restored.insert(rel.to_path_buf());
+        if !saved.is_empty() {
+            self.notes.insert(rel.to_path_buf(), NoteFolds::from_saved(saved));
+        }
+    }
+
+    /// What the vault state should hold for each note this editor has shown (EDIT-079): its folds, or
+    /// `None` when they are the ones it starts with and nothing needs to be remembered.
+    pub fn snapshot(&self) -> Vec<(PathBuf, Option<Vec<Key>>)> {
+        let empty = NoteFolds::default();
+        self.seen
+            .iter()
+            .map(|rel| {
+                let now = self.notes.get(rel).unwrap_or(&empty);
+                let start = self.initial.get(rel).unwrap_or(&empty);
+                let keep = self.restored.contains(rel) || now != start;
+                (rel.clone(), keep.then(|| now.to_saved()))
+            })
+            .collect()
+    }
+
+    /// A note or folder was moved: what is kept for `from` follows to the new path `remap` gives.
+    pub fn moved(&mut self, remap: impl Fn(&Path) -> Option<PathBuf>) {
+        fn rekey<V>(m: &mut HashMap<PathBuf, V>, remap: &impl Fn(&Path) -> Option<PathBuf>) {
+            for k in m.keys().cloned().collect::<Vec<_>>() {
+                if let (Some(nk), Some(v)) = (remap(&k), m.remove(&k)) {
+                    m.insert(nk, v);
+                }
+            }
+        }
+        fn rekey_set(m: &mut HashSet<PathBuf>, remap: &impl Fn(&Path) -> Option<PathBuf>) {
+            for k in m.iter().cloned().collect::<Vec<_>>() {
+                if let Some(nk) = remap(&k) {
+                    m.remove(&k);
+                    m.insert(nk);
+                }
+            }
+        }
+        rekey(&mut self.notes, &remap);
+        rekey(&mut self.initial, &remap);
+        rekey(&mut self.in_front, &remap);
+        rekey_set(&mut self.seen, &remap);
+        rekey_set(&mut self.restored, &remap);
+        rekey_set(&mut self.auto, &remap);
+        // (the cached frames are made again from the text)
+        self.last.clear();
     }
 
     /// Do a command with the cursor in `line`; the answer is the line the cursor has to go to when
@@ -342,11 +401,11 @@ impl FoldUi {
             }
             let kind = frame.folded.iter().map(|&i| &frame.blocks[i]).filter(|b| b.header == header).max_by_key(|b| b.end).map_or(FoldKind::Heading, |b| b.kind);
             let label = crate::fold::badge_label(kind, frame.mail, n);
-            let g = painter.layout_no_wrap(label, egui::FontId::proportional((base * 0.8).max(9.0)), theme::MUTED);
+            let g = painter.layout_no_wrap(label, egui::FontId::proportional((base * 0.8).max(9.0)), theme::palette().muted);
             let rect = Rect::from_center_size(Pos2::new(end.min.x + 10.0 + (g.size().x + 10.0) / 2.0, end.center().y), g.size() + Vec2::new(10.0, 2.0));
             let resp = ui.interact(rect, id.with(("fold-badge", header)), Sense::click());
-            painter.rect_filled(rect, 4.0, if resp.hovered() { theme::BG_ACTIVE } else { theme::BG_SECONDARY });
-            painter.galley(rect.center() - g.size() / 2.0, g, theme::MUTED);
+            painter.rect_filled(rect, 4.0, if resp.hovered() { theme::palette().bg_active } else { theme::palette().bg_secondary });
+            painter.galley(rect.center() - g.size() / 2.0, g, theme::palette().muted);
             if resp.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
@@ -369,7 +428,7 @@ impl FoldUi {
                 };
                 let hit = Rect::from_min_max(Pos2::new(pos.x, row.min.y), Pos2::new(area.right(), row.max.y));
                 let resp = ui.interact(hit, id.with("fold-summary"), Sense::click());
-                let colour = if resp.hovered() { theme::TEXT } else { theme::MUTED };
+                let colour = if resp.hovered() { theme::palette().text } else { theme::palette().muted };
                 let g = painter.layout_no_wrap(label, egui::FontId::proportional((base * 0.9).max(9.0)), colour);
                 painter.with_clip_rect(hit.intersect(clip)).galley(Pos2::new(pos.x, row.center().y - g.size().y / 2.0), g, colour);
                 if resp.hovered() {

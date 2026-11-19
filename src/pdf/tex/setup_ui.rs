@@ -17,9 +17,6 @@ use crate::theme;
 use eframe::egui::{self, Color32, Context, Ui};
 use std::path::Path;
 
-/// The green of a step that is done.
-pub const GREEN: Color32 = Color32::from_rgb(110, 200, 130);
-
 /// The page of the university library that has the logo and the install scripts for it, as the
 /// README of tuda-ci says (the logo itself is for members of the university).
 pub const LOGO_PAGE: &str = "https://www.ulb.tu-darmstadt.de/finden_nutzen/medien_nutzen/dokumente_erstellen/latex/index.de.jsp";
@@ -55,11 +52,11 @@ fn indicator(ui: &mut Ui, st: &TexState, cfg: &TexConfig) {
             let text = format!("{} {}", if done { "✓".to_string() } else { (i + 1).to_string() }, s.title());
             let t = egui::RichText::new(text);
             ui.label(if s == st.setup.step {
-                t.strong().color(theme::TEXT_STRONG)
+                t.strong().color(theme::palette().text_strong)
             } else if done {
-                t.color(GREEN)
+                t.color(theme::palette().ok_text)
             } else {
-                t.color(theme::MUTED)
+                t.color(theme::palette().muted)
             });
         }
     });
@@ -68,7 +65,7 @@ fn indicator(ui: &mut Ui, st: &TexState, cfg: &TexConfig) {
 
 /// A line that says something is done.
 fn done_line(ui: &mut Ui, text: impl Into<String>) {
-    ui.label(egui::RichText::new(text).color(GREEN));
+    ui.label(egui::RichText::new(text).color(theme::palette().ok_text));
 }
 
 /// What the last job said, when it failed or when it has something to add.
@@ -98,7 +95,6 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig, acts: &mut Vec<Act>
 
 fn tex_step(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig, acts: &mut Vec<Act>) {
     crate::theme::paragraph(ui, "To make a PDF from a template, Shale needs a program called TeX.");
-    ui.add_space(4.0);
     // the install runs: its progress and Cancel
     if let Some(t) = st.task.as_ref().filter(|t| t.kind == TaskKind::Install) {
         let p = t.handle.progress();
@@ -121,7 +117,6 @@ fn tex_step(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig, acts: &mut Vec<Act>
         }
         TexFact::Missing(why) => {
             crate::theme::paragraph(ui, "It is not on this computer yet. Shale can install its own copy: it lives in a folder of its own and changes nothing else on your computer.");
-            ui.add_space(4.0);
             match &st.data {
                 None => {
                     crate::theme::problem(ui, "This computer has no data folder to keep TeX in, so Shale cannot install it.");
@@ -133,7 +128,6 @@ fn tex_step(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig, acts: &mut Vec<Act>
                     if let Some(p) = &perl {
                         crate::theme::problem(ui, p);
                     }
-                    ui.add_space(4.0);
                     let label = format!("Install (about {DOWNLOAD_MB} MB download, {DISK_MB} MB on disk)");
                     if ui.add_enabled(perl.is_none() && st.task.is_none(), egui::Button::new(label)).on_hover_text("Download and install TeX Live into Shale's own folder").clicked() {
                         acts.push(Act::Install);
@@ -144,14 +138,12 @@ fn tex_step(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig, acts: &mut Vec<Act>
         }
     }
     if let Some(n) = &st.notice {
-        ui.add_space(4.0);
         notice(ui, n);
     }
 }
 
 fn templates_step(ui: &mut Ui, st: &mut TexState, acts: &mut Vec<Act>) {
     crate::theme::paragraph(ui, "The templates give your PDFs the look of your university: the title page, the colours, the fonts. They are kept in your vault, so they are backed up and synced with your notes.");
-    ui.add_space(4.0);
     if st.sets.vault.is_none() {
         crate::theme::problem(ui, "Open a vault first: the templates are kept in it.");
         return;
@@ -167,7 +159,6 @@ fn templates_step(ui: &mut Ui, st: &mut TexState, acts: &mut Vec<Act>) {
     }
     if let Some(s) = st.chosen_set() {
         done_line(ui, format!("Using “{}” ✓", s.meta.name));
-        ui.add_space(4.0);
     }
     let existing: Vec<(String, String)> = st.usable_sets().iter().map(|s| (s.id.clone(), s.meta.name.clone())).collect();
     for (id, name) in existing {
@@ -187,13 +178,11 @@ fn templates_step(ui: &mut Ui, st: &mut TexState, acts: &mut Vec<Act>) {
         ui.add(egui::TextEdit::singleline(&mut st.setup.github_url).hint_text("https://github.com/owner/repository").desired_width(380.0));
         ui.add(egui::TextEdit::singleline(&mut st.setup.github_ref).hint_text("branch, tag or commit (empty: the default branch)").desired_width(380.0));
     }
-    ui.add_space(4.0);
     let existing_choice = matches!(st.setup.choice, Choice::Existing(_));
     if ui.button(if existing_choice { "Use this set" } else { "Import" }).clicked() {
         acts.push(Act::Import);
     }
     if let Some(n) = &st.notice {
-        ui.add_space(4.0);
         notice(ui, n);
     }
 }
@@ -224,7 +213,6 @@ fn logo_step(ui: &mut Ui, st: &mut TexState, acts: &mut Vec<Act>) {
                 }
                 crate::theme::prose(ui, muted(format!("Direct download in the university network: {LOGO_DOWNLOAD}")).size(11.0));
             });
-            ui.add_space(4.0);
             crate::theme::paragraph(ui, "Then give the file to Shale: drag it onto this window, or type or paste where it is.");
             ui.horizontal(|ui| {
                 ui.add(egui::TextEdit::singleline(&mut st.setup.logo_path).hint_text("~/Downloads/tuda_logo.pdf").desired_width(320.0));
@@ -235,10 +223,8 @@ fn logo_step(ui: &mut Ui, st: &mut TexState, acts: &mut Vec<Act>) {
             crate::theme::hint(ui, "Not now? Press Later: exports then carry a grey placeholder and are not CI-conformant. You can add the logo any time in Settings → LaTeX.");
         }
     }
-    ui.add_space(8.0);
     department_logo(ui, st, acts);
     if let Some(n) = &st.setup.message {
-        ui.add_space(4.0);
         notice(ui, n);
     }
 }
@@ -246,13 +232,13 @@ fn logo_step(ui: &mut Ui, st: &mut TexState, acts: &mut Vec<Act>) {
 /// The optional second field of the logo step: the logo of the person's department (TEX-035).
 fn department_logo(ui: &mut Ui, st: &mut TexState, acts: &mut Vec<Act>) {
     let Some(set) = st.chosen_set() else { return };
-    ui.label(egui::RichText::new("Department logo (optional)").strong());
+    theme::section(ui, "Department logo (optional)");
     match set.department_logo_text() {
         Some(text) => {
             ui.label(format!("{text} ✓"));
         }
         None => {
-            ui.label(muted("Your department or institution may have a logo of its own: documents show it under the university's logo.").size(12.0));
+            crate::theme::hint(ui, "Your department or institution may have a logo of its own: documents show it under the university's logo.");
         }
     }
     ui.horizontal(|ui| {
@@ -280,8 +266,7 @@ fn details_step(ui: &mut Ui, st: &mut TexState) {
     };
     let id = set.id.clone();
     crate::theme::paragraph(ui, "These choices are used for every PDF you make with these templates. You can run this setup again from Settings → LaTeX whenever you want to change them.");
-    ui.add_space(4.0);
-    ui.label(egui::RichText::new("Accent colour").color(theme::MUTED));
+    theme::section(ui, "Accent colour");
     if st.setup.accents.is_empty() {
         ui.add(egui::TextEdit::singleline(&mut st.setup.details.accent).hint_text("the name of a colour of the templates").desired_width(200.0));
     } else {
@@ -298,7 +283,7 @@ fn details_step(ui: &mut Ui, st: &mut TexState) {
                 let on = st.setup.details.accent == s.code;
                 let colour = Color32::from_rgb(s.rgb[0], s.rgb[1], s.rgb[2]);
                 let text = egui::RichText::new(&s.code).size(11.0).color(contrast(s.rgb));
-                let stroke = if on { egui::Stroke::new(2.5, theme::ACCENT) } else { egui::Stroke::new(1.0, theme::BORDER) };
+                let stroke = if on { egui::Stroke::new(2.5, theme::palette().accent) } else { egui::Stroke::new(1.0, theme::palette().border) };
                 if ui.add(egui::Button::new(text).fill(colour).stroke(stroke).min_size(egui::vec2(34.0, 24.0))).on_hover_text(format!("{} (#{:02X}{:02X}{:02X})", s.code, s.rgb[0], s.rgb[1], s.rgb[2])).clicked() {
                     st.setup.details.accent = s.code.clone();
                 }
@@ -306,27 +291,23 @@ fn details_step(ui: &mut Ui, st: &mut TexState) {
         });
         crate::theme::hint(ui, format!("Chosen: {}", if st.setup.details.accent.is_empty() { "none".to_string() } else { st.setup.details.accent.clone() }));
     }
-    ui.add_space(4.0);
-    ui.label(egui::RichText::new("Language of your documents").color(theme::MUTED));
+    theme::section(ui, "Language of your documents");
     ui.horizontal(|ui| {
         ui.radio_value(&mut st.setup.details.language, Language::De, "German (de)");
         ui.radio_value(&mut st.setup.details.language, Language::En, "English (en)");
     });
-    ui.add_space(4.0);
-    ui.label(egui::RichText::new("Department").color(theme::MUTED));
+    theme::section(ui, "Department");
     ui.add(egui::TextEdit::singleline(&mut st.setup.details.department).hint_text("for example your department's name").desired_width(300.0));
-    ui.label(egui::RichText::new("Your name (optional)").color(theme::MUTED));
+    theme::section(ui, "Your name (optional)");
     ui.add(egui::TextEdit::singleline(&mut st.setup.details.author).hint_text("filled in as the author of your documents").desired_width(300.0));
     crate::theme::hint(ui, format!("Saved in templates/tex/{id}/settings.toml when you press Next."));
     if let Some(n) = &st.setup.message {
-        ui.add_space(4.0);
         notice(ui, n);
     }
 }
 
 fn test_step(ui: &mut Ui, st: &mut TexState, acts: &mut Vec<Act>) {
     crate::theme::paragraph(ui, "Shale now makes a small PDF with your templates and your details, to show that everything works.");
-    ui.add_space(4.0);
     if st.setup.job.is_some() || st.setup.run_test {
         ui.horizontal(|ui| {
             ui.spinner();
@@ -378,7 +359,6 @@ fn test_step(ui: &mut Ui, st: &mut TexState, acts: &mut Vec<Act>) {
 
 /// The footer: Back, Next (Later on the logo step while there is none, Finish on the last) and Cancel.
 pub fn footer(ui: &mut Ui, st: &TexState, cfg: &TexConfig, acts: &mut Vec<Act>) {
-    ui.add_space(4.0);
     ui.horizontal(|ui| {
         let step = st.setup.step;
         let last = step == Step::Test;

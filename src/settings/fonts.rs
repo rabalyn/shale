@@ -43,7 +43,7 @@ impl ShaleApp {
             }
         });
         if self.cfg.fonts.same_everywhere {
-            theme::prose(ui, egui::RichText::new("The size is that of dialogs and menus; the text of the editor is drawn a little larger, as before.").small().color(theme::MUTED));
+            theme::prose(ui, egui::RichText::new("The size is that of dialogs and menus; the text of the editor is drawn a little larger, as before.").small().color(theme::palette().muted));
         }
         changed
     }
@@ -60,7 +60,7 @@ fn font_row(ui: &mut Ui, label: &str, choice: &mut FontChoice, families: &[Strin
         changed |= ui.add(egui::DragValue::new(&mut choice.size).range(MIN_SIZE..=MAX_SIZE).speed(0.1).suffix(" pt").max_decimals(1)).on_hover_text("Text size in points").changed();
         if let (Some(f), false) = (&choice.family, searching) {
             if !families.contains(f) {
-                ui.label(egui::RichText::new("not installed").small().color(theme::LINK_MISSING));
+                ui.label(egui::RichText::new("not installed").small().color(theme::palette().link_missing));
             }
         }
     });
@@ -74,7 +74,7 @@ fn font_row(ui: &mut Ui, label: &str, choice: &mut FontChoice, families: &[Strin
             });
         }
         Preview::Loading => {
-            ui.label(egui::RichText::new("Loading the font…").small().color(theme::MUTED));
+            ui.label(egui::RichText::new("Loading the font…").small().color(theme::palette().muted));
             ui.ctx().request_repaint();
         }
         Preview::Missing => {
@@ -89,8 +89,13 @@ fn sample(font: &AreaFont) -> LayoutJob {
     let mut job = LayoutJob::default();
     for (i, piece) in SAMPLE.iter().enumerate() {
         let st = font.styled(i == 1, i == 3);
-        let fmt =
-            TextFormat { font_id: FontId::new(font.size, st.family), color: if i == 1 { theme::TEXT_STRONG } else { theme::TEXT }, italics: st.fake_italic, extra_letter_spacing: if st.fake_bold { 0.3 } else { 0.0 }, ..Default::default() };
+        let fmt = TextFormat {
+            font_id: FontId::new(font.size, st.family),
+            color: if i == 1 { theme::palette().text_strong } else { theme::palette().text },
+            italics: st.fake_italic,
+            extra_letter_spacing: if st.fake_bold { 0.3 } else { 0.0 },
+            ..Default::default()
+        };
         job.append(piece, 0.0, fmt);
     }
     job

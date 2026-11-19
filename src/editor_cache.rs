@@ -3,7 +3,7 @@
 //! (its job, its galley and the marks painted over it). A frame of a note of 20 000 lines does
 //! none of this again for a blinking cursor or a mouse that moves.
 
-use crate::editor::{MathMark, NumberMark};
+use crate::editor::{FormatCache, MathMark, NumberMark};
 use crate::fonts::EditorFonts;
 use crate::table::Block;
 use eframe::egui::Galley;
@@ -84,6 +84,8 @@ pub struct Laid {
 #[derive(Default)]
 pub struct LayoutCache {
     last: Option<(LayoutKey, Laid)>,
+    /// the formatted blocks of the text (EDIT-109): a layout that is built again does not format all of the text again
+    formats: FormatCache,
     /// how many times the job was built and laid out, for the tests
     #[cfg(test)]
     pub builds: u32,
@@ -92,7 +94,7 @@ pub struct LayoutCache {
 impl LayoutCache {
     /// The layout for `key`: the one kept, or the one `build` makes (and keeps). `keep` is false in
     /// the pass that sets the fonts of egui, when nothing laid out is to be kept.
-    pub fn get(&mut self, key: LayoutKey, keep: bool, build: impl FnOnce(&LayoutKey) -> Laid) -> Laid {
+    pub fn get(&mut self, key: LayoutKey, keep: bool, build: impl FnOnce(&LayoutKey, &mut FormatCache) -> Laid) -> Laid {
         if let Some((k, laid)) = &self.last {
             if keep && *k == key {
                 return laid.clone();
@@ -102,7 +104,7 @@ impl LayoutCache {
         {
             self.builds += 1;
         }
-        let laid = build(&key);
+        let laid = build(&key, &mut self.formats);
         self.last = keep.then(|| (key, laid.clone()));
         laid
     }
@@ -179,7 +181,7 @@ mod tests {
         done.textures_delta.clear();
         let laid = Laid { galley: galley.unwrap(), formulas: Arc::new(vec![]), numbers: Arc::new(vec![]) };
         let mut cache = LayoutCache::default();
-        let make = |_: &LayoutKey| laid.clone();
+        let make = |_: &LayoutKey, _: &mut FormatCache| laid.clone();
         cache.get(key("a"), true, make);
         cache.get(key("a"), true, make);
         assert_eq!(cache.builds, 1, "the same key is kept");

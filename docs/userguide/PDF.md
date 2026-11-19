@@ -86,10 +86,38 @@ print-heading-color: "#1F4E79"
 
 **The paper look.** A note with any of these keys is printed like a document on paper, not in the app's colours: the bullets and
 numbers of lists are in the text colour, a quote is indented without a bar, inline code is in the mono font without a dark box, a code block is on a light
-grey box with dark text and no syntax colours, and a table has thin black lines and a bold header row without a fill. A note without any of the keys
+grey box with dark text and no syntax colours, and a table looks like Word's: the full text width, thin black rules above it, under the bold header row, between the rows and at the bottom, no vertical lines and no fill. The export dialog's "From the note" line says "paper look" when it is on, and names the heading weight and sizes the note sets. A note without any of the keys
 prints as before. A key that Shale does not know (a typo such as `print-colour`) does not count. The LaTeX export has its own styling and ignores this.
 
 The properties apply to the export of a single note; a book ([[PDF#A folder as one PDF]]) uses the dialog's choices for all its notes.
+
+## Aligned paragraphs
+
+A paragraph or heading between a line `<div align="center">` and a line `</div>` is **centred**; with
+`align="right"` it is flush right and with `align="justify"` it is justified (`align="left"` is read too).
+This is the HTML Obsidian understands, so a note reads the same there. Put a blank line next to each of the two
+lines, as in
+
+```
+<div align="center">
+
+## A centred heading
+
+Some centred text.
+
+</div>
+```
+
+and one wrapper may hold several paragraphs and headings. The reading view, the PDF and the LaTeX export
+(`center` and `flushright`; slides and posters have their own layout and leave it out) show it so; in the editor the two
+lines are dimmed. A heading in a wrapper is still in the outline and the contents. An opening line without
+a `</div>` after it is plain text, and so is a wrapper in a code block or the properties. Lists, quotes, tables and
+pictures in a wrapper stay as they are.
+
+The toolbar buttons **Align left**, **Centre the paragraph** and **Align the paragraph right** (see [[Editor]]) do it
+for the paragraphs under the cursor or the selection: centre and right wrap them, another button changes the
+wrapper, the same button again or left takes it off. A Word document gets a wrapper for every paragraph and heading
+that is not aligned like its body text (see [[Import]]).
 
 ## Page breaks
 
@@ -305,6 +333,14 @@ the TeX and checks it:
   once which mirror to use and then downloads everything from that one mirror. If that mirror is
   behind your installation (mirrors catch up within a day or two), the update tries another mirror,
   three times at most.
+- After an install or update Shale builds TeX's font list once and compiles the test document. If
+  that fails because a font cannot be loaded (a mirror that handed out a package incompletely),
+  Shale installs the font packages again from another mirror and tries once more. The message that
+  ends the install or update names the mirror (or mirrors) the files came from. If the test document
+  still does not compile, the message says so and names the mirror; TeX Live is installed anyway,
+  and **Install TeX Live…** again, after **Remove…**, starts afresh from another mirror. A compile
+  that stops at a font that cannot be loaded says in a line that the fonts or the font list of the TeX
+  look incomplete.
 
 Shale runs the programs without a shell, in a temporary folder that is removed afterwards, with
 each run limited to two minutes; a document cannot start programs (`\write18` is off) and cannot
