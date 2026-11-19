@@ -164,6 +164,9 @@ fn tex_env_slides_have_a_page_for_the_title_and_one_for_every_frame() {
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_a_letter_has_its_recipient_subject_and_text() {
     let note = "---\nrecipient: |\n  Dr. Grace Hopper\n  Navy Street 1\nsubject: About the compiler\nsender: Ada Lovelace\nsender_address: Analytical Street 2\nopening: Dear Dr. Hopper,\nclosing: Yours sincerely\ndate: 2026-11-17\n---\nThe body of the letter with a table:\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n";
+    // the precondition, outside the recording: the template set is imported once per run, by whichever
+    // test comes first, so the diagram must not depend on that order (DEV-026)
+    let _ = the_set();
     let forest = crate::dataflow::record(|| {
         for lang in [Language::En, Language::De] {
             let (pdf, doc) = export(note, "letter", lang, &[], false);
