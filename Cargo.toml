@@ -2,7 +2,7 @@
 name = "shale"
 version = "0.6.7"
 edition = "2021"
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "A native Rust notes vault with wiki links, drawings, tasks and a graph"
 
 [dependencies]

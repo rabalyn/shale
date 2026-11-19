@@ -12,7 +12,7 @@
 > Some people do not want to use, support or contribute to software made this way. If that is
 > you, Shale is not for you, and that is a fair choice. Every release page carries the same notice.
 
-A native Rust notes app for the desktop: Linux, macOS and Windows (MIT licensed). Your vault is a plain folder of
+A native Rust notes app for the desktop: Linux, macOS and Windows (licensed under the GPL-3.0-or-later). Your vault is a plain folder of
 markdown files. Notes link to each other with `[[wiki links]]`.
 
 - **Links you can see**: `[[Note]]` is **blue** when the note exists and **red** when it doesn't.
@@ -401,3 +401,9 @@ platform's own toolchain, run real Windows and run the macOS tests.
 See [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) for what is done, what is tested and what is
 still missing. What Shale guarantees is in the specs ([docs/spec/](docs/spec/README.md)), and
 why it is built that way is in the decision records ([docs/decisions/](docs/decisions/README.md)).
+
+## Licence
+
+Shale is free software under the GNU General Public License, version 3 or (at your option) any later
+version (see `LICENSE`). Copyright (C) 2026 The Shale contributors. Releases up to
+v0.6.7 were published under the MIT licence.
