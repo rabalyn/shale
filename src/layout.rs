@@ -845,7 +845,8 @@ impl ShaleApp {
         if self.cfg.format_toolbar && !self.tabbar.tabs[active].reading {
             if let Some(doc) = self.notes.get(&rel).filter(|d| d.unreadable.is_none()) {
                 let badges = self.key_badges(ui);
-                let palettes = crate::format_bar::Palettes { badges: &badges, highlight: &self.cfg.highlight_colours, font: &self.cfg.font_colours, scale: self.cfg.toolbar_size.clamp(80, 200) as f32 / 100.0 };
+                let palettes =
+                    crate::format_bar::Palettes { badges: &badges, highlight: &self.cfg.highlight_colours, font: &self.cfg.font_colours, scale: self.cfg.toolbar_size.clamp(80, 200) as f32 / 100.0, text: self.tabbar.tabs[active].editor.id };
                 ui.add_space(4.0);
                 let mut colours = self.vdata.state.toolbar_colours();
                 self.tabbar.tabs[active].editor.toolbar(ui, &doc.text, &palettes, &mut colours);

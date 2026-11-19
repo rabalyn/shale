@@ -1,9 +1,9 @@
 //! The badges that show the Alt key of a button while Alt is held (KEY-016): a small label with the
 //! key's text (`B`, `1`, `,`) at the corner of each shown, enabled button whose action has a
-//! single-chord Alt key, following a rebound key. The mail view's buttons underline a letter instead
-//! (MAIL-229); both read the key through `Keymap::alt_chord`.
+//! single-chord Alt key, following a rebound key (Alt+Shift+Y shows `⇧Y`). The mail view's buttons underline a letter
+//! instead (MAIL-229), which they read through `Keymap::alt_chord`.
 
-use crate::keys::{Action, Keymap, DEFS};
+use crate::keys::{Action, Keymap, DEFS, SHIFT_MARK};
 use crate::theme;
 use eframe::egui::{Align2, Color32, CornerRadius, FontId, Id, LayerId, Order, Pos2, Rect, Stroke, StrokeKind, Ui, Vec2};
 use std::collections::HashMap;
@@ -30,7 +30,9 @@ impl Badges {
         let Some(text) = self.0.get(&a) else { return };
         // on top of the neighbouring buttons and of what clips the bar
         let painter = ui.ctx().layer_painter(LayerId::new(Order::Tooltip, Id::unique("key-badges")));
-        let galley = painter.layout_no_wrap(text.clone(), FontId::proportional(FONT_SIZE), theme::palette().text_strong);
+        // the sign of Shift is in the monospace font only
+        let font = if text.contains(SHIFT_MARK) { FontId::monospace(FONT_SIZE) } else { FontId::proportional(FONT_SIZE) };
+        let galley = painter.layout_no_wrap(text.clone(), font, theme::palette().text_strong);
         let size = galley.size() + Vec2::new(6.0, 2.0);
         let badge = Rect::from_min_size(Pos2::new(rect.right() - size.x + 2.0, rect.bottom() - size.y + 2.0), size);
         painter.rect(badge, CornerRadius::same(3), theme::palette().bg_active, Stroke::new(1.0, theme::palette().accent), StrokeKind::Inside);

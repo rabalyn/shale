@@ -149,7 +149,9 @@ pub struct ReaderFolds<'a> {
 /// The ▸ / ▾ marker in `rect`: drawn, with its hand cursor and its hint; true when it was clicked.
 pub fn marker_button(ui: &mut Ui, id: egui::Id, rect: Rect, folded: bool) -> bool {
     let painter = ui.painter().with_clip_rect(ui.clip_rect());
-    let resp = ui.interact(rect, id, Sense::click());
+    // it takes drags too: a button that only senses clicks leaves the drag to the text box under it, which then
+    // moves its cursor to the pointer for as long as the button is held (EDIT-112)
+    let resp = ui.interact(rect, id, Sense::click_and_drag());
     let colour = if resp.hovered() { theme::palette().text } else { theme::palette().muted };
     let c = rect.center();
     let tri = if folded { vec![c + Vec2::new(-2.5, -4.0), c + Vec2::new(-2.5, 4.0), c + Vec2::new(3.5, 0.0)] } else { vec![c + Vec2::new(-4.0, -2.5), c + Vec2::new(4.0, -2.5), c + Vec2::new(0.0, 3.5)] };
@@ -403,7 +405,8 @@ impl FoldUi {
             let label = crate::fold::badge_label(kind, frame.mail, n);
             let g = painter.layout_no_wrap(label, egui::FontId::proportional((base * 0.8).max(9.0)), theme::palette().muted);
             let rect = Rect::from_center_size(Pos2::new(end.min.x + 10.0 + (g.size().x + 10.0) / 2.0, end.center().y), g.size() + Vec2::new(10.0, 2.0));
-            let resp = ui.interact(rect, id.with(("fold-badge", header)), Sense::click());
+            // takes drags too, so the text box under it does not get the press (EDIT-112)
+            let resp = ui.interact(rect, id.with(("fold-badge", header)), Sense::click_and_drag());
             painter.rect_filled(rect, 4.0, if resp.hovered() { theme::palette().bg_active } else { theme::palette().bg_secondary });
             painter.galley(rect.center() - g.size() / 2.0, g, theme::palette().muted);
             if resp.hovered() {
@@ -427,7 +430,8 @@ impl FoldUi {
                     None => "Properties".to_string(),
                 };
                 let hit = Rect::from_min_max(Pos2::new(pos.x, row.min.y), Pos2::new(area.right(), row.max.y));
-                let resp = ui.interact(hit, id.with("fold-summary"), Sense::click());
+                // takes drags too, so the text box under it does not get the press (EDIT-112)
+                let resp = ui.interact(hit, id.with("fold-summary"), Sense::click_and_drag());
                 let colour = if resp.hovered() { theme::palette().text } else { theme::palette().muted };
                 let g = painter.layout_no_wrap(label, egui::FontId::proportional((base * 0.9).max(9.0)), colour);
                 painter.with_clip_rect(hit.intersect(clip)).galley(Pos2::new(pos.x, row.center().y - g.size().y / 2.0), g, colour);

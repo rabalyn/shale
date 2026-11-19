@@ -168,6 +168,39 @@ fn clicking_the_button_in_the_editor_plays_and_leaves_the_cursor_alone() {
     assert!(at.is_none_or(|c| c == 0), "the click did not put the cursor into the text: {at:?}");
 }
 
+// spec: EDIT-112, MEDIA-001
+#[test]
+fn a_click_held_on_a_player_button_leaves_the_cursor_and_the_selection_where_they_were() {
+    for (name, from, to) in [("Play", 2, 8), ("Play", 33, 33), ("Mute", 2, 8), ("Position", 33, 40), ("Volume", 33, 33)] {
+        let mut fx = Fx::new("held", NOTE, &["tone-cover.mp3"]);
+        fx.reading(false);
+        fx.app.cfg.live_preview = true;
+        fx.hl.frames(&mut fx.app, 3);
+        let a = fx.app.tabbar.active;
+        let id = fx.app.tabbar.tabs[a].editor.id;
+        fx.app.focus_editor();
+        fx.hl.frames(&mut fx.app, 3);
+        let mut st = egui::text_edit::TextEditState::load(fx.hl.ctx(), id).unwrap_or_default();
+        st.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(from), egui::text::CCursor::new(to))));
+        st.store(fx.hl.ctx(), id);
+        fx.hl.frames(&mut fx.app, 3);
+        let p = fx.label(name).center();
+        let button = |down| Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: down, modifiers: Modifiers::NONE };
+        for events in [vec![Event::PointerMoved(p), button(true)], vec![], vec![], vec![], vec![Event::PointerMoved(p + egui::vec2(1.0, 0.0))], vec![button(false)]] {
+            fx.hl.frame(&mut fx.app, events);
+        }
+        fx.hl.frames(&mut fx.app, 3);
+        let at = egui::text_edit::TextEditState::load(fx.hl.ctx(), id).and_then(|st| st.cursor.char_range()).map(|r| (r.primary.index.0, r.secondary.index.0));
+        // the card has the keyboard now, and a text box without it shows no selection; the cursor is where it was
+        assert_eq!(at.map(|r| r.0), Some(to), "{name}: the cursor is where it was");
+        // the keyboard goes back to the text at the same place
+        fx.app.focus_editor();
+        fx.hl.frames(&mut fx.app, 4);
+        let at = egui::text_edit::TextEditState::load(fx.hl.ctx(), id).and_then(|st| st.cursor.char_range()).map(|r| (r.primary.index.0, r.secondary.index.0));
+        assert_eq!(at, Some((to, from)), "{name}: the selection {from}..{to} is back with the keyboard");
+    }
+}
+
 // spec: MEDIA-001
 #[test]
 fn the_extension_decides_in_any_case_and_a_link_without_the_bang_is_no_player() {

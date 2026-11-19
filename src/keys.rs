@@ -252,8 +252,10 @@ actions! {
     NoteStrike => "note.strike", "Note: Strikethrough button", NoteView, ["Alt+S"];
     NoteHighlight => "note.highlight", "Note: Highlight button", NoteView, ["Alt+H"];
     NoteCode => "note.code", "Note: Inline code button", NoteView, ["Alt+C"];
-    NoteHighlightColour => "note.highlight_colour", "Note: Highlight colour button (opens its palette)", NoteView, ["Alt+Y"];
-    NoteFontColour => "note.font_colour", "Note: Font colour button (opens its palette)", NoteView, ["Alt+F"];
+    NoteHighlightColour => "note.highlight_colour", "Note: Highlight colour button (applies the current colour)", NoteView, ["Alt+Y"];
+    NoteFontColour => "note.font_colour", "Note: Font colour button (applies the current colour)", NoteView, ["Alt+F"];
+    NoteHighlightPalette => "note.highlight_palette", "Note: Highlight colour palette (opens it, the ▾ of the button)", NoteView, ["Alt+Shift+Y"];
+    NoteFontPalette => "note.font_palette", "Note: Font colour palette (opens it, the ▾ of the button)", NoteView, ["Alt+Shift+F"];
     NoteHeading => "note.heading", "Note: Heading level button (opens its menu)", NoteView, ["Alt+E"];
     NoteBullet => "note.bullet", "Note: Bullet list button", NoteView, ["Alt+U"];
     NoteNumbered => "note.numbered", "Note: Numbered list button", NoteView, ["Alt+O"];
@@ -399,6 +401,9 @@ fn consume_exact(input: &mut InputState, c: Chord) -> bool {
     found
 }
 
+/// The sign of Shift in a badge (KEY-016); the monospace font of the app has it, the proportional one has not.
+pub const SHIFT_MARK: char = '\u{21e7}';
+
 /// How long an unfinished sequence waits for its next key (KEY-009).
 pub const SEQUENCE_TIMEOUT: f64 = 1.5;
 
@@ -466,9 +471,12 @@ impl Keymap {
         self.bindings(a).into_iter().find(|b| b.0.len() == 1 && b.0[0].alt && !b.0[0].ctrl && !b.0[0].shift).map(|b| b.0[0])
     }
 
-    /// The text of the key of `a` for a badge: `B`, `1`, `,` (KEY-016); `None` without an Alt key.
+    /// The text of the key of `a` for a badge: `B`, `1`, `,`, and `⇧Y` for Alt+Shift+Y (KEY-016); `None`
+    /// without a single-chord Alt key (with or without Shift, but not with Ctrl).
     pub fn alt_badge(&self, a: Action) -> Option<String> {
-        self.alt_chord(a).map(|c| c.key.symbol_or_name().to_uppercase())
+        let c = self.bindings(a).into_iter().find(|b| b.0.len() == 1 && b.0[0].alt && !b.0[0].ctrl)?.0[0];
+        let key = c.key.symbol_or_name().to_uppercase();
+        Some(if c.shift { format!("{SHIFT_MARK}{key}") } else { key })
     }
 
     pub fn is_default(&self, a: Action) -> bool {
@@ -697,8 +705,8 @@ mod tests {
             };
             assert_eq!(mac.display(d.action), on_mac, "{}", d.id);
         }
-        assert_eq!(DEFS.iter().filter(|d| d.scope == Scope::NoteView).count(), 24 + 5);
-        assert_eq!(DEFS.len(), 29 + 36 + 6 + 12 + 24 + 5);
+        assert_eq!(DEFS.iter().filter(|d| d.scope == Scope::NoteView).count(), 26 + 5);
+        assert_eq!(DEFS.len(), 29 + 36 + 6 + 12 + 26 + 5);
     }
 
     // spec: KEY-014
@@ -746,7 +754,7 @@ mod tests {
     fn the_alt_keys_of_the_buttons_have_defaults_on_linux_and_windows_but_none_on_macos() {
         let (linux, mac) = (Keymap::for_os(false), Keymap::for_os(true));
         let alt: Vec<&Def> = DEFS.iter().filter(|d| d.action.is_alt_key()).collect();
-        assert_eq!(alt.len(), 24 + 12 + 9);
+        assert_eq!(alt.len(), 26 + 12 + 9);
         for d in &alt {
             assert!(!linux.bindings(d.action).is_empty(), "{} has a default on Linux", d.id);
             assert!(mac.bindings(d.action).is_empty(), "{} has none on macOS", d.id);
@@ -781,6 +789,39 @@ mod tests {
         assert_eq!(linux.alt_badge(Action::SidebarLeft).as_deref(), Some(","));
         assert_eq!(linux.alt_badge(Action::Save), None, "Ctrl+S is no Alt key");
         assert_eq!(mac.alt_badge(Action::NoteBold), None);
+    }
+
+    // spec: KEY-016, KEY-015
+    #[test]
+    fn an_alt_shift_key_has_a_badge_with_the_shift_sign_and_the_colour_keys_do_not_clash() {
+        let (linux, mac) = (Keymap::for_os(false), Keymap::for_os(true));
+        assert_eq!(linux.bindings(Action::NoteHighlightColour), vec![b("Alt+Y")]);
+        assert_eq!(linux.bindings(Action::NoteFontColour), vec![b("Alt+F")]);
+        assert_eq!(linux.bindings(Action::NoteHighlightPalette), vec![b("Alt+Shift+Y")]);
+        assert_eq!(linux.bindings(Action::NoteFontPalette), vec![b("Alt+Shift+F")]);
+        assert_eq!(linux.alt_badge(Action::NoteHighlightColour).as_deref(), Some("Y"), "an Alt+letter key shows just the letter");
+        assert_eq!(linux.alt_badge(Action::NoteHighlightPalette).as_deref(), Some("\u{21e7}Y"));
+        assert_eq!(linux.alt_badge(Action::NoteFontPalette).as_deref(), Some("\u{21e7}F"));
+        // the underlines of the mail view read `alt_chord`, which stays without Shift
+        assert_eq!(linux.alt_chord(Action::NoteHighlightPalette), None);
+        assert!(linux.alt_chord(Action::NoteHighlightColour).is_some());
+        // a key with Ctrl has no badge
+        let mut k = Keymap::for_os(false);
+        k.set(Action::NoteHighlightPalette, b("Ctrl+Alt+Y")).unwrap();
+        assert_eq!(k.alt_badge(Action::NoteHighlightPalette), None);
+        // no default clashes with another action, the new actions are Alt keys without a default on macOS
+        for a in [Action::NoteHighlightColour, Action::NoteFontColour, Action::NoteHighlightPalette, Action::NoteFontPalette] {
+            assert!(a.is_alt_key());
+            assert!(mac.bindings(a).is_empty(), "{a:?} has no default on macOS");
+            for bind in linux.bindings(a) {
+                assert_eq!(linux.check(a, &bind), Ok(()), "{a:?}");
+            }
+        }
+        // Alt+Y and Alt+Shift+Y are told apart when a key is pressed
+        let mut k = linux;
+        assert_eq!(frame(&mut k, Scope::NoteView, vec![key_event(Key::Y, Modifiers::ALT)]), Some(Action::NoteHighlightColour));
+        assert_eq!(frame(&mut k, Scope::NoteView, vec![key_event(Key::Y, Modifiers::ALT | Modifiers::SHIFT)]), Some(Action::NoteHighlightPalette));
+        assert_eq!(frame(&mut k, Scope::NoteView, vec![key_event(Key::F, Modifiers::ALT | Modifiers::SHIFT)]), Some(Action::NoteFontPalette));
     }
 
     // spec: KEY-030, KEY-031, KEY-032, KEY-033, KEY-034
