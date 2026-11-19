@@ -842,6 +842,8 @@ impl ShaleApp {
                 } else {
                     self.open(&rel, new_tab);
                 }
+            } else if let Some(kind) = &st.view {
+                self.restore_view_tab(kind, st, new_tab);
             } else if let Some(f) = &st.feed {
                 // (the account must still exist)
                 if self.cfg.social_accounts.iter().any(|e| e.account.id == f.account) {
@@ -866,6 +868,48 @@ impl ShaleApp {
         let last_id = self.tabbar.tabs.get(self.tabbar.active).map(|t| t.id);
         self.tabbar.tabs.sort_by_key(|t| !t.pinned);
         self.tabbar.active = open_id.or(last_id).and_then(|id| self.tabbar.tabs.iter().position(|t| t.id == id)).unwrap_or(0);
+    }
+
+    /// Bring back a tab of a view that has no file (NAV-044): the view as it is shown when opened by
+    /// hand, with the place it was left at (NAV-045 to NAV-047). The mail view and the calendar
+    /// are one each in the window, so their place is the one of the first such tab. A kind that is
+    /// not known is skipped.
+    fn restore_view_tab(&mut self, kind: &str, st: &crate::vault_state::SavedTab, new_tab: bool) {
+        use crate::vault_state::SavedTab;
+        let view = match kind {
+            SavedTab::MAIL => {
+                if self.mail.restore.is_none() {
+                    self.mail.restore = st.mail.clone().filter(|m| !m.account.is_empty());
+                }
+                View::Mail
+            }
+            SavedTab::CALENDAR => {
+                if let Some(c) = st.calendar.as_ref().filter(|c| c.day != 0) {
+                    if let Some(mode) = crate::calendar::ui::Mode::from_name(&c.mode) {
+                        self.cal.main.mode = mode;
+                    }
+                    self.cal.main.anchor = c.day;
+                    self.cal.main.selected = c.day;
+                }
+                View::Calendar
+            }
+            SavedTab::TASKS => {
+                if let Some(t) = &st.tasks {
+                    self.tasks = TasksFilter { show_done: t.show_done, query: t.query.clone(), only_due: t.only_due };
+                }
+                View::Tasks
+            }
+            SavedTab::GRAPH => {
+                if let Some(g) = &st.graph {
+                    self.graphs.global.show_missing = !g.hide_missing;
+                    self.graphs.global.show_orphans = !g.hide_orphans;
+                }
+                View::Graph
+            }
+            SavedTab::SETTINGS_FILE => View::SettingsFile,
+            _ => return,
+        };
+        self.show_view(view, new_tab);
     }
 
     pub fn show_view(&mut self, view: View, new_tab: bool) {

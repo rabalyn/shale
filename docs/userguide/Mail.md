@@ -44,6 +44,9 @@ panes has the keyboard and is framed; Ctrl+H / Ctrl+L (macOS: Cmd+Shift+H / Cmd+
 or `f` flag, `d` delete, `m` move, `i` import to the vault ([[Import]]). All mail keys are in
 [[Keyboard shortcuts]] and can be changed in Settings → Keybindings.
 
+After a restart a Mail tab comes back on the folder and the message you had open (the first folder if
+that folder or account is gone), without asking for anything. See [[Tabs]].
+
 ## Writing and sending
 
 - `c` compose, `r` reply, `Shift+R` reply all, `Shift+F` forward. Plain text, with attachments
