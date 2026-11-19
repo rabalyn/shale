@@ -48,3 +48,7 @@ One row per flow, one row per line; the flow is the name in the begin marker of 
 | tex_export | [tex-export.md](tex-export.md) | `pdf/tex/writer_env_tests.rs::tex_env_a_letter_has_its_recipient_subject_and_text` | tex-env suite (land.sh, when TeX code changes) |
 | tex_book | [tex-book.md](tex-book.md) | `pdf/tex/book_env_tests.rs::tex_env_a_folder_compiles_as_a_report_with_sections` | tex-env suite (land.sh, when TeX code changes) |
 | tex_setup | [tex-setup.md](tex-setup.md) | `pdf/tex/setup_env_tests.rs::tex_env_the_setup_imports_the_cached_archive_takes_a_logo_and_the_details_and_makes_a_test_page_with_the_department` | tex-env suite (land.sh, when TeX code changes) |
+| update_check | [update.md](update.md) | `update/logic_tests.rs::dev_032_dataflow_of_the_check_for_a_release` | every `cargo test` (Linux, macOS) |
+| update_download | [update.md](update.md) | `update/logic_tests.rs::dev_032_dataflow_of_a_download_with_its_checksum` | every `cargo test` (Linux, macOS) |
+| update_install_folder | [update.md](update.md) | `update/logic_tests.rs::dev_032_dataflow_of_an_install_into_a_portable_folder` | every `cargo test` (Linux, macOS) |
+| update_install_script | [update.md](update.md) | `update/logic_tests.rs::dev_032_dataflow_of_an_install_through_install_sh` | every `cargo test` (Linux, macOS) |

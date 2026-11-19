@@ -1243,3 +1243,71 @@ fn upd_006_the_downloads_are_in_the_cache_folder_of_shale() {
     let root = staging_root();
     assert!(root.ends_with("shale/updates"), "{}", root.display());
 }
+
+// ---------------------------------------------------------------- the dataflow diagrams (DEV-032)
+
+fn update_doc() -> PathBuf {
+    crate::dataflow::doc("update.md")
+}
+
+// spec: DEV-026, DEV-032
+#[cfg(unix)]
+#[test]
+fn dev_032_dataflow_of_the_check_for_a_release() {
+    let github = FakeGithub::start();
+    github.publish("9.9.9", &[("shale-9.9.9-linux-x86_64.tar.gz", tarball(NEW_PROGRAM))], false);
+    let backend = pretend_backend(&github, &temp("flow-check"));
+    let flow = crate::dataflow::record(|| assert!((backend.check)(&AtomicBool::new(false)).unwrap().is_some()));
+    crate::dataflow::verify_flow(&flow, "update_check", &update_doc());
+}
+
+// spec: DEV-026, DEV-032
+#[cfg(unix)]
+#[test]
+fn dev_032_dataflow_of_a_download_with_its_checksum() {
+    let github = FakeGithub::start();
+    github.publish("9.9.9", &[("shale-9.9.9-linux-x86_64.tar.gz", tarball(NEW_PROGRAM))], false);
+    let (backend, release) = get_latest(&github, &temp("flow-download"));
+    let flow = crate::dataflow::record(|| {
+        (backend.fetch)(&release, &AtomicBool::new(false)).unwrap();
+    });
+    crate::dataflow::verify_flow(&flow, "update_download", &update_doc());
+}
+
+// spec: DEV-026, DEV-032
+#[cfg(unix)]
+#[test]
+fn dev_032_dataflow_of_an_install_into_a_portable_folder() {
+    let github = FakeGithub::start();
+    github.publish("9.9.9", &[("shale-9.9.9-linux-x86_64.tar.gz", tarball(NEW_PROGRAM))], false);
+    let (dir, kind) = portable("flow-portable");
+    let (backend, release) = get_latest(&github, &temp("flow-stage-portable"));
+    let cancel = AtomicBool::new(false);
+    let staged = (backend.fetch)(&release, &cancel).unwrap();
+    let flow = crate::dataflow::record(|| {
+        (backend.install)(&kind, &staged, &cancel).unwrap();
+    });
+    assert_eq!(std::fs::read(dir.join("shale")).unwrap(), NEW_PROGRAM);
+    crate::dataflow::verify_flow(&flow, "update_install_folder", &update_doc());
+}
+
+// the shipped install.sh uses `install -D` (GNU): it is the Linux download's script
+// spec: DEV-026, DEV-032
+#[cfg(target_os = "linux")]
+#[test]
+fn dev_032_dataflow_of_an_install_through_install_sh() {
+    let github = FakeGithub::start();
+    github.publish("9.9.9", &[("shale-9.9.9-linux-x86_64.tar.gz", tarball(NEW_PROGRAM))], false);
+    let prefix = temp("flow-prefix");
+    std::fs::create_dir_all(prefix.join("bin")).unwrap();
+    std::fs::write(prefix.join("bin/shale"), OLD_PROGRAM).unwrap();
+    let kind = InstallKind::LinuxInstalled { prefix: prefix.clone(), user_default: false };
+    let (backend, release) = get_latest(&github, &temp("flow-stage-installed"));
+    let cancel = AtomicBool::new(false);
+    let staged = (backend.fetch)(&release, &cancel).unwrap();
+    let flow = crate::dataflow::record(|| {
+        (backend.install)(&kind, &staged, &cancel).unwrap();
+    });
+    assert_eq!(std::fs::read(prefix.join("bin/shale")).unwrap(), NEW_PROGRAM);
+    crate::dataflow::verify_flow(&flow, "update_install_script", &update_doc());
+}
