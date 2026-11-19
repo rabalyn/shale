@@ -94,9 +94,11 @@ fn dev_026_the_diagram_text_of_a_small_tree() {
     sync->>imap: connect
     loop repeated
         sync->>imap: fetch
-        opt sometimes
-            loop repeated
-                sync->>store: write
+        rect rgba(127, 127, 127, 0.12)
+            opt sometimes
+                loop repeated
+                    sync->>store: write
+                end
             end
         end
     end
@@ -115,9 +117,11 @@ fn dev_026_a_step_both_optional_and_repeated_has_the_opt_outside() {
     participant store
     loop repeated
         sync->>imap: a
-        opt sometimes
-            loop repeated
-                sync->>store: b
+        rect rgba(127, 127, 127, 0.12)
+            opt sometimes
+                loop repeated
+                    sync->>store: b
+                end
             end
         end
     end
@@ -221,7 +225,9 @@ fn dev_026_a_step_of_the_callers_own_peer_is_a_block_and_arrows_start_at_the_cal
         sync->>imap: select
         opt sometimes
             sync->>imap: fetch
-            sync->>store: write
+            rect rgba(127, 127, 127, 0.12)
+                sync->>store: write
+            end
         end
     end
 ";
@@ -232,7 +238,7 @@ fn dev_026_a_step_of_the_callers_own_peer_is_a_block_and_arrows_start_at_the_cal
     // both optional and repeated: opt outside, loop inside, both named after the step
     let tree = canonical(&flow(vec![Raw::new("flow.t.a", "imap", vec![folder(vec![]), folder(vec![])]), Raw::new("flow.t.a", "imap", vec![])]));
     let text = render_mermaid(&tree);
-    assert!(text.contains("        opt folder\n            loop folder\n            end\n        end\n"), "{text}");
+    assert!(text.contains("            opt folder\n                loop folder\n                end\n            end\n"), "{text}");
 }
 
 fn hold_step() {
@@ -307,4 +313,14 @@ fn dev_026_a_nested_root_of_another_flow_is_labelled_with_its_name() {
     let forest = canonical(&[raw_flow("flow.t", vec![Raw::new("flow.other", "imap", vec![leaf("flow.other.step", "store")])])]);
     let text = render_mermaid(&flow_tree(&forest, "t"));
     assert!(text.contains("sync->>imap: other\n") && text.contains("sync->>store: other.step\n"), "{text}");
+}
+
+// spec: DEV-026
+#[test]
+fn dev_026_an_arrow_step_with_steps_inside_draws_them_in_a_neutral_rect_block() {
+    let forest = canonical(&[raw_flow("flow.t", vec![Raw::new("flow.t.check", "imap", vec![leaf("flow.t.fetch", "store")]), leaf("flow.t.idle", "imap")])]);
+    assert_eq!(
+        render_mermaid(&flow_tree(&forest, "t")),
+        "sequenceDiagram\n    participant sync\n    participant imap\n    participant store\n    sync->>imap: check\n    rect rgba(127, 127, 127, 0.12)\n        sync->>store: fetch\n    end\n    sync->>imap: idle\n"
+    );
 }

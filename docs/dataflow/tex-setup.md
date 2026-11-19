@@ -18,7 +18,9 @@ sequenceDiagram
     setup->>vault: logo
     setup->>vault: save_details
     setup->>vault: test_page
-    setup->>vault: tex_export.write
+    rect rgba(127, 127, 127, 0.12)
+        setup->>vault: tex_export.write
+    end
     setup->>disk: tex_export.stage
     setup->>tex: tex_export.compile
 ```

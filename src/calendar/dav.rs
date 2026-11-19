@@ -711,7 +711,7 @@ const CHANGED_MEANWHILE: &str = "the event was changed on the server meanwhile; 
 /// Returns the address and the new version tag (if the server sent one).
 pub fn put_event(cal_url: &str, acct: &Account, parts: &[Event], existing: Option<(&str, Option<&str>)>, before: &[Event]) -> Result<(String, Option<String>), String> {
     let e = parts.first().ok_or("nothing to save")?;
-    let _flow = tracing::info_span!("flow.caldav_edit", peer = "calendar").entered();
+    let _flow = tracing::info_span!("flow.caldav_put", peer = "calendar").entered();
     let clean: Vec<Event> = parts.iter().map(|p| Event { href: None, etag: None, ..p.clone() }).collect();
     let body = ics::to_ics("", &clean);
     let creating = existing.is_none();
@@ -725,8 +725,8 @@ pub fn put_event(cal_url: &str, acct: &Account, parts: &[Event], existing: Optio
             let tag = match tag.and_then(clean_etag) {
                 Some(t) => Some(t),
                 None => {
-                    let now = tracing::info_span!("flow.caldav_edit.fetch_etag", peer = "caldav").in_scope(|| current_etag(href, acct)).ok().flatten();
-                    if !tracing::info_span!("flow.caldav_edit.check_server", peer = "caldav").in_scope(|| unchanged_on_server(href, acct, before))? {
+                    let now = tracing::info_span!("flow.caldav_put.fetch_etag", peer = "caldav").in_scope(|| current_etag(href, acct)).ok().flatten();
+                    if !tracing::info_span!("flow.caldav_put.check_server", peer = "caldav").in_scope(|| unchanged_on_server(href, acct, before))? {
                         return Err(CHANGED_MEANWHILE.into());
                     }
                     now
@@ -745,7 +745,7 @@ pub fn put_event(cal_url: &str, acct: &Account, parts: &[Event], existing: Optio
     if let Some(c) = &cond {
         headers.push(c);
     }
-    let r = tracing::info_span!("flow.caldav_edit.put", peer = "caldav").in_scope(|| request_with("PUT", &url, &headers, &body, acct))?;
+    let r = tracing::info_span!("flow.caldav_put.put", peer = "caldav").in_scope(|| request_with("PUT", &url, &headers, &body, acct))?;
     match r.status {
         200..=299 => Ok((url, r.etag)),
         401 => Err(check(&r, &url).unwrap_err()),
@@ -761,10 +761,10 @@ pub fn delete_event(href: &str, acct: &Account, etag: Option<&str>, before: &[Ev
     if !same_server(href, &acct.url) {
         return Err(OTHER_SERVER.into());
     }
-    let _flow = tracing::info_span!("flow.caldav_edit", peer = "calendar").entered();
+    let _flow = tracing::info_span!("flow.caldav_delete", peer = "calendar").entered();
     let tag = etag.and_then(clean_etag);
     if tag.is_none() {
-        let r = tracing::info_span!("flow.caldav_edit.check_server", peer = "caldav").in_scope(|| request_with("GET", href, &[], "", acct))?;
+        let r = tracing::info_span!("flow.caldav_delete.check_server", peer = "caldav").in_scope(|| request_with("GET", href, &[], "", acct))?;
         match r.status {
             404 | 410 => return Ok(()),
             200..=299 if src_key(&ics::parse_ics(&r.body)) != src_key(before) => return Err(CHANGED_MEANWHILE.into()),
@@ -775,7 +775,7 @@ pub fn delete_event(href: &str, acct: &Account, etag: Option<&str>, before: &[Ev
     }
     let cond = tag.map(|t| format!("If-Match: {t}"));
     let headers: Vec<&str> = cond.iter().map(|s| s.as_str()).collect();
-    let r = tracing::info_span!("flow.caldav_edit.delete", peer = "caldav").in_scope(|| request_with("DELETE", href, &headers, "", acct))?;
+    let r = tracing::info_span!("flow.caldav_delete.delete", peer = "caldav").in_scope(|| request_with("DELETE", href, &headers, "", acct))?;
     match r.status {
         200..=299 | 404 | 410 => Ok(()),
         401 => Err(check(&r, href).unwrap_err()),

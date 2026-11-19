@@ -242,7 +242,8 @@ fn caldav_env_creates_edits_and_deletes_an_event() {
         // an event that is already gone counts as removed
         dav::delete_event(&href, &a, None, std::slice::from_ref(&after)).expect("delete again");
     });
-    crate::dataflow::verify_flow(&forest, "caldav_edit", &crate::dataflow::doc("caldav-edit.md"));
+    crate::dataflow::verify_flow(&forest, "caldav_put", &crate::dataflow::doc("caldav-edit.md"));
+    crate::dataflow::verify_flow(&forest, "caldav_delete", &crate::dataflow::doc("caldav-edit.md"));
 }
 
 // spec: CALENV-002
@@ -337,7 +338,7 @@ fn caldav_env_a_change_on_the_server_meanwhile_is_not_overwritten() {
         let (_, their_tag) = dav::put_event(&cal(name), &a, std::slice::from_ref(&theirs), Some((&href, read.etag.as_deref())), std::slice::from_ref(&read)).expect("their edit");
         assert_ne!(their_tag, read.etag);
 
-        // the refused writes are the flow `caldav_conflict` (DEV-028): its steps are those of `caldav_edit`, which the code of the write runs
+        // the refused writes are the flow `caldav_conflict` (DEV-028): its steps are those of `caldav_put` and `caldav_delete`, which the code of the write runs
         let conflict = tracing::info_span!("flow.caldav_conflict", peer = "calendar").entered();
         // our save with the old version tag is refused (HTTP 412) and the server keeps their version
         let mut mine = read.clone();

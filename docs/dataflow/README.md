@@ -41,7 +41,8 @@ One row per flow, one row per line; the flow is the name in the begin marker of 
 | mail_crypto_read | [mail-crypto.md](mail-crypto.md) | `mail/env_tests.rs::mail_env_signed_and_encrypted_openpgp_and_smime_mail_arrives_intact_verifies_decrypts_and_the_sent_copy_decrypts` | mail-env suite (land.sh, when mail code changes) |
 | caldav_discover | [caldav-load.md](caldav-load.md) | `calendar/env_tests.rs::caldav_env_discovers_and_loads_the_seeded_calendars` | caldav-env suite (land.sh, when calendar code changes) |
 | caldav_load | [caldav-load.md](caldav-load.md) | `calendar/env_tests.rs::caldav_env_discovers_and_loads_the_seeded_calendars` | caldav-env suite (land.sh, when calendar code changes) |
-| caldav_edit | [caldav-edit.md](caldav-edit.md) | `calendar/env_tests.rs::caldav_env_creates_edits_and_deletes_an_event` | caldav-env suite (land.sh, when calendar code changes) |
+| caldav_put | [caldav-edit.md](caldav-edit.md) | `calendar/env_tests.rs::caldav_env_creates_edits_and_deletes_an_event` | caldav-env suite (land.sh, when calendar code changes) |
+| caldav_delete | [caldav-edit.md](caldav-edit.md) | `calendar/env_tests.rs::caldav_env_creates_edits_and_deletes_an_event` | caldav-env suite (land.sh, when calendar code changes) |
 | caldav_move | [caldav-edit.md](caldav-edit.md) | `calendar/env_tests.rs::caldav_env_moves_an_event_to_another_calendar_and_deletes_it` | caldav-env suite (land.sh, when calendar code changes) |
 | caldav_conflict | [caldav-edit.md](caldav-edit.md) | `calendar/env_tests.rs::caldav_env_a_change_on_the_server_meanwhile_is_not_overwritten` | caldav-env suite (land.sh, when calendar code changes) |
 | tex_export | [tex-export.md](tex-export.md) | `pdf/tex/writer_env_tests.rs::tex_env_a_letter_has_its_recipient_subject_and_text` | tex-env suite (land.sh, when TeX code changes) |

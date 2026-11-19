@@ -12,12 +12,14 @@ sequenceDiagram
     participant store
     watch->>imap: connect
     watch->>imap: check_folder
-    watch->>imap: mail_sync.select_folder
-    watch->>store: mail_sync.adopt_validity
-    watch->>imap: mail_sync.search_new
-    watch->>imap: mail_sync.fetch
-    watch->>imap: mail_sync.compare_with_server
-    watch->>store: mail_sync.store_folder_state
+    rect rgba(127, 127, 127, 0.12)
+        watch->>imap: mail_sync.select_folder
+        watch->>store: mail_sync.adopt_validity
+        watch->>imap: mail_sync.search_new
+        watch->>imap: mail_sync.fetch
+        watch->>imap: mail_sync.compare_with_server
+        watch->>store: mail_sync.store_folder_state
+    end
     watch->>imap: idle
 ```
 <!-- dataflow:end mail_watch -->

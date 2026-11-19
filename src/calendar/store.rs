@@ -593,7 +593,7 @@ impl CalendarStore {
         let trash = self.trash_dir.clone();
         Ok(run_job(
             move || {
-                // only a move is a flow of its own here; saving in place is `caldav_edit` (DEV-028)
+                // only a move is a flow of its own here; saving in place is `caldav_put` (DEV-028)
                 let _flow = moved_from.is_some().then(|| tracing::info_span!("flow.caldav_move", peer = "calendar").entered());
                 let write = match &target {
                     Target::Local { .. } => tracing::info_span!("flow.caldav_move.write_new", peer = "disk"),

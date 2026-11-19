@@ -20,8 +20,10 @@ sequenceDiagram
         sync->>store: adopt_validity
         sync->>imap: search_new
         sync->>imap: fetch
-        opt sometimes
-            sync->>store: store_messages
+        rect rgba(127, 127, 127, 0.12)
+            opt sometimes
+                sync->>store: store_messages
+            end
         end
         sync->>store: store_folder_state
     end

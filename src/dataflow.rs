@@ -240,7 +240,9 @@ fn merge_nodes(instances: &[&[Node]]) -> Vec<Node> {
 /// arrow but a block named after the step around its children: `loop <step>`, `opt <step>` (with
 /// the loop inside when both), or `Note over <caller>: <step>` when it is neither. Other
 /// repeated and optional steps are arrows inside `loop repeated` and `opt sometimes` blocks
-/// (`opt` outside, `loop` inside).
+/// (`opt` outside, `loop` inside). An arrow step with steps inside it draws them in a neutral
+/// `rect rgba(127, 127, 127, 0.12)` block after its arrow (the arrows inside still start at the
+/// caller).
 pub fn render_mermaid(forest: &[Node]) -> String {
     fn peers<'a>(nodes: &'a [Node], out: &mut Vec<&'a str>) {
         for n in nodes {
@@ -268,7 +270,13 @@ pub fn render_mermaid(forest: &[Node]) -> String {
             } else if !n.opt && !n.looped {
                 out.push_str(&format!("{}Note over {caller}: {}\n", pad(d), label(&n.name, flow)));
             }
-            steps(out, &n.children, caller, flow, d);
+            if !block && !n.children.is_empty() {
+                out.push_str(&format!("{}rect rgba(127, 127, 127, 0.12)\n", pad(d)));
+                steps(out, &n.children, caller, flow, d + 1);
+                out.push_str(&format!("{}end\n", pad(d)));
+            } else {
+                steps(out, &n.children, caller, flow, d);
+            }
             for closing in (depth..d).rev() {
                 out.push_str(&format!("{}end\n", pad(closing)));
             }
