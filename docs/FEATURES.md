@@ -27,6 +27,38 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   on the same dark code background (PDF-007).
 - Line numbers are shown left of the text (Settings → Editor, on by default); a wrapped
   line keeps one number.
+- **Folding.** Headings (up to the next heading of the same or a higher level), quotes, list items and whole lists can be
+  folded away: a folded block shows its first line and a muted `… n lines` badge; the rest is hidden (no line
+  numbers for it), with the Markdown preview on and off. Hover a line that starts a block and click the ▾ marker left of
+  it (a folded block always shows ▸) to fold it; click the marker or the badge to unfold. Keys (Settings →
+  Keybindings → Note view): **Ctrl+Shift+K** fold, **Ctrl+Shift+J** unfold, **Ctrl+Shift+O** fold all,
+  **Ctrl+Shift+I** unfold all; with Vim-style editing `za` `zc` `zo` `zM` `zR`. The cursor never stays in hidden
+  text: moving into a fold (or a link or search jumping there) opens it. Folds are kept for the session only and
+  are never written into the file. Also foldable (EDIT-080 to EDIT-085): **code blocks**, the **front matter** and a
+  **signature** (a line `-- ` up to the next heading). A note's front matter starts folded to one muted line
+  `▸ Properties · email · Anna Müller · 2026-11-12` (the setting "Properties in the editor": folded or card; raw leaves it
+  open); the cursor moving into it opens the YAML and folds it again when it leaves. In a **mail note**
+  (`type: email`) the quotes (`… n quoted lines`) and the signature start folded too.
+- **Folding in the reading view** (EDIT-095 to EDIT-099, rabalyn/shale#364): the reading view folds the same blocks with
+  the same folds as the editor of the note (fold in one, it is folded in the other; session only, never written).
+  Hover a block's first line and click the ▾ marker left of it, or the `… n lines` badge under a folded block (a folded code block is one row with its badge in the box, EDIT-103);
+  **Ctrl+Shift+O** / **Ctrl+Shift+I** fold and unfold all there (fold and unfold at the cursor are editor keys). A footnote
+  jump or a click in the outline on a heading that a fold hides opens the fold. The front matter card keeps its own toggle.
+  Large notes stay quick (EDIT-099 to EDIT-102, rabalyn/shale#369): the folds of an unchanged text are not found again, and
+  from 2 000 lines on the reading view draws only what is near the visible part. The editor keeps the laid-out note, the
+  parsed tables and footnotes and the counts of the status bar while nothing changes (EDIT-104 to EDIT-107, rabalyn/shale#372),
+  so a frame of a 20 000-line note takes a few milliseconds.
+
+![Folded code blocks, quote and signature in the reading view](userguide/z_media/screenshots/reading-folds.png)
+- **Code blocks as boxes** (EDIT-080, EDIT-086, rabalyn/shale#356): with the Markdown preview on, a fenced code block is a
+  rounded box on the code background with a thin border and a badge at its top right with the language (`code` when there is
+  none); the ``` lines are hidden and show again when the cursor is in the block. The reading view draws the same box.
+  A small **copy button** (EDIT-090 to EDIT-094, rabalyn/shale#365) at its top right, left of the badge, copies the code
+  without the fences and the last newline; it shows on hover (in the editor also with the cursor in the block, and on a
+  folded block), in the editor and the reading view. **Ctrl+Shift+C** copies the block at the cursor.
+
+![Code boxes, folded properties, quote and signature](userguide/z_media/screenshots/editor-code-box.png)
+
 - The **text cursor** (Settings → Editor → Cursor) is one of four shapes: a bar before the character (default), a bar after it,
   a block or an underline; with Vim-style editing the cursor of normal mode has its own choice (default: block).
   "Blinking cursor" (on by default) makes it steady when off. The Vim tab (listed under Editor) holds the Vim settings: the switch, the cursor of normal mode, "Esc from insert mode" (the cursor stays after the typing by default, or steps back like Vim) and the link preview size. Exactly one cursor is drawn in every mode.
@@ -435,7 +467,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   lines: an e-mail as a mail header (sender, date, to / cc, subject, tag chips), an event with its time, place, attendees and a repeats badge, a Word import as one page chip
   (`A4 · 2.5 cm margins · 11 pt`), any other note as key and value rows. Ids and `print-*` settings are left out, a ▸ toggle shows every property, and people with a contact
   note are links. `properties::summary` gives the one line for a folded view (`email · Anna Müller · 2026-11-12 · #work #mail`). Settings → Appearance → "Properties in the editor"
-  / "Properties in the reading view": folded, card or raw (defaults: folded in the editor, card in the reading view). Dates are not links yet: the calendar has no entry point for a day.
+  / "Properties in the reading view": folded, card or raw (defaults: folded in the editor, card in the reading view). In the editor a note's front matter starts folded to its summary line unless the setting is raw (EDIT-081, EDIT-084). Dates are not links yet: the calendar has no entry point for a day.
 - **Title line and date prefix** (VAULT-025, CFG-043): above line 1 a note shows its title line, its file name without `.md` and without a
   leading date prefix `YYMMDD_` (`261117_Plan.md` shows `Plan`); editing it renames the file and keeps the prefix. Tabs and the PDF title show the name without the prefix; the file
   list, the quick switcher and links keep the full name, so the list sorts by date. Settings → Editor → "Date prefix for new notes" (on by default) names a note made by Shale
@@ -977,6 +1009,9 @@ Text editing keys and vim keys are fixed.
 | Ctrl+Shift+M | Mail view (its keys are listed below) |
 | Alt+← / Alt+→ | Back / forward (macOS: Cmd+[ / Cmd+], because Option+← / → move by word in text) |
 | Alt+B, Alt+I, Alt+S, Alt+H, Alt+C, Alt+Y, Alt+F, Alt+E, Alt+U, Alt+O, Alt+T, Alt+Q, Alt+K, Alt+R, Alt+J, Alt+A, Alt+L, Alt+W, Alt+M, Alt+X | The buttons of the formatting toolbar of a note, each doing what a click on it does (the keyboard stays in the text and nothing is typed): Bold, Italic, Strikethrough, Highlight, Inline code, Highlight colour and Font colour (open their palette, the ▾ part of the split button), Heading level (opens its menu), Bullet list, Numbered list, Task, Quote, Code block, Horizontal rule, Table, Link to a note, Web link, Embed, Clear formatting. A key whose button is not there (reading view) or is greyed out (in a table cell) does nothing |
+| Ctrl+Shift+K / Ctrl+Shift+J | Fold / unfold the block at the cursor (a heading section, quote, list item or list; again on a folded line folds the block around it); the cursor then goes to the block's first line |
+| Ctrl+Shift+O / Ctrl+Shift+I | Fold all / unfold all blocks of the note (also in the reading view) |
+| Ctrl+Shift+C | Copy the code of the code block at the cursor (no fences, no newline at the end) |
 | Alt+V, Alt+P, Alt+D, Alt+N | The buttons of the view header and tab bar of a note: edit / reading view, Markdown preview, the ⋯ menu (opens it), New tab |
 | Alt+1, Alt+2, Alt+3, Alt+4, Alt+5, Alt+6, Alt+7, Alt+8, Alt+9, Alt+0 | The ribbon items by position: the first ten icons of the ribbon, as shown (also after you reordered or removed some) |
 | Alt+, / Alt+. | Show or hide the left / right sidebar |

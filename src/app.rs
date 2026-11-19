@@ -352,6 +352,8 @@ pub struct ShaleApp {
     pub calendar: crate::calendar::store::CalendarStore,
     /// The mail view (ADR-0007 phase 1b).
     pub mail: crate::mail::ui::MailView,
+    /// the counts of the status bar, kept for a note and a vault that did not change (EDIT-107)
+    pub status: crate::editor_cache::StatusCache,
     /// the calendar views, the jobs of their popups and the default calendar for new events
     pub cal: crate::calendar::ui::CalendarUi,
     /// the feed view (Mastodon / Bluesky)
@@ -567,6 +569,7 @@ impl ShaleApp {
                 c
             },
             mail: crate::mail::ui::MailView::new(mail_root),
+            status: Default::default(),
             cal: crate::calendar::ui::CalendarUi::new(),
             social: {
                 let mut s = crate::social::state::SocialState::new(social_dir);
@@ -1763,6 +1766,16 @@ impl ShaleApp {
                 ctx.data_mut(|d| d.insert_temp(egui::Id::unique(("note-menu-key", tab_id)), true));
                 ctx.request_repaint();
             }
+            // fold all and unfold all work in the reading view too; the others act on the cursor, which it has not (EDIT-098)
+            KeyAction::NoteFoldAll | KeyAction::NoteUnfoldAll => {
+                use crate::fold::FoldCmd;
+                self.tabbar.tabs[active].editor.key_fold(if a == KeyAction::NoteFoldAll { FoldCmd::FoldAll } else { FoldCmd::UnfoldAll });
+            }
+            KeyAction::NoteFold | KeyAction::NoteUnfold if !reading => {
+                use crate::fold::FoldCmd;
+                self.tabbar.tabs[active].editor.key_fold(if a == KeyAction::NoteFold { FoldCmd::Fold } else { FoldCmd::Unfold });
+            }
+            KeyAction::NoteCopyCode if !reading => self.tabbar.tabs[active].editor.key_copy_code(),
             KeyAction::NoteHighlightColour if bar => self.tabbar.tabs[active].editor.key_menu(crate::format_bar::Menu::Highlight),
             KeyAction::NoteFontColour if bar => self.tabbar.tabs[active].editor.key_menu(crate::format_bar::Menu::Font),
             KeyAction::NoteHeading if bar => self.tabbar.tabs[active].editor.key_menu(crate::format_bar::Menu::Heading),

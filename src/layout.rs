@@ -876,7 +876,12 @@ impl ShaleApp {
                     }
                     if reading {
                         let text = doc.text.clone();
-                        let extras = reader::Extras { numbers: reader::Extras::numbers_of(&text, self.cfg.numbered_headings), scroll_to: tab.reader_line.take(), properties: self.cfg.properties_in_reader };
+                        let extras = reader::Extras {
+                            numbers: reader::Extras::numbers_of(&text, self.cfg.numbered_headings),
+                            scroll_to: tab.reader_line.take(),
+                            properties: self.cfg.properties_in_reader,
+                            folds: Some(std::cell::RefCell::new(crate::fold_ui::ReaderFolds { ui: &mut tab.editor.fold, summary: self.cfg.properties_in_editor != crate::config::PropertiesView::Raw })),
+                        };
                         let shown = crate::fonts::with_area(ui, &fonts.rendered, |ui| reader::show(ui, &text, vault, &rel, &mut reader::Caches { scenes: &mut self.scenes, media: &self.media }, (base, dark), &extras));
                         if let Some(a) = shown {
                             handle_reader_action(&mut self.actions, a, &rel);
@@ -887,6 +892,7 @@ impl ShaleApp {
                         tab.editor.numbered_headings = self.cfg.numbered_headings;
                         tab.editor.live_preview = self.cfg.live_preview;
                         tab.editor.preview_raw_lines = self.cfg.preview_raw_lines;
+                        tab.editor.properties_summary = self.cfg.properties_in_editor != crate::config::PropertiesView::Raw;
                         tab.editor.table_cell_edit = self.cfg.table_cell_edit;
                         tab.editor.vim_enabled = self.cfg.vim_mode;
                         tab.editor.cursor_style = crate::cursor_style::CursorStyle { shape: self.cfg.cursor_shape, normal_shape: self.cfg.normal_cursor_shape, blink: self.cfg.cursor_blink };
@@ -939,11 +945,10 @@ impl ShaleApp {
             }
             if let (Some(rel), Some(v)) = (self.current_path(), &self.vault) {
                 if let Some(doc) = self.notes.get(&rel) {
-                    let words = doc.text.split_whitespace().count();
-                    let chars = doc.text.chars().count();
+                    let (chars, words) = self.status.counts(&rel, &doc.text);
                     ui.label(small(format!("{chars} characters")));
                     ui.label(small(format!("{words} words")));
-                    let bl = v.backlinks(&rel).len();
+                    let bl = self.status.backlinks(v, &rel);
                     ui.label(small(format!("{bl} backlink{}", if bl == 1 { "" } else { "s" })));
                     if doc.unreadable.is_some() {
                         ui.label(egui::RichText::new("Read-only: could not be read").size(11.5).color(theme::LINK_MISSING));
@@ -962,7 +967,7 @@ impl ShaleApp {
                 }
             }
             if let Some(v) = &self.vault {
-                let open = v.all_tasks().iter().filter(|(_, t)| !t.done).count();
+                let open = self.status.open_tasks(v);
                 ui.label(small(format!("{open} open tasks")));
             }
             if let Some(t) = self.mail.status(&self.cfg) {

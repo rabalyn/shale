@@ -271,6 +271,13 @@ actions! {
     NotePreview => "note.preview", "Note: Markdown preview button", NoteView, ["Alt+P"];
     NoteMenu => "note.menu", "Note: ⋯ menu button (opens its menu)", NoteView, ["Alt+D"];
     NoteNewTab => "note.new_tab", "Note: New tab button", NoteView, ["Alt+N"];
+    // Folding (KEY-030…KEY-034): bound with Ctrl and Shift, so macOS has the same keys
+    NoteFold => "note.fold", "Fold the block at the cursor (again: the block around it)", NoteView, ["Ctrl+Shift+K"];
+    NoteUnfold => "note.unfold", "Unfold the block at the cursor", NoteView, ["Ctrl+Shift+J"];
+    NoteFoldAll => "note.fold_all", "Fold every block of the note", NoteView, ["Ctrl+Shift+O"];
+    NoteUnfoldAll => "note.unfold_all", "Unfold every block of the note", NoteView, ["Ctrl+Shift+I"];
+    // KEY-035…KEY-037
+    NoteCopyCode => "note.copy_code", "Copy the code of the code block at the cursor", NoteView, ["Ctrl+Shift+C"];
     NormalAlternate => "normal.alternate_view", "Back to the previous view of this tab (again: forward)", EditorNormal, ["Space Tab"];
     NormalFindFile => "normal.find_file", "Find a file by name", EditorNormal, ["Space F F"];
     NormalSearchAll => "normal.search_all", "Search notes, mail and posts", EditorNormal, ["Space F G"];
@@ -356,7 +363,7 @@ impl Action {
     /// types characters, they have no default key.
     pub fn is_alt_key(self) -> bool {
         let d = self.def();
-        d.scope == Scope::NoteView || d.id.starts_with("global.ribbon_") || d.id.starts_with("global.sidebar_") || d.id.starts_with("mail.button_")
+        (d.scope == Scope::NoteView && d.defaults.iter().all(|k| k.starts_with("Alt+"))) || d.id.starts_with("global.ribbon_") || d.id.starts_with("global.sidebar_") || d.id.starts_with("mail.button_")
     }
 
     /// The place (0 to 9) of the ribbon item a `RibbonSlot` action opens.
@@ -690,8 +697,8 @@ mod tests {
             };
             assert_eq!(mac.display(d.action), on_mac, "{}", d.id);
         }
-        assert_eq!(DEFS.iter().filter(|d| d.scope == Scope::NoteView).count(), 24);
-        assert_eq!(DEFS.len(), 29 + 36 + 6 + 12 + 24);
+        assert_eq!(DEFS.iter().filter(|d| d.scope == Scope::NoteView).count(), 24 + 5);
+        assert_eq!(DEFS.len(), 29 + 36 + 6 + 12 + 24 + 5);
     }
 
     // spec: KEY-014
@@ -774,6 +781,31 @@ mod tests {
         assert_eq!(linux.alt_badge(Action::SidebarLeft).as_deref(), Some(","));
         assert_eq!(linux.alt_badge(Action::Save), None, "Ctrl+S is no Alt key");
         assert_eq!(mac.alt_badge(Action::NoteBold), None);
+    }
+
+    // spec: KEY-030, KEY-031, KEY-032, KEY-033, KEY-034
+    #[test]
+    fn the_fold_keys_have_the_same_defaults_on_every_system_and_clash_with_nothing() {
+        let (linux, mac) = (Keymap::for_os(false), Keymap::for_os(true));
+        for (a, key) in [(Action::NoteFold, "Ctrl+Shift+K"), (Action::NoteUnfold, "Ctrl+Shift+J"), (Action::NoteFoldAll, "Ctrl+Shift+O"), (Action::NoteUnfoldAll, "Ctrl+Shift+I")] {
+            assert!(!a.is_alt_key(), "{key} is no Alt key");
+            for k in [&linux, &mac] {
+                assert_eq!(k.bindings(a), vec![b(key)]);
+                assert_eq!(k.check(a, &b(key)), Ok(()));
+            }
+        }
+        assert_eq!(linux.check(Action::NoteFold, &b("Ctrl+Shift+F")), Err("Ctrl+Shift+F is already used by “Search all notes”".to_string()));
+    }
+
+    // spec: KEY-035, KEY-036
+    #[test]
+    fn the_copy_code_key_is_the_same_on_every_system_and_clashes_with_nothing() {
+        let (linux, mac) = (Keymap::for_os(false), Keymap::for_os(true));
+        assert!(!Action::NoteCopyCode.is_alt_key());
+        for k in [&linux, &mac] {
+            assert_eq!(k.bindings(Action::NoteCopyCode), vec![b("Ctrl+Shift+C")]);
+            assert_eq!(k.check(Action::NoteCopyCode, &b("Ctrl+Shift+C")), Ok(()));
+        }
     }
 
     // spec: KEY-017
@@ -1257,6 +1289,7 @@ mod tests {
                 (true, true, false, Key::T) => Some("terminal"),
                 (true, true, false, Key::D) => Some("show desktop"),
                 (true, true, false, Key::Delete) => Some("log out"),
+                (true, false, true, Key::U) => Some("Unicode input of IBus and GTK"),
                 (true, true, false, Key::Backspace) => Some("kill the X server"),
                 (true, true, false, Key::Escape) => Some("kill a window"),
                 (false, true, false, _) if function => Some("Alt+F1…F12 of the desktops"),
@@ -1300,6 +1333,7 @@ mod tests {
             (Os::Linux, Scope::Global, "Ctrl+Alt+Left"),
             (Os::Linux, Scope::Global, "Ctrl+Alt+Right"),
             (Os::Linux, Scope::Global, "Ctrl+Alt+L"),
+            (Os::Linux, Scope::NoteView, "Ctrl+Shift+U"),
         ] {
             assert!(os_reserved(os, scope, c(old)).is_some(), "{os:?} {old}");
         }

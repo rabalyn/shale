@@ -73,7 +73,7 @@ pub fn font_definitions(system: SystemFonts) -> egui::FontDefinitions {
 
 /// Register the bundled hand-drawn font.
 pub fn install_fonts(ctx: &egui::Context) {
-    ctx.set_fonts(font_definitions(SystemFonts::default()));
+    crate::fonts::set_fonts(ctx, font_definitions(SystemFonts::default()));
 }
 
 /// The text styles for a font: the sizes of Small, Heading and Monospace follow the size of
