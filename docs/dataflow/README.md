@@ -12,4 +12,5 @@ One row per flow, one row per line; the flow is the name in the begin marker of 
 | import_docx | [import-docx.md](import-docx.md) | `import/dataflow_tests.rs::dev_030_a_word_import_is_a_dataflow_diagram` | every `cargo test` |
 | import_thunderbird | [import-thunderbird.md](import-thunderbird.md) | `import/tb_store/dataflow_tests.rs::dev_030_a_thunderbird_lookup_is_a_dataflow_diagram` | every `cargo test` |
 | import_mail_text | [import-mail-text.md](import-mail-text.md) | `import/dataflow_tests.rs::dev_030_an_imported_email_is_a_dataflow_diagram` | every `cargo test` |
-| import_programs | [import-programs.md](import-programs.md) | `import/from_programs/dataflow_tests.rs::dev_030_a_drop_from_another_program_is_a_dataflow_diagram` | every `cargo test` |
+| import_programs_files | [import-programs.md](import-programs.md) | `import/from_programs/dataflow_tests.rs::dev_030_a_drop_from_another_program_is_a_dataflow_diagram` | every `cargo test` |
+| import_programs_web | [import-programs.md](import-programs.md) | `import/from_programs/dataflow_tests.rs::dev_030_a_drop_from_another_program_is_a_dataflow_diagram` | every `cargo test` |

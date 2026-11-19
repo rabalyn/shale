@@ -565,7 +565,7 @@ pub fn email_note(mail: &Mail, tags: &[String], attachments: &[PathBuf], origina
         s.push('\n');
     }
     s.push_str("## Message\n\n");
-    s.push_str(&tracing::info_span!("flow.import_mail_text.tidy", peer = "import").in_scope(|| mail_text::tidy(&mail.text)));
+    s.push_str(&mail_text::tidy(&mail.text));
     s.push('\n');
     s
 }

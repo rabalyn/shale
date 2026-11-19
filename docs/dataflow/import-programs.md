@@ -1,20 +1,23 @@
 # Drop from other programs dataflow
 
-A drop from another program (`items_from_parts_in` in `src/import/from_programs.rs`): files are read, a picture offered only as a web address is downloaded, or text is taken as it is. The diagram below is recorded from a run of its driving test with a stand-in for the download, so it shows the steps of three drops in one (DEV-030).
+A drop from another program (`items_from_parts_in` in `src/import/from_programs.rs`) is read in one of two ways that leave the program: dropped files are read from disk, or a picture offered only as a web address is downloaded. Dropped text and a message handed over whole cross no boundary and have no diagram. The diagrams below are recorded from a run of their driving test with a stand-in for the download (DEV-030).
 
-To regenerate it after a change to the flow, run its driving test (named in the index, `docs/dataflow/README.md`) with `SHALE_UPDATE_DATAFLOW=1` and commit the result.
+To regenerate them after a change to the flow, run the driving test (named in the index, `docs/dataflow/README.md`) with `SHALE_UPDATE_DATAFLOW=1` and commit the result.
 
-<!-- dataflow:begin import_programs -->
+<!-- dataflow:begin import_programs_files -->
 ```mermaid
 sequenceDiagram
     participant import
     participant source
-    participant web
-    opt sometimes
-        import->>source: read_files
-    end
-    opt sometimes
-        import->>web: download
-    end
+    import->>source: read_files
 ```
-<!-- dataflow:end import_programs -->
+<!-- dataflow:end import_programs_files -->
+
+<!-- dataflow:begin import_programs_web -->
+```mermaid
+sequenceDiagram
+    participant import
+    participant web
+    import->>web: download
+```
+<!-- dataflow:end import_programs_web -->
