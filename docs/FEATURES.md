@@ -510,10 +510,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - A middle click on the **Mail**, **Feeds** or **Calendar** icon opens that view in a new tab.
 - Right-click an icon (in the ribbon or in a view's menubar) for a menu: **Remove from the
   ribbon** / **Remove from this view**, **Restore …** for every icon removed earlier, and
-  **Reset layout** (the default icons, order and heights). The last icon of the ribbon cannot
+  **Reset layout** (the default icons, order, heights and sidebar widths). The last icon of the ribbon cannot
   be removed. Panel shortcuts in the ribbon have their own glyphs, not those of the Graph and
   Calendar buttons.
-- The layout (icons, heights, removed icons) is kept in the settings.
+- The layout (icons, heights, removed icons) and the widths of the left and the right sidebar (drag their borders) are kept in the settings.
 - **F1** (or Settings → Help → **Open user guide**) opens the user guide, itself a Shale vault:
   The guide is built into the program, which unpacks it once per version into its data folder (a
   copy you edited is not overwritten) and opens it at "Start here". This works in every build on
