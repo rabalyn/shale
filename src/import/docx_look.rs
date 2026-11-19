@@ -44,6 +44,12 @@ pub struct Look {
     paragraph_spacing: Option<String>,
     align: Option<&'static str>,
     heading_color: Option<String>,
+    /// `normal` or `bold`, from Heading 1 (#366)
+    heading_weight: Option<&'static str>,
+    /// pt of Heading 1 to 6, joined by spaces; none when a level has no size (#366)
+    heading_sizes: Option<String>,
+    /// whether Heading 1 has numbering; `None` when there are no styles to tell (#366)
+    headings_numbered: Option<bool>,
     /// the lowest level of a Heading style that starts a page (IMP-044)
     break_before: Option<u8>,
     /// the document part was read: a Word import never prints a title of its own, and has a table of contents or not
@@ -65,9 +71,13 @@ impl Look {
         put("print-align", self.align.map(String::from));
         // a colour starts with `#`, which YAML reads as a comment unless it is quoted
         put("print-heading-color", self.heading_color.as_deref().map(super::yaml));
+        put("print-heading-weight", self.heading_weight.map(String::from));
+        put("print-heading-sizes", self.heading_sizes.as_deref().map(super::yaml));
         put("print-break-before", self.break_before.map(|n| n.to_string()));
         put("print-title", self.title_off.then(|| "false".to_string()));
         put("print-toc", (self.title_off && !self.toc).then(|| "false".to_string()));
+        // CFG-042: Word does not number headings unless the style does
+        put("numbered-headings", (self.headings_numbered == Some(false)).then(|| "false".to_string()));
         out
     }
 }
@@ -340,8 +350,42 @@ pub fn read(document: &str, styles: Option<&str>, theme: Option<&str>) -> Look {
     let palette = Palette { styles: Some(&styles), theme: theme.as_ref() };
     look.heading_color = palette.of_style("Heading1").and_then(|(c, _)| c);
     look.heading_color = look.heading_color.map(|c| format!("#{c}"));
+    let heading = |n: u8| styles.descendants().find(|s| is_w(*s, "style") && heading_level(*s) == Some(n));
+    if let Some(h1) = heading(1) {
+        let default_rpr = styles.descendants().find(|n| is_w(*n, "rPrDefault")).and_then(|d| child(d, "rPr"));
+        let chain = style_chain(&styles, h1);
+        let bold = chain.iter().find_map(|s| child(*s, "rPr").and_then(|r| child(r, "b"))).or_else(|| default_rpr.and_then(|r| child(r, "b"))).is_some_and(flag);
+        look.heading_weight = Some(if bold { "bold" } else { "normal" });
+        let numbering = chain.iter().find_map(|s| child(*s, "pPr").and_then(|p| child(p, "numPr")));
+        look.headings_numbered = Some(numbering.and_then(|n| child(n, "numId")).and_then(|i| val(i, "val")).is_some_and(|id| id.trim() != "0"));
+    } else {
+        look.headings_numbered = Some(false);
+    }
+    // a level without a size of its own has the size of the document defaults, as in Word
+    let default_size = styles.descendants().find(|n| is_w(*n, "rPrDefault")).and_then(|d| child(d, "rPr")).and_then(|r| child(r, "sz")).and_then(|z| val(z, "val")).and_then(|v| v.parse::<f64>().ok());
+    let sizes: Option<Vec<String>> = (1..=6)
+        .map(|n| {
+            let size = style_chain(&styles, heading(n)?).iter().find_map(|s| child(*s, "rPr").and_then(|r| child(r, "sz")).and_then(|z| val(z, "val")).and_then(|v| v.parse::<f64>().ok())).or(default_size);
+            size.filter(|s| *s > 0.0).map(|s| trim_num(s / 2.0))
+        })
+        .collect();
+    look.heading_sizes = sizes.map(|s| s.join(" "));
     look.break_before = (1..=9).find(|n| styles.descendants().any(|s| is_w(s, "style") && heading_level(s) == Some(*n) && style_page_break(&styles, s) == Some(true)));
     look
+}
+
+/// `style` and the styles it is based on, nearest first (a loop or a missing style ends the list).
+fn style_chain<'a, 'i>(styles: &'a Document<'i>, style: Node<'a, 'i>) -> Vec<Node<'a, 'i>> {
+    let mut out = vec![style];
+    while out.len() < CHAIN {
+        let Some(parent) = child(out[out.len() - 1], "basedOn").and_then(|b| val(b, "val")) else { break };
+        let Some(next) = styles.descendants().find(|n| is_w(*n, "style") && val(*n, "styleId") == Some(parent)) else { break };
+        if out.iter().any(|s| s.id() == next.id()) {
+            break;
+        }
+        out.push(next);
+    }
+    out
 }
 
 /// Whether the document has a table of contents: a `TOC` field or the content control of one.
@@ -482,8 +526,7 @@ impl<'a, 'i> Palette<'a, 'i> {
 
 /// The text of `document` with sentinels around the text of every run that has a text colour of
 /// its own, from a style or from a table (`styles` and `theme` are the text of `word/styles.xml`
-/// and `word/theme/theme1.xml`, when there are such parts), or a highlight other than plain
-/// yellow (which pandoc keeps as `==`), and that highlight's
+/// and `word/theme/theme1.xml`, when there are such parts), or a highlight, and that highlight's
 /// element taken out so that pandoc does not also mark it. Whitespace at the ends of a text stays
 /// outside, so that Markdown emphasis still works. `None` when there is nothing to tag or the text
 /// does not parse.
@@ -497,8 +540,7 @@ pub fn tag_runs(document: &str, styles: Option<&str>, theme: Option<&str>) -> Op
         let colour = palette.of_run(run);
         let named = pr.and_then(|p| child(p, "highlight")).and_then(|h| val(h, "val").map(|v| (h, v)));
         let highlight = match named {
-            // plain yellow stays pandoc's own `==`
-            Some((_, "yellow")) => None,
+            // every named colour, yellow too (FFFF00), becomes a mark of its real colour
             Some((h, name)) if highlight_hex(name).is_some() => {
                 edits.push(Edit { start: h.range().start, end: h.range().end, with: String::new() });
                 highlight_hex(name).map(String::from)

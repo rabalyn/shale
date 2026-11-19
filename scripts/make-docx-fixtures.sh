@@ -8,7 +8,7 @@
 # styled.md is made with a reference document (made here from pandoc's own) that sets the page
 # (Letter, margins 20, 25, 20, 30 mm), a page break before Heading 1, the body (Times New Roman 12 pt, justified, line spacing 1.15,
 # 8 pt after), the colour of Heading 1 (2F5496) and a character style "Emphasis red" (7030A0), for
-# the look tests (IMP-040, IMP-041).
+# the look tests (IMP-040, IMP-041); Heading 1 is bold there (#366).
 #
 # toc.docx (IMP-043) is made from toc.fodt, a flat ODT with a table of contents, by LibreOffice
 # (`soffice --convert-to docx`). LibreOffice does not give the same bytes twice, so this step runs
@@ -50,7 +50,8 @@ with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as out:
             # Body Text follows the defaults
             s = s.replace('<w:spacing w:before="180" w:after="180" />', '<w:spacing w:before="0" w:after="160" />', 1)
             # Heading 1: a fixed colour
-            s = re.sub(r'<w:color w:val="0F4761"[^>]*/>', '<w:color w:val="2F5496" />', s, count=1)
+            # (bold, for print-heading-weight, #366)
+            s = re.sub(r'<w:color w:val="0F4761"[^>]*/>', '<w:b />\n        <w:color w:val="2F5496" />', s, count=1)
             # Heading 1 starts a page (print-break-before, IMP-043)
             s = s.replace('<w:outlineLvl w:val="0" />', '<w:pageBreakBefore />\n      <w:outlineLvl w:val="0" />', 1)
             # a character style with a colour, for the span "Emphasis red" of styled.md (IMP-041)
