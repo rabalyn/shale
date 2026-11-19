@@ -319,7 +319,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - Drag the border between two panes to resize them (neither gets narrower than 240 points).
   Closing the last tab of a pane (or **Ctrl+Shift+W**) removes the pane; the last pane stays.
 - The panes, their tabs, the open tab of each, the focused pane and the widths come back at the
-  next start, and each note with its cursor or selection, its scroll position and its reading view; the
+  next start, and each note with its cursor or selection, its scroll position and its reading view. Mail,
+  Calendar, Tasks, Graph and Settings-file tabs come back too: the mail view on its folder and open message,
+  the calendar on its mode and day, Tasks with its filter, the graph with its switches (an empty tab is
+  not kept); the
   state is written every few seconds when something changed, and at exit. All the keys can be changed in Settings, Keybindings.
 
 ## Fonts and text sizes

@@ -419,6 +419,67 @@ fn the_selection_and_scroll_of_notes_in_both_panes_and_the_reading_view_come_bac
     assert_eq!(again.pane_bar(1).tabs[0].editor.selection_chars(hl.ctx()).map(ordered), Some((40, 40)));
 }
 
+// spec: NAV-044, NAV-046, NAV-047
+#[test]
+fn every_kind_of_tab_comes_back_in_its_pane_with_its_pin_and_place() {
+    use crate::calendar::ui::Mode;
+    let mut w = W::new("views");
+    // pane 0: Welcome, Ideas, Mail (pinned), Calendar, Tasks (open); an empty tab is not saved
+    w.app.show_view(View::Mail, true);
+    w.app.show_view(View::Calendar, true);
+    w.app.show_view(View::Tasks, true);
+    w.app.tabbar.new_tab(View::Empty);
+    w.app.set_tab_pinned(2, true);
+    w.app.tabbar.active = w.app.tabbar.tabs.iter().position(|t| t.view == View::Tasks).unwrap();
+    w.app.cal.main.mode = Mode::Day;
+    w.app.cal.main.anchor = 20_500;
+    w.app.tasks.query = "#home".into();
+    w.app.tasks.only_due = true;
+    // pane 1: Daily log, Graph (open), Settings file
+    w.split("Daily log.md");
+    w.app.show_view(View::SettingsFile, true);
+    w.app.show_view(View::Graph, true);
+    w.app.graphs.global.show_orphans = false;
+    w.frames(3);
+    w.app.save_config();
+    w.app.vdata.save().unwrap();
+    let kinds = |a: &ShaleApp, p: usize| a.pane_bar(p).tabs.iter().map(|t| t.view.clone()).collect::<Vec<_>>();
+    let (left, right) = (kinds(&w.app, 0), kinds(&w.app, 1));
+    assert_eq!(left.len(), 6, "{left:?}");
+    let saved = &w.app.vdata.state.panes;
+    assert_eq!(saved[0].tabs.len(), 5, "the empty tab is not saved");
+    assert_eq!(saved[0].tabs[0].view.as_deref(), Some("mail"), "the pinned tab is first");
+
+    let mut again = reopen(&w);
+    let mut hl = Headless::new();
+    hl.frames(&mut again, 4);
+    let notes = |v: Vec<View>| v.into_iter().filter(|v| *v != View::Empty).collect::<Vec<_>>();
+    assert_eq!(kinds(&again, 0), notes(left.clone()), "the first pane: the tabs in their order");
+    assert_eq!(kinds(&again, 1), right);
+    assert_eq!(kinds(&again, 0)[0], View::Mail);
+    assert!(again.pane_bar(0).tabs[0].pinned && !again.pane_bar(0).tabs[1].pinned);
+    assert_eq!(again.pane_bar(0).tabs[again.pane_bar(0).active].view, View::Tasks);
+    assert_eq!(again.pane_bar(1).tabs[again.pane_bar(1).active].view, View::Graph);
+    assert_eq!((again.cal.main.mode, again.cal.main.anchor), (Mode::Day, 20_500));
+    assert_eq!((again.tasks.query.as_str(), again.tasks.only_due, again.tasks.show_done), ("#home", true, false));
+    assert!(!again.graphs.global.show_orphans && again.graphs.global.show_missing);
+
+    // a view this version does not know is skipped, a saved mail place of an account that is gone is dropped
+    let mut w2 = W::new("views-odd");
+    let tab = |v: &str| crate::vault_state::SavedTab { view: Some(v.into()), ..Default::default() };
+    let mut mail = tab("mail");
+    mail.mail = Some(crate::vault_state::SavedMail { account: "gone".into(), folder: "INBOX".into(), uid: Some(3), ..Default::default() });
+    w2.app.vdata.state.panes = vec![crate::vault_state::SavedPane { tabs: vec![tab("kanban"), mail, tab("calendar")], active: 2, ..Default::default() }];
+    w2.app.vdata.save().unwrap();
+    let mut again = reopen(&w2);
+    assert_eq!(kinds(&again, 0), vec![View::Mail, View::Calendar]);
+    assert!(again.mail.restore.is_some());
+    let mut hl = Headless::new();
+    hl.frames(&mut again, 4);
+    assert_eq!(again.cal.main.mode, Mode::Month, "a calendar tab without a place shows the default");
+    assert_eq!(again.pane_bar(0).active, 1);
+}
+
 // spec: NAV-038
 #[test]
 fn a_selection_behind_the_end_of_a_note_that_shrank_on_disk_is_kept_inside_it() {

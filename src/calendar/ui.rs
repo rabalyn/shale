@@ -12,6 +12,21 @@ pub enum Mode {
     Day,
 }
 
+impl Mode {
+    /// The name the mode is saved under (NAV-046).
+    pub fn name(self) -> &'static str {
+        match self {
+            Mode::Month => "month",
+            Mode::Week => "week",
+            Mode::Day => "day",
+        }
+    }
+
+    pub fn from_name(s: &str) -> Option<Mode> {
+        [Mode::Month, Mode::Week, Mode::Day].into_iter().find(|m| m.name() == s)
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Size {
     Small,
