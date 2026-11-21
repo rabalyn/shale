@@ -407,7 +407,13 @@ impl ShaleApp {
         let mut changed = self.git_settings_ui(ui);
         let Some(root) = self.vault.as_ref().map(|v| v.root.clone()) else { return changed };
         if self.git_version().is_none() {
-            crate::theme::paragraph(ui, "git is not installed. Install git to sync this vault with a git repository.");
+            crate::theme::paragraph(ui, "git is not installed. Install git to keep a history of this vault or to sync it with a git repository.");
+            // the wizard's first step is the install (SYNC-048)
+            let b = ui.button("Turn on sync…");
+            self.sync.rects.push(("turn-on", b.rect));
+            if b.clicked() {
+                self.open_sync_wizard();
+            }
             return changed;
         }
         let repo = gitsync::is_repo(&root);

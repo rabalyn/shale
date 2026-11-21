@@ -16,6 +16,8 @@ pub(crate) use ui::warnings_ui;
 
 #[cfg(test)]
 mod parts_tests;
+#[cfg(all(test, unix))]
+mod ui_tests;
 
 use super::detect::Finding;
 use super::{connect, credentials, Git};
