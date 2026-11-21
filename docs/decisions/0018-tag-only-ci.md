@@ -27,7 +27,7 @@
 3. **A check tag is a pre-release** `vX.Y.Z-rc.N`, made by `scripts/make-tag.sh` when the owner
    is done for now: it bumps the version, merges `docs/changelog-pending/` into `[Unreleased]`,
    lands the bump, tags the landed commit and pushes the tag to Forgejo. A green run (all check
-   jobs, BUILD-016) pushes `main` to GitHub; the tag stays on Forgejo, and GitHub builds nothing.
+   jobs, BUILD-016) pushes `main` to GitHub; the tag stays on Forgejo. (Amended by ADR-0025: GitHub does test the pushed `main` on macOS and Windows, BUILD-039; it builds no release for a check tag.)
 4. **A release is `vX.Y.Z`**, made by `scripts/make-release.sh`: it bumps the version, moves
    `[Unreleased]` and `docs/changelog-pending/` into the version's `CHANGELOG.md` section, runs
    the release check, lands, tags and pushes the tag to Forgejo. A green run pushes `main` and the

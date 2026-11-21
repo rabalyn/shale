@@ -60,6 +60,17 @@ check() {
   if eval "$2"; then echo "ok $N - $1"; else echo "not ok $N - $1"; FAILED=1; fi
 }
 
+# FORGE-011, #451: without cargo-nextest the landing stops at the start, with the install command,
+# before it merges or builds anything (the fake cargo knows no `nextest`)
+FAKEBIN="$TMP/fakebin"
+mkdir -p "$FAKEBIN"
+printf '#!/bin/sh\necho "error: no such command: nextest" >&2\nexit 101\n' > "$FAKEBIN/cargo"
+chmod +x "$FAKEBIN/cargo"
+branch nonextest n.txt n
+before=$(git rev-parse origin/main)
+PATH="$FAKEBIN:$PATH" expect "forge_011: a missing cargo-nextest stops the landing and names the install command" 2 "cargo install cargo-nextest --locked" nonextest
+check "forge_011: a missing cargo-nextest lands nothing and starts no landing" "main_is $before && [ ! -e \"$TMP/work/.git/land/worktree\" ]"
+
 export LAND_CHECK_CMD=true
 branch feature-b b.txt b
 branch feature-c c.txt c

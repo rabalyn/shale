@@ -8,7 +8,7 @@
 #
 # A branch is a local branch if one has the name, else `origin/<branch>`, else any commit.
 # The checks: every new commit names an issue (FORGE-008), `cargo fmt --check`, clippy with
-# `-D warnings` for Linux (also with `--features bench`), and for macOS and Windows (`scripts/cross-check.sh`), `cargo test` (also `cargo test --features bench bench::` when the change touches the harness or the build, `scripts/bench-tests-wanted.sh` (BUILD-035, #449), or with --release, and also `cargo test --release` with --release), and the real-server
+# `-D warnings` for Linux (also with `--features bench`), and for macOS and Windows (`scripts/cross-check.sh`), `cargo nextest run --locked --no-fail-fast` (#451; cargo-nextest is required, a landing without it stops at the start; `--test-threads` from RUST_TEST_THREADS or the cargo config's [env], because nextest does not read it itself; also `cargo test --features bench bench::` when the change touches the harness or the build, `scripts/bench-tests-wanted.sh` (BUILD-035, #449), or with --release, and also `cargo test --release` with --release), and the real-server
 # suites of tests/caldav-env and tests/mail-env and the LuaLaTeX suite of tests/tex-env, each only when the
 # change touches its code or environment (`.forgejo/scripts/env-tests.sh suites`, #447); --no-env-tests skips them and
 # says so. A merge conflict is not resolved here: merge `origin/main` into the branch, resolve
@@ -46,6 +46,14 @@ for a in "$@"; do
 done
 if [ ${#BRANCHES[@]} -eq 0 ]; then
   echo "usage: scripts/land.sh [--release] [--no-env-tests] <branch>…" >&2
+  exit 2
+fi
+
+# The main test step runs with cargo-nextest (FORGE-011, #451): no silent fallback to `cargo test`,
+# so a missing tool stops the landing before anything is merged or built. (LAND_CHECK_CMD replaces
+# the checks, so it needs no nextest.)
+if [ -z "${LAND_CHECK_CMD:-}" ] && ! cargo nextest --version >/dev/null 2>&1; then
+  echo "land.sh: cargo-nextest is missing: install it with: cargo install cargo-nextest --locked" >&2
   exit 2
 fi
 
@@ -195,7 +203,16 @@ checks() {
   step "cargo clippy --features bench" cargo clippy -q --all-targets --locked --features bench -- -D warnings || return 1
   # code used only from Linux-only `cfg` code is dead on macOS and Windows (BUILD-004, DEV-015)
   step "macOS and Windows clippy (scripts/cross-check.sh)" sh scripts/cross-check.sh || return 1
-  step "cargo test" cargo test -q --locked || return 1
+  # nextest runs all tests in one pool, ~30 % faster than libtest (#451); it does not read
+  # RUST_TEST_THREADS (only NEXTEST_TEST_THREADS), so the thread budget is passed on: the variable,
+  # else the `RUST_TEST_THREADS = "N"` of the cargo config's [env] (which only `cargo test` applies
+  # to libtest, so this shell does not have it), else nextest's default (all cores)
+  local nextest_threads=() threads=${RUST_TEST_THREADS:-}
+  if [ -z "$threads" ]; then
+    threads=$(command grep -hs -m1 '^[[:space:]]*RUST_TEST_THREADS[[:space:]]*=' "${CARGO_HOME:-$HOME/.cargo}/config.toml" .cargo/config.toml | sed 's/[^0-9]//g' | head -n 1 || true)
+  fi
+  [ -z "$threads" ] || nextest_threads=(--test-threads "$threads")
+  step "cargo nextest run" cargo nextest run --locked --no-fail-fast --status-level fail "${nextest_threads[@]}" || return 1
   # its tests only when the change touches the harness or the build, and with --release (BUILD-035, #449)
   if [ "$RELEASE" = yes ] || [ "$(sh scripts/bench-tests-wanted.sh "$base" HEAD)" = yes ]; then
     step "cargo test --features bench bench::" cargo test -q --locked --features bench bench:: || return 1

@@ -99,6 +99,19 @@ fn build_034_bench_release_sh_checks_its_arguments() {
     assert_eq!(code, 0);
 }
 
+// spec: FORGE-011
+#[test]
+fn forge_011_land_sh_runs_the_tests_with_nextest_and_needs_it() {
+    let land = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/land.sh")).unwrap();
+    // the missing tool stops the landing before the first merge, with the install command (#451)
+    let need = land.find("cargo install cargo-nextest --locked").unwrap();
+    assert!(need < land.find("git worktree add").unwrap());
+    // the main test step is nextest, with the thread budget passed on, and there is no libtest step for it
+    assert!(land.contains("step \"cargo nextest run\" cargo nextest run --locked --no-fail-fast"));
+    assert!(land.contains("--test-threads \"$threads\"") && land.contains("RUST_TEST_THREADS"));
+    assert!(!land.contains("step \"cargo test\""));
+}
+
 // spec: BUILD-035
 #[test]
 fn build_035_land_sh_checks_the_benchmark_feature() {
