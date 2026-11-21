@@ -2,7 +2,7 @@
 
 - **Status**: Accepted (owner decision, 2026-11-21)
 - **Date**: 2026-11-21
-- **Specs**: FORGE-003, FORGE-014, FORGE-017, BUILD-005, BUILD-012, BUILD-016, BUILD-017, BUILD-039
+- **Specs**: FORGE-003, FORGE-014, FORGE-020, BUILD-005, BUILD-012, BUILD-016, BUILD-017, BUILD-039
 - **Issue**: #452, #453
 - **Amends**: [ADR-0017](0017-github-issues-forgejo-ci.md) §4 ("GitHub builds only releases")
 
@@ -41,7 +41,7 @@
    ends green without having tested anything; the release build has tested that commit, and the next
    check tag's run replaces it as the latest.
    *Not chosen*: letting both run (about 30 extra runner minutes per release on macOS and Windows).
-4. **`make-release.sh` looks at that run** (FORGE-017): it stops when the latest main-check run on
+4. **`make-release.sh` looks at that run** (FORGE-020): it stops when the latest main-check run on
    GitHub's `main` is red or still running, when `gh` cannot answer, and says so; `--ignore-github-check`
    skips it, `--dry-run` reports it. The release commit itself is not on GitHub yet, so the latest run
    is the one of the last check tag; a macOS or Windows failure is found there, before a release is cut.

@@ -33,7 +33,7 @@ way it is. They are append-only. *What* Shale does today is in the living specs 
 | [0023](0023-auto-update.md) | Shale checks GitHub releases and updates itself (notify, download or install) when the person wants it; package-managed installs are never touched | Accepted |
 | [0024](0024-gpl-licence.md) | Shale is licensed under the GPL-3.0-or-later (before: MIT); releases up to v0.6.7 stay MIT | Accepted |
 | [0025](0025-github-checks-main.md) | GitHub checks macOS and Windows on every push of `main` (per green check tag) and saves the Rust cache there; `make-release.sh` stops on a red run | Accepted |
-| [0026](0026-weekly-only-texlive-refresh.md) | Only the weekly run rebuilds the TeX image without the cache; release tags use the cached image and run no coverage job | Accepted |
+| [0026](0026-weekly-only-texlive-refresh.md) | Only the weekly run rebuilds the TeX image without the cache; tags use the cached image | Accepted |
 
 Format: Context, Decision, Consequences (and Alternatives if any). Statuses: *Proposed* →
 *Accepted* → (*Superseded by NNNN*). An accepted ADR is not edited; a new one supersedes it.

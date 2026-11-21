@@ -3,7 +3,7 @@
 # reaches GitHub only from Forgejo's `mirror` job after a green check tag or release (BUILD-016), so
 # this runs once per check tag, never per landing. Two reasons:
 # 1. A macOS- or Windows-only failure shows at the check tag, before a release is made (#453);
-#    scripts/make-release.sh refuses while the latest run here is red (FORGE-017).
+#    scripts/make-release.sh refuses while the latest run here is red (FORGE-020).
 # 2. GitHub caches are scoped to their ref and only the default branch's caches are readable by
 #    other refs, so the release build (build.yml, run for tags) never found one. The cache saved
 #    here, on `main`, is what the release jobs restore (#452): both workflows use the same

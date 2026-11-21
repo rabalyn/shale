@@ -118,15 +118,12 @@ fn dev_011_only_the_weekly_run_refreshes_the_tex_image() {
     assert!(install.contains("!contains(github.ref_name, '-')"), "the install stays for release tags");
 }
 
-// spec: DEV-010 (ADR-0026, #455): coverage runs for check tags only, and nothing waits for it
+// spec: DEV-010 (#461): coverage runs for every tag push, check and release, because mirror needs it
+// (that mirror needs all four jobs is build_016_mirror_needs_every_check_job_of_a_tag_push)
 #[test]
-fn dev_010_coverage_runs_for_check_tags_only() {
+fn dev_010_coverage_runs_for_every_tag_push() {
     let cov = ci_job("coverage");
     let cond = cov.lines().find(|l| l.trim_start().starts_with("if:")).expect("the coverage job has a condition");
-    assert!(cond.contains("startsWith(github.ref, 'refs/tags/v')") && cond.contains("contains(github.ref_name, '-')"), "check tags (a pre-release part): {cond}");
-    assert!(cond.contains("github.event_name == 'push'") && !cond.contains('!'), "tags only, not weekly, not by hand, not releases: {cond}");
-    // a skipped job must not hold up the tag's push to GitHub: mirror needs the build only
-    let ci = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(".forgejo/workflows/ci.yml")).unwrap();
-    assert!(ci_job("mirror").contains("needs: build\n"), "mirror needs the build only");
-    assert!(!ci.contains("needs: coverage") && !ci.contains("needs: ["), "no job needs coverage");
+    assert!(cond.contains("github.event_name != 'schedule'") && cond.contains("github.event_name != 'workflow_dispatch'"), "tag pushes only, not weekly, not by hand: {cond}");
+    assert!(!cond.contains("contains(github.ref_name"), "check and release tags alike: {cond}");
 }

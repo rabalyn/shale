@@ -403,6 +403,12 @@ See [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) for what is done, what is t
 still missing. What Shale guarantees is in the specs ([docs/spec/](docs/spec/README.md)), and
 why it is built that way is in the decision records ([docs/decisions/](docs/decisions/README.md)).
 
+## Contributing
+
+Reports, ideas and changes are welcome. How to report a bug, how changes are made and how a pull
+request reaches `main` is in [CONTRIBUTING.md](CONTRIBUTING.md); the rules for how we treat each
+other are in [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
 ## Licence
 
 Shale is free software under the GNU General Public License, version 3 or (at your option) any later

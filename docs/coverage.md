@@ -13,8 +13,8 @@ test vault.
 
 ## How it is measured
 
-- CI: the `coverage` job of `.forgejo/workflows/ci.yml` (separate from the build, for check tags
-  `vX.Y.Z-rc.N` only: not release tags, ADR-0026) installs `cargo-llvm-cov`, runs the tests, prints the table per file into the log,
+- CI: the `coverage` job of `.forgejo/workflows/ci.yml` (separate from the build, for every `v*` tag, check
+  and release, because `mirror` needs it, #461) installs `cargo-llvm-cov`, runs the tests, prints the table per file into the log,
   writes `lcov.info` (no artifact: upload-artifact is a JavaScript action, which the job containers
   do not run) and checks the ratchet.
 - Locally (needs `rustup component add llvm-tools-preview` and `cargo install cargo-llvm-cov --locked`;

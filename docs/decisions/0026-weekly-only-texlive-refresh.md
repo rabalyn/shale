@@ -1,4 +1,4 @@
-# ADR-0026: Only the weekly run rebuilds the TeX image without the cache; no coverage job on release tags
+# ADR-0026: Only the weekly run rebuilds the TeX image without the cache
 
 - **Status**: Accepted (owner decision, 2026-11-21)
 - **Date**: 2026-11-21
@@ -21,9 +21,11 @@ weekly run already notices a changed TeX Live within a week (ADR-0020).
 1. `SHALE_ENV_TESTS_TEX_REFRESH` is `yes` only in the weekly scheduled run. Check tags and release tags
    build the TeX image as cached (ADR-0022). Release tags still run the real TeX Live install and the
    template import (`SHALE_ENV_TESTS_TEX_INSTALL`, `SHALE_ENV_TESTS_TEX_IMPORT`, ADR-0021).
-2. The `coverage` job runs for check tags only (`vX.Y.Z-rc.N`), not for release tags; it did not run
-   for the weekly run or a manual dispatch before. `mirror` needs only `build`, so a skipped
-   `coverage` job holds up nothing.
+
+The `coverage` job was meant to skip release tags in this decision, but `mirror` now needs every
+check job (`build`, `unused-deps`, `coverage`, `env-tests`, #461), so a skipped `coverage` would skip
+the mirror of every release. It stays on every `v*` tag, check and release (not the weekly run, not a
+run by hand), as before.
 
 Raising the runner capacity so that jobs run side by side is the owner's change to the homelab runner
 and not part of this decision.
@@ -33,4 +35,3 @@ and not part of this decision.
 - A release tag takes about the time of its slowest job.
 - A changed TeX Live shows within a week, not necessarily at the release; a release follows a check
   tag, and the check tag and the weekly run are the earlier checks.
-- A coverage drop is seen at the check tag; the release of the same code is not measured again.
