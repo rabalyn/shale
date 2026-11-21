@@ -54,16 +54,21 @@ impl T {
     }
 
     fn wait_for_job(&mut self) {
-        for _ in 0..400 {
+        self.wait_until("the jobs end", |t| !t.app.sync.managed.busy() && t.app.sync.managed.detection.is_some());
+        self.hl.frames(&mut self.app, 3);
+    }
+
+    /// Frames until `done` holds, up to a minute; the jobs are real, so no fixed number of frames is enough.
+    fn wait_until(&mut self, what: &str, done: impl Fn(&T) -> bool) {
+        let start = std::time::Instant::now();
+        loop {
             self.hl.frames(&mut self.app, 1);
-            let m = &self.app.sync.managed;
-            if m.task.is_none() && m.detection.is_some() {
-                self.hl.frames(&mut self.app, 3);
+            if done(self) {
                 return;
             }
-            std::thread::sleep(Duration::from_millis(20));
+            assert!(start.elapsed() < Duration::from_secs(60), "{what}: not within a minute");
+            std::thread::sleep(Duration::from_millis(10));
         }
-        panic!("the job did not end");
     }
 
     fn root(&self) -> std::path::PathBuf {
@@ -206,11 +211,13 @@ fn the_git_choice_is_a_setting_changed_by_a_click_and_selects_another_git() {
     assert_eq!(t.app.sync.git.program, t.root().join("cmd/git.exe"), "Auto: no system git, so the managed one");
     t.click("The git of this computer");
     assert_eq!(t.app.cfg.git.choice, GitChoice::System);
-    t.hl.frames(&mut t.app, 3);
+    // a new choice makes the page look for git again; it is clicked again when that has ended and
+    // the page has its height back
+    t.wait_for_job();
     assert_eq!(t.app.sync.git.program, std::path::PathBuf::from("git"), "System: only the git of PATH, none here");
     t.click("The git that Shale installs");
     assert_eq!(t.app.cfg.git.choice, GitChoice::Managed);
-    t.hl.frames(&mut t.app, 3);
+    t.wait_for_job();
     assert_eq!(t.app.sync.git.program, t.root().join("cmd/git.exe"));
     t.click("Automatic");
     assert_eq!(t.app.cfg.git.choice, GitChoice::Auto);
@@ -279,14 +286,10 @@ fn the_check_for_a_new_version_is_opt_in_and_the_setting_decides_what_happens_to
     t.click("Look for a new version and tell me");
     assert_eq!(t.app.cfg.git.updates, GitUpdates::Notify);
     t.app.sync.managed.check_is_due();
-    for _ in 0..200 {
-        t.hl.frames(&mut t.app, 1);
-        if t.app.sync.managed.update.is_some() {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    assert!(t.app.sync.managed.update.is_some(), "the newer release was found");
+    t.wait_until("the newer release is found", |t| t.app.sync.managed.update.is_some());
+    // the click above may have started a check already, and `check_is_due` another one: both end
+    // before the page is touched again
+    t.wait_for_job();
     assert!(t.app.toasts.iter().any(|(m, _)| m.contains("A newer git is available (git 2.100.0, git-lfs 9.10.0)")), "{:?}", t.app.toasts);
     assert!(t.app.sync.managed.task.is_none(), "Notify installs nothing");
     assert_eq!(Installed::read(&t.root()).unwrap().versions_text(), "git 2.99.0, git-lfs 9.9.9");
@@ -295,14 +298,7 @@ fn the_check_for_a_new_version_is_opt_in_and_the_setting_decides_what_happens_to
     t.click("Look for a new version and install it");
     assert_eq!(t.app.cfg.git.updates, GitUpdates::Install);
     t.app.sync.managed.check_is_due();
-    t.wait_for_job();
-    for _ in 0..200 {
-        if Installed::read(&t.root()).is_some_and(|i| i.versions_text() == "git 2.100.0, git-lfs 9.10.0") {
-            break;
-        }
-        t.hl.frames(&mut t.app, 1);
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    t.wait_until("the release is installed", |t| Installed::read(&t.root()).is_some_and(|i| i.versions_text() == "git 2.100.0, git-lfs 9.10.0"));
     t.wait_for_job();
     assert_eq!(Installed::read(&t.root()).unwrap().versions_text(), "git 2.100.0, git-lfs 9.10.0", "{:?}", t.painted());
 }
@@ -314,13 +310,7 @@ fn the_button_looks_for_a_new_version_now_and_says_when_there_is_none() {
     installed(&mut t);
     publish_newer_for_ui(&t.w, "2.99.0", "9.9.9");
     t.click("Look for a new version");
-    for _ in 0..200 {
-        t.hl.frames(&mut t.app, 1);
-        if t.app.sync.managed.notice.is_some() {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    t.wait_until("the answer of the check", |t| t.app.sync.managed.notice.is_some());
     assert!(t.shows("The git that Shale installed is up to date."), "{:?}", t.painted());
     assert_eq!(api_requests(&t), 2, "one per project");
 }

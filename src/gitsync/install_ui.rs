@@ -152,6 +152,13 @@ impl ManagedState {
         self.next_check = Some(Instant::now());
     }
 
+    /// Tests: a job runs (the look for git, an install, update or removal, a check for a new
+    /// version); the page changes its height when one ends.
+    #[cfg(all(test, unix))]
+    pub(crate) fn busy(&self) -> bool {
+        self.detecting.is_some() || self.task.is_some() || self.checking.is_some()
+    }
+
     /// The `Git` to run for this choice (SYNC-024).
     pub fn selected(&self, choice: GitChoice) -> super::Git {
         let mut git = managed::selected_git(choice, self.data.as_deref(), self.path_var.as_deref());
