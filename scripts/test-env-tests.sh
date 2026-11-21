@@ -178,21 +178,22 @@ MAIL_RUN="cargo test --locked -- --ignored mail_env --test-threads=1"
 TEX_RUN="cargo test --locked -- --ignored tex_env --test-threads=4"
 CAL_DOWN="caldav reset"
 MAIL_DOWN="mail reset"
+WARM="cargo test --locked --no-run"
 run_case "unset runs all three suites on both stacks and builds the image" \
-  "caldav reset,mail reset,$CAL_UP,$MAIL_UP,tex build,$CAL_RUN,$MAIL_RUN,$TEX_RUN,$CAL_DOWN,$MAIL_DOWN"
+  "$WARM,caldav reset,mail reset,$CAL_UP,$MAIL_UP,tex build,$CAL_RUN,$MAIL_RUN,$TEX_RUN,$CAL_DOWN,$MAIL_DOWN"
 run_case "a CalDAV list starts only the CalDAV stack, no image" \
-  "$CAL_DOWN,$CAL_UP,$CAL_RUN,$CAL_DOWN" "SHALE_ENV_TESTS_SUITES=calendar::env_tests"
+  "$WARM,$CAL_DOWN,$CAL_UP,$CAL_RUN,$CAL_DOWN" "SHALE_ENV_TESTS_SUITES=calendar::env_tests"
 run_case "a mail list starts only the mail stack, no image" \
-  "$MAIL_DOWN,$MAIL_UP,$MAIL_RUN,$MAIL_DOWN" "SHALE_ENV_TESTS_SUITES=mail_env"
+  "$WARM,$MAIL_DOWN,$MAIL_UP,$MAIL_RUN,$MAIL_DOWN" "SHALE_ENV_TESTS_SUITES=mail_env"
 run_case "a TeX list starts no stack and builds the image" \
-  "tex build,$TEX_RUN" "SHALE_ENV_TESTS_SUITES=tex_env"
+  "$WARM,tex build,$TEX_RUN" "SHALE_ENV_TESTS_SUITES=tex_env"
 run_case "CalDAV and TeX start the CalDAV stack and build the image" \
-  "$CAL_DOWN,$CAL_UP,tex build,$CAL_RUN,$TEX_RUN,$CAL_DOWN" "SHALE_ENV_TESTS_SUITES=calendar::env_tests tex_env"
+  "$WARM,$CAL_DOWN,$CAL_UP,tex build,$CAL_RUN,$TEX_RUN,$CAL_DOWN" "SHALE_ENV_TESTS_SUITES=calendar::env_tests tex_env"
 run_case "tex_install and tex_import ask for the image, and run on top of the list" \
-  "$MAIL_DOWN,$MAIL_UP,tex build,$MAIL_RUN,cargo test --locked -- --ignored tex_install --test-threads=1,cargo test --locked -- --ignored tex_import --test-threads=1,$MAIL_DOWN" \
+  "$WARM,$MAIL_DOWN,$MAIL_UP,tex build,$MAIL_RUN,cargo test --locked -- --ignored tex_install --test-threads=1,cargo test --locked -- --ignored tex_import --test-threads=1,$MAIL_DOWN" \
   "SHALE_ENV_TESTS_SUITES=mail_env" SHALE_ENV_TESTS_TEX_INSTALL=yes SHALE_ENV_TESTS_TEX_IMPORT=yes
 run_case "the refresh flag reaches the image build" \
-  "tex build --refresh,$TEX_RUN" "SHALE_ENV_TESTS_SUITES=tex_env" SHALE_ENV_TESTS_TEX_REFRESH=yes
+  "$WARM,tex build --refresh,$TEX_RUN" "SHALE_ENV_TESTS_SUITES=tex_env" SHALE_ENV_TESTS_TEX_REFRESH=yes
 
 # run_fails <name> <needle> [VAR=value…]: `run` fails at once, starting nothing
 run_fails() {
@@ -245,6 +246,14 @@ mkdir -p "$TMP/pbin"
 cat > "$TMP/pbin/cargo" <<'CARGO'
 #!/bin/sh
 # cargo test --locked -- --ignored <suite> --test-threads=<n>: three lines of output, FAKE_SLEEP apart; FAKE_FAIL names a suite that fails
+if [ "$3" = --no-run ]; then
+  echo "warmup begin" >> "$SCENARIO/events"
+  sleep "${FAKE_SLEEP:-0}"
+  echo "warmup end" >> "$SCENARIO/events"
+  echo "warmup log line"
+  if [ -n "${FAKE_FAIL_WARMUP:-}" ]; then echo "warmup broke" >&2; exit 101; fi
+  exit 0
+fi
 suite=$5
 echo "start $suite $6" >> "$SCENARIO/events"
 for i in 1 2 3; do echo "out $suite $i"; sleep "${FAKE_SLEEP:-0}"; done
@@ -332,6 +341,21 @@ check "run: and the stacks are taken down again" '[ "$(grep -c "^begin caldav re
 par_run "image failing" FAKE_FAIL_HELPER="tex build"
 check "run: an image that cannot be built fails the run before any suite" '
   [ "$CODE" = 1 ] && printf "%s\n" "$OUT" | grep -q "the TeX image could not be built" && ! grep -q "^start " "$EVENTS"'
+
+# the warm-up (#462): one cargo before any suite, so a fresh toolchain is installed once
+par_run "warm-up" FAKE_SLEEP=0.1
+check "run: the warm-up cargo test --locked --no-run runs once, before any suite and after the stacks and the image" '
+  [ "$CODE" = 0 ] && [ "$(grep -c "^warmup begin$" "$EVENTS")" = 1 ] && [ "$(nopos "warmup end")" -gt 0 ] &&
+  [ "$(nopos "finish tex build")" -lt "$(nopos "warmup begin")" ] && [ "$(nopos "finish caldav up")" -lt "$(nopos "warmup begin")" ] &&
+  [ "$(nopos "warmup end")" -lt "$(nopos "start calendar::env_tests --test-threads=1")" ] &&
+  [ "$(nopos "warmup end")" -lt "$(nopos "start mail_env --test-threads=1")" ] &&
+  [ "$(nopos "warmup end")" -lt "$(nopos "start tex_env --test-threads=4")" ]'
+check "run: a successful warm-up does not print its log" '! printf "%s\n" "$OUT" | grep -q "warmup log line"'
+par_run "warm-up failing" FAKE_FAIL_WARMUP=yes
+check "run: a failing warm-up fails the run, names the warm-up, shows its log and starts no suite" '
+  [ "$CODE" = 1 ] && printf "%s\n" "$OUT" | grep -q "the cargo warm-up (cargo test --locked --no-run) failed" &&
+  printf "%s\n" "$OUT" | grep -q "warmup broke" && ! grep -q "^start " "$EVENTS"'
+check "run: and the stacks are taken down after a failing warm-up" '[ "$(grep -c "^begin caldav reset" "$EVENTS")" = 2 ] && [ "$(grep -c "^begin mail reset" "$EVENTS")" = 2 ]'
 
 # tex_install and tex_import share one install of TeX Live: one after the other, but beside the other suites
 par_run "install and import" FAKE_SLEEP=0.3 SHALE_ENV_TESTS_SUITES="mail_env" SHALE_ENV_TESTS_TEX_INSTALL=yes SHALE_ENV_TESTS_TEX_IMPORT=yes
