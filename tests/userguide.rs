@@ -186,3 +186,68 @@ fn dev_018_the_guide_is_a_vault_of_its_own_and_holds_the_screenshots() {
     let stray: Vec<_> = fs::read_dir(root().join("docs/screenshots")).unwrap().filter_map(|e| e.ok()).filter(|e| e.path().extension().is_some_and(|x| x == "png")).collect();
     assert!(stray.is_empty(), "pictures belong in docs/userguide/z_media/screenshots, not in docs/screenshots: {stray:?}");
 }
+
+/// The levels of the ATX headings of a note, outside front matter, code fences and math blocks.
+fn heading_levels(text: &str) -> Vec<usize> {
+    let body = match text.strip_prefix("---\n").and_then(|r| r.split_once("\n---\n")) {
+        Some((_, body)) => body,
+        None => text,
+    };
+    let mut fence: Option<&str> = None;
+    let mut math = false;
+    let mut out = vec![];
+    for line in body.lines() {
+        let t = line.trim_start();
+        if let Some(open) = fence {
+            if t.starts_with(open) {
+                fence = None;
+            }
+        } else if math {
+            if t.starts_with("$$") {
+                math = false;
+            }
+        } else if t.starts_with("```") {
+            fence = Some("```");
+        } else if t.starts_with("~~~") {
+            fence = Some("~~~");
+        } else if t.starts_with("$$") {
+            // a one-line `$$ … $$` block opens and closes at once
+            math = t.matches("$$").count() == 1;
+        } else {
+            let hashes = line.chars().take_while(|c| *c == '#').count();
+            if (1..=6).contains(&hashes) && line[hashes..].starts_with(' ') {
+                out.push(hashes);
+            }
+        }
+    }
+    out
+}
+
+// spec: DEV-018
+#[test]
+fn dev_018_the_headings_of_every_guide_note_start_at_level_1_and_skip_no_level() {
+    let mut bad = vec![];
+    let mut with_headings = 0;
+    for (path, text) in notes() {
+        let levels = heading_levels(&text);
+        if levels.is_empty() {
+            continue;
+        }
+        with_headings += 1;
+        let name = path.strip_prefix(guide()).unwrap().display().to_string();
+        if levels.iter().min() != Some(&1) {
+            bad.push(format!("{name}: the highest heading is level {}, not 1", levels.iter().min().unwrap()));
+        }
+        // a heading may be at most one level deeper than the one before it
+        let mut prev = levels[0];
+        for l in &levels {
+            if *l > prev + 1 {
+                bad.push(format!("{name}: a level {l} heading follows level {prev}"));
+                break;
+            }
+            prev = *l;
+        }
+    }
+    assert!(with_headings > 10, "the headings of the guide are read ({with_headings})");
+    assert!(bad.is_empty(), "headings of the user guide must start at level 1 and skip no level: {bad:?}");
+}

@@ -12,7 +12,7 @@ does the same. Back to [[Start here]].
 - A due date is written `📅 2026-12-01` or `due:2026-12-01`.
 - Lists continue on Enter, also to-dos, see [[Editor]].
 
-## Try it
+# Try it
 
 These are real tasks, they are in the list of this guide:
 

@@ -14,13 +14,13 @@ the reading view, dialogs, the graph and code. Shale comes with nine themes, and
 
 *(The window in Catppuccin Latte.)*
 
-## Follow the system's light or dark mode
+# Follow the system's light or dark mode
 
 Tick **Follow the system's light or dark mode** and the one **Theme** list becomes two: **Light theme**
 (Catppuccin Latte at first) and **Dark theme** (Shale). Shale uses the one that matches the mode of your
 computer and changes by itself when the mode changes. If Shale cannot tell the mode, it uses the dark theme.
 
-## Your own themes
+# Your own themes
 
 A theme is a terminal colour scheme in the format of [Alacritty](https://alacritty.org). Shale reads
 those files as they are, so the whole collection at
@@ -58,7 +58,7 @@ the background (a contrast under 3 to 1, or 4.5 to 1 for text). The details are 
 A file that cannot be read is skipped, and the reason is listed under the theme list ("Theme file
 skipped: Mine.toml: [colors.normal] is missing `red`").
 
-### Set a colour exactly: the `[shale]` table
+## Set a colour exactly: the `[shale]` table
 
 If the colours that Shale makes are not what you want, add a table `[shale]` to the file. Its keys are
 the names of the colours of the window, and the value is the colour, written as above (with `#rrggbbaa`
@@ -81,18 +81,18 @@ The names: `bg_primary`, `bg_secondary`, `bg_ribbon`, `bg_hover`, `bg_active`, `
 `good`, `good_bg`, `warn`, `warn_bg`, `bad_bg`, `graph_edge_dim`, `graph_edge`, `graph_node` and
 `graph_node_drawing`. A name that is not on the list is an error of the file.
 
-## What a theme does not change
+# What a theme does not change
 
 Colours you set in a note yourself (highlights and font colours, `<mark>` and `<span>`) stay as
 written. The drawing canvas has its own switch ("Dark drawing canvas" in Appearance). The PDF export
 always prints with Shale's own colours.
 
-## In the settings file
+# In the settings file
 
 The choice is the `[theme]` table of the settings file (`name`, `follow_system`, `light`, `dark`), see
 [[Settings reference]]; changing it there applies at once, too.
 
-## Licences
+# Licences
 
 The built-in themes are colour schemes of other people, taken from the alacritty-theme collection:
 Dracula, Nord, Catppuccin, Gruvbox, Solarized and GitHub (Primer). They are used under their MIT

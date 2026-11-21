@@ -5,13 +5,13 @@ features:
 ---
 Back to [[Start here]]. This note is itself tagged: #userguide #tags #people.
 
-## Tags
+# Tags
 
 Tags are `#tag` in the text (nested `a/b` is fine, not inside links or code) or `tags:` in the
 front matter of a note, as the notes made by [[Import]] have. The task list filters
 by `#tag` ([[Tasks]]).
 
-## Tags found automatically
+# Tags found automatically
 
 - Tags of the vault that are written in the imported text are set right away (`#lecture-hall-b`
   for "Lecture Hall B").
@@ -20,7 +20,7 @@ by `#tag` ([[Tasks]]).
   no server and no AI: the same notes always give the same suggestions. It is learned again in
   the background now and then and kept in `.shale/tag-words.json` in the vault.
 
-## People
+# People
 
 ![[people-picker.png]]
 
