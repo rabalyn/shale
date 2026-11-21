@@ -94,7 +94,7 @@ fn sync_059_windows_knows_unc_paths_and_remote_drives() {
 fn sync_060_places_name_cloud_folders_on_macos_and_windows_and_in_dropbox_s_info_file() {
     let mac = Inputs { home: Some("/Users/u".into()), ..Inputs::none(Os::Mac) };
     let f = detect(Path::new("/Users/u/Library/Mobile Documents/com~apple~CloudDocs/notes"), &mac);
-    assert_eq!(f[0].kind, Kind::Cloud(Cloud::ICloud));
+    assert_eq!(f[0].kind, Kind::Cloud(Cloud::Apple));
     assert_eq!(f[0].what(), "a iCloud Drive folder");
     for (dir, cloud) in [("OneDrive-Personal", Cloud::OneDrive), ("GoogleDrive-me@x.org", Cloud::GoogleDrive), ("Dropbox", Cloud::Dropbox), ("Box-Box", Cloud::Other("Box".into()))] {
         let p = format!("/Users/u/Library/CloudStorage/{dir}/notes");
@@ -161,7 +161,7 @@ fn sync_060_markers_in_the_vault_or_a_parent_name_the_syncing_app() {
     std::fs::write(ic.join(".Plan.md.icloud"), "").unwrap();
     assert!(detect(&ic.join("vault"), &Inputs::none(Os::Linux)).is_empty());
     std::fs::write(ic.join("vault").join(".Plan.md.icloud"), "").unwrap();
-    assert_eq!(detect(&ic.join("vault"), &Inputs::none(Os::Linux))[0].kind, Kind::Cloud(Cloud::ICloud));
+    assert_eq!(detect(&ic.join("vault"), &Inputs::none(Os::Linux))[0].kind, Kind::Cloud(Cloud::Apple));
     // two apps, found once each
     let two = root.join("two");
     std::fs::create_dir_all(&two).unwrap();

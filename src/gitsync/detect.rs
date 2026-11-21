@@ -37,7 +37,8 @@ pub enum Cloud {
     Nextcloud,
     Syncthing,
     GoogleDrive,
-    ICloud,
+    /// iCloud Drive.
+    Apple,
     OneDrive,
     /// Another provider of `~/Library/CloudStorage` (by its folder's name).
     Other(String),
@@ -50,7 +51,7 @@ impl Cloud {
             Cloud::Nextcloud => "Nextcloud or ownCloud".into(),
             Cloud::Syncthing => "Syncthing".into(),
             Cloud::GoogleDrive => "Google Drive".into(),
-            Cloud::ICloud => "iCloud Drive".into(),
+            Cloud::Apple => "iCloud Drive".into(),
             Cloud::OneDrive => "OneDrive".into(),
             Cloud::Other(n) => n.clone(),
         }
@@ -184,7 +185,9 @@ fn mac_fs_name(path: &Path) -> Option<String> {
 /// Is the drive of `path` a remote one (Windows `GetDriveTypeW`; a mapped network drive is)?
 #[cfg(windows)]
 fn drive_is_remote(path: &Path) -> Option<bool> {
-    use windows_sys::Win32::Storage::FileSystem::{GetDriveTypeW, DRIVE_REMOTE};
+    use windows_sys::Win32::Storage::FileSystem::GetDriveTypeW;
+    // `DRIVE_REMOTE` of winbase.h: the value of a network drive, mapped or not
+    const DRIVE_REMOTE: u32 = 4;
     let text = path.to_string_lossy().replace('/', "\\");
     let text = text.strip_prefix("\\\\?\\").unwrap_or(&text);
     let mut chars = text.chars();
@@ -375,7 +378,7 @@ fn clouds_by_place(vault: &Path, inp: &Inputs) -> Vec<Finding> {
         if let Some(h) = &inp.home {
             let icloud = h.join("Library").join("Mobile Documents");
             if under(vault, &icloud, inp.os) {
-                add(Cloud::ICloud, icloud);
+                add(Cloud::Apple, icloud);
             }
             let storage = h.join("Library").join("CloudStorage");
             if let Ok(rest) = vault.strip_prefix(&storage) {
@@ -418,7 +421,7 @@ fn clouds_by_marker(vault: &Path) -> Vec<Finding> {
         let Ok(entries) = std::fs::read_dir(dir) else { continue };
         for e in entries.flatten() {
             let name = e.file_name().to_string_lossy().into_owned();
-            let found = marker(&name).or_else(|| (depth == 0 && name.starts_with('.') && name.to_ascii_lowercase().ends_with(".icloud")).then_some(Cloud::ICloud));
+            let found = marker(&name).or_else(|| (depth == 0 && name.starts_with('.') && name.to_ascii_lowercase().ends_with(".icloud")).then_some(Cloud::Apple));
             if let Some(c) = found {
                 if !out.iter().any(|f| f.kind == Kind::Cloud(c.clone())) {
                     out.push(Finding { kind: Kind::Cloud(c), at: dir.to_path_buf() });

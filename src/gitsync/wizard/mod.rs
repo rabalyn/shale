@@ -219,10 +219,13 @@ pub struct Detect {
     pub(super) job: Option<Receiver<Result<Vec<Finding>, String>>>,
 }
 
+/// Where a move's result arrives (the outer error: the job itself died).
+type MoveJob = Receiver<Result<Result<PathBuf, String>, String>>;
+
 /// A running or finished move of `.git` out of the vault (SYNC-063).
 #[derive(Default)]
 pub struct MoveOut {
-    pub(super) job: Option<(PathBuf, Receiver<Result<Result<PathBuf, String>, String>>)>,
+    pub(super) job: Option<(PathBuf, MoveJob)>,
     /// How the last move ended: words and whether it went well.
     pub result: Option<(String, bool)>,
 }

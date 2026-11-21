@@ -254,7 +254,7 @@ impl ShaleApp {
 
     /// A finished job.
     fn wizard_job_done(&mut self, ctx: &egui::Context, w: &mut Wizard, r: Result<Result<Msg, String>, String>) {
-        match r.unwrap_or_else(|e| Err(e)) {
+        match r.unwrap_or_else(Err) {
             Ok(Msg::SignedIn(s)) => {
                 w.signed_in = true;
                 w.user = s.login.clone();
