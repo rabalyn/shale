@@ -33,6 +33,10 @@
 #       the same time (a log each, printed whole when the suite ends, not interleaved), so a run takes about as long as
 #       its slowest suite (DEV-035, #448); `tex_install` and `tex_import` share one install and run one after the other in
 #       one job; `run` exits 1 and names the failed suites (`FAILED suites: …`) when any fails
+#       between the stacks and the suites `run` runs one `cargo test --locked --no-run` alone (the warm-up, its log shown
+#       only when it fails: `run` exits 1 and no suite starts): in a fresh container it installs the toolchain of
+#       rust-toolchain.toml and builds the test binary once, so the suites that follow, at the same time, never install it
+#       together (#462); `tex-suite` alone runs one cargo and needs none
 #       The suites run with one test thread (CalDAV, mail, `tex_install` and `tex_import` share one stack or
 #       one install); `tex_env` shares nothing and runs with ${SHALE_ENV_TESTS_TEX_THREADS:-4} test threads (a
 #       positive integer, else `run` fails at once with a message; DEV-011, #370)
@@ -270,6 +274,16 @@ case "${1:-}" in
     fi
     if [ "$need_tex" = yes ] && [ -n "$(failed_of tex-build)" ]; then
       echo "the TeX image could not be built" >&2
+      exit 1
+    fi
+
+    # the warm-up (DEV-035, #462): ONE cargo before the suites go at the same time. In a fresh container the toolchain of
+    # rust-toolchain.toml is not installed yet, and several cargo calls at once make rustup install it at the same time
+    # (they fail renaming the downloaded files); this one installs it and builds the test binary once, so the suites only run it
+    echo "Warming up cargo: cargo test --locked --no-run"
+    if ! cargo test --locked --no-run > "$wd/warmup.log" 2>&1; then
+      cat "$wd/warmup.log"
+      echo "the cargo warm-up (cargo test --locked --no-run) failed: no suite was started" >&2
       exit 1
     fi
 
