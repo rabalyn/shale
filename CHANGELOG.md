@@ -37,6 +37,7 @@ its section from this file.
 - Settings → Keybindings: a chord with Ctrl, Alt or Shift (such as Ctrl+Alt+1) is recorded as that one chord. Before, the modifier keys pressed first were recorded as chords of their own, so Enter found a sequence that starts with a bare Ctrl, refused it, and the action kept its old key (#445).
 - A sequence that waits for a chord with Ctrl, Alt, Shift or Super (such as Space Ctrl+F) is no longer cancelled by the modifier key itself, which a keyboard reports before the key (#445).
 - A tag whose real-server tests, coverage or unused-dependency check failed no longer reaches GitHub: the mirror job now waits for every check job (build, unused-deps, coverage, env-tests), so a red run stops a release too (#461).
+- The real-server suites of the tag CI (`env-tests.sh run`) no longer fail in a fresh container where the Rust toolchain is not installed yet: one `cargo test --locked --no-run` runs first and installs it, so the suites that go at the same time do not install it together (#462).
 
 ### Tests
 
