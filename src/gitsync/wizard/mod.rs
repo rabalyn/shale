@@ -18,6 +18,17 @@ pub(crate) use ui::warnings_ui;
 mod parts_tests;
 #[cfg(all(test, unix))]
 mod ui_tests;
+#[cfg(all(test, unix))]
+mod forgejo_env_tests;
+
+/// Tests: a hermetic git (no user or system configuration, branch `main`, no git-lfs) for a test folder.
+#[cfg(all(test, unix))]
+fn ui_git(_root: &Path) -> Git {
+    let env = [("GIT_CONFIG_GLOBAL", "/dev/null"), ("GIT_CONFIG_NOSYSTEM", "1"), ("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "init.defaultBranch"), ("GIT_CONFIG_VALUE_0", "main")];
+    let mut git = Git { program: "git".into(), env: env.iter().map(|(k, v)| (std::ffi::OsString::from(k), std::ffi::OsString::from(v))).collect() };
+    super::hide_lfs(&mut git);
+    git
+}
 
 use super::detect::Finding;
 use super::{connect, credentials, Git};
