@@ -258,6 +258,11 @@ Some behaviour is decided by a note's own properties (front matter) instead of a
 | `sync.commit_suffix` | empty | Git sync, "suffix" |
 | `sync.lfs_download` | `on_demand` (a media file stored with Git LFS is downloaded when you play or open it; `always`: after every sync) | Git sync, "Download media files after every sync" (shown only when `git-lfs` is installed) |
 
+Settings → Sync starts with **Turn on sync…** ([[Turn on sync]]), which sets up the history, a folder another app syncs, or a git server; the
+address field and **Connect** are under **Advanced**. The wizard adds no setting of its own: it turns `history.enabled` on, and for a server it
+sets the vault's `origin` and `sync.enabled`. A token is kept in the system keyring, never in a settings file. Where the vault is (a network
+folder or a cloud-synced folder) is a warning, not a setting.
+
 The settings of the git that Shale runs are in the settings file of this computer ([[Git sync]]):
 
 | Setting | Default | Where |

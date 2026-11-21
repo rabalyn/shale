@@ -57,6 +57,10 @@ pub struct SyncState {
     pulls: VecDeque<Option<PathBuf>>,
     /// `git --version`, looked up once (None inside = git is missing).
     git_version: Option<Option<String>>,
+    /// The report of the last sync that worked (the wizard's test sync tells it in words, SYNC-058).
+    pub last_report: Option<Report>,
+    /// The "Turn on sync" wizard, the detection of shared folders and the move out (SYNC-047…SYNC-063).
+    pub setup: crate::gitsync::wizard::Setup,
     /// The URL field in the settings.
     pub url: String,
     /// `origin` of the open vault.
@@ -91,6 +95,7 @@ impl ShaleApp {
     pub(crate) fn sync_vault_opened(&mut self) {
         self.sync.last_start = None;
         self.sync.last = None;
+        self.sync.setup.forget_vault();
         self.sync.remote = self.vault.as_ref().and_then(|v| gitsync::remote_url(&self.sync.git, &v.root)).map(|u| gitsync::hide_passwords(&u));
         self.sync.url = self.sync.remote.clone().unwrap_or_default();
         self.refresh_lfs();
@@ -228,6 +233,7 @@ impl ShaleApp {
 
     /// Every frame: collect a finished sync, start one when it is due (SYNC-002).
     pub(crate) fn sync_tick(&mut self, ctx: &egui::Context) {
+        self.wizard_tick(ctx);
         self.lfs_pull_tick(ctx);
         if self.lfs_job_done(ctx) {
             return;
@@ -264,17 +270,23 @@ impl ShaleApp {
 
     /// Save everything, then sync in the background.
     pub(crate) fn start_sync(&mut self) {
+        let git = self.sync.git.clone();
+        self.start_sync_with(git);
+    }
+
+    /// Like [`start_sync`](Self::start_sync) with this git (the wizard's test sync trusts a new SSH
+    /// host once, SYNC-058). False: nothing started (another job runs, or there is no vault).
+    pub(crate) fn start_sync_with(&mut self, git: Git) -> bool {
         // a snapshot and the sync never run on the repository at once (SYNC-035)
         if self.sync.running() || self.sync.lfs_job.is_some() || self.history.busy() {
-            return;
+            return false;
         }
-        let Some(root) = self.vault.as_ref().map(|v| v.root.clone()) else { return };
+        let Some(root) = self.vault.as_ref().map(|v| v.root.clone()) else { return false };
         self.sync.last_start = Some(Instant::now());
         self.flush_all();
         self.remember_open_files();
         self.save_config();
         let opts = self.sync_options();
-        let git = self.sync.git.clone();
         let tree = self.sync.tree.clone();
         let ctx = self.ctx.clone();
         let job_root = root.clone();
@@ -287,6 +299,7 @@ impl ShaleApp {
             },
         );
         self.sync.job = Some((root, rx));
+        true
     }
 
     /// Bring buffers in line with what the sync changed (SYNC-013) and tell the user (SYNC-014).
@@ -307,6 +320,7 @@ impl ShaleApp {
             }
         };
         self.sync.last = Some((when, Ok(report.summary())));
+        self.sync.last_report = Some(report.clone());
         self.refresh_lfs();
         if lfs::pull_after_sync(&self.vdata.settings.sync.lfs_download, root) && self.vault.as_ref().map(|v| v.root.as_path()) == Some(root) {
             self.sync.pulls.push_back(None);
@@ -393,37 +407,65 @@ impl ShaleApp {
         let mut changed = self.git_settings_ui(ui);
         let Some(root) = self.vault.as_ref().map(|v| v.root.clone()) else { return changed };
         if self.git_version().is_none() {
-            crate::theme::paragraph(ui, "git is not installed. Install git to sync this vault with a git repository.");
+            crate::theme::paragraph(ui, "git is not installed. Install git to keep a history of this vault or to sync it with a git repository.");
+            // the wizard's first step is the install (SYNC-048)
+            let b = ui.button("Turn on sync…");
+            self.sync.rects.push(("turn-on", b.rect));
+            if b.clicked() {
+                self.open_sync_wizard();
+            }
             return changed;
         }
         let repo = gitsync::is_repo(&root);
-        if !repo {
-            crate::theme::hint(ui, "This vault is not a git repository yet. Enter the URL of a remote repository, or run “git init” in the vault folder; Shale then syncs it on its own.");
-        } else {
+        let ctx = ui.ctx().clone();
+        // where the vault is, looked up once in a background job (SYNC-061)
+        self.sync.setup.detect_for(&root, &ctx);
+        if repo {
             match &self.sync.remote {
                 Some(u) => crate::theme::hint(ui, format!("Remote: {u}")),
                 None => crate::theme::hint(ui, "No remote: changes are committed in the vault's own history only."),
             };
         }
-        ui.horizontal(|ui| {
-            let r = ui.add(egui::TextEdit::singleline(&mut self.sync.url).hint_text("https://… or git@host:notes.git").desired_width(300.0));
-            self.sync.rects.push(("url", r.rect));
-            let label = if self.sync.remote.is_some() { "Change remote" } else { "Connect" };
-            let b = ui.button(label);
-            self.sync.rects.push(("connect", b.rect));
+        let findings = self.sync.setup.findings(&root).to_vec();
+        let (moving, moved) = (self.sync.setup.moveout.running(), self.sync.setup.moveout.result.clone());
+        if crate::gitsync::wizard::warnings_ui(ui, &findings, repo, self.sync.remote.is_some(), moving, moved.as_ref()) {
+            self.start_moveout();
+        }
+        if self.sync.remote.is_none() {
+            crate::theme::hint(ui, "Keep your notes safe with a history on this device, or sync them with a server (Forgejo, Gitea, GitHub, GitLab or any git address). Shale asks what you need and does the rest.");
+            let b = ui.button("Turn on sync…");
+            self.sync.rects.push(("turn-on", b.rect));
             if b.clicked() {
-                let url = self.sync.url.trim().to_string();
-                match gitsync::connect(&self.sync.git, &root, &url) {
-                    Ok(()) => {
-                        self.sync.remote = Some(url);
-                        self.sync.last_start = None;
-                        self.toast("Remote set; syncing now");
-                        self.start_sync();
-                    }
-                    Err(e) => self.toast(format!("Could not set the remote: {e}")),
-                }
+                self.open_sync_wizard();
             }
-        });
+        }
+        let advanced = self.sync.setup.advanced;
+        let b = ui.button(if advanced { "Advanced ▾" } else { "Advanced ▸" });
+        self.sync.rects.push(("advanced", b.rect));
+        if b.clicked() {
+            self.sync.setup.advanced = !advanced;
+        }
+        if advanced {
+            ui.horizontal(|ui| {
+                let r = ui.add(egui::TextEdit::singleline(&mut self.sync.url).hint_text("https://… or git@host:notes.git").desired_width(300.0));
+                self.sync.rects.push(("url", r.rect));
+                let label = if self.sync.remote.is_some() { "Change remote" } else { "Connect" };
+                let b = ui.button(label);
+                self.sync.rects.push(("connect", b.rect));
+                if b.clicked() {
+                    let url = self.sync.url.trim().to_string();
+                    match gitsync::connect(&self.sync.git, &root, &url) {
+                        Ok(()) => {
+                            self.sync.remote = Some(url);
+                            self.sync.last_start = None;
+                            self.toast("Remote set; syncing now");
+                            self.start_sync();
+                        }
+                        Err(e) => self.toast(format!("Could not set the remote: {e}")),
+                    }
+                }
+            });
+        }
         if !repo {
             return changed;
         }
@@ -706,6 +748,8 @@ mod tests {
         let mut h = H { ctx: egui::Context::default(), t: 0.0 };
         h.frame(&mut app, vec![]);
         assert!(!app.sync.rects.iter().any(|r| r.0 == "enabled"), "no sync settings before there is a repository");
+        assert!(app.sync.rects.iter().any(|r| r.0 == "turn-on") && !app.sync.rects.iter().any(|r| r.0 == "url"), "the wizard is the way in, the address field is under Advanced");
+        h.click(&mut app, "advanced");
         h.typ(&mut app, "url", remote.to_str().unwrap());
         h.click(&mut app, "connect");
         assert!(gitsync::is_repo(&v));

@@ -50,7 +50,7 @@ pub fn default_root() -> PathBuf {
 pub const ID_FILE: &str = ".shale/history-id";
 
 /// The file in a git directory that names the folder it belongs to.
-const WORKTREE_FILE: &str = "worktree";
+pub(crate) const WORKTREE_FILE: &str = "worktree";
 
 /// Names that no snapshot takes: Shale's temporary files and what cloud clients and network
 /// shares make next to the notes (`*` is any text; compared without letter case).
@@ -281,6 +281,14 @@ pub fn locate(git: &Git, vault: &Path, history_root: &Path) -> Result<Repo, Stri
     if super::is_repo(vault) {
         return Ok(Repo { git: git.clone(), vault: vault.to_path_buf(), git_dir: None });
     }
+    Ok(Repo { git: git.clone(), vault: vault.to_path_buf(), git_dir: Some(local_git_dir(vault, history_root)?) })
+}
+
+/// The git directory a vault without `.git` has: `<history_root>/<vault id>` (SYNC-031). A vault
+/// without an ID gets one (written to [`ID_FILE`]), and so does a copy of a vault whose original
+/// still exists with the same ID. The wizard's move of a repository out of the vault (SYNC-063)
+/// uses it too.
+pub fn local_git_dir(vault: &Path, history_root: &Path) -> Result<PathBuf, String> {
     let mut id = match vault_id(vault) {
         Some(i) => i,
         None => {
@@ -295,7 +303,7 @@ pub fn locate(git: &Git, vault: &Path, history_root: &Path) -> Result<Repo, Stri
         id = new_id();
         write_id(vault, &id)?;
     }
-    Ok(Repo { git: git.clone(), vault: vault.to_path_buf(), git_dir: Some(history_root.join(id)) })
+    Ok(history_root.join(id))
 }
 
 fn write_id(vault: &Path, id: &str) -> Result<(), String> {

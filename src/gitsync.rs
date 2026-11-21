@@ -632,12 +632,16 @@ pub fn host_name() -> String {
     "this computer".into()
 }
 
+pub mod credentials;
+pub mod detect;
 pub mod history;
 pub mod install;
 pub mod install_ui;
 pub mod lfs;
 pub mod managed;
+pub mod moveout;
 pub mod sources;
+pub mod wizard;
 
 /// Marks a `Git` whose `git lfs …` calls fail (see `hide_lfs`).
 #[cfg(test)]
@@ -665,12 +669,18 @@ pub fn hide_lfs(git: &mut Git) {
 }
 
 // the fake programs are shell scripts: these run on Unix
+#[cfg(test)]
+mod credentials_tests;
+#[cfg(test)]
+mod detect_tests;
 #[cfg(all(test, unix))]
 mod install_tests;
 #[cfg(all(test, unix))]
 mod install_ui_tests;
 #[cfg(test)]
 mod managed_tests;
+#[cfg(test)]
+mod moveout_tests;
 #[cfg(test)]
 mod sources_tests;
 #[cfg(test)]

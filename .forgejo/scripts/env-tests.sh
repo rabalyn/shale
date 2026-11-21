@@ -1,6 +1,9 @@
 #!/bin/sh
 # The CI job "env-tests" (DEV-005, CALENV-004): runs the real-server suites of the CalDAV and mail
-# test environments and the LuaLaTeX suite of the TeX environment (TEX-020). Usage:
+# test environments and the LuaLaTeX suite of the TeX environment (TEX-020). The fourth suite, `forgejo_env`
+# (SYNC-066), runs the sync wizard's server path against a real Forgejo (`tests/forgejo-env/`): `suites` names it
+# for `src/gitsync/wizard/`, `src/gitsync/credentials.rs`, `tests/forgejo-env/` and `tests/askpass`; `run` starts
+# the Forgejo stack for it (SHALE_FORGEJO_ENV_SH) and takes it down again. Usage:
 #   env-tests.sh suites <base> <head>
 #       prints the suites the change from <base> to <head> needs, space separated (empty: none):
 #       `calendar::env_tests` for `src/calendar/` and `tests/caldav-env/`, `mail_env` for `src/mail*` and
@@ -67,13 +70,14 @@ case "${1:-}" in
   suites)
     files=$(git diff --name-only "$2" "$3")
     if printf '%s\n' "$files" | grep -Eq '^\.forgejo/(workflows/ci\.yml|scripts/env-tests\.sh)$'; then
-      echo "calendar::env_tests mail_env tex_env"
+      echo "calendar::env_tests mail_env tex_env forgejo_env"
       exit 0
     fi
     out=""
     if printf '%s\n' "$files" | grep -Eq '^(src/calendar/|tests/caldav-env/)'; then out="$out calendar::env_tests"; fi
     if printf '%s\n' "$files" | grep -Eq '^(src/mail|tests/mail-env/)'; then out="$out mail_env"; fi
     if printf '%s\n' "$files" | grep -Eq '^(src/pdf/tex|assets/tex/|tests/tex-env/)'; then out="$out tex_env"; fi
+    if printf '%s\n' "$files" | grep -Eq '^(src/gitsync/wizard/|src/gitsync/credentials\.rs|tests/forgejo-env/|tests/askpass)'; then out="$out forgejo_env"; fi
     echo "${out# }"
     ;;
 
@@ -144,12 +148,13 @@ case "${1:-}" in
     esac
 
     # the suites to run: the list of `suites` (land.sh), unset = all (the tag CI)
-    suites=${SHALE_ENV_TESTS_SUITES-calendar::env_tests mail_env tex_env}
-    need_caldav=no; need_mail=no; need_tex=no
+    suites=${SHALE_ENV_TESTS_SUITES-calendar::env_tests mail_env tex_env forgejo_env}
+    need_caldav=no; need_mail=no; need_tex=no; need_forgejo=no
     for suite in $suites; do
       case $suite in
         calendar::env_tests) need_caldav=yes ;;
         mail_env) need_mail=yes ;;
+        forgejo_env) need_forgejo=yes ;;
         tex_env) need_tex=yes ;;
         *) echo "SHALE_ENV_TESTS_SUITES names an unknown suite: '$suite'" >&2; exit 1 ;;
       esac
@@ -161,6 +166,7 @@ case "${1:-}" in
     if [ "${SHALE_ENV_TESTS_TEX_IMPORT:-no}" = yes ]; then suites="$suites tex_import"; need_tex=yes; fi
     caldav_sh=${SHALE_CALDAV_ENV_SH:-tests/caldav-env/caldav-env.sh}
     mail_sh=${SHALE_MAIL_ENV_SH:-tests/mail-env/mail-env.sh}
+    forgejo_sh=${SHALE_FORGEJO_ENV_SH:-tests/forgejo-env/forgejo-env.sh}
     texenv=${SHALE_TEX_ENV_SH:-tests/tex-env/tex-env.sh}
 
     # a second `podman info` right after the first can fail where the first worked: trust the
@@ -171,9 +177,10 @@ case "${1:-}" in
       docker)
         SHALE_CALDAV_ENV_COMPOSE=${SHALE_CALDAV_ENV_COMPOSE:-docker-compose}
         SHALE_MAIL_ENV_COMPOSE=${SHALE_MAIL_ENV_COMPOSE:-docker-compose}
+        SHALE_FORGEJO_ENV_COMPOSE=${SHALE_FORGEJO_ENV_COMPOSE:-docker-compose}
         SHALE_MAIL_ENV_ENGINE=docker
         SHALE_TEX_ENV_ENGINE=docker
-        export SHALE_CALDAV_ENV_COMPOSE SHALE_MAIL_ENV_COMPOSE SHALE_MAIL_ENV_ENGINE SHALE_TEX_ENV_ENGINE
+        export SHALE_CALDAV_ENV_COMPOSE SHALE_MAIL_ENV_COMPOSE SHALE_FORGEJO_ENV_COMPOSE SHALE_MAIL_ENV_ENGINE SHALE_TEX_ENV_ENGINE
         ;;
       *) echo "no container engine is usable here" >&2; exit 1 ;;
     esac
@@ -240,6 +247,7 @@ case "${1:-}" in
     down() {
       if [ "$need_caldav" = yes ]; then sh "$caldav_sh" reset >/dev/null 2>&1 || true; fi
       if [ "$need_mail" = yes ]; then sh "$mail_sh" reset >/dev/null 2>&1 || true; fi
+      if [ "$need_forgejo" = yes ]; then sh "$forgejo_sh" reset >/dev/null 2>&1 || true; fi
     }
     cleanup() {
       # an interrupt: a background job ignores SIGINT, so stop the jobs and what they started
@@ -260,6 +268,7 @@ case "${1:-}" in
     stacks=""
     if [ "$need_caldav" = yes ]; then start_job up-caldav sh "$caldav_sh" up; stacks="$stacks up-caldav"; fi
     if [ "$need_mail" = yes ]; then start_job up-mail sh "$mail_sh" up; stacks="$stacks up-mail"; fi
+    if [ "$need_forgejo" = yes ]; then start_job up-forgejo sh "$forgejo_sh" up; stacks="$stacks up-forgejo"; fi
     prepare=$stacks
     if [ "$need_tex" = yes ]; then start_job tex-build sh "$texenv" build $refresh; prepare="$prepare tex-build"; fi
     # shellcheck disable=SC2086 # the names are words
@@ -270,6 +279,7 @@ case "${1:-}" in
       echo "a stack did not come up:$stacks_failed" >&2
       if [ "$need_caldav" = yes ]; then sh "$caldav_sh" status || true; fi
       if [ "$need_mail" = yes ]; then sh "$mail_sh" status || true; fi
+      if [ "$need_forgejo" = yes ]; then sh "$forgejo_sh" status || true; fi
       exit 1
     fi
     if [ "$need_tex" = yes ] && [ -n "$(failed_of tex-build)" ]; then

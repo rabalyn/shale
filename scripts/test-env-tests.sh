@@ -117,7 +117,7 @@ suites_case() {
     FAILED=1
   fi
 }
-ALL="calendar::env_tests mail_env tex_env"
+ALL="calendar::env_tests mail_env tex_env forgejo_env"
 suites_case "CalDAV code" "calendar::env_tests" src/calendar/ui.rs
 suites_case "CalDAV environment" "calendar::env_tests" tests/caldav-env/caldav-env.sh
 suites_case "mail code (src/mail.rs)" "mail_env" src/mail.rs
@@ -126,10 +126,15 @@ suites_case "mail environment" "mail_env" tests/mail-env/mail-env.sh
 suites_case "TeX code" "tex_env" src/pdf/tex/build.rs
 suites_case "TeX assets" "tex_env" assets/tex/sets/x.txt
 suites_case "TeX environment" "tex_env" tests/tex-env/tex-env.sh
+suites_case "the sync wizard" "forgejo_env" src/gitsync/wizard/ui.rs
+suites_case "the git credentials" "forgejo_env" src/gitsync/credentials.rs
+suites_case "the Forgejo environment" "forgejo_env" tests/forgejo-env/forgejo-env.sh
+suites_case "the askpass fake keyring" "forgejo_env" tests/askpass/secret-tool
+suites_case "other git sync code needs none" "" src/gitsync/detect.rs
 suites_case "CalDAV and TeX together, in a fixed order" "calendar::env_tests tex_env" src/pdf/tex/a.rs src/calendar/b.rs
-suites_case "CalDAV, mail and TeX together" "$ALL" src/calendar/b.rs src/mail/c.rs tests/tex-env/d
-suites_case "the CI workflow runs all three" "$ALL" .forgejo/workflows/ci.yml
-suites_case "env-tests.sh itself runs all three" "$ALL" .forgejo/scripts/env-tests.sh
+suites_case "CalDAV, mail, TeX and Forgejo together" "$ALL" src/calendar/b.rs src/mail/c.rs tests/tex-env/d src/gitsync/wizard/e.rs
+suites_case "the CI workflow runs all four" "$ALL" .forgejo/workflows/ci.yml
+suites_case "env-tests.sh itself runs all four" "$ALL" .forgejo/scripts/env-tests.sh
 suites_case "another file needs none" "" src/editor/x.rs docs/a.md
 suites_case "another CI file needs none" "" .forgejo/scripts/check-coverage.sh
 
@@ -140,7 +145,7 @@ cat > "$TMP/runbin/cargo" <<'CARGO'
 echo "cargo $*" >> "$SCENARIO/calls"
 echo 'test result: ok. 3 passed; 0 failed; 0 ignored'
 CARGO
-for name in caldav mail tex; do
+for name in caldav mail tex forgejo; do
   cat > "$TMP/runbin/$name-env.sh" <<'ENVSH'
 #!/bin/sh
 echo "$(basename "$0" -env.sh) $*" >> "$SCENARIO/calls"
@@ -158,7 +163,7 @@ run_case() {
   : > "$SCENARIO/calls"
   OUT=$(env -u SHALE_ENV_TESTS_SUITES "$@" PATH="$TMP/runbin:$PATH" SCENARIO="$SCENARIO" \
     SHALE_CALDAV_ENV_SH="$TMP/runbin/caldav-env.sh" SHALE_MAIL_ENV_SH="$TMP/runbin/mail-env.sh" \
-    SHALE_TEX_ENV_SH="$TMP/runbin/tex-env.sh" SHALE_TEX_FAILED_LOGS="$SCENARIO/failed" \
+    SHALE_TEX_ENV_SH="$TMP/runbin/tex-env.sh" SHALE_FORGEJO_ENV_SH="$TMP/runbin/forgejo-env.sh" SHALE_TEX_FAILED_LOGS="$SCENARIO/failed" \
     sh "$SCRIPT" run podman 2>&1)
   code=$?
   # the helpers and the suites run at the same time (#448): the calls are compared as a set, the order is tested below
@@ -176,11 +181,16 @@ MAIL_UP="mail up"
 CAL_RUN="cargo test --locked -- --ignored calendar::env_tests --test-threads=1"
 MAIL_RUN="cargo test --locked -- --ignored mail_env --test-threads=1"
 TEX_RUN="cargo test --locked -- --ignored tex_env --test-threads=4"
+FJ_UP="forgejo up"
+FJ_RUN="cargo test --locked -- --ignored forgejo_env --test-threads=1"
+FJ_DOWN="forgejo reset"
 CAL_DOWN="caldav reset"
 MAIL_DOWN="mail reset"
 WARM="cargo test --locked --no-run"
-run_case "unset runs all three suites on both stacks and builds the image" \
-  "$WARM,caldav reset,mail reset,$CAL_UP,$MAIL_UP,tex build,$CAL_RUN,$MAIL_RUN,$TEX_RUN,$CAL_DOWN,$MAIL_DOWN"
+run_case "unset runs all four suites on the three stacks and builds the image" \
+  "$WARM,caldav reset,mail reset,$FJ_DOWN,$CAL_UP,$MAIL_UP,$FJ_UP,tex build,$CAL_RUN,$MAIL_RUN,$FJ_RUN,$TEX_RUN,$CAL_DOWN,$MAIL_DOWN,$FJ_DOWN"
+run_case "a Forgejo list starts only the Forgejo stack, no image" \
+  "$WARM,$FJ_DOWN,$FJ_UP,$FJ_RUN,$FJ_DOWN" "SHALE_ENV_TESTS_SUITES=forgejo_env"
 run_case "a CalDAV list starts only the CalDAV stack, no image" \
   "$WARM,$CAL_DOWN,$CAL_UP,$CAL_RUN,$CAL_DOWN" "SHALE_ENV_TESTS_SUITES=calendar::env_tests"
 run_case "a mail list starts only the mail stack, no image" \
@@ -205,7 +215,7 @@ run_fails() {
   : > "$SCENARIO/calls"
   OUT=$(env -u SHALE_ENV_TESTS_SUITES "$@" PATH="$TMP/runbin:$PATH" SCENARIO="$SCENARIO" \
     SHALE_CALDAV_ENV_SH="$TMP/runbin/caldav-env.sh" SHALE_MAIL_ENV_SH="$TMP/runbin/mail-env.sh" \
-    SHALE_TEX_ENV_SH="$TMP/runbin/tex-env.sh" SHALE_TEX_FAILED_LOGS="$SCENARIO/failed" \
+    SHALE_TEX_ENV_SH="$TMP/runbin/tex-env.sh" SHALE_FORGEJO_ENV_SH="$TMP/runbin/forgejo-env.sh" SHALE_TEX_FAILED_LOGS="$SCENARIO/failed" \
     sh "$SCRIPT" run podman 2>&1)
   code=$?
   if [ "$code" = 1 ] && [ ! -s "$SCENARIO/calls" ] && printf '%s' "$OUT" | grep -Fq -- "$needle"; then
@@ -230,7 +240,7 @@ mkdir -p "$SCENARIO"
 : > "$SCENARIO/calls"
 OUT=$(env -u SHALE_ENV_TESTS_SUITES SHALE_ENV_TESTS_SUITES=mail_env PATH="$TMP/runbin:$PATH" SCENARIO="$SCENARIO" \
   SHALE_CALDAV_ENV_SH="$TMP/runbin/caldav-env.sh" SHALE_MAIL_ENV_SH="$TMP/runbin/mail-env.sh" \
-  SHALE_TEX_ENV_SH="$TMP/runbin/tex-env.sh" SHALE_TEX_FAILED_LOGS="$SCENARIO/failed" \
+  SHALE_TEX_ENV_SH="$TMP/runbin/tex-env.sh" SHALE_FORGEJO_ENV_SH="$TMP/runbin/forgejo-env.sh" SHALE_TEX_FAILED_LOGS="$SCENARIO/failed" \
   sh "$SCRIPT" run podman 2>&1)
 code=$?
 if [ "$code" = 1 ] && [ "$(paste -sd, "$SCENARIO/calls")" = "mail reset,mail up,mail status,mail reset" ]; then
@@ -262,7 +272,7 @@ if [ "$suite" = "${FAKE_FAIL:-}" ]; then echo 'test result: FAILED. 0 passed; 1 
 if [ "$suite" = "${FAKE_NONE:-}" ]; then echo 'test result: ok. 0 passed; 0 failed; 0 ignored'; exit 0; fi
 echo 'test result: ok. 3 passed; 0 failed; 0 ignored'
 CARGO
-for name in caldav mail tex; do
+for name in caldav mail tex forgejo; do
   cat > "$TMP/pbin/$name-env.sh" <<'ENVSH'
 #!/bin/sh
 n=$(basename "$0" -env.sh)
@@ -286,7 +296,7 @@ par_run() {
   t0=$(date +%s%N)
   OUT=$(env -u SHALE_ENV_TESTS_SUITES "$@" PATH="$TMP/pbin:$PATH" SCENARIO="$SCENARIO" \
     SHALE_CALDAV_ENV_SH="$TMP/pbin/caldav-env.sh" SHALE_MAIL_ENV_SH="$TMP/pbin/mail-env.sh" \
-    SHALE_TEX_ENV_SH="$TMP/pbin/tex-env.sh" SHALE_TEX_FAILED_LOGS="$SCENARIO/failed" \
+    SHALE_TEX_ENV_SH="$TMP/pbin/tex-env.sh" SHALE_FORGEJO_ENV_SH="$TMP/pbin/forgejo-env.sh" SHALE_TEX_FAILED_LOGS="$SCENARIO/failed" \
     sh "$SCRIPT" run podman 2>&1)
   CODE=$?
   t1=$(date +%s%N)
@@ -300,9 +310,9 @@ check() {
 pos() { grep -nxF -- "$1" "$EVENTS" | head -n 1 | cut -d: -f1 | sed 's/^$/0/'; }
 nopos() { local p; p=$(pos "$1"); echo "${p:-0}"; }
 
-# spec: DEV-011 (#448): the stacks and the image start together, the suites run together: three suites of 1.5 s each, helpers of 0.5 s
+# spec: DEV-011 (#448): the stacks and the image start together, the suites run together: four suites of 1.5 s each, helpers of 0.5 s
 par_run "all" FAKE_SLEEP=0.5
-check "run: all three suites ran, with their own thread counts, and the run ends well" '[ "$CODE" = 0 ] && grep -qx "start calendar::env_tests --test-threads=1" "$EVENTS" && grep -qx "start mail_env --test-threads=1" "$EVENTS" && grep -qx "start tex_env --test-threads=4" "$EVENTS"'
+check "run: all four suites ran, with their own thread counts, and the run ends well" '[ "$CODE" = 0 ] && grep -qx "start calendar::env_tests --test-threads=1" "$EVENTS" && grep -qx "start mail_env --test-threads=1" "$EVENTS" && grep -qx "start forgejo_env --test-threads=1" "$EVENTS" && grep -qx "start tex_env --test-threads=4" "$EVENTS"'
 # sequential: 3 x 0.5 s of helpers + 3 x 1.5 s of suites = 6 s; at the same time: 0.5 + 1.5 s plus the polling
 check "run: the stacks, the image and the suites go at the same time (about as long as the slowest, not the sum)" '[ "$MS" -lt 3800 ]'
 check "run: every helper started before the first suite and ended before it (the suites wait for the stacks)" '
@@ -315,9 +325,9 @@ check "run: the suites overlap (all started before the first ended)" '
   [ "$(nopos "start tex_env --test-threads=4")" -lt "$(nopos "end calendar::env_tests")" ] && [ "$(nopos "start mail_env --test-threads=1")" -lt "$(nopos "end calendar::env_tests")" ]'
 # each log is printed on its own, in one piece
 check "run: the output of a suite is not interleaved with another one" '
-  [ "$(printf "%s\n" "$OUT" | grep "^out " | awk "{print \$2}" | uniq | wc -l)" = 3 ] && [ "$(printf "%s\n" "$OUT" | grep -c "^out ")" = 9 ]'
+  [ "$(printf "%s\n" "$OUT" | grep "^out " | awk "{print \$2}" | uniq | wc -l)" = 4 ] && [ "$(printf "%s\n" "$OUT" | grep -c "^out ")" = 12 ]'
 check "run: every log has a heading with its exit code" '
-  printf "%s\n" "$OUT" | grep -q "^===== calendar::env_tests: exit 0" && printf "%s\n" "$OUT" | grep -q "^===== mail_env: exit 0" && printf "%s\n" "$OUT" | grep -q "^===== tex_env: exit 0"'
+  printf "%s\n" "$OUT" | grep -q "^===== calendar::env_tests: exit 0" && printf "%s\n" "$OUT" | grep -q "^===== mail_env: exit 0" && printf "%s\n" "$OUT" | grep -q "^===== tex_env: exit 0" && printf "%s\n" "$OUT" | grep -q "^===== forgejo_env: exit 0"'
 
 # one suite fails: the others still end and are reported, and the failing one is named
 par_run "one failing" FAKE_SLEEP=0.2 FAKE_FAIL=mail_env
@@ -371,10 +381,10 @@ check "run: a failed tex_install still lets tex_import run, and names the pair" 
 # spec: DEV-034: one checkout at a time uses the podman stacks (#420). `run` is started with fake helpers
 # (the real ones are in a copy of the tree), a fake cargo and a fake container engine.
 LT="$TMP/lt"
-mkdir -p "$LT/.forgejo/scripts" "$LT/tests/mail-env" "$LT/tests/caldav-env" "$LT/tests/tex-env" "$LT/lbin"
+mkdir -p "$LT/.forgejo/scripts" "$LT/tests/mail-env" "$LT/tests/caldav-env" "$LT/tests/tex-env" "$LT/tests/forgejo-env" "$LT/lbin"
 cp "$SCRIPT" "$LT/.forgejo/scripts/env-tests.sh"
 cp "$(dirname "$SCRIPT")/../../tests/env-lock.sh" "$LT/tests/env-lock.sh"
-for h in mail-env caldav-env tex-env; do
+for h in mail-env caldav-env tex-env forgejo-env; do
   # each helper records that it ran and whether it saw the held marker
   cat > "$LT/tests/$h/$h.sh" <<'HELPER'
 #!/bin/sh

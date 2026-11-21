@@ -17,6 +17,13 @@ iCloud or Syncthing syncs. Back to [[Start here]].
   app keeps current. On an NFS share it can take up to a minute (NFS caches folder listings).
   Shale looks at the folder every 3 seconds; it does not rely on the system telling it.
 
+# Shale tells you
+
+[[Turn on sync]] and Settings → Sync warn when Shale finds that the vault is on a network share or in a folder that Dropbox, Nextcloud,
+Syncthing, Google Drive, iCloud or OneDrive syncs (a guess from the file system and from marker files; it never decides anything). For a
+vault that has a `.git` folder inside such a folder and no server, **Move the repository out** puts the repository in a private place on this
+computer and removes `.git` from the vault, after checking the copy.
+
 # What to avoid
 
 - **A git repository in a synced folder.** Do not run `git init` in a vault that Nextcloud,

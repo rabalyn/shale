@@ -36,6 +36,7 @@ way it is. They are append-only. *What* Shale does today is in the living specs 
 | [0026](0026-weekly-only-texlive-refresh.md) | Only the weekly run rebuilds the TeX image without the cache; tags use the cached image | Accepted |
 | [0027](0027-managed-git.md) | A managed git, installed with one button | Accepted |
 | [0028](0028-file-history.md) | File history: snapshot commits and restoring a version | Accepted |
+| [0029](0029-sync-wizard-and-git-credentials.md) | The sync wizard, git credentials through GIT_ASKPASS and detection of shared folders | Accepted |
 
 Format: Context, Decision, Consequences (and Alternatives if any). Statuses: *Proposed* →
 *Accepted* → (*Superseded by NNNN*). An accepted ADR is not edited; a new one supersedes it.
