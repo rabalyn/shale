@@ -251,6 +251,30 @@ fn nfs_env_storage_checks() {
     storage_checks("nfs", &dir, false);
 }
 
+/// The detection of SYNC-059 on a mounted share: a network file system, by the mount table.
+fn detect_network_on(dir: &Path, fs_names: &[&str]) {
+    let found = crate::gitsync::detect::detect_real(dir);
+    let net: Vec<_> = found.iter().filter(|f| f.is_network()).collect();
+    assert!(net.iter().any(|f| matches!(&f.kind, crate::gitsync::detect::Kind::Network { fs, sure: true } if fs_names.contains(&fs.as_str()))), "no network file system among {found:?} (wanted one of {fs_names:?})");
+    observe("detect", &format!("{} is {}", dir.display(), net[0].what()));
+}
+
+// spec: SYNC-059, NET-011
+#[test]
+#[ignore = "needs a mounted Samba share: tests/smb-env/smb-env.sh up, then mount"]
+fn smb_env_detect_sees_the_mounted_share_as_a_network_folder() {
+    crate::env_lock::hold();
+    detect_network_on(&mounted_dir("smb-env", "smb-env.sh"), &["cifs", "smb3", "smb2", "smbfs"]);
+}
+
+// spec: SYNC-059, NET-012
+#[test]
+#[ignore = "needs a mounted NFS export: tests/nfs-env/nfs-env.sh up, then mount"]
+fn nfs_env_detect_sees_the_mounted_export_as_a_network_folder() {
+    crate::env_lock::hold();
+    detect_network_on(&mounted_dir("nfs-env", "nfs-env.sh"), &["nfs", "nfs4"]);
+}
+
 // ---- two devices through Syncthing ----
 
 /// The vault folders of device A and device B of the running pair.
@@ -424,4 +448,22 @@ fn syncthing_env_vault_state_written_on_both_devices_at_once_leaves_a_conflict_f
         assert_eq!(data.state.recent_tags.len(), 1);
         assert!(Vault::open(d).unwrap().files.is_empty(), "the files in .shale/ are not notes");
     }
+}
+
+// spec: SYNC-060, NET-010
+#[test]
+#[ignore = "needs the Syncthing pair: tests/syncthing-env/syncthing-env.sh up"]
+fn syncthing_env_detect_sees_a_synced_folder_by_its_marker_and_warns_that_a_repository_does_not_belong_there() {
+    use crate::gitsync::detect::{detect_real, repo_warning, Cloud, Kind};
+    crate::env_lock::hold();
+    let (a, b) = pair();
+    for dir in [&a, &b] {
+        let found = detect_real(dir);
+        assert!(found.iter().any(|f| f.kind == Kind::Cloud(Cloud::Syncthing)), "{found:?}");
+        assert!(repo_warning(&found, false).unwrap().contains("a Syncthing folder"));
+    }
+    // a vault folder inside it is found through its parent
+    let p = Pair::new("detect");
+    let found = detect_real(&p.a);
+    assert!(found.iter().any(|f| f.kind == Kind::Cloud(Cloud::Syncthing)), "{found:?}");
 }
