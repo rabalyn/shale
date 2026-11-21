@@ -8,7 +8,7 @@
 # change elsewhere that breaks the harness' build is still caught.
 set -eu
 cd "$(dirname "$0")/.."
-if git diff --name-only "$1" "$2" | grep -Eq '^(src/bench/|src/main\.rs$|benches/|scripts/bench[^/]*\.sh$|Cargo\.toml$|Cargo\.lock$|rust-toolchain\.toml$|scripts/land\.sh$)'; then
+if git diff --name-only "$1" "$2" | grep -E '^(src/bench/|src/main\.rs$|benches/|scripts/bench[^/]*\.sh$|Cargo\.toml$|Cargo\.lock$|rust-toolchain\.toml$|scripts/land\.sh$)' >/dev/null; then
   echo yes
 else
   echo no
