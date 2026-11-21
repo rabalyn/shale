@@ -64,7 +64,7 @@ upstream `latexmkrc`).
   most). So the image is **not reproducible**: it is whatever TeX Live is current when it is
   built. It records which one in `/etc/shale-tex-build` (year, repository, mirror, date), which `status` and the
   demo test print. `build` reuses a cached image; `build --refresh` rebuilds it without the cache, which the
-  weekly and tag CI runs do, so a change upstream shows within a week.
+  weekly CI run does (tags use the cached image, ADR-0026), so a change upstream shows within a week.
 - **tuda-ci at commit `e933be93…`** (v4.06; there is no tag): GitHub's archive, checked by sha256, in
   `tests/tex-env/cache/` (git-ignored). `build` runs docstrip (`latex tuda-ci.ins`) in the
   image to make the `.cls`/`.sty` files from the `.dtx`.

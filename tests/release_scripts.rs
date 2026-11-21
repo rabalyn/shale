@@ -86,3 +86,47 @@ fn build_025_install_script_uses_no_gnu_only_install_d() {
         assert!(!gnu, "GNU-only `install -D` in scripts/install.sh: {l}");
     }
 }
+
+fn ci_job(name: &str) -> String {
+    let ci = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(".forgejo/workflows/ci.yml")).unwrap();
+    let start = ci.find(&format!("\n  {name}:\n")).unwrap_or_else(|| panic!("no job {name}")) + 1;
+    let rest = &ci[start + 1..];
+    let end = rest
+        .lines()
+        .scan(0, |off, l| {
+            let at = *off;
+            *off += l.len() + 1;
+            Some((at, l))
+        })
+        .skip(1)
+        .find(|(_, l)| l.starts_with("  ") && !l.starts_with("   ") && !l.starts_with("  #") && l.trim_end().ends_with(':'))
+        .map(|(at, _)| at)
+        .unwrap_or(rest.len());
+    ci[start..start + 1 + end].to_string()
+}
+
+// spec: DEV-011, ADR-0026 (#455): a tag, check or release, uses the cached TeX image; only the weekly
+// scheduled run rebuilds it without the cache
+#[test]
+fn dev_011_only_the_weekly_run_refreshes_the_tex_image() {
+    let env_tests = ci_job("env-tests");
+    let line = env_tests.lines().find(|l| l.trim_start().starts_with("SHALE_ENV_TESTS_TEX_REFRESH:")).expect("the refresh variable is set");
+    assert!(line.contains("github.event_name == 'schedule'"), "the weekly run refreshes");
+    assert!(!line.contains("refs/tags") && !line.contains("ref_name"), "no tag refreshes: {line}");
+    // a release tag still runs the real install and the template import (ADR-0021)
+    let install = env_tests.lines().find(|l| l.trim_start().starts_with("SHALE_ENV_TESTS_TEX_INSTALL:")).unwrap();
+    assert!(install.contains("!contains(github.ref_name, '-')"), "the install stays for release tags");
+}
+
+// spec: DEV-010, ADR-0026 (#455): coverage runs for check tags only, and nothing waits for it
+#[test]
+fn dev_010_coverage_runs_for_check_tags_only() {
+    let cov = ci_job("coverage");
+    let cond = cov.lines().find(|l| l.trim_start().starts_with("if:")).expect("the coverage job has a condition");
+    assert!(cond.contains("startsWith(github.ref, 'refs/tags/v')") && cond.contains("contains(github.ref_name, '-')"), "check tags (a pre-release part): {cond}");
+    assert!(cond.contains("github.event_name == 'push'") && !cond.contains('!'), "tags only, not weekly, not by hand, not releases: {cond}");
+    // a skipped job must not hold up the tag's push to GitHub: mirror needs the build only
+    let ci = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(".forgejo/workflows/ci.yml")).unwrap();
+    assert!(ci_job("mirror").contains("needs: build\n"), "mirror needs the build only");
+    assert!(!ci.contains("needs: coverage") && !ci.contains("needs: ["), "no job needs coverage");
+}
