@@ -2,6 +2,7 @@
 
 - **Status**: Accepted (owner decision, 2026-11-18)
 - **Date**: 2026-11-18
+- **Amended by**: [ADR-0026](0026-weekly-only-texlive-refresh.md), release tags no longer refresh the TeX image
 - **Amends**: [ADR-0020](0020-current-texlive.md), the consequence that the CI job (tags and weekly) refreshes the image and runs the real install
 - **Specs**: DEV-011 ([`docs/spec/engineering.md`](../spec/engineering.md)), TEX-020 ([`docs/spec/tex-export.md`](../spec/tex-export.md))
 - **Issues**: #325
