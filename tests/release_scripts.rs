@@ -105,7 +105,7 @@ fn ci_job(name: &str) -> String {
     ci[start..start + 1 + end].to_string()
 }
 
-// spec: DEV-011, ADR-0026 (#455): a tag, check or release, uses the cached TeX image; only the weekly
+// spec: DEV-011 (ADR-0026, #455): a tag, check or release, uses the cached TeX image; only the weekly
 // scheduled run rebuilds it without the cache
 #[test]
 fn dev_011_only_the_weekly_run_refreshes_the_tex_image() {
@@ -118,7 +118,7 @@ fn dev_011_only_the_weekly_run_refreshes_the_tex_image() {
     assert!(install.contains("!contains(github.ref_name, '-')"), "the install stays for release tags");
 }
 
-// spec: DEV-010, ADR-0026 (#455): coverage runs for check tags only, and nothing waits for it
+// spec: DEV-010 (ADR-0026, #455): coverage runs for check tags only, and nothing waits for it
 #[test]
 fn dev_010_coverage_runs_for_check_tags_only() {
     let cov = ci_job("coverage");
