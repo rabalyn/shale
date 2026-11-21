@@ -1,5 +1,7 @@
 //! The Unix side of the lock (see the parent module): `File::lock` is an advisory `flock`, so the
 //! holder can write its token into the locked file and a waiting process can read it.
+// Already test-only through the parent; stated here too because the DATA-010 scan in fsutil.rs reads this file alone.
+#![cfg(test)]
 
 use std::fs::{File, OpenOptions, TryLockError};
 use std::io::Write;
