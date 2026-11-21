@@ -45,8 +45,14 @@ fn srcinfo(text: &str, key: &str) -> Vec<String> {
     text.lines().filter_map(|l| l.trim().strip_prefix(&format!("{key} = "))).map(str::to_string).collect()
 }
 
-fn version_triple(v: &str) -> Vec<u64> {
-    v.split('.').map(|p| p.parse().unwrap()).collect()
+/// A sortable key of a semver version: the numbers of its X.Y.Z core (the part before the first
+/// `-`) and whether it has no pre-release part, so a release ranks above a pre-release of the same core.
+fn version_key(v: &str) -> (Vec<u64>, bool) {
+    let (core, pre) = match v.split_once('-') {
+        Some((core, _)) => (core, false),
+        None => (v, true),
+    };
+    (core.split('.').map(|p| p.parse().unwrap()).collect(), pre)
 }
 
 // spec: BUILD-026
@@ -87,7 +93,16 @@ fn build_026_the_packaged_version_is_a_release_not_newer_than_cargo_toml() {
     assert!(ver.chars().all(|c| c.is_ascii_digit() || c == '.') && ver.split('.').count() == 3, "pkgver {ver} is not X.Y.Z");
     let cargo = read("Cargo.toml");
     let cargo_ver = cargo.lines().find_map(|l| l.strip_prefix("version = ")).unwrap().trim_matches('"');
-    assert!(version_triple(&ver) <= version_triple(cargo_ver), "pkgver {ver} is newer than Cargo.toml {cargo_ver}");
+    assert!(version_key(&ver) <= version_key(cargo_ver), "pkgver {ver} is newer than Cargo.toml {cargo_ver}");
+}
+
+// spec: BUILD-026
+#[test]
+fn build_026_a_pre_release_cargo_version_is_compared_by_semver() {
+    assert!(version_key("0.6.9") <= version_key("0.6.10-rc.1"));
+    assert!(version_key("0.6.10") > version_key("0.6.10-rc.1"));
+    assert!(version_key("0.6.10-rc.1") <= version_key("0.6.10"));
+    assert!(version_key("0.6.10") <= version_key("0.6.10"));
 }
 
 // spec: BUILD-026
