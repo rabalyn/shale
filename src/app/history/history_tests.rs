@@ -28,7 +28,10 @@ pub(super) struct T {
 }
 
 pub(super) fn setup(tag: &str, git_init: bool) -> T {
-    let root = std::env::temp_dir().join(format!("shale-app-history-{tag}-{}", std::process::id()));
+    // one folder per window: two tests that name the same tag (`restore` is in both test files) run
+    // in parallel and must not remove each other's vault and its `.shale/history-id`
+    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let root = std::env::temp_dir().join(format!("shale-app-history-{tag}-{}-{}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst)));
     let _ = std::fs::remove_dir_all(&root);
     let vault = root.join("vault");
     std::fs::create_dir_all(&vault).unwrap();
