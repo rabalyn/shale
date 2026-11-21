@@ -53,6 +53,10 @@ impl KeyDialog {
         let mut saved = false;
         for e in events {
             let Event::Key { key, pressed: true, repeat: false, modifiers, .. } = e else { continue };
+            // Ctrl, Alt, Shift and Super pressed on their own are the start of a chord, not a chord
+            if crate::keys::is_modifier_key(*key) {
+                continue;
+            }
             let Some((action, chords)) = &mut self.recording else { break };
             let bare = !modifiers.any();
             if bare && *key == Key::Escape {
@@ -422,6 +426,25 @@ mod tests {
         assert!(w.dialog().recording.is_none());
         assert!(w.app.keymap.is_default(Action::Save));
         assert!(!w.app.keymap.recording, "triggers work again after the recording");
+    }
+
+    // spec: KEY-006, KEY-007
+    #[test]
+    fn key_006_the_modifier_keys_of_a_chord_are_not_recorded() {
+        let mut w = W::new("ctrl-alt-1");
+        w.open_dialog();
+        w.click("key:global.ribbon_1");
+        // a real keyboard (X11, Wayland) reports Ctrl and Alt as keys of their own before the digit
+        let key = |key, modifiers| Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers };
+        w.frame(vec![key(Key::ControlLeft, Modifiers::CTRL)]);
+        w.frame(vec![key(Key::AltLeft, CTRL_ALT)]);
+        w.frame(vec![key(Key::Num1, CTRL_ALT)]);
+        assert_eq!(w.dialog().recording.as_ref().map(|r| Binding(r.1.clone()).display()), Some("Ctrl+Alt+1".to_string()), "only the chord is recorded");
+        w.press(Key::Enter, Modifiers::NONE);
+        assert_eq!(w.dialog().error, None);
+        assert!(w.dialog().confirm.is_none());
+        assert_eq!(w.app.cfg.keybindings.get("global.ribbon_1"), Some(&vec!["Ctrl+Alt+1".to_string()]));
+        assert_eq!(w.app.keymap.display(Action::RibbonSlot1), "Ctrl+Alt+1");
     }
 
     fn shows(w: &W, needle: &str) -> bool {
