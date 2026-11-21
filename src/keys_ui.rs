@@ -21,11 +21,6 @@ pub struct KeyDialog {
     pub rects: Vec<(String, Rect)>,
 }
 
-/// A modifier pressed on its own: backends report these as keys of their own (`ControlLeft`, …).
-fn is_modifier_key(key: Key) -> bool {
-    matches!(key, Key::ShiftLeft | Key::ShiftRight | Key::ControlLeft | Key::ControlRight | Key::AltLeft | Key::AltRight | Key::SuperLeft | Key::SuperRight)
-}
-
 /// The question “<keys> is used by “<action>”. Overwrite it?” (KEY-018).
 pub struct Confirm {
     action: Action,
@@ -59,7 +54,7 @@ impl KeyDialog {
         for e in events {
             let Event::Key { key, pressed: true, repeat: false, modifiers, .. } = e else { continue };
             // Ctrl, Alt, Shift and Super pressed on their own are the start of a chord, not a chord
-            if is_modifier_key(*key) {
+            if crate::keys::is_modifier_key(*key) {
                 continue;
             }
             let Some((action, chords)) = &mut self.recording else { break };
