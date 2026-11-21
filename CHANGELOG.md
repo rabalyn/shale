@@ -10,6 +10,14 @@ its section from this file.
 
 ## [Unreleased]
 
+### Added
+
+- GitHub issue forms for a bug report and a feature request, a `CONTRIBUTING.md` (how to report, how changes are made, how a pull request reaches `main`, labels, licence) and a `CODE_OF_CONDUCT.md` (#456).
+
+### Fixed
+
+- In the editor, a click on a media player (play and pause, the seek bar, the volume, mute, the card, and the round buttons over a video) no longer takes the keyboard from the text: the cursor and the selection stay active, Space types a space, and you keep typing where you stopped. In the reading view a click still gives the player the keyboard, so Space toggles it (#441).
+
 ## [0.6.9] - 2026-11-19
 
 ### Added
