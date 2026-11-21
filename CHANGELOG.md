@@ -28,6 +28,7 @@ its section from this file.
 - Forgejo's `mirror` job pushes a release tag to GitHub before `main`, so the main-check of a release commit leaves the tests to the release build (#452).
 - The GitHub release workflow no longer repeats checks that already ran on the same commit: clippy and `cargo fmt --check` (run by `scripts/land.sh` and `scripts/cross-check.sh` on every landing) and the Linux tests (run by Forgejo before the tag reaches GitHub) are gone from it, so a release build is faster. macOS and Windows are still tested there (#454).
 - Forgejo CI: a release tag no longer rebuilds the TeX image without the cache (only the weekly run does) (ADR-0026, #455).
+- Developers only: tests for the mail index rebuild guard, calendar edit and delete from the window, the updater's recovery when an install step fails, account switching and attachments in the compose window, clearing caches from the Data usage window, and clicking, dragging and zooming in the graph view. The coverage baseline is now 94.66 % (#463).
 
 ### Fixed
 
@@ -38,6 +39,8 @@ its section from this file.
 - A sequence that waits for a chord with Ctrl, Alt, Shift or Super (such as Space Ctrl+F) is no longer cancelled by the modifier key itself, which a keyboard reports before the key (#445).
 - A tag whose real-server tests, coverage or unused-dependency check failed no longer reaches GitHub: the mirror job now waits for every check job (build, unused-deps, coverage, env-tests), so a red run stops a release too (#461).
 - The real-server suites of the tag CI (`env-tests.sh run`) no longer fail in a fresh container where the Rust toolchain is not installed yet: one `cargo test --locked --no-run` runs first and installs it, so the suites that go at the same time do not install it together (#462).
+- The mail index's hand-back after a rebuild no longer closes a mail store that was not being rebuilt. Not reachable from the app today; a guard for later callers (#464).
+- Developers only: the test suite on Windows no longer fails in the tests of the podman stack lock. The lock (`src/env_lock.rs`) is built for Unix only, because the stacks run on Linux only and a Windows file lock is mandatory, so the token in the locked file could not be read; on other systems the ignored env tests take no lock (#465).
 
 ### Tests
 
