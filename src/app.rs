@@ -141,6 +141,8 @@ pub enum RightPanel {
     Outline,
     LocalGraph,
     Calendar,
+    /// the file history of the note (HIST-002)
+    History,
 }
 
 #[cfg(test)]
@@ -150,6 +152,8 @@ mod drops;
 mod drops_tests;
 #[cfg(test)]
 mod handover_tests;
+mod history;
+mod history_ui;
 mod link_preview;
 mod mail;
 pub mod panes;
@@ -205,6 +209,12 @@ pub enum Modal {
     },
     /// the Data usage dialog (USE-001)
     DataUsage,
+    /// the deleted notes (SYNC-040); its state is `ShaleApp::history.deleted`
+    History,
+    /// the comparison of two versions of a note (HIST-008); its state is `ShaleApp::history.changes`
+    Changes,
+    /// the "Turn on sync" wizard (SYNC-047); its state is `ShaleApp::sync.setup.wizard`
+    SyncWizard,
     Export(Box<crate::pdf::export_dialog::ExportDialog>),
     /// the guided setup of the LaTeX export (TEX-017); its state is `ShaleApp::tex.setup`
     TexSetup,
@@ -292,6 +302,8 @@ pub enum Action {
         tab: usize,
     },
     Rename(PathBuf),
+    /// the versions of a note or drawing (SYNC-045)
+    History(PathBuf),
     Trash(PathBuf),
     /// put the item moved to the trash last (in this session) back where it was (VAULT-020)
     RestoreTrashed,
@@ -337,6 +349,8 @@ pub struct ShaleApp {
     pub vdata: crate::vault_state::VaultData,
     /// Git sync of the open vault (ADR-0008).
     pub sync: sync::SyncState,
+    /// The file history of the open vault: snapshots and restore (ADR-0028).
+    pub history: history::HistoryState,
     pub vault: Option<Vault>,
     /// the open tabs, the active one and what the tab bar drew last frame
     pub tabbar: tabs::TabBar,
@@ -551,11 +565,12 @@ impl ShaleApp {
                 calendars: calendar_dir.clone(),
                 calendar_trash: crate::calendar::store::default_trash_dir(),
                 recovery: recovery_root.clone(),
+                history: crate::gitsync::history::default_root(),
                 cleanup_file: crate::data_usage::cleanup::default_path(),
                 vault: None,
             }
         } else {
-            crate::data_usage::Places {
+            let mut places = crate::data_usage::Places {
                 pictures: social_dir.clone(),
                 post_index: None,
                 mail_root: mail_root.clone(),
@@ -563,14 +578,20 @@ impl ShaleApp {
                 calendar_trash: calendar_dir.join(".calendar-trash"),
                 recovery: recovery_root.clone(),
                 ..crate::data_usage::Places::in_folder(&std::env::temp_dir().join(format!("shale-usage-{tag}-{n}")))
+            };
+            // screenshots name a data folder to show (SHALE_FAKE_DATA_DIR); nothing is written there
+            if let Some(d) = std::env::var_os("SHALE_FAKE_DATA_DIR") {
+                places.history = PathBuf::from(d).join("shale").join("history");
             }
+            places
         };
         let mut app = ShaleApp {
             keymap: crate::keys::Keymap::from_overrides(&cfg.keybindings),
             cfg: cfg.clone(),
             persist_config,
             vdata: crate::vault_state::VaultData::default(),
-            sync: sync::SyncState::default(),
+            history: Default::default(),
+            sync: sync::SyncState::with_managed(crate::gitsync::install_ui::ManagedState::new(persist, &tag)),
             vault: None,
             tabbar: tabs::TabBar::new(),
             panes: panes::Panes::new(),
@@ -630,6 +651,9 @@ impl ShaleApp {
             guide: if persist { crate::userguide::Places::system() } else { crate::userguide::Places::none() },
             handover: None,
         };
+        if persist {
+            app.refresh_git();
+        }
         app.recovery.notice = crate::recovery::unseen(&app.recovery.root);
         if let Some(p) = cfg_problem {
             app.toast(p);
@@ -638,6 +662,12 @@ impl ShaleApp {
             app.open_vault(&p);
             if app.shot.path.is_some() && p.join("Welcome.md").is_file() {
                 app.open(Path::new("Welcome.md"), false);
+            }
+            // screenshots: a made-up history of the notes (HIST-018)
+            if let (true, Some(dir)) = (app.shot.path.is_some(), std::env::var_os("SHALE_DEMO_HISTORY")) {
+                if let Err(e) = app.history_demo(Path::new(&dir)) {
+                    eprintln!("could not make the demo history: {e}");
+                }
             }
             // screenshots: a demo calendar full of sample events
             if app.shot.path.is_some() && app.cfg.calendars.is_empty() {
@@ -782,6 +812,7 @@ impl ShaleApp {
 
     pub fn open_vault(&mut self, path: &Path) {
         self.flush_all();
+        self.history_flush_now();
         // closing the buffers would lose edits that could not be saved (DATA-009)
         if let Some(bad) = self.notes.iter().find(|(_, d)| d.dirty).map(|(k, _)| k).or_else(|| self.drawings.iter().find(|(_, d)| d.dirty).map(|(k, _)| k)) {
             let bad = rel_to_string(bad);
@@ -1347,6 +1378,7 @@ impl ShaleApp {
                 doc.base = stamp;
                 doc.dirty = false;
                 doc.save_error = None;
+                self.history.note_saved(rel);
                 None
             }
             Ok(Saved::Conflict { copy, theirs }) => {
@@ -1383,6 +1415,7 @@ impl ShaleApp {
                 d.dirty = false;
                 d.save_error = None;
                 self.scenes.put(rel, d.scene.clone());
+                self.history.note_saved(rel);
                 None
             }
             Ok(Saved::Conflict { copy, theirs }) => {
@@ -1689,6 +1722,7 @@ impl ShaleApp {
                 self.tree.expanded.insert(to.join(rest));
             }
         }
+        self.history_renamed(rel, &to, changed);
     }
 
     /// Move a note, drawing, file or folder into another folder (drag and drop in the file list).
@@ -1724,9 +1758,11 @@ impl ShaleApp {
             self.toast(format!("“{bad}” has changes that could not be saved, so “{}” is not moved to the trash", rel_to_string(rel)));
             return;
         }
+        self.history_before_trash(rel);
         let Some(v) = self.vault.as_mut() else { return };
         match v.trash(rel) {
             Ok(in_trash) => {
+                self.history_trashed(rel);
                 self.trashed.push(in_trash);
                 self.notes.retain(|k, _| !k.starts_with(rel));
                 self.drawings.retain(|k, _| !k.starts_with(rel));
@@ -2233,6 +2269,12 @@ impl ShaleApp {
                     self.media.stop_for_note(rel);
                 }
             }
+            // the last tab of a note or drawing: its saved changes are snapshotted (SYNC-033)
+            if let View::Note(rel) | View::Drawing(rel) = &closed.view {
+                if !self.all_tabs().any(|t| t.view == closed.view) {
+                    self.history_tab_closed(rel);
+                }
+            }
             if self.tabbar.active >= self.tabbar.tabs.len() && self.tabbar.active > 0 {
                 self.tabbar.active = self.tabbar.tabs.len() - 1;
             } else if i < self.tabbar.active {
@@ -2372,6 +2414,7 @@ impl ShaleApp {
                     let name = self.vault.as_ref().and_then(|v| v.file(&rel).map(|f| f.display_name())).unwrap_or_else(|| rel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
                     self.modal = Some(Modal::Rename { rel, name, error: None });
                 }
+                Action::History(rel) => self.history_show(&rel),
                 Action::Trash(rel) => self.modal = Some(Modal::ConfirmTrash { rel }),
                 Action::RestoreTrashed => self.restore_trashed(),
                 Action::NewFolder(parent) => self.modal = Some(Modal::NewFolder { parent, name: String::new() }),
@@ -2823,6 +2866,7 @@ impl eframe::App for ShaleApp {
     fn on_exit(&mut self) {
         // flush_all waits for a running sync's merge step first
         self.flush_all();
+        self.history_flush_now();
         // a valid text of the settings tab is saved now; what is left is rescued (CFG-015)
         self.settings_file_flush(true);
         self.undo.flush_all();
@@ -2870,9 +2914,11 @@ impl ShaleApp {
         let ctx = ui.ctx().clone();
         self.media_tick(&ctx);
         self.tex.poll(&ctx);
+        self.git_tick(&ctx);
         self.update_tick(&ctx);
         self.take_handover(&ctx);
         self.sync_tick(&ctx);
+        self.history_tick(&ctx);
         self.mail_tick(&ctx);
         if self.calendar.poll() {
             ui.ctx().request_repaint();

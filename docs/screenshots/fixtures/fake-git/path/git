@@ -1,0 +1,6 @@
+#!/bin/sh
+# A pretend git for the picture of Settings -> Sync (SYNC-023): it has a version and no git-lfs.
+case "$*" in
+  *"lfs version"*) exit 1 ;;
+  *--version*) echo "git version 2.47.1" ;;
+esac

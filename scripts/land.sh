@@ -9,7 +9,7 @@
 # A branch is a local branch if one has the name, else `origin/<branch>`, else any commit.
 # The checks: every new commit names an issue (FORGE-008), `cargo fmt --check`, clippy with
 # `-D warnings` for Linux (also with `--features bench`), and for macOS and Windows (`scripts/cross-check.sh`), `cargo nextest run --locked --no-fail-fast` (#451; cargo-nextest is required, a landing without it stops at the start; `--test-threads` from RUST_TEST_THREADS or the cargo config's [env], because nextest does not read it itself; also `cargo test --features bench bench::` when the change touches the harness or the build, `scripts/bench-tests-wanted.sh` (BUILD-035, #449), or with --release, and also `cargo test --release` with --release), and the real-server
-# suites of tests/caldav-env and tests/mail-env and the LuaLaTeX suite of tests/tex-env, each only when the
+# suites of tests/caldav-env, tests/mail-env and tests/forgejo-env and the LuaLaTeX suite of tests/tex-env, each only when the
 # change touches its code or environment (`.forgejo/scripts/env-tests.sh suites`, #447); --no-env-tests skips them and
 # says so. A merge conflict is not resolved here: merge `origin/main` into the branch, resolve
 # it there and run land.sh again. After the push the local branch `main` is fast-forwarded to

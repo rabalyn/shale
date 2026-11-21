@@ -32,6 +32,8 @@ markdown files. Notes link to each other with `[[wiki links]]`.
   Tick tasks off there (the change is saved to the note), filter them, and sort by due date
   (`📅 2026-12-01` or `due:2026-12-01`).
 - **Updates**: Shale can look for a new release on GitHub, check its download against the release's SHA-256 file and notify, download or install it, as you choose (Settings → Updates; off by `SHALE_UPDATES=off`). A package-managed install (AUR `shale-bin`) is never touched. See `docs/userguide/Updates.md`.
+- **Turn on sync**: a short wizard in Settings → Sync asks how you want to keep your notes safe (history on this device, a folder another app already syncs, or a git server), signs you in with a token kept in the system keyring or an SSH key, creates or picks the repository (Forgejo, Gitea, GitHub), says what the first sync will do and tests it in plain words. Shale warns when a vault is in a network folder or a cloud-synced folder, and can move a `.git` folder out of one.
+- **File history**: Shale keeps earlier versions of your notes and drawings, with or without a git server (on save, when you stop typing and when you close a note), and a history column beside the note (or a panel of the right sidebar) lists them by day in plain words with the size of each change; a click shows the note with its changes marked (inserted and deleted words, folded unchanged parts, a source view side by side for experts) and restores a version as a new change you can undo; Settings → Sync restores a deleted note. A vault without `.git` keeps its history in your data folder, never inside the vault.
 - **Feeds**: read your Mastodon and Bluesky timelines in Shale and save a post (or a whole
   thread by one author) as a note, with its pictures and a link back to the post.
 - **Linked notes**: backlinks, unlinked mentions, outgoing links, outline, a local graph per note
@@ -113,10 +115,13 @@ What differs from Linux:
 - **Word files** (`.docx`) are imported as notes by `pandoc` on your computer, once you turn it on in Settings →
   Import (`brew install pandoc` on macOS, `winget install JohnMacFarlane.Pandoc` on Windows, your package
   manager on Linux). Without it a `.docx` is saved as an attachment and the Import dialog says so.
-- **CalDAV** and **git sync** need `curl` and `git` on the path (both come with macOS and Windows 10 and later; Git
-  for Windows is a separate install).
+- **CalDAV** and **git sync** need `curl` and `git` on the path (`curl` comes with macOS and Windows 10 and later).
+  For git, Settings → Sync can install one with a button (Windows: MinGit and git-lfs from the official releases into
+  Shale's data folder; macOS: Apple's command line tools; Linux: it shows your distribution's install command), after
+  you agree and with the SHA-256 checked; the system's git is used when there is one.
 - **Media files in git sync** (audio and video, stored with Git LFS) need `git-lfs` as well
-  (<https://git-lfs.com>; `apt install git-lfs`, `brew install git-lfs`; Git for Windows brings it). Without it Shale
+  (<https://git-lfs.com>; `apt install git-lfs`, `brew install git-lfs`; Git for Windows brings it; Settings → Sync can
+  also download it into Shale's data folder). Without it Shale
   says so in the settings and everything else works; a vault that already stores media with LFS is not synced on a
   computer without git-lfs, so no media file lands in the history as a plain file. On another computer a media
   file arrives as a small pointer and is downloaded when you play or open it (or after every sync, if you switch

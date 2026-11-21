@@ -534,7 +534,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   between two icons shows where the icon lands; Esc, or letting go anywhere else, cancels. The
   sidebar toggles at the top and bottom and the settings button stay where they are.
 - The right sidebar is a stack of **views**. Each view has its own menubar of panel icons
-  (Backlinks, Outgoing links, Outline, Graph, Calendar) and shows the panel of the selected
+  (Backlinks, Outgoing links, Outline, Graph, Calendar, History) and shows the panel of the selected
   icon, so several panels can be open at once.
 - Drag a panel icon over the content of the right sidebar: the area lights up ("Drop to open
   this icon in a new view") and dropping makes a new view below it. Drag icons from one
@@ -970,7 +970,8 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   **Saved**: the vault by kind (notes, drawings, pictures, PDFs, other attachments, `.shale/`,
   `.trash/`, `.git/`), its 10 largest files and folders (a click opens the file or shows the
   folder), and your data outside the vault: mail per account, drafts, outbox, mail trash, local
-  calendars, calendar trash and recovered notes. Nothing in this part can be deleted here.
+  calendars, calendar trash, recovered notes and the file history of a vault that has no `.git` (with `.git` it is
+  counted in the vault's `.git/`). Nothing in this part can be deleted here.
 - **Caches** are what Shale can build or fetch again: social pictures, the social post index,
   the mail index, its daily backups, damaged copies of the mail index, the learned tag words, the
   undo histories of the notes of the open vault and the keyboard debug log. Each row shows its size, entries, oldest entry and last cleanup, and
@@ -1008,10 +1009,54 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 ## Git sync
 
-- Needs `git` installed. In Settings → Sync, enter the URL of a git repository
-  (`https://…`, `ssh://…`, `git@host:notes.git` or a folder path) and press Connect (an address with a password in it, and plain `http://` or `git://` except on this computer, are refused: use a credential helper or an SSH key), or run
+- Needs `git`; without it Shale can install one (see the next point). **Turn on sync** (Settings → Sync) is a short wizard that
+  asks how you want to keep your notes safe: **History on this device only** (the file history, outside the vault, no server and
+  no account), **My folder is already synced by another app** (Nextcloud, Dropbox, OneDrive, iCloud or a network drive: the files
+  travel through that app, the history stays on each computer and no `.git` folder is put in the folder) or **Sync with a server**.
+  The first step shows the install of git when there is none, and warns when it finds that the vault is in a network folder or in
+  a folder another app syncs (a guess from the file system and from marker files such as `.dropbox` and `.stfolder`; it never
+  decides anything).
+
+  ![Turn on sync: the three ways to keep notes safe](userguide/z_media/screenshots/wizard-choose.png)
+
+  ![The same page for a vault in a Dropbox folder: a warning that names the folder](userguide/z_media/screenshots/wizard-warning.png)
+
+- **Sync with a server.** Pick GitHub, GitLab, Codeberg or another server (or paste a repository address), then sign in with a
+  **personal access token** (the wizard links to the provider's page where you make one) or an **SSH key** (Shale uses one of
+  `~/.ssh` or makes an ed25519 key and shows the public key with a **Copy** button and a link to the provider's "add a key"
+  page). The token is kept in the system keyring (the Secret Service, the Keychain or the Credential Manager), never in a file, in
+  `.git/config`, in the address or on a command line; git gets it from Shale's own helper (`GIT_ASKPASS`, the Shale program started
+  without a window). Where the provider has an API (Forgejo, Gitea, GitHub) the wizard lists your repositories and creates a private
+  one; elsewhere it links to the provider's website and takes the address. Before the first sync it says what will happen
+  (an empty repository gets your notes, a repository with notes comes down, both with notes are merged and nothing is deleted),
+  and the **test sync** is one real sync with the result in plain words (it worked, wrong user name or token, no network, no
+  repository at that address, SSH key not accepted, certificate not trusted).
+
+  ![Choosing the server](userguide/z_media/screenshots/wizard-server.png)
+
+  ![Signing in with a token or an SSH key](userguide/z_media/screenshots/wizard-sign-in.png)
+
+- **The address field.** Settings → Sync keeps the old way under **Advanced**: enter the URL of a git repository
+  (`https://…`, `ssh://…`, `git@host:notes.git` or a folder path) and press Connect (an address with a password in it, and plain `http://` or `git://` except on this computer, are refused: use the wizard's token or an SSH key), or run
   `git init` in the vault folder yourself. Shale then syncs on its own: when the vault opens,
   every few minutes (default 5, changeable) and on "Sync now".
+- **A repository inside a synced folder.** A vault with a `.git` folder inside a folder another app syncs or on a network share
+  gets a warning in Settings → Sync; when it has no server, **Move the repository out** copies it to the history place on this
+  computer, checks the copy and only then removes `.git` from the vault. With a server nothing is offered.
+- **Install git with one button.** Settings → Sync shows whether a git and a git-lfs are found (through `PATH`), whether Shale's
+  own git is installed, and which git is in use. Where a git is missing, **Download and install git** offers it with the
+  download size, the size on disk and the folder `<data folder>/shale/git`; nothing is downloaded before you press the
+  button. **Windows:** MinGit (the official portable Git for Windows, no administrator rights) and git-lfs, each file checked
+  against the SHA-256 pinned in Shale. **macOS:** git comes with Apple's command line tools, and the button opens Apple's
+  installer; git-lfs is downloaded. **Linux:** the page shows the install command of your distribution (apt, dnf, pacman, zypper
+  or apk) with a copy button; git-lfs is downloaded when git is there and git-lfs is not. The install is built in `git.partial`
+  and renamed when it works; Cancel or a failure leaves nothing. **Remove…** deletes that folder only. A choice
+  (**Automatic**: the git of this computer first, else Shale's; **The git of this computer**; **The git that Shale installs**)
+  says which one runs. Updates are opt-in: the setting `git.updates` (Off by default) lets Shale look for a newer release 30
+  seconds after the start and weekly, and tell you or install it; `SHALE_UPDATES=off` switches that off. See ADR-0027.
+
+  ![Settings → Sync with git found, git-lfs missing and the offer to install it](userguide/z_media/screenshots/settings-sync.png)
+
 - A sync commits every change (the `.shale/` files too, so settings and open notes follow you;
   only the undo histories in `.shale/undo/` stay on the computer),
   fetches, merges and pushes. Commit messages read `Sync from <computer>: 3 file(s)`, with an
@@ -1024,6 +1069,9 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 - Edits you type while a sync runs are never overwritten: if the sync brought a new version of
   that note, your text is saved as a conflict copy next to it.
 - Passwords are git's business (credential helper or SSH key); Shale never asks for one.
+- Every commit ends with the lines `Shale-Reason:` (`sync`, `merge`, or why a version was kept, see File history) and
+  `Shale-Device:` (the name of the computer), after the optional suffix. The sync pushes the version commits of File
+  history as they are: no squash, no rewrite.
 - **Media in Git LFS.** Audio and video files are large, so they do not belong in the git history.
   With `git-lfs` installed, a repository Shale creates (Connect on a folder that is no repository
   yet) stores media with Git LFS from the start, and for an existing repository Settings → Sync
@@ -1040,6 +1088,64 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   sync" (vault setting `sync.lfs_download`: `on_demand`, the default, or `always`). A conflict copy of a media file is stored in LFS too. On a
   computer without git-lfs, a vault that stores media with LFS is not synced (nothing is
   committed) and the settings say why.
+
+## File history
+
+- Shale keeps earlier versions of notes and drawings, with or without a git server, and a note can go back to
+  one. A version is a git commit ("snapshot"): made when a note or drawing is saved (at most one per note
+  every 10 minutes while typing, then `history.coalesce_minutes`), when it has had no change for a minute
+  (`history.idle_seconds`), when its last tab closes, and when the window closes (waiting at most 3 seconds). Only saved text is committed, never an
+  open buffer; a save that changes nothing makes no commit. Snapshots run in the background, one at a
+  time and never while the sync runs; a busy repository is asked again later and typing is never blocked.
+- **Where.** A vault with `.git` keeps them in its repository (also with sync off) and the sync pushes
+  them unchanged. A vault without `.git` keeps a repository **outside the vault**, with git's separate
+  git directory `<data folder>/shale/history/<vault id>` and the vault as work tree; no `.git` file or
+  folder is ever written into the vault. The vault id is the file `.shale/history-id` (128 random
+  bits, synced with the vault); a moved or renamed vault keeps its history, a copy of a vault gets a
+  new id. A new local history starts with one snapshot of every note and drawing.
+- **What.** Notes and drawings (`.md`, `.excalidraw`, `.excalidraw.md`, `.canvas`), not media. Never
+  Shale's temporary files, the temporary and housekeeping names of cloud clients and network shares
+  (`.syncthing.*.tmp`, `.stfolder`, `.stversions`, `.stignore`, `.~lock.*#`, `~$*`, `*.tmp`, `*.part`,
+  `.nfs*`, `.fuse_hidden*`, `*.icloud`, `desktop.ini`, `.DS_Store`, `Thumbs.db`), or the device-local files
+  of `.shale/` (`state.json`, `undo/`). In a vault repository a snapshot commits only its own paths and
+  leaves other staged changes alone.
+- **Messages.** A short subject and the lines `Shale-Reason:` (`save`, `idle`, `close`, `initial`,
+  `sync`, `restore`, `merge`, `rename`, `delete`), `Shale-Device:`, one `Shale-Path:` per path and
+  `Shale-Restored:` for a restore; a commit without them (made by another tool) is read as a subject only.
+- **The history panel.** The history of the note of the focused pane is a slim column (236 points) in the empty
+  right margin of the note, between the text and the right sidebar, when exactly one note is open, **Readable line length**
+  is on and the note area is at least 1040 points wide; the text keeps its width. With several panes side by side, a drawing or a
+  narrow window the same list is the **History** panel of the right sidebar (a clock icon, last in the default order;
+  it is a panel like the outline: it can be moved, hidden and shown). The **×** of the column hides it
+  (`history.show_panel`, remembered), **Show it here** in the sidebar panel or the ⋯ menu entry **History of this note**
+  shows it again. The list is read in the background and again after a new version or a sync.
+  ![The history in the margin of a note](userguide/z_media/screenshots/history-margin.png)
+  ![The history as a panel of the right sidebar](userguide/z_media/screenshots/history-sidebar.png)
+- **The list.** Grouped by day (Today, Yesterday, `12 Nov`), each version with "5 min ago" or its time, where it came from
+  in words (edited here, edited on a laptop, synced from a laptop, restored version of …, merged after a conflict,
+  renamed from …, deleted, first version kept, changed outside Shale), and a bar of five +/− ticks with the counts as text
+  (`+12 −3`); the hover says "12 lines added, 3 removed". A binary version says "changed". The right-click menu has
+  **Restore this version** and **Copy text**. With history off the panel says why and has **Open Settings → Sync**.
+- **The comparison.** A click on a version opens **Changes since 11:05**, the note as it is now against that version:
+  paragraphs, headings (by size), list items, table rows and quotes with inserted words highlighted and underlined and deleted
+  words struck through (theme colours, never colour alone), a gutter mark **+** added, **−** removed, **~** changed on every
+  changed block, and unchanged runs folded into "… 34 unchanged paragraphs" (a click opens them). The slider moves the older end
+  over all versions, the **to** list picks the newer end, **Next change** and **Previous change** jump (the current one has a frame).
+  **Restore this version** (undoable, the text you had is kept first), **Copy text** and **Read-only** are the actions of
+  SYNC-038 and SYNC-039. Drawings show before and after thumbnails, a binary version "changed" with two placeholders.
+  ![Changes since 06:00 as track changes](userguide/z_media/screenshots/history-changes.png)
+- **Source side by side.** The switch **Source, side by side** shows the Markdown, old left and new right, with line numbers,
+  tinted changed lines, marks between the sides and the changed words underlined or struck through; **Copy as patch** copies
+  unified diff text. Only here are versions named by a short hash (a tooltip has the full one).
+  ![The source side by side](userguide/z_media/screenshots/history-source.png)
+- **Go back.** **Restore** snapshots the text you have, then puts the old text in the note as one new change (one
+  undo step in an open note; an atomic save otherwise) and snapshots that with the version it came from;
+  history is never reset or rewritten. Settings → Sync and the panel have **Restore a deleted note…**: notes deleted or moved
+  to the trash, newest first, written back at their path or at `Name (restored).md`. A rename or move and moving to the trash
+  make their own snapshots, so the history stays connected.
+- **Settings** (Settings → Sync, **File history**): on by default for every vault (`history.enabled`),
+  `history.coalesce_minutes` (10), `history.idle_seconds` (60) and `history.show_panel` (the margin column). Without a usable git, history is off and
+  the page says why. Data usage lists the size of a local history. Nothing is thinned out; see ADR-0028.
 
 ## Keyboard
 

@@ -503,6 +503,10 @@ impl ShaleApp {
             }
             return;
         }
+        if panel == RightPanel::History {
+            self.history_panel_body(ui);
+            return;
+        }
         let Some(rel) = self.current_path() else {
             ui.label(muted("Open a note to see its links."));
             return;
@@ -601,7 +605,7 @@ impl ShaleApp {
                     }
                 });
             }
-            RightPanel::Calendar => {}
+            RightPanel::Calendar | RightPanel::History => {}
             RightPanel::LocalGraph => {
                 ui.horizontal(|ui| {
                     ui.label(muted("Depth"));
@@ -747,6 +751,7 @@ impl ShaleApp {
         let mut keep = true;
         let mut open_calendars = false;
         let mut open_usage = false;
+        let mut open_history = false;
         let mut open_guide = false;
         let mut open_mail = false;
         let mut open_social = false;
@@ -903,7 +908,18 @@ impl ShaleApp {
                     keep = false;
                 }
             }
-            Modal::TexSetup | Modal::Export(_) | Modal::Calendars(_) | Modal::Event(_) | Modal::Import(_) | Modal::ImportSummary(_) | Modal::MailAccounts(_) | Modal::Social(_) | Modal::DataUsage => {}
+            Modal::TexSetup
+            | Modal::Export(_)
+            | Modal::Calendars(_)
+            | Modal::Event(_)
+            | Modal::Import(_)
+            | Modal::ImportSummary(_)
+            | Modal::MailAccounts(_)
+            | Modal::Social(_)
+            | Modal::DataUsage
+            | Modal::History
+            | Modal::Changes
+            | Modal::SyncWizard => {}
             Modal::ConvertCanvas { rel, new_tab, always, existing } => {
                 let resp = crate::dialog::Dialog::new("convert-canvas", "Convert to an editable drawing?").width(460.0).show(&ctx, |ui| {
                     let name = rel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -967,6 +983,7 @@ impl ShaleApp {
                 }
                 open_calendars |= asks.calendars;
                 open_usage |= asks.usage;
+                open_history |= asks.history_deleted;
                 open_guide |= asks.guide;
                 open_tex_setup |= asks.tex_setup;
                 open_mail |= asks.mail;
@@ -993,6 +1010,10 @@ impl ShaleApp {
             self.open_calendar_settings();
             keep = false;
         }
+        if open_history {
+            self.open_history_deleted();
+            keep = false;
+        }
         if open_usage {
             self.open_data_usage();
             keep = false;
@@ -1000,6 +1021,15 @@ impl ShaleApp {
         if open_guide {
             self.open_user_guide();
             keep = false;
+        }
+        if let Modal::History = &modal {
+            keep = self.history_dialog(&ctx);
+        }
+        if let Modal::Changes = &modal {
+            keep = self.history_changes_dialog(&ctx);
+        }
+        if let Modal::SyncWizard = &modal {
+            keep = self.sync_wizard_dialog(&ctx);
         }
         if let Modal::DataUsage = &modal {
             // the state both parts work on, and what the footer asked for

@@ -1,0 +1,354 @@
+//! The "Turn on sync" wizard (SYNC-047…SYNC-058, ADR-0029): its state, and the jobs that talk to
+//! the network, the keyring and git. The dialog is `ui.rs`; the pieces are `provider` (what a
+//! server is), `api` (list and create repositories), `ssh` (keys) and `test_sync` (what the
+//! remote holds, the words for the result).
+//!
+//! The state is one small struct owned by the sync state (`Setup`), not fields of the window.
+//! Every slow thing is a background job (JOB-001) that reports a [`Msg`] or a message in words.
+
+pub mod api;
+pub mod provider;
+pub mod ssh;
+pub mod test_sync;
+mod ui;
+
+pub(crate) use ui::warnings_ui;
+
+#[cfg(all(test, unix))]
+mod forgejo_env_tests;
+#[cfg(test)]
+mod parts_tests;
+#[cfg(all(test, unix))]
+mod ui_tests;
+
+/// Tests: a hermetic git (no user or system configuration, branch `main`, no git-lfs) for a test folder.
+#[cfg(all(test, unix))]
+fn ui_git(_root: &Path) -> Git {
+    let env = [("GIT_CONFIG_GLOBAL", "/dev/null"), ("GIT_CONFIG_NOSYSTEM", "1"), ("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "init.defaultBranch"), ("GIT_CONFIG_VALUE_0", "main")];
+    let mut git = Git { program: "git".into(), env: env.iter().map(|(k, v)| (std::ffi::OsString::from(k), std::ffi::OsString::from(v))).collect() };
+    super::hide_lfs(&mut git);
+    git
+}
+
+use super::detect::Finding;
+use super::{connect, credentials, Git};
+use crate::secret::Secret;
+use api::RepoInfo;
+use eframe::egui;
+use provider::{Kind, Server};
+use ssh::Key;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::Receiver;
+use test_sync::{Problem, Remote};
+
+/// The steps of the wizard.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Step {
+    /// "How do you want to keep your notes safe?"
+    Choose,
+    /// The server: a provider button or an address.
+    Server,
+    /// Sign in: a token or an SSH key.
+    SignIn,
+    /// Create or pick the repository.
+    Repo,
+    /// What will happen, and the test sync.
+    Test,
+    /// The history choices end here.
+    Done,
+}
+
+/// The three ways to keep notes safe (SYNC-049, SYNC-050).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Choice {
+    Local,
+    Synced,
+    Server,
+}
+
+/// How the person signs in to the server.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Method {
+    Token,
+    Ssh,
+}
+
+/// How the test sync is going.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Test {
+    Idle,
+    /// Asked for; it starts when no snapshot or sync runs.
+    Pending,
+    Running,
+    Worked(String),
+    Failed(Problem),
+}
+
+/// What a finished sign-in job brings.
+pub struct SignedIn {
+    pub login: String,
+    pub repos: Vec<RepoInfo>,
+}
+
+/// What a job reports.
+pub enum Msg {
+    SignedIn(SignedIn),
+    Key(Key),
+    Created(RepoInfo),
+    /// What the server's repository holds, and whether the vault has notes.
+    Inspected(Remote, bool),
+}
+
+type Job = Receiver<Result<Result<Msg, String>, String>>;
+
+/// The wizard's state while it is open.
+pub struct Wizard {
+    pub step: Step,
+    pub choice: Option<Choice>,
+    pub kind: Kind,
+    pub address: String,
+    pub server: Option<Server>,
+    /// A repository named by the pasted address, or picked.
+    pub repo_named: Option<(String, String)>,
+    /// A folder or file address (no sign-in).
+    pub local_remote: Option<String>,
+    pub method: Method,
+    pub user: String,
+    pub token: Secret,
+    pub signed_in: bool,
+    pub keys: Vec<Key>,
+    pub key: Option<usize>,
+    pub repos: Vec<RepoInfo>,
+    pub repo: Option<usize>,
+    pub repo_text: String,
+    pub new_name: String,
+    pub remote: Option<String>,
+    pub inspected: Option<Remote>,
+    pub vault_has_notes: bool,
+    pub test: Test,
+    /// What the last step said went wrong (or right), in words.
+    pub message: Option<(String, bool)>,
+    pub(super) job: Option<(&'static str, Job)>,
+    /// The text of the final screen of the history choices.
+    pub done: Option<String>,
+}
+
+impl Default for Wizard {
+    fn default() -> Wizard {
+        Wizard {
+            step: Step::Choose,
+            choice: None,
+            kind: Kind::Other,
+            address: String::new(),
+            server: None,
+            repo_named: None,
+            local_remote: None,
+            method: Method::Token,
+            user: String::new(),
+            token: Secret::default(),
+            signed_in: false,
+            keys: vec![],
+            key: None,
+            repos: vec![],
+            repo: None,
+            repo_text: String::new(),
+            new_name: "notes".into(),
+            remote: None,
+            inspected: None,
+            vault_has_notes: false,
+            test: Test::Idle,
+            message: None,
+            job: None,
+            done: None,
+        }
+    }
+}
+
+impl Wizard {
+    /// A job runs.
+    pub fn busy(&self) -> bool {
+        self.job.is_some() || matches!(self.test, Test::Pending | Test::Running)
+    }
+
+    /// The step before this one (SYNC-047: Back changes nothing but the step).
+    pub fn back(&mut self) {
+        self.message = None;
+        self.step = match self.step {
+            Step::Choose | Step::Server | Step::Done => Step::Choose,
+            Step::SignIn => Step::Server,
+            Step::Repo => {
+                if self.local_remote.is_some() {
+                    Step::Server
+                } else {
+                    Step::SignIn
+                }
+            }
+            Step::Test => {
+                self.test = Test::Idle;
+                if self.local_remote.is_some() {
+                    Step::Server
+                } else {
+                    Step::Repo
+                }
+            }
+        };
+    }
+
+    /// The key picked in the list of SSH keys.
+    pub fn chosen_key(&self) -> Option<&Key> {
+        self.key.and_then(|i| self.keys.get(i))
+    }
+
+    pub fn say(&mut self, text: impl Into<String>, ok: bool) {
+        self.message = Some((text.into(), ok));
+    }
+}
+
+/// An absolute path to a folder (or a `file://` address): a remote that needs no sign-in.
+pub fn is_local_remote(text: &str) -> bool {
+    let t = text.trim();
+    Path::new(t).is_absolute() || t.starts_with("file://")
+}
+
+/// What the Settings page and the wizard know about where the vault is (SYNC-059…SYNC-062).
+#[derive(Default)]
+pub struct Detect {
+    /// The vault the findings are for.
+    pub for_vault: Option<PathBuf>,
+    pub findings: Vec<Finding>,
+    pub(super) job: Option<Receiver<Result<Vec<Finding>, String>>>,
+}
+
+/// Where a move's result arrives (the outer error: the job itself died).
+type MoveJob = Receiver<Result<Result<PathBuf, String>, String>>;
+
+/// A running or finished move of `.git` out of the vault (SYNC-063).
+#[derive(Default)]
+pub struct MoveOut {
+    pub(super) job: Option<(PathBuf, MoveJob)>,
+    /// How the last move ended: words and whether it went well.
+    pub result: Option<(String, bool)>,
+}
+
+/// The wizard, the detection and the move, as one sub-state of the sync state.
+#[derive(Default)]
+pub struct Setup {
+    pub wizard: Option<Wizard>,
+    pub detect: Detect,
+    pub moveout: MoveOut,
+    /// Settings → Sync shows the address field and **Connect** (SYNC-047).
+    pub advanced: bool,
+    /// The home folder for SSH keys (tests use another).
+    pub home: Option<PathBuf>,
+}
+
+impl MoveOut {
+    /// A move runs.
+    pub fn running(&self) -> bool {
+        self.job.is_some()
+    }
+}
+
+impl Setup {
+    pub fn home(&self) -> Option<PathBuf> {
+        self.home.clone().or_else(dirs::home_dir)
+    }
+
+    /// Findings for this vault (empty while the job runs or when nothing was found).
+    pub fn findings(&self, vault: &Path) -> &[Finding] {
+        if self.detect.for_vault.as_deref() == Some(vault) {
+            &self.detect.findings
+        } else {
+            &[]
+        }
+    }
+
+    /// Look at where `vault` is, in a job, unless that was done (SYNC-061).
+    pub fn detect_for(&mut self, vault: &Path, ctx: &egui::Context) {
+        if self.detect.for_vault.as_deref() == Some(vault) || self.detect.job.is_some() {
+            return;
+        }
+        self.detect.for_vault = Some(vault.to_path_buf());
+        self.detect.findings.clear();
+        let (v, ctx) = (vault.to_path_buf(), ctx.clone());
+        self.detect.job = Some(crate::jobs::spawn(move || super::detect::detect_real(&v), move || ctx.request_repaint()));
+    }
+
+    /// Take a finished detection.
+    pub fn poll_detect(&mut self) {
+        if let Some(rx) = &self.detect.job {
+            if let Ok(r) = rx.try_recv() {
+                self.detect.job = None;
+                self.detect.findings = r.unwrap_or_default();
+            }
+        }
+    }
+
+    /// The vault was closed or another one opened: look again when asked.
+    pub fn forget_vault(&mut self) {
+        self.detect.for_vault = None;
+        self.detect.findings.clear();
+        self.moveout.result = None;
+    }
+}
+
+// ---------------------------------------------------------------- jobs
+
+/// Sign in with a token (SYNC-052, SYNC-053): ask the provider who the token belongs to and for the
+/// person's repositories where it has an API, then keep the token in the keyring.
+pub fn sign_in(server: &Server, user_hint: &str, token: &Secret) -> Result<SignedIn, String> {
+    if token.is_empty() {
+        return Err("Paste the token first".into());
+    }
+    let (login, repos) = if server.has_api() {
+        let login = api::whoami(server, token).map_err(|e| e.message())?;
+        // the list is a convenience: a token that may not list repositories can still sync one
+        let repos = api::list(server, token).unwrap_or_default();
+        (login, repos)
+    } else {
+        let user = user_hint.trim();
+        if user.is_empty() {
+            return Err("Enter your user name on the server".into());
+        }
+        if user.contains(['@', ':', '/', '\\']) || user.chars().any(|c| c.is_whitespace() || c.is_control()) {
+            return Err("A user name has no spaces, @, : or slashes".into());
+        }
+        (user.to_string(), vec![])
+    };
+    let key = credentials::server_key(&server.base()).ok_or("That server address cannot hold a token")?;
+    if !crate::secrets::git_token_store(&key, &login, token.expose()) {
+        return Err("Shale could not keep the token: this computer has no keyring, or it refused. Use an SSH key instead; Shale never writes a token to a file.".into());
+    }
+    Ok(SignedIn { login, repos })
+}
+
+/// Make the vault a repository whose `origin` is `url`, set the SSH command for a key, and ask the
+/// server what its repository holds (SYNC-057).
+pub fn connect_and_inspect(git: &Git, vault: &Path, url: &str, ssh_key: Option<&Path>) -> Result<(Remote, bool), String> {
+    connect(git, vault, url)?;
+    if let Some(cmd) = ssh::ssh_command(ssh_key, false) {
+        // the key is part of the repository's configuration (a path, nothing secret)
+        if ssh_key.is_some() {
+            git.ok(vault, args_of(&["config", "core.sshCommand", &cmd]).as_slice())?;
+        }
+    }
+    let mut probe = git.clone();
+    if let Some(cmd) = ssh::ssh_command(ssh_key, true) {
+        probe.env.push(("GIT_SSH_COMMAND".into(), cmd.into()));
+    }
+    let remote = test_sync::inspect(&probe, vault).map_err(|e| test_sync::classify(&e).words())?;
+    Ok((remote, test_sync::vault_has_notes(vault)))
+}
+
+fn args_of<'a>(a: &'a [&'a str]) -> Vec<&'a std::ffi::OsStr> {
+    a.iter().map(std::ffi::OsStr::new).collect()
+}
+
+/// The address of the remote for a repository: with the user name for a token (SYNC-054), the SSH
+/// address for a key.
+pub fn remote_for(server: &Server, method: Method, user: &str, owner: &str, repo: &str) -> String {
+    match method {
+        Method::Token => server.https_remote(user, owner, repo),
+        Method::Ssh => server.ssh_remote(owner, repo),
+    }
+}

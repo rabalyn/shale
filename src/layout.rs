@@ -43,6 +43,7 @@ pub enum Icon {
     Outline,
     LocalGraph,
     CalendarPanel,
+    History,
 }
 
 pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
@@ -235,6 +236,12 @@ pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
                 p.line_segment([Pos2::new(cx.x - w * 0.31 + w * x, y), Pos2::new(cx.x - w * 0.31 + w * (x + len), y)], s);
             }
         }
+        Icon::History => {
+            // a clock face with its hands
+            p.circle_stroke(cx, w * 0.34, s);
+            p.line_segment([cx, cx + Vec2::new(0.0, -w * 0.2)], s);
+            p.line_segment([cx, cx + Vec2::new(w * 0.15, w * 0.08)], s);
+        }
         Icon::Sort => {
             for (k, len) in [0.62f32, 0.44, 0.26].iter().enumerate() {
                 let y = cx.y + (k as f32 - 1.0) * w * 0.24;
@@ -389,9 +396,27 @@ impl ShaleApp {
         if n == 1 {
             self.tab_bar(ui);
             self.view_header(ui);
-            self.content(ui);
+            let area = ui.available_rect_before_wrap();
+            let place = self.history_place(area.width());
+            self.history.panel.place = Some(place);
+            if place == crate::history::place::Place::Margin {
+                // the history takes a column at the right edge; the note keeps the rest (HIST-001)
+                let column = Rect::from_min_max(Pos2::new(area.max.x - crate::history::place::COLUMN_W, area.min.y), area.max);
+                let note = Rect::from_min_max(area.min, Pos2::new(column.min.x, area.max.y));
+                let mut child = ui.new_child(egui::UiBuilder::new().max_rect(note).layout(egui::Layout::top_down(egui::Align::Min)));
+                child.set_clip_rect(note.intersect(ui.clip_rect()));
+                self.content(&mut child);
+                ui.painter().line_segment([column.left_top(), column.left_bottom()], Stroke::new(1.0, theme::palette().border));
+                let mut side = ui.new_child(egui::UiBuilder::new().max_rect(column.shrink2(Vec2::new(8.0, 0.0))).layout(egui::Layout::top_down(egui::Align::Min)));
+                side.set_clip_rect(column.intersect(ui.clip_rect()));
+                self.history_margin(&mut side);
+                ui.allocate_rect(area, Sense::hover());
+            } else {
+                self.content(ui);
+            }
             return;
         }
+        self.history.panel.place = Some(crate::history::place::Place::Sidebar);
         let area = ui.available_rect_before_wrap();
         let total = area.width() - BORDER_W * (n - 1) as f32;
         let widths = pane_widths(&self.panes.weights, total, MIN_PANE_W);
@@ -694,6 +719,10 @@ impl ShaleApp {
                             self.actions.push(Action::NewDrawing { folder, embed_into: Some(p2.clone()) });
                             ui.close();
                         }
+                        if ui.button("History of this note").clicked() {
+                            self.actions.push(Action::History(p2.clone()));
+                            ui.close();
+                        }
                         if ui.button("Rename…").clicked() {
                             self.actions.push(Action::Rename(p2.clone()));
                             ui.close();
@@ -718,6 +747,10 @@ impl ShaleApp {
                     ui.menu_button(egui::RichText::new("⋯").size(16.0).color(theme::palette().muted), |ui| {
                         if ui.button("Export to PDF…").clicked() {
                             self.actions.push(Action::Export(p2.clone()));
+                            ui.close();
+                        }
+                        if ui.button("History of this drawing").clicked() {
+                            self.actions.push(Action::History(p2.clone()));
                             ui.close();
                         }
                         if ui.button("Rename…").clicked() {

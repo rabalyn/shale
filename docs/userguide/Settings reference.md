@@ -258,6 +258,29 @@ Some behaviour is decided by a note's own properties (front matter) instead of a
 | `sync.commit_suffix` | empty | Git sync, "suffix" |
 | `sync.lfs_download` | `on_demand` (a media file stored with Git LFS is downloaded when you play or open it; `always`: after every sync) | Git sync, "Download media files after every sync" (shown only when `git-lfs` is installed) |
 
+Settings → Sync starts with **Turn on sync…** ([[Turn on sync]]), which sets up the history, a folder another app syncs, or a git server; the
+address field and **Connect** are under **Advanced**. The wizard adds no setting of its own: it turns `history.enabled` on, and for a server it
+sets the vault's `origin` and `sync.enabled`. A token is kept in the system keyring, never in a settings file. Where the vault is (a network
+folder or a cloud-synced folder) is a warning, not a setting.
+
+The settings of the git that Shale runs are in the settings file of this computer ([[Git sync]]):
+
+| Setting | Default | Where |
+|---|---|---|
+| `git` | the group of the two keys below | Settings → Sync |
+| `git.choice` | `Auto` (the git of this computer when there is one, else Shale's own; `System`: only the git of `PATH`; `Managed`: Shale's own, where Shale installs only git-lfs the git of `PATH` with that git-lfs) | Settings → Sync, "Git to use" |
+| `git.updates` | `Off` (no request; `Notify`: look 30 seconds after the start and weekly and say so; `Install`: and install it) | Settings → Sync, "New versions" (shown once Shale's git is installed) |
+
+The file history ([[File history]]) is set in the settings file of this computer:
+
+| Setting | Default | Where |
+|---|---|---|
+| `history` | the group of the four keys below | Settings → Sync, "File history" |
+| `history.enabled` | on (`false`: no new versions are kept; the old ones stay) | Settings → Sync, "Keep earlier versions of my notes" |
+| `history.coalesce_minutes` | 10 (1 to 1440; at most one version of a note in this time while you type) | Settings → Sync, "At most one version of a note every … minutes" |
+| `history.idle_seconds` | 60 (5 to 3600; a version when a note had no change for so long) | Settings → Sync, "… no change for … seconds" |
+| `history.show_panel` | on (`false`: the history column beside a note is hidden; the History panel of the right sidebar stays) | the **×** of the column, **Show it here** in the panel, ⋯ → "History of this note" |
+
 The git remote itself is git's (`git remote`), set with **Connect** in the same section.
 
 Settings → Vault also has **Check names for Windows and macOS…** (no setting, a tool): it lists the files

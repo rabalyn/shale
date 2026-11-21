@@ -21,7 +21,7 @@ of **views**.
 # The right sidebar
 
 - Each view has its own menubar of panel icons (Backlinks, Outgoing links, Outline, Graph,
-  Calendar) and shows the panel of the selected icon, so several panels can be open at once.
+  Calendar, History) and shows the panel of the selected icon, so several panels can be open at once.
 - Drag a panel icon over the right sidebar ("Drop to open this icon in a new view") to make a
   new view below it. Drag icons between menubars, to the ribbon (a shortcut that shows the panel
   below the views) and back. Icons that are no panels (Files, Mail, …) cannot go there. Taking

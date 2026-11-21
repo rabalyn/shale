@@ -58,6 +58,7 @@ mod galley_index;
 mod gitsync;
 mod graph;
 mod graph_tree;
+mod history;
 mod import;
 mod instance;
 mod jobs;
@@ -76,6 +77,8 @@ mod math;
 #[cfg(test)]
 mod math_ui_tests;
 mod media;
+#[cfg(test)]
+mod netshare_env_tests;
 #[cfg(test)]
 mod notes_vault_tests;
 mod opener;
@@ -265,6 +268,13 @@ fn main() -> eframe::Result {
     // release builds: no core dumps, no memory reads by other processes (SEC-019)
     if let Err(e) = secret::harden_process(cfg!(not(debug_assertions))) {
         eprintln!("shale: could not make the process undumpable: {e}");
+    }
+    // git's askpass helper (SYNC-054): answers one prompt from the keyring, opens nothing
+    {
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        if gitsync::credentials::askpass_requested(std::env::var_os(gitsync::credentials::ASKPASS_ENV).as_deref(), &args) {
+            std::process::exit(gitsync::credentials::run_askpass(&args[0]));
+        }
     }
     let Cli { screenshot, record, vault, view, keys, size, export_pdf, restarted } = match parse_args(std::env::args().skip(1)) {
         Parsed::Run(cli) => cli,

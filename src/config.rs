@@ -441,6 +441,12 @@ pub struct Config {
     /// The TeX that exports notes to PDF through LaTeX templates (TEX-001, CFG-044).
     #[serde(deserialize_with = "lenient")]
     pub tex: crate::pdf::tex::TexConfig,
+    /// Which git Shale runs, and the opt-in check of the managed git (SYNC-024, SYNC-027, CFG-054).
+    #[serde(deserialize_with = "lenient")]
+    pub git: crate::gitsync::managed::GitConfig,
+    /// The file history: snapshots of the notes (SYNC-032, SYNC-033, CFG-066).
+    #[serde(deserialize_with = "lenient")]
+    pub history: crate::gitsync::history::HistoryConfig,
     /// What Shale does about new releases (UPD-001).
     #[serde(deserialize_with = "lenient")]
     pub updates: crate::update::UpdateConfig,
@@ -526,6 +532,8 @@ impl Default for Config {
             social_check_minutes: 5,
             caches: CacheRetention::default(),
             tex: Default::default(),
+            git: Default::default(),
+            history: Default::default(),
             updates: Default::default(),
             keybindings: Default::default(),
             legacy_open_files: None,

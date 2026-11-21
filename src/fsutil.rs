@@ -166,6 +166,23 @@ pub fn create_private_dir_new(path: &Path) -> io::Result<()> {
     b.create(path).map_err(|e| named(path, e))
 }
 
+/// May `folder` be removed as the managed folder of a tool Shale installs below `<data>/shale`
+/// (`what`: "the managed TeX Live")? Only one of the `allowed` folders, which is a real folder: a
+/// link is never followed, and neither is a link in the place of `<data>/shale` (TEX-003, SYNC-028).
+pub fn removable_folder(data: &Path, folder: &Path, allowed: &[PathBuf], what: &str) -> Result<(), String> {
+    if !allowed.iter().any(|a| a == folder) {
+        return Err(format!("{} is not the folder of {what}", folder.display()));
+    }
+    let real_dir = |p: &Path| fs::symlink_metadata(p).is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink());
+    if !real_dir(&data.join("shale")) {
+        return Err(format!("{} is not a plain folder", data.join("shale").display()));
+    }
+    if !real_dir(folder) {
+        return Err(format!("{} is not a plain folder (a link, or a file): nothing was removed", folder.display()));
+    }
+    Ok(())
+}
+
 /// A folder `<prefix>-<user id>` for temporary files that must stay private: in the user's runtime
 /// folder when there is one (already private), else in the system temp folder, where an existing
 /// path of that name that is not a folder of the current user is refused.

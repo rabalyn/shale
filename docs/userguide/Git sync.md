@@ -2,20 +2,59 @@
 features:
   - "Git sync"
 ---
-Keep a vault on several computers with git. Back to [[Start here]].
+Keep a vault on several computers with git. Back to [[Start here]]. The easy way in is [[Turn on sync]]; this note is what runs behind it. A vault in a folder that Dropbox, Nextcloud or OneDrive syncs: [[Vaults in cloud and network folders]].
 
-- Needs `git` installed. In Settings → Sync, enter the URL of a git repository
-  (`https://…`, `ssh://…`, `git@host:notes.git` or a folder path) and press **Connect**, or run
-  `git init` in the vault folder yourself. An address with a password in it, and plain `http://`
-  or `git://` (except on this computer), are refused: use a credential helper or an SSH key.
-  Shale never asks for a password; that is git's business.
+- Needs `git` (see "Installing git" below if you have none). In Settings → Sync press **Turn on sync…** ([[Turn on sync]]),
+  or open **Advanced**, enter the URL of a git repository (`https://…`, `ssh://…`, `git@host:notes.git` or a folder path)
+  and press **Connect**, or run `git init` in the vault folder yourself. An address with a password in it, and plain `http://`
+  or `git://` (except on this computer), are refused: use the wizard's token, a credential helper or an SSH key.
+  A token made through the wizard is kept in your system's keyring and given to git by Shale; it is never in a file.
 - Shale then syncs on its own: when the vault opens, every few minutes (default 5; the setting
   is `sync.interval_minutes`) and on **Sync now**. "Sync this vault automatically" switches it
   off (`sync.enabled`). Those settings are in the vault's `.shale/settings.json`, so they travel
   with it ([[Vault settings]]).
 - A sync commits every change (the `.shale/` files too, so settings and open tabs follow you),
   fetches, merges and pushes. Commit messages read `Sync from <computer>: 3 file(s)`, with an
-  optional prefix and suffix. Without a remote, Shale only keeps a local history.
+  optional prefix and suffix, and end with the lines `Shale-Reason:` and `Shale-Device:` (the computer's name).
+  Without a remote, Shale only keeps a local history.
+- Besides the sync's commits, Shale makes a small commit of a note when you save it, stop typing or close it,
+  so that you can go back to an earlier version ([[File history]]). The sync pushes them as they are, and
+  a vault without a git repository gets the same history on this computer, outside the vault.
+
+# Installing git
+
+Settings → Sync starts with what it found: the git and the git-lfs of your computer (through `PATH`),
+Shale's own git if you installed one, and which of them is in use.
+
+![[settings-sync.png]]
+
+- **Windows.** Without git, **Download and install git** downloads MinGit (the official portable
+  Git for Windows, about 40 MB) and git-lfs (about 6 MB) from their GitHub releases into
+  `shale\git` in your data folder, about 110 MB on disk. No administrator rights are needed and
+  nothing else on the computer changes. The page shows the sizes and the folder first; nothing is
+  downloaded before you press the button. Shale checks every file against the SHA-256 it has
+  pinned, builds the folder aside as `git.partial`, runs `git --version` from it, and only then
+  renames it to `git`. **Cancel** or a failure leaves nothing behind.
+- **macOS.** Apple ships git only with its command line tools. The button **Install git (Apple's
+  command line tools)** opens Apple's installer (a system dialog, 1 to 2 GB); press **Check
+  again** when it is done. git-lfs, if missing, is downloaded by Shale (about 6 MB).
+- **Linux.** Install git with your package manager; the page shows the command for your
+  distribution (for example `sudo apt install git git-lfs`) with a **Copy command** button, and
+  Shale never runs `sudo`. When git is there and git-lfs is not, **Download and install git-lfs**
+  puts it into `~/.local/share/shale/git` (about 6 MB).
+- **Which git runs.** **Automatic** uses the git of your computer when there is one (its
+  git-lfs first, Shale's as the fallback) and Shale's own git otherwise. **The git of this
+  computer** and **The git that Shale installs** pin the choice (`git.choice` in the settings file,
+  [[Settings reference]]).
+- **Updates.** Shale never asks the network for a newer git unless you turn it on: **Look for a new
+  version and tell me** (or **…and install it**) looks 30 seconds after Shale starts and then
+  every week at the releases of git-for-windows and git-lfs, and checks the download against the
+  SHA-256 GitHub lists. **Look for a new version** checks once, now. **Update** replaces Shale's git
+  only when the new one runs; the old one stays until then. `SHALE_UPDATES=off` switches every
+  check off. Shale's own git is not updated by your system's package manager.
+- **Remove…** asks first and deletes the folder `shale/git` and nothing else.
+- Passwords are git's business unless you used the wizard: then Shale gives git the token from the keyring (see
+  [[Turn on sync]]); otherwise a credential helper or an SSH key. Shale's git is run the same way as any other git (no shell, no prompts).
 
 # Nothing is ever lost
 

@@ -316,7 +316,7 @@ jobs:
         run: sh .forgejo/scripts/check-coverage.sh lcov.info .forgejo/coverage-baseline
 
   # DEV-011, CALENV-004, MAIL-093, TEX-020: the real-server suites (Radicale, Dovecot, the OAuth2 provider and
-  # Mailpit in containers) of tests/caldav-env and tests/mail-env, and the LuaLaTeX suite of tests/tex-env. Needs a container engine inside the
+  # Mailpit in containers) of tests/caldav-env and tests/mail-env, the sync wizard against a real Forgejo (tests/forgejo-env, SYNC-066) and the LuaLaTeX suite of tests/tex-env. Needs a container engine inside the
   # job container; where the runner offers none, the job says so and ends green without running the
   # suites (see tests/caldav-env/README.md, "In CI"). Separate from the build, so it never blocks it.
   env-tests:
@@ -381,7 +381,7 @@ jobs:
           echo "engine=$engine" >> "$GITHUB_OUTPUT"
           if [ "$engine" = none ]; then
             echo "SKIPPED: this runner cannot run containers inside the job container (podman and docker cannot start a container here; the reason is above)."
-            echo "The CalDAV, mail and TeX real-server tests did NOT run. What the runner needs: tests/caldav-env/README.md, section 'In CI'."
+            echo "The CalDAV, mail, Forgejo and TeX real-server tests did NOT run. What the runner needs: tests/caldav-env/README.md, section 'In CI'."
           else
             echo "Container engine: $engine"
           fi
