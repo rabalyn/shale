@@ -9,8 +9,9 @@
 # Nothing is published from here. Releases are built and published by GitHub from release tags
 # (.github/workflows/build.yml; Forgejo ignores .github/workflows because this folder exists).
 # The commit of a tag that passes the build is pushed to GitHub's `main` (the `mirror` job), so
-# the public repository has the code its issues talk about; a release tag is pushed there too,
-# which starts the release build, also on macOS and Windows (BUILD-016, BUILD-017).
+# the public repository has the code its issues talk about; that push starts GitHub's main-check
+# (macOS and Windows tests, which also keep the Rust cache warm, BUILD-039, ADR-0025). A release tag is
+# pushed there too (before main), which starts the release build (BUILD-016, BUILD-017).
 #
 # The runner starts the job in a container (Docker or Podman). Steps are plain shell: JavaScript
 # actions (checkout, cache, upload-artifact) need Node, which the Rust image does not have, and
@@ -120,6 +121,7 @@ jobs:
           sh .forgejo/scripts/test-check-commit-issues.sh
           bash scripts/test-land.sh
           bash scripts/test-env-tests.sh
+          bash scripts/test-bench-wanted.sh
           bash scripts/test-dev-metrics.sh
           bash scripts/test-release.sh
 
@@ -249,6 +251,8 @@ jobs:
   # a ratchet against .forgejo/coverage-baseline. Separate from the build, so it never blocks it.
   # No artifact is uploaded (upload-artifact is a JavaScript action); the table in the log is the
   # report, and `cargo llvm-cov --html` makes the browsable one locally (docs/coverage.md).
+  # Runs for every tag, check and release: `mirror` needs it (#461, ADR-0026), so a skipped
+  # coverage would skip the mirror of every release. Not for the weekly run or a run by hand.
   coverage:
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -359,7 +363,7 @@ jobs:
       # step finds no engine and skips
       - name: Container engine (Podman)
         run: |
-          (apt-get update -qq && apt-get install -y -qq --no-install-recommends podman python3-pip openssl curl netcat-openbsd >/dev/null) \
+          (apt-get update -qq && apt-get install -y -qq --no-install-recommends podman python3-pip openssl curl netcat-openbsd util-linux >/dev/null) \
             || echo "Could not install Podman here."
           # bookworm's podman-compose (1.0.3) does not know `network_mode: "service:…"`, which the mail
           # stack uses: a pinned newer one from PyPI
@@ -392,14 +396,15 @@ jobs:
       - name: CalDAV, mail and TeX tests against the real servers
         if: steps.engine.outputs.engine == 'podman' || steps.engine.outputs.engine == 'docker'
         env:
-          # The weekly run and release tags (vX.Y.Z) refresh TeX Live and run the real install and the
-          # template downloads; check tags (vX.Y.Z-rc.N) use the image as built (ADR-0021, #325).
+          # The weekly run and release tags (vX.Y.Z) run the real install and the template downloads;
+          # check tags (vX.Y.Z-rc.N) do not (ADR-0021, #325). Only the weekly run builds the TeX image
+          # again without the cache; every tag uses the image as built (ADR-0026, #455).
           # The real install of TeX Live (about 100 MB, minutes):
           SHALE_ENV_TESTS_TEX_INSTALL: ${{ (github.event_name == 'schedule' || (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-'))) && 'yes' || 'no' }}
           # the template import from GitHub and CTAN (a few MB), which also shows when CTAN's tuda-ci stops fitting the kinds:
           SHALE_ENV_TESTS_TEX_IMPORT: ${{ (github.event_name == 'schedule' || (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-'))) && 'yes' || 'no' }}
-          # and the TeX image built again from the current TeX Live, so upstream breakage shows up within a week (ADR-0020):
-          SHALE_ENV_TESTS_TEX_REFRESH: ${{ (github.event_name == 'schedule' || (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-'))) && 'yes' || 'no' }}
+          # and the TeX image built again from the current TeX Live, so upstream breakage shows up within a week (ADR-0020, ADR-0026); only the weekly run:
+          SHALE_ENV_TESTS_TEX_REFRESH: ${{ github.event_name == 'schedule' && 'yes' || 'no' }}
         run: |
           # Tags (release and check) take TeX Live from the homelab mirror next to the runner, as the public
           # CTAN mirror answers the runner with 403 (#424); the address is the repository variable
@@ -481,29 +486,36 @@ jobs:
           git remote add github https://github.com/rabalyn/shale.git
           gh=(-c "http.https://github.com/.extraHeader=Authorization: basic $(printf 'x-access-token:%s' "$MIRROR_TOKEN" | base64 -w0)")
           git "${gh[@]}" fetch -q github "+refs/heads/main:refs/remotes/github/main" || true
+          # a release tag is pushed BEFORE main: GitHub's workflow main-check.yml, started by the push of
+          # main, then finds the tag at its commit and leaves the macOS and Windows tests to the release
+          # build, which runs them too (BUILD-039, ADR-0025)
+          release=yes
+          case "$TAG" in *-*) release=no ;; esac
+          push_tag() {
+            # GitHub builds and publishes it (BUILD-012); an existing one is never replaced
+            there=$(git "${gh[@]}" ls-remote github "refs/tags/$TAG" | cut -f1)
+            here=$(git rev-parse "refs/tags/$TAG")
+            if [ -n "$there" ]; then
+              if [ "$there" = "$here" ]; then
+                echo "GitHub already has the tag $TAG."
+                return 0
+              fi
+              echo "::error::GitHub has a different tag $TAG ($there, here $here); nothing is replaced"
+              return 1
+            fi
+            git "${gh[@]}" push github "refs/tags/$TAG:refs/tags/$TAG"
+            echo "Pushed the tag $TAG to GitHub: its release build starts there."
+          }
+          if [ "$release" = yes ]; then
+            push_tag
+          fi
           # a later tag got there first: main stays (an older commit is never forced over it)
           if git rev-parse -q --verify refs/remotes/github/main >/dev/null && git merge-base --is-ancestor "$SHA" refs/remotes/github/main; then
             echo "GitHub's main already contains $SHA."
           else
             git "${gh[@]}" push github "$SHA:refs/heads/main"
-            echo "Pushed $SHA to GitHub's main."
+            echo "Pushed $SHA to GitHub's main: its main-check starts there."
           fi
-          case "$TAG" in
-            *-*)
-              echo "$TAG is a pre-release (check tag): it stays on Forgejo."
-              exit 0
-              ;;
-          esac
-          # a release tag: GitHub builds and publishes it (BUILD-012); an existing one is never replaced
-          there=$(git "${gh[@]}" ls-remote github "refs/tags/$TAG" | cut -f1)
-          here=$(git rev-parse "refs/tags/$TAG")
-          if [ -n "$there" ]; then
-            if [ "$there" = "$here" ]; then
-              echo "GitHub already has the tag $TAG."
-              exit 0
-            fi
-            echo "::error::GitHub has a different tag $TAG ($there, here $here); nothing is replaced"
-            exit 1
+          if [ "$release" = no ]; then
+            echo "$TAG is a pre-release (check tag): it stays on Forgejo."
           fi
-          git "${gh[@]}" push github "refs/tags/$TAG:refs/tags/$TAG"
-          echo "Pushed the tag $TAG to GitHub: its release build starts there."

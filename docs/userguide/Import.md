@@ -54,7 +54,7 @@ ticked.
 
 ![[imported-note.png]]
 
-## Word files
+# Word files
 
 ![[settings-import.png]]
 

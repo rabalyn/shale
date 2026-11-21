@@ -7,7 +7,7 @@ features:
 Hand-drawn style sketches, saved as standard `.excalidraw` files. The drawing on
 [[Start here]] is one: [[How notes connect.excalidraw]].
 
-## Draw
+# Draw
 
 - Tools on keys 1 to 0: hand, select, rectangle, diamond, ellipse, arrow, line, pen, text,
   eraser.
@@ -19,20 +19,20 @@ Hand-drawn style sketches, saved as standard `.excalidraw` files. The drawing on
 - "Auto arrange" untangles a diagram; "Spread out" and "Pull together" change the spacing.
 - Insert a new drawing from the note menu, or embed one with `![[Name.excalidraw]]`.
 
-## Links inside drawings
+# Links inside drawings
 
 Type `[[` in a label or text for note suggestions, `[[p ` for people and `[!` for the file
 picker. A shape with a link gets a small ↗; click it (or Ctrl+click the shape) to open the
 note, Shift for a new tab. The linked note lists the drawing under Backlinks, and the graph
 shows the connection ([[Graph and backlinks]]).
 
-## Obsidian files
+# Obsidian files
 
 - Drawings of the Obsidian Excalidraw plugin (`.excalidraw.md`) open in the drawing editor and
   are saved in the plugin's own format, so Obsidian keeps reading them.
 - Pictures inside drawings show up, also in embedded drawings and in PDF export.
 
-### Obsidian canvases
+## Obsidian canvases
 
 ![[canvas.png]]
 

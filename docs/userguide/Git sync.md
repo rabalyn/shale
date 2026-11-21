@@ -17,7 +17,7 @@ Keep a vault on several computers with git. Back to [[Start here]].
   fetches, merges and pushes. Commit messages read `Sync from <computer>: 3 file(s)`, with an
   optional prefix and suffix. Without a remote, Shale only keeps a local history.
 
-## Nothing is ever lost
+# Nothing is ever lost
 
 - A note changed on two computers keeps the remote version, and yours is kept next to it as
   `Note (conflict 2026-11-14 1530).md`. A note deleted on one side and changed on the other is
@@ -27,7 +27,7 @@ Keep a vault on several computers with git. Back to [[Start here]].
 - Edits you type while a sync runs are never overwritten: your text is saved as a conflict copy
   next to the new version.
 
-## Media with Git LFS
+# Media with Git LFS
 
 Sounds and videos are big and do not merge, so Shale can keep them in Git LFS: the history holds
 a small pointer and the file itself lives in the remote's LFS store. See [[Sounds and videos]].
@@ -51,7 +51,7 @@ a small pointer and the file itself lives in the remote's LFS store. See [[Sound
 - **Conflicts.** The conflict copy of a file stored in LFS is stored in LFS too.
 - **SSH and HTTPS** remotes both work with your normal git credentials.
 
-### Forgejo
+## Forgejo
 
 Forgejo has LFS switched on by default (`[server] LFS_START_SERVER = true`). To keep the LFS files
 on S3 or MinIO instead of the server's disk, put this in `app.ini` (placeholder values):

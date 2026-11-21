@@ -1,25 +1,35 @@
-# GitHub builds only releases (ADR-0017): this workflow runs for version tags and by hand, never
+# GitHub builds releases here (ADR-0017): this workflow runs for version tags and by hand, never
 # for a push to `main` (which reaches GitHub from Forgejo's mirror job, BUILD-016) or a pull
-# request, so the public runners are not used for day-to-day work. Day-to-day CI for Linux and the
+# request, so the public runners are not used for day-to-day work. The one other GitHub workflow is
+# main-check.yml (ADR-0025, BUILD-039): macOS and Windows tests of `main` per green check tag, which
+# also saves the Rust cache that the jobs below restore (same `shared-key`). Day-to-day CI for Linux and the
 # daily dependency audit run on the homelab Forgejo instead: .forgejo/workflows/ci.yml and
 # security.yml.
 # 1. Releases (BUILD-012): GitHub gets the release tags that scripts/make-release.sh pushes to
 #    Forgejo, from Forgejo's `mirror` job once they passed CI there (BUILD-016).
-#    - every version tag (v0.2.0, ...): the jobs `linux`, `macos` and `windows` check, build and
-#      test it again on their system, and each packages its download (BUILD-010, BUILD-024) after
-#      the tests passed and uploads it as a workflow artifact; then the job `release` attests all
+#    - every version tag (v0.2.0, ...): the job `linux` builds and packages it, the jobs `macos`
+#      and `windows` build and test it on their system, and each packages its download
+#      (BUILD-010, BUILD-024; macOS and Windows after their tests passed) and uploads it as a
+#      workflow artifact; then the job `release` attests all
 #      the files at once and publishes a release page named after the version, with that version's
 #      notes from CHANGELOG.md (the tag must match the version in Cargo.toml), the three
 #      downloads (Linux tarball, macOS arm64 tarball, Windows zip, all unsigned), the zip of the
 #      user guide (DEV-020) and the guide as a PDF (BUILD-023), their .sha256 files and the
 #      build attestation. A red macOS or Windows job stops the release.
-#    - workflow_dispatch: the same checks, builds and attestation without publishing, to try the
-#      workflow (the files are workflow artifacts)
+#    - workflow_dispatch: the same builds and attestation without publishing, to try the
+#      workflow (the files are workflow artifacts). It is not a test run for Linux: see below.
 #    The attestation (BUILD-014) is keyless: GitHub signs it through Sigstore with a short-lived
 #    certificate naming this repository, this workflow and the tag, so there is no key to keep.
 # 2. macOS and Windows (BUILD-005, BUILD-017, BUILD-024): the homelab cannot run those systems, so
-#    the jobs `macos` and `windows` lint, build, test and package Shale there. They publish
+#    the jobs `macos` and `windows` build, test and package Shale there. They publish
 #    nothing themselves (the job `release` does), and the downloads are not signed or notarised.
+# 3. What is not repeated here (BUILD-012): clippy and `cargo fmt --check` (scripts/land.sh runs
+#    them on every landing, and scripts/cross-check.sh clippy for macOS and Windows, which fails
+#    when a tool it needs is missing, BUILD-004, DEV-015), and the Linux tests (Forgejo's `build`
+#    job ran `cargo test --release --locked` on this very commit, and the tag only reaches GitHub
+#    from Forgejo's `mirror` job after that run was green, BUILD-016). So the `linux` job builds
+#    and packages only, and a run by hand (workflow_dispatch) tests nothing on Linux; it is only
+#    for trying the workflow. The code of the commit is checked by land.sh and Forgejo.
 name: build
 
 on:
@@ -81,21 +91,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: 1.100.0
-          components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          # the cache that main-check.yml saved on `main` (only the default branch's caches are
+          # readable from a tag, #452); a tag run restores it and saves nothing
+          shared-key: release-${{ runner.os }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Format
-        run: cargo fmt --check
-
-      - name: Clippy
-        run: cargo clippy --all-targets --locked -- -D warnings
-
+      # no fmt, clippy or tests here (BUILD-012): they ran on this commit already, see the header
       - name: Build
         run: cargo build --release --locked
-
-      - name: Test
-        run: cargo test --release --locked
 
       - name: Package
         run: |
@@ -160,12 +166,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: 1.100.0
-          components: clippy
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-
-      - name: Clippy
-        run: cargo clippy --all-targets --locked -- -D warnings
+        with:
+          # the cache that main-check.yml saved on `main` (only the default branch's caches are
+          # readable from a tag, #452); a tag run restores it and saves nothing
+          shared-key: release-${{ runner.os }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build
         run: cargo build --release --locked
@@ -226,12 +233,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: 1.100.0
-          components: clippy
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-
-      - name: Clippy
-        run: cargo clippy --all-targets --locked -- -D warnings
+        with:
+          # the cache that main-check.yml saved on `main` (only the default branch's caches are
+          # readable from a tag, #452); a tag run restores it and saves nothing
+          shared-key: release-${{ runner.os }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build
         run: cargo build --release --locked

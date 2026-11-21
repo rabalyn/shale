@@ -22,6 +22,8 @@ to the first `up` (a few days around today, so they are inside the window Shale 
 back to 13 months ahead), and the certificate lasts a year: after a long time, `rm -r
 tests/caldav-env/certs`, then `reset` and `up`.
 
+**Two checkouts take turns.** The stacks have fixed names per machine, so everything that uses or changes them (the `up`, `down` and `reset` commands of the helper script, `.forgejo/scripts/env-tests.sh run`, and the ignored `cargo test` suites) takes one machine-wide lock (`${XDG_RUNTIME_DIR:-/tmp}/shale-env-stacks-<user>.lock`, DEV-034, #420); a second checkout (another worktree, or `scripts/land.sh`) waits for the first.
+
 ## The account and calendars
 
 User name `shale`, password `shale-test-pw`. Server address `https://localhost:15232/` (Shale finds
@@ -77,8 +79,8 @@ in test builds. Use `SHALE_CALDAV_ENV_COMPOSE` as above for Docker.
 The `env-tests` job of `.forgejo/workflows/ci.yml` (DEV-011, CALENV-004, MAIL-093) runs both this
 suite and the mail suite (`tests/mail-env/`) with `.forgejo/scripts/env-tests.sh run`: on pushes to
 `main`, on pull requests that touch `src/calendar/`, `src/imap*`, `src/mail*`,
-`src/smtp*` or `tests/{caldav,mail}-env/`, and weekly. It starts both stacks, runs both ignored
-suites (one test thread each, except the TeX compiles of `tex_env`, which run with four, `SHALE_ENV_TESTS_TEX_THREADS`; it fails if a suite ran no test) and always takes the stacks down.
+`src/smtp*` or `tests/{caldav,mail}-env/`, and weekly. It starts both stacks (and the TeX image build) at the same time, runs the ignored
+suites at the same time, each with its own log (one test thread each, except the TeX compiles of `tex_env`, which run with four, `SHALE_ENV_TESTS_TEX_THREADS`; it fails if a suite ran no test) and always takes the stacks down.
 
 The job runs in the `rust` container like the other jobs, so it needs a container engine **inside**
 that container. It installs `podman` with apt and `podman-compose` 1.2.0 with pip (bookworm's 1.0.3 lacks

@@ -104,6 +104,7 @@ fn pdf_title_and_pages(pdf: Vec<u8>) -> (Option<String>, usize) {
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_the_pinned_tuda_ci_archive_is_imported_with_docstrip_and_every_class_of_the_kinds_exists() {
+    crate::env_lock::hold();
     // the archive of the cache is the pinned one
     let bytes = std::fs::read(cached_archive()).unwrap();
     verify_sha256(&bytes, PRESET_SHA256).expect("the cached archive is the pinned one");
@@ -163,6 +164,7 @@ fn compile_every_kind_with(set: &SetInfo, expect_placeholder: bool, department_l
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_every_kind_of_the_imported_tuda_set_compiles_with_the_placeholder_logo() {
+    crate::env_lock::hold();
     let set = the_set();
     assert_eq!(set.logo, LogoStatus::Missing, "no logo in the slot");
     compile_every_kind(&set, true);
@@ -173,6 +175,7 @@ fn tex_env_every_kind_of_the_imported_tuda_set_compiles_with_the_placeholder_log
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_every_kind_of_the_imported_tuda_set_compiles_with_a_logo_in_the_slot_and_german_settings() {
+    crate::env_lock::hold();
     // a copy of the vault's set with a logo, in German with another accent colour
     let (vault, _) = imported_vault();
     let root = mounted_root();
@@ -195,6 +198,7 @@ fn tex_env_every_kind_of_the_imported_tuda_set_compiles_with_a_logo_in_the_slot_
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_every_kind_with_a_department_logo_compiles_and_the_pdf_shows_the_logo_where_the_kind_has_a_place() {
+    crate::env_lock::hold();
     let set = the_set_with_a_department_logo();
     // an empty slot is no warning and no placeholder (the TU logo's is still the placeholder)
     let empty = the_set();
@@ -231,6 +235,7 @@ fn tex_env_every_kind_with_a_department_logo_compiles_and_the_pdf_shows_the_logo
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_a_re_import_of_the_cached_archive_keeps_the_logo_and_the_settings() {
+    crate::env_lock::hold();
     let root = mounted_root();
     let vault = root.join(format!("vault-again-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&vault);
@@ -253,6 +258,7 @@ fn tex_env_a_re_import_of_the_cached_archive_keeps_the_logo_and_the_settings() {
 #[test]
 #[ignore = "needs the network and the container: tests/tex-env/tex-env.sh build"]
 fn tex_import_the_pinned_preset_is_downloaded_from_github_checked_by_its_sha_and_laid_out() {
+    crate::env_lock::hold();
     let root = mounted_root();
     let vault = root.join(format!("vault-github-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&vault);
@@ -274,6 +280,7 @@ fn tex_import_the_pinned_preset_is_downloaded_from_github_checked_by_its_sha_and
 #[test]
 #[ignore = "needs the network and the container: tests/tex-env/tex-env.sh build"]
 fn tex_import_the_newest_tuda_ci_from_ctan_is_imported_and_its_test_page_compiles() {
+    crate::env_lock::hold();
     let root = mounted_root();
     let vault = root.join(format!("vault-ctan-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&vault);

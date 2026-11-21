@@ -23,6 +23,8 @@ cargo test -- --ignored tex_import  # downloads tuda-ci from GitHub and CTAN (a 
 cargo test -- --ignored tex_install # not this image: installs TeX Live for real from the default repository (network, minutes)
 ```
 
+**Two checkouts take turns.** The stacks have fixed names per machine, so everything that uses or changes them (the `build`, `compile`, `exec` and `reset` commands of the helper script, `.forgejo/scripts/env-tests.sh run`, and the ignored `cargo test` suites) takes one machine-wide lock (`${XDG_RUNTIME_DIR:-/tmp}/shale-env-stacks-<user>.lock`, DEV-034, #420); a second checkout (another worktree, or `scripts/land.sh`) waits for the first.
+
 The `tex_env` tests share nothing (own work folders, a fresh container per compile), so they can run in parallel:
 `.forgejo/scripts/env-tests.sh run` (and so `scripts/land.sh`) uses four test threads, `SHALE_ENV_TESTS_TEX_THREADS`
 sets the number (the demos test starts four compiles itself; #370). `tex_import` and `tex_install` run with one thread.
@@ -62,7 +64,7 @@ upstream `latexmkrc`).
   most). So the image is **not reproducible**: it is whatever TeX Live is current when it is
   built. It records which one in `/etc/shale-tex-build` (year, repository, mirror, date), which `status` and the
   demo test print. `build` reuses a cached image; `build --refresh` rebuilds it without the cache, which the
-  weekly and tag CI runs do, so a change upstream shows within a week.
+  weekly CI run does (tags use the cached image, ADR-0026), so a change upstream shows within a week.
 - **tuda-ci at commit `e933be93…`** (v4.06; there is no tag): GitHub's archive, checked by sha256, in
   `tests/tex-env/cache/` (git-ignored). `build` runs docstrip (`latex tuda-ci.ins`) in the
   image to make the `.cls`/`.sty` files from the `.dtx`.

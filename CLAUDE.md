@@ -18,8 +18,10 @@ Shale is a native Rust notes app. These rules are binding; the full versions are
 - **Git and CI are on Forgejo**: <https://git.home.rabalyn.de/raba/shale> (remote `origin`, the
   owner's homelab, not public), which has no issues or pull requests any more. Its CI runs **only
   for `v*` tags** (and weekly), not for a push to `main`; when every check job of a tag passed
-  (`build`, `unused-deps`, `coverage`, `env-tests`), its `mirror` job pushes `main` to GitHub, and
-  a release tag too, which GitHub builds and publishes (FORGE-002, FORGE-003, BUILD-016, [ADR-0018](docs/decisions/0018-tag-only-ci.md)). `fj --host git.home.rabalyn.de` is only for CI
+  (`build`, `unused-deps`, `coverage`, `env-tests`), its `mirror` job pushes `main` to GitHub (where
+  `main-check.yml` tests macOS and Windows and warms the Rust cache, BUILD-039,
+  [ADR-0025](docs/decisions/0025-github-checks-main.md)), and a release tag too, which GitHub builds and publishes (FORGE-002, FORGE-003,
+  BUILD-016, [ADR-0018](docs/decisions/0018-tag-only-ci.md)). `fj --host git.home.rabalyn.de` is only for CI
   runs (`fj … actions tasks`), not for issues.
 - **Before you start**: read the open issues of your area (`gh issue list -R rabalyn/shale`,
   `--label security` for findings of `cargo audit`, BUILD-021). If the work has no issue, create
@@ -47,7 +49,7 @@ Shale is a native Rust notes app. These rules are binding; the full versions are
   - `scripts/make-tag.sh [patch|minor|major]` makes a **check tag** `vX.Y.Z-rc.N` for "done for
     now" (FORGE-013): it bumps `Cargo.toml`/`Cargo.lock`, merges `docs/changelog-pending/` into
     `[Unreleased]`, lands the bump, tags the landed commit and pushes the tag to Forgejo, whose CI
-    runs once; when green, `main` goes to GitHub (no build there).
+    runs once; when green, `main` goes to GitHub (only `main-check.yml` runs there: macOS and Windows tests).
   - `scripts/make-release.sh [patch|minor|major]` makes a **release** `vX.Y.Z` (FORGE-014): the
     version bump, `[Unreleased]` and `docs/changelog-pending/` merged into the version's
     `CHANGELOG.md` section, the release check (BUILD-013), landing, tag; when Forgejo is green,
@@ -55,6 +57,8 @@ Shale is a native Rust notes app. These rules are binding; the full versions are
   - Both stop with "the changelog needs an update first" when there is nothing new in the
     changelog (a check tag: no change since the previous tag; a release: no entries), so every
     change carries its `docs/changelog-pending/` entry.
+  - `make-release.sh` also stops when GitHub's latest `main-check` run is red or still running
+    (FORGE-020); `--ignore-github-check` skips that.
   - Both name the issue `Release X.Y.Z` (made when missing) and accept `--dry-run`. Never tag by
     hand, never move or delete a pushed tag: a red run is fixed in a branch, landed, then the next
     tag is made.

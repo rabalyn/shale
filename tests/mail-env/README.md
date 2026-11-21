@@ -23,6 +23,8 @@ tests/mail-env/mail-env.sh reset    # stop and delete the mail; the next `up` se
 first `up`, and the certificate lasts a year: after a long time, `rm -r tests/mail-env/certs`,
 then `reset` and `up`.
 
+**Two checkouts take turns.** The stacks have fixed names per machine, so everything that uses or changes them (the `up`, `down`, `reset` and `revoke` commands of the helper script, `.forgejo/scripts/env-tests.sh run`, and the ignored `cargo test` suites) takes one machine-wide lock (`${XDG_RUNTIME_DIR:-/tmp}/shale-env-stacks-<user>.lock`, DEV-034, #420); a second checkout (another worktree, or `scripts/land.sh`) waits for the first.
+
 ## The two accounts
 
 | | Password account | OAuth2 account |

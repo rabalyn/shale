@@ -63,6 +63,12 @@ fn dev_025_test_tex_env_script_passes() {
     run("scripts/test-tex-env.sh");
 }
 
+// spec: BUILD-035
+#[test]
+fn build_035_test_bench_wanted_script_passes() {
+    run("scripts/test-bench-wanted.sh");
+}
+
 // spec: DEV-011
 #[test]
 fn dev_011_test_env_tests_script_passes() {
@@ -79,4 +85,45 @@ fn build_025_install_script_uses_no_gnu_only_install_d() {
         let gnu = words.windows(2).any(|w| w[0] == "install" && w[1].starts_with('-') && !w[1].starts_with("--") && w[1].contains('D')) || l.contains("install --directory") || l.contains("install --create-leading");
         assert!(!gnu, "GNU-only `install -D` in scripts/install.sh: {l}");
     }
+}
+
+fn ci_job(name: &str) -> String {
+    let ci = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(".forgejo/workflows/ci.yml")).unwrap();
+    let start = ci.find(&format!("\n  {name}:\n")).unwrap_or_else(|| panic!("no job {name}")) + 1;
+    let rest = &ci[start + 1..];
+    let end = rest
+        .lines()
+        .scan(0, |off, l| {
+            let at = *off;
+            *off += l.len() + 1;
+            Some((at, l))
+        })
+        .skip(1)
+        .find(|(_, l)| l.starts_with("  ") && !l.starts_with("   ") && !l.starts_with("  #") && l.trim_end().ends_with(':'))
+        .map(|(at, _)| at)
+        .unwrap_or(rest.len());
+    ci[start..start + 1 + end].to_string()
+}
+
+// spec: DEV-011 (ADR-0026, #455): a tag, check or release, uses the cached TeX image; only the weekly
+// scheduled run rebuilds it without the cache
+#[test]
+fn dev_011_only_the_weekly_run_refreshes_the_tex_image() {
+    let env_tests = ci_job("env-tests");
+    let line = env_tests.lines().find(|l| l.trim_start().starts_with("SHALE_ENV_TESTS_TEX_REFRESH:")).expect("the refresh variable is set");
+    assert!(line.contains("github.event_name == 'schedule'"), "the weekly run refreshes");
+    assert!(!line.contains("refs/tags") && !line.contains("ref_name"), "no tag refreshes: {line}");
+    // a release tag still runs the real install and the template import (ADR-0021)
+    let install = env_tests.lines().find(|l| l.trim_start().starts_with("SHALE_ENV_TESTS_TEX_INSTALL:")).unwrap();
+    assert!(install.contains("!contains(github.ref_name, '-')"), "the install stays for release tags");
+}
+
+// spec: DEV-010 (#461): coverage runs for every tag push, check and release, because mirror needs it
+// (that mirror needs all four jobs is build_016_mirror_needs_every_check_job_of_a_tag_push)
+#[test]
+fn dev_010_coverage_runs_for_every_tag_push() {
+    let cov = ci_job("coverage");
+    let cond = cov.lines().find(|l| l.trim_start().starts_with("if:")).expect("the coverage job has a condition");
+    assert!(cond.contains("github.event_name != 'schedule'") && cond.contains("github.event_name != 'workflow_dispatch'"), "tag pushes only, not weekly, not by hand: {cond}");
+    assert!(!cond.contains("contains(github.ref_name"), "check and release tags alike: {cond}");
 }

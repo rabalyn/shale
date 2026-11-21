@@ -152,7 +152,7 @@ fn tool_part(ui: &mut Ui, (s, width): (f32, f32), round: CornerRadius, on: bool,
         theme::palette().text
     };
     draw(ui.painter(), r, c, s);
-    crate::script::hint(tip, r);
+    crate::script::hint(ui.ctx(), tip, r);
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, tip));
     resp.on_hover_text(tip)
 }
@@ -417,7 +417,7 @@ impl FormatBar {
                     ui.painter().galley(r.left_top() + Vec2::new(4.0, 2.0), digit, Color32::PLACEHOLDER);
                     let hex = crate::colour_tags::hex(*c);
                     let label = format!("{tip} {hex}");
-                    crate::script::hint(&label, r);
+                    crate::script::hint(ui.ctx(), &label, r);
                     sw.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label.clone()));
                     if sw.on_hover_text(hex).clicked() {
                         pick = Some(Some(*c));
@@ -509,7 +509,7 @@ fn heading_menu(ui: &mut Ui, b: Look, text: &str, sel: &Range<usize>, open_now: 
             let label = if n == 0 { "Normal text".to_string() } else { format!("Heading {n}") };
             let size = 13.0 + (crate::editor::heading_scale(n) - 1.0) * 6.0;
             let b = ui.add(egui::Button::new(egui::RichText::new(label.clone()).size(size).color(if n == level { theme::palette().accent } else { theme::palette().text })).frame(false).min_size(Vec2::new(120.0, 22.0)));
-            crate::script::hint(&label, b.rect);
+            crate::script::hint(ui.ctx(), &label, b.rect);
             b.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label.clone()));
             if b.clicked() {
                 out = Some(Cmd::Heading(n));

@@ -401,6 +401,12 @@ fn consume_exact(input: &mut InputState, c: Chord) -> bool {
     found
 }
 
+/// A modifier pressed on its own: backends report these as keys of their own (`ControlLeft`, …)
+/// before the key of the chord, so they are no chord and no key that breaks a sequence.
+pub(crate) fn is_modifier_key(key: Key) -> bool {
+    matches!(key, Key::ShiftLeft | Key::ShiftRight | Key::ControlLeft | Key::ControlRight | Key::AltLeft | Key::AltRight | Key::SuperLeft | Key::SuperRight)
+}
+
 /// The sign of Shift in a badge (KEY-016); the monospace font of the app has it, the proportional one has not.
 pub const SHIFT_MARK: char = '\u{21e7}';
 
@@ -646,7 +652,7 @@ impl Keymap {
                 entry.0.push(c);
                 entry.1 = now;
             }
-            None if depth > 0 && input.events.iter().any(|e| matches!(e, eframe::egui::Event::Key { pressed: true, .. })) => {
+            None if depth > 0 && input.events.iter().any(|e| matches!(e, eframe::egui::Event::Key { pressed: true, key, .. } if !is_modifier_key(*key))) => {
                 self.pending.remove(&scope);
             }
             None => {}
@@ -1179,6 +1185,22 @@ mod tests {
         at(&mut k, 21.0, Key::F);
         assert_eq!(at(&mut k, 22.4, Key::F), Some(Action::TreeToggleFolder));
         assert_eq!(k.pending_text(22.5), None);
+    }
+
+    // spec: KEY-009
+    #[test]
+    fn key_009_a_modifier_key_does_not_cancel_a_waiting_sequence() {
+        let mut k = linux();
+        k.set(Action::TreeToggleFolder, b("Space Ctrl+F")).unwrap();
+        let sc = Scope::FileList;
+        assert_eq!(frame(&mut k, sc, vec![key_event(Key::Space, Modifiers::NONE)]), None);
+        // a real keyboard reports Ctrl as a key of its own before the F
+        assert_eq!(frame(&mut k, sc, vec![key_event(Key::ControlLeft, Modifiers::COMMAND)]), None);
+        assert_eq!(frame(&mut k, sc, vec![key_event(Key::F, Modifiers::COMMAND)]), Some(Action::TreeToggleFolder));
+        // any other key still cancels
+        assert_eq!(frame(&mut k, sc, vec![key_event(Key::Space, Modifiers::NONE)]), None);
+        assert_eq!(frame(&mut k, sc, vec![key_event(Key::G, Modifiers::NONE)]), None);
+        assert_eq!(frame(&mut k, sc, vec![key_event(Key::F, Modifiers::COMMAND)]), None);
     }
 
     fn key_event(key: Key, mods: Modifiers) -> Event {

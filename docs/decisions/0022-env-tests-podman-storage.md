@@ -24,8 +24,8 @@ the job prunes dangling images (`podman image prune -f`) and logs `podman system
 ## Consequences
 
 - A check tag run reuses the TeX image built by an earlier run and the pulled test images; the weekly
-  run and a release tag still rebuild the TeX image without the cache (ADR-0021), and the prune then
-  drops the old one.
+  run still rebuilds the TeX image without the cache (ADR-0021; release tags no longer, ADR-0026), and
+  the prune then drops the old one.
 - Containers, pods and volumes a cancelled run left behind are in the kept storage too;
   `env-tests.sh run` already resets both stacks (`down -v`) before it starts them.
 - The storage driver cannot change without emptying the directory on the runner (a different driver

@@ -1,9 +1,14 @@
 #!/bin/sh
 # The CI job "env-tests" (DEV-005, CALENV-004): runs the real-server suites of the CalDAV and mail
 # test environments and the LuaLaTeX suite of the TeX environment (TEX-020). Usage:
+#   env-tests.sh suites <base> <head>
+#       prints the suites the change from <base> to <head> needs, space separated (empty: none):
+#       `calendar::env_tests` for `src/calendar/` and `tests/caldav-env/`, `mail_env` for `src/mail*` and
+#       `tests/mail-env/`, `tex_env` for `src/pdf/tex`, `assets/tex/` and `tests/tex-env/`; all three when
+#       `.forgejo/workflows/ci.yml` or this script changes; scripts/land.sh runs those suites locally
+#       (FORGE-011, #447)
 #   env-tests.sh wanted <base> <head>
-#       prints "yes" or "no": whether the change from <base> to <head> touches the CalDAV, mail or
-#       TeX export code or the environments; scripts/land.sh runs the suites locally then (FORGE-011)
+#       prints "yes" or "no": whether `suites` names any suite for the same change
 #   env-tests.sh install-wanted <base> <head>
 #       prints "yes" or "no": whether the change touches the managed TeX Live install (`assets/tex/`,
 #       `src/pdf/tex/install*`); only then scripts/land.sh sets SHALE_ENV_TESTS_TEX_INSTALL=yes, which
@@ -19,11 +24,20 @@
 #       prints "podman", "docker" or "none": which container engine the job container can use
 #   env-tests.sh run [podman|docker]
 #       uses the given engine (the one the detect step found; detected again when left out),
-#       starts both stacks, builds the TeX image, runs `cargo test -- --ignored calendar::env_tests`,
-#       `… mail_env` and `… tex_env` (SHALE_TEX_ENV_REPOSITORY and SHALE_TEX_INSTALL_REPOSITORY, when set (the CI job sets them for v* tags from vars.SHALE_TEX_MIRROR, DEV-025), reach the TeX build and the tex_install test through the environment; the TeX image is built with --refresh when SHALE_ENV_TESTS_TEX_REFRESH=yes, as the weekly run and release tags of the CI job do, not check tags, ADR-0021, so a change of the current TeX Live shows up; `… tex_install` with SHALE_ENV_TESTS_TEX_INSTALL=yes and `… tex_import` with SHALE_ENV_TESTS_TEX_IMPORT=yes), and always takes the stacks down again; exits 1 if a stack or a test fails or no test ran
+#       runs the suites of SHALE_ENV_TESTS_SUITES (space separated, from `suites`; unset: all three, as the
+#       tag CI runs them; empty or an unknown name: `run` fails at once) and starts only the stacks they need
+#       (CalDAV for `calendar::env_tests`, mail for `mail_env`) and builds the TeX image only when a TeX suite
+#       (`tex_env`, `tex_install`, `tex_import`) runs: `cargo test -- --ignored calendar::env_tests`,
+#       `… mail_env` and `… tex_env` (SHALE_TEX_ENV_REPOSITORY and SHALE_TEX_INSTALL_REPOSITORY, when set (the CI job sets them for v* tags from vars.SHALE_TEX_MIRROR, DEV-025), reach the TeX build and the tex_install test through the environment; the TeX image is built with --refresh when SHALE_ENV_TESTS_TEX_REFRESH=yes, as the weekly run of the CI job does, not tags, ADR-0021, ADR-0026, so a change of the current TeX Live shows up; `… tex_install` with SHALE_ENV_TESTS_TEX_INSTALL=yes and `… tex_import` with SHALE_ENV_TESTS_TEX_IMPORT=yes), and always takes the stacks down again; exits 1 if a stack or a test fails or no test ran
+#       the stacks and the TeX image build start at the same time (background jobs, a log each), then the suites run at
+#       the same time (a log each, printed whole when the suite ends, not interleaved), so a run takes about as long as
+#       its slowest suite (DEV-035, #448); `tex_install` and `tex_import` share one install and run one after the other in
+#       one job; `run` exits 1 and names the failed suites (`FAILED suites: …`) when any fails
 #       The suites run with one test thread (CalDAV, mail, `tex_install` and `tex_import` share one stack or
 #       one install); `tex_env` shares nothing and runs with ${SHALE_ENV_TESTS_TEX_THREADS:-4} test threads (a
 #       positive integer, else `run` fails at once with a message; DEV-011, #370)
+#       `run` holds the machine-wide lock of the stacks for its whole run (tests/env-lock.sh, DEV-034, #420): a second
+#       checkout that wants the stacks says "waiting for the podman test stacks…" and waits (no timeout)
 #       `run` sets SHALE_TEX_FAILED_LOGS (default target/tex-failed-logs, emptied first): the TeX suites keep the full
 #       log of every failed compile there, and `run` lists them at the end (#327)
 #   env-tests.sh tex-suite [threads]
@@ -33,6 +47,8 @@
 #       retried. SHALE_TEX_ENV_SH is the script to use (default tests/tex-env/tex-env.sh; the script tests set it)
 set -eu
 cd "$(dirname "$0")/../.."
+# one checkout at a time uses the podman stacks (DEV-034, #420): `run` and `tex-suite` hold the machine-wide lock
+. tests/env-lock.sh
 
 # the cargo output of a suite shows that tests ran and passed (a filter that matches nothing "passes")
 passed() { grep -Eq '^test result: ok\. [1-9][0-9]* passed' "$1"; }
@@ -41,12 +57,20 @@ font_signature='not loadable|metric data not found'
 
 case "${1:-}" in
   wanted)
+    if [ -n "$(sh "$0" suites "$2" "$3")" ]; then echo yes; else echo no; fi
+    ;;
+
+  suites)
     files=$(git diff --name-only "$2" "$3")
-    if printf '%s\n' "$files" | grep -Eq '^(src/(calendar/|mail|pdf/tex)|assets/tex/|tests/(caldav|mail|tex)-env/|\.forgejo/(workflows/ci\.yml|scripts/env-tests\.sh))'; then
-      echo yes
-    else
-      echo no
+    if printf '%s\n' "$files" | grep -Eq '^\.forgejo/(workflows/ci\.yml|scripts/env-tests\.sh)$'; then
+      echo "calendar::env_tests mail_env tex_env"
+      exit 0
     fi
+    out=""
+    if printf '%s\n' "$files" | grep -Eq '^(src/calendar/|tests/caldav-env/)'; then out="$out calendar::env_tests"; fi
+    if printf '%s\n' "$files" | grep -Eq '^(src/mail|tests/mail-env/)'; then out="$out mail_env"; fi
+    if printf '%s\n' "$files" | grep -Eq '^(src/pdf/tex|assets/tex/|tests/tex-env/)'; then out="$out tex_env"; fi
+    echo "${out# }"
     ;;
 
   install-wanted)
@@ -84,6 +108,7 @@ case "${1:-}" in
     ;;
 
   tex-suite)
+    shale_env_lock
     threads=${2:-4}
     texenv=${SHALE_TEX_ENV_SH:-tests/tex-env/tex-env.sh}
     log=$(mktemp)
@@ -114,6 +139,26 @@ case "${1:-}" in
       ''|*[!0-9]*|0|0[0-9]*) echo "SHALE_ENV_TESTS_TEX_THREADS must be a positive integer, not '$tex_threads'" >&2; exit 1 ;;
     esac
 
+    # the suites to run: the list of `suites` (land.sh), unset = all (the tag CI)
+    suites=${SHALE_ENV_TESTS_SUITES-calendar::env_tests mail_env tex_env}
+    need_caldav=no; need_mail=no; need_tex=no
+    for suite in $suites; do
+      case $suite in
+        calendar::env_tests) need_caldav=yes ;;
+        mail_env) need_mail=yes ;;
+        tex_env) need_tex=yes ;;
+        *) echo "SHALE_ENV_TESTS_SUITES names an unknown suite: '$suite'" >&2; exit 1 ;;
+      esac
+    done
+    if [ -z "$suites" ]; then echo "SHALE_ENV_TESTS_SUITES is empty: no suite to run" >&2; exit 1; fi
+    # the real install of TeX Live downloads about 100 MB and takes minutes: only when asked for
+    if [ "${SHALE_ENV_TESTS_TEX_INSTALL:-no}" = yes ]; then suites="$suites tex_install"; need_tex=yes; fi
+    # the real downloads of the template sets (GitHub, CTAN) need the network: only when asked for
+    if [ "${SHALE_ENV_TESTS_TEX_IMPORT:-no}" = yes ]; then suites="$suites tex_import"; need_tex=yes; fi
+    caldav_sh=${SHALE_CALDAV_ENV_SH:-tests/caldav-env/caldav-env.sh}
+    mail_sh=${SHALE_MAIL_ENV_SH:-tests/mail-env/mail-env.sh}
+    texenv=${SHALE_TEX_ENV_SH:-tests/tex-env/tex-env.sh}
+
     # a second `podman info` right after the first can fail where the first worked: trust the
     # engine the detect step found, and let the stacks themselves show a real problem
     engine=${2:-$(sh "$0" detect)}
@@ -129,6 +174,8 @@ case "${1:-}" in
       *) echo "no container engine is usable here" >&2; exit 1 ;;
     esac
     echo "Using $engine."
+    # held for the whole run, children (the helpers, cargo and its tests) see it by SHALE_ENV_LOCK_TOKEN
+    shale_env_lock
 
     # the TeX suites keep the log of every failed compile here (#327): a failure that does not come again can still be read
     failed_logs=${SHALE_TEX_FAILED_LOGS:-target/tex-failed-logs}
@@ -138,50 +185,149 @@ case "${1:-}" in
     SHALE_TEX_FAILED_LOGS=$failed_logs
     export SHALE_TEX_FAILED_LOGS
 
-    down() {
-      sh tests/caldav-env/caldav-env.sh reset >/dev/null 2>&1 || true
-      sh tests/mail-env/mail-env.sh reset >/dev/null 2>&1 || true
+    # the parts of the run (the stack starts, the image build, the suites) run as background jobs of this shell (#448):
+    # start_job <name> <command…> writes the output to $wd/<name>.log, the seconds to <name>.sec and the exit code
+    # to <name>.rc (last, so a log is complete when its .rc is there). A job is a child of the holder of the lock
+    # (DEV-034): it sees SHALE_ENV_LOCK_TOKEN and does not wait for it.
+    wd=$(mktemp -d)
+    job_pids=""
+    start_job() {
+      _job=$1; shift
+      (
+        _t0=$(date +%s)
+        _rc=0
+        "$@" > "$wd/$_job.log" 2>&1 || _rc=$?
+        echo $(($(date +%s) - _t0)) > "$wd/$_job.sec"
+        echo "$_rc" > "$wd/$_job.rc.tmp"
+        mv "$wd/$_job.rc.tmp" "$wd/$_job.rc"
+      ) &
+      job_pids="$job_pids $!"
     }
-    trap down EXIT
+    nap() { sleep 0.2 2>/dev/null || sleep 1; }
+    # collect <name>…: waits for the jobs and prints the log of each one when it ended (one after another, never interleaved)
+    collect() {
+      _pending=$*
+      while [ -n "$_pending" ]; do
+        _still=""
+        for _job in $_pending; do
+          if [ -f "$wd/$_job.rc" ]; then
+            echo "===== $_job: exit $(cat "$wd/$_job.rc"), $(cat "$wd/$_job.sec") s ====="
+            cat "$wd/$_job.log"
+          else
+            _still="$_still $_job"
+          fi
+        done
+        _pending=${_still# }
+        if [ -n "$_pending" ]; then nap; fi
+      done
+      job_pids=""
+    }
+    # the jobs of <names> that did not end with 0
+    failed_of() {
+      for _job in "$@"; do
+        if [ "$(cat "$wd/$_job.rc")" != 0 ]; then printf ' %s' "$_job"; fi
+      done
+    }
+    kill_tree() {
+      for _child in $(pgrep -P "$1" 2>/dev/null); do kill_tree "$_child"; done
+      kill "$1" 2>/dev/null || true
+    }
+
+    down() {
+      if [ "$need_caldav" = yes ]; then sh "$caldav_sh" reset >/dev/null 2>&1 || true; fi
+      if [ "$need_mail" = yes ]; then sh "$mail_sh" reset >/dev/null 2>&1 || true; fi
+    }
+    cleanup() {
+      # an interrupt: a background job ignores SIGINT, so stop the jobs and what they started
+      for _pid in $job_pids; do kill_tree "$_pid"; done
+      down
+      rm -rf "$wd"
+    }
+    trap cleanup EXIT
+    trap 'exit 1' INT TERM
     # a failed run on a reused host may have left containers behind
     down
 
-    status=0
-    sh tests/caldav-env/caldav-env.sh up || status=1
-    sh tests/mail-env/mail-env.sh up || status=1
-    if [ "$status" -ne 0 ]; then
-      sh tests/caldav-env/caldav-env.sh status || true
-      sh tests/mail-env/mail-env.sh status || true
+    # the stacks and the TeX image do not depend on each other: all of them at the same time. The TeX image is no running
+    # stack, only built (the current TeX Live, ADR-0020, and the pinned tuda-ci sources); land.sh and a check tag use the
+    # cached image (CI keeps podman's storage, ADR-0022), the weekly run and release tags rebuild it without the cache
+    refresh=""
+    if [ "${SHALE_ENV_TESTS_TEX_REFRESH:-no}" = yes ]; then refresh="--refresh"; fi
+    stacks=""
+    if [ "$need_caldav" = yes ]; then start_job up-caldav sh "$caldav_sh" up; stacks="$stacks up-caldav"; fi
+    if [ "$need_mail" = yes ]; then start_job up-mail sh "$mail_sh" up; stacks="$stacks up-mail"; fi
+    prepare=$stacks
+    if [ "$need_tex" = yes ]; then start_job tex-build sh "$texenv" build $refresh; prepare="$prepare tex-build"; fi
+    # shellcheck disable=SC2086 # the names are words
+    collect $prepare
+    # shellcheck disable=SC2086
+    stacks_failed=$(failed_of $stacks)
+    if [ -n "$stacks_failed" ]; then
+      echo "a stack did not come up:$stacks_failed" >&2
+      if [ "$need_caldav" = yes ]; then sh "$caldav_sh" status || true; fi
+      if [ "$need_mail" = yes ]; then sh "$mail_sh" status || true; fi
+      exit 1
+    fi
+    if [ "$need_tex" = yes ] && [ -n "$(failed_of tex-build)" ]; then
+      echo "the TeX image could not be built" >&2
       exit 1
     fi
 
-    # the TeX image is no running stack: only built (the current TeX Live, ADR-0020, and the pinned tuda-ci sources);
-    # land.sh and a check tag use the cached image (CI keeps podman's storage, ADR-0022), the weekly run and release tags rebuild it without the cache
-    refresh=""
-    if [ "${SHALE_ENV_TESTS_TEX_REFRESH:-no}" = yes ]; then refresh="--refresh"; fi
-    sh tests/tex-env/tex-env.sh build $refresh || { echo "the TeX image could not be built" >&2; exit 1; }
-
-    suites="calendar::env_tests mail_env tex_env"
-    # the real install of TeX Live downloads about 100 MB and takes minutes: only when asked for
-    if [ "${SHALE_ENV_TESTS_TEX_INSTALL:-no}" = yes ]; then suites="$suites tex_install"; fi
-    # the real downloads of the template sets (GitHub, CTAN) need the network: only when asked for
-    if [ "${SHALE_ENV_TESTS_TEX_IMPORT:-no}" = yes ]; then suites="$suites tex_import"; fi
-    for suite in $suites; do
-      if [ "$suite" = tex_env ]; then
-        # shares nothing, so it runs with several threads; a font problem of the image is tried once more on a fresh mirror
-        sh "$0" tex-suite "$tex_threads" || status=1
-        continue
-      fi
-      log=$(mktemp)
+    # one suite as `cargo test` runs it, with the check that it really ran: a filter that matches nothing "passes"
+    run_suite() {
+      _slog=$(mktemp "$wd/suite.XXXXXX")
+      _src=0
       # one stack or one install per suite: one thread
-      cargo test --locked -- --ignored "$suite" --test-threads=1 2>&1 | tee "$log" || status=1
-      # a filter that matches nothing "passes": make sure the suite really ran
-      if ! passed "$log"; then
-        echo "no $suite test passed" >&2
-        status=1
+      cargo test --locked -- --ignored "$1" --test-threads=1 2>&1 | tee "$_slog" || _src=1
+      if ! passed "$_slog"; then
+        echo "no $1 test passed" >&2
+        _src=1
       fi
-      rm -f "$log"
+      rm -f "$_slog"
+      return "$_src"
+    }
+    # suites one after another (tex_install and tex_import share one install of TeX Live)
+    run_suites() {
+      _all=0
+      for _s in "$@"; do run_suite "$_s" || _all=1; done
+      return "$_all"
+    }
+
+    # the suites at the same time, each with its own log: a landing takes as long as its slowest suite (#448). Each one has
+    # its own stack, so none shares anything with another; the load is small (they mostly wait for a server), only the
+    # TeX compiles of `tex_env` need CPU, with their own thread count
+    names=""
+    serial=""
+    for suite in $suites; do
+      case $suite in
+        tex_env)
+          # shares nothing, so it runs with several threads; a font problem of the image is tried once more on a fresh mirror
+          start_job tex_env sh "$0" tex-suite "$tex_threads"
+          names="$names tex_env"
+          ;;
+        tex_install|tex_import) serial="$serial $suite" ;;
+        *)
+          start_job "$suite" run_suites "$suite"
+          names="$names $suite"
+          ;;
+      esac
     done
+    if [ -n "$serial" ]; then
+      # one job, named by its suites joined with +
+      serial_name=$(printf '%s' "${serial# }" | tr ' ' '+')
+      # shellcheck disable=SC2086 # the names are words
+      start_job "$serial_name" run_suites $serial
+      names="$names $serial_name"
+    fi
+    status=0
+    # shellcheck disable=SC2086 # the names are words
+    collect $names
+    # shellcheck disable=SC2086 # the names are words
+    suites_failed=$(failed_of $names)
+    if [ -n "$suites_failed" ]; then
+      echo "FAILED suites:$suites_failed" >&2
+      status=1
+    fi
     kept=$(ls "$failed_logs" | wc -l)
     if [ "$kept" -gt 0 ]; then
       echo "The TeX logs of $kept failed compiles are kept in $failed_logs:"
@@ -191,7 +337,7 @@ case "${1:-}" in
     ;;
 
   *)
-    echo "usage: $0 wanted <base> <head> | install-wanted <base> <head> | import-wanted <base> <head> | detect | tex-suite [threads] | run [podman|docker]" >&2
+    echo "usage: $0 suites <base> <head> | wanted <base> <head> | install-wanted <base> <head> | import-wanted <base> <head> | detect | tex-suite [threads] | run [podman|docker]" >&2
     exit 2
     ;;
 esac

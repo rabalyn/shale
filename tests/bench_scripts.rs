@@ -104,5 +104,12 @@ fn build_034_bench_release_sh_checks_its_arguments() {
 fn build_035_land_sh_checks_the_benchmark_feature() {
     let land = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/land.sh")).unwrap();
     assert!(land.contains("cargo clippy -q --all-targets --locked --features bench -- -D warnings"));
-    assert!(land.contains("cargo test -q --locked --features bench bench::"));
+    // clippy on every landing, the tests only by path (#449) or with --release
+    let clippy = land.find("cargo clippy -q --all-targets --locked --features bench -- -D warnings").unwrap();
+    let gate = land.find("sh scripts/bench-tests-wanted.sh").unwrap();
+    let tests = land.find("cargo test -q --locked --features bench bench::").unwrap();
+    assert!(clippy < gate && gate < tests);
+    assert!(land[..clippy].lines().last().unwrap().trim_start().starts_with("step "), "clippy is gated");
+    assert!(land[gate - 40..gate].contains("\"$RELEASE\" = yes"));
+    assert!(land.contains("-- SKIPPED (the change touches neither the benchmark harness nor the build)"));
 }

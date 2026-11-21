@@ -1,6 +1,6 @@
 Back to [[Start here]].
 
-## Export
+# Export
 
 Notes and drawings export to PDF from the note menu, with no external tools: the text stays
 selectable (fonts are embedded), web links stay clickable and drawings are vector. A dialog
@@ -48,7 +48,7 @@ the dialog opens, so nothing is stored in the settings.
 
 ![[pdf-export-dialog.png]]
 
-## Print properties of a note
+# Print properties of a note
 
 A note can say how it is printed, in its properties (front matter, see [[Notes and links]]). The export dialog opens with the note's
 paper, margins, text size, title and contents already filled in, and you can still change them there; the keys that
@@ -91,7 +91,7 @@ prints as before. A key that Shale does not know (a typo such as `print-colour`)
 
 The properties apply to the export of a single note; a book ([[PDF#A folder as one PDF]]) uses the dialog's choices for all its notes.
 
-## Aligned paragraphs
+# Aligned paragraphs
 
 A paragraph or heading between a line `<div align="center">` and a line `</div>` is **centred**; with
 `align="right"` it is flush right and with `align="justify"` it is justified (`align="left"` is read too).
@@ -119,7 +119,7 @@ for the paragraphs under the cursor or the selection: centre and right wrap them
 wrapper, the same button again or left takes it off. A Word document gets a wrapper for every paragraph and heading
 that is not aligned like its body text (see [[Import]]).
 
-## Page breaks
+# Page breaks
 
 A line of its own with `<div style="page-break-after: always;"></div>` is a **page break**: the PDF
 goes on at the top of a new page there. This is the line Obsidian writes, and an imported Word
@@ -134,7 +134,7 @@ The property `print-break-before` and the box "Start each # heading on a new pag
 before the headings: with `1` every `#` heading starts a new page, but the first thing of the first page does not
 move. It is the same for the LaTeX export of an article or a book (slides, letters and posters have their own pages).
 
-## A folder as one PDF
+# A folder as one PDF
 
 A folder of the vault, up to the vault itself, is exported as **one PDF**, a book: right-click the
 folder in the file list (or the empty space under the tree, for the whole vault) and choose
@@ -183,7 +183,7 @@ Handbook/                     the book: its title is the folder note's `title`, 
   `[[Tables#Grid]]`) jumps to its page; a link to a note outside the book is its text. The contents and
   the bookmarks of your PDF reader nest parts, chapters and headings.
 
-### A folder through a LaTeX template
+## A folder through a LaTeX template
 
 The dialog of a folder has the same **Engine** choice as a note's: with **LaTeX template** the folder is
 written as one LaTeX document of a template kind (see below for the templates and their setup), for a
@@ -212,7 +212,7 @@ On the command line, `shale --export-pdf <folder> <file.pdf>` writes the book of
 a window (A4, numbered headings, title page, contents, each note on a new page); it ends with 0, or with 1
 and the reason on stderr.
 
-## Read
+# Read
 
 A PDF embedded with `![[Paper.pdf]]` is drawn inside the editor and the reading view (up to 50
 pages, rendered in the background). PDFs dropped on the window go through [[Import]]; see
@@ -220,7 +220,7 @@ pages, rendered in the background). PDFs dropped on the window go through [[Impo
 
 #userguide #pdf
 
-## Export with your university's LaTeX template: the guided setup
+# Export with your university's LaTeX template: the guided setup
 
 Besides the built-in export, a note (or a folder, above) can be exported through a **LaTeX template**, for example the
 corporate design of the TU Darmstadt. You do not have to know what TeX is: **Settings → LaTeX → Set up
@@ -294,7 +294,7 @@ set whose **Choose logo…** or **Choose department logo…** is open, for that 
 The setup opens by itself only once per vault (finishing or cancelling it both count); run it again from
 Settings → LaTeX whenever you like. The steps are the buttons of Settings → LaTeX (below), put in order.
 
-## LaTeX export: the TeX it needs
+# LaTeX export: the TeX it needs
 
 A note can also be exported through LaTeX templates (the first ones are the TU Darmstadt classes
 `tuda-ci`; they are imported into your vault, and the export dialog uses them: see "LaTeX export:
@@ -346,7 +346,7 @@ Shale runs the programs without a shell, in a temporary folder that is removed a
 each run limited to two minutes; a document cannot start programs (`\write18` is off) and cannot
 write outside its folder.
 
-## LaTeX export: template sets
+# LaTeX export: template sets
 
 The templates a LaTeX export is made with are not part of TeX Live and not part of Shale: they are
 **template sets in your vault**, in the folder `templates/tex/<set>/`. A vault therefore carries
@@ -396,7 +396,7 @@ when there is one), and has these buttons:
 - **Remove set…** asks first and then moves the set to the vault's `.trash` (never a hard delete);
   "Restore last deleted" in the file list puts it back.
 
-### The logo
+## The logo
 
 The logo of the university, `tuda_logo.pdf`, may not be redistributed, so Shale does not ship it:
 members of the TU Darmstadt get it from the page of the university library about LaTeX
@@ -410,7 +410,7 @@ logo step) does the same; you can also put `tuda_logo.pdf` there yourself. Until
 slides, letters and posters still compile; the placeholder lives only in the temporary folder of the
 compile, never in your vault. Documents with the placeholder must not be used as official documents.
 
-### The department logo
+## The department logo
 
 Departments and institutions have a logo of their own, which documents show together with the
 university's. Every set has an optional second slot for it, `logo/department_logo.pdf` or `.png`.
@@ -437,7 +437,7 @@ about 5 mm apart. Where the class puts it:
 In the export dialog a **Department logo** box appears when the set has a department logo: it is on by
 default and greyed out (off) for a kind that does not show it. The test page of the set shows it too.
 
-### Your choices: `settings.toml`
+## Your choices: `settings.toml`
 
 Each set has its own `settings.toml`, which a re-import keeps:
 
@@ -450,7 +450,7 @@ Each set has its own `settings.toml`, which a re-import keeps:
 | `logo` | the logo file in `logo/`, set by **Choose logo…** |
 | `department_logo` | the department logo file in `logo/` (`department_logo.pdf` or `.png`), set by **Choose department logo…** |
 
-### Adding or changing a document kind: `kinds/<kind>.toml`
+## Adding or changing a document kind: `kinds/<kind>.toml`
 
 A kind says which LaTeX class a note is written to and which properties of the note go where. Shale
 ships these files for tuda-ci and copies them into the vault; you can edit them, and for a set Shale
@@ -471,7 +471,7 @@ does not know you write them yourself (the README of the set has an example):
 
 A kind that cannot be read is shown in red in the list of sets with the reason.
 
-## LaTeX export: a note through a template
+# LaTeX export: a note through a template
 
 ![[pdf-export-dialog-latex.png]]
 
@@ -510,7 +510,7 @@ always exported with the built-in engine.
   of that name (or the value has no `/kind`), a red line at the top says what was not found and what the
   dialog uses instead; choosing a set or kind yourself takes it away.
 
-### How the note becomes the document
+## How the note becomes the document
 
 The title is the note's name without a `YYMMDD_` date prefix (or the property `title`); a first
 heading `#` that says the same is not printed again. The front matter is never printed; its
