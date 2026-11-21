@@ -154,7 +154,14 @@ impl ManagedState {
 
     /// The `Git` to run for this choice (SYNC-024).
     pub fn selected(&self, choice: GitChoice) -> super::Git {
-        managed::selected_git(choice, self.data.as_deref(), self.path_var.as_deref())
+        let mut git = managed::selected_git(choice, self.data.as_deref(), self.path_var.as_deref());
+        // git asks this executable for tokens of the wizard's sign-ins (SYNC-054)
+        if self.select {
+            if let Ok(exe) = std::env::current_exe() {
+                super::credentials::attach(&mut git, &exe);
+            }
+        }
+        git
     }
 
     /// Whether the window's git has to be selected again for this choice; call it every frame.

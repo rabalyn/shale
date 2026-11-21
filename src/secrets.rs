@@ -43,6 +43,8 @@ const CALDAV: &str = "shale-caldav";
 const MAIL: &str = "shale-mail";
 /// Keyring application name of social account secrets: calendars, mail and social accounts never see each other's entries.
 const SOCIAL: &str = "shale-social";
+/// Keyring application name of git tokens (the sync wizard, SYNC-053): their own entries too.
+const GIT: &str = "shale-git";
 
 /// What a mail account secret is.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -247,6 +249,25 @@ pub fn social_secret(server: &str, handle: &str, from_file: &Secret) -> Secret {
     social_lookup(server, handle).or_else(|| SOCIAL_SESSION.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(&(server.to_string(), handle.to_string())).cloned())).unwrap_or_else(|| from_file.clone())
 }
 
+// ---------------------------------------------------------------- git tokens (the sync wizard)
+
+/// The personal access token for a git server and user name, from the keyring (SYNC-053). `server`
+/// is `https://host[:port]` (`gitsync::credentials::server_key`). Without a keyring: None.
+pub fn git_token(server: &str, user: &str) -> Option<Secret> {
+    backend::lookup(GIT, server, user)
+}
+
+/// Put a git token into the keyring and read it back. False when no keyring works: the token is then
+/// not kept anywhere (no settings file, no `.git/config`, SYNC-053).
+pub fn git_token_store(server: &str, user: &str, token: &str) -> bool {
+    backend::store(GIT, server, user, token)
+}
+
+/// Remove a git token from the keyring.
+pub fn git_token_clear(server: &str, user: &str) {
+    backend::clear(GIT, server, user)
+}
+
 // ---------------------------------------------------------------- password fields and the key recording
 
 thread_local! {
@@ -401,6 +422,8 @@ mod backend {
                 "Shale CalDAV"
             } else if app == super::SOCIAL {
                 "Shale social"
+            } else if app == super::GIT {
+                "Shale git"
             } else {
                 "Shale mail"
             }
@@ -526,6 +549,22 @@ mod tests {
         assert_eq!(social_secret("https://social.test", "ada@social.test", &Secret::new("file")), "tok-2");
         social_clear("https://social.test", "ada@social.test");
         assert_eq!(social_secret("https://social.test", "ada@social.test", &Secret::new("file")), "file");
+    }
+
+    // spec: SYNC-053
+    #[test]
+    fn git_tokens_have_their_own_keyring_entries_and_without_a_keyring_nothing_is_kept() {
+        let _serial = serial();
+        assert!(git_token_store("https://git.test", "ada", "tok-g"));
+        assert_eq!(git_token("https://git.test", "ada").as_ref().map(|s| s.expose()), Some("tok-g"));
+        assert_eq!(backend::lookup(SOCIAL, "https://git.test", "ada"), None, "not mixed up with social accounts");
+        assert_eq!(git_token("https://git.test", "bob").map(|s| s.expose().to_string()), None);
+        git_token_clear("https://git.test", "ada");
+        assert!(git_token("https://git.test", "ada").is_none());
+        pretend_no_keyring(true);
+        assert!(!git_token_store("https://git.test", "ada", "tok-g"), "no keyring: not kept");
+        assert!(git_token("https://git.test", "ada").is_none());
+        pretend_no_keyring(false);
     }
 
     fn dav(id: &str, url: &str, user: &str, pw: &str) -> CalendarSource {

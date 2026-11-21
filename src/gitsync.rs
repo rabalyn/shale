@@ -632,6 +632,7 @@ pub fn host_name() -> String {
     "this computer".into()
 }
 
+pub mod credentials;
 pub mod detect;
 pub mod history;
 pub mod install;
@@ -671,6 +672,8 @@ pub fn hide_lfs(git: &mut Git) {
 mod install_tests;
 #[cfg(all(test, unix))]
 mod install_ui_tests;
+#[cfg(test)]
+mod credentials_tests;
 #[cfg(test)]
 mod detect_tests;
 #[cfg(test)]

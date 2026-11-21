@@ -38,9 +38,10 @@ store safely, and a warning when the vault is on a network share or in a cloud-s
      configuration is not changed (as ADR-0027 decided for the managed git).
    - The helper answers only for a prompt that names a host and user it has a token for; for every other
      prompt it prints nothing and exits 1, so git fails at once ("terminal prompts disabled") as before.
-   - `credential.helper=` is set empty on that `Git` (through `GIT_CONFIG_COUNT`), so a helper of the person
-     (the Git Credential Manager of Windows, `osxkeychain`) cannot open a window, store or send another
-     secret during a sync.
+   - The person's own credential helpers are **not** cleared: git asks them first and only then the
+     askpass program, so a vault that already syncs through the Git Credential Manager or
+     `osxkeychain` keeps working. `GCM_INTERACTIVE=never` is set so that the Git Credential Manager
+     fails at once instead of opening a window in a background sync.
    - A remote made by the wizard is `https://<user>@host/owner/repo.git` (a user name alone is fine,
      SEC-010), so the prompt names the user and the helper needs no second environment variable.
 5. **SSH**: an existing key is used as it is; a new key is made with `ssh-keygen -t ed25519 -N ""` (an
