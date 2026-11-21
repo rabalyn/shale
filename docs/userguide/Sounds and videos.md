@@ -1,7 +1,7 @@
 Play audio and video files inside your notes. Back to [[Start here]]; embeds in general are in
 [[Notes and links]].
 
-## Sounds
+# Sounds
 
 Embed a sound like a picture, with `![[file.mp3]]`. Here is one:
 
@@ -29,7 +29,7 @@ Embed a sound like a picture, with `![[file.mp3]]`. Here is one:
   a sound file does not play. A video still plays its pictures, without sound, and says "No sound
   output: playing without sound".
 
-## Videos
+# Videos
 
 Embed a video with `![[clip.mp4]]` (mp4, m4v, mov, webm and mkv). It has the same player as a
 sound, with a 16:9 picture (the first frame until you play) and the controls below it. While it
@@ -44,7 +44,7 @@ A click on the progress bar restarts the video at that place. Frames are shown a
 
 A video can be resized like a picture, see "Resizing pictures and videos" in [[Editor]].
 
-### ffmpeg
+## ffmpeg
 
 Videos are decoded by `ffmpeg` and `ffprobe` on your computer. They are optional: install them
 with `apt install ffmpeg` (Linux), `brew install ffmpeg` (macOS) or `winget install ffmpeg`
@@ -55,7 +55,7 @@ Without them the video shows a tile with a play mark, and a click opens the file
 system's video player. Settings → Appearance says where ffmpeg was found, or that it
 is missing and where to get it.
 
-## Media from other computers
+# Media from other computers
 
 When a vault is synced with [[Git sync]] and its media are stored with Git LFS, a sound or
 video that came from another computer first arrives as a small pointer file. Its player shows

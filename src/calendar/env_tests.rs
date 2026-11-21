@@ -74,6 +74,7 @@ struct Env {
 
 impl Env {
     fn start() -> Env {
+        crate::env_lock::hold(); // the machine-wide lock of the podman stacks (DEV-034)
         let turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
         let ca = ca_path();
         assert!(ca.exists(), "no {}. Start the environment first: tests/caldav-env/caldav-env.sh up", ca.display());

@@ -79,8 +79,8 @@ impl Files {
     /// The red italic text that stands where a file could not be used, and its warning.
     pub fn missing(&mut self, what: &str) -> String {
         self.warnings.push(what.to_string());
-        let c = theme::Palette::shale().link_missing;
-        format!("\\textcolor[RGB]{{{},{},{}}}{{\\textit{{[{}]}}}}", c.r(), c.g(), c.b(), tex_escape(what))
+        let c = print_color(theme::Palette::shale().link_missing);
+        format!("\\textcolor[RGB]{{{},{},{}}}{{\\textit{{[{}]}}}}", c.0, c.1, c.2, tex_escape(what))
     }
 }
 

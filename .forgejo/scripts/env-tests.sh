@@ -32,6 +32,8 @@
 #       The suites run with one test thread (CalDAV, mail, `tex_install` and `tex_import` share one stack or
 #       one install); `tex_env` shares nothing and runs with ${SHALE_ENV_TESTS_TEX_THREADS:-4} test threads (a
 #       positive integer, else `run` fails at once with a message; DEV-011, #370)
+#       `run` holds the machine-wide lock of the stacks for its whole run (tests/env-lock.sh, DEV-034, #420): a second
+#       checkout that wants the stacks says "waiting for the podman test stacks…" and waits (no timeout)
 #       `run` sets SHALE_TEX_FAILED_LOGS (default target/tex-failed-logs, emptied first): the TeX suites keep the full
 #       log of every failed compile there, and `run` lists them at the end (#327)
 #   env-tests.sh tex-suite [threads]
@@ -41,6 +43,8 @@
 #       retried. SHALE_TEX_ENV_SH is the script to use (default tests/tex-env/tex-env.sh; the script tests set it)
 set -eu
 cd "$(dirname "$0")/../.."
+# one checkout at a time uses the podman stacks (DEV-034, #420): `run` and `tex-suite` hold the machine-wide lock
+. tests/env-lock.sh
 
 # the cargo output of a suite shows that tests ran and passed (a filter that matches nothing "passes")
 passed() { grep -Eq '^test result: ok\. [1-9][0-9]* passed' "$1"; }
@@ -100,6 +104,7 @@ case "${1:-}" in
     ;;
 
   tex-suite)
+    shale_env_lock
     threads=${2:-4}
     texenv=${SHALE_TEX_ENV_SH:-tests/tex-env/tex-env.sh}
     log=$(mktemp)
@@ -165,6 +170,8 @@ case "${1:-}" in
       *) echo "no container engine is usable here" >&2; exit 1 ;;
     esac
     echo "Using $engine."
+    # held for the whole run, children (the helpers, cargo and its tests) see it by SHALE_ENV_LOCK_TOKEN
+    shale_env_lock
 
     # the TeX suites keep the log of every failed compile here (#327): a failure that does not come again can still be read
     failed_logs=${SHALE_TEX_FAILED_LOGS:-target/tex-failed-logs}

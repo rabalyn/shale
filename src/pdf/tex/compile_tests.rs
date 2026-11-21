@@ -532,6 +532,7 @@ fn container_compile(files: &[(&str, &str)], main: &str, opts: &Options) -> Resu
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_a_small_article_compiles_to_a_pdf() {
+    crate::env_lock::hold();
     let out = container_compile(&[("main.tex", "\\documentclass{article}\n\\begin{document}\nHello \\LaTeX.\n\\end{document}\n")], "main.tex", &Options::default()).unwrap_or_else(|e| panic!("{e}\n{}", e.log_tail));
     assert!(out.pdf.starts_with(b"%PDF"), "a PDF");
     assert_eq!(out.runs, 1);
@@ -542,6 +543,7 @@ fn tex_env_a_small_article_compiles_to_a_pdf() {
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_a_work_folder_and_a_template_folder_with_spaces_work() {
+    crate::env_lock::hold();
     let parent = std::env::temp_dir().join(format!("shale tex space {}", std::process::id()));
     let work = WorkDir::new_in(&parent).unwrap();
     let tpl = work.path().join("my templates");
@@ -559,6 +561,7 @@ fn tex_env_a_work_folder_and_a_template_folder_with_spaces_work() {
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_a_missing_package_is_reported_as_missing() {
+    crate::env_lock::hold();
     let e = container_compile(&[("main.tex", "\\documentclass{article}\n\\usepackage{nosuchpackage}\n\\begin{document}x\\end{document}\n")], "main.tex", &Options::default()).unwrap_err();
     assert_eq!(e.problems.iter().map(Problem::text).collect::<Vec<_>>(), ["package nosuchpackage is missing"], "{e}\n{}", e.log_tail);
 }
@@ -567,6 +570,7 @@ fn tex_env_a_missing_package_is_reported_as_missing() {
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_a_tex_error_has_file_and_line() {
+    crate::env_lock::hold();
     let e = container_compile(&[("main.tex", "\\documentclass{article}\n\\begin{document}\nfine\n\\nosuchmacro\n\\end{document}\n")], "main.tex", &Options::default()).unwrap_err();
     let p = &e.problems[0];
     assert_eq!((p.file.as_deref().map(|f| f.trim_start_matches("./")), p.line, p.message.as_str()), (Some("main.tex"), Some(4), "Undefined control sequence."), "{e}");
@@ -576,6 +580,7 @@ fn tex_env_a_tex_error_has_file_and_line() {
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_a_document_with_biblatex_runs_biber_and_resolves_the_citation() {
+    crate::env_lock::hold();
     let out = container_compile(&[("test.tex", TEST_DOCUMENT), ("test.bib", TEST_BIB)], "test.tex", &Options::default()).unwrap_or_else(|e| panic!("{e}\n{}", e.log_tail));
     assert!(out.runs >= 2, "LuaLaTeX, biber, LuaLaTeX: {} runs", out.runs);
     assert!(!out.font_cache_built, "the image has the font names database, a fresh container does not build it (#327)");
@@ -585,6 +590,7 @@ fn tex_env_a_document_with_biblatex_runs_biber_and_resolves_the_citation() {
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_write18_stays_disabled_and_output_stays_in_the_work_folder() {
+    crate::env_lock::hold();
     // \write18 only prints the command instead of running it
     let work = WorkDir::new().unwrap();
     work.write("main.tex", b"\\documentclass{article}\n\\begin{document}\n\\immediate\\write18{touch hacked.txt}\nok\n\\end{document}\n").unwrap();

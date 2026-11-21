@@ -4,7 +4,7 @@ features:
 ---
 How you write in Shale. Back to [[Start here]]; the links and embeds are in [[Notes and links]].
 
-## Lists and lines
+# Lists and lines
 
 - **Enter** continues a list (also numbered lists and to-dos `- [ ]`).
 - **Tab / Shift+Tab** indent list items, or change heading levels.
@@ -15,7 +15,7 @@ How you write in Shale. Back to [[Start here]]; the links and embeds are in [[No
   cursor (the default), a bar after it, a block or an underline. With vim-style editing the cursor in
   normal mode has its own choice (Settings → Vim, default: block). "Blinking cursor" turns the blinking off.
 
-## Folding
+# Folding
 
 Headings, quotes and lists can be folded away so that a long note is short again:
 
@@ -44,7 +44,7 @@ changed by folding, and undo, selection and copy work as always. The cursor neve
 with the arrow keys, or a link or a search result jumps there, it opens. Select all (Ctrl+A) leaves folds alone.
 Folds are remembered per note, also after you quit and start Shale again (in the vault's `.shale/state.json`, see [[Vault settings]]), and are never written into the note; a fold whose block you deleted is forgotten, and a renamed or moved note keeps its folds. The [[Reading view]] folds the same blocks, with the same folds: what you fold in one is folded in the other.
 
-### Properties
+## Properties
 
 A note whose first line is `---` has properties (the front matter, see [[Notes and links]]). When you open it, the
 editor folds them to one muted line, `▸ Properties · email · Anna Müller · 2026-11-12 · #work`, so that an imported mail
@@ -54,12 +54,12 @@ again. If you opened them with the ▸ marker, the badge or a fold key, they sta
 Properties in the editor** is `Folded` (the default; `Card` looks the same in the editor, the card is for the reading
 view) or `Raw`, which opens a note with its properties unfolded.
 
-### Mail notes
+## Mail notes
 
 A note imported from a mail (its properties say `type: email`, see [[Import]]) also starts with its quoted replies
 (`> …` lines, shown as `… 12 quoted lines`) and its signature folded. Click the badge to read them.
 
-### Code blocks
+## Code blocks
 
 With the Markdown preview on, a fenced code block (three backticks or `~~~`) is drawn as a box: a rounded
 rectangle on the code colour with a thin border, and a small badge at its top right with the language you wrote
@@ -76,7 +76,7 @@ when the cursor is in no code block nothing happens.
 
 ![[editor-code-box.png]]
 
-## The title line and pasting
+# The title line and pasting
 
 Above the first line a note shows its **title line**: the file name without `.md` and without a
 leading date prefix `YYMMDD_` (a note called `261117_Plan.md` shows `Plan`). Edit it to rename the
@@ -89,7 +89,7 @@ Pasting text whose headings are all `##` or deeper asks "The pasted text has no 
 headings?": **Lift** moves them up so that the highest becomes `#`, **Paste as it is** (or Esc) pastes
 the text unchanged. Text without headings, or with a `#`, is pasted at once.
 
-## Formatting toolbar
+# Formatting toolbar
 
 ![[editor-colours.png]]
 
@@ -115,7 +115,7 @@ embed (it opens the `[!` file picker of [[Notes and links]]); and "Clear formatt
 - Settings → Editor → Editing, "Show formatting toolbar" turns the toolbar off; "Toolbar button size"
   makes its buttons bigger or smaller (80 % to 200 %, 110 % by default).
 
-## Colours
+# Colours
 
 The **highlight colour** and **font colour** buttons are split buttons. A click on the coloured part
 applies the colour it shows (neon yellow and red at first, then the last colour you picked, which Shale remembers in the vault, also after a restart) to the
@@ -144,7 +144,7 @@ other editors and renderers show them too:
 tag, or inside inline code, is just text. Colours show in the editor (the tags dimmed; the
 Markdown preview hides them), in the [[Reading view]], in table cells and in the [[PDF]] export.
 
-## Footnotes, underline, subscript and superscript
+# Footnotes, underline, subscript and superscript
 
 A footnote is a reference in the text and a definition anywhere in the note:
 
@@ -174,7 +174,7 @@ All of this also shows in the heading titles of the outline, in table cells, and
 export, where a footnote reference links to its definition. Word notes imported with pandoc use
 exactly these forms (see [[Import]]).
 
-## Math
+# Math
 
 A formula between dollar signs is set in the text, `$E = mc^2$`, and two dollar signs make a display formula, centred in a row of its own:
 
@@ -194,7 +194,7 @@ Shale typesets formulas itself, with the bundled font STIX Two Math (SIL Open Fo
 
 With the Markdown preview on, a formula takes the place of its TeX; the line with the cursor shows the TeX, as with every other markup (the TeX stays in the note, so the cursor, selection and search work on it). The same formulas are drawn in the [[Reading view]], in table cells, in the headings of the outline and in the [[PDF]] export. A formula Shale cannot typeset (an unknown command, braces that do not match, `\left` without `\right`, more than 64 levels of nesting or more than 10 000 characters) stays as its TeX in the code style, and the reason shows when you point at it. Word files imported with pandoc bring their formulas as `$…$` and `$$…$$` (see [[Import]]).
 
-## Code
+# Code
 
 Code is coloured: write the language after the opening fence, as in ```` ```js ````
 or ```` ```rust ```` (also `python`, `sh`, `json`, `yaml`, `typescript`, `tsx`, `toml` and about 140 more; the usual short names such as `rs`,
@@ -203,7 +203,7 @@ own colours, in the editor, in the reading view and in the [[PDF]] export. A blo
 not know, stays plain. Inline code (`console.log("hi")`) has no language, so only its strings,
 numbers and called names are coloured.
 
-## Markdown preview
+# Markdown preview
 
 ![[editor-preview.png]]
 
@@ -274,14 +274,14 @@ can undo, and the table stays a grid.
 
 ![[table-grid.png]]
 
-## Sound players
+# Sound players
 
 ![[sound-player.png]]
 
 A sound embedded with `![[song.mp3]]` shows a player in the editor, the markdown preview and the
 reading view; videos work the same way. All about them is in [[Sounds and videos]].
 
-## Resizing pictures and videos
+# Resizing pictures and videos
 
 Move the mouse over a picture or a video in the editor: its edges and corners
 become handles, and a drag changes the size (the proportions stay). The width is written into
@@ -299,7 +299,7 @@ Videos resize the same way (the controls stay below the picture; **100%** is the
 
 ![[video-resize.webm]]
 
-## Vim-style editing
+# Vim-style editing
 
 Settings → Vim (listed under Editor), off by default. Notes open in normal mode. The cursor in normal mode is a block
 unless you choose another shape ("Cursor in normal mode"); typing uses "Cursor while typing" (Settings → Editor).
@@ -345,7 +345,7 @@ The status bar shows NORMAL, INSERT, VISUAL or V-LINE. The vim keys themselves c
 rebound. In normal mode **Space Tab** goes back to the view this tab showed just before, and
 again to return. **Space f f** and **Space f g** open the pickers of [[Search and pickers]].
 
-## Keyboard only
+# Keyboard only
 
 ![[keybindings.png]]
 
@@ -356,7 +356,7 @@ the file list with the open note selected: j / k go from file to file, Ctrl+J / 
 folder to folder, Space opens or closes a folder, Enter opens a file. All of this can be
 changed in Settings → Keybindings, see [[Keyboard shortcuts]].
 
-## Text size and width
+# Text size and width
 
 "Readable line length" is in Settings → Appearance. The font and size of the raw markdown text and
 of the rendered text (the preview and the reading view) are two settings of their own in

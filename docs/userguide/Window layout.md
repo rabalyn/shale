@@ -7,7 +7,7 @@ features:
 Back to [[Start here]]. The ribbon is the narrow bar on the left; the right sidebar is a stack
 of **views**.
 
-## The ribbon
+# The ribbon
 
 - Drag the icons into any order; a line shows where the icon lands. Esc, or letting go anywhere
   else, cancels. The sidebar toggles and the settings button stay where they are.
@@ -18,7 +18,7 @@ of **views**.
 - Right-click an icon: **Remove from the ribbon** / **Remove from this view**, **Restore …** for
   every icon removed earlier, and **Reset layout**. The last icon cannot be removed.
 
-## The right sidebar
+# The right sidebar
 
 - Each view has its own menubar of panel icons (Backlinks, Outgoing links, Outline, Graph,
   Calendar) and shows the panel of the selected icon, so several panels can be open at once.
@@ -32,13 +32,13 @@ of **views**.
 - The layout is kept in the settings (`sidebars`, `show_left`, `show_right`), see
   [[Settings reference]].
 
-## The app icon
+# The app icon
 
 The Shale icon (stacked slate plates) shows in the title bar and taskbar, and in the Dock on
 macOS. On Linux with Wayland the taskbar takes it from a desktop file: `install.sh` in the download installs
 the desktop file and the icons (see Start here).
 
-## Dialogs
+# Dialogs
 
 Every dialog is a window you can move by its title bar and resize from any edge or corner. In a
 small window the content scrolls and the buttons stay inside the window.

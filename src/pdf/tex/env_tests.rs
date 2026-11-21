@@ -80,6 +80,7 @@ fn demos() -> Vec<String> {
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn every_tuda_ci_demo_compiles_to_a_pdf_with_pages_tex_env() {
+    crate::env_lock::hold();
     // the image follows the current TeX Live (ADR-0020): say which one this run is against
     if let Ok(out) = Command::new("sh").arg(env_dir().join("tex-env.sh")).arg("status").output() {
         eprintln!("{}", String::from_utf8_lossy(&out.stdout));

@@ -206,6 +206,7 @@ mod fake {
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_the_real_tex_passes_the_probe_with_every_package() {
+    crate::env_lock::hold();
     let work = super::compile::WorkDir::new().unwrap();
     let mut e = Engine::new(Kind::System, PathBuf::new());
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/tex-env/tex-env.sh");

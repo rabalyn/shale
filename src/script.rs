@@ -204,7 +204,7 @@ impl ScriptRun {
                 }
             }
         });
-        out.extend(take_hints());
+        out.extend(take_hints(ctx));
         self.texts = out;
     }
 }
@@ -216,26 +216,31 @@ pub fn find_label(texts: &[(String, egui::Rect)], label: &str, nth: usize) -> Op
 }
 
 /// Icon buttons draw no text, so they tell the script their tooltip and place instead: the
-/// tooltip is their `@label`. `None` = no script runs and nothing is kept.
-static HINTS: std::sync::Mutex<Option<Vec<(String, egui::Rect)>>> = std::sync::Mutex::new(None);
+/// tooltip is their `@label`. The hints live in the `Context` of the window that runs the script
+/// (not in a global), so another window, or a headless test drawing the same buttons, neither
+/// feeds nor takes them. `None` = no script runs here and nothing is kept.
+#[derive(Clone, Default)]
+struct Hints(Option<Vec<(String, egui::Rect)>>);
 
-/// A script runs: start keeping the hints of icon buttons.
-pub fn collect_hints() {
-    *HINTS.lock().unwrap_or_else(|e| e.into_inner()) = Some(Vec::new());
+/// A script runs in this context: start keeping the hints of icon buttons.
+pub fn collect_hints(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::NULL, Hints(Some(Vec::new()))));
 }
 
 /// An icon button (or other widget without text) of this frame, found by its tooltip.
-pub fn hint(tip: &str, rect: egui::Rect) {
-    if let Some(v) = HINTS.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
-        if v.len() < 2000 {
-            v.push((tip.to_string(), rect));
+pub fn hint(ctx: &egui::Context, tip: &str, rect: egui::Rect) {
+    ctx.data_mut(|d| {
+        if let Some(v) = d.get_temp_mut_or_default::<Hints>(egui::Id::NULL).0.as_mut() {
+            if v.len() < 2000 {
+                v.push((tip.to_string(), rect));
+            }
         }
-    }
+    });
 }
 
 /// The hints of the frame so far (they are forgotten).
-pub fn take_hints() -> Vec<(String, egui::Rect)> {
-    HINTS.lock().unwrap_or_else(|e| e.into_inner()).as_mut().map(std::mem::take).unwrap_or_default()
+pub fn take_hints(ctx: &egui::Context) -> Vec<(String, egui::Rect)> {
+    ctx.data_mut(|d| d.get_temp_mut_or_default::<Hints>(egui::Id::NULL).0.as_mut().map(std::mem::take).unwrap_or_default())
 }
 
 #[cfg(test)]
@@ -276,17 +281,34 @@ mod tests {
     // spec: BUILD-007
     #[test]
     fn build_007_an_icon_button_is_found_by_its_tooltip_and_only_while_a_script_runs() {
+        let ctx = egui::Context::default();
         let r = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(30.0, 30.0));
-        hint("Outline of the note", r);
-        assert!(take_hints().is_empty(), "nothing is kept without a script");
-        collect_hints();
-        hint("Outline of the note", r);
+        hint(&ctx, "Outline of the note", r);
+        assert!(take_hints(&ctx).is_empty(), "nothing is kept without a script");
+        collect_hints(&ctx);
+        hint(&ctx, "Outline of the note", r);
         let mut texts = vec![("Outline".to_string(), egui::Rect::from_min_size(egui::pos2(100.0, 5.0), egui::vec2(10.0, 10.0)))];
-        texts.extend(take_hints());
+        texts.extend(take_hints(&ctx));
         assert_eq!(find_label(&texts, "Outline of the note", 1), Some(egui::pos2(25.0, 35.0)));
         assert_eq!(find_label(&texts, "Outline", 1), Some(egui::pos2(105.0, 10.0)), "a drawn text is preferred");
-        assert!(take_hints().iter().all(|(t, _)| t != "Outline of the note"), "forgotten once taken");
-        *HINTS.lock().unwrap() = None;
+        assert!(take_hints(&ctx).iter().all(|(t, _)| t != "Outline of the note"), "forgotten once taken");
+    }
+
+    // spec: BUILD-007
+    #[test]
+    fn build_007_the_hints_belong_to_the_context_of_the_script_that_runs() {
+        let (running, other) = (egui::Context::default(), egui::Context::default());
+        let r = egui::Rect::from_min_size(egui::pos2(1.0, 2.0), egui::vec2(3.0, 3.0));
+        collect_hints(&running);
+        hint(&other, "Elsewhere", r);
+        hint(&running, "Here", r);
+        assert!(take_hints(&other).is_empty(), "a context without a script keeps nothing, whatever runs in another");
+        hint(&other, "Elsewhere", r);
+        assert_eq!(take_hints(&running).iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["Here"], "only its own hints");
+        collect_hints(&other);
+        hint(&other, "Elsewhere", r);
+        assert!(take_hints(&running).is_empty(), "collecting in another context collects nothing here");
+        assert_eq!(take_hints(&other).len(), 1);
     }
 
     #[test]

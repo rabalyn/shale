@@ -7,7 +7,7 @@ features:
 Read your Mastodon and Bluesky timelines next to your notes. The ribbon's speech-bubble button
 opens **Feeds** in a **new tab** every time. Back to [[Start here]].
 
-## Accounts
+# Accounts
 
 **Accounts…** adds a Mastodon account (server, sign-in in the browser, paste the code; or an
 access token) or a Bluesky account (handle and an **app password**, never your main password).
@@ -17,7 +17,7 @@ sign-in replaces the saved secret, and the account keeps its feeds, posts and op
 for another handle is refused; a failed one keeps the old secret. **Cancel** leaves the form. Try it without an account: `shale --screenshot out.png --view
 social` shows made-up posts.
 
-## Reading
+# Reading
 
 - Pick the account and the feed (Mastodon: Home and your lists; Bluesky: Following and saved
   feeds). Posts show avatar, name, time, boosts, pictures, quoted posts and link cards. A
@@ -29,14 +29,14 @@ social` shows made-up posts.
   each open feed looks for newer posts and offers "12 new posts, show" (or press `.`). The list
   never moves until you click. **Check now** looks right away.
 
-## Search the posts you loaded
+# Search the posts you loaded
 
 Every post a feed brings in is kept in a local search index. The sidebar search (Ctrl+Shift+F)
 lists matching posts under the notes ([[Search and pickers]]); `from:ada`, `text:`, `in:`,
 `link:` and `date:2026-11` limit a word to one part. Settings → Feeds → Post search index
 shows how many posts are indexed, **Rebuild**s or **Clear…**s it.
 
-## Save to vault
+# Save to vault
 
 **Save to vault** copies the post, and the whole thread when it is by one author, into the
 Import dialog ([[Import]]): choose the folder (default `Social`), tags and which pictures to

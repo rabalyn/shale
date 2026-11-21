@@ -14,7 +14,7 @@ A value of the wrong shape in the file loads as its default; fields Shale does n
 The "Where" column says which window changes a value. The global file is meant to be edited
 too: it is plain text with a description above every setting.
 
-## The settings file
+# The settings file
 
 **Settings → Open settings file** opens `config.toml` in a tab of its own. It is not a note: it
 is not in the file tree, not in any vault and not in the lists of recent files. Change a value,
@@ -36,9 +36,9 @@ change within a second.
 - An old `config.json` is turned into `config.toml` the first time this version starts; the old
   file is renamed `config.json.migrated`.
 
-## Global settings (`config.toml`)
+# Global settings (`config.toml`)
 
-### Links and notes
+## Links and notes
 
 | Key | Default | Where |
 |---|---|---|
@@ -48,7 +48,7 @@ change within a second.
 | `auto_convert_canvas` | off (asks) | Settings → Editor → Drawings; or the tick in the canvas question |
 | `file_sort` | `NameAsc` (file name A to Z); also `NameDesc`, `ModifiedDesc`, `ModifiedAsc`, `CreatedDesc`, `CreatedAsc` | the sort icon above the file list |
 
-### Appearance and editor
+## Appearance and editor
 
 | Key | Default | Where |
 |---|---|---|
@@ -66,7 +66,7 @@ change within a second.
 | `left_sidebar_width` | left out (260 points; 170 at least, 520 at most) | the border between the left sidebar and the notes: drag it to set the width; it is kept after a restart; "Reset layout" in the ribbon's menu goes back to the default |
 | `right_sidebar_width` | left out (290 points; 200 at least, 560 at most) | the border between the notes and the right sidebar: drag it to set the width; it is kept after a restart; "Reset layout" goes back to the default |
 
-### Fonts
+## Fonts
 
 One table, `fonts` (`[fonts]` in the file), in the settings file. Each area has a `family` (an installed font family such as
 "DejaVu Sans"; left out: Shale's own font) and a `size` in points (8 to 48). Settings → Fonts shows them
@@ -106,7 +106,7 @@ size of the two editor areas when you updated.
 | `esc_cursor` | `stay` (`stay` or `step_back`; another word is `stay`) | Vim, "Esc from insert mode": where the cursor lands when Esc leaves insert mode, on the character after the typing or one back like Vim; used only with Vim-style editing |
 | `keybindings` | empty (the defaults of [[Keyboard shortcuts]]; macOS has other defaults for some actions) | Settings → Keybindings; only the actions you changed are stored |
 
-### Window and vault
+## Window and vault
 
 | Key | Default | Where |
 |---|---|---|
@@ -123,14 +123,14 @@ size of the two editor areas when you updated.
 
 (`right[].…` are the fields of each entry of `sidebars.right`.)
 
-### Calendar
+## Calendar
 
 | Key | Default | Where |
 |---|---|---|
 | `calendars` | empty; each entry has `id`, `name`, `color`, `enabled`, `sync_minutes` (15 for a new CalDAV calendar) and its source (a local `.ics` file, or a CalDAV URL with user name and password) | Settings → Calendar → Calendars… |
 | `week_starts_monday` | on | Settings → Calendar, and the Calendars… dialog |
 
-### Mail ([[Mail]])
+## Mail ([[Mail]])
 
 | Key | Default | Where |
 |---|---|---|
@@ -169,7 +169,7 @@ system keyring, never in this file):
 | `mail_accounts[].sign_by_default` | off |
 | `mail_accounts[].preferred_standard` | `OpenPgp`; or `Smime` |
 
-### Feeds ([[Feeds]])
+## Feeds ([[Feeds]])
 
 | Key | Default | Where |
 |---|---|---|
@@ -178,7 +178,7 @@ system keyring, never in this file):
 | `social_replies` | off | the tick "Include replies from others" in the Import dialog |
 | `social_check_minutes` | 5 (0 = never) | Settings → Feeds, and Feeds → Accounts… |
 
-### Import ([[Import]])
+## Import ([[Import]])
 
 | Key | Default | Where |
 |---|---|---|
@@ -189,7 +189,7 @@ system keyring, never in this file):
 To set it up: install pandoc (Linux `sudo pacman -S pandoc-cli` or `sudo apt install pandoc`, macOS `brew install pandoc`,
 Windows `winget install JohnMacFarlane.Pandoc`), tick the box and press Check again.
 
-### LaTeX ([[PDF]])
+## LaTeX ([[PDF]])
 
 Settings → LaTeX is the table `[tex]` in the settings file.
 
@@ -210,7 +210,7 @@ The template sets of the vault ([[PDF]], "LaTeX export: template sets") have a s
 | `logo` | none, set by Settings → LaTeX → Template sets → Choose logo… | `settings.toml` of the set |
 | `department_logo` | none, set by Settings → LaTeX → Template sets → Choose department logo… (cleared by Remove department logo); the logo of your department, shown under the TU logo | `settings.toml` of the set, the guided setup (logo step) |
 
-### Updates ([[Updates]])
+## Updates ([[Updates]])
 
 Settings → Updates is the table `[updates]` in the settings file. `SHALE_UPDATES=off` in the environment switches updates off whatever is set here (no request, no notice).
 
@@ -222,7 +222,7 @@ Settings → Updates is the table `[updates]` in the settings file. `SHALE_UPDAT
 | `updates.last_check` | `0` (never; seconds since 1970 of the last successful check) | written by Shale after a check; shown in Settings → Updates |
 | `updates.install_on_start` | empty (a downloaded version to install at the next start) | the notice's "At next start" |
 
-### Data and troubleshooting ([[Data usage and caches]])
+## Data and troubleshooting ([[Data usage and caches]])
 
 | Key | Default | Where |
 |---|---|---|
@@ -237,7 +237,7 @@ Settings → Updates is the table `[updates]` in the settings file. `SHALE_UPDAT
 | `caches.debug_log_mb` | 10 | same |
 | `caches.undo_days` | 30 (undo steps of notes, days) | same |
 
-## Properties of a note
+# Properties of a note
 
 Some behaviour is decided by a note's own properties (front matter) instead of a setting; they are not stored in any settings file.
 `numbered-headings` (`true` or `false`) overrides the setting `numbered_headings` for the note ([[Notes and links]]). The PDF export reads
@@ -245,7 +245,7 @@ Some behaviour is decided by a note's own properties (front matter) instead of a
 `print-heading-color`, `print-heading-weight`, `print-heading-sizes`, `print-break-before`, `print-title` and `print-toc` (any of them also switches on the plain paper look of the PDF); each has its values, default and effect in the table of
 [[PDF#Print properties of a note]]. Every one is optional, and a value that cannot be read is ignored.
 
-## Vault settings (`<vault>/.shale/settings.json`)
+# Vault settings (`<vault>/.shale/settings.json`)
 
 | Key | Default | Where |
 |---|---|---|
@@ -263,7 +263,7 @@ The git remote itself is git's (`git remote`), set with **Connect** in the same 
 Settings → Vault also has **Check names for Windows and macOS…** (no setting, a tool): it lists the files
 and folders whose names would break on Windows or macOS and renames them on request ([[Vault settings]]).
 
-## Vault session state (`<vault>/.shale/state.json`)
+# Vault session state (`<vault>/.shale/state.json`)
 
 Kept by Shale as you work, so a vault opens as you left it ([[Tabs]], [[Import]]).
 

@@ -12,7 +12,7 @@ editing and reading, open the graph from the ribbon and see how the notes connec
 *(That is a drawing, embedded with `![[How notes connect.excalidraw]]`. Double-click it in the
 file list to edit it.)*
 
-## Where to go
+# Where to go
 
 Writing and finding:
 
@@ -50,7 +50,7 @@ Keeping it safe and tidy:
 - [[Fonts]]: the font and text size of the editor, dialogs, mail, calendar and feeds.
 - [[Themes]]: light and dark colour themes, your own Alacritty theme files.
 
-## Where this guide comes from
+# Where this guide comes from
 
 Press **F1** in Shale (or Settings → Help → **Open user guide**) to open it. The guide is built
 into the program, which unpacks it once per version into its data folder (on Linux
@@ -61,7 +61,7 @@ also has the guide as `shale-userguide-<version>.zip`, to unpack anywhere and op
 and as one PDF to print or read anywhere, `shale-userguide-<version>.pdf` (made from this vault
 as a book).
 
-## Installing on macOS
+# Installing on macOS
 
 Open `shale-<version>-macos-arm64.dmg` (Apple silicon) and drag **Shale** onto the **Applications** link in the window. The first
 start needs one extra step, because the app is not notarised by Apple (it is signed ad hoc): right-click Shale in Applications and
@@ -70,7 +70,7 @@ run `xattr -dr com.apple.quarantine /Applications/Shale.app` in the Terminal. Be
 Keychain may ask again for access to your saved passwords after an update. Shale finds programs from Homebrew (`git-lfs`, `ffmpeg`,
 `gpg`, `pandoc`) even though Finder starts it with a short search path.
 
-## Installing on Linux
+# Installing on Linux
 
 The Linux download unpacks to a folder `shale/` with an `install.sh`. Run `./install.sh` in it to
 put Shale in `~/.local/bin` with its app menu entry and icons, or `sudo ./install.sh --prefix /usr/local`
@@ -81,7 +81,7 @@ On Arch Linux, the package `shale-bin` installs the same download system-wide: b
 `packaging/aur/shale-bin/` in the source with `makepkg -si`, or install it with `yay -S shale-bin` or
 `paru -S shale-bin` once it is on the AUR.
 
-## How to read this guide
+# How to read this guide
 
 Each note names the setting or key you need, and every picture was made by the app itself
 (`docs/screenshots/regen.sh`), so it shows the current look; the short videos were recorded

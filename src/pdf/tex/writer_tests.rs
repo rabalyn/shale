@@ -646,6 +646,18 @@ fn fenced_code_is_on_a_light_box_that_breaks_across_pages_where_tables_may() {
     }
 }
 
+// spec: TEX-015
+#[test]
+fn tex_015_the_missing_placeholder_of_a_picture_is_in_the_paper_red_of_missing_links() {
+    let note = "## S\nOn its own:\n\n![[gone.png]]\n\nIn a line ![[away.png]] here and [[Nowhere]].\n";
+    let out = doc_with(note, "pub", &ExportOptions::for_note(), &[("author", "A")], &[]).unwrap();
+    let b = body_of(&out.tex);
+    for what in ["gone.png", "away.png"] {
+        assert!(b.contains(&format!("\\textcolor[RGB]{{192,28,40}}{{\\textit{{[missing: {what}]}}}}")), "{what} in the paper red: {b}");
+    }
+    assert!(!b.contains("255,104,104"), "never the screen colour: {b}");
+}
+
 // spec: TEX-031
 #[test]
 fn a_picture_inside_a_line_is_as_high_as_the_line_and_a_missing_one_says_so() {
@@ -657,7 +669,7 @@ fn a_picture_inside_a_line_is_as_high_as_the_line_and_a_missing_one_says_so() {
     let pic = "\\raisebox{-0.2\\baselineskip}{\\includegraphics[height=0.9\\baselineskip,width=\\linewidth,keepaspectratio]{picture-1.png}}";
     assert!(b.contains(&format!("A {pic} icon, {pic} again, ")), "in the line, as high as it: {b}");
     assert!(b.contains(&format!("cell {pic}")), "in a table cell too: {b}");
-    assert!(b.contains("\\textcolor[RGB]{255,104,104}{\\textit{[missing: gone.png]}} and"), "a missing picture says so, in the line: {b}");
+    assert!(b.contains("\\textcolor[RGB]{192,28,40}{\\textit{[missing: gone.png]}} and"), "a missing picture says so, in the line: {b}");
     assert!(b.contains("{Sketch.excalidraw}") && !b.contains("drawing-"), "a drawing in a line stays its link text: {b}");
     assert!(b.contains("{picture-1.png}\\par\\nopagebreak"), "the same picture on its own line is the same file: {b}");
     assert_eq!(out.files.len(), 1, "one file");
