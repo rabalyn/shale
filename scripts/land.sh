@@ -8,7 +8,7 @@
 #
 # A branch is a local branch if one has the name, else `origin/<branch>`, else any commit.
 # The checks: every new commit names an issue (FORGE-008), `cargo fmt --check`, clippy with
-# `-D warnings` for Linux (also with `--features bench`), and for macOS and Windows (`scripts/cross-check.sh`), `cargo test` (also `cargo test --features bench bench::`, and also `cargo test --release` with --release), and the real-server
+# `-D warnings` for Linux (also with `--features bench`), and for macOS and Windows (`scripts/cross-check.sh`), `cargo test` (also `cargo test --features bench bench::` when the change touches the harness or the build, `scripts/bench-tests-wanted.sh` (BUILD-035, #449), or with --release, and also `cargo test --release` with --release), and the real-server
 # suites of tests/caldav-env and tests/mail-env and the LuaLaTeX suite of tests/tex-env, each only when the
 # change touches its code or environment (`.forgejo/scripts/env-tests.sh suites`, #447); --no-env-tests skips them and
 # says so. A merge conflict is not resolved here: merge `origin/main` into the branch, resolve
@@ -196,7 +196,12 @@ checks() {
   # code used only from Linux-only `cfg` code is dead on macOS and Windows (BUILD-004, DEV-015)
   step "macOS and Windows clippy (scripts/cross-check.sh)" sh scripts/cross-check.sh || return 1
   step "cargo test" cargo test -q --locked || return 1
-  step "cargo test --features bench bench::" cargo test -q --locked --features bench bench:: || return 1
+  # its tests only when the change touches the harness or the build, and with --release (BUILD-035, #449)
+  if [ "$RELEASE" = yes ] || [ "$(sh scripts/bench-tests-wanted.sh "$base" HEAD)" = yes ]; then
+    step "cargo test --features bench bench::" cargo test -q --locked --features bench bench:: || return 1
+  else
+    echo "-- SKIPPED (the change touches neither the benchmark harness nor the build): cargo test --features bench bench:: did not run"
+  fi
   if [ "$RELEASE" = yes ]; then
     step "cargo test --release" cargo test -q --release --locked || return 1
   fi

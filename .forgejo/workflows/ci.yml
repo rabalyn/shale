@@ -120,6 +120,7 @@ jobs:
           sh .forgejo/scripts/test-check-commit-issues.sh
           bash scripts/test-land.sh
           bash scripts/test-env-tests.sh
+          bash scripts/test-bench-wanted.sh
           bash scripts/test-dev-metrics.sh
           bash scripts/test-release.sh
 

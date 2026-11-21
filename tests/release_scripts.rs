@@ -63,6 +63,12 @@ fn dev_025_test_tex_env_script_passes() {
     run("scripts/test-tex-env.sh");
 }
 
+// spec: BUILD-035
+#[test]
+fn build_035_test_bench_wanted_script_passes() {
+    run("scripts/test-bench-wanted.sh");
+}
+
 // spec: DEV-011
 #[test]
 fn dev_011_test_env_tests_script_passes() {
