@@ -11,9 +11,15 @@ use std::path::Path;
 pub enum Loaded {
     Text(Box<TextPair>),
     /// A drawing: shown as two thumbnails, not as text (HIST-015).
-    Drawing { before: String, after: String },
+    Drawing {
+        before: String,
+        after: String,
+    },
     /// Not text, or an LFS pointer: shown as "changed" with the sizes in bytes.
-    Binary { before: usize, after: usize },
+    Binary {
+        before: usize,
+        after: usize,
+    },
 }
 
 /// The comparison of two texts.

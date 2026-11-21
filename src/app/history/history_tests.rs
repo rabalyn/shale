@@ -6,7 +6,7 @@ use crate::app::Options as AppOptions;
 use std::ffi::OsString;
 use std::time::Instant;
 
-fn hermetic() -> Git {
+pub(super) fn hermetic() -> Git {
     let env = [("GIT_CONFIG_GLOBAL", "/dev/null"), ("GIT_CONFIG_NOSYSTEM", "1"), ("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "init.defaultBranch"), ("GIT_CONFIG_VALUE_0", "main")];
     let mut git = Git { program: "git".into(), env: env.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))).collect() };
     crate::gitsync::hide_lfs(&mut git);
@@ -23,7 +23,7 @@ pub(super) fn write(root: &Path, rel: &str, text: &str) {
 pub(super) struct T {
     pub(super) app: ShaleApp,
     pub(super) ctx: egui::Context,
-    root: PathBuf,
+    pub(super) root: PathBuf,
     pub(super) vault: PathBuf,
 }
 

@@ -275,10 +275,11 @@ The file history ([[File history]]) is set in the settings file of this computer
 
 | Setting | Default | Where |
 |---|---|---|
-| `history` | the group of the three keys below | Settings → Sync, "File history" |
+| `history` | the group of the four keys below | Settings → Sync, "File history" |
 | `history.enabled` | on (`false`: no new versions are kept; the old ones stay) | Settings → Sync, "Keep earlier versions of my notes" |
 | `history.coalesce_minutes` | 10 (1 to 1440; at most one version of a note in this time while you type) | Settings → Sync, "At most one version of a note every … minutes" |
 | `history.idle_seconds` | 60 (5 to 3600; a version when a note had no change for so long) | Settings → Sync, "… no change for … seconds" |
+| `history.show_panel` | on (`false`: the history column beside a note is hidden; the History panel of the right sidebar stays) | the **×** of the column, **Show it here** in the panel, ⋯ → "History of this note" |
 
 The git remote itself is git's (`git remote`), set with **Connect** in the same section.
 

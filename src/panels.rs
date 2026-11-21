@@ -908,7 +908,18 @@ impl ShaleApp {
                     keep = false;
                 }
             }
-            Modal::TexSetup | Modal::Export(_) | Modal::Calendars(_) | Modal::Event(_) | Modal::Import(_) | Modal::ImportSummary(_) | Modal::MailAccounts(_) | Modal::Social(_) | Modal::DataUsage | Modal::History | Modal::Changes | Modal::SyncWizard => {}
+            Modal::TexSetup
+            | Modal::Export(_)
+            | Modal::Calendars(_)
+            | Modal::Event(_)
+            | Modal::Import(_)
+            | Modal::ImportSummary(_)
+            | Modal::MailAccounts(_)
+            | Modal::Social(_)
+            | Modal::DataUsage
+            | Modal::History
+            | Modal::Changes
+            | Modal::SyncWizard => {}
             Modal::ConvertCanvas { rel, new_tab, always, existing } => {
                 let resp = crate::dialog::Dialog::new("convert-canvas", "Convert to an editable drawing?").width(460.0).show(&ctx, |ui| {
                     let name = rel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();

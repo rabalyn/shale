@@ -663,6 +663,12 @@ impl ShaleApp {
             if app.shot.path.is_some() && p.join("Welcome.md").is_file() {
                 app.open(Path::new("Welcome.md"), false);
             }
+            // screenshots: a made-up history of the notes (HIST-018)
+            if let (true, Some(dir)) = (app.shot.path.is_some(), std::env::var_os("SHALE_DEMO_HISTORY")) {
+                if let Err(e) = app.history_demo(Path::new(&dir)) {
+                    eprintln!("could not make the demo history: {e}");
+                }
+            }
             // screenshots: a demo calendar full of sample events
             if app.shot.path.is_some() && app.cfg.calendars.is_empty() {
                 let src = app.calendar.new_local_source("Demo calendar", &[]);

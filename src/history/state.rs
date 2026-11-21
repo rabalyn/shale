@@ -38,7 +38,7 @@ pub enum Mode {
 /// What the view got for the two versions.
 pub enum Data {
     Text(Box<super::compare::TextPair>),
-    Drawing { before: crate::drawing::Scene, after: crate::drawing::Scene },
+    Drawing { before: Box<crate::drawing::Scene>, after: Box<crate::drawing::Scene> },
     Binary { before: usize, after: usize },
 }
 
@@ -49,7 +49,7 @@ impl Data {
             Loaded::Text(t) => Data::Text(t),
             Loaded::Drawing { before, after } => {
                 let scene = |text: &str| crate::drawing::Scene::from_file_text(rel, text).unwrap_or_default();
-                Data::Drawing { before: scene(&before), after: scene(&after) }
+                Data::Drawing { before: Box::new(scene(&before)), after: Box::new(scene(&after)) }
             }
             Loaded::Binary { before, after } => Data::Binary { before, after },
         }

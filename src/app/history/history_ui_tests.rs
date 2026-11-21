@@ -390,7 +390,12 @@ fn hist_015_a_binary_version_is_changed_with_two_placeholders() {
 fn hist_015_a_drawing_is_changed_with_the_drawing_before_and_after() {
     let mut t = setup("drawing", false);
     let scene = |n: usize| {
-        let el = |i: usize| format!(r##"{{"id":"e{i}","type":"rectangle","x":{x},"y":10,"width":80,"height":40,"angle":0,"strokeColor":"#1e1e1e","backgroundColor":"transparent","fillStyle":"solid","strokeWidth":2,"roughness":0,"opacity":100,"version":1,"versionNonce":1,"isDeleted":false,"seed":{i}}}"##, x = i * 100);
+        let el = |i: usize| {
+            format!(
+                r##"{{"id":"e{i}","type":"rectangle","x":{x},"y":10,"width":80,"height":40,"angle":0,"strokeColor":"#1e1e1e","backgroundColor":"transparent","fillStyle":"solid","strokeWidth":2,"roughness":0,"opacity":100,"version":1,"versionNonce":1,"isDeleted":false,"seed":{i}}}"##,
+                x = i * 100
+            )
+        };
         format!(r#"{{"type":"excalidraw","version":2,"source":"test","elements":[{}],"appState":{{}},"files":{{}}}}"#, (0..n).map(el).collect::<Vec<_>>().join(","))
     };
     write(&t.vault, "Sketch.excalidraw", &scene(1));
@@ -456,4 +461,27 @@ fn sync_045_the_deleted_notes_dialog_lists_a_trashed_note_and_restores_it() {
     let restore = w.t.app.history.deleted.rects.iter().find(|r| r.0 == "restore-deleted-0").expect("a Restore button").1;
     w.click(restore.center());
     assert_eq!(crate::fsutil::read_to_string(w.t.vault.join("Trip.md")).unwrap(), V3);
+}
+
+// spec: HIST-018
+#[test]
+fn hist_018_a_made_up_history_has_a_version_per_step_an_hour_apart_ending_an_hour_ago() {
+    let mut t = setup("demo", false);
+    t.app.sync.git = super::history_tests::hermetic();
+    let steps = t.root.join("steps");
+    for (dir, text) in [("v1", V1), ("v2", V2), ("v3-sync-laptop", V3)] {
+        write(&steps.join(dir), "Trip.md", text);
+    }
+    let before = crate::calendar::time::now();
+    t.app.history_demo(&steps).unwrap();
+    let after = crate::calendar::time::now();
+    assert_eq!(crate::fsutil::read_to_string(t.vault.join("Trip.md")).unwrap(), V3, "the vault ends as the last step");
+    let versions = t.versions("Trip.md");
+    assert_eq!(versions.len(), 3, "{versions:?}");
+    let ages: Vec<i64> = versions.iter().map(|v| (before - v.time) / 3600).collect();
+    assert_eq!(ages, [1, 2, 3], "an hour apart, the newest an hour ago: {ages:?} {} {}", before, after);
+    assert_eq!(versions[0].meta.reason, Some(Reason::Sync));
+    assert_eq!(versions[0].meta.device.as_deref(), Some("laptop"));
+    assert_eq!(versions[2].meta.reason, Some(Reason::Initial));
+    assert!(t.app.history_active(), "the window keeps the made-up history");
 }

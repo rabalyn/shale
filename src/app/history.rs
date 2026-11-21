@@ -14,9 +14,9 @@
 
 use super::{unix_now, ShaleApp};
 use crate::gitsync::history::{self, Deleted, HistoryConfig, Outcome, Reason, Repo, Request, Schedule, Version};
+use crate::gitsync::{Git, Options};
 use crate::history::compare::Loaded;
 use crate::history::state::{Changes, Data, DeletedList, Panel};
-use crate::gitsync::{Git, Options};
 use crate::vault::rel_to_string;
 use eframe::egui;
 use std::collections::VecDeque;
@@ -62,11 +62,25 @@ struct SnapJob {
 enum Query {
     Versions(PathBuf),
     Deleted,
-    Content { commit: String, path: PathBuf, then: Use },
+    Content {
+        commit: String,
+        path: PathBuf,
+        then: Use,
+    },
     DeletedContent(Deleted),
     /// The two ends of a comparison (HIST-008): the older version, the newer one or the note as it is
     /// now (`live`: the text on the screen, or None to read the file), and the names of the sides in a patch.
-    Compare { rel: PathBuf, from: Version, to: Option<Version>, live: Option<String>, labels: (String, String) },
+    Compare(Box<Compared>),
+}
+
+/// The ends of a comparison, for a read.
+#[derive(Clone)]
+struct Compared {
+    rel: PathBuf,
+    from: Version,
+    to: Option<Version>,
+    live: Option<String>,
+    labels: (String, String),
 }
 
 /// What is done with a text read from the history.
@@ -112,6 +126,8 @@ pub struct HistoryState {
     pub changes: Changes,
     /// The list of the deleted notes (SYNC-040).
     pub deleted: DeletedList,
+    /// A screenshot run with a made-up history keeps it (HIST-018).
+    pub(crate) demo: bool,
     /// Tests: the clock.
     #[cfg(test)]
     pub(crate) fake_now: Option<u64>,
@@ -157,10 +173,9 @@ impl ShaleApp {
     /// Does history run now (SYNC-032): it is on, a vault is open, there is a git and, as with the
     /// automatic sync, the window keeps its settings (a window built for a test does not).
     pub fn history_active(&mut self) -> bool {
+        let persist = self.persist_config || self.history.demo;
         #[cfg(test)]
-        let persist = self.persist_config || self.history.on;
-        #[cfg(not(test))]
-        let persist = self.persist_config;
+        let persist = persist || self.history.on;
         persist && self.cfg.history.enabled && self.vault.is_some() && self.git_version().is_some()
     }
 
@@ -178,7 +193,7 @@ impl ShaleApp {
     }
 
     /// The things a job needs: git, the vault, where the histories live and the commit options.
-    fn history_job_data(&self) -> Option<(Git, PathBuf, PathBuf, Options)> {
+    pub(crate) fn history_job_data(&self) -> Option<(Git, PathBuf, PathBuf, Options)> {
         let root = self.vault.as_ref()?.root.clone();
         Some((self.sync.git.clone(), root, self.usage.places.history.clone(), self.sync_options()))
     }
@@ -370,7 +385,7 @@ impl ShaleApp {
                         self.history.deleted.loading = false;
                         self.history.deleted.error = Some(e.clone());
                     }
-                    Query::Compare { .. } => {
+                    Query::Compare(_) => {
                         self.history.changes.loading = false;
                         self.history.changes.error = Some(e.clone());
                     }
@@ -393,7 +408,8 @@ impl ShaleApp {
                 self.history.deleted.loading = false;
                 self.history.deleted.error = None;
             }
-            (Query::Compare { rel, from, to, .. }, Answer::Compare(loaded)) => {
+            (Query::Compare(c), Answer::Compare(loaded)) => {
+                let Compared { rel, from, to, .. } = *c;
                 let ch = &mut self.history.changes;
                 // an answer for ends the view has moved away from is dropped
                 if ch.rel == rel && ch.from == from.commit && ch.to == to.map(|t| t.commit) {
@@ -470,7 +486,7 @@ impl ShaleApp {
         let live = if to.is_none() { self.notes.get(&rel).filter(|d| d.unreadable.is_none()).map(|d| d.text.clone()) } else { None };
         self.history.changes.loading = true;
         self.history.changes.data = None;
-        self.history.queries.push_back(Query::Compare { rel, from, to, live, labels });
+        self.history.queries.push_back(Query::Compare(Box::new(Compared { rel, from, to, live, labels })));
     }
 
     /// Open the list of the deleted notes (SYNC-040).
@@ -664,7 +680,8 @@ fn run_query(repo: &Repo, q: &Query) -> Result<Answer, String> {
         Query::Deleted => Answer::Deleted(history::deleted(repo, LIST_LIMIT)?),
         Query::Content { commit, path, .. } => Answer::Text(history::content_at(repo, commit, path)?),
         Query::DeletedContent(d) => Answer::Text(history::deleted_content(repo, d)?),
-        Query::Compare { rel, from, to, live, labels } => {
+        Query::Compare(c) => {
+            let Compared { rel, from, to, live, labels } = &**c;
             let old = history::content_at(repo, &from.commit, &from.path)?;
             let (new, binary) = match (to, live) {
                 (Some(t), _) => (history::content_at(repo, &t.commit, &t.path)?, from.binary || t.binary),

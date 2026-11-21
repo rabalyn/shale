@@ -534,7 +534,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   between two icons shows where the icon lands; Esc, or letting go anywhere else, cancels. The
   sidebar toggles at the top and bottom and the settings button stay where they are.
 - The right sidebar is a stack of **views**. Each view has its own menubar of panel icons
-  (Backlinks, Outgoing links, Outline, Graph, Calendar) and shows the panel of the selected
+  (Backlinks, Outgoing links, Outline, Graph, Calendar, History) and shows the panel of the selected
   icon, so several panels can be open at once.
 - Drag a panel icon over the content of the right sidebar: the area lights up ("Drop to open
   this icon in a new view") and dropping makes a new view below it. Drag icons from one
@@ -1112,16 +1112,39 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 - **Messages.** A short subject and the lines `Shale-Reason:` (`save`, `idle`, `close`, `initial`,
   `sync`, `restore`, `merge`, `rename`, `delete`), `Shale-Device:`, one `Shale-Path:` per path and
   `Shale-Restored:` for a restore; a commit without them (made by another tool) is read as a subject only.
-- **Go back.** A note's (or drawing's) ⋯ menu has **Versions of this note…**: each version with its time,
-  reason, computer and the lines added and removed (a binary file has no counts), following renames.
-  **Restore** snapshots the text you have, then puts the old text in the note as one new change (one
+- **The history panel.** The history of the note of the focused pane is a slim column (236 points) in the empty
+  right margin of the note, between the text and the right sidebar, when exactly one note is open, **Readable line length**
+  is on and the note area is at least 1040 points wide; the text keeps its width. With several panes side by side, a drawing or a
+  narrow window the same list is the **History** panel of the right sidebar (a clock icon, last in the default order;
+  it is a panel like the outline: it can be moved, hidden and shown). The **×** of the column hides it
+  (`history.show_panel`, remembered), **Show it here** in the sidebar panel or the ⋯ menu entry **History of this note**
+  shows it again. The list is read in the background and again after a new version or a sync.
+  ![The history in the margin of a note](userguide/z_media/screenshots/history-margin.png)
+  ![The history as a panel of the right sidebar](userguide/z_media/screenshots/history-sidebar.png)
+- **The list.** Grouped by day (Today, Yesterday, `12 Nov`), each version with "5 min ago" or its time, where it came from
+  in words (edited here, edited on a laptop, synced from a laptop, restored version of …, merged after a conflict,
+  renamed from …, deleted, first version kept, changed outside Shale), and a bar of five +/− ticks with the counts as text
+  (`+12 −3`); the hover says "12 lines added, 3 removed". A binary version says "changed". The right-click menu has
+  **Restore this version** and **Copy text**. With history off the panel says why and has **Open Settings → Sync**.
+- **The comparison.** A click on a version opens **Changes since 11:05**, the note as it is now against that version:
+  paragraphs, headings (by size), list items, table rows and quotes with inserted words highlighted and underlined and deleted
+  words struck through (theme colours, never colour alone), a gutter mark **+** added, **−** removed, **~** changed on every
+  changed block, and unchanged runs folded into "… 34 unchanged paragraphs" (a click opens them). The slider moves the older end
+  over all versions, the **to** list picks the newer end, **Next change** and **Previous change** jump (the current one has a frame).
+  **Restore this version** (undoable, the text you had is kept first), **Copy text** and **Read-only** are the actions of
+  SYNC-038 and SYNC-039. Drawings show before and after thumbnails, a binary version "changed" with two placeholders.
+  ![Changes since 06:00 as track changes](userguide/z_media/screenshots/history-changes.png)
+- **Source side by side.** The switch **Source, side by side** shows the Markdown, old left and new right, with line numbers,
+  tinted changed lines, marks between the sides and the changed words underlined or struck through; **Copy as patch** copies
+  unified diff text. Only here are versions named by a short hash (a tooltip has the full one).
+  ![The source side by side](userguide/z_media/screenshots/history-source.png)
+- **Go back.** **Restore** snapshots the text you have, then puts the old text in the note as one new change (one
   undo step in an open note; an atomic save otherwise) and snapshots that with the version it came from;
-  history is never reset or rewritten. **Copy text** and **Read-only** read a version without changing
-  anything. Settings → Sync has **Restore a deleted note…**: notes deleted or moved to the trash, newest
-  first, written back at their path or at `Name (restored).md`. A rename or move and moving to the trash
+  history is never reset or rewritten. Settings → Sync and the panel have **Restore a deleted note…**: notes deleted or moved
+  to the trash, newest first, written back at their path or at `Name (restored).md`. A rename or move and moving to the trash
   make their own snapshots, so the history stays connected.
 - **Settings** (Settings → Sync, **File history**): on by default for every vault (`history.enabled`),
-  `history.coalesce_minutes` (10) and `history.idle_seconds` (60). Without a usable git, history is off and
+  `history.coalesce_minutes` (10), `history.idle_seconds` (60) and `history.show_panel` (the margin column). Without a usable git, history is off and
   the page says why. Data usage lists the size of a local history. Nothing is thinned out; see ADR-0028.
 
 ## Keyboard

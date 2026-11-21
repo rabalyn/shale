@@ -411,7 +411,11 @@ impl Shown {
         let n = to - from;
         let kind = &rows[from].kind;
         let word = if rows[from..to].iter().all(|r| std::mem::discriminant(&r.kind) == std::mem::discriminant(kind)) {
-            if n == 1 { kind.name() } else { kind.plural() }
+            if n == 1 {
+                kind.name()
+            } else {
+                kind.plural()
+            }
         } else if n == 1 {
             "part"
         } else {
