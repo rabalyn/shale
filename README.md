@@ -196,7 +196,7 @@ no entries at all) both stop with "the changelog needs an update first".
 1. **Check tag**, when the work is done for now: `scripts/make-tag.sh minor` (or `patch`,
    `major`) makes `v0.4.0-rc.1`, and `scripts/make-tag.sh` the next `rc`. It merges the files in
    `docs/changelog-pending/` into `## [Unreleased]`. When the development server's CI passes,
-   `main` is pushed to GitHub, which builds nothing; the tag stays there.
+   `main` is pushed to GitHub, which then tests macOS and Windows on it (`main-check.yml`, BUILD-039); the tag stays there.
 2. **Release**: `scripts/make-release.sh` releases the version the check tags led to (`0.4.0`).
    It also turns `## [Unreleased]` in `CHANGELOG.md` and the files in `docs/changelog-pending/`
    into the section `## [0.4.0] - date`. When the development server's CI passes, `main` and the

@@ -1,7 +1,9 @@
 #!/bin/bash
 # Makes a check tag (FORGE-013, ADR-0018): a pre-release `vX.Y.Z-rc.N` of the current
 # `origin/main`, for when the work is done for now. Forgejo's CI runs for it once; when it is
-# green, its `mirror` job pushes `main` to GitHub, which builds nothing (the tag stays on Forgejo).
+# green (all four check jobs, #461), its `mirror` job pushes `main` to GitHub, where
+# `.github/workflows/main-check.yml` tests macOS and Windows and warms the Rust cache (ADR-0025,
+# BUILD-039); the tag stays on Forgejo.
 #
 #   scripts/make-tag.sh [--dry-run] [--issue N] [patch|minor|major|X.Y.Z-rc.N]
 #
