@@ -161,7 +161,9 @@ run_case() {
     SHALE_TEX_ENV_SH="$TMP/runbin/tex-env.sh" SHALE_TEX_FAILED_LOGS="$SCENARIO/failed" \
     sh "$SCRIPT" run podman 2>&1)
   code=$?
-  got=$(paste -sd, "$SCENARIO/calls")
+  # the helpers and the suites run at the same time (#448): the calls are compared as a set, the order is tested below
+  got=$(sort "$SCENARIO/calls" | paste -sd,)
+  want=$(printf '%s\n' "$want" | tr ',' '\n' | sort | paste -sd,)
   if [ "$code" = 0 ] && [ "$got" = "$want" ]; then
     echo "ok - dev_011: run $name"
   else
@@ -236,6 +238,109 @@ else
   echo "not ok - dev_011: run failed start (exit $code): $(paste -sd, "$SCENARIO/calls") $OUT"
   FAILED=1
 fi
+
+
+# --- the parts of `run` go at the same time (DEV-011, #448) ---
+mkdir -p "$TMP/pbin"
+cat > "$TMP/pbin/cargo" <<'CARGO'
+#!/bin/sh
+# cargo test --locked -- --ignored <suite> --test-threads=<n>: three lines of output, FAKE_SLEEP apart; FAKE_FAIL names a suite that fails
+suite=$5
+echo "start $suite $6" >> "$SCENARIO/events"
+for i in 1 2 3; do echo "out $suite $i"; sleep "${FAKE_SLEEP:-0}"; done
+echo "end $suite" >> "$SCENARIO/events"
+if [ "$suite" = "${FAKE_FAIL:-}" ]; then echo 'test result: FAILED. 0 passed; 1 failed; 0 ignored'; exit 101; fi
+if [ "$suite" = "${FAKE_NONE:-}" ]; then echo 'test result: ok. 0 passed; 0 failed; 0 ignored'; exit 0; fi
+echo 'test result: ok. 3 passed; 0 failed; 0 ignored'
+CARGO
+for name in caldav mail tex; do
+  cat > "$TMP/pbin/$name-env.sh" <<'ENVSH'
+#!/bin/sh
+n=$(basename "$0" -env.sh)
+echo "begin $n $1" >> "$SCENARIO/events"
+case "$1" in reset|status) ;; *) sleep "${FAKE_SLEEP:-0}" ;; esac
+echo "finish $n $1" >> "$SCENARIO/events"
+case " ${FAKE_FAIL_HELPER:-} " in *" $n $1 "*) echo "$n $1 broke" >&2; exit 1 ;; esac
+ENVSH
+done
+chmod +x "$TMP/pbin/"*
+
+# par_run <name> [VAR=value…]: `run` with the fakes above; sets OUT, CODE, MS (milliseconds) and EVENTS (the file)
+par_run() {
+  shift # the name is for the reader of the test
+  N=$((N + 1))
+  export SCENARIO="$TMP/p$N"
+  mkdir -p "$SCENARIO"
+  : > "$SCENARIO/events"
+  EVENTS="$SCENARIO/events"
+  local t0 t1
+  t0=$(date +%s%N)
+  OUT=$(env -u SHALE_ENV_TESTS_SUITES "$@" PATH="$TMP/pbin:$PATH" SCENARIO="$SCENARIO" \
+    SHALE_CALDAV_ENV_SH="$TMP/pbin/caldav-env.sh" SHALE_MAIL_ENV_SH="$TMP/pbin/mail-env.sh" \
+    SHALE_TEX_ENV_SH="$TMP/pbin/tex-env.sh" SHALE_TEX_FAILED_LOGS="$SCENARIO/failed" \
+    sh "$SCRIPT" run podman 2>&1)
+  CODE=$?
+  t1=$(date +%s%N)
+  MS=$(((t1 - t0) / 1000000))
+}
+# check <name> <command>: ok when the command succeeds
+check() {
+  if eval "$2"; then echo "ok - dev_011: $1"; else echo "not ok - dev_011: $1 (exit $CODE, $MS ms): $OUT"; FAILED=1; fi
+}
+# the position of the first line of the events that equals $1 (0: none)
+pos() { grep -nxF -- "$1" "$EVENTS" | head -n 1 | cut -d: -f1 | sed 's/^$/0/'; }
+nopos() { local p; p=$(pos "$1"); echo "${p:-0}"; }
+
+# spec: DEV-011 (#448): the stacks and the image start together, the suites run together: three suites of 1.5 s each, helpers of 0.5 s
+par_run "all" FAKE_SLEEP=0.5
+check "run: all three suites ran, with their own thread counts, and the run ends well" '[ "$CODE" = 0 ] && grep -qx "start calendar::env_tests --test-threads=1" "$EVENTS" && grep -qx "start mail_env --test-threads=1" "$EVENTS" && grep -qx "start tex_env --test-threads=4" "$EVENTS"'
+# sequential: 3 x 0.5 s of helpers + 3 x 1.5 s of suites = 6 s; at the same time: 0.5 + 1.5 s plus the polling
+check "run: the stacks, the image and the suites go at the same time (about as long as the slowest, not the sum)" '[ "$MS" -lt 3800 ]'
+check "run: every helper started before the first suite and ended before it (the suites wait for the stacks)" '
+  [ "$(nopos "begin caldav up")" -gt 0 ] && [ "$(nopos "begin mail up")" -gt 0 ] && [ "$(nopos "begin tex build")" -gt 0 ] &&
+  [ "$(nopos "begin tex build")" -lt "$(nopos "finish caldav up")" ] && [ "$(nopos "begin mail up")" -lt "$(nopos "finish caldav up")" ] &&
+  [ "$(nopos "finish caldav up")" -lt "$(nopos "start calendar::env_tests --test-threads=1")" ] &&
+  [ "$(nopos "finish mail up")" -lt "$(nopos "start mail_env --test-threads=1")" ] &&
+  [ "$(nopos "finish tex build")" -lt "$(nopos "start tex_env --test-threads=4")" ]'
+check "run: the suites overlap (all started before the first ended)" '
+  [ "$(nopos "start tex_env --test-threads=4")" -lt "$(nopos "end calendar::env_tests")" ] && [ "$(nopos "start mail_env --test-threads=1")" -lt "$(nopos "end calendar::env_tests")" ]'
+# each log is printed on its own, in one piece
+check "run: the output of a suite is not interleaved with another one" '
+  [ "$(printf "%s\n" "$OUT" | grep "^out " | awk "{print \$2}" | uniq | wc -l)" = 3 ] && [ "$(printf "%s\n" "$OUT" | grep -c "^out ")" = 9 ]'
+check "run: every log has a heading with its exit code" '
+  printf "%s\n" "$OUT" | grep -q "^===== calendar::env_tests: exit 0" && printf "%s\n" "$OUT" | grep -q "^===== mail_env: exit 0" && printf "%s\n" "$OUT" | grep -q "^===== tex_env: exit 0"'
+
+# one suite fails: the others still end and are reported, and the failing one is named
+par_run "one failing" FAKE_SLEEP=0.2 FAKE_FAIL=mail_env
+check "run: a failing suite fails the run and is named" '[ "$CODE" = 1 ] && printf "%s\n" "$OUT" | grep -q "^FAILED suites: mail_env$"'
+check "run: the other suites still ran to the end and are reported with their results" '
+  grep -qx "end calendar::env_tests" "$EVENTS" && grep -qx "end tex_env" "$EVENTS" &&
+  printf "%s\n" "$OUT" | grep -q "^===== calendar::env_tests: exit 0" && printf "%s\n" "$OUT" | grep -q "^===== tex_env: exit 0" &&
+  printf "%s\n" "$OUT" | grep -q "^===== mail_env: exit 1" && printf "%s\n" "$OUT" | grep -q "test result: FAILED"'
+par_run "two failing" FAKE_SLEEP=0 FAKE_FAIL=calendar::env_tests SHALE_ENV_TESTS_SUITES="calendar::env_tests mail_env"
+check "run: a suite that fails and one that passes: only the failing one is named" '[ "$CODE" = 1 ] && printf "%s\n" "$OUT" | grep -q "^FAILED suites: calendar::env_tests$"'
+# a suite that ran no test (a filter that matches nothing) is a failure of that suite
+par_run "no test" FAKE_NONE=mail_env SHALE_ENV_TESTS_SUITES="calendar::env_tests mail_env"
+check "run: a suite that ran no test fails on its own, as before" '[ "$CODE" = 1 ] && printf "%s\n" "$OUT" | grep -q "^no mail_env test passed$" && printf "%s\n" "$OUT" | grep -q "^FAILED suites: mail_env$"'
+
+# a stack that does not come up: the other parts of the start are waited for, the status of the stacks is shown, no suite starts
+par_run "stack failing" FAKE_FAIL_HELPER="caldav up"
+check "run: a stack that does not come up is named, the status of both stacks is shown and no suite starts" '
+  [ "$CODE" = 1 ] && printf "%s\n" "$OUT" | grep -q "a stack did not come up: up-caldav" && printf "%s\n" "$OUT" | grep -q "caldav up broke" &&
+  grep -qx "finish tex build" "$EVENTS" && grep -qx "begin caldav status" "$EVENTS" && grep -qx "begin mail status" "$EVENTS" && ! grep -q "^start " "$EVENTS"'
+check "run: and the stacks are taken down again" '[ "$(grep -c "^begin caldav reset" "$EVENTS")" = 2 ] && [ "$(grep -c "^begin mail reset" "$EVENTS")" = 2 ]'
+par_run "image failing" FAKE_FAIL_HELPER="tex build"
+check "run: an image that cannot be built fails the run before any suite" '
+  [ "$CODE" = 1 ] && printf "%s\n" "$OUT" | grep -q "the TeX image could not be built" && ! grep -q "^start " "$EVENTS"'
+
+# tex_install and tex_import share one install of TeX Live: one after the other, but beside the other suites
+par_run "install and import" FAKE_SLEEP=0.3 SHALE_ENV_TESTS_SUITES="mail_env" SHALE_ENV_TESTS_TEX_INSTALL=yes SHALE_ENV_TESTS_TEX_IMPORT=yes
+check "run: tex_install ends before tex_import starts" '
+  [ "$CODE" = 0 ] && [ "$(nopos "end tex_install")" -gt 0 ] && [ "$(nopos "end tex_install")" -lt "$(nopos "start tex_import --test-threads=1")" ]'
+check "run: and they run beside the other suites" '[ "$(nopos "start tex_install --test-threads=1")" -lt "$(nopos "end mail_env")" ] && printf "%s\n" "$OUT" | grep -q "^===== tex_install+tex_import: exit 0"'
+par_run "install failing" FAKE_FAIL=tex_install SHALE_ENV_TESTS_TEX_INSTALL=yes SHALE_ENV_TESTS_TEX_IMPORT=yes SHALE_ENV_TESTS_SUITES="mail_env"
+check "run: a failed tex_install still lets tex_import run, and names the pair" '
+  [ "$CODE" = 1 ] && grep -qx "end tex_import" "$EVENTS" && printf "%s\n" "$OUT" | grep -q "^FAILED suites: tex_install+tex_import$"'
 
 
 
