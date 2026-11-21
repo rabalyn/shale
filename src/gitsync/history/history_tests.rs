@@ -496,7 +496,7 @@ fn a_note_moved_to_the_trash_by_the_sync_is_a_deletion_too() {
 // spec: SYNC-033
 #[test]
 fn the_schedule_coalesces_saves_and_asks_again_after_idle_and_close() {
-    let cfg = HistoryConfig { enabled: true, coalesce_minutes: 10, idle_seconds: 60 };
+    let cfg = HistoryConfig { enabled: true, coalesce_minutes: 10, idle_seconds: 60, show_panel: true };
     let n = Path::new("N.md");
     let mut s = Schedule::default();
     let typing = |_: &Path| true;
@@ -553,9 +553,9 @@ fn the_history_settings_default_to_on_load_from_old_files_round_trip_and_stay_in
     assert_eq!(c.history, HistoryConfig { coalesce_minutes: 3, ..HistoryConfig::default() }, "a missing field takes its default");
     let (c, _) = crate::vault_state::parse::<crate::config::Config>(br#"{"history": {"enabled": "maybe"}}"#).unwrap();
     assert_eq!(c.history, HistoryConfig::default(), "a value of the wrong shape loads as the default");
-    let c = crate::config::Config { history: HistoryConfig { enabled: false, coalesce_minutes: 30, idle_seconds: 9 }, ..Default::default() };
+    let c = crate::config::Config { history: HistoryConfig { enabled: false, coalesce_minutes: 30, idle_seconds: 9, show_panel: false }, ..Default::default() };
     let text = crate::config::text::to_toml(&c);
-    assert!(text.contains("[history]") && text.contains("enabled = false") && text.contains("coalesce_minutes = 30") && text.contains("idle_seconds = 9"), "{text}");
+    assert!(text.contains("[history]") && text.contains("enabled = false") && text.contains("coalesce_minutes = 30") && text.contains("idle_seconds = 9") && text.contains("show_panel = false"), "{text}");
     let (back, _) = crate::config::Config::parse_text(&text).unwrap();
     assert_eq!(back.history, c.history);
     // a number out of range works as its nearest limit

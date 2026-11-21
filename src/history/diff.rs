@@ -505,6 +505,11 @@ pub fn side_by_side(old: &str, new: &str) -> Vec<Side> {
     rows
 }
 
+/// Where the changes begin in the side-by-side source: the first row of every run of changed rows.
+pub fn side_change_starts(rows: &[Side]) -> Vec<usize> {
+    (0..rows.len()).filter(|&i| rows[i].mark != Mark::Same && (i == 0 || rows[i - 1].mark == Mark::Same)).collect()
+}
+
 /// The change as unified diff text (HIST-013), with three lines of context.
 pub fn patch(old_label: &str, new_label: &str, old: &str, new: &str) -> String {
     const CONTEXT: usize = 3;

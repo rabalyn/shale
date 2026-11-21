@@ -1,11 +1,12 @@
 //! File history in the app: when snapshots run, what happens to open buffers when a version is
 //! restored, and the actions the history panel calls (SYNC-032…SYNC-046, ADR-0028).
 //!
-//! Public actions (functions of [`ShaleApp`], for the history panel #472 and the wizard #469):
+//! Public actions (functions of [`ShaleApp`], for the history panel of #472 and the wizard #469):
 //!
-//! - `open_history_versions(&Path)`, `open_history_deleted()`: open the list dialog (until #472).
-//! - `history_restore_version(&Path, &Version)`, `history_copy_version(&Path, &Version)`,
-//!   `history_view_version(&Path, &Version)`, `history_restore_deleted(&Deleted)`.
+//! - `history_show(&Path)`: show the panel of a note (the ⋯ menu); `open_history_changes(&Path, &Version)`:
+//!   open the comparison view; `open_history_deleted()`: the list of the deleted notes.
+//! - `history_restore_version(&Path, &Version)`, `history_copy_version(&Version)`,
+//!   `history_view_version(&Version)`, `history_restore_deleted(&Deleted)`.
 //! - `history_active() -> bool`, `history_off_reason() -> Option<String>`.
 //!
 //! Every git call runs in a background job: snapshots one at a time and never while the sync runs
@@ -13,6 +14,8 @@
 
 use super::{unix_now, ShaleApp};
 use crate::gitsync::history::{self, Deleted, HistoryConfig, Outcome, Reason, Repo, Request, Schedule, Version};
+use crate::history::compare::Loaded;
+use crate::history::state::{Changes, Data, DeletedList, Panel};
 use crate::gitsync::{Git, Options};
 use crate::vault::rel_to_string;
 use eframe::egui;
@@ -61,6 +64,9 @@ enum Query {
     Deleted,
     Content { commit: String, path: PathBuf, then: Use },
     DeletedContent(Deleted),
+    /// The two ends of a comparison (HIST-008): the older version, the newer one or the note as it is
+    /// now (`live`: the text on the screen, or None to read the file), and the names of the sides in a patch.
+    Compare { rel: PathBuf, from: Version, to: Option<Version>, live: Option<String>, labels: (String, String) },
 }
 
 /// What is done with a text read from the history.
@@ -76,36 +82,13 @@ enum Answer {
     Versions(Vec<Version>),
     Deleted(Vec<Deleted>),
     Text(Vec<u8>),
+    Compare(Box<Loaded>),
 }
 
 struct QueryJob {
     vault: PathBuf,
     query: Query,
     rx: Receiver<Sent<Answer>>,
-}
-
-/// Which list the dialog shows.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum Tab {
-    /// The versions of this note.
-    Note(PathBuf),
-    Deleted,
-}
-
-/// The list dialog (SYNC-045), until the panel of #472.
-#[derive(Default)]
-pub struct HistoryDialog {
-    pub tab: Option<Tab>,
-    /// The note the dialog was opened for: its tab stays when "Deleted notes" is shown.
-    pub note: Option<PathBuf>,
-    pub versions: Vec<Version>,
-    pub deleted: Vec<Deleted>,
-    pub loading: bool,
-    pub error: Option<String>,
-    /// An old text shown read-only: its title and the text (SYNC-039).
-    pub view: Option<(String, String)>,
-    /// Where the buttons were drawn, for UI tests.
-    pub(crate) rects: Vec<(String, egui::Rect)>,
 }
 
 /// The history's state in the app.
@@ -123,7 +106,12 @@ pub struct HistoryState {
     not_before: u64,
     /// The last error that was shown, so it is shown once.
     last_error: Option<String>,
-    pub dialog: HistoryDialog,
+    /// The list of the versions of the focused note, in the panel (HIST-004).
+    pub panel: Panel,
+    /// The comparison view (HIST-008).
+    pub changes: Changes,
+    /// The list of the deleted notes (SYNC-040).
+    pub deleted: DeletedList,
     /// Tests: the clock.
     #[cfg(test)]
     pub(crate) fake_now: Option<u64>,
@@ -159,26 +147,10 @@ impl HistoryState {
 }
 
 /// "2026-11-21 15:04" in local time, for a unix time.
-pub fn when(ts: i64) -> String {
+pub(super) fn when(ts: i64) -> String {
     let (days, sod) = crate::calendar::time::utc_to_local(ts);
     let (y, m, d) = crate::calendar::time::civil_from_days(days);
     format!("{y:04}-{m:02}-{d:02} {}", crate::calendar::time::hhmm(sod))
-}
-
-/// What a reason is called in the list.
-pub fn reason_label(r: Option<Reason>) -> &'static str {
-    match r {
-        Some(Reason::Save) => "Saved",
-        Some(Reason::Idle) => "Saved (idle)",
-        Some(Reason::Close) => "Closed",
-        Some(Reason::Initial) => "Start of the history",
-        Some(Reason::Sync) => "Synced",
-        Some(Reason::Merge) => "Merged",
-        Some(Reason::Restore) => "Restored",
-        Some(Reason::Rename) => "Renamed",
-        Some(Reason::Delete) => "Deleted",
-        None => "Changed by another program",
-    }
 }
 
 impl ShaleApp {
@@ -234,6 +206,7 @@ impl ShaleApp {
             // a new local history starts with the vault as it is (SYNC-044)
             self.history.queue.push_back(Queued { req: Request::new(Reason::Initial, vec![]), then: None, scheduled: false });
         }
+        self.history_panel_tick();
         self.history_start_query(ctx);
         let sync_busy = self.sync.running() || self.sync.lfs_job_running();
         if self.history.job.is_none() && !sync_busy && now >= self.history.not_before {
@@ -347,7 +320,7 @@ impl ShaleApp {
                     self.history_start_query(ctx);
                 }
                 if matches!(outcome, Outcome::Committed(_)) {
-                    self.history_refresh_dialog();
+                    self.history_refresh();
                 }
             }
             Err(e) => {
@@ -360,39 +333,77 @@ impl ShaleApp {
         }
     }
 
-    /// Ask for the list the dialog shows again, after something changed it.
-    fn history_refresh_dialog(&mut self) {
-        let query = match (&self.modal, &self.history.dialog.tab) {
-            (Some(super::Modal::History), Some(Tab::Note(rel))) => Query::Versions(rel.clone()),
-            (Some(super::Modal::History), Some(Tab::Deleted)) => Query::Deleted,
-            _ => return,
-        };
-        self.history.dialog.loading = true;
-        self.history.queries.push_back(query);
+    /// The versions may have changed (a snapshot was made, a sync ended): the panel reads its list
+    /// again when it is shown, and the lists that are open now.
+    pub(crate) fn history_refresh(&mut self) {
+        self.history.panel.stale = true;
+        if matches!(self.modal, Some(super::Modal::History)) {
+            self.history.deleted.loading = true;
+            self.history.queries.push_back(Query::Deleted);
+        }
+    }
+
+    /// Every frame, in `history_tick`: the panel asks for the list of the note it shows, when it has
+    /// none or an old one (HIST-007).
+    fn history_panel_tick(&mut self) {
+        let Some(want) = self.history.panel.want.take() else { return };
+        let panel = &mut self.history.panel;
+        if panel.loading || (panel.note.as_ref() == Some(&want) && !panel.stale) {
+            return;
+        }
+        panel.loading = true;
+        panel.stale = false;
+        panel.error = None;
+        self.history.queries.push_back(Query::Versions(want));
     }
 
     fn history_query_done(&mut self, query: Query, r: Result<Answer, String>) {
         let answer = match r {
             Ok(a) => a,
             Err(e) => {
-                self.history.dialog.loading = false;
-                self.history.dialog.error = Some(e.clone());
+                match query {
+                    Query::Versions(_) => {
+                        self.history.panel.loading = false;
+                        self.history.panel.error = Some(e.clone());
+                    }
+                    Query::Deleted => {
+                        self.history.deleted.loading = false;
+                        self.history.deleted.error = Some(e.clone());
+                    }
+                    Query::Compare { .. } => {
+                        self.history.changes.loading = false;
+                        self.history.changes.error = Some(e.clone());
+                    }
+                    _ => {}
+                }
                 self.toast(format!("Could not read the history: {e}"));
                 return;
             }
         };
         match (query, answer) {
             (Query::Versions(rel), Answer::Versions(list)) => {
-                if self.history.dialog.tab == Some(Tab::Note(rel)) {
-                    self.history.dialog.versions = list;
-                    self.history.dialog.loading = false;
-                    self.history.dialog.error = None;
-                }
+                let panel = &mut self.history.panel;
+                panel.note = Some(rel);
+                panel.versions = list;
+                panel.loading = false;
+                panel.error = None;
             }
             (Query::Deleted, Answer::Deleted(list)) => {
-                self.history.dialog.deleted = list;
-                self.history.dialog.loading = false;
-                self.history.dialog.error = None;
+                self.history.deleted.list = list;
+                self.history.deleted.loading = false;
+                self.history.deleted.error = None;
+            }
+            (Query::Compare { rel, from, to, .. }, Answer::Compare(loaded)) => {
+                let ch = &mut self.history.changes;
+                // an answer for ends the view has moved away from is dropped
+                if ch.rel == rel && ch.from == from.commit && ch.to == to.map(|t| t.commit) {
+                    ch.data = Some(Data::of(&rel, *loaded));
+                    ch.loading = false;
+                    ch.error = None;
+                    ch.current = 0;
+                    ch.jump = true;
+                    ch.open_folds.clear();
+                }
             }
             (Query::Content { then, .. }, Answer::Text(bytes)) => self.history_use_text(then, bytes),
             (Query::DeletedContent(d), Answer::Text(bytes)) => self.history_use_text(Use::RestoreDeleted(d), bytes),
@@ -414,41 +425,64 @@ impl ShaleApp {
                 }
                 None => self.toast("Could not copy: there is no window"),
             },
-            Use::View(title) => self.history.dialog.view = Some((title, text)),
+            Use::View(title) => self.history.changes.alone = Some((title, text)),
             Use::Restore { rel, commit } => self.history_apply_restore(&rel, &commit, text),
             Use::RestoreDeleted(d) => self.history_apply_restore_deleted(&d, text),
         }
     }
 
-    /// The dialog asks for a list; with the history off it says why instead.
-    fn history_ask(&mut self, dialog: &mut HistoryDialog, query: Query) {
-        match self.history_off_reason().filter(|_| !self.history_active()) {
-            Some(why) => dialog.error = Some(why),
-            None if !self.history_active() => dialog.error = Some("The history is not kept in this window.".into()),
-            None => {
-                dialog.loading = true;
-                self.history.queries.push_back(query);
-            }
+    /// Why nothing can be read: history is off, or this window keeps none.
+    pub(crate) fn history_unavailable(&mut self) -> Option<String> {
+        if self.history_active() {
+            None
+        } else {
+            Some(self.history_off_reason().unwrap_or_else(|| "The history is not kept in this window.".into()))
         }
     }
 
-    /// Open the list of the versions of a note (SYNC-045).
-    pub fn open_history_versions(&mut self, rel: &Path) {
-        let mut dialog = HistoryDialog { tab: Some(Tab::Note(rel.to_path_buf())), note: Some(rel.to_path_buf()), ..Default::default() };
-        self.history_ask(&mut dialog, Query::Versions(rel.to_path_buf()));
-        self.history.dialog = dialog;
-        self.modal = Some(super::Modal::History);
+    /// Show the history of a note (HIST-003): the column in the margin when the window has room for
+    /// it, else the panel of the right sidebar.
+    pub fn history_show(&mut self, _rel: &Path) {
+        self.cfg.history.show_panel = true;
+        self.save_config();
+        if self.history.panel.place != Some(crate::history::place::Place::Margin) {
+            self.show_history_in_sidebar();
+        }
     }
 
-    /// Open the list of the deleted notes (SYNC-040, SYNC-045).
+    /// Open the comparison of a version with the note as it is now (HIST-008).
+    pub fn open_history_changes(&mut self, rel: &Path, v: &Version) {
+        self.history.changes = Changes { rel: rel.to_path_buf(), from: v.commit.clone(), ..Default::default() };
+        self.modal = Some(super::Modal::Changes);
+        self.history_compare();
+    }
+
+    /// Read the two ends of the comparison again, after they changed (HIST-014).
+    pub(crate) fn history_compare(&mut self) {
+        let ch = &self.history.changes;
+        let versions = &self.history.panel.versions;
+        let Some(from) = versions.iter().find(|v| v.commit == ch.from).cloned() else { return };
+        let to = ch.to.as_ref().and_then(|c| versions.iter().find(|v| &v.commit == c).cloned());
+        let now = crate::calendar::time::now();
+        let rel = ch.rel.clone();
+        let name = rel_to_string(&rel);
+        let labels = (format!("{name} ({})", crate::history::labels::day_time(from.time, now)), format!("{name} ({})", to.as_ref().map_or("now".to_string(), |t| crate::history::labels::day_time(t.time, now))));
+        let live = if to.is_none() { self.notes.get(&rel).filter(|d| d.unreadable.is_none()).map(|d| d.text.clone()) } else { None };
+        self.history.changes.loading = true;
+        self.history.changes.data = None;
+        self.history.queries.push_back(Query::Compare { rel, from, to, live, labels });
+    }
+
+    /// Open the list of the deleted notes (SYNC-040).
     pub fn open_history_deleted(&mut self) {
-        let note = match (&self.modal, &self.history.dialog.note) {
-            (Some(super::Modal::History), n) => n.clone(),
-            _ => self.current_path().filter(|p| self.notes.contains_key(p) || self.drawings.contains_key(p)),
-        };
-        let mut dialog = HistoryDialog { tab: Some(Tab::Deleted), note, ..Default::default() };
-        self.history_ask(&mut dialog, Query::Deleted);
-        self.history.dialog = dialog;
+        self.history.deleted = DeletedList::default();
+        match self.history_unavailable() {
+            Some(why) => self.history.deleted.error = Some(why),
+            None => {
+                self.history.deleted.loading = true;
+                self.history.queries.push_back(Query::Deleted);
+            }
+        }
         self.modal = Some(super::Modal::History);
     }
 
@@ -531,7 +565,7 @@ impl ShaleApp {
             self.toast(format!("“{name}” could not be saved yet; the old text stays in it until it is"));
             return;
         }
-        let at = self.history.dialog.versions.iter().find(|v| v.commit == commit).map(|v| format!(" of {}", when(v.time))).unwrap_or_default();
+        let at = self.history.panel.versions.iter().find(|v| v.commit == commit).map(|v| format!(" of {}", when(v.time))).unwrap_or_default();
         self.toast(format!("Restored “{name}” to the version{at}"));
         self.history.sched.forget(rel);
         let mut req = Request::new(Reason::Restore, vec![rel.to_path_buf()]);
@@ -556,7 +590,7 @@ impl ShaleApp {
         req.restored = Some(d.commit.clone());
         self.history.queue.push_back(Queued { req, then: None, scheduled: false });
         self.open(&target, true);
-        self.history_refresh_dialog();
+        self.history_refresh();
     }
 
     /// A note or folder was renamed or moved (SYNC-041): one snapshot of the old and the new path and
@@ -630,8 +664,19 @@ fn run_query(repo: &Repo, q: &Query) -> Result<Answer, String> {
         Query::Deleted => Answer::Deleted(history::deleted(repo, LIST_LIMIT)?),
         Query::Content { commit, path, .. } => Answer::Text(history::content_at(repo, commit, path)?),
         Query::DeletedContent(d) => Answer::Text(history::deleted_content(repo, d)?),
+        Query::Compare { rel, from, to, live, labels } => {
+            let old = history::content_at(repo, &from.commit, &from.path)?;
+            let (new, binary) = match (to, live) {
+                (Some(t), _) => (history::content_at(repo, &t.commit, &t.path)?, from.binary || t.binary),
+                (None, Some(text)) => (text.clone().into_bytes(), from.binary),
+                (None, None) => (crate::fsutil::read(repo.vault.join(rel)).map_err(|e| e.to_string())?, from.binary),
+            };
+            Answer::Compare(Box::new(Loaded::of(rel, binary, old, new, (&labels.0, &labels.1))))
+        }
     })
 }
 
 #[cfg(test)]
 mod history_tests;
+#[cfg(test)]
+mod history_ui_tests;

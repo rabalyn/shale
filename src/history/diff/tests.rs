@@ -208,3 +208,10 @@ fn hist_013_the_patch_is_unified_diff_text_with_three_lines_of_context() {
     assert_eq!(patch("a", "b", "", "new\n"), "--- a\n+++ b\n@@ -0,0 +1,1 @@\n+new\n");
     assert_eq!(patch("a", "b", "gone\n", ""), "--- a\n+++ b\n@@ -1,1 +0,0 @@\n-gone\n");
 }
+
+// spec: HIST-014
+#[test]
+fn hist_014_the_changes_of_the_source_begin_at_the_first_row_of_each_run() {
+    let rows = side_by_side("a\nb\nc\nd\ne\n", "a\nB\nC\nd\nE\nf\n");
+    assert_eq!(side_change_starts(&rows), [1, 4]);
+}

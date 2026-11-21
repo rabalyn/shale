@@ -28,7 +28,7 @@ pub enum Item {
 
 impl Item {
     /// All items in their default order: the ribbon's, then the panels'.
-    pub const ALL: [Item; 17] = [
+    pub const ALL: [Item; 18] = [
         Item::Files,
         Item::Search,
         Item::Tags,
@@ -46,6 +46,7 @@ impl Item {
         Item::Panel(RightPanel::Outline),
         Item::Panel(RightPanel::LocalGraph),
         Item::Panel(RightPanel::Calendar),
+        Item::Panel(RightPanel::History),
     ];
 
     /// The panels, in the default order of the right sidebar's menubar.
@@ -73,6 +74,7 @@ impl Item {
             Item::Panel(RightPanel::Outline) => "panel:outline",
             Item::Panel(RightPanel::LocalGraph) => "panel:graph",
             Item::Panel(RightPanel::Calendar) => "panel:calendar",
+            Item::Panel(RightPanel::History) => "panel:history",
         }
     }
 
@@ -99,6 +101,7 @@ impl Item {
             Item::Panel(RightPanel::Outline) => Icon::Outline,
             Item::Panel(RightPanel::LocalGraph) => Icon::LocalGraph,
             Item::Panel(RightPanel::Calendar) => Icon::CalendarPanel,
+            Item::Panel(RightPanel::History) => Icon::History,
         }
     }
 
@@ -122,6 +125,7 @@ impl Item {
             Item::Panel(RightPanel::Outline) => "Outline panel",
             Item::Panel(RightPanel::LocalGraph) => "Local graph panel",
             Item::Panel(RightPanel::Calendar) => "Calendar panel",
+            Item::Panel(RightPanel::History) => "History panel",
         }
     }
 
@@ -144,6 +148,7 @@ impl Item {
             Item::Panel(RightPanel::Outline) => "Outline of the note",
             Item::Panel(RightPanel::LocalGraph) => "Graph around the note",
             Item::Panel(RightPanel::Calendar) => "Calendar",
+            Item::Panel(RightPanel::History) => "File history of the note",
         }
     }
 }

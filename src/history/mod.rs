@@ -6,6 +6,10 @@
 //!
 //! The reading of the history and the actions (restore, copy) are in `app/history.rs`.
 
+pub mod compare;
 pub mod diff;
 pub mod labels;
+pub mod compare_ui;
+pub mod panel_ui;
 pub mod place;
+pub mod state;

@@ -2,7 +2,7 @@
 //! the dialog (SYNC-032…SYNC-046), against real git in temporary folders.
 
 use super::*;
-use crate::app::{Options as AppOptions, View};
+use crate::app::Options as AppOptions;
 use std::ffi::OsString;
 use std::time::Instant;
 
@@ -13,21 +13,21 @@ fn hermetic() -> Git {
     git
 }
 
-fn write(root: &Path, rel: &str, text: &str) {
+pub(super) fn write(root: &Path, rel: &str, text: &str) {
     let p = root.join(rel);
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
     crate::fsutil::write_atomic(&p, text.as_bytes()).unwrap();
 }
 
 /// A window on a vault, with history on and a clock that tests set.
-struct T {
-    app: ShaleApp,
-    ctx: egui::Context,
+pub(super) struct T {
+    pub(super) app: ShaleApp,
+    pub(super) ctx: egui::Context,
     root: PathBuf,
-    vault: PathBuf,
+    pub(super) vault: PathBuf,
 }
 
-fn setup(tag: &str, git_init: bool) -> T {
+pub(super) fn setup(tag: &str, git_init: bool) -> T {
     let root = std::env::temp_dir().join(format!("shale-app-history-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     let vault = root.join("vault");
@@ -40,7 +40,7 @@ fn setup(tag: &str, git_init: bool) -> T {
 }
 
 impl T {
-    fn start(&mut self) {
+    pub(super) fn start(&mut self) {
         self.app.sync.git = hermetic();
         self.app.refresh_lfs();
         self.app.history.on = true;
@@ -49,7 +49,7 @@ impl T {
     }
 
     /// Frames until no snapshot job and no read is left (not the saves that wait for their time).
-    fn settle(&mut self) {
+    pub(super) fn settle(&mut self) {
         let t = Instant::now();
         self.app.history_tick(&self.ctx);
         while !self.app.history_quiet() {
@@ -65,31 +65,39 @@ impl T {
         }
     }
 
-    fn at(&mut self, secs: u64) {
+    /// The versions of a note as the panel reads them.
+    pub(super) fn versions(&mut self, rel: &str) -> Vec<crate::gitsync::history::Version> {
+        self.app.history.panel.stale = true;
+        self.app.history.panel.want = Some(PathBuf::from(rel));
+        self.settle();
+        self.app.history.panel.versions.clone()
+    }
+
+    pub(super) fn at(&mut self, secs: u64) {
         self.app.history.fake_now = Some(secs);
     }
 
-    fn repo(&self) -> Repo {
+    pub(super) fn repo(&self) -> Repo {
         history::locate(&hermetic(), &self.vault, &self.app.usage.places.history).unwrap()
     }
 
-    fn messages(&self) -> Vec<crate::gitsync::history::Meta> {
+    pub(super) fn messages(&self) -> Vec<crate::gitsync::history::Meta> {
         let o = self.repo().run_for_test(&["log", "-z", "--format=%B"]);
         o.split('\0').filter(|m| !m.trim().is_empty()).map(history::parse_message).collect()
     }
 
-    fn reasons(&self) -> Vec<Option<Reason>> {
+    pub(super) fn reasons(&self) -> Vec<Option<Reason>> {
         self.messages().iter().map(|m| m.reason).collect()
     }
 
-    fn type_into(&mut self, rel: &str, text: &str) {
+    pub(super) fn type_into(&mut self, rel: &str, text: &str) {
         let doc = self.app.notes.get_mut(Path::new(rel)).unwrap();
         doc.text = text.into();
         doc.dirty = true;
         self.app.save_note(Path::new(rel));
     }
 
-    fn toasted(&self, part: &str) -> bool {
+    pub(super) fn toasted(&self, part: &str) -> bool {
         self.app.toasts.iter().any(|(t, _)| t.contains(part))
     }
 }
@@ -209,9 +217,7 @@ fn restoring_a_version_into_an_open_note_is_one_undoable_change_with_snapshots_a
     assert_eq!(before.len(), 3);
 
     // the versions of the note
-    t.app.open_history_versions(Path::new("Note.md"));
-    t.settle();
-    let versions = t.app.history.dialog.versions.clone();
+    let versions = t.versions("Note.md");
     assert_eq!(versions.len(), 3, "{versions:?}");
     // type something unsaved, then restore the first version ("one")
     let doc = t.app.notes.get_mut(Path::new("Note.md")).unwrap();
@@ -252,9 +258,7 @@ fn restoring_a_version_of_a_note_that_is_not_open_writes_it_like_a_save() {
     write(&t.vault, "Note.md", "two\n");
     t.app.history.note_saved(Path::new("Note.md"));
     t.settle();
-    t.app.open_history_versions(Path::new("Note.md"));
-    t.settle();
-    let old = t.app.history.dialog.versions.last().unwrap().clone();
+    let old = t.versions("Note.md").last().unwrap().clone();
     assert_eq!(old.meta.reason, Some(Reason::Initial));
     // the text on disk now has no snapshot yet; the restore makes one first
     write(&t.vault, "Note.md", "three\n");
@@ -269,18 +273,16 @@ fn restoring_a_version_of_a_note_that_is_not_open_writes_it_like_a_save() {
 
 // spec: SYNC-039
 #[test]
-fn a_version_is_read_only_in_the_dialog_and_its_text_is_copied() {
+fn a_version_is_shown_read_only_and_its_text_is_copied() {
     let mut t = setup("view", false);
     t.start();
     t.app.open(Path::new("Note.md"), false);
     t.type_into("Note.md", "two\n");
     t.settle();
-    t.app.open_history_versions(Path::new("Note.md"));
-    t.settle();
-    let v = t.app.history.dialog.versions.last().unwrap().clone();
+    let v = t.versions("Note.md").last().unwrap().clone();
     t.app.history_view_version(&v);
     t.settle();
-    let (title, text) = t.app.history.dialog.view.clone().unwrap();
+    let (title, text) = t.app.history.changes.alone.clone().unwrap();
     assert_eq!(text, "one\n");
     assert!(title.starts_with("Note.md as of "), "{title}");
     assert_eq!(t.app.notes[Path::new("Note.md")].text, "two\n", "viewing changes nothing");
@@ -310,7 +312,7 @@ fn a_trashed_note_is_listed_as_deleted_with_its_last_text_and_comes_back_at_its_
 
     t.app.open_history_deleted();
     t.settle();
-    let list = t.app.history.dialog.deleted.clone();
+    let list = t.app.history.deleted.list.clone();
     assert_eq!(list.len(), 1, "{list:?}");
     assert_eq!(list[0].path, Path::new("Note.md"));
     t.app.history_restore_deleted(&list[0]);
@@ -343,9 +345,7 @@ fn a_rename_makes_a_rename_snapshot_and_the_versions_follow_it() {
     t.settle();
     assert_eq!(t.reasons()[0], Some(Reason::Rename));
     assert_eq!(t.messages()[0].paths, ["Note.md", "Renamed.md"]);
-    t.app.open_history_versions(Path::new("Renamed.md"));
-    t.settle();
-    let v = &t.app.history.dialog.versions;
+    let v = &t.versions("Renamed.md");
     assert_eq!(v.iter().map(|v| v.path.to_string_lossy().into_owned()).collect::<Vec<_>>(), ["Renamed.md", "Note.md", "Note.md"]);
 }
 
@@ -364,51 +364,6 @@ fn closing_the_window_snapshots_what_is_waiting() {
     t.app.history_flush_now();
     assert_eq!(t.reasons()[0], Some(Reason::Close));
     assert_eq!(t.repo().run_for_test(&["show", "HEAD:Note.md"]), "three\n");
-}
-
-// spec: SYNC-045
-#[test]
-fn the_dialog_lists_versions_and_a_click_restores_one() {
-    let mut t = setup("dialog", false);
-    t.start();
-    t.app.open(Path::new("Note.md"), false);
-    t.type_into("Note.md", "two\n");
-    t.settle();
-    t.app.actions.push(crate::app::Action::History(PathBuf::from("Note.md")));
-    t.app.process_actions();
-    assert!(matches!(t.app.modal, Some(crate::app::Modal::History)));
-    t.settle();
-    let mut time = 0.0;
-    let mut frame = |t: &mut T, events: Vec<egui::Event>| {
-        time += 0.05;
-        let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 900.0))), time: Some(time), events, ..Default::default() };
-        let ctx = t.ctx.clone();
-        let mut out = ctx.run_ui(raw, |_| {
-            t.app.history_dialog(&ctx);
-        });
-        out.textures_delta.clear();
-    };
-    frame(&mut t, vec![]);
-    frame(&mut t, vec![]);
-    let rect = |t: &T, key: &str| t.app.history.dialog.rects.iter().find(|r| r.0 == key).unwrap_or_else(|| panic!("no {key}: {:?}", t.app.history.dialog.rects)).1;
-    // the oldest version is the last row: "Start of the history"; restore it
-    let p = rect(&t, "restore-1").center();
-    let b = |pressed| egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
-    frame(&mut t, vec![egui::Event::PointerMoved(p)]);
-    frame(&mut t, vec![b(true)]);
-    frame(&mut t, vec![b(false)]);
-    t.settle();
-    assert_eq!(t.app.notes[Path::new("Note.md")].text, "one\n");
-    // the deleted-notes tab and the read-only button
-    let p = rect(&t, "tab-deleted").center();
-    let b = |pressed| egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
-    frame(&mut t, vec![egui::Event::PointerMoved(p)]);
-    frame(&mut t, vec![b(true)]);
-    frame(&mut t, vec![b(false)]);
-    t.settle();
-    frame(&mut t, vec![]);
-    assert_eq!(t.app.history.dialog.tab, Some(Tab::Deleted));
-    assert!(matches!(t.app.tabbar.tabs[t.app.tabbar.active].view, View::Note(_)));
 }
 
 // spec: SYNC-032, CFG-066, SYNC-045
