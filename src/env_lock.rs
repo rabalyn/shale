@@ -10,6 +10,7 @@
 //! exactly that token and the lock is held right now, so it does not wait for its own parent (and a
 //! stale or inherited token never skips the lock). A holder here exports the token too, so the
 //! `mail-env.sh` and `tex-env.sh` the tests start do not wait for the test process.
+#![cfg(test)]
 
 use std::fs::{File, OpenOptions, TryLockError};
 use std::io::Write;
