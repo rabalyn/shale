@@ -1109,7 +1109,7 @@ pub mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
     /// A draft with one attachment "report.pdf" saved, then the same name and size with other bytes, cut off at step `n`.
-    fn cut_off_replacement(tag: &str, n: usize) -> (PathBuf, Outbox, Draft) {
+    pub(crate) fn cut_off_replacement(tag: &str, n: usize) -> (PathBuf, Outbox, Draft) {
         let root = temp(tag);
         let ob = Outbox::new(&root);
         let mut d = draft("acct1", "R", "text");
