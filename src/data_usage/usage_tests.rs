@@ -396,3 +396,27 @@ fn dataflow_data_usage_prune() {
     crate::dataflow::verify(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/dataflow/data-usage.md"), "data_usage_prune", &crate::dataflow::render_mermaid(&flow));
     let _ = fs::remove_dir_all(&d);
 }
+
+// spec: USE-025
+#[test]
+fn saved_lists_the_file_history_of_a_vault_without_git_and_not_of_one_with_git() {
+    let (p, d) = places_with_caches("history-line");
+    let v = p.vault.clone().unwrap();
+    let line = |p: &Places| scan::saved(p).outside.into_iter().find(|l| l.label == "File history of this vault");
+    // no history yet: an empty line
+    let empty = line(&p).expect("a line for a vault without .git");
+    assert_eq!((empty.files, empty.bytes, empty.problem), (0, 0, None));
+    // a history: the git directory of the vault's ID, counted
+    let id = "0123456789abcdef0123456789abcdef";
+    write(&v.join(".shale/history-id"), format!("{id}\n").as_bytes());
+    write(&p.history.join(id).join("objects/aa/bb"), &[0; 700]);
+    write(&p.history.join(id).join("HEAD"), b"ref: refs/heads/main\n");
+    write(&p.history.join("fedcba9876543210fedcba9876543210/HEAD"), b"another vault's history");
+    let l = line(&p).unwrap();
+    assert_eq!((l.files, l.bytes), (2, 700 + 21));
+    assert_eq!(l.path.as_deref(), Some(p.history.join(id).as_path()));
+    // a vault with .git: its history is in .git, which the vault's own list counts (USE-002)
+    write(&v.join(".git/HEAD"), b"ref");
+    assert!(line(&p).is_none());
+    let _ = fs::remove_dir_all(&d);
+}

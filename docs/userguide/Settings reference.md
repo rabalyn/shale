@@ -266,6 +266,15 @@ The settings of the git that Shale runs are in the settings file of this compute
 | `git.choice` | `Auto` (the git of this computer when there is one, else Shale's own; `System`: only the git of `PATH`; `Managed`: Shale's own, where Shale installs only git-lfs the git of `PATH` with that git-lfs) | Settings → Sync, "Git to use" |
 | `git.updates` | `Off` (no request; `Notify`: look 30 seconds after the start and weekly and say so; `Install`: and install it) | Settings → Sync, "New versions" (shown once Shale's git is installed) |
 
+The file history ([[File history]]) is set in the settings file of this computer:
+
+| Setting | Default | Where |
+|---|---|---|
+| `history` | the group of the three keys below | Settings → Sync, "File history" |
+| `history.enabled` | on (`false`: no new versions are kept; the old ones stay) | Settings → Sync, "Keep earlier versions of my notes" |
+| `history.coalesce_minutes` | 10 (1 to 1440; at most one version of a note in this time while you type) | Settings → Sync, "At most one version of a note every … minutes" |
+| `history.idle_seconds` | 60 (5 to 3600; a version when a note had no change for so long) | Settings → Sync, "… no change for … seconds" |
+
 The git remote itself is git's (`git remote`), set with **Connect** in the same section.
 
 Settings → Vault also has **Check names for Windows and macOS…** (no setting, a tool): it lists the files

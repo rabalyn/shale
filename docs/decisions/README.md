@@ -35,6 +35,7 @@ way it is. They are append-only. *What* Shale does today is in the living specs 
 | [0025](0025-github-checks-main.md) | GitHub checks macOS and Windows on every push of `main` (per green check tag) and saves the Rust cache there; `make-release.sh` stops on a red run | Accepted |
 | [0026](0026-weekly-only-texlive-refresh.md) | Only the weekly run rebuilds the TeX image without the cache; tags use the cached image | Accepted |
 | [0027](0027-managed-git.md) | A managed git, installed with one button | Accepted |
+| [0028](0028-file-history.md) | File history: snapshot commits and restoring a version | Accepted |
 
 Format: Context, Decision, Consequences (and Alternatives if any). Statuses: *Proposed* →
 *Accepted* → (*Superseded by NNNN*). An accepted ADR is not edited; a new one supersedes it.

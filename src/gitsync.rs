@@ -220,8 +220,9 @@ pub struct Options {
 }
 
 impl Options {
-    fn message(&self, body: &str) -> String {
-        format!("{}{body}{}", self.commit_prefix, self.commit_suffix)
+    /// The subject with the prefix and suffix, then the trailers (SYNC-006, SYNC-036).
+    fn message(&self, body: &str, reason: history::Reason) -> String {
+        format!("{}{body}{}\n\n{}", self.commit_prefix, self.commit_suffix, history::trailers(reason, &self.host, &[], None))
     }
 }
 
@@ -347,7 +348,7 @@ pub fn sync(git: &Git, vault: &Path, opts: &Options, tree: &TreeLock) -> Result<
     let staged = git.ok(vault, args!["diff", "--cached", "--name-only", "-z"])?;
     report.committed = staged.stdout.split(|b| *b == 0).filter(|s| !s.is_empty()).count();
     if report.committed > 0 {
-        let msg = opts.message(&format!("Sync from {}: {} file(s)", opts.host, report.committed));
+        let msg = opts.message(&format!("Sync from {}: {} file(s)", opts.host, report.committed), history::Reason::Sync);
         commit(git, vault, &ident, &["commit", "--quiet", "-m", &msg])?;
     }
     drop(commit_local);
@@ -478,7 +479,7 @@ fn integrate(git: &Git, vault: &Path, opts: &Options, ident: &[String], heads: H
     if fast {
         git.ok(vault, args!["merge", "--ff-only", "--quiet", theirs])?;
     } else {
-        let msg = opts.message(&format!("Sync from {}: merge", opts.host));
+        let msg = opts.message(&format!("Sync from {}: merge", opts.host), history::Reason::Merge);
         let all: Vec<&OsStr> = ident.iter().map(OsStr::new).chain(["merge", "--no-ff", "--no-edit", "--quiet", "--allow-unrelated-histories", "-m", msg.as_str(), theirs].into_iter().map(OsStr::new)).collect();
         let m = git.run(vault, &all)?;
         if !m.ok {
@@ -564,7 +565,7 @@ fn resolve(git: &Git, vault: &Path, opts: &Options, ident: &[String], report: &m
     a.extend(specs.iter().map(OsStr::new));
     git.ok(vault, &a)?;
     let n = report.conflicts.len();
-    let msg = opts.message(&format!("Sync from {}: merge, {n} conflict copy/copies", opts.host));
+    let msg = opts.message(&format!("Sync from {}: merge, {n} conflict copy/copies", opts.host), history::Reason::Merge);
     commit(git, vault, ident, &["commit", "--quiet", "-m", &msg])?;
     Ok(())
 }
@@ -572,6 +573,11 @@ fn resolve(git: &Git, vault: &Path, opts: &Options, ident: &[String], report: &m
 /// `dir/Name (conflict 2026-11-14 1530).md`; `.excalidraw.md` stays whole; a taken name gets
 /// a number (`… 1530 2).md`).
 pub fn conflict_name(path: &Path, stamp: &str, taken: impl Fn(&Path) -> bool) -> PathBuf {
+    numbered_name(path, &format!("conflict {stamp}"), taken)
+}
+
+/// `dir/Name (label).md`, then `Name (label 2).md` while the name is taken.
+pub(crate) fn numbered_name(path: &Path, label: &str, taken: impl Fn(&Path) -> bool) -> PathBuf {
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let (stem, ext) = if name.to_ascii_lowercase().ends_with(".excalidraw.md") {
         let i = name.len() - ".excalidraw.md".len();
@@ -586,7 +592,7 @@ pub fn conflict_name(path: &Path, stamp: &str, taken: impl Fn(&Path) -> bool) ->
     let mut n = 1;
     loop {
         let num = if n == 1 { String::new() } else { format!(" {n}") };
-        let p = dir.join(format!("{stem} (conflict {stamp}{num}){ext}"));
+        let p = dir.join(format!("{stem} ({label}{num}){ext}"));
         if !taken(&p) {
             return p;
         }
@@ -626,6 +632,7 @@ pub fn host_name() -> String {
     "this computer".into()
 }
 
+pub mod history;
 pub mod install;
 pub mod install_ui;
 pub mod lfs;
