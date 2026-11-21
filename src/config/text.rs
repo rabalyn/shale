@@ -175,6 +175,7 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
     ("history.enabled", "Keep the file history (true) or not (false). Versions already kept stay."),
     ("history.coalesce_minutes", "At most one version of a note is kept in this many minutes while you type (1 to 1440)."),
     ("history.idle_seconds", "A version is also kept when a note has had no change for this many seconds (5 to 3600)."),
+    ("history.show_panel", "Show the history of the note in a column beside it when the window is wide enough (the X of the column hides it)."),
     ("tex.repository", "The TeX Live repository the managed install and update download from."),
     ("updates", "What Shale does about new releases on GitHub. SHALE_UPDATES=off in the environment switches it off whatever is set here."),
     ("updates.mode", "Ask (not chosen yet: the first update found asks), Off (no request, no notice), Notify (say a new version is out), Download (download and check it in the background) or Install (download, check and install it; you restart when you like)."),

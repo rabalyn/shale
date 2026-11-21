@@ -141,6 +141,8 @@ pub enum RightPanel {
     Outline,
     LocalGraph,
     Calendar,
+    /// the file history of the note (HIST-002)
+    History,
 }
 
 #[cfg(test)]
@@ -207,8 +209,10 @@ pub enum Modal {
     },
     /// the Data usage dialog (USE-001)
     DataUsage,
-    /// the versions of a note and the deleted notes (SYNC-045); its state is `ShaleApp::history.dialog`
+    /// the deleted notes (SYNC-040); its state is `ShaleApp::history.deleted`
     History,
+    /// the comparison of two versions of a note (HIST-008); its state is `ShaleApp::history.changes`
+    Changes,
     /// the "Turn on sync" wizard (SYNC-047); its state is `ShaleApp::sync.setup.wizard`
     SyncWizard,
     Export(Box<crate::pdf::export_dialog::ExportDialog>),
@@ -658,6 +662,12 @@ impl ShaleApp {
             app.open_vault(&p);
             if app.shot.path.is_some() && p.join("Welcome.md").is_file() {
                 app.open(Path::new("Welcome.md"), false);
+            }
+            // screenshots: a made-up history of the notes (HIST-018)
+            if let (true, Some(dir)) = (app.shot.path.is_some(), std::env::var_os("SHALE_DEMO_HISTORY")) {
+                if let Err(e) = app.history_demo(Path::new(&dir)) {
+                    eprintln!("could not make the demo history: {e}");
+                }
             }
             // screenshots: a demo calendar full of sample events
             if app.shot.path.is_some() && app.cfg.calendars.is_empty() {
@@ -2404,7 +2414,7 @@ impl ShaleApp {
                     let name = self.vault.as_ref().and_then(|v| v.file(&rel).map(|f| f.display_name())).unwrap_or_else(|| rel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
                     self.modal = Some(Modal::Rename { rel, name, error: None });
                 }
-                Action::History(rel) => self.open_history_versions(&rel),
+                Action::History(rel) => self.history_show(&rel),
                 Action::Trash(rel) => self.modal = Some(Modal::ConfirmTrash { rel }),
                 Action::RestoreTrashed => self.restore_trashed(),
                 Action::NewFolder(parent) => self.modal = Some(Modal::NewFolder { parent, name: String::new() }),

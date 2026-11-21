@@ -122,6 +122,15 @@ impl SideState {
 }
 
 impl ShaleApp {
+    /// Show the History panel in the right sidebar: in the view that has it, else as a shortcut panel (HIST-003).
+    pub(crate) fn show_history_in_sidebar(&mut self) {
+        if !self.side.layout.show_panel(RightPanel::History) {
+            self.side.peek = Some(RightPanel::History);
+            self.side.peek_weight = EQUAL;
+        }
+        self.cfg.show_right = true;
+    }
+
     /// Show or close a panel from its shortcut in the ribbon (LAY-011).
     pub(crate) fn toggle_peek(&mut self, panel: RightPanel) {
         if self.side.peek == Some(panel) && self.cfg.show_right {

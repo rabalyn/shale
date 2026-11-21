@@ -66,11 +66,13 @@ pub struct HistoryConfig {
     pub coalesce_minutes: u32,
     /// A snapshot when a note had no change for this many seconds (SYNC-033).
     pub idle_seconds: u32,
+    /// The history column beside a note is shown when there is room (HIST-003).
+    pub show_panel: bool,
 }
 
 impl Default for HistoryConfig {
     fn default() -> Self {
-        HistoryConfig { enabled: true, coalesce_minutes: 10, idle_seconds: 60 }
+        HistoryConfig { enabled: true, coalesce_minutes: 10, idle_seconds: 60, show_panel: true }
     }
 }
 
