@@ -143,6 +143,8 @@ pub enum RightPanel {
     Calendar,
 }
 
+#[cfg(test)]
+mod calendar_action_tests;
 mod drops;
 #[cfg(all(test, target_os = "linux"))]
 mod drops_tests;
