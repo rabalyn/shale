@@ -259,7 +259,7 @@ macro_rules! osv {
 
 /// The ID of the vault, if it has one.
 pub fn vault_id(vault: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(vault.join(ID_FILE)).ok()?;
+    let text = crate::fsutil::read_to_string(vault.join(ID_FILE)).ok()?;
     let id = text.trim();
     (id.len() == 32 && id.chars().all(|c| c.is_ascii_hexdigit())).then(|| id.to_ascii_lowercase())
 }
@@ -290,7 +290,7 @@ pub fn locate(git: &Git, vault: &Path, history_root: &Path) -> Result<Repo, Stri
         }
     };
     // a copy has the ID of a folder that is still there, and gets a new one (a new ID is not taken)
-    let owner = |id: &str| std::fs::read_to_string(history_root.join(id).join(WORKTREE_FILE)).ok().map(|s| PathBuf::from(s.trim()));
+    let owner = |id: &str| crate::fsutil::read_to_string(history_root.join(id).join(WORKTREE_FILE)).ok().map(|s| PathBuf::from(s.trim()));
     if owner(&id).is_some_and(|o| !same_folder(&o, vault) && o.is_dir() && vault_id(&o).as_deref() == Some(id.as_str())) {
         id = new_id();
         write_id(vault, &id)?;
@@ -320,8 +320,8 @@ pub fn ensure(repo: &Repo) -> Result<bool, String> {
         repo.ok(&osv!["symbolic-ref", "HEAD", "refs/heads/main"])?;
     }
     let want = repo.vault.canonicalize().unwrap_or_else(|_| repo.vault.clone());
-    if std::fs::read_to_string(gd.join(WORKTREE_FILE)).ok().map(|s| PathBuf::from(s.trim())).as_deref() != Some(want.as_path()) {
-        std::fs::write(gd.join(WORKTREE_FILE), want.to_string_lossy().as_bytes()).map_err(|e| format!("could not write {}: {e}", gd.join(WORKTREE_FILE).display()))?;
+    if crate::fsutil::read_to_string(gd.join(WORKTREE_FILE)).ok().map(|s| PathBuf::from(s.trim())).as_deref() != Some(want.as_path()) {
+        crate::fsutil::write_atomic(&gd.join(WORKTREE_FILE), want.to_string_lossy().as_bytes()).map_err(|e| format!("could not write {}: {e}", gd.join(WORKTREE_FILE).display()))?;
     }
     Ok(made)
 }
@@ -790,4 +790,4 @@ impl Schedule {
 }
 
 #[cfg(test)]
-mod tests;
+mod history_tests;

@@ -43,6 +43,7 @@ Your other data:
 Keeping it safe and tidy:
 
 - [[Git sync]]: the same vault on several computers.
+- [[File history]]: earlier versions of a note, and getting a deleted note back.
 - [[Vaults in cloud and network folders]]: Nextcloud, Dropbox, OneDrive, network drives: what is safe.
 - [[Vault settings]]: what travels with a vault.
 - [[Data usage and caches]]: what Shale keeps on disk.

@@ -9,8 +9,9 @@ on disk. Back to [[Start here]].
 
 - **Saved**: the vault by kind (notes, drawings, pictures, PDFs, other files, `.shale/`,
   `.trash/`, `.git/`), its 10 largest files and folders, and your data outside the vault: mail
-  per account, drafts, outbox, calendars and recovered notes. Nothing here can be deleted from
-  this window.
+  per account, drafts, outbox, calendars, recovered notes and, for a vault that is not a git
+  repository, its file history ([[File history]]; in a git repository it is in `.git/`, counted with the
+  vault). Nothing here can be deleted from this window.
 - **Caches** are what Shale can build or fetch again: social pictures, the social post index,
   the mail index and its backups, damaged copies of the mail index, learned tag words, the
   keyboard debug log and the undo histories of notes (vim `u` / Ctrl+R). Each row shows its size and has a **Clear** button.

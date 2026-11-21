@@ -73,14 +73,15 @@ calls.
    rename and move actions; the versions of a note follow its renames with `git log --follow`.
 10. **Query API** (module docs of `gitsync::history`): versions of a note (commit, time, reason, device,
     lines added and removed or the `binary` flag, the path at that version), the text at a version, the
-    deleted notes, the size of the history on disk. Binary files and LFS pointers have no counts (git's
+    deleted notes. Binary files and LFS pointers have no counts (git's
     numstat prints `-`).
 11. **Retention: keep everything.** Thinning (hourly after a day, daily after a month) would rewrite history,
-    so it is not done; follow-up issue. The size of a local-only history is shown in Data usage (USE-025);
+    so it is not done; follow-up issue #479. The size of a local-only history is shown in Data usage (USE-025);
     an in-vault `.git` is already counted as vault data (`.git/`, USE-002).
-12. **Entry points until #472.** A note's ⋯ menu has "Versions of this note…", the file tree menu of the
-    vault and Settings → Sync have "Restore a deleted note…"; both open a plain list dialog that #472
-    replaces. They are also definable key actions without a default key (KEY-*).
+12. **Entry points until #472.** The ⋯ menu of a note or drawing has "Versions of this note…" and Settings →
+    Sync has "Restore a deleted note…"; both open one plain list dialog that #472 replaces. There is no
+    command palette in Shale, and no key action was added (they are part of the keyboard reference and its
+    tests); #472 may add them.
 
 ## Rejected
 
@@ -92,7 +93,7 @@ calls.
 Defaults implemented now, each reversible:
 
 - Local history does not track media (only notes and drawings).
-- Old snapshots are never thinned out (follow-up issue "thinning").
+- Old snapshots are never thinned out (follow-up issue #479).
 - A copied vault gets a new ID and a history of its own.
 - A vault that later gets `.git` continues in that repository; the old local history is not merged in
   (it stays in the data folder and is shown in Data usage until removed).

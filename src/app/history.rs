@@ -229,6 +229,8 @@ impl ShaleApp {
         if self.history.started_for.as_deref() != Some(root.as_path()) {
             self.history.started_for = Some(root.clone());
             self.history.sched = Schedule::default();
+            self.history.queue.clear();
+            self.history.queries.clear();
             // a new local history starts with the vault as it is (SYNC-044)
             self.history.queue.push_back(Queued { req: Request::new(Reason::Initial, vec![]), then: None, scheduled: false });
         }
@@ -418,10 +420,23 @@ impl ShaleApp {
         }
     }
 
+    /// The dialog asks for a list; with the history off it says why instead.
+    fn history_ask(&mut self, dialog: &mut HistoryDialog, query: Query) {
+        match self.history_off_reason().filter(|_| !self.history_active()) {
+            Some(why) => dialog.error = Some(why),
+            None if !self.history_active() => dialog.error = Some("The history is not kept in this window.".into()),
+            None => {
+                dialog.loading = true;
+                self.history.queries.push_back(query);
+            }
+        }
+    }
+
     /// Open the list of the versions of a note (SYNC-045).
     pub fn open_history_versions(&mut self, rel: &Path) {
-        self.history.dialog = HistoryDialog { tab: Some(Tab::Note(rel.to_path_buf())), note: Some(rel.to_path_buf()), loading: true, ..Default::default() };
-        self.history.queries.push_back(Query::Versions(rel.to_path_buf()));
+        let mut dialog = HistoryDialog { tab: Some(Tab::Note(rel.to_path_buf())), note: Some(rel.to_path_buf()), ..Default::default() };
+        self.history_ask(&mut dialog, Query::Versions(rel.to_path_buf()));
+        self.history.dialog = dialog;
         self.modal = Some(super::Modal::History);
     }
 
@@ -431,8 +446,9 @@ impl ShaleApp {
             (Some(super::Modal::History), n) => n.clone(),
             _ => self.current_path().filter(|p| self.notes.contains_key(p) || self.drawings.contains_key(p)),
         };
-        self.history.dialog = HistoryDialog { tab: Some(Tab::Deleted), note, loading: true, ..Default::default() };
-        self.history.queries.push_back(Query::Deleted);
+        let mut dialog = HistoryDialog { tab: Some(Tab::Deleted), note, ..Default::default() };
+        self.history_ask(&mut dialog, Query::Deleted);
+        self.history.dialog = dialog;
         self.modal = Some(super::Modal::History);
     }
 

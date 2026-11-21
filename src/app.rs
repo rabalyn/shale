@@ -564,7 +564,7 @@ impl ShaleApp {
                 vault: None,
             }
         } else {
-            crate::data_usage::Places {
+            let mut places = crate::data_usage::Places {
                 pictures: social_dir.clone(),
                 post_index: None,
                 mail_root: mail_root.clone(),
@@ -572,7 +572,12 @@ impl ShaleApp {
                 calendar_trash: calendar_dir.join(".calendar-trash"),
                 recovery: recovery_root.clone(),
                 ..crate::data_usage::Places::in_folder(&std::env::temp_dir().join(format!("shale-usage-{tag}-{n}")))
+            };
+            // screenshots name a data folder to show (SHALE_FAKE_DATA_DIR); nothing is written there
+            if let Some(d) = std::env::var_os("SHALE_FAKE_DATA_DIR") {
+                places.history = PathBuf::from(d).join("shale").join("history");
             }
+            places
         };
         let mut app = ShaleApp {
             keymap: crate::keys::Keymap::from_overrides(&cfg.keybindings),

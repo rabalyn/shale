@@ -970,7 +970,8 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   **Saved**: the vault by kind (notes, drawings, pictures, PDFs, other attachments, `.shale/`,
   `.trash/`, `.git/`), its 10 largest files and folders (a click opens the file or shows the
   folder), and your data outside the vault: mail per account, drafts, outbox, mail trash, local
-  calendars, calendar trash and recovered notes. Nothing in this part can be deleted here.
+  calendars, calendar trash, recovered notes and the file history of a vault that has no `.git` (with `.git` it is
+  counted in the vault's `.git/`). Nothing in this part can be deleted here.
 - **Caches** are what Shale can build or fetch again: social pictures, the social post index,
   the mail index, its daily backups, damaged copies of the mail index, the learned tag words, the
   undo histories of the notes of the open vault and the keyboard debug log. Each row shows its size, entries, oldest entry and last cleanup, and
@@ -1038,6 +1039,9 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 - Edits you type while a sync runs are never overwritten: if the sync brought a new version of
   that note, your text is saved as a conflict copy next to it.
 - Passwords are git's business (credential helper or SSH key); Shale never asks for one.
+- Every commit ends with the lines `Shale-Reason:` (`sync`, `merge`, or why a version was kept, see File history) and
+  `Shale-Device:` (the name of the computer), after the optional suffix. The sync pushes the version commits of File
+  history as they are: no squash, no rewrite.
 - **Media in Git LFS.** Audio and video files are large, so they do not belong in the git history.
   With `git-lfs` installed, a repository Shale creates (Connect on a folder that is no repository
   yet) stores media with Git LFS from the start, and for an existing repository Settings → Sync
@@ -1054,6 +1058,41 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   sync" (vault setting `sync.lfs_download`: `on_demand`, the default, or `always`). A conflict copy of a media file is stored in LFS too. On a
   computer without git-lfs, a vault that stores media with LFS is not synced (nothing is
   committed) and the settings say why.
+
+## File history
+
+- Shale keeps earlier versions of notes and drawings, with or without a git server, and a note can go back to
+  one. A version is a git commit ("snapshot"): made when a note or drawing is saved (at most one per note
+  every 10 minutes while typing, then `history.coalesce_minutes`), when it has had no change for a minute
+  (`history.idle_seconds`), when its last tab closes, and when the window closes (waiting at most 3 seconds). Only saved text is committed, never an
+  open buffer; a save that changes nothing makes no commit. Snapshots run in the background, one at a
+  time and never while the sync runs; a busy repository is asked again later and typing is never blocked.
+- **Where.** A vault with `.git` keeps them in its repository (also with sync off) and the sync pushes
+  them unchanged. A vault without `.git` keeps a repository **outside the vault**, with git's separate
+  git directory `<data folder>/shale/history/<vault id>` and the vault as work tree; no `.git` file or
+  folder is ever written into the vault. The vault id is the file `.shale/history-id` (128 random
+  bits, synced with the vault); a moved or renamed vault keeps its history, a copy of a vault gets a
+  new id. A new local history starts with one snapshot of every note and drawing.
+- **What.** Notes and drawings (`.md`, `.excalidraw`, `.excalidraw.md`, `.canvas`), not media. Never
+  Shale's temporary files, the temporary and housekeeping names of cloud clients and network shares
+  (`.syncthing.*.tmp`, `.stfolder`, `.stversions`, `.stignore`, `.~lock.*#`, `~$*`, `*.tmp`, `*.part`,
+  `.nfs*`, `.fuse_hidden*`, `*.icloud`, `desktop.ini`, `.DS_Store`, `Thumbs.db`), or the device-local files
+  of `.shale/` (`state.json`, `undo/`). In a vault repository a snapshot commits only its own paths and
+  leaves other staged changes alone.
+- **Messages.** A short subject and the lines `Shale-Reason:` (`save`, `idle`, `close`, `initial`,
+  `sync`, `restore`, `merge`, `rename`, `delete`), `Shale-Device:`, one `Shale-Path:` per path and
+  `Shale-Restored:` for a restore; a commit without them (made by another tool) is read as a subject only.
+- **Go back.** A note's (or drawing's) ⋯ menu has **Versions of this note…**: each version with its time,
+  reason, computer and the lines added and removed (a binary file has no counts), following renames.
+  **Restore** snapshots the text you have, then puts the old text in the note as one new change (one
+  undo step in an open note; an atomic save otherwise) and snapshots that with the version it came from;
+  history is never reset or rewritten. **Copy text** and **Read-only** read a version without changing
+  anything. Settings → Sync has **Restore a deleted note…**: notes deleted or moved to the trash, newest
+  first, written back at their path or at `Name (restored).md`. A rename or move and moving to the trash
+  make their own snapshots, so the history stays connected.
+- **Settings** (Settings → Sync, **File history**): on by default for every vault (`history.enabled`),
+  `history.coalesce_minutes` (10) and `history.idle_seconds` (60). Without a usable git, history is off and
+  the page says why. Data usage lists the size of a local history. Nothing is thinned out; see ADR-0028.
 
 ## Keyboard
 

@@ -15,7 +15,11 @@ Keep a vault on several computers with git. Back to [[Start here]]. A vault in a
   with it ([[Vault settings]]).
 - A sync commits every change (the `.shale/` files too, so settings and open tabs follow you),
   fetches, merges and pushes. Commit messages read `Sync from <computer>: 3 file(s)`, with an
-  optional prefix and suffix. Without a remote, Shale only keeps a local history.
+  optional prefix and suffix, and end with the lines `Shale-Reason:` and `Shale-Device:` (the computer's name).
+  Without a remote, Shale only keeps a local history.
+- Besides the sync's commits, Shale makes a small commit of a note when you save it, stop typing or close it,
+  so that you can go back to an earlier version ([[File history]]). The sync pushes them as they are, and
+  a vault without a git repository gets the same history on this computer, outside the vault.
 
 # Installing git
 
