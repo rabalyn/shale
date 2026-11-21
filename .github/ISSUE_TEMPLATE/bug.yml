@@ -1,0 +1,52 @@
+name: Bug report
+description: Something in Shale does not work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        One problem per issue, please.
+        A security problem does not belong here. Report it privately, see [SECURITY.md](https://github.com/rabalyn/shale/blob/main/SECURITY.md).
+  - type: input
+    id: version
+    attributes:
+      label: Shale version
+      description: Shown at the right end of the status bar ("Shale 0.6.9 · build …"). If you built Shale yourself, give the commit.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux (Wayland)
+        - Linux (X11)
+        - macOS
+        - Windows
+        - Other (say which below)
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: What you did
+      description: The steps, from opening Shale to the problem. A small vault or note that shows it helps.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Logs or screenshots
+      description: Optional. Leave out anything private, such as passwords, tokens and the text of personal notes.
