@@ -408,4 +408,246 @@ mod tests {
         assert!(near < 20, "{near} neighbours on top of each other");
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    // ------------------------------------------------------------ the interaction, with real pointer events
+
+    /// A graph view in a headless egui context of 400 x 400 points; the view fills the screen.
+    struct Frames {
+        ctx: egui::Context,
+        t: f64,
+        dir: PathBuf,
+        vault: Vault,
+        g: GraphView,
+        /// what the last frame returned, the cursor it asked for, the text it painted
+        click: Option<GraphClick>,
+        cursor: egui::CursorIcon,
+        text: Vec<String>,
+    }
+
+    fn collect_text(shape: &egui::Shape, out: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(t) => out.push(t.galley.text().to_string()),
+            egui::Shape::Vec(v) => v.iter().for_each(|s| collect_text(s, out)),
+            _ => {}
+        }
+    }
+
+    impl Frames {
+        /// A vault of `files` (name, text), the view built and still: no physics, no auto fit, zoom 1, no offset.
+        fn new(tag: &str, files: &[(&str, &str)]) -> Frames {
+            let dir = std::env::temp_dir().join(format!("shale-graph-ui-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            for (name, text) in files {
+                std::fs::write(dir.join(name), text).unwrap();
+            }
+            let vault = Vault::open(&dir).unwrap();
+            let ctx = egui::Context::default();
+            crate::theme::apply(&ctx);
+            let mut f = Frames { ctx, t: 0.0, dir, vault, g: GraphView::new(false), click: None, cursor: egui::CursorIcon::Default, text: vec![] };
+            f.frame(vec![]);
+            f.g.auto_fit = false;
+            f.g.zoom = 1.0;
+            f.g.offset = Vec2::ZERO;
+            f.g.energy = 0.0;
+            f
+        }
+
+        fn frame(&mut self, events: Vec<egui::Event>) {
+            self.t += 0.05;
+            let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::splat(400.0))), time: Some(self.t), events, ..Default::default() };
+            let (g, vault) = (&mut self.g, &self.vault);
+            let mut click = None;
+            let mut out = self.ctx.run_ui(raw, |ui| click = g.ui(ui, vault, None, true));
+            out.textures_delta.clear();
+            if click.is_some() {
+                self.click = click;
+            }
+            self.cursor = out.platform_output.cursor_icon;
+            self.text.clear();
+            out.shapes.iter().for_each(|c| collect_text(&c.shape, &mut self.text));
+        }
+
+        fn index(&self, label: &str) -> usize {
+            self.g.nodes.iter().position(|n| n.label == label).unwrap_or_else(|| panic!("no node {label}"))
+        }
+
+        /// Where the node is on the screen now.
+        fn screen(&self, label: &str) -> Pos2 {
+            Pos2::new(200.0, 200.0) + self.g.offset + self.g.pos[self.index(label)] * self.g.zoom
+        }
+
+        fn move_to(&mut self, p: Pos2) {
+            self.frame(vec![egui::Event::PointerMoved(p)]);
+        }
+
+        fn button(&mut self, p: Pos2, pressed: bool) {
+            self.frame(vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }]);
+        }
+
+        /// Move to `p`, press and release there; what the release returned.
+        fn click_at(&mut self, p: Pos2) -> Option<GraphClick> {
+            self.move_to(p);
+            self.button(p, true);
+            self.button(p, false);
+            self.click.take()
+        }
+
+        /// Press at `from` and move in small steps to `to`, the button stays down.
+        fn drag(&mut self, from: Pos2, to: Pos2) {
+            self.move_to(from);
+            self.button(from, true);
+            let n = ((to - from).length() / 2.0).ceil().max(1.0) as u32;
+            for k in 1..=n {
+                self.move_to(from + (to - from) * (k as f32 / n as f32));
+            }
+        }
+    }
+
+    impl Drop for Frames {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    const LINKED: &[(&str, &str)] = &[("A.md", "[[B]] [[Missing]]"), ("B.md", "[[A]]")];
+
+    /// Put the three notes of `LINKED` apart, where nothing else is near them.
+    fn place(f: &mut Frames) {
+        for (label, p) in [("A", Vec2::new(-80.0, 0.0)), ("B", Vec2::new(80.0, 0.0)), ("Missing", Vec2::new(0.0, 90.0))] {
+            let i = f.index(label);
+            f.g.pos[i] = p;
+        }
+        f.frame(vec![]);
+    }
+
+    // spec: LINK-017
+    #[test]
+    fn graph_the_wheel_zooms_on_the_pointer_clamped_and_stops_the_auto_fit() {
+        let mut f = Frames::new("wheel", LINKED);
+        place(&mut f);
+        f.g.auto_fit = true;
+        f.g.zoom = 1.0;
+        let p = Pos2::new(300.0, 150.0);
+        f.move_to(p);
+        f.frame(vec![egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: Vec2::new(0.0, 100.0), modifiers: egui::Modifiers::NONE, phase: egui::TouchPhase::Move, source: egui::MouseWheelSource::Wheel }]);
+        for _ in 0..8 {
+            f.frame(vec![]);
+        }
+        assert!(f.g.zoom > 1.0, "scrolling up zooms in: {}", f.g.zoom);
+        assert!(!f.g.auto_fit, "zooming by hand ends the zoom to fit");
+        let zoomed_in = f.g.zoom;
+        let world_before = (p - Pos2::new(200.0, 200.0) - f.g.offset) / f.g.zoom;
+        f.frame(vec![egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: Vec2::new(0.0, -300.0), modifiers: egui::Modifiers::NONE, phase: egui::TouchPhase::Move, source: egui::MouseWheelSource::Wheel }]);
+        for _ in 0..8 {
+            f.frame(vec![]);
+        }
+        assert!(f.g.zoom < zoomed_in, "scrolling down zooms out");
+        let world_after = (p - Pos2::new(200.0, 200.0) - f.g.offset) / f.g.zoom;
+        assert!((world_before - world_after).length() < 1.0, "the point under the pointer stays: {world_before:?} {world_after:?}");
+    }
+
+    // spec: LINK-017
+    #[test]
+    fn graph_a_pinch_zoom_is_kept_between_015_and_5() {
+        let mut f = Frames::new("pinch", LINKED);
+        f.move_to(Pos2::new(200.0, 200.0));
+        f.frame(vec![egui::Event::Zoom(1000.0)]);
+        assert_eq!(f.g.zoom, 5.0, "the largest zoom");
+        f.frame(vec![egui::Event::Zoom(0.0001)]);
+        assert_eq!(f.g.zoom, 0.15, "the smallest zoom");
+        f.frame(vec![egui::Event::Zoom(2.0)]);
+        assert!((f.g.zoom - 0.3).abs() < 1e-4, "{}", f.g.zoom);
+    }
+
+    // spec: LINK-017
+    #[test]
+    fn graph_the_wheel_does_nothing_when_the_pointer_is_not_over_the_view() {
+        let mut f = Frames::new("wheel-outside", LINKED);
+        f.g.auto_fit = true;
+        f.frame(vec![egui::Event::PointerMoved(Pos2::new(900.0, 900.0)), egui::Event::Zoom(2.0)]);
+        assert!(f.g.auto_fit, "no zoom by hand");
+    }
+
+    // spec: LINK-017
+    #[test]
+    fn graph_the_pointer_over_a_node_is_a_pointing_hand_and_over_empty_space_is_not() {
+        let mut f = Frames::new("hover", LINKED);
+        place(&mut f);
+        let a = f.screen("A");
+        f.move_to(a);
+        f.frame(vec![]);
+        assert_eq!(f.cursor, egui::CursorIcon::PointingHand);
+        f.move_to(Pos2::new(20.0, 20.0));
+        f.frame(vec![]);
+        assert_ne!(f.cursor, egui::CursorIcon::PointingHand);
+    }
+
+    // spec: LINK-017
+    #[test]
+    fn graph_dragging_a_node_moves_it_and_wakes_the_physics_and_dragging_space_pans_and_stops_the_auto_fit() {
+        let mut f = Frames::new("drag", LINKED);
+        place(&mut f);
+        let a = f.index("A");
+        let a0 = f.g.pos[a];
+        let from = f.screen("A");
+        f.g.energy = 0.0;
+        f.drag(from, from + Vec2::new(0.0, 60.0));
+        assert_eq!(f.g.dragging, Some(a), "the node under the pointer is held");
+        assert_eq!(f.g.energy, 1.0, "the physics is awake");
+        assert!(f.g.pos[a].y > a0.y + 20.0 && (f.g.pos[a].x - a0.x).abs() < 5.0, "the node follows the pointer down: {:?} -> {:?}", a0, f.g.pos[a]);
+        assert_eq!(f.g.offset, Vec2::ZERO, "dragging a node does not pan");
+        f.button(from + Vec2::new(0.0, 60.0), false);
+        assert_eq!(f.g.dragging, None, "let go");
+        // empty space pans
+        f.g.energy = 0.0;
+        f.g.auto_fit = true;
+        let empty = Pos2::new(30.0, 360.0);
+        let pos_before = f.g.pos.clone();
+        f.drag(empty, empty + Vec2::new(50.0, -20.0));
+        f.button(empty + Vec2::new(50.0, -20.0), false);
+        assert!(!f.g.auto_fit, "panning by hand ends the zoom to fit");
+        assert!(f.g.offset.x > 20.0 && f.g.offset.y < -5.0, "the view moved with the pointer: {:?}", f.g.offset);
+        assert_eq!(f.g.pos.len(), pos_before.len());
+    }
+
+    // spec: LINK-017
+    #[test]
+    fn graph_a_click_on_a_note_opens_it_and_a_click_on_a_missing_one_creates_it_and_empty_space_does_nothing() {
+        let mut f = Frames::new("click", LINKED);
+        place(&mut f);
+        let p = f.screen("B");
+        match f.click_at(p) {
+            Some(GraphClick::Open(rel)) => assert_eq!(rel, PathBuf::from("B.md")),
+            _ => panic!("a click on a note opens it"),
+        }
+        let p = f.screen("Missing");
+        match f.click_at(p) {
+            Some(GraphClick::Create(name)) => assert_eq!(name, "Missing"),
+            _ => panic!("a click on a missing note creates it"),
+        }
+        assert!(f.click_at(Pos2::new(30.0, 360.0)).is_none());
+    }
+
+    // spec: LINK-017
+    #[test]
+    fn graph_click_turns_a_click_into_the_action_that_opens_or_creates() {
+        let mut actions = vec![];
+        crate::app::graph_click(&mut actions, GraphClick::Open(PathBuf::from("dir/B.md")));
+        crate::app::graph_click(&mut actions, GraphClick::Create("Missing".into()));
+        assert!(matches!(&actions[0], crate::app::Action::Open { rel, new_tab: false } if rel == Path::new("dir/B.md")));
+        assert!(matches!(&actions[1], crate::app::Action::OpenLink { target, heading: None, from: None, new_tab: false } if target == "Missing"));
+        assert_eq!(actions.len(), 2);
+    }
+
+    // spec: LINK-017
+    #[test]
+    fn graph_a_vault_without_links_says_so_and_a_vault_with_notes_does_not() {
+        let mut f = Frames::new("empty", &[]);
+        f.frame(vec![]);
+        assert!(f.text.iter().any(|t| t == "No linked notes yet"), "{:?}", f.text);
+        let mut f = Frames::new("not-empty", LINKED);
+        f.frame(vec![]);
+        assert!(!f.text.iter().any(|t| t == "No linked notes yet"));
+    }
 }

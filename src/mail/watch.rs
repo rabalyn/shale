@@ -156,6 +156,12 @@ impl Watch {
         self.checking.load(Ordering::SeqCst) > 0
     }
 
+    /// Tests: pretend `n` quick checks are going on.
+    #[cfg(test)]
+    pub fn set_checking(&self, n: usize) {
+        self.checking.store(n, Ordering::SeqCst);
+    }
+
     /// The folders being watched: (account, folder).
     #[cfg(test)]
     pub fn watching(&self) -> Vec<(String, String)> {

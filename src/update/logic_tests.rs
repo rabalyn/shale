@@ -492,6 +492,85 @@ fn upd_014_a_folder_replaces_the_old_one_and_a_program_that_fails_ends_the_plan_
     assert!(e.contains("could not run"), "{e}");
 }
 
+#[cfg(unix)]
+#[test]
+fn upd_014_a_new_file_that_cannot_be_put_in_place_leaves_the_old_entry_and_no_temporary_file() {
+    let d = temp("install-fails");
+    let cancel = AtomicBool::new(false);
+    std::fs::write(d.join("new"), b"new").unwrap();
+    // without a file moved aside: a folder with content is where the file should go
+    std::fs::create_dir(d.join("shale")).unwrap();
+    std::fs::write(d.join("shale/inner"), b"old").unwrap();
+    let e = execute(&Plan { ops: vec![Op::Install { from: d.join("new"), to: d.join("shale"), exec: true, aside: None }], cleanup: vec![] }, &cancel).unwrap_err();
+    assert!(e.contains("could not put the new file in place"), "{e}");
+    assert_eq!(std::fs::read(d.join("shale/inner")).unwrap(), b"old");
+    assert!(!d.join("shale.new").exists(), "the temporary file is removed");
+    // the place to move the program aside to is a folder with content: the program stays, no temporary file
+    std::fs::write(d.join("prog"), b"old").unwrap();
+    std::fs::create_dir(d.join("aside")).unwrap();
+    std::fs::write(d.join("aside/x"), b"x").unwrap();
+    let e = execute(&Plan { ops: vec![Op::Install { from: d.join("new"), to: d.join("prog"), exec: false, aside: Some(d.join("aside")) }], cleanup: vec![] }, &cancel).unwrap_err();
+    assert!(e.contains("could not move the running program aside"), "{e}");
+    assert_eq!(std::fs::read(d.join("prog")).unwrap(), b"old");
+    assert!(!d.join("prog.new").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn upd_014_a_folder_that_cannot_be_copied_leaves_the_old_folder_and_a_folder_in_a_locked_place_fails_in_words() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = temp("replace-dir-fails");
+    let cancel = AtomicBool::new(false);
+    std::fs::create_dir_all(d.join("to")).unwrap();
+    std::fs::write(d.join("to/old"), b"old").unwrap();
+    // the source is missing: an error naming it, the old folder is untouched
+    let e = execute(&Plan { ops: vec![Op::ReplaceDir { from: d.join("no-such-from"), to: d.join("to") }], cleanup: vec![] }, &cancel).unwrap_err();
+    assert!(e.contains("no-such-from"), "{e}");
+    assert_eq!(std::fs::read(d.join("to/old")).unwrap(), b"old");
+    // the folder that holds `to` cannot be written
+    std::fs::create_dir_all(d.join("from")).unwrap();
+    std::fs::write(d.join("from/new"), b"new").unwrap();
+    std::fs::create_dir_all(d.join("locked/to")).unwrap();
+    std::fs::write(d.join("locked/to/old"), b"old").unwrap();
+    std::fs::set_permissions(d.join("locked"), std::fs::Permissions::from_mode(0o555)).unwrap();
+    let can_write = std::fs::write(d.join("locked/probe"), b"x").is_ok();
+    let result = execute(&Plan { ops: vec![Op::ReplaceDir { from: d.join("from"), to: d.join("locked/to") }], cleanup: vec![] }, &cancel);
+    std::fs::set_permissions(d.join("locked"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    if can_write {
+        return; // running as root: permissions do not stop us
+    }
+    let e = result.unwrap_err();
+    assert!(e.contains("could not make"), "{e}");
+    assert_eq!(std::fs::read(d.join("locked/to/old")).unwrap(), b"old", "the old folder is still there");
+}
+
+#[cfg(unix)]
+#[test]
+fn upd_016_a_swap_without_a_current_version_fails_in_words_and_changes_nothing() {
+    let d = temp("swap-first");
+    let cancel = AtomicBool::new(false);
+    std::fs::create_dir_all(d.join("Shale.app.new")).unwrap();
+    std::fs::write(d.join("Shale.app.new/v"), b"new").unwrap();
+    let e = execute(&Plan { ops: vec![Op::Swap { new: d.join("Shale.app.new"), current: d.join("Shale.app"), old: d.join("Shale.app.old"), keep_old: false }], cleanup: vec![] }, &cancel).unwrap_err();
+    assert!(e.contains("could not move the old version aside"), "{e}");
+    assert_eq!(std::fs::read(d.join("Shale.app.new/v")).unwrap(), b"new");
+    assert!(!d.join("Shale.app").exists() && !d.join("Shale.app.old").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn upd_016_a_failed_second_rename_of_a_swap_puts_the_old_version_back_even_when_keeping_it() {
+    let d = temp("swap-second");
+    let cancel = AtomicBool::new(false);
+    std::fs::create_dir_all(d.join("Shale.app")).unwrap();
+    std::fs::write(d.join("Shale.app/v"), b"old").unwrap();
+    // the new version is missing: the second rename fails, with keep_old the backup must not stay either
+    let e = execute(&Plan { ops: vec![Op::Swap { new: d.join("gone"), current: d.join("Shale.app"), old: d.join("Shale.app.old"), keep_old: true }], cleanup: vec![] }, &cancel).unwrap_err();
+    assert!(e.contains("could not put the new version in place"), "{e}");
+    assert_eq!(std::fs::read(d.join("Shale.app/v")).unwrap(), b"old", "the old version is back, intact");
+    assert!(!d.join("Shale.app.old").exists(), "nothing is left aside");
+}
+
 // ---------------------------------------------------------------- the whole way, against a pretend GitHub
 
 const OLD_PROGRAM: &[u8] = b"#!/bin/sh\necho old\n";

@@ -494,4 +494,6 @@ pub fn finished_text(f: &Finished) -> String {
 }
 
 #[cfg(test)]
+mod usage_gap_tests;
+#[cfg(test)]
 mod usage_tests;

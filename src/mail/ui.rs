@@ -641,7 +641,8 @@ impl MailView {
 
     /// The rebuild ended (well or not): the index is read again from the start.
     pub fn end_rebuild(&mut self, cfg: &Config) {
-        let StoreState::Rebuilding(s) = std::mem::replace(&mut self.store, StoreState::Closed) else { return };
+        let StoreState::Rebuilding(s) = &self.store else { return };
+        let s = s.clone();
         self.reader = s.reader().ok();
         self.store = StoreState::Ready(s);
         // the folders keep their rows (and ids), so the folder shown stays
@@ -2749,5 +2750,270 @@ pub fn size_text(n: u64) -> String {
         format!("{:.1} MB", n as f64 / (1u64 << 20) as f64)
     } else {
         format!("{} KB", n.div_ceil(1024).max(1))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::CryptoStandard::{OpenPgp, Smime};
+    use crate::mail::compose::Att;
+    use crate::mail::outbox::tests::{cut_off_replacement, temp};
+
+    fn account(id: &str) -> MailAccount {
+        MailAccount { id: id.into(), ..MailAccount::default() }
+    }
+
+    /// A view whose store is open (in a temporary folder) with an account `a` that has the folders INBOX and Other.
+    fn view_with_store(tag: &str) -> (MailView, Config, Arc<MailStore>, Vec<FolderRow>) {
+        let root = temp(tag);
+        let store = Arc::new(MailStore::open(&root).unwrap());
+        let folders = vec![store.ensure_folder("a", "A", "INBOX", None, None, true).unwrap(), store.ensure_folder("a", "A", "Other", None, None, true).unwrap()];
+        let mut v = MailView::new(root);
+        v.store = StoreState::Ready(store.clone());
+        v.reader = store.reader().ok();
+        let cfg = Config { mail_accounts: vec![account("a")], ..Config::default() };
+        (v, cfg, store, folders)
+    }
+
+    fn running_sync() -> SyncRun {
+        SyncRun { rx: channel().1, cancel: Arc::new(AtomicBool::new(false)), folder: String::new(), done: 0, total: 0, added: 0, errors: vec![], finished: None }
+    }
+
+    // spec: USE-012
+    #[test]
+    fn the_mail_index_is_not_rebuilt_while_the_store_is_closed_or_a_sync_an_action_a_send_or_a_folder_check_runs() {
+        let (mut v, _cfg, store, _) = view_with_store("rebuild-blocked");
+        assert_eq!(v.rebuild_blocked(), None, "nothing runs: the rebuild may start");
+        // the store is not open (still closed, opening, being rebuilt already)
+        for state in [StoreState::Closed, StoreState::Opening, StoreState::Rebuilding(store.clone()), StoreState::Failed("x".into())] {
+            v.store = state;
+            assert!(v.rebuild_blocked().is_some_and(|w| w.contains("not open")));
+        }
+        v.store = StoreState::Ready(store);
+        // a sync runs; a finished one does not block
+        v.syncs.insert("a".into(), running_sync());
+        assert!(v.rebuild_blocked().is_some_and(|w| w.contains("syncing")));
+        v.syncs.get_mut("a").unwrap().finished = Some(SyncSummary::default());
+        assert_eq!(v.rebuild_blocked(), None);
+        // actions on their way to the server
+        v.ops_running.insert("a".into());
+        assert!(v.rebuild_blocked().is_some_and(|w| w.contains("sent to the server")));
+        v.ops_running.clear();
+        assert_eq!(v.rebuild_blocked(), None);
+        // a mail on its way
+        v.send_running.insert("a/1".into());
+        assert!(v.rebuild_blocked().is_some_and(|w| w.contains("sent to the server")));
+        v.send_running.clear();
+        // a folder check writes to the index
+        v.watch.set_checking(1);
+        assert!(v.rebuild_blocked().is_some_and(|w| w.contains("checked for changes")));
+        v.watch.set_checking(0);
+        assert_eq!(v.rebuild_blocked(), None);
+    }
+
+    // spec: USE-012
+    #[test]
+    fn a_refused_rebuild_leaves_the_store_ready_and_a_started_one_closes_the_message_and_hands_out_the_store_alone() {
+        let (mut v, _cfg, store, folders) = view_with_store("rebuild-begin");
+        let nm = store.save_message(&folders[0], 1, 1, b"From: a@x.de\r\nSubject: Hi\r\nMessage-ID: <1@x>\r\n\r\nbody\r\n", "", Some(1_794_657_600)).unwrap();
+        store.commit(vec![crate::mail::db::Op::Message(Box::new(nm))]).unwrap();
+        let msg = v.reader.as_ref().unwrap().list(folders[0].id, 10, 0).unwrap().remove(0);
+        v.open_message(msg);
+        assert!(v.open.is_some());
+        // blocked: the reason comes back, nothing changes
+        v.ops_running.insert("a".into());
+        let why = v.begin_rebuild().err().expect("refused");
+        assert_eq!(Some(why), v.rebuild_blocked());
+        assert!(matches!(v.store, StoreState::Ready(_)) && v.open.is_some(), "a refusal changes nothing");
+        v.ops_running.clear();
+        // allowed: the same store comes back, the message is closed, the store is Rebuilding
+        let handed = v.begin_rebuild().unwrap();
+        assert!(Arc::ptr_eq(&handed, &store));
+        assert!(matches!(v.store, StoreState::Rebuilding(_)));
+        assert!(v.open.is_none(), "the open message is closed");
+        // meanwhile nothing that writes the index can start: every job starts from ready_store
+        assert!(v.ready_store().is_none());
+        assert!(v.rebuild_blocked().is_some());
+        assert!(v.begin_rebuild().is_err(), "no second rebuild");
+        v.open_store();
+        assert!(matches!(v.store, StoreState::Rebuilding(_)), "open_store does not take the store back");
+    }
+
+    // spec: USE-012
+    #[test]
+    fn the_end_of_a_rebuild_makes_the_store_ready_again_keeps_the_shown_folder_or_selects_the_first_and_does_nothing_without_a_rebuild() {
+        // no rebuild: nothing happens
+        let (mut v, cfg, _store, _) = view_with_store("rebuild-end");
+        let before = v.ready_store().unwrap();
+        v.folder = Some(7);
+        v.end_rebuild(&cfg);
+        assert!(Arc::ptr_eq(&v.ready_store().unwrap(), &before), "a Ready store stays the same Ready store");
+        assert_eq!(v.folder, Some(7), "the shown folder is untouched");
+        v.store = StoreState::Failed("x".into());
+        v.end_rebuild(&cfg);
+        assert!(matches!(&v.store, StoreState::Failed(m) if m == "x"), "a Failed store stays Failed");
+        v.store = StoreState::Opening;
+        v.end_rebuild(&cfg);
+        assert!(matches!(v.store, StoreState::Opening), "an Opening store stays Opening");
+        v.store = StoreState::Closed;
+        v.end_rebuild(&cfg);
+        assert!(matches!(v.store, StoreState::Closed));
+        assert!(v.folders.is_empty(), "nothing was read");
+        // no folder shown: the first one is selected, and the reader is back
+        let (mut v, cfg, _store, folders) = view_with_store("rebuild-end-none");
+        v.begin_rebuild().unwrap();
+        v.reader = None;
+        v.end_rebuild(&cfg);
+        assert!(v.ready_store().is_some());
+        assert!(v.reader.is_some(), "the reader is opened again");
+        assert_eq!(v.folders.len(), 2);
+        assert_eq!(v.folder, Some(folders[0].id), "the first folder of the first account");
+        // a folder shown stays shown
+        let (mut v, cfg, _store, folders) = view_with_store("rebuild-end-keep");
+        v.folder = Some(folders[1].id);
+        v.begin_rebuild().unwrap();
+        v.end_rebuild(&cfg);
+        assert!(v.ready_store().is_some());
+        assert_eq!(v.folder, Some(folders[1].id));
+        assert!(v.rebuild_blocked().is_none(), "work may start again");
+    }
+
+    fn compose_view(accounts: Vec<MailAccount>, draft: compose::Draft) -> (MailView, Config) {
+        let mut v = MailView::new(temp("compose-out"));
+        v.compose = Some(Compose::new(draft));
+        (v, Config { mail_accounts: accounts, ..Config::default() })
+    }
+
+    fn att(name: &str, file: &str) -> Att {
+        Att { name: name.into(), mime: "application/pdf".into(), data: Arc::new(name.as_bytes().to_vec()), file: file.into() }
+    }
+
+    fn alert(file: &str) -> crate::mail::compose_ui::AttAlertState {
+        crate::mail::compose_ui::AttAlertState { alert: crate::mail::outbox::AttAlert { file: file.into(), name: file.into(), trash: PathBuf::from("t"), trash_present: true }, dismissed: false }
+    }
+
+    // spec: MAIL-190, MAIL-192
+    #[test]
+    fn switching_the_draft_to_another_account_takes_its_sender_and_falls_back_to_its_standard_when_it_has_no_key_for_the_current_one() {
+        let a1 = MailAccount { pgp_key: "AAAA".into(), from_name: "Ada".into(), from_address: "ada@x.de".into(), ..account("a1") };
+        let a2 = MailAccount { smime_key: "BBBB".into(), preferred_standard: Smime, sign_by_default: true, from_name: "Bea".into(), user: "bea@y.de".into(), ..account("a2") };
+        let a3 = MailAccount { pgp_key: "CCCC".into(), from_name: "Cy".into(), from_address: "cy@z.de".into(), ..account("a3") };
+        let mut d = compose::new_draft("a1", "Ada", "ada@x.de", "");
+        (d.standard, d.sign, d.encrypt) = (OpenPgp, false, true);
+        let (mut v, cfg) = compose_view(vec![a1, a2, a3], d);
+        // a2 has no OpenPGP key: its own standard and sign default, and Encrypt is off
+        v.apply_compose_out(&cfg, ComposeOut { account: Some("a2".into()), ..Default::default() });
+        let c = v.compose.as_ref().unwrap();
+        assert_eq!((c.draft.account.as_str(), c.draft.from_name.as_str(), c.draft.from_addr.as_str()), ("a2", "Bea", "bea@y.de"), "the user name is the address when none is set");
+        assert_eq!((c.draft.standard, c.draft.sign, c.draft.encrypt), (Smime, true, false));
+        assert_eq!(c.rev, 1, "the draft counts as changed");
+        // a3 has a key for OpenPGP only: the draft is on S/MIME, so it falls back again
+        v.compose.as_mut().unwrap().draft.encrypt = true;
+        v.apply_compose_out(&cfg, ComposeOut { account: Some("a3".into()), ..Default::default() });
+        let c = v.compose.as_ref().unwrap();
+        assert_eq!((c.draft.account.as_str(), c.draft.from_addr.as_str(), c.draft.standard, c.draft.encrypt), ("a3", "cy@z.de", OpenPgp, false));
+        // an account with a key for the standard in use: standard, Sign and Encrypt stay
+        let mut d = compose::new_draft("a3", "Cy", "cy@z.de", "");
+        (d.standard, d.sign, d.encrypt) = (OpenPgp, true, true);
+        v.compose = Some(Compose::new(d));
+        let a4 = MailAccount { pgp_key: "DDDD".into(), from_name: "Di".into(), from_address: "di@z.de".into(), ..account("a4") };
+        let cfg4 = Config { mail_accounts: vec![a4], ..Config::default() };
+        v.apply_compose_out(&cfg4, ComposeOut { account: Some("a4".into()), ..Default::default() });
+        let c = v.compose.as_ref().unwrap();
+        assert_eq!((c.draft.account.as_str(), c.draft.standard, c.draft.sign, c.draft.encrypt), ("a4", OpenPgp, true, true));
+        // an account that is not configured changes nothing
+        v.apply_compose_out(&cfg4, ComposeOut { account: Some("gone".into()), ..Default::default() });
+        assert_eq!(v.compose.as_ref().unwrap().draft.account, "a4");
+    }
+
+    // spec: MAIL-127, MAIL-216, MAIL-219
+    #[test]
+    fn removing_an_attachment_by_index_or_a_missing_one_by_file_drops_its_alert_and_an_index_out_of_range_does_nothing() {
+        let mut d = compose::new_draft("a", "Ada", "ada@x.de", "");
+        d.attachments = vec![att("one.pdf", "0-1-one.pdf"), att("two.pdf", "1-2-two.pdf"), att("three.pdf", "2-3-three.pdf")];
+        let (mut v, cfg) = compose_view(vec![account("a")], d);
+        v.compose.as_mut().unwrap().att_alerts = vec![alert("0-1-one.pdf"), alert("1-2-two.pdf")];
+        let files = |v: &MailView| v.compose.as_ref().unwrap().draft.attachments.iter().map(|a| a.file.clone()).collect::<Vec<_>>();
+        let alerts = |v: &MailView| v.compose.as_ref().unwrap().att_alerts.iter().map(|a| a.alert.file.clone()).collect::<Vec<_>>();
+        // out of range: nothing changes, not even the revision
+        v.apply_compose_out(&cfg, ComposeOut { remove_att: Some(3), ..Default::default() });
+        assert_eq!(files(&v).len(), 3);
+        assert_eq!(alerts(&v).len(), 2);
+        assert_eq!(v.compose.as_ref().unwrap().rev, 0);
+        // by index: the attachment and its alert go, the other alert stays
+        v.apply_compose_out(&cfg, ComposeOut { remove_att: Some(0), ..Default::default() });
+        assert_eq!(files(&v), ["1-2-two.pdf", "2-3-three.pdf"]);
+        assert_eq!(alerts(&v), ["1-2-two.pdf"]);
+        assert_eq!(v.compose.as_ref().unwrap().rev, 1);
+        // a missing one by file name
+        v.apply_compose_out(&cfg, ComposeOut { att_remove_missing: Some("1-2-two.pdf".into()), ..Default::default() });
+        assert_eq!(files(&v), ["2-3-three.pdf"]);
+        assert!(alerts(&v).is_empty());
+        assert_eq!(v.compose.as_ref().unwrap().rev, 2);
+    }
+
+    // spec: MAIL-216, MAIL-219
+    #[test]
+    fn dismissing_an_alert_hides_it_but_keeps_the_alert_and_the_attachment() {
+        let mut d = compose::new_draft("a", "Ada", "ada@x.de", "");
+        d.attachments = vec![att("one.pdf", "0-1-one.pdf"), att("two.pdf", "1-2-two.pdf")];
+        let (mut v, cfg) = compose_view(vec![account("a")], d);
+        v.compose.as_mut().unwrap().att_alerts = vec![alert("0-1-one.pdf"), alert("1-2-two.pdf")];
+        v.apply_compose_out(&cfg, ComposeOut { att_dismiss: Some("1-2-two.pdf".into()), ..Default::default() });
+        let c = v.compose.as_ref().unwrap();
+        assert_eq!(c.att_alerts.iter().map(|a| a.dismissed).collect::<Vec<_>>(), [false, true]);
+        assert_eq!(c.draft.attachments.len(), 2, "dismissing changes nothing on the draft");
+        assert_eq!(c.rev, 0);
+    }
+
+    /// A compose view of a draft whose attachment replacement was cut off: its alert and its outbox.
+    fn view_with_cut_off_attachment(tag: &str, trash_gone: bool) -> (MailView, Config, String, PathBuf) {
+        let (root, ob, d) = cut_off_replacement(tag, 2);
+        let (back, _) = ob.load_draft("acct1", &d.id).unwrap();
+        let al = ob.att_alerts("drafts", "acct1", &d.id, &back.attachments);
+        assert_eq!(al.len(), 1);
+        assert!(back.attachments[0].data.is_empty(), "the bytes were not read back");
+        if trash_gone {
+            std::fs::remove_file(&al[0].trash).unwrap();
+        }
+        let file = al[0].file.clone();
+        let (mut v, cfg) = compose_view(vec![account("acct1")], back);
+        v.outbox = Some(Arc::new(ob));
+        v.compose.as_mut().unwrap().att_alerts = al.into_iter().map(|alert| crate::mail::compose_ui::AttAlertState { alert, dismissed: false }).collect();
+        (v, cfg, file, root)
+    }
+
+    // spec: MAIL-217
+    #[test]
+    fn restoring_a_missing_attachment_puts_the_old_bytes_back_and_drops_the_alert() {
+        let (mut v, cfg, file, root) = view_with_cut_off_attachment("compose-restore", false);
+        v.apply_compose_out(&cfg, ComposeOut { att_restore: Some(file), ..Default::default() });
+        let c = v.compose.as_ref().unwrap();
+        assert_eq!(c.draft.attachments[0].data.as_slice(), b"old-bytes");
+        assert!(c.att_alerts.is_empty());
+        assert!(c.error.is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // spec: MAIL-217
+    #[test]
+    fn a_failed_restore_says_why_and_keeps_the_alert_and_the_empty_attachment() {
+        // a file that has no record
+        let (mut v, cfg, _file, root) = view_with_cut_off_attachment("compose-restore-none", false);
+        v.apply_compose_out(&cfg, ComposeOut { att_restore: Some("no-such-file.pdf".into()), ..Default::default() });
+        let c = v.compose.as_ref().unwrap();
+        assert!(c.error.as_ref().is_some_and(|e| e.starts_with("The old file could not be restored: ") && e.contains("nothing to restore")), "{:?}", c.error);
+        assert_eq!(c.att_alerts.len(), 1);
+        assert!(c.draft.attachments[0].data.is_empty());
+        let _ = std::fs::remove_dir_all(root);
+        // the trash copy is gone
+        let (mut v, cfg, file, root) = view_with_cut_off_attachment("compose-restore-gone", true);
+        v.apply_compose_out(&cfg, ComposeOut { att_restore: Some(file), ..Default::default() });
+        let c = v.compose.as_ref().unwrap();
+        assert!(c.error.as_ref().is_some_and(|e| e.contains("not in the trash any more")), "{:?}", c.error);
+        assert_eq!(c.att_alerts.len(), 1, "the alert stays");
+        assert!(c.draft.attachments[0].data.is_empty());
+        let _ = std::fs::remove_dir_all(root);
     }
 }

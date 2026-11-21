@@ -143,6 +143,8 @@ pub enum RightPanel {
     Calendar,
 }
 
+#[cfg(test)]
+mod calendar_action_tests;
 mod drops;
 #[cfg(all(test, target_os = "linux"))]
 mod drops_tests;
@@ -3094,6 +3096,36 @@ pub(crate) mod tests {
         assert_eq!(app.current_path(), Some(PathBuf::from("Ideas.md")));
         app.usage_ask(Ask::ShowFolder(PathBuf::from("Projects")));
         assert!(app.tree.expanded.contains(Path::new("Projects")));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: USE-012
+    #[test]
+    fn clearing_the_mail_index_hands_the_store_over_and_the_finished_clear_makes_it_ready_again() {
+        use crate::data_usage::{dialog::Ask, CacheId};
+        let (mut app, d) = test_app("usage-mail-index");
+        app.ctx = Some(egui::Context::default());
+        let mut n = 0;
+        while app.mail.ready_store().is_none() && n < 500 {
+            app.mail.tick(&app.cfg.clone(), true);
+            std::thread::sleep(Duration::from_millis(10));
+            n += 1;
+        }
+        assert!(app.mail.ready_store().is_some(), "the store of the test app opens");
+        app.usage_ask(Ask::Clear(CacheId::MailIndex));
+        assert!(app.usage.running(CacheId::MailIndex));
+        assert!(app.mail.ready_store().is_none(), "while the index is rebuilt nothing may write to it");
+        assert!(app.mail.rebuild_blocked().is_some());
+        let mut n = 0;
+        while app.usage.running(CacheId::MailIndex) && n < 500 {
+            app.usage_tick();
+            std::thread::sleep(Duration::from_millis(10));
+            n += 1;
+        }
+        assert!(!app.usage.running(CacheId::MailIndex));
+        assert!(app.mail.ready_store().is_some(), "the finished clear gives the store back");
+        assert!(app.mail.rebuild_blocked().is_none());
+        assert!(!app.toasts.is_empty() && app.toasts.iter().all(|(t, _)| !t.contains("not now")), "a clear says what it did: {:?}", app.toasts);
         let _ = std::fs::remove_dir_all(&d);
     }
 
