@@ -521,6 +521,7 @@ mod tests {
         f.frame(vec![]);
     }
 
+    // spec: LINK-017
     #[test]
     fn graph_the_wheel_zooms_on_the_pointer_clamped_and_stops_the_auto_fit() {
         let mut f = Frames::new("wheel", LINKED);
@@ -546,6 +547,7 @@ mod tests {
         assert!((world_before - world_after).length() < 1.0, "the point under the pointer stays: {world_before:?} {world_after:?}");
     }
 
+    // spec: LINK-017
     #[test]
     fn graph_a_pinch_zoom_is_kept_between_015_and_5() {
         let mut f = Frames::new("pinch", LINKED);
@@ -558,6 +560,7 @@ mod tests {
         assert!((f.g.zoom - 0.3).abs() < 1e-4, "{}", f.g.zoom);
     }
 
+    // spec: LINK-017
     #[test]
     fn graph_the_wheel_does_nothing_when_the_pointer_is_not_over_the_view() {
         let mut f = Frames::new("wheel-outside", LINKED);
@@ -566,6 +569,7 @@ mod tests {
         assert!(f.g.auto_fit, "no zoom by hand");
     }
 
+    // spec: LINK-017
     #[test]
     fn graph_the_pointer_over_a_node_is_a_pointing_hand_and_over_empty_space_is_not() {
         let mut f = Frames::new("hover", LINKED);
@@ -579,6 +583,7 @@ mod tests {
         assert_ne!(f.cursor, egui::CursorIcon::PointingHand);
     }
 
+    // spec: LINK-017
     #[test]
     fn graph_dragging_a_node_moves_it_and_wakes_the_physics_and_dragging_space_pans_and_stops_the_auto_fit() {
         let mut f = Frames::new("drag", LINKED);
@@ -606,6 +611,7 @@ mod tests {
         assert_eq!(f.g.pos.len(), pos_before.len());
     }
 
+    // spec: LINK-017
     #[test]
     fn graph_a_click_on_a_note_opens_it_and_a_click_on_a_missing_one_creates_it_and_empty_space_does_nothing() {
         let mut f = Frames::new("click", LINKED);
@@ -623,6 +629,7 @@ mod tests {
         assert!(f.click_at(Pos2::new(30.0, 360.0)).is_none());
     }
 
+    // spec: LINK-017
     #[test]
     fn graph_click_turns_a_click_into_the_action_that_opens_or_creates() {
         let mut actions = vec![];
@@ -633,6 +640,7 @@ mod tests {
         assert_eq!(actions.len(), 2);
     }
 
+    // spec: LINK-017
     #[test]
     fn graph_a_vault_without_links_says_so_and_a_vault_with_notes_does_not() {
         let mut f = Frames::new("empty", &[]);

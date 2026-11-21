@@ -1,15 +1,15 @@
 # Test coverage and gaps
 
 Spec: DEV-003 (coverage is measured and the gaps are tracked), DEV-010 (the ratchet). Measured on
-2026-11-15 at `df259ac` (Wave 3) with `cargo llvm-cov` 0.9.1 on Rust 1.100.0, the normal `cargo test`
-(751 tests; the 13 ignored ones, the real-server suites of DEV-005, are not run) and no `notes/`
-test vault.
+2026-11-21 on the branch of #463 with `cargo llvm-cov` 0.9.1 on Rust 1.100.0, the normal `cargo test`
+(2,519 tests run, 2,426 of them in the main binary; the 64 ignored ones, the real-server suites of
+DEV-005, are not run) and no `notes/` test vault. Functions come from the lcov file; it holds no
+regions, so there is no Regions row (`cargo llvm-cov report` prints them).
 
 | | Covered | Total | Percent |
 |---|---:|---:|---:|
-| **Lines** | 42,452 | 47,832 | **88.75 %** |
-| Functions | 6,243 | 7,056 | 88.48 % |
-| Regions | 76,724 | 86,090 | 89.12 % |
+| **Lines** | 86,102 | 90,955 | **94.66 %** |
+| Functions | 13,588 | 14,494 | 93.75 % |
 
 ## How it is measured
 
@@ -48,101 +48,46 @@ be tested without tooling and an issue for it).
 
 ## Coverage per file
 
-Lowest first. `sidebar.rs` and `theme.rs` are at 100 %; `keys.rs` and `keys_ui.rs` at 99 %.
+Lowest first (the 25 lowest of 215 files; 18 files are at 100 %). The lowest files are test helpers
+that only the ignored podman suites run, the `--screenshot`/`--record`/`--keys` tooling, process
+start-up and real OS calls (see "What remains" below).
 
 | File | Lines | Missed | Line coverage |
 |---|---:|---:|---:|
-| `src/main.rs` | 56 | 45 | 19.64 % |
-| `src/instance.rs` | 28 | 16 | 42.86 % |
-| `src/import/wl_drop.rs` | 292 | 162 | 44.52 % |
-| `src/app/drops.rs` | 403 | 216 | 46.40 % |
-| `src/reader.rs` | 398 | 149 | 62.56 % |
-| `src/graph.rs` | 273 | 87 | 68.13 % |
-| `src/panels.rs` | 1507 | 469 | 68.88 % |
-| `src/layout.rs` | 710 | 218 | 69.30 % |
-| `src/drawing.rs` | 1655 | 501 | 69.73 % |
-| `src/app.rs` | 1883 | 540 | 71.32 % |
-| `src/social/accounts_ui.rs` | 274 | 67 | 75.55 % |
-| `src/social/images.rs` | 98 | 19 | 80.61 % |
-| `src/app/mail.rs` | 160 | 30 | 81.25 % |
-| `src/link_assist.rs` | 472 | 81 | 82.84 % |
-| `src/mail/ui.rs` | 1836 | 269 | 85.35 % |
-| `src/import/tb_store.rs` | 524 | 73 | 86.07 % |
-| `src/opener.rs` | 309 | 42 | 86.41 % |
-| `src/mail/compose_ui.rs` | 782 | 106 | 86.45 % |
-| `src/pdf/export.rs` | 655 | 84 | 87.18 % |
+| `src/app/screenshot.rs` | 125 | 65 | 48.00 % |
+| `src/settings/data.rs` | 27 | 14 | 48.15 % |
+| `src/env_lock.rs` | 60 | 31 | 48.33 % |
+| `src/pdf/tex/pdf_text.rs` | 152 | 75 | 50.66 % |
+| `src/settings/help.rs` | 25 | 12 | 52.00 % |
+| `src/data_usage/cleanup.rs` | 42 | 8 | 80.95 % |
+| `src/secrets.rs` | 483 | 90 | 81.37 % |
+| `src/main.rs` | 222 | 41 | 81.53 % |
+| `src/media/output.rs` | 101 | 17 | 83.17 % |
+| `src/app.rs` | 2,802 | 436 | 84.44 % |
+| `src/app/mail.rs` | 162 | 25 | 84.57 % |
+| `src/social/images.rs` | 130 | 20 | 84.62 % |
+| `src/social/demo.rs` | 147 | 22 | 85.03 % |
+| `src/app/tex_setup.rs` | 124 | 18 | 85.48 % |
+| `src/pdf/tex/import.rs` | 317 | 46 | 85.49 % |
+| `src/script.rs` | 354 | 49 | 86.16 % |
+| `src/data_usage/dialog.rs` | 198 | 27 | 86.36 % |
+| `src/pdf/tex/archive.rs` | 286 | 37 | 87.06 % |
 | `src/social/markup.rs` | 252 | 32 | 87.30 % |
-| `src/drawing/connect.rs` | 877 | 109 | 87.57 % |
-| `src/mail.rs` | 686 | 83 | 87.90 % |
-| `src/social/demo.rs` | 142 | 17 | 88.03 % |
-| `src/social/feed_ui.rs` | 780 | 88 | 88.72 % |
-| `src/recovery.rs` | 81 | 9 | 88.89 % |
-| `src/social/note.rs` | 364 | 40 | 89.01 % |
-| `src/app/sync.rs` | 495 | 54 | 89.09 % |
-| `src/import.rs` | 747 | 81 | 89.16 % |
-| `src/mail/imap_client.rs` | 1027 | 110 | 89.29 % |
-| `src/config.rs` | 315 | 33 | 89.52 % |
-| `src/mail/demo.rs` | 68 | 7 | 89.71 % |
-| `src/mail/gpg.rs` | 786 | 76 | 90.33 % |
-| `src/mail/imap_sync.rs` | 787 | 76 | 90.34 % |
-| `src/vault_state.rs` | 301 | 28 | 90.70 % |
-| `src/mail/view.rs` | 1095 | 101 | 90.78 % |
-| `src/mail/send.rs` | 499 | 43 | 91.38 % |
-| `src/social/state.rs` | 649 | 53 | 91.83 % |
-| `src/social/mod.rs` | 329 | 26 | 92.10 % |
-| `src/social/bluesky.rs` | 569 | 44 | 92.27 % |
-| `src/app/social.rs` | 118 | 9 | 92.37 % |
-| `src/mail/smtp_client.rs` | 293 | 22 | 92.49 % |
-| `src/mail/ops.rs` | 1204 | 90 | 92.52 % |
-| `src/gitsync.rs` | 411 | 30 | 92.70 % |
-| `src/social/mastodon.rs` | 362 | 26 | 92.82 % |
-| `src/pdf/view.rs` | 101 | 7 | 93.07 % |
-| `src/mail/crypto.rs` | 1112 | 76 | 93.17 % |
-| `src/media.rs` | 235 | 16 | 93.19 % |
-| `src/fsutil.rs` | 522 | 35 | 93.30 % |
-| `src/calendar/dav.rs` | 875 | 58 | 93.37 % |
-| `src/mail/oauth.rs` | 856 | 56 | 93.46 % |
-| `src/calendar/ui.rs` | 969 | 58 | 94.01 % |
-| `src/mail/compose.rs` | 587 | 35 | 94.04 % |
-| `src/calendar/time.rs` | 194 | 11 | 94.33 % |
-| `src/mail/dialog.rs` | 707 | 39 | 94.48 % |
-| `src/mail/unsent.rs` | 129 | 7 | 94.57 % |
-| `src/pdf/write.rs` | 355 | 19 | 94.65 % |
-| `src/script.rs` | 190 | 10 | 94.74 % |
-| `src/calendar/store.rs` | 884 | 46 | 94.80 % |
-| `src/secrets.rs` | 289 | 15 | 94.81 % |
-| `src/social/post_index.rs` | 197 | 10 | 94.92 % |
-| `src/drawing/excalidraw_md.rs` | 474 | 24 | 94.94 % |
-| `src/editor.rs` | 1357 | 66 | 95.14 % |
-| `src/drawing/links.rs` | 216 | 10 | 95.37 % |
-| `src/vim.rs` | 464 | 18 | 96.12 % |
-| `src/import/people.rs` | 258 | 10 | 96.12 % |
-| `src/drawing/canvas.rs` | 285 | 11 | 96.14 % |
-| `src/lists.rs` | 446 | 17 | 96.19 % |
-| `src/calendar/dialog.rs` | 1391 | 50 | 96.41 % |
-| `src/vault.rs` | 1302 | 43 | 96.70 % |
-| `src/calendar/ics.rs` | 1010 | 33 | 96.73 % |
-| `src/drawing/layout.rs` | 397 | 13 | 96.73 % |
-| `src/sidebar_ui.rs` | 184 | 6 | 96.74 % |
-| `src/vault_path.rs` | 92 | 3 | 96.74 % |
-| `src/import/dialog.rs` | 277 | 8 | 97.11 % |
-| `src/mail/store.rs` | 944 | 27 | 97.14 % |
-| `src/mail/db.rs` | 776 | 22 | 97.16 % |
-| `src/import/tagwords.rs` | 157 | 4 | 97.45 % |
-| `src/mail/outbox.rs` | 925 | 23 | 97.51 % |
-| `src/drawing/pictures.rs` | 169 | 4 | 97.63 % |
-| `src/markdown.rs` | 531 | 11 | 97.93 % |
-| `src/jobs.rs` | 52 | 1 | 98.08 % |
-| `src/pdf/export_dialog.rs` | 191 | 3 | 98.43 % |
-| `src/picker.rs` | 186 | 2 | 98.92 % |
-| `src/dialog.rs` | 217 | 2 | 99.08 % |
-| `src/keys_ui.rs` | 721 | 6 | 99.17 % |
-| `src/keys.rs` | 533 | 3 | 99.44 % |
-| `src/search_all.rs` | 185 | 1 | 99.46 % |
-| `src/sidebar.rs` | 286 | 0 | 100.00 % |
-| `src/theme.rs` | 52 | 0 | 100.00 % |
+| `src/pdf/tex/ctan.rs` | 105 | 13 | 87.62 % |
+| `src/pdf/tex/settings_ui.rs` | 281 | 34 | 87.90 % |
+| `src/layout.rs` | 918 | 111 | 87.91 % |
+| `src/link_assist.rs` | 520 | 59 | 88.65 % |
+| `src/instance.rs` | 236 | 26 | 88.98 % |
+| `src/social/feed_ui.rs` | 819 | 89 | 89.13 % |
 
 ## Biggest gaps
+
+**What remains (2026-11-21, 94.66 %).** What is still uncovered is mostly test helpers that only the
+ignored podman suites run (`env_lock.rs`, `pdf/tex/pdf_text.rs`, `wl_drop/fake_compositor.rs`,
+`social/fake_server.rs`), the `--screenshot`, `--record` and `--keys` tooling (`app/screenshot.rs`,
+`script.rs`, `recorder.rs`, the `--view` demo set-up in `app.rs`), process start-up (`main.rs`,
+`instance.rs`) and real OS calls (the `secret-tool` keyring backend in `secrets.rs`, the sound card
+output in `media/output.rs`). The numbered list below is the history of the earlier gaps.
 
 The first ten are ordered by how much a silent bug costs (data loss, wrong mail or calendar state),
 not by line count. **Tooling** means a plain test is not sensible and a helper (DEV-004) should be
