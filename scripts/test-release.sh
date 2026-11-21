@@ -36,7 +36,7 @@ case "$1 $2" in
     [ -z "${GH_RELEASE_FAIL:-}" ] || { echo "gh: no network" >&2; exit 1; }
     echo "${GH_RELEASE_TAG:-}" ;;
   "run list")
-    # the main-check runs on GitHub (BUILD-038): GH_RUN_FAIL makes gh fail, GH_RUN_OUT is the list (tab-separated)
+    # the main-check runs on GitHub (BUILD-039): GH_RUN_FAIL makes gh fail, GH_RUN_OUT is the list (tab-separated)
     [ -z "${GH_RUN_FAIL:-}" ] || { echo "gh: no network" >&2; exit 1; }
     [ -z "${GH_RUN_OUT:-}" ] || printf '%b\n' "$GH_RUN_OUT" ;;
   "issue create") touch "$GH_LOG.made"; echo "https://github.com/rabalyn/shale/issues/77" ;;
@@ -163,7 +163,7 @@ expect "an issue missing from the notes stops the release before landing" 1 "#9"
 check "nothing landed or tagged after the failed check" '! remote_tag v0.4.0 && [ "$(version_on_main)" = 0.4.0-rc.2 ] && ! git rev-parse -q --verify refs/heads/release/v0.4.0 >/dev/null'
 land notes9 docs/changelog-pending/I9.md $'### Fixed\n\n- Nine (#9).'
 expect "a release is not a pre-release" 1 "has no pre-release part" make-release.sh 0.4.0-rc.9
-# the main-check of GitHub (BUILD-038, #453); the latest run that was not cancelled decides
+# the main-check of GitHub (BUILD-039, #453); the latest run that was not cancelled decides
 R_GREEN='completed\tsuccess\taaaaaaa1111\thttps://example/run/1'
 R_RED='completed\tfailure\tbbbbbbb2222\thttps://example/run/2'
 R_RUN='in_progress\t\tccccccc3333\thttps://example/run/3'

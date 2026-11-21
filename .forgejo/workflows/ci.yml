@@ -10,7 +10,7 @@
 # (.github/workflows/build.yml; Forgejo ignores .github/workflows because this folder exists).
 # The commit of a tag that passes the build is pushed to GitHub's `main` (the `mirror` job), so
 # the public repository has the code its issues talk about; that push starts GitHub's main-check
-# (macOS and Windows tests, which also keep the Rust cache warm, BUILD-038, ADR-0025). A release tag is
+# (macOS and Windows tests, which also keep the Rust cache warm, BUILD-039, ADR-0025). A release tag is
 # pushed there too (before main), which starts the release build (BUILD-016, BUILD-017).
 #
 # The runner starts the job in a container (Docker or Podman). Steps are plain shell: JavaScript
@@ -486,7 +486,7 @@ jobs:
           git "${gh[@]}" fetch -q github "+refs/heads/main:refs/remotes/github/main" || true
           # a release tag is pushed BEFORE main: GitHub's workflow main-check.yml, started by the push of
           # main, then finds the tag at its commit and leaves the macOS and Windows tests to the release
-          # build, which runs them too (BUILD-038, ADR-0025)
+          # build, which runs them too (BUILD-039, ADR-0025)
           release=yes
           case "$TAG" in *-*) release=no ;; esac
           push_tag() {

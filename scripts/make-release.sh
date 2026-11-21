@@ -18,7 +18,7 @@
 # Before the commit it runs scripts/bench-release.sh (BUILD-034): the full and the worst benchmark
 # profiles, stored under docs/perf/ with their comparison against the last release; a regression
 # stops the release unless --allow-perf-regression; --skip-bench leaves the step out.
-# Before anything is changed it looks at GitHub's workflow main-check (BUILD-038, ADR-0025, #453):
+# Before anything is changed it looks at GitHub's workflow main-check (BUILD-039, ADR-0025, #453):
 # when its latest run on `main` is red or still running (macOS or Windows fail there at the check tag,
 # before a release is made) the release stops; --ignore-github-check skips that, and a gh that
 # cannot answer stops it too. A dry run reports it.

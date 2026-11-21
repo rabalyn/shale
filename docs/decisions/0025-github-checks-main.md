@@ -2,7 +2,7 @@
 
 - **Status**: Accepted (owner decision, 2026-11-21)
 - **Date**: 2026-11-21
-- **Specs**: FORGE-003, FORGE-014, FORGE-017, BUILD-005, BUILD-012, BUILD-016, BUILD-017, BUILD-038
+- **Specs**: FORGE-003, FORGE-014, FORGE-017, BUILD-005, BUILD-012, BUILD-016, BUILD-017, BUILD-039
 - **Issue**: #452, #453
 - **Amends**: [ADR-0017](0017-github-issues-forgejo-ci.md) §4 ("GitHub builds only releases")
 

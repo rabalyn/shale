@@ -1,4 +1,4 @@
-# GitHub checks macOS and Windows on `main` (ADR-0025, BUILD-038, amends ADR-0017): every push of
+# GitHub checks macOS and Windows on `main` (ADR-0025, BUILD-039, amends ADR-0017): every push of
 # `main` to GitHub builds and tests the commit on macOS and Windows, and builds it on Linux. `main`
 # reaches GitHub only from Forgejo's `mirror` job after a green check tag or release (BUILD-016), so
 # this runs once per check tag, never per landing. Two reasons:

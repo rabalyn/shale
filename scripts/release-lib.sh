@@ -103,7 +103,7 @@ published_release() {
   PREV_PUBLISHED=$tag
 }
 
-# github_main_check <dry-run: yes|no>: GitHub's workflow main-check.yml (BUILD-038, ADR-0025) builds
+# github_main_check <dry-run: yes|no>: GitHub's workflow main-check.yml (BUILD-039, ADR-0025) builds
 # and tests macOS and Windows for every push of `main` to GitHub, i.e. for every green check tag. A release
 # is stopped when its latest run (cancelled and skipped runs do not count: a newer push replaced them) is
 # red or still running, because a red macOS or Windows test would stop the release build there too
@@ -118,7 +118,7 @@ github_main_check() {
   fi
   if ! out=$("$GH" run list -R "$GH_REPO" --workflow main-check.yml --branch main --limit 10 \
     --json status,conclusion,headSha,url -q '.[] | [.status, .conclusion, .headSha, .url] | @tsv'); then
-    msg="gh could not list the main-check runs of $GH_REPO (needed to see whether macOS and Windows pass on GitHub's main, BUILD-038); fix gh or say --ignore-github-check"
+    msg="gh could not list the main-check runs of $GH_REPO (needed to see whether macOS and Windows pass on GitHub's main, BUILD-039); fix gh or say --ignore-github-check"
   else
     # the latest run that was not replaced by a newer one decides
     while IFS=$'\t' read -r status conclusion sha url; do

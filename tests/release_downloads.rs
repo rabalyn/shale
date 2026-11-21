@@ -212,9 +212,9 @@ fn read(path: &str) -> String {
     fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path)).unwrap()
 }
 
-// spec: BUILD-038
+// spec: BUILD-039
 #[test]
-fn build_038_main_check_tests_macos_and_windows_on_pushes_of_main() {
+fn build_039_main_check_tests_macos_and_windows_on_pushes_of_main() {
     let mc = read(".github/workflows/main-check.yml");
     let code: String = mc.lines().filter(|l| !l.trim_start().starts_with('#')).collect::<Vec<_>>().join("\n");
     assert!(code.contains("on:\n  push:\n    branches: [main]\n  workflow_dispatch:"), "main and by hand only");
@@ -238,9 +238,9 @@ fn build_038_main_check_tests_macos_and_windows_on_pushes_of_main() {
     assert!(!linux.contains("cargo test --release --locked\n"), "Linux tests ran on Forgejo");
 }
 
-// spec: BUILD-038
+// spec: BUILD-039
 #[test]
-fn build_038_both_workflows_share_the_rust_cache_key() {
+fn build_039_both_workflows_share_the_rust_cache_key() {
     let (mc, build) = (read(".github/workflows/main-check.yml"), workflow());
     let pinned = "Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2";
     for (file, text, jobs) in [("main-check.yml", &mc, ["linux", "macos", "windows"]), ("build.yml", &build, ["linux", "macos", "windows"])] {
@@ -255,9 +255,9 @@ fn build_038_both_workflows_share_the_rust_cache_key() {
     assert_eq!(build.matches("rust-cache@").count(), 3);
 }
 
-// spec: BUILD-038
+// spec: BUILD-039
 #[test]
-fn build_038_a_release_tag_reaches_github_before_main_and_is_not_tested_twice() {
+fn build_039_a_release_tag_reaches_github_before_main_and_is_not_tested_twice() {
     let mc = read(".github/workflows/main-check.yml");
     let gate = job(&mc, "gate");
     assert!(gate.contains("git ls-remote --tags origin") && gate.contains("[0-9]+\\.[0-9]+\\.[0-9]+$"), "a release tag (no pre-release part) at the commit");
