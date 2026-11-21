@@ -4,11 +4,11 @@
 //! it would from a desktop's keyring.
 
 use super::api::{self, ApiError};
+use super::connect_and_inspect;
 use super::provider::{Kind, Server};
 use super::test_sync::{self, Problem, Remote};
-use super::connect_and_inspect;
-use crate::calendar::dav::{self, Account};
 use crate::calendar::dav::tests::closed_port;
+use crate::calendar::dav::{self, Account};
 use crate::gitsync::{self, credentials, Git, Options, TreeLock};
 use crate::secret::Secret;
 use std::io::Write;

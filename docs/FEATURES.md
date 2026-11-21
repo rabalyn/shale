@@ -1009,10 +1009,40 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 ## Git sync
 
-- Needs `git`; without it Shale can install one (see the next point). In Settings → Sync, enter the URL of a git repository
-  (`https://…`, `ssh://…`, `git@host:notes.git` or a folder path) and press Connect (an address with a password in it, and plain `http://` or `git://` except on this computer, are refused: use a credential helper or an SSH key), or run
+- Needs `git`; without it Shale can install one (see the next point). **Turn on sync** (Settings → Sync) is a short wizard that
+  asks how you want to keep your notes safe: **History on this device only** (the file history, outside the vault, no server and
+  no account), **My folder is already synced by another app** (Nextcloud, Dropbox, OneDrive, iCloud or a network drive: the files
+  travel through that app, the history stays on each computer and no `.git` folder is put in the folder) or **Sync with a server**.
+  The first step shows the install of git when there is none, and warns when it finds that the vault is in a network folder or in
+  a folder another app syncs (a guess from the file system and from marker files such as `.dropbox` and `.stfolder`; it never
+  decides anything).
+
+  ![Turn on sync: the three ways to keep notes safe](userguide/z_media/screenshots/wizard-choose.png)
+
+  ![The same page for a vault in a Dropbox folder: a warning that names the folder](userguide/z_media/screenshots/wizard-warning.png)
+
+- **Sync with a server.** Pick GitHub, GitLab, Codeberg or another server (or paste a repository address), then sign in with a
+  **personal access token** (the wizard links to the provider's page where you make one) or an **SSH key** (Shale uses one of
+  `~/.ssh` or makes an ed25519 key and shows the public key with a **Copy** button and a link to the provider's "add a key"
+  page). The token is kept in the system keyring (the Secret Service, the Keychain or the Credential Manager), never in a file, in
+  `.git/config`, in the address or on a command line; git gets it from Shale's own helper (`GIT_ASKPASS`, the Shale program started
+  without a window). Where the provider has an API (Forgejo, Gitea, GitHub) the wizard lists your repositories and creates a private
+  one; elsewhere it links to the provider's website and takes the address. Before the first sync it says what will happen
+  (an empty repository gets your notes, a repository with notes comes down, both with notes are merged and nothing is deleted),
+  and the **test sync** is one real sync with the result in plain words (it worked, wrong user name or token, no network, no
+  repository at that address, SSH key not accepted, certificate not trusted).
+
+  ![Choosing the server](userguide/z_media/screenshots/wizard-server.png)
+
+  ![Signing in with a token or an SSH key](userguide/z_media/screenshots/wizard-sign-in.png)
+
+- **The address field.** Settings → Sync keeps the old way under **Advanced**: enter the URL of a git repository
+  (`https://…`, `ssh://…`, `git@host:notes.git` or a folder path) and press Connect (an address with a password in it, and plain `http://` or `git://` except on this computer, are refused: use the wizard's token or an SSH key), or run
   `git init` in the vault folder yourself. Shale then syncs on its own: when the vault opens,
   every few minutes (default 5, changeable) and on "Sync now".
+- **A repository inside a synced folder.** A vault with a `.git` folder inside a folder another app syncs or on a network share
+  gets a warning in Settings → Sync; when it has no server, **Move the repository out** copies it to the history place on this
+  computer, checks the copy and only then removes `.git` from the vault. With a server nothing is offered.
 - **Install git with one button.** Settings → Sync shows whether a git and a git-lfs are found (through `PATH`), whether Shale's
   own git is installed, and which git is in use. Where a git is missing, **Download and install git** offers it with the
   download size, the size on disk and the folder `<data folder>/shale/git`; nothing is downloaded before you press the

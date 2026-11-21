@@ -669,14 +669,14 @@ pub fn hide_lfs(git: &mut Git) {
 }
 
 // the fake programs are shell scripts: these run on Unix
-#[cfg(all(test, unix))]
-mod install_tests;
-#[cfg(all(test, unix))]
-mod install_ui_tests;
 #[cfg(test)]
 mod credentials_tests;
 #[cfg(test)]
 mod detect_tests;
+#[cfg(all(test, unix))]
+mod install_tests;
+#[cfg(all(test, unix))]
+mod install_ui_tests;
 #[cfg(test)]
 mod managed_tests;
 #[cfg(test)]

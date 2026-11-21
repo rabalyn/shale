@@ -61,7 +61,10 @@ impl Cloud {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Kind {
     /// A network file system: its name, and whether it surely is one (a plain `fuse` may be local).
-    Network { fs: String, sure: bool },
+    Network {
+        fs: String,
+        sure: bool,
+    },
     Cloud(Cloud),
 }
 
@@ -204,7 +207,30 @@ pub fn dropbox_roots(json: &str) -> Vec<PathBuf> {
 // ---------------------------------------------------------------- network file systems
 
 /// The network file systems of the Linux kernel, `/proc/self/mountinfo` names.
-const NETWORK_FS: &[&str] = &["nfs", "nfs4", "cifs", "smb3", "smbfs", "smb2", "ncpfs", "9p", "afs", "ceph", "glusterfs", "lustre", "davfs", "fuse.davfs2", "fuse.sshfs", "fuse.rclone", "fuse.gvfsd-fuse", "fuse.s3fs", "fuse.cryptomator", "fuse.glusterfs", "fuse.ceph-fuse", "fuse.curlftpfs"];
+const NETWORK_FS: &[&str] = &[
+    "nfs",
+    "nfs4",
+    "cifs",
+    "smb3",
+    "smbfs",
+    "smb2",
+    "ncpfs",
+    "9p",
+    "afs",
+    "ceph",
+    "glusterfs",
+    "lustre",
+    "davfs",
+    "fuse.davfs2",
+    "fuse.sshfs",
+    "fuse.rclone",
+    "fuse.gvfsd-fuse",
+    "fuse.s3fs",
+    "fuse.cryptomator",
+    "fuse.glusterfs",
+    "fuse.ceph-fuse",
+    "fuse.curlftpfs",
+];
 
 /// Is this mount table file system (`nfs4`, `fuse.sshfs`) a network one? `Some(sure)`; None: local.
 pub fn linux_fs(fs: &str) -> Option<bool> {
@@ -434,7 +460,7 @@ pub fn warning(findings: &[Finding]) -> Option<String> {
     if findings.iter().any(Finding::is_network) {
         text.push_str("On a network folder Shale can be slow, and another computer's change may show up late. ");
     }
-    text.push_str("A git repository (a `.git` folder) does not belong in such a folder. This is a guess from the folder's marker files and file system; Shale only warns.");
+    text.push_str("A git repository (a .git folder) does not belong in such a folder. This is a guess from the folder's marker files and file system; Shale only warns.");
     Some(text)
 }
 
@@ -444,7 +470,7 @@ pub fn repo_warning(findings: &[Finding], has_remote: bool) -> Option<String> {
         return None;
     }
     let what: Vec<String> = findings.iter().map(Finding::what).collect();
-    let risk = format!("This vault has a `.git` folder inside {}. Sync programs and shares move a repository's files one by one and in any order, so the repository can end up half copied, forked or locked.", what.join(" and "));
+    let risk = format!("This vault has a .git folder inside {}. Sync programs and shares move a repository's files one by one and in any order, so the repository can end up half copied, forked or locked.", what.join(" and "));
     Some(if has_remote {
         format!("{risk} Your notes are kept safe by the sync with the server, so Shale offers no change here; if the repository breaks, clone it again from the server into a folder that no other program syncs.")
     } else {

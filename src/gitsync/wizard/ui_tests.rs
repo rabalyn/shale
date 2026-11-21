@@ -361,8 +361,11 @@ fn sync_053_a_token_is_checked_kept_in_the_keyring_and_never_in_a_file_and_the_r
     t.click("Next");
     assert_eq!(t.wizard().step, Step::SignIn);
     assert!(t.shows(&format!("Sign in to {host}")) && t.shows("A personal access token") && t.shows("An SSH key"), "{:?}", t.painted());
-    // a Forgejo has its token page
+    // a Forgejo has its token page, opened by the system's opener (SEC-006)
     assert!(t.shows("Open the page where you make a token"));
+    let opener = crate::opener::FakeXdgOpen::install();
+    t.click("Open the page where you make a token");
+    assert_eq!(opener.calls(1), vec![vec![format!("{base}/user/settings/applications")]]);
     // the token goes in a password field and is checked against the provider
     t.wizard().token = crate::secret::Secret::new("tok-secret-1");
     t.click("Check the token");

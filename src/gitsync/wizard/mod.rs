@@ -14,12 +14,12 @@ mod ui;
 
 pub(crate) use ui::warnings_ui;
 
+#[cfg(all(test, unix))]
+mod forgejo_env_tests;
 #[cfg(test)]
 mod parts_tests;
 #[cfg(all(test, unix))]
 mod ui_tests;
-#[cfg(all(test, unix))]
-mod forgejo_env_tests;
 
 /// Tests: a hermetic git (no user or system configuration, branch `main`, no git-lfs) for a test folder.
 #[cfg(all(test, unix))]

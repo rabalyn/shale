@@ -55,7 +55,9 @@ pub fn what_happens(remote: Remote, vault_has_notes: bool) -> &'static str {
         (Remote::Empty, true) => "The repository on the server is empty, so your notes will be uploaded to it.",
         (Remote::Empty, false) => "The repository on the server is empty and so is this vault, so there is nothing to copy yet. Notes you write from now on are uploaded.",
         (Remote::HasNotes, false) => "The repository on the server already has notes. They will be downloaded into this vault.",
-        (Remote::HasNotes, true) => "Both this vault and the repository on the server have notes. Shale merges them: nothing is deleted, and when the same note differs in both places both versions are kept, one as a copy marked “conflict”.",
+        (Remote::HasNotes, true) => {
+            "Both this vault and the repository on the server have notes. Shale merges them: nothing is deleted, and when the same note differs in both places both versions are kept, one as a copy marked “conflict”."
+        }
     }
 }
 
@@ -82,9 +84,32 @@ pub fn classify(error: &str) -> Problem {
         Problem::HostKey
     } else if has(&["ssl certificate", "certificate verify failed", "unable to get local issuer", "self-signed", "self signed", "ssl: no alternative certificate"]) && !has(&["authentication failed"]) {
         Problem::Certificate
-    } else if has(&["authentication failed", "invalid username or password", "invalid credentials", "could not read password", "could not read username", "terminal prompts disabled", "http basic: access denied", "returned error: 401", "returned error: 403", "unauthorized"]) {
+    } else if has(&[
+        "authentication failed",
+        "invalid username or password",
+        "invalid credentials",
+        "could not read password",
+        "could not read username",
+        "terminal prompts disabled",
+        "http basic: access denied",
+        "returned error: 401",
+        "returned error: 403",
+        "unauthorized",
+    ]) {
         Problem::Sign
-    } else if has(&["could not resolve host", "failed to connect", "connection refused", "network is unreachable", "timed out", "could not connect", "temporary failure in name resolution", "no route to host", "name or service not known", "connection reset", "could not resolve hostname"]) {
+    } else if has(&[
+        "could not resolve host",
+        "failed to connect",
+        "connection refused",
+        "network is unreachable",
+        "timed out",
+        "could not connect",
+        "temporary failure in name resolution",
+        "no route to host",
+        "name or service not known",
+        "connection reset",
+        "could not resolve hostname",
+    ]) {
         Problem::NoNetwork
     } else if has(&["repository not found", "not found", "does not appear to be a git repository", "returned error: 404", "does not exist"]) {
         Problem::NoRepository

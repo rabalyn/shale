@@ -39,7 +39,8 @@ fn read_public(private: &Path) -> Option<Key> {
 pub fn existing(home: &Path) -> Vec<Key> {
     let dir = dir_of(home);
     let mut out: Vec<Key> = ["id_ed25519", "id_ecdsa", "id_rsa"].iter().filter_map(|n| read_public(&dir.join(n))).collect();
-    let mut shale: Vec<PathBuf> = std::fs::read_dir(&dir).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("shale_") && !n.to_string_lossy().ends_with(".pub"))).collect();
+    let mut shale: Vec<PathBuf> =
+        std::fs::read_dir(&dir).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("shale_") && !n.to_string_lossy().ends_with(".pub"))).collect();
     shale.sort();
     out.extend(shale.iter().filter_map(|p| read_public(p)));
     out

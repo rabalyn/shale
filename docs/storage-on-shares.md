@@ -184,8 +184,8 @@ I did **not** corrupt a repository on purpose in a test: the Syncthing pair coul
 demonstration of a documented failure, not new information, and git's own documentation, Dropbox's and
 Nextcloud's support pages all warn against it. The verdict stands: **local-only history keeps its repository
 outside the vault** (`<data folder>/shale/history/<vault-id>`, separate git-dir), and only sync with a server keeps
-`.git` inside the vault, on a folder no cloud client syncs. #469's detection warns when a vault with `.git` is in
-such a folder.
+`.git` inside the vault, on a folder no cloud client syncs. The detection of #469 (`gitsync/detect.rs`, SYNC-059…SYNC-063)
+warns when a vault with `.git` is in such a folder, and moves the repository out when the vault has no server.
 
 ## Limits of the evidence
 
@@ -201,6 +201,8 @@ such a folder.
 - The Syncthing tests exercise one pair on one Linux machine (ext4/btrfs-class timestamps).
 
 ## Inputs for #471 and #469
+
+(Both are built: #471 as the file history, #469 as `gitsync/detect.rs` and the wizard, which use exactly these lists.)
 
 **File-system type strings** (for the detection of network folders, warning only):
 
@@ -239,7 +241,7 @@ commit must read file content (not trust mtime, which is coarse and skewed on sh
 names above and `.shale/` device-local files (#476). Commit identity and timestamps come from the local clock; do
 not compare them with the file's mtime.
 
-**The wizard (#469)** can say, in plain words: "Nextcloud, Dropbox, OneDrive and Syncthing folders are safe for your
+**The wizard (#469)** says, in plain words (`gitsync/wizard/ui.rs`): "Nextcloud, Dropbox, OneDrive and Syncthing folders are safe for your
 notes; do not put a `.git` folder in them"; the heuristic detection only warns. Concurrent edits are safe either way
 (conflict copies, never an overwrite); the two things a user can notice are a `…conflict…` note and an old
 tab layout after another device saved `.shale/state.json` (#476).

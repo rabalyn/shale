@@ -2,13 +2,13 @@
 features:
   - "Git sync"
 ---
-Keep a vault on several computers with git. Back to [[Start here]]. A vault in a folder that Dropbox, Nextcloud or OneDrive syncs: [[Vaults in cloud and network folders]].
+Keep a vault on several computers with git. Back to [[Start here]]. The easy way in is [[Turn on sync]]; this note is what runs behind it. A vault in a folder that Dropbox, Nextcloud or OneDrive syncs: [[Vaults in cloud and network folders]].
 
-- Needs `git` (see "Installing git" below if you have none). In Settings → Sync, enter the URL of a git repository
-  (`https://…`, `ssh://…`, `git@host:notes.git` or a folder path) and press **Connect**, or run
-  `git init` in the vault folder yourself. An address with a password in it, and plain `http://`
-  or `git://` (except on this computer), are refused: use a credential helper or an SSH key.
-  Shale never asks for a password; that is git's business.
+- Needs `git` (see "Installing git" below if you have none). In Settings → Sync press **Turn on sync…** ([[Turn on sync]]),
+  or open **Advanced**, enter the URL of a git repository (`https://…`, `ssh://…`, `git@host:notes.git` or a folder path)
+  and press **Connect**, or run `git init` in the vault folder yourself. An address with a password in it, and plain `http://`
+  or `git://` (except on this computer), are refused: use the wizard's token, a credential helper or an SSH key.
+  A token made through the wizard is kept in your system's keyring and given to git by Shale; it is never in a file.
 - Shale then syncs on its own: when the vault opens, every few minutes (default 5; the setting
   is `sync.interval_minutes`) and on **Sync now**. "Sync this vault automatically" switches it
   off (`sync.enabled`). Those settings are in the vault's `.shale/settings.json`, so they travel
@@ -53,8 +53,8 @@ Shale's own git if you installed one, and which of them is in use.
   only when the new one runs; the old one stays until then. `SHALE_UPDATES=off` switches every
   check off. Shale's own git is not updated by your system's package manager.
 - **Remove…** asks first and deletes the folder `shale/git` and nothing else.
-- Passwords are still git's business: a credential helper or an SSH key. Shale's git is run the
-  same way as any other git (no shell, no prompts).
+- Passwords are git's business unless you used the wizard: then Shale gives git the token from the keyring (see
+  [[Turn on sync]]); otherwise a credential helper or an SSH key. Shale's git is run the same way as any other git (no shell, no prompts).
 
 # Nothing is ever lost
 

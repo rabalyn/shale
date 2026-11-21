@@ -51,11 +51,7 @@ pub fn user_of(url: &str) -> Option<String> {
 
 /// Read git's prompt: `Password for 'https://user@host': ` or `Username for 'https://host': `.
 pub fn parse_prompt(prompt: &str) -> Option<Prompt> {
-    let (password, rest) = if let Some(r) = prompt.strip_prefix("Password for '") {
-        (true, r)
-    } else {
-        (false, prompt.strip_prefix("Username for '")?)
-    };
+    let (password, rest) = if let Some(r) = prompt.strip_prefix("Password for '") { (true, r) } else { (false, prompt.strip_prefix("Username for '")?) };
     let url = rest.split('\'').next()?;
     Some(Prompt { password, server: server_key(url)?, user: user_of(url) })
 }

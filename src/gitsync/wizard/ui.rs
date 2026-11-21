@@ -458,7 +458,11 @@ fn body(ui: &mut Ui, w: &mut Wizard, cx: &Cx, managed: &mut ManagedState, gitcfg
             }
             for (choice, title, text) in [
                 (Choice::Local, "History on this device only", "Shale keeps earlier versions of your notes on this computer, outside your vault folder. No server and no account."),
-                (Choice::Synced, "My folder is already synced by another app", "Nextcloud, Dropbox, OneDrive, iCloud or a network drive. The files travel through that app; the history stays on each computer, and no .git folder goes into the folder. That is safe for your notes."),
+                (
+                    Choice::Synced,
+                    "My folder is already synced by another app",
+                    "Nextcloud, Dropbox, OneDrive, iCloud or a network drive. The files travel through that app; the history stays on each computer, and no .git folder goes into the folder. That is safe for your notes.",
+                ),
                 (Choice::Server, "Sync with a server", "Forgejo, Gitea, GitHub, GitLab or any git address. Your notes are sent to the server and to your other computers; this vault gets a .git folder."),
             ] {
                 ui.add_space(6.0);
