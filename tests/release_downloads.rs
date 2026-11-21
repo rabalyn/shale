@@ -189,3 +189,21 @@ fn build_024_every_action_is_pinned_by_commit() {
         assert!(sha.chars().all(|c| c.is_ascii_hexdigit()) && at[40..].trim_start().starts_with("# "), "not pinned by commit: {l}");
     }
 }
+
+// spec: BUILD-012, BUILD-004
+#[test]
+fn build_012_github_does_not_repeat_checks_that_ran_before() {
+    let wf = workflow();
+    let code: String = wf.lines().filter(|l| !l.trim_start().starts_with('#')).collect::<Vec<_>>().join("\n");
+    assert!(!code.contains("cargo clippy") && !code.contains("cargo fmt"), "land.sh and cross-check.sh run these before main");
+    let linux = job(&wf, "linux");
+    assert!(!linux.contains("cargo test"), "Forgejo's build job tested this commit before the tag was mirrored");
+    assert!(linux.contains("cargo build --release --locked") && linux.contains("name: Package"), "the Linux build and download stay");
+    assert!(linux.contains("check-release.sh"), "the release check stays");
+    for name in ["macos", "windows"] {
+        assert!(job(&wf, name).contains("cargo test --release --locked"), "{name} is tested nowhere else");
+    }
+    let ci = fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".forgejo/workflows/ci.yml")).unwrap();
+    assert!(ci.contains("cargo test --release --locked"), "the Forgejo build job tests the tagged commit");
+    assert!(job(&ci, "mirror").contains("needs: build"), "the tag reaches GitHub only after a green build");
+}

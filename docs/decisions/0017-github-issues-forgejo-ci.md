@@ -39,6 +39,8 @@
    (to try `main` on macOS and Windows before a release), never for a push to `main`. Nothing is
    reported back from GitHub runs any more (BUILD-020 retired): a release is cut by hand and
    watched, and GitHub's notification of a failed run reaches the owner.
+   *Note (#454): the workflow does not repeat checks that ran on the same commit: no clippy or
+   fmt (`land.sh`), and no Linux tests (Forgejo, before the tag is mirrored); see BUILD-012.*
 5. **Security findings become issues** (#257): a daily Forgejo workflow (`security.yml`, and for
    every push to `main`) runs `cargo audit` and opens one GitHub issue per finding, closes it when
    the finding is gone, and leaves one closed as *not planned* alone (BUILD-021). GitHub's own

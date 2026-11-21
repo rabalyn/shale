@@ -210,7 +210,7 @@ no entries at all) both stop with "the changelog needs an update first".
 Day-to-day development is on a self-hosted Forgejo, whose CI (`.forgejo/workflows/ci.yml`)
 formats, lints, builds, tests and packages every tag and audits the dependencies daily
 (`security.yml`); GitHub gets `main` with each green tag and builds only the releases, on Linux,
-macOS and Windows (`.github/workflows/build.yml` runs for release tags and by hand, never for a
+macOS and Windows (it tests macOS and Windows; the Linux checks ran on Forgejo) (`.github/workflows/build.yml` runs for release tags and by hand, never for a
 push or a check tag).
 
 ## Development and issues
