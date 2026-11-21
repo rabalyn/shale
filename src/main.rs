@@ -37,7 +37,6 @@ mod editor;
 mod editor_cache;
 mod editor_preview;
 mod embed_size;
-#[cfg(test)]
 mod env_lock;
 #[cfg(test)]
 mod env_lock_tests;

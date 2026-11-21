@@ -1236,10 +1236,38 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    /// The lines (1-based, trimmed) of one source file that call a file function DATA-010 bans. Code compiled
+    /// only for tests is exempt: `*_tests.rs` files, everything after the first `#[cfg(test)]`, and a file
+    /// whose inner attributes (before any code) include `#![cfg(test)]`.
+    fn unsafe_file_calls(name: &str, text: &str) -> Vec<(usize, String)> {
+        let banned = ["fs::write(", "File::create(", "File::open(", "OpenOptions", "fs::copy(", "fs::rename(", "fs::read(", "fs::read_to_string("];
+        if name.ends_with("_tests.rs") {
+            return Vec::new();
+        }
+        for line in text.lines() {
+            let l = line.trim();
+            if l == "#![cfg(test)]" {
+                return Vec::new();
+            }
+            if !(l.is_empty() || l.starts_with("//") || l.starts_with("#![")) {
+                break; // the first code line ends the inner attributes
+            }
+        }
+        // everything from the test module on is test code
+        let code = text.split("#[cfg(test)]").next().unwrap_or("");
+        let mut bad = Vec::new();
+        for (i, line) in code.lines().enumerate() {
+            let l = line.trim_start();
+            if !l.starts_with("//") && banned.iter().any(|b| l.contains(b)) {
+                bad.push((i + 1, l.to_string()));
+            }
+        }
+        bad
+    }
+
     // spec: DATA-010
     #[test]
     fn no_unsafe_file_calls_outside_fsutil() {
-        let banned = ["fs::write(", "File::create(", "File::open(", "OpenOptions", "fs::copy(", "fs::rename(", "fs::read(", "fs::read_to_string("];
         let mut bad = Vec::new();
         let mut stack = vec![PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src")];
         while let Some(dir) = stack.pop() {
@@ -1253,24 +1281,35 @@ mod tests {
                     continue;
                 }
                 let name = p.file_name().unwrap().to_string_lossy().into_owned();
-                if !name.ends_with(".rs") || name == "fsutil.rs" || name.ends_with("_tests.rs") {
+                if !name.ends_with(".rs") || name == "fsutil.rs" {
                     continue;
                 }
                 let text = fs::read_to_string(&p).unwrap();
-                // everything from the test module on is test code
-                let code = text.split("#[cfg(test)]").next().unwrap_or("");
-                for (i, line) in code.lines().enumerate() {
-                    let l = line.trim_start();
-                    if l.starts_with("//") {
-                        continue;
-                    }
-                    if banned.iter().any(|b| l.contains(b)) {
-                        bad.push(format!("{}:{}: {}", p.strip_prefix(env!("CARGO_MANIFEST_DIR")).unwrap().display(), i + 1, l));
-                    }
+                for (line, l) in unsafe_file_calls(&name, &text) {
+                    bad.push(format!("{}:{}: {}", p.strip_prefix(env!("CARGO_MANIFEST_DIR")).unwrap().display(), line, l));
                 }
             }
         }
         assert!(bad.is_empty(), "write user data through fsutil instead:\n{}", bad.join("\n"));
+    }
+
+    // spec: DATA-010
+    #[test]
+    fn data_010_test_only_files_are_exempt_and_others_are_not() {
+        let call = "    let _ = std::fs::read_to_string(p);\n";
+        let plain = format!("//! docs\n\nfn f() {{\n{call}}}\n");
+        assert_eq!(unsafe_file_calls("a.rs", &plain).len(), 1, "a normal file is flagged");
+        let inner = format!("//! docs\n#![cfg(test)]\n\nfn f() {{\n{call}}}\n");
+        assert!(unsafe_file_calls("a.rs", &inner).is_empty(), "#![cfg(test)] exempts the file");
+        assert!(unsafe_file_calls("a_tests.rs", &plain).is_empty(), "*_tests.rs stays exempt");
+        let after = format!("fn f() {{}}\n#[cfg(test)]\nmod t {{\n{call}}}\n");
+        assert!(unsafe_file_calls("a.rs", &after).is_empty(), "code after #[cfg(test)] stays exempt");
+        let in_comment = format!("//! docs\n// #![cfg(test)]\nfn f() {{\n{call}}}\n");
+        assert_eq!(unsafe_file_calls("a.rs", &in_comment).len(), 1, "in a comment it does not count");
+        let in_string = format!("fn f() {{\n    let s = \"#![cfg(test)]\";\n{call}}}\n");
+        assert_eq!(unsafe_file_calls("a.rs", &in_string).len(), 1, "in a string it does not count");
+        let later = format!("fn f() {{}}\n#![cfg(test)]\nfn g() {{\n{call}}}\n");
+        assert_eq!(unsafe_file_calls("a.rs", &later).len(), 1, "after code it does not count");
     }
 
     // spec: VAULT-026
