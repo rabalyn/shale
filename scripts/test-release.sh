@@ -297,5 +297,29 @@ LAND_CHECK_CMD="echo ran >> $TMP/land-env.log; env | grep ^SHALE_PREV_PUBLISHED=
 check "the checks of land.sh did not see SHALE_PREV_PUBLISHED (#406)" '[ "$(command grep -c ^ran "$TMP/land-env.log")" -ge 1 ] && [ "$(command grep -c ^SHALE_PREV "$TMP/land-env.log")" = 0 ]'
 check "it compares with the last release that has a result" 'grep -Fq -- "--bench-compare docs/perf/results/v0.4.3.json docs/perf/results/v0.4.5.json" "$BENCH_LOG"'
 
+# spec: FORGE-013, FORGE-014: a changelog bigger than the pipe buffer (#466): has_entries must read
+# all of it, or git show dies of SIGPIPE and pipefail reports "no entries" for a filled [Unreleased]
+git checkout -q -b bigcl origin/main
+{
+  awk '/^\[Unreleased\]: / { exit } { print }' CHANGELOG.md
+  for i in $(seq 1 3000); do printf '## [0.0.%s] - 2026-01-01\n\n### Fixed\n\n- An old fix that pads the file to make it big, number %s.\n\n' "$i" "$i"; done
+  awk '/^\[Unreleased\]: / { on = 1 } on { print }' CHANGELOG.md
+} > CHANGELOG.md.big
+mv CHANGELOG.md.big CHANGELOG.md
+git add -A && git commit -q -m "Big changelog (Refs #1)"
+git checkout -q main
+bash scripts/land.sh bigcl >/dev/null 2>&1 || echo "setup: landing bigcl failed"
+check "the changelog is bigger than 200 KB (#466)" '[ "$(git show origin/main:CHANGELOG.md | wc -c)" -gt 200000 ]'
+expect "a big changelog with an empty [Unreleased] still stops a release (#466)" 1 "the changelog needs an update first" make-release.sh --dry-run patch
+expect "a big changelog with an empty [Unreleased] still stops a check tag (#466)" 1 "the changelog needs an update first" make-tag.sh --dry-run patch
+git checkout -q -b bigcl2 origin/main
+awk '{ print } /^## \[Unreleased\]/ { printf "\n### Fixed\n\n- Big (#466).\n" }' CHANGELOG.md > CHANGELOG.md.new
+mv CHANGELOG.md.new CHANGELOG.md
+git add -A && git commit -q -m "Entry in a big changelog (Refs #466)"
+git checkout -q main
+bash scripts/land.sh bigcl2 >/dev/null 2>&1 || echo "setup: landing bigcl2 failed"
+OUT=$(bash scripts/make-release.sh --dry-run patch 2>&1)
+check "a big changelog with an [Unreleased] entry does not stop a release dry run (#466)" '! printf "%s" "$OUT" | grep -Fq "needs an update first" && printf "%s" "$OUT" | grep -Fq "v0.4."'
+
 [ "$FAILED" = 0 ] && echo "all $N checks passed"
 exit "$FAILED"
