@@ -641,7 +641,8 @@ impl MailView {
 
     /// The rebuild ended (well or not): the index is read again from the start.
     pub fn end_rebuild(&mut self, cfg: &Config) {
-        let StoreState::Rebuilding(s) = std::mem::replace(&mut self.store, StoreState::Closed) else { return };
+        let StoreState::Rebuilding(s) = &self.store else { return };
+        let s = s.clone();
         self.reader = s.reader().ok();
         self.store = StoreState::Ready(s);
         // the folders keep their rows (and ids), so the folder shown stays
@@ -2844,11 +2845,21 @@ mod tests {
     fn the_end_of_a_rebuild_makes_the_store_ready_again_keeps_the_shown_folder_or_selects_the_first_and_does_nothing_without_a_rebuild() {
         // no rebuild: nothing happens
         let (mut v, cfg, _store, _) = view_with_store("rebuild-end");
-        // (a store that is Ready when end_rebuild is called ends up Closed: reported in #463, not tested here)
+        let before = v.ready_store().unwrap();
+        v.folder = Some(7);
+        v.end_rebuild(&cfg);
+        assert!(Arc::ptr_eq(&v.ready_store().unwrap(), &before), "a Ready store stays the same Ready store");
+        assert_eq!(v.folder, Some(7), "the shown folder is untouched");
+        v.store = StoreState::Failed("x".into());
+        v.end_rebuild(&cfg);
+        assert!(matches!(&v.store, StoreState::Failed(m) if m == "x"), "a Failed store stays Failed");
+        v.store = StoreState::Opening;
+        v.end_rebuild(&cfg);
+        assert!(matches!(v.store, StoreState::Opening), "an Opening store stays Opening");
         v.store = StoreState::Closed;
         v.end_rebuild(&cfg);
         assert!(matches!(v.store, StoreState::Closed));
-        assert!(v.folders.is_empty() && v.folder.is_none(), "nothing was read");
+        assert!(v.folders.is_empty(), "nothing was read");
         // no folder shown: the first one is selected, and the reader is back
         let (mut v, cfg, _store, folders) = view_with_store("rebuild-end-none");
         v.begin_rebuild().unwrap();
