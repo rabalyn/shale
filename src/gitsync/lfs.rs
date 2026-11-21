@@ -164,7 +164,7 @@ pub fn setup(git: &Git, vault: &Path, opts: &Options, tree: &TreeLock) -> Result
     }
     let staged = git.ok(vault, args!["diff", "--cached", "--name-only", "-z"])?.stdout.split(|b| *b == 0).filter(|s| !s.is_empty()).count();
     if staged > 0 {
-        let msg = opts.message("Store media files with Git LFS");
+        let msg = opts.message("Store media files with Git LFS", super::history::Reason::Sync);
         commit(git, vault, &ident, &["commit", "--quiet", "-m", &msg])?;
     }
     Ok(staged)

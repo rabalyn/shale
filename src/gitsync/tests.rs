@@ -3,23 +3,23 @@
 use super::*;
 use std::fs;
 
-const STAMP: &str = "2026-11-14 1200";
+pub(super) const STAMP: &str = "2026-11-14 1200";
 
 /// A temporary folder with a hermetic git: no user or system configuration, branch `main`.
-struct Env {
-    root: PathBuf,
-    git: Git,
+pub(super) struct Env {
+    pub(super) root: PathBuf,
+    pub(super) git: Git,
 }
 
 impl Env {
     /// A hermetic git without Git LFS (`hide_lfs`), so the tests behave the same on machines with
     /// and without git-lfs (SYNC-016).
-    fn new(tag: &str) -> Env {
+    pub(super) fn new(tag: &str) -> Env {
         Env::build(tag, false)
     }
 
     /// A hermetic git with the real git-lfs, or None (and a printed note) without it (BUILD-018).
-    fn lfs(tag: &str) -> Option<Env> {
+    pub(super) fn lfs(tag: &str) -> Option<Env> {
         if Git::default().lfs_version().is_none() {
             eprintln!("skipping: git-lfs is not installed here (CI installs it)");
             return None;
@@ -27,7 +27,7 @@ impl Env {
         Some(Env::build(tag, true))
     }
 
-    fn build(tag: &str, lfs: bool) -> Env {
+    pub(super) fn build(tag: &str, lfs: bool) -> Env {
         let root = std::env::temp_dir().join(format!("shale-gitsync-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
@@ -51,14 +51,14 @@ impl Env {
     }
 
     /// Run git for test setup; panics on failure.
-    fn git(&self, dir: &Path, a: &[&str]) -> String {
+    pub(super) fn git(&self, dir: &Path, a: &[&str]) -> String {
         let a: Vec<&OsStr> = a.iter().map(OsStr::new).collect();
         let o = self.git.run(dir, &a).unwrap();
         assert!(o.ok, "git {a:?} failed: {}", o.stderr);
         o.text()
     }
 
-    fn bare(&self) -> PathBuf {
+    pub(super) fn bare(&self) -> PathBuf {
         let p = self.root.join("remote.git");
         fs::create_dir_all(&p).unwrap();
         self.git(&p, &["init", "--quiet", "--bare"]);
@@ -66,31 +66,31 @@ impl Env {
     }
 
     /// An empty folder (not a repository yet).
-    fn folder(&self, name: &str) -> PathBuf {
+    pub(super) fn folder(&self, name: &str) -> PathBuf {
         let p = self.root.join(name);
         fs::create_dir_all(&p).unwrap();
         p
     }
 
     /// A vault connected to `remote` (via the same call the settings use).
-    fn vault(&self, name: &str, remote: &Path) -> PathBuf {
+    pub(super) fn vault(&self, name: &str, remote: &Path) -> PathBuf {
         let p = self.folder(name);
         connect(&self.git, &p, remote.to_str().unwrap()).unwrap();
         p
     }
 
-    fn opts(&self, host: &str) -> Options {
+    pub(super) fn opts(&self, host: &str) -> Options {
         Options { commit_prefix: String::new(), commit_suffix: String::new(), host: host.into(), stamp: STAMP.into() }
     }
 
-    fn sync(&self, vault: &Path) -> Report {
+    pub(super) fn sync(&self, vault: &Path) -> Report {
         let tree = TreeLock::default();
         let r = sync(&self.git, vault, &self.opts("test"), &tree).unwrap_or_else(|e| panic!("sync of {} failed: {e}", vault.display()));
         assert!(tree.try_hold().is_some(), "the sync must release the tree lock");
         r
     }
 
-    fn try_sync(&self, vault: &Path) -> Result<Report, String> {
+    pub(super) fn try_sync(&self, vault: &Path) -> Result<Report, String> {
         sync(&self.git, vault, &self.opts("test"), &TreeLock::default())
     }
 }
@@ -101,13 +101,13 @@ impl Drop for Env {
     }
 }
 
-fn write(vault: &Path, rel: &str, text: &str) {
+pub(super) fn write(vault: &Path, rel: &str, text: &str) {
     let p = vault.join(rel);
     fs::create_dir_all(p.parent().unwrap()).unwrap();
     crate::fsutil::write_atomic(&p, text.as_bytes()).unwrap();
 }
 
-fn read(vault: &Path, rel: &str) -> String {
+pub(super) fn read(vault: &Path, rel: &str) -> String {
     crate::fsutil::read_to_string(vault.join(rel)).unwrap_or_else(|e| panic!("{rel}: {e}"))
 }
 
