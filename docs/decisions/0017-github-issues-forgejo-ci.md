@@ -5,6 +5,7 @@
 - **Specs**: FORGE-001, FORGE-003…FORGE-009, FORGE-012, BUILD-005, BUILD-009, BUILD-012, BUILD-016, BUILD-017, BUILD-020 (retired), BUILD-021, BUILD-022, DEV-009
 - **Issue**: #256 (security scanning: #257)
 - **Amends**: [ADR-0013](0013-forgejo-and-issue-tracking.md) §1, §3, §4, §5
+- **Amended by**: [ADR-0018](0018-tag-only-ci.md); [ADR-0025](0025-github-checks-main.md) §4: GitHub also tests macOS and Windows on each push of `main` (per green check tag) and saves the Rust cache there
 
 ## Context
 
@@ -35,7 +36,7 @@
    when it arrives there. The direction is not reversed (GitHub first, Forgejo mirroring it),
    because then GitHub would see every change before the homelab checked it, and a pull mirror
    does not start Forgejo's CI.
-4. **GitHub builds only releases**: `.github/workflows/build.yml` runs for `v*` tags and by hand
+4. **GitHub builds only releases** (*amended by ADR-0025: and checks macOS and Windows on `main`, `.github/workflows/main-check.yml`*): `.github/workflows/build.yml` runs for `v*` tags and by hand
    (to try `main` on macOS and Windows before a release), never for a push to `main`. Nothing is
    reported back from GitHub runs any more (BUILD-020 retired): a release is cut by hand and
    watched, and GitHub's notification of a failed run reaches the owner.

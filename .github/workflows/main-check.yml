@@ -1,0 +1,158 @@
+# GitHub checks macOS and Windows on `main` (ADR-0025, BUILD-038, amends ADR-0017): every push of
+# `main` to GitHub builds and tests the commit on macOS and Windows, and builds it on Linux. `main`
+# reaches GitHub only from Forgejo's `mirror` job after a green check tag or release (BUILD-016), so
+# this runs once per check tag, never per landing. Two reasons:
+# 1. A macOS- or Windows-only failure shows at the check tag, before a release is made (#453);
+#    scripts/make-release.sh refuses while the latest run here is red (FORGE-017).
+# 2. GitHub caches are scoped to their ref and only the default branch's caches are readable by
+#    other refs, so the release build (build.yml, run for tags) never found one. The cache saved
+#    here, on `main`, is what the release jobs restore (#452): both workflows use the same
+#    rust-cache `shared-key` (release-<OS>), the same compiler, RUSTFLAGS and cargo commands.
+# Nothing is published, only `contents: read`. A release pushes its tag to GitHub before `main` (the
+# mirror job), and the job `gate` then skips the tests here: the release build runs them again.
+name: main-check
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# a newer push of main replaces a running check
+concurrency:
+  group: main-check
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  # a release commit is tested by build.yml (the tag is already on GitHub when main arrives): skip it
+  # here instead of testing it twice. A run by hand is never skipped.
+  gate:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.release.outputs.skip }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name: Is this commit a release?
+        id: release
+        run: |
+          skip=false
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            # tags that point at the pushed commit, annotated (peeled with ^{}) or not; a release has no "-"
+            if git ls-remote --tags origin 'refs/tags/v*' | awk -v sha="$GITHUB_SHA" '
+                { name = $2; sub(/\^\{\}$/, "", name); sub(/^refs\/tags\//, "", name) }
+                $1 == sha && name ~ /^v[0-9]+\.[0-9]+\.[0-9]+$/ { found = 1 }
+                END { exit !found }'; then
+              skip=true
+              echo "$GITHUB_SHA has a release tag: build.yml builds and tests it, nothing is repeated here."
+            fi
+          fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+
+  # Linux is built only to warm its cache: Forgejo ran the tests on this commit (BUILD-012). The
+  # same commands as build.yml (`cargo build --release --locked`), plus the test binaries, which
+  # the tests of a later run reuse.
+  linux:
+    needs: gate
+    if: needs.gate.outputs.skip != 'true'
+    permissions:
+      contents: read
+    env:
+      RUSTFLAGS: -D warnings
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Libraries for the window (Wayland, X11, OpenGL)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libasound2-dev libwayland-dev libxkbcommon-dev libx11-dev \
+            libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev libegl1-mesa-dev curl git-lfs ffmpeg
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.100.0
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: release-${{ runner.os }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Build the tests (not run, Forgejo ran them)
+        run: cargo test --release --locked --no-run
+
+  macos:
+    needs: gate
+    if: needs.gate.outputs.skip != 'true'
+    permissions:
+      contents: read
+    env:
+      RUSTFLAGS: -D warnings
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # the sync tests of Git LFS need it (SYNC-017); the runner image usually has it already
+      - name: Git LFS
+        run: command -v git-lfs >/dev/null || brew install git-lfs
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.100.0
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: release-${{ runner.os }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
+
+      - name: Build
+        run: cargo build --release --locked
+
+      # ffmpeg: the video tests run with it (MEDIA-009); they skip with a note without it (BUILD-018)
+      - name: ffmpeg
+        run: brew install ffmpeg
+
+      - name: Test
+        run: cargo test --release --locked
+
+  windows:
+    needs: gate
+    if: needs.gate.outputs.skip != 'true'
+    permissions:
+      contents: read
+    env:
+      RUSTFLAGS: -D warnings
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.100.0
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: release-${{ runner.os }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
+
+      - name: Build
+        run: cargo build --release --locked
+
+      # ffmpeg for the video tests (MEDIA-009); if Chocolatey cannot get it the tests skip with a note
+      - name: ffmpeg
+        continue-on-error: true
+        run: choco install ffmpeg -y --no-progress
+
+      - name: Test
+        run: cargo test --release --locked
