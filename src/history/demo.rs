@@ -45,7 +45,7 @@ fn copy_over(from: &Path, to: &Path, rel: &Path, out: &mut Vec<PathBuf>) -> std:
             if let Some(parent) = target.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            std::fs::copy(entry.path(), target)?;
+            crate::fsutil::write_atomic(&target, &crate::fsutil::read(entry.path())?)?;
             out.push(path);
         }
     }
