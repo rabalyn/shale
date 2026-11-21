@@ -632,11 +632,13 @@ pub fn host_name() -> String {
     "this computer".into()
 }
 
+pub mod detect;
 pub mod history;
 pub mod install;
 pub mod install_ui;
 pub mod lfs;
 pub mod managed;
+pub mod moveout;
 pub mod sources;
 
 /// Marks a `Git` whose `git lfs …` calls fail (see `hide_lfs`).
@@ -670,7 +672,11 @@ mod install_tests;
 #[cfg(all(test, unix))]
 mod install_ui_tests;
 #[cfg(test)]
+mod detect_tests;
+#[cfg(test)]
 mod managed_tests;
+#[cfg(test)]
+mod moveout_tests;
 #[cfg(test)]
 mod sources_tests;
 #[cfg(test)]
