@@ -77,6 +77,8 @@ mod math;
 mod math_ui_tests;
 mod media;
 #[cfg(test)]
+mod netshare_env_tests;
+#[cfg(test)]
 mod notes_vault_tests;
 mod opener;
 #[cfg(test)]

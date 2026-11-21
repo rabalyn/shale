@@ -96,7 +96,7 @@ fn dev_034_every_ignored_env_test_takes_the_lock_in_its_first_lines() {
     for file in files {
         let text = std::fs::read_to_string(&file).unwrap();
         let lines: Vec<&str> = text.lines().collect();
-        for (i, _) in lines.iter().enumerate().filter(|(_, l)| l.trim_start().starts_with("#[ignore") && ["mail-env.sh", "caldav-env.sh", "tex-env.sh"].iter().any(|h| l.contains(h))) {
+        for (i, _) in lines.iter().enumerate().filter(|(_, l)| l.trim_start().starts_with("#[ignore") && ["mail-env.sh", "caldav-env.sh", "tex-env.sh", "smb-env.sh", "nfs-env.sh", "syncthing-env.sh"].iter().any(|h| l.contains(h))) {
             let body: Vec<&str> = lines[i + 1..].iter().skip_while(|l| !l.contains("fn ")).skip(1).take(3).copied().collect();
             assert!(body.iter().any(|l| l.contains("env_lock::hold()") || l.contains("= turn()") || l.contains("Env::start()")), "{}:{}: an ignored env test takes the lock in its first lines, not {body:?}", file.display(), i + 1);
             checked += 1;
