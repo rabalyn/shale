@@ -61,7 +61,7 @@ fn fingerprint(git: &Git, vault: &Path, git_dir: Option<&Path>) -> Result<String
         a.push(d);
         a
     });
-    let mut run = |tail: &[&str]| -> Result<String, String> {
+    let run = |tail: &[&str]| -> Result<String, String> {
         let mut all: Vec<&OsStr> = dir_arg.iter().map(|a| a.as_os_str()).collect();
         all.extend(tail.iter().map(OsStr::new));
         git.ok(vault, &all).map(|o| o.text())

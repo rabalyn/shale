@@ -209,6 +209,8 @@ pub enum Modal {
     DataUsage,
     /// the versions of a note and the deleted notes (SYNC-045); its state is `ShaleApp::history.dialog`
     History,
+    /// the "Turn on sync" wizard (SYNC-047); its state is `ShaleApp::sync.setup.wizard`
+    SyncWizard,
     Export(Box<crate::pdf::export_dialog::ExportDialog>),
     /// the guided setup of the LaTeX export (TEX-017); its state is `ShaleApp::tex.setup`
     TexSetup,

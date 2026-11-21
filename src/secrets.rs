@@ -263,11 +263,6 @@ pub fn git_token_store(server: &str, user: &str, token: &str) -> bool {
     backend::store(GIT, server, user, token)
 }
 
-/// Remove a git token from the keyring.
-pub fn git_token_clear(server: &str, user: &str) {
-    backend::clear(GIT, server, user)
-}
-
 // ---------------------------------------------------------------- password fields and the key recording
 
 thread_local! {
@@ -559,7 +554,7 @@ mod tests {
         assert_eq!(git_token("https://git.test", "ada").as_ref().map(|s| s.expose()), Some("tok-g"));
         assert_eq!(backend::lookup(SOCIAL, "https://git.test", "ada"), None, "not mixed up with social accounts");
         assert_eq!(git_token("https://git.test", "bob").map(|s| s.expose().to_string()), None);
-        git_token_clear("https://git.test", "ada");
+        backend::clear(GIT, "https://git.test", "ada");
         assert!(git_token("https://git.test", "ada").is_none());
         pretend_no_keyring(true);
         assert!(!git_token_store("https://git.test", "ada", "tok-g"), "no keyring: not kept");

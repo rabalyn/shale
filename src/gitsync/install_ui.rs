@@ -323,7 +323,7 @@ fn origin_text(o: Origin) -> &'static str {
 }
 
 /// The page. Returns whether a setting changed.
-pub fn show(ui: &mut Ui, st: &mut ManagedState, cfg: &mut GitConfig) -> bool {
+pub(crate) fn show(ui: &mut Ui, st: &mut ManagedState, cfg: &mut GitConfig) -> bool {
     let ctx = ui.ctx().clone();
     let mut changed = false;
     if (st.detection.is_none() || st.detected_for != cfg.choice) && st.detecting.is_none() && st.task.is_none() {

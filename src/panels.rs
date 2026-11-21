@@ -904,7 +904,7 @@ impl ShaleApp {
                     keep = false;
                 }
             }
-            Modal::TexSetup | Modal::Export(_) | Modal::Calendars(_) | Modal::Event(_) | Modal::Import(_) | Modal::ImportSummary(_) | Modal::MailAccounts(_) | Modal::Social(_) | Modal::DataUsage | Modal::History => {}
+            Modal::TexSetup | Modal::Export(_) | Modal::Calendars(_) | Modal::Event(_) | Modal::Import(_) | Modal::ImportSummary(_) | Modal::MailAccounts(_) | Modal::Social(_) | Modal::DataUsage | Modal::History | Modal::SyncWizard => {}
             Modal::ConvertCanvas { rel, new_tab, always, existing } => {
                 let resp = crate::dialog::Dialog::new("convert-canvas", "Convert to an editable drawing?").width(460.0).show(&ctx, |ui| {
                     let name = rel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -1009,6 +1009,9 @@ impl ShaleApp {
         }
         if let Modal::History = &modal {
             keep = self.history_dialog(&ctx);
+        }
+        if let Modal::SyncWizard = &modal {
+            keep = self.sync_wizard_dialog(&ctx);
         }
         if let Modal::DataUsage = &modal {
             // the state both parts work on, and what the footer asked for

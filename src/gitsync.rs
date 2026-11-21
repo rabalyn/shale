@@ -641,6 +641,7 @@ pub mod lfs;
 pub mod managed;
 pub mod moveout;
 pub mod sources;
+pub mod wizard;
 
 /// Marks a `Git` whose `git lfs …` calls fail (see `hide_lfs`).
 #[cfg(test)]
