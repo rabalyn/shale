@@ -2,7 +2,7 @@
 features:
   - "Git sync"
 ---
-Keep a vault on several computers with git. Back to [[Start here]].
+Keep a vault on several computers with git. Back to [[Start here]]. A vault in a folder that Dropbox, Nextcloud or OneDrive syncs: [[Vaults in cloud and network folders]].
 
 - Needs `git` installed. In Settings → Sync, enter the URL of a git repository
   (`https://…`, `ssh://…`, `git@host:notes.git` or a folder path) and press **Connect**, or run
