@@ -15,3 +15,5 @@ lcov.info
 
 # flamegraphs of scripts/bench.sh --flamegraph: made again from any commit, attached to releases (#400)
 /docs/perf/flamegraphs/
+/tests/syncthing-env/data/
+/tests/nfs-env/data/
