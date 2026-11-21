@@ -14,9 +14,33 @@ its section from this file.
 
 - GitHub issue forms for a bug report and a feature request, a `CONTRIBUTING.md` (how to report, how changes are made, how a pull request reaches `main`, labels, licence) and a `CODE_OF_CONDUCT.md` (#456).
 
+### Changed
+
+- Developers only: the podman test stacks (mail, CalDAV, TeX image) are used by one checkout at a time. Everything that starts or changes them, `scripts/land.sh`, the helper scripts and the ignored `cargo test` suites, takes one lock per user and machine and a second checkout waits for the first, so a suite no longer fails because another worktree restarted the stacks or added mail (#420, #417).
+- Developers only: the icon-button hints of a `--keys` script run (BUILD-007) belong to the window that runs the script instead of one process-wide list, so a test that draws icon buttons can no longer feed or empty the hints of another test; `build_007_an_icon_button_is_found_by_its_tooltip_and_only_while_a_script_runs` no longer fails now and then in a parallel `cargo test` (#429).
+- The notes of the user guide have proper headings: the headings of each note start at level 1 (`#`) instead of level 2, so the outline of a note and its table of contents begin at the top (#446).
+- Landing a change (`scripts/land.sh`) runs only the real-server suites the change touches: CalDAV code starts only the CalDAV stack, mail code only the mail stack, and the TeX image is built only for TeX changes. Before, any one of them started both stacks, built the TeX image and ran all three suites. The tag CI still runs all of them (#447).
+- The real-server suites of a landing (`env-tests.sh run`) run at the same time: the CalDAV and mail stacks and the TeX image build start together, then every suite runs with its own log (printed whole when the suite ends), so a landing that needs two or three suites takes about as long as the slowest one instead of the sum. A failing suite is named and the others still finish (#448).
+- Landing a change (`scripts/land.sh`) runs the benchmark tests (`cargo test --features bench bench::`, about a minute) only when the change touches the benchmark harness or the build (`src/bench/`, `src/main.rs`, `scripts/bench*.sh`, `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `scripts/land.sh`), and always for a release landing. The clippy check of the benchmark feature still runs on every landing, so a change anywhere that breaks the harness' build is still caught (#449).
+- Developers only: `scripts/land.sh` runs the tests of a landing with `cargo nextest run --locked --no-fail-fast` instead of `cargo test`, about 18 s faster (38 s instead of 57 s at 14 test threads); it passes the thread budget (`RUST_TEST_THREADS`, or the one in the cargo config's `[env]`) on as `--test-threads`. It needs cargo-nextest (`cargo install cargo-nextest --locked`) and stops at the start without it. The step is named `cargo nextest run` in the landing statistics (#451).
+- Builds: GitHub now tests macOS and Windows for each check tag. A new workflow `main-check.yml` runs when Forgejo's green run pushes `main` to GitHub: it builds and tests macOS and Windows (and builds Linux), so a macOS- or Windows-only failure shows at the check tag and not at the release. It also saves the Rust cache on `main`, which the release build restores (both use the cache key `release-<OS>`), so release builds stop starting cold (#452, #453, ADR-0025).
+- `scripts/make-release.sh` stops when GitHub's latest main-check run is red or still running, or when `gh` cannot tell; `--ignore-github-check` skips this and `--dry-run` reports it (#453).
+- Forgejo's `mirror` job pushes a release tag to GitHub before `main`, so the main-check of a release commit leaves the tests to the release build (#452).
+- The GitHub release workflow no longer repeats checks that already ran on the same commit: clippy and `cargo fmt --check` (run by `scripts/land.sh` and `scripts/cross-check.sh` on every landing) and the Linux tests (run by Forgejo before the tag reaches GitHub) are gone from it, so a release build is faster. macOS and Windows are still tested there (#454).
+- Forgejo CI: a release tag no longer rebuilds the TeX image without the cache (only the weekly run does) (ADR-0026, #455).
+
 ### Fixed
 
 - In the editor, a click on a media player (play and pause, the seek bar, the volume, mute, the card, and the round buttons over a video) no longer takes the keyboard from the text: the cursor and the selection stay active, Space types a space, and you keep typing where you stopped. In the reading view a click still gives the player the keyboard, so Space toggles it (#441).
+- LaTeX export: the red `[missing: …]` placeholder of a picture or embed is in the paper red of missing links (RGB 192, 28, 40), as the built-in PDF export prints them, instead of the screen colour (#315).
+- Editor: when the 100 % button or a drag on the edge of a picture or video writes a width into its link, the text cursor and the selection move with the text, like with any edit before them. Before, a letter typed right afterwards landed a few characters away from where the cursor was (#443).
+- Settings → Keybindings: a chord with Ctrl, Alt or Shift (such as Ctrl+Alt+1) is recorded as that one chord. Before, the modifier keys pressed first were recorded as chords of their own, so Enter found a sequence that starts with a bare Ctrl, refused it, and the action kept its old key (#445).
+- A sequence that waits for a chord with Ctrl, Alt, Shift or Super (such as Space Ctrl+F) is no longer cancelled by the modifier key itself, which a keyboard reports before the key (#445).
+- A tag whose real-server tests, coverage or unused-dependency check failed no longer reaches GitHub: the mirror job now waits for every check job (build, unused-deps, coverage, env-tests), so a red run stops a release too (#461).
+
+### Tests
+
+- Tests for `main-check.yml` (triggers, same commands as `build.yml`, shared cache key, release gate and the order of the mirror pushes) in `tests/release_downloads.rs`, and for the GitHub check of `make-release.sh` in `scripts/test-release.sh`.
 
 ## [0.6.9] - 2026-11-19
 
