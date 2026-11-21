@@ -228,7 +228,13 @@ merge_changelog() {
 # has_entries <commit>: [Unreleased] of CHANGELOG.md or a file of docs/changelog-pending/ has a line
 has_entries() {
   [ -n "$(git ls-tree --name-only "$1" docs/changelog-pending/ | grep '\.md$' || true)" ] && return 0
-  git show "$1:CHANGELOG.md" 2>/dev/null | awk '/^## \[/ { if (on) exit; if ($0 == "## [Unreleased]") { on = 1; next } } /^\[[^]]+\]: / { if (on) exit } on && /[^[:space:]]/ && !/^### / { found = 1 } END { exit !found }'
+  # awk reads all of it (a flag, no exit): an early exit kills `git show` with SIGPIPE under pipefail (#466)
+  git show "$1:CHANGELOG.md" 2>/dev/null | awk '
+    done { next }
+    /^## \[/ { if (on) { done = 1; next } if ($0 == "## [Unreleased]") { on = 1; next } }
+    /^\[[^]]+\]: / { if (on) { done = 1; next } }
+    on && /[^[:space:]]/ && !/^### / { found = 1 }
+    END { exit !found }'
 }
 
 # tag_and_push <kind: check|release> <version> <issue|""> <dry-run: yes|no>

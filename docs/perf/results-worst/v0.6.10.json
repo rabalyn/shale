@@ -1,0 +1,79 @@
+{
+  "schema": 2,
+  "commit": "3967e9daeee8efb3468023af99a5d5946a18143d",
+  "describe": "v0.6.10",
+  "date": "2026-11-21T16:25:29Z",
+  "host": {
+    "cpu": "Intel(R) Core(TM) i7-14700KF",
+    "cores": 28,
+    "os": "linux x86_64 7.3.5-2-cachyos",
+    "load": 2.56
+  },
+  "profile": "bench-release",
+  "scenarios": [
+    {
+      "id": "worst.startup",
+      "iters": 3,
+      "median_ns": 757795360,
+      "p95_ns": 760889887,
+      "min_ns": 755536976,
+      "allocs": 5007880,
+      "alloc_bytes": 931022716,
+      "peak_bytes": 183189037,
+      "retained_bytes": 43529210,
+      "version": 1
+    },
+    {
+      "id": "worst.frame.idle",
+      "iters": 60,
+      "median_ns": 2248545,
+      "p95_ns": 2424022,
+      "min_ns": 2173180,
+      "allocs": 10008,
+      "alloc_bytes": 22479193,
+      "peak_bytes": 19367768,
+      "retained_bytes": 1920,
+      "version": 1
+    },
+    {
+      "id": "worst.frame.typing",
+      "iters": 30,
+      "median_ns": 23875722,
+      "p95_ns": 26153518,
+      "min_ns": 23475975,
+      "allocs": 145707,
+      "alloc_bytes": 74709561,
+      "peak_bytes": 22299293,
+      "retained_bytes": 4981489,
+      "version": 1
+    },
+    {
+      "id": "worst.views.cycle",
+      "iters": 3,
+      "median_ns": 139787303,
+      "p95_ns": 209360958,
+      "min_ns": 139517493,
+      "allocs": 397975,
+      "alloc_bytes": 406656983,
+      "peak_bytes": 90851372,
+      "retained_bytes": 135570354,
+      "version": 1
+    },
+    {
+      "id": "worst.memory.growth",
+      "iters": 1,
+      "median_ns": 26632883858,
+      "p95_ns": 26632883858,
+      "min_ns": 26632883858,
+      "allocs": 114358175,
+      "alloc_bytes": 73086882109,
+      "peak_bytes": 59368296,
+      "retained_bytes": 508762,
+      "version": 1
+    }
+  ],
+  "skipped": [],
+  "run": "worst",
+  "peak_rss_kb": 608664,
+  "repeats": 1
+}
