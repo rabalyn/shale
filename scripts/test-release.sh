@@ -35,6 +35,10 @@ case "$1 $2" in
     # the last published release (BUILD-013): GH_RELEASE_FAIL makes gh fail, GH_RELEASE_TAG names the tag
     [ -z "${GH_RELEASE_FAIL:-}" ] || { echo "gh: no network" >&2; exit 1; }
     echo "${GH_RELEASE_TAG:-}" ;;
+  "run list")
+    # the main-check runs on GitHub (BUILD-038): GH_RUN_FAIL makes gh fail, GH_RUN_OUT is the list (tab-separated)
+    [ -z "${GH_RUN_FAIL:-}" ] || { echo "gh: no network" >&2; exit 1; }
+    [ -z "${GH_RUN_OUT:-}" ] || printf '%b\n' "$GH_RUN_OUT" ;;
   "issue create") touch "$GH_LOG.made"; echo "https://github.com/rabalyn/shale/issues/77" ;;
 esac
 exit 0
@@ -159,6 +163,19 @@ expect "an issue missing from the notes stops the release before landing" 1 "#9"
 check "nothing landed or tagged after the failed check" '! remote_tag v0.4.0 && [ "$(version_on_main)" = 0.4.0-rc.2 ] && ! git rev-parse -q --verify refs/heads/release/v0.4.0 >/dev/null'
 land notes9 docs/changelog-pending/I9.md $'### Fixed\n\n- Nine (#9).'
 expect "a release is not a pre-release" 1 "has no pre-release part" make-release.sh 0.4.0-rc.9
+# the main-check of GitHub (BUILD-038, #453); the latest run that was not cancelled decides
+R_GREEN='completed\tsuccess\taaaaaaa1111\thttps://example/run/1'
+R_RED='completed\tfailure\tbbbbbbb2222\thttps://example/run/2'
+R_RUN='in_progress\t\tccccccc3333\thttps://example/run/3'
+R_CANCEL='completed\tcancelled\tddddddd4444\thttps://example/run/4'
+GH_RUN_OUT="$R_RED" expect "a red main-check on GitHub stops the release" 1 "is failure" make-release.sh 0.4.0
+GH_RUN_OUT="$R_RUN\n$R_GREEN" expect "a main-check that is still running stops the release" 1 "is still in_progress" make-release.sh 0.4.0
+GH_RUN_OUT="$R_CANCEL\n$R_RED" expect "a cancelled run does not count: the red one before it stops" 1 "is failure" make-release.sh 0.4.0
+GH_RUN_FAIL=1 expect "a gh that cannot list the runs stops the release" 1 "could not list the main-check runs" make-release.sh 0.4.0
+GH_RUN_OUT="$R_RED" expect "--ignore-github-check skips the check" 0 "not looked at" make-release.sh --dry-run --ignore-github-check 0.4.0
+GH_RUN_OUT="$R_RED" expect "a dry run reports a red main-check and goes on" 0 "a release would stop here" make-release.sh --dry-run 0.4.0
+GH_RUN_OUT="$R_CANCEL\n$R_GREEN\n$R_RED" expect "a green main-check lets the release go on" 0 "main-check is green for aaaaaaa" make-release.sh --dry-run 0.4.0
+check "the check asked GitHub for the runs of main-check.yml on main" 'grep -Fq "run list -R rabalyn/shale --workflow main-check.yml --branch main" "$GH_LOG"'
 expect "the release of the rc version" 0 "release tag: v0.4.0" make-release.sh
 check "main and the tag have version 0.4.0" 'remote_tag v0.4.0 && [ "$(version_on_main)" = 0.4.0 ] && [ "$(git rev-parse "v0.4.0^{commit}")" = "$(git rev-parse origin/main)" ]'
 git show origin/main:CHANGELOG.md > "$TMP/cl"
