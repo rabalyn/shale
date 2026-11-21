@@ -481,7 +481,13 @@ fn imp_031_pictures_and_pdfs_dropped_on_a_note_are_saved_as_files_and_linked_fro
 #[test]
 fn imp_035_a_word_file_is_converted_in_a_job_while_the_dialog_waits_and_then_becomes_a_note() {
     let mut w = W::new("docx");
-    let fake = crate::import::docx_tests::fake_pandoc(&w.out, "pandoc", "while [ $# -gt 0 ]; do case \"$1\" in -o) out=\"$2\"; shift;; esac; shift; done; sleep 0.3; printf '# From Word\\n' > \"$out\"");
+    // pandoc ends when the test has looked at the waiting dialog (a sleep would race the frames)
+    let gate = w.out.join("pandoc-may-end");
+    let fake = crate::import::docx_tests::fake_pandoc(
+        &w.out,
+        "pandoc",
+        &format!("while [ $# -gt 0 ]; do case \"$1\" in -o) out=\"$2\"; shift;; esac; shift; done; n=0; while [ ! -e '{}' ] && [ $n -lt 3000 ]; do sleep 0.01; n=$((n+1)); done; printf '# From Word\\n' > \"$out\"", gate.display()),
+    );
     let docx = w.file("Quarterly Plan.docx");
     std::fs::write(&docx, b"PK").unwrap();
     // off: an attachment, as before
@@ -503,6 +509,7 @@ fn imp_035_a_word_file_is_converted_in_a_job_while_the_dialog_waits_and_then_bec
     w.app.modal = Some(Modal::Import(d));
     w.frames(2);
     assert!(w.dialog_open() && w.painted("Converting the Word files with pandoc"), "the window is not blocked: it says what is going on");
+    std::fs::write(&gate, b"").unwrap();
     w.until("the note", |a| a.modal.is_none());
     let root = w.app.vault.as_ref().unwrap().root.clone();
     let note = std::fs::read_to_string(root.join("Sub/Quarterly Plan.md")).unwrap();

@@ -67,9 +67,25 @@ impl T {
         self.hl.try_label(&mut self.app, label).is_some()
     }
 
-    fn open_wizard(&mut self) {
+    /// Settings → Sync, drawn once the page has its final height. The page starts a job that looks
+    /// for git ("Looking for git…", one line) and shows what it found when it ends (five lines):
+    /// everything below moves down by then, so a click on a place read before that misses.
+    fn open_sync_settings(&mut self) {
         self.app.open_settings(SettingsTab::Sync);
+        let t = Instant::now();
+        loop {
+            self.hl.frames(&mut self.app, 1);
+            if self.app.sync.managed.detection.is_some() {
+                break;
+            }
+            assert!(t.elapsed() < Duration::from_secs(60), "the look for git did not end");
+            std::thread::sleep(Duration::from_millis(10));
+        }
         self.hl.frames(&mut self.app, 3);
+    }
+
+    fn open_wizard(&mut self) {
+        self.open_sync_settings();
         self.click("Turn on sync…");
         assert!(matches!(self.app.modal, Some(Modal::SyncWizard)), "the wizard opened");
         self.hl.frames(&mut self.app, 3);
@@ -114,7 +130,7 @@ const THREE: [&str; 3] = ["History on this device only", "My folder is already s
 #[test]
 fn sync_047_settings_offer_turn_on_sync_the_wizard_asks_three_things_and_cancel_changes_nothing() {
     let mut t = T::new("three");
-    t.app.open_settings(SettingsTab::Sync);
+    t.open_sync_settings();
     assert!(t.shows("Turn on sync…") && t.shows("Advanced"), "{:?}", t.painted());
     assert!(!t.has_button("Connect"), "the address field is under Advanced");
     t.click("Turn on sync…");
@@ -477,11 +493,8 @@ fn sync_062_a_vault_with_git_inside_a_cloud_folder_is_warned_and_offered_the_mov
     gitsync::connect(&git, &t.vault, t.bare().to_str().unwrap()).unwrap();
     t.app.sync.remote = Some("x".into());
     t.app.sync.setup.detect.findings = vec![Finding { kind: Found::Cloud(Cloud::Dropbox), at: t.root.clone() }];
-    t.app.open_settings(SettingsTab::Sync);
-    let text = {
-        t.hl.frames(&mut t.app, 4);
-        t.painted().join("\n")
-    };
+    t.open_sync_settings();
+    let text = t.painted().join("\n");
     assert!(text.contains("a Dropbox folder") && text.contains("half copied"), "{text}");
     assert!(text.contains("sync with the server") && !t.has_button("Move the repository out"), "a vault with a server is offered nothing destructive: {text}");
 
