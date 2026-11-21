@@ -48,7 +48,7 @@ fn copy_dir(from: &Path, to: &Path) -> Result<(), String> {
         } else if t.is_dir() {
             copy_dir(&src, &dst)?;
         } else {
-            std::fs::copy(&src, &dst).map_err(|e| format!("could not copy {}: {e}", src.display()))?;
+            crate::fsutil::copy_new(&src, &dst).map_err(|e| format!("could not copy {}: {e}", src.display()))?;
         }
     }
     Ok(())
@@ -118,7 +118,7 @@ pub fn move_out(git: &Git, vault: &Path, history_root: &Path, tree: &TreeLock, w
         let _ = std::fs::remove_dir_all(&moving);
         return Err(e);
     }
-    if let Err(e) = std::fs::rename(&moving, &target) {
+    if let Err(e) = crate::fsutil::rename_noreplace(&moving, &target) {
         let _ = std::fs::remove_dir_all(&moving);
         return Err(format!("could not put the copy in place ({}): {e}", target.display()));
     }
@@ -126,7 +126,8 @@ pub fn move_out(git: &Git, vault: &Path, history_root: &Path, tree: &TreeLock, w
     // removal that fails halfway never leaves a vault with a broken `.git`
     let dot_git = vault.join(".git");
     let removing = vault.join(".git.shale-removing");
-    std::fs::rename(&dot_git, &removing).map_err(|e| format!("the history is on this computer now ({}), but the .git folder of the vault could not be removed: {e}", target.display()))?;
+    let _ = std::fs::remove_dir_all(&removing);
+    crate::fsutil::rename_noreplace(&dot_git, &removing).map_err(|e| format!("the history is on this computer now ({}), but the .git folder of the vault could not be removed: {e}", target.display()))?;
     std::fs::remove_dir_all(&removing).map_err(|e| format!("the history is on this computer now ({}), but the leftover folder {} of the vault could not be deleted: {e}", target.display(), removing.display()))?;
     Ok(target)
 }
