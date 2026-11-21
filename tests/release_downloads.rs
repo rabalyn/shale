@@ -189,3 +189,48 @@ fn build_024_every_action_is_pinned_by_commit() {
         assert!(sha.chars().all(|c| c.is_ascii_hexdigit()) && at[40..].trim_start().starts_with("# "), "not pinned by commit: {l}");
     }
 }
+
+/// The top-level jobs of Forgejo's `ci.yml` as `(name, job-level if:, needs)`; `if:` is empty when absent.
+fn forgejo_jobs() -> Vec<(String, String, Vec<String>)> {
+    let text = fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".forgejo/workflows/ci.yml")).unwrap();
+    let after = text.split("\njobs:\n").nth(1).expect("no `jobs:` in ci.yml");
+    let mut jobs: Vec<(String, String, Vec<String>)> = Vec::new();
+    for line in after.lines() {
+        if let Some(name) = line.strip_prefix("  ").filter(|r| !r.starts_with(' ') && r.ends_with(':') && !r.starts_with('#')) {
+            jobs.push((name.trim_end_matches(':').to_string(), String::new(), Vec::new()));
+        } else if let Some(cond) = line.strip_prefix("    if:") {
+            jobs.last_mut().expect("`if:` before any job").1 = cond.trim().to_string();
+        } else if let Some(needs) = line.strip_prefix("    needs:") {
+            let list = needs.trim().trim_start_matches('[').trim_end_matches(']');
+            jobs.last_mut().expect("`needs:` before any job").2 = list.split(',').map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).collect();
+        }
+    }
+    jobs
+}
+
+/// Whether a job-level `if:` keeps the job from running on a tag push (a push event).
+fn excludes_tag_push(cond: &str) -> bool {
+    cond.contains("!= 'push'") || (cond.contains("github.event_name == ") && !cond.contains("github.event_name == 'push'"))
+}
+
+// spec: BUILD-016
+#[test]
+fn build_016_mirror_needs_every_check_job_of_a_tag_push() {
+    let jobs = forgejo_jobs();
+    let names: Vec<&str> = jobs.iter().map(|j| j.0.as_str()).collect();
+    let (_, mirror_if, needs) = jobs.iter().find(|j| j.0 == "mirror").expect("no job `mirror`");
+    assert!(mirror_if.contains("startsWith(github.ref, 'refs/tags/v')"), "mirror no longer only runs for a v* tag: {mirror_if}");
+    for n in needs {
+        assert!(names.contains(&n.as_str()), "mirror needs `{n}`, which is no job of ci.yml");
+    }
+    for (name, cond, _) in &jobs {
+        if name == "mirror" {
+            continue;
+        }
+        assert!(!excludes_tag_push(cond), "job `{name}` does not run on a tag push (`if: {cond}`), so a mirror that needs it would be skipped");
+        assert!(needs.contains(name), "mirror does not need `{name}`: a red `{name}` would not stop it (needs: {needs:?})");
+    }
+    for expected in ["build", "unused-deps", "coverage", "env-tests"] {
+        assert!(needs.iter().any(|n| n == expected), "mirror must need `{expected}`");
+    }
+}

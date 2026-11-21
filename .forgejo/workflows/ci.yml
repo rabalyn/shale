@@ -428,7 +428,9 @@ jobs:
           ${{ steps.engine.outputs.engine }} image prune -f >/dev/null || true
           ${{ steps.engine.outputs.engine }} system df || true
 
-  # The commit of a tag that is green on Linux goes to GitHub's `main` (BUILD-016, FORGE-003): the
+  # The commit of a tag whose every check job is green (build, unused-deps, coverage, env-tests; a red
+  # one, e.g. env-tests, must stop it, and a skipped needed job skips this one too, so each of them
+  # must run on a tag push) goes to GitHub's `main` (BUILD-016, FORGE-003): the
   # public repository, where the issues are (ADR-0017), shows the code they refer to; a pushed
   # commit that says `Closes #N` closes that issue there. GitHub runs no workflow for it. A release
   # tag (`vX.Y.Z`, no pre-release part) is pushed after it and starts the release build there
@@ -439,7 +441,7 @@ jobs:
   # as the Forgejo Actions secret MIRROR_DEPLOY_KEY (the name is from the deploy key it replaced;
   # Forgejo refuses names that start with GITHUB_). Without it the job says so and fails.
   mirror:
-    needs: build
+    needs: [build, unused-deps, coverage, env-tests]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     container:
