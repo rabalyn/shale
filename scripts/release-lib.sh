@@ -103,6 +103,46 @@ published_release() {
   PREV_PUBLISHED=$tag
 }
 
+# github_main_check <dry-run: yes|no>: GitHub's workflow main-check.yml (BUILD-038, ADR-0025) builds
+# and tests macOS and Windows for every push of `main` to GitHub, i.e. for every green check tag. A release
+# is stopped when its latest run (cancelled and skipped runs do not count: a newer push replaced them) is
+# red or still running, because a red macOS or Windows test would stop the release build there too
+# (#453). No run at all passes with a note (a repository that never had one). A gh that cannot answer
+# stops it as well; --ignore-github-check (RELEASE_IGNORE_GH_CHECK=yes) skips the whole check. A dry run
+# only says what it would do.
+github_main_check() {
+  local dry=$1 out status conclusion sha url msg=""
+  if [ "${RELEASE_IGNORE_GH_CHECK:-no}" = yes ]; then
+    echo "note: --ignore-github-check: the main-check run on GitHub is not looked at"
+    return 0
+  fi
+  if ! out=$("$GH" run list -R "$GH_REPO" --workflow main-check.yml --branch main --limit 10 \
+    --json status,conclusion,headSha,url -q '.[] | [.status, .conclusion, .headSha, .url] | @tsv'); then
+    msg="gh could not list the main-check runs of $GH_REPO (needed to see whether macOS and Windows pass on GitHub's main, BUILD-038); fix gh or say --ignore-github-check"
+  else
+    # the latest run that was not replaced by a newer one decides
+    while IFS=$'\t' read -r status conclusion sha url; do
+      case $conclusion in cancelled | skipped) continue ;; esac
+      [ -n "$status" ] || continue
+      if [ "$status" != completed ]; then
+        msg="the main-check run of GitHub's main (${sha:0:7}) is still $status: $url; wait for it, or say --ignore-github-check"
+      elif [ "$conclusion" != success ]; then
+        msg="the latest main-check run of GitHub's main (${sha:0:7}) is $conclusion: $url; fix macOS or Windows first (a branch, landed, a new check tag), or say --ignore-github-check"
+      else
+        echo "GitHub's main-check is green for ${sha:0:7}"
+        return 0
+      fi
+      break
+    done <<< "$out"
+    [ -n "$msg" ] || { echo "note: GitHub has no main-check run yet"; return 0; }
+  fi
+  if [ "$dry" = yes ]; then
+    echo "(--dry-run) a release would stop here: $msg"
+    return 0
+  fi
+  die "$msg"
+}
+
 # release_issue <x.y.z>: the number of the open issue "Release x.y.z", made when there is none
 release_issue() {
   local title="Release $1" n url

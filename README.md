@@ -159,7 +159,8 @@ The macOS and Windows downloads are not notarised or signed with a developer cer
 - **Windows** (SmartScreen) shows "Windows protected your PC": choose More info, then Run anyway.
 
 Releases are built by GitHub Actions
-(`.github/workflows/build.yml`); there are no builds between releases. To try an unreleased
+(`.github/workflows/build.yml`); between releases GitHub only tests macOS and Windows for each
+check tag (`.github/workflows/main-check.yml`). To try an unreleased
 version, build it from source (below).
 
 Each download has a `.sha256` file next to it; to check the download, put both files in one folder and run
@@ -209,7 +210,7 @@ no entries at all) both stop with "the changelog needs an update first".
 
 Day-to-day development is on a self-hosted Forgejo, whose CI (`.forgejo/workflows/ci.yml`)
 formats, lints, builds, tests and packages every tag and audits the dependencies daily
-(`security.yml`); GitHub gets `main` with each green tag and builds only the releases, on Linux,
+(`security.yml`); GitHub gets `main` with each green tag and tests macOS and Windows on it (`.github/workflows/main-check.yml`, which also keeps the Rust cache warm), and builds only the releases, on Linux,
 macOS and Windows (it tests macOS and Windows; the Linux checks ran on Forgejo) (`.github/workflows/build.yml` runs for release tags and by hand, never for a
 push or a check tag).
 

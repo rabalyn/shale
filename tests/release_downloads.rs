@@ -207,3 +207,68 @@ fn build_012_github_does_not_repeat_checks_that_ran_before() {
     assert!(ci.contains("cargo test --release --locked"), "the Forgejo build job tests the tagged commit");
     assert!(job(&ci, "mirror").contains("needs: build"), "the tag reaches GitHub only after a green build");
 }
+
+fn read(path: &str) -> String {
+    fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path)).unwrap()
+}
+
+// spec: BUILD-038
+#[test]
+fn build_038_main_check_tests_macos_and_windows_on_pushes_of_main() {
+    let mc = read(".github/workflows/main-check.yml");
+    let code: String = mc.lines().filter(|l| !l.trim_start().starts_with('#')).collect::<Vec<_>>().join("\n");
+    assert!(code.contains("on:\n  push:\n    branches: [main]\n  workflow_dispatch:"), "main and by hand only");
+    assert!(!code.contains("tags:") && !code.contains("pull_request"), "no tags, no pull requests");
+    assert!(code.contains("\npermissions: {}\n"), "no permissions by default");
+    assert!(code.contains("concurrency:") && code.contains("cancel-in-progress: true"), "a newer push cancels an older run");
+    assert!(!code.contains("contents: write") && !code.contains("id-token") && !code.contains("upload-artifact"), "publishes nothing");
+    assert!(!code.contains("cargo clippy") && !code.contains("cargo fmt"), "land.sh runs these");
+    let build = workflow();
+    for name in ["macos", "windows"] {
+        let (m, b) = (job(&mc, name), job(&build, name));
+        for cmd in ["cargo build --release --locked", "cargo test --release --locked", "RUSTFLAGS: -D warnings", "toolchain: 1.100.0"] {
+            assert!(m.contains(cmd) && b.contains(cmd), "{name}: `{cmd}` differs between main-check.yml and build.yml");
+        }
+        assert!(m.contains("permissions:\n      contents: read"), "{name}: read-only");
+    }
+    assert!(job(&mc, "macos").contains("brew install ffmpeg") && job(&mc, "windows").contains("choco install ffmpeg"), "the video tests run");
+    let linux = job(&mc, "linux");
+    assert!(linux.contains("cargo build --release --locked") && linux.contains("cargo test --release --locked --no-run"), "Linux builds and warms its cache");
+    assert!(linux.contains("runs-on: ubuntu-22.04"), "the runner of build.yml's linux job");
+    assert!(!linux.contains("cargo test --release --locked\n"), "Linux tests ran on Forgejo");
+}
+
+// spec: BUILD-038
+#[test]
+fn build_038_both_workflows_share_the_rust_cache_key() {
+    let (mc, build) = (read(".github/workflows/main-check.yml"), workflow());
+    let pinned = "Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2";
+    for (file, text, jobs) in [("main-check.yml", &mc, ["linux", "macos", "windows"]), ("build.yml", &build, ["linux", "macos", "windows"])] {
+        for name in jobs {
+            let j = job(text, name);
+            assert!(j.contains(pinned), "{file} {name}: the pinned cache action");
+            assert!(j.contains("shared-key: release-${{ runner.os }}"), "{file} {name}: the same shared-key, or the release build cannot restore what main saved");
+            assert!(j.contains("save-if: ${{ github.ref == 'refs/heads/main' }}"), "{file} {name}: only main saves");
+        }
+    }
+    assert_eq!(mc.matches("rust-cache@").count(), 3);
+    assert_eq!(build.matches("rust-cache@").count(), 3);
+}
+
+// spec: BUILD-038
+#[test]
+fn build_038_a_release_tag_reaches_github_before_main_and_is_not_tested_twice() {
+    let mc = read(".github/workflows/main-check.yml");
+    let gate = job(&mc, "gate");
+    assert!(gate.contains("git ls-remote --tags origin") && gate.contains("[0-9]+\\.[0-9]+\\.[0-9]+$"), "a release tag (no pre-release part) at the commit");
+    assert!(gate.contains("[ \"$GITHUB_EVENT_NAME\" = push ]"), "a run by hand is never skipped");
+    for name in ["linux", "macos", "windows"] {
+        let j = job(&mc, name);
+        assert!(j.contains("needs: gate") && j.contains("needs.gate.outputs.skip != 'true'"), "{name} waits for the gate");
+    }
+    let mirror = job(&read(".forgejo/workflows/ci.yml"), "mirror");
+    let tag = mirror.find("          if [ \"$release\" = yes ]; then\n            push_tag").expect("the tag is pushed for a release");
+    let main = mirror.find("git \"${gh[@]}\" push github \"$SHA:refs/heads/main\"").expect("main is pushed");
+    assert!(tag < main, "the release tag must reach GitHub before main, or the gate finds no tag");
+    assert!(mirror.contains("needs: build"), "after a green build");
+}

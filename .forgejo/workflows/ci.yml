@@ -9,8 +9,9 @@
 # Nothing is published from here. Releases are built and published by GitHub from release tags
 # (.github/workflows/build.yml; Forgejo ignores .github/workflows because this folder exists).
 # The commit of a tag that passes the build is pushed to GitHub's `main` (the `mirror` job), so
-# the public repository has the code its issues talk about; a release tag is pushed there too,
-# which starts the release build, also on macOS and Windows (BUILD-016, BUILD-017).
+# the public repository has the code its issues talk about; that push starts GitHub's main-check
+# (macOS and Windows tests, which also keep the Rust cache warm, BUILD-038, ADR-0025). A release tag is
+# pushed there too (before main), which starts the release build (BUILD-016, BUILD-017).
 #
 # The runner starts the job in a container (Docker or Podman). Steps are plain shell: JavaScript
 # actions (checkout, cache, upload-artifact) need Node, which the Rust image does not have, and
@@ -480,29 +481,36 @@ jobs:
           git remote add github https://github.com/rabalyn/shale.git
           gh=(-c "http.https://github.com/.extraHeader=Authorization: basic $(printf 'x-access-token:%s' "$MIRROR_TOKEN" | base64 -w0)")
           git "${gh[@]}" fetch -q github "+refs/heads/main:refs/remotes/github/main" || true
+          # a release tag is pushed BEFORE main: GitHub's workflow main-check.yml, started by the push of
+          # main, then finds the tag at its commit and leaves the macOS and Windows tests to the release
+          # build, which runs them too (BUILD-038, ADR-0025)
+          release=yes
+          case "$TAG" in *-*) release=no ;; esac
+          push_tag() {
+            # GitHub builds and publishes it (BUILD-012); an existing one is never replaced
+            there=$(git "${gh[@]}" ls-remote github "refs/tags/$TAG" | cut -f1)
+            here=$(git rev-parse "refs/tags/$TAG")
+            if [ -n "$there" ]; then
+              if [ "$there" = "$here" ]; then
+                echo "GitHub already has the tag $TAG."
+                return 0
+              fi
+              echo "::error::GitHub has a different tag $TAG ($there, here $here); nothing is replaced"
+              return 1
+            fi
+            git "${gh[@]}" push github "refs/tags/$TAG:refs/tags/$TAG"
+            echo "Pushed the tag $TAG to GitHub: its release build starts there."
+          }
+          if [ "$release" = yes ]; then
+            push_tag
+          fi
           # a later tag got there first: main stays (an older commit is never forced over it)
           if git rev-parse -q --verify refs/remotes/github/main >/dev/null && git merge-base --is-ancestor "$SHA" refs/remotes/github/main; then
             echo "GitHub's main already contains $SHA."
           else
             git "${gh[@]}" push github "$SHA:refs/heads/main"
-            echo "Pushed $SHA to GitHub's main."
+            echo "Pushed $SHA to GitHub's main: its main-check starts there."
           fi
-          case "$TAG" in
-            *-*)
-              echo "$TAG is a pre-release (check tag): it stays on Forgejo."
-              exit 0
-              ;;
-          esac
-          # a release tag: GitHub builds and publishes it (BUILD-012); an existing one is never replaced
-          there=$(git "${gh[@]}" ls-remote github "refs/tags/$TAG" | cut -f1)
-          here=$(git rev-parse "refs/tags/$TAG")
-          if [ -n "$there" ]; then
-            if [ "$there" = "$here" ]; then
-              echo "GitHub already has the tag $TAG."
-              exit 0
-            fi
-            echo "::error::GitHub has a different tag $TAG ($there, here $here); nothing is replaced"
-            exit 1
+          if [ "$release" = no ]; then
+            echo "$TAG is a pre-release (check tag): it stays on Forgejo."
           fi
-          git "${gh[@]}" push github "refs/tags/$TAG:refs/tags/$TAG"
-          echo "Pushed the tag $TAG to GitHub: its release build starts there."
