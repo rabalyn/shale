@@ -440,7 +440,12 @@ impl ShaleApp {
             crate::import::wl_drop::attach(cc);
         }
         let persist = opts.screenshot.is_none();
+        let scripted = opts.keys.is_some();
         let mut app = Self::build(opts, persist);
+        if scripted {
+            // icon buttons tell the script their tooltips (BUILD-007), kept in this window's context
+            crate::script::collect_hints(&cc.egui_ctx);
+        }
         if let Some(h) = &handover {
             h.attach(&cc.egui_ctx);
         }
@@ -612,7 +617,7 @@ impl ShaleApp {
             sf: crate::settings_file::SettingsFile::new(),
             fonts: crate::fonts::FontState::new(),
             themes: crate::themes::ThemeState::new(persist),
-            script: crate::script::ScriptRun::new(opts.keys.as_deref().inspect(|_| crate::script::collect_hints()).map(|k| crate::script::parse(k).unwrap_or_default().into()).unwrap_or_default()),
+            script: crate::script::ScriptRun::new(opts.keys.as_deref().map(|k| crate::script::parse(k).unwrap_or_default().into()).unwrap_or_default()),
             recovery: crate::recovery::RecoveryState { root: recovery_root, notice: vec![] },
             link_preview: Default::default(),
             usage: crate::data_usage::DataUsage::new(places),
