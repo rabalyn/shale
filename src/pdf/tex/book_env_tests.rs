@@ -89,6 +89,7 @@ fn check(kind_id: &str) {
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_a_folder_compiles_as_a_thesis_with_parts_and_chapters() {
+    crate::env_lock::hold();
     check("thesis");
 }
 
@@ -96,6 +97,7 @@ fn tex_env_a_folder_compiles_as_a_thesis_with_parts_and_chapters() {
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_a_folder_compiles_as_a_report_with_sections() {
+    crate::env_lock::hold();
     // the precondition, outside the recording: the template set is imported once per run, by whichever
     // test comes first, so the diagram must not depend on that order (DEV-026)
     let _ = the_set();

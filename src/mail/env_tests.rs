@@ -10,7 +10,8 @@
 //! Trust: the server's certificate is made by `setup-certs.sh`; here it is trusted as an extra
 //! root by test code only (`Client::connect_test`). The production client has no such switch.
 //!
-//! The tests share one environment, so they take turns (`TURN`); the OAuth2 test ends by
+//! The tests hold the machine-wide lock of the podman stacks (`env_lock`, DEV-034) and share one
+//! environment, so they take turns (`TURN`); the OAuth2 test ends by
 //! restarting the provider (`mail-env.sh revoke`), which kills every token it handed out.
 
 use crate::config::{MailAccount, MailAuth, MailSecurity, OAuthProvider};
@@ -37,6 +38,13 @@ const MAILDATA_VOLUME: &str = "shale-mail-env-maildata";
 const ALPINE: &str = "docker.io/library/alpine:3.24.2";
 
 static TURN: Mutex<()> = Mutex::new(());
+
+/// Every test starts here: first the machine-wide lock of the podman stacks (DEV-034, so no other
+/// checkout uses them meanwhile), then its turn among the tests of this run.
+fn turn() -> std::sync::MutexGuard<'static, ()> {
+    crate::env_lock::hold();
+    TURN.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 fn env_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("mail-env")
@@ -126,7 +134,7 @@ fn is_unseen(line: &str) -> bool {
 #[test]
 #[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
 fn mail_env_password_account_syncs_end_to_end_and_changes_nothing_on_the_server() {
-    let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
+    let _turn = turn();
     let (dir, store) = temp_store("pw");
     let auth: Arc<dyn AuthFactory> = Arc::new(PasswordAuth { user: "alice@shale.test".into(), password: "shale-test-pw".into() });
     let connector = EnvConnector { auth };
@@ -171,7 +179,10 @@ fn mail_env_password_account_syncs_end_to_end_and_changes_nothing_on_the_server(
         assert!(messages(&store, &rows, never).is_empty(), "{never} was synced");
         assert!(!folder(&rows, never).sync_enabled, "{never} is switched on");
     }
-    assert_eq!(store.reader().unwrap().count_messages().unwrap(), 10);
+    // when the count differs, say which folders hold the messages (#417: a suite of another checkout had added mail)
+    let total = store.reader().unwrap().count_messages().unwrap();
+    let per_folder: Vec<String> = rows.iter().map(|r| (r.name.clone(), messages(&store, &rows, &r.name).len())).filter(|(_, n)| *n > 0).map(|(name, n)| format!("{name}: {n}")).collect();
+    assert_eq!(total, 10, "10 messages are expected; the folders hold {per_folder:?}");
 
     // a large mail with an attachment, fully downloaded
     let inbox_msgs = messages(&store, &rows, "INBOX");
@@ -247,7 +258,7 @@ fn sign_in_headless(acct: &MailAccount) -> Result<oauth::SignedIn, oauth::OAuthE
 #[test]
 #[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
 fn mail_env_oauth_account_signs_in_syncs_renews_its_token_and_a_dead_sign_in_is_said_in_words() {
-    let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
+    let _turn = turn();
     // the whole run is recorded; the sign-in and the token renewal are its two dataflow diagrams (DEV-028), the sync inside it is not
     let forest = crate::dataflow::record(|| {
         let acct = oauth_account();
@@ -389,7 +400,7 @@ fn only_scratch_is_synced(store: &MailStore, connector: &dyn Connector) {
 #[test]
 #[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
 fn mail_env_flag_unflag_move_delete_and_delete_forever_change_dovecot_as_asked_and_nothing_else() {
-    let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
+    let _turn = turn();
     let forest = crate::dataflow::record(|| {
         clean_scratch();
         let (dir, store) = temp_store("ops");
@@ -633,7 +644,7 @@ fn send_end_to_end(acct: &MailAccount, smtp: EnvSmtp, imap: EnvConnector, tag: &
 #[test]
 #[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
 fn mail_env_password_and_oauth_accounts_send_with_an_attachment_and_dovecot_has_one_sent_copy_each() {
-    let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
+    let _turn = turn();
     let forest = crate::dataflow::record(|| {
         // the password account sends over STARTTLS (587): nothing, AUTH included, goes before the upgrade
         let pw = MailAccount {
@@ -808,7 +819,7 @@ fn crypto_end_to_end(std: crate::config::CryptoStandard, tag: &str) {
 #[test]
 #[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
 fn mail_env_signed_and_encrypted_openpgp_and_smime_mail_arrives_intact_verifies_decrypts_and_the_sent_copy_decrypts() {
-    let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
+    let _turn = turn();
     let forest = crate::dataflow::record(|| {
         if !crate::mail::gpg::testkit::have_gnupg() {
             panic!("gpg, gpgsm and gpgconf are needed for this test");
@@ -827,7 +838,7 @@ fn mail_env_signed_and_encrypted_openpgp_and_smime_mail_arrives_intact_verifies_
 #[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
 fn mail_env_a_flag_that_another_connection_sets_and_removes_shows_in_the_store_within_seconds_through_idle() {
     use crate::mail::watch::{Timing, Wanted, Watch};
-    let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
+    let _turn = turn();
     let forest = crate::dataflow::record(|| {
         clean_scratch();
         let (dir, store) = temp_store("watch");

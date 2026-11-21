@@ -79,6 +79,7 @@ macro_rules! kind_tests {
         #[test]
         #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
         fn $name() {
+            crate::env_lock::hold();
             check_rich($kind, Language::$lang);
         }
     )*};
@@ -113,6 +114,7 @@ kind_tests! {
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_a_note_exported_with_a_department_logo_shows_it_in_every_kind_that_has_a_place_and_not_when_switched_off() {
+    crate::env_lock::hold();
     let set = the_set_with_a_department_logo();
     let engine = container_engine(&mounted_root());
     let note = "# A note\n\nSome text.\n\n## A part\n\nMore text.\n";
@@ -145,6 +147,7 @@ fn tex_env_a_note_exported_with_a_department_logo_shows_it_in_every_kind_that_ha
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_slides_have_a_page_for_the_title_and_one_for_every_frame() {
+    crate::env_lock::hold();
     for lang in [Language::En, Language::De] {
         let note = "# Plan\n# Part one\n## Slide A\ntext a\n## Slide B\n- x\n- y\n# Part two\n## Slide C\n| A | B |\n| --- | --- |\n| 1 | 2 |\n";
         let (pdf, doc) = export(note, "beamer", lang, AUTHOR, true);
@@ -163,6 +166,7 @@ fn tex_env_slides_have_a_page_for_the_title_and_one_for_every_frame() {
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_a_letter_has_its_recipient_subject_and_text() {
+    crate::env_lock::hold();
     let note = "---\nrecipient: |\n  Dr. Grace Hopper\n  Navy Street 1\nsubject: About the compiler\nsender: Ada Lovelace\nsender_address: Analytical Street 2\nopening: Dear Dr. Hopper,\nclosing: Yours sincerely\ndate: 2026-11-17\n---\nThe body of the letter with a table:\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n";
     // the precondition, outside the recording: the template set is imported once per run, by whichever
     // test comes first, so the diagram must not depend on that order (DEV-026)
@@ -183,6 +187,7 @@ fn tex_env_a_letter_has_its_recipient_subject_and_text() {
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_a_thesis_has_chapters_its_fields_and_a_table_of_contents() {
+    crate::env_lock::hold();
     let note = "---\nauthor: Ada Lovelace\nsubtitle: A study\nreviewer: [Prof. Babbage, Prof. Turing]\ndepartment: ce\ninstitute: The Institute\n---\n# Rich sample note\n# One chapter\nText\n## A section\n### A subsection\n#### A subsubsection\n# Second chapter\nMore\n";
     for kind in ["thesis", "phd"] {
         for lang in [Language::En, Language::De] {
@@ -203,6 +208,7 @@ fn tex_env_a_thesis_has_chapters_its_fields_and_a_table_of_contents() {
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_unnumbered_headings_are_still_in_the_contents_and_the_pdf_has_bookmarks_of_every_level() {
+    crate::env_lock::hold();
     let note = "---\nnumbered-headings: false\n---\n# A\n## B\n### C\n#### D\ntext\n";
     let (pdf, doc) = export(note, "pub", Language::En, AUTHOR, true);
     let text = squashed(pdf.clone());
@@ -216,6 +222,7 @@ fn tex_env_unnumbered_headings_are_still_in_the_contents_and_the_pdf_has_bookmar
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_underline_scripts_footnotes_breaks_in_cells_and_math_compile_in_every_family() {
+    crate::env_lock::hold();
     let note = "# Rich sample note\n\nWater H<sub>2</sub>O, x<sup>2</sup> and <u>under *lined*</u> text[^1] with $\\frac{a}{b} + \\sum_{i=1}^n \\binom{n}{i} + \\mathbb{R}$ and $$\\dfrac{x}{y}$$ inline, $\\input{/etc/passwd}$ and $\\text{50% ^^5cinput{x}}$.\n\n$$\n\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix} = \\begin{cases} x & y \\\\ z & \\text{else} \\end{cases}\n$$\n\n```math\n\\sqrt[3]{x^2} + \\operatorname{rank} A\n```\n\n| A | B |\n| --- | --- |\n| one<br>two[^2] | z |\n\n[^1]: A *footnote*\n    with a second line and $x^2$.\n[^2]: In a cell.\n\nLast paragraph\n";
     for kind in ["pub", "report", "beamer", "letter", "poster", "sciposter", "leaflet"] {
         let (pdf, doc) = export(note, kind, Language::En, AUTHOR, false);
@@ -230,6 +237,7 @@ fn tex_env_underline_scripts_footnotes_breaks_in_cells_and_math_compile_in_every
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_long_code_breaks_across_pages_on_its_box_in_articles_and_books() {
+    crate::env_lock::hold();
     let code: String = (1..=160).map(|n| format!("let line_{n} = {n}; // code\n")).collect();
     let note = format!("# Rich sample note\n\n## Code\n\n```rust\n{code}```\n\nAfter the code\n");
     for kind in ["pub", "thesis"] {

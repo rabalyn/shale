@@ -23,6 +23,8 @@ cargo test -- --ignored tex_import  # downloads tuda-ci from GitHub and CTAN (a 
 cargo test -- --ignored tex_install # not this image: installs TeX Live for real from the default repository (network, minutes)
 ```
 
+**Two checkouts take turns.** The stacks have fixed names per machine, so everything that uses or changes them (the `build`, `compile`, `exec` and `reset` commands of the helper script, `.forgejo/scripts/env-tests.sh run`, and the ignored `cargo test` suites) takes one machine-wide lock (`${XDG_RUNTIME_DIR:-/tmp}/shale-env-stacks-<user>.lock`, DEV-034, #420); a second checkout (another worktree, or `scripts/land.sh`) waits for the first.
+
 The `tex_env` tests share nothing (own work folders, a fresh container per compile), so they can run in parallel:
 `.forgejo/scripts/env-tests.sh run` (and so `scripts/land.sh`) uses four test threads, `SHALE_ENV_TESTS_TEX_THREADS`
 sets the number (the demos test starts four compiles itself; #370). `tex_import` and `tex_install` run with one thread.

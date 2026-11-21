@@ -22,6 +22,8 @@ to the first `up` (a few days around today, so they are inside the window Shale 
 back to 13 months ahead), and the certificate lasts a year: after a long time, `rm -r
 tests/caldav-env/certs`, then `reset` and `up`.
 
+**Two checkouts take turns.** The stacks have fixed names per machine, so everything that uses or changes them (the `up`, `down` and `reset` commands of the helper script, `.forgejo/scripts/env-tests.sh run`, and the ignored `cargo test` suites) takes one machine-wide lock (`${XDG_RUNTIME_DIR:-/tmp}/shale-env-stacks-<user>.lock`, DEV-034, #420); a second checkout (another worktree, or `scripts/land.sh`) waits for the first.
+
 ## The account and calendars
 
 User name `shale`, password `shale-test-pw`. Server address `https://localhost:15232/` (Shale finds

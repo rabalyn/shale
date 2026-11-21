@@ -12,6 +12,7 @@
 #            TEXINPUTS, BIBINPUTS, openout_any and shell_escape are passed on when set (Shale's compile tests put this in front of lualatex and biber)
 #   reset    remove the image and the cache (the next build starts again)
 #   SHALE_TEX_ENV_REPOSITORY=<url> makes `build` take TeX Live from that tlnet mirror (`--build-arg TL_REPO=<url>`) instead of the default repository; scripts/land.sh sets it from a local, uncommitted setting (DEV-025, #371)
+# build, compile, exec and reset take the machine-wide lock of the podman stacks (tests/env-lock.sh, DEV-034): one checkout cannot rebuild the image under another one's run; two checkouts take turns. A caller that holds it already (env-tests.sh, a Rust env test) passes it on.
 # SHALE_TEX_ENV_ENGINE=docker selects Docker instead of Podman; SHALE_TEX_ENV_IMAGE=<name> another image name than shale-tex-env.
 set -eu
 caller=$(pwd)
@@ -32,6 +33,8 @@ image_there() { "$ENGINE" image exists "$IMAGE" 2>/dev/null || "$ENGINE" image i
 sha256_of() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi
 }
+
+case "${1:-}" in build|compile|exec|reset) . ../env-lock.sh; shale_env_lock ;; esac
 
 case "${1:-}" in
   build)

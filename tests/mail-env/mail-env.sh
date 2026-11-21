@@ -7,6 +7,7 @@
 #           token handed out before is dead (to try "the sign-in was revoked" by hand)
 #   status  show the containers
 #   logs    follow the containers' logs
+# up, down, reset and revoke take the machine-wide lock of the podman stacks (tests/env-lock.sh, DEV-034): two checkouts take turns.
 # SHALE_MAIL_ENV_COMPOSE overrides the compose command, e.g. SHALE_MAIL_ENV_COMPOSE="docker compose".
 set -eu
 cd "$(dirname "$0")"
@@ -34,24 +35,27 @@ wait_for() { # host port seconds
   return 1
 }
 
+# no container started below may keep the lock's file descriptor (7): a daemon that outlived the script would hold the lock
+case "${1:-}" in up|down|reset|revoke) . ../env-lock.sh; shale_env_lock ;; esac
+
 case "${1:-}" in
   up)
     ./setup-certs.sh
-    $COMPOSE -f compose.yaml up -d
+    $COMPOSE -f compose.yaml up -d 7>&-
     wait_for 127.0.0.1 10993 90 || { echo "Dovecot did not come up on 127.0.0.1:10993 (see: $0 logs)" >&2; exit 1; }
     wait_for 127.0.0.1 18080 90 || { echo "the OAuth2 provider did not come up on 127.0.0.1:18080 (see: $0 logs)" >&2; exit 1; }
     wait_for 127.0.0.1 18025 90 || { echo "the mail sink (Mailpit) did not come up on 127.0.0.1:18025 (see: $0 logs)" >&2; exit 1; }
     echo "Mail test environment is up. See tests/mail-env/README.md for the accounts."
     ;;
-  down) $COMPOSE -f compose.yaml down ;;
-  reset) $COMPOSE -f compose.yaml down -v ;;
+  down) $COMPOSE -f compose.yaml down 7>&- ;;
+  reset) $COMPOSE -f compose.yaml down -v 7>&- ;;
   revoke)
     # Dovecot and the sink share the provider's network, so they are stopped first and started last
-    $COMPOSE -f compose.yaml stop dovecot mailpit oauth
-    $COMPOSE -f compose.yaml start oauth
+    $COMPOSE -f compose.yaml stop dovecot mailpit oauth 7>&-
+    $COMPOSE -f compose.yaml start oauth 7>&-
     wait_for 127.0.0.1 18080 60 || { echo "the OAuth2 provider did not come back" >&2; exit 1; }
-    $COMPOSE -f compose.yaml start mailpit
-    $COMPOSE -f compose.yaml start dovecot
+    $COMPOSE -f compose.yaml start mailpit 7>&-
+    $COMPOSE -f compose.yaml start dovecot 7>&-
     wait_for 127.0.0.1 10993 60 || { echo "Dovecot did not come back" >&2; exit 1; }
     wait_for 127.0.0.1 18025 60 || { echo "the mail sink did not come back" >&2; exit 1; }
     sleep 2
