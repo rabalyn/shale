@@ -1,6 +1,6 @@
 # ADR-0029: The "Turn on sync" wizard, git credentials and detection of shared folders
 
-- **Status**: Accepted for the implementation of #469; the points under "Open for the owner" are reversible defaults
+- **Status**: Accepted and implemented in #469; the points under "Open for the owner" are reversible defaults
 - **Date**: 2026-11-21
 - **Specs**: SYNC-047…SYNC-066, NET-017 ([`docs/spec/vault-and-files.md`](../spec/vault-and-files.md))
 - **Issues**: #469 (this), #467 (umbrella), #480 (the provider sign-in flows, open), #485 (local history into `.git`, open)
