@@ -258,6 +258,14 @@ Some behaviour is decided by a note's own properties (front matter) instead of a
 | `sync.commit_suffix` | empty | Git sync, "suffix" |
 | `sync.lfs_download` | `on_demand` (a media file stored with Git LFS is downloaded when you play or open it; `always`: after every sync) | Git sync, "Download media files after every sync" (shown only when `git-lfs` is installed) |
 
+The settings of the git that Shale runs are in the settings file of this computer ([[Git sync]]):
+
+| Setting | Default | Where |
+|---|---|---|
+| `git` | the group of the two keys below | Settings → Sync |
+| `git.choice` | `Auto` (the git of this computer when there is one, else Shale's own; `System`: only the git of `PATH`; `Managed`: Shale's own, where Shale installs only git-lfs the git of `PATH` with that git-lfs) | Settings → Sync, "Git to use" |
+| `git.updates` | `Off` (no request; `Notify`: look 30 seconds after the start and weekly and say so; `Install`: and install it) | Settings → Sync, "New versions" (shown once Shale's git is installed) |
+
 The git remote itself is git's (`git remote`), set with **Connect** in the same section.
 
 Settings → Vault also has **Check names for Windows and macOS…** (no setting, a tool): it lists the files

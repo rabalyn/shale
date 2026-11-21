@@ -34,6 +34,8 @@ struct PullJob {
 #[derive(Default)]
 pub struct SyncState {
     pub git: Git,
+    /// The managed git and the choice of git (SYNC-023…SYNC-029).
+    pub managed: crate::gitsync::install_ui::ManagedState,
     /// A running sync: its vault and where its result arrives.
     job: Option<(PathBuf, Receiver<SyncResult>)>,
     /// Held by the job while it changes files in the vault, and by the window while it writes
@@ -64,8 +66,18 @@ pub struct SyncState {
 }
 
 impl SyncState {
+    /// A state with this managed git (the window's, SYNC-023).
+    pub fn with_managed(managed: crate::gitsync::install_ui::ManagedState) -> SyncState {
+        SyncState { managed, ..Default::default() }
+    }
+
     pub fn running(&self) -> bool {
         self.job.is_some()
+    }
+
+    /// The git changed (SYNC-024): `git --version` is looked up again.
+    pub(crate) fn forget_git_version(&mut self) {
+        self.git_version = None;
     }
 }
 
@@ -370,13 +382,13 @@ impl ShaleApp {
 
     /// The "Git sync" part of the settings. Returns whether a setting changed.
     pub(crate) fn sync_settings_ui(&mut self, ui: &mut Ui) -> bool {
-        let mut changed = false;
         self.sync.rects.clear();
         ui.label(egui::RichText::new("Git sync").color(theme::palette().muted));
-        let Some(root) = self.vault.as_ref().map(|v| v.root.clone()) else { return false };
+        let mut changed = self.git_settings_ui(ui);
+        let Some(root) = self.vault.as_ref().map(|v| v.root.clone()) else { return changed };
         if self.git_version().is_none() {
             crate::theme::paragraph(ui, "git is not installed. Install git to sync this vault with a git repository.");
-            return false;
+            return changed;
         }
         let repo = gitsync::is_repo(&root);
         if !repo {
@@ -407,7 +419,7 @@ impl ShaleApp {
             }
         });
         if !repo {
-            return false;
+            return changed;
         }
         self.lfs_settings_ui(ui);
         let writable = self.vdata.settings_writable();

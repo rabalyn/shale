@@ -570,7 +570,7 @@ impl ShaleApp {
             cfg: cfg.clone(),
             persist_config,
             vdata: crate::vault_state::VaultData::default(),
-            sync: sync::SyncState::default(),
+            sync: sync::SyncState::with_managed(crate::gitsync::install_ui::ManagedState::new(persist, &tag)),
             vault: None,
             tabbar: tabs::TabBar::new(),
             panes: panes::Panes::new(),
@@ -630,6 +630,9 @@ impl ShaleApp {
             guide: if persist { crate::userguide::Places::system() } else { crate::userguide::Places::none() },
             handover: None,
         };
+        if persist {
+            app.refresh_git();
+        }
         app.recovery.notice = crate::recovery::unseen(&app.recovery.root);
         if let Some(p) = cfg_problem {
             app.toast(p);
@@ -2870,6 +2873,7 @@ impl ShaleApp {
         let ctx = ui.ctx().clone();
         self.media_tick(&ctx);
         self.tex.poll(&ctx);
+        self.git_tick(&ctx);
         self.update_tick(&ctx);
         self.take_handover(&ctx);
         self.sync_tick(&ctx);

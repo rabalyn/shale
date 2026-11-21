@@ -91,7 +91,9 @@ impl Git {
 
     /// The installed git's version line, or None without git (SYNC-003).
     pub fn version(&self) -> Option<String> {
-        let o = Command::new(&self.program).arg("--version").stdin(Stdio::null()).output().ok()?;
+        let mut c = Command::new(&self.program);
+        c.arg("--version");
+        let o = self.finish_command(c).output().ok()?;
         o.status.success().then(|| String::from_utf8_lossy(&o.stdout).trim().to_string())
     }
 }
@@ -624,7 +626,11 @@ pub fn host_name() -> String {
     "this computer".into()
 }
 
+pub mod install;
+pub mod install_ui;
 pub mod lfs;
+pub mod managed;
+pub mod sources;
 
 /// Marks a `Git` whose `git lfs …` calls fail (see `hide_lfs`).
 #[cfg(test)]
@@ -651,5 +657,14 @@ pub fn hide_lfs(git: &mut Git) {
     git.env.push(("PATH".into(), path.clone()));
 }
 
+// the fake programs are shell scripts: these run on Unix
+#[cfg(all(test, unix))]
+mod install_tests;
+#[cfg(all(test, unix))]
+mod install_ui_tests;
+#[cfg(test)]
+mod managed_tests;
+#[cfg(test)]
+mod sources_tests;
 #[cfg(test)]
 mod tests;

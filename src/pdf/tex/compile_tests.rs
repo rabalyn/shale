@@ -189,7 +189,7 @@ fn the_log_of_a_failed_compile_is_kept_under_a_unique_name_and_a_missing_log_or_
 }
 
 #[cfg(unix)]
-pub(super) mod fake {
+pub(crate) mod fake {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
     use std::time::{Duration, Instant};

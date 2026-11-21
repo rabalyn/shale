@@ -31,7 +31,7 @@ mod book_env_tests;
 #[cfg(test)]
 mod book_tests;
 #[cfg(test)]
-mod compile_tests;
+pub(crate) mod compile_tests;
 #[cfg(test)]
 mod ctan_tests;
 #[cfg(test)]
