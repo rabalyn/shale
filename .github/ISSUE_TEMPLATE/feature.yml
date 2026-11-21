@@ -1,0 +1,30 @@
+name: Feature request
+description: Something you would like Shale to do.
+labels: [kind/feature]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The owner decides what Shale does. An accepted request becomes a SHOULD BE row in the specs
+        (see [ADR-0001](https://github.com/rabalyn/shale/blob/main/docs/decisions/0001-spec-driven-development.md)),
+        and the issue stays open until the row is IS NOW. A "no" is possible and will be explained.
+        One idea per issue, please.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you want to do
+      description: The problem or task, not the solution. What are you trying to get done, and what stops you today?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How it could work
+      description: What you would see and do in Shale.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Optional. Other ways you tried or thought of, and how other apps do it.
