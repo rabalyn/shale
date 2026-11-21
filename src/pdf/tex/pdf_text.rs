@@ -62,8 +62,31 @@ pub(super) fn squashed(pdf: Vec<u8>) -> String {
     page_texts(pdf).concat().chars().filter(|c| !c.is_whitespace()).collect()
 }
 
+/// The direct `/Length` of the stream dictionary that ends right before the `stream` keyword at
+/// `at`, `None` for an indirect length (`5 0 R`), a missing one or a dictionary that is not there.
+fn direct_length(pdf: &[u8], at: usize) -> Option<usize> {
+    let head = pdf[..at].trim_ascii_end();
+    let dict = &head[head.windows(3).rposition(|w| w == b"obj")? + 3..];
+    if !dict.ends_with(b">>") {
+        return None;
+    }
+    let after = &dict[dict.windows(8).position(|w| w == b"/Length ")? + 8..];
+    let after = after.trim_ascii_start();
+    let digits = after.iter().take_while(|b| b.is_ascii_digit()).count();
+    let mut rest = after[digits..].trim_ascii_start().split(|b| b.is_ascii_whitespace());
+    // `5 0 R` is a reference, the number in it is not the length
+    let indirect = rest.next().is_some_and(|g| !g.is_empty() && g.iter().all(u8::is_ascii_digit)) && rest.next() == Some(b"R");
+    if indirect {
+        return None;
+    }
+    std::str::from_utf8(&after[..digits]).ok()?.parse().ok()
+}
+
 /// The streams of a PDF, inflated: LuaLaTeX keeps the pages' contents, its outline items and its
-/// annotations in compressed streams.
+/// annotations in compressed streams. A stream ends where its dictionary's direct `/Length` says,
+/// since the data may end in a `\r` that looks like the end of line before `endstream`; without a
+/// direct length (a reference, or one that does not fit the file) the end of line before
+/// `endstream` is dropped.
 fn streams(pdf: &[u8]) -> Vec<Vec<u8>> {
     let find = |from: usize, needle: &[u8]| pdf[from..].windows(needle.len()).position(|w| w == needle).map(|p| from + p);
     let (mut out, mut at) = (Vec::new(), 0);
@@ -76,10 +99,16 @@ fn streams(pdf: &[u8]) -> Vec<Vec<u8>> {
         };
         let body = rest.strip_prefix(b"\r\n").or_else(|| rest.strip_prefix(b"\n")).unwrap_or(rest);
         let skipped = rest.len() - body.len();
-        let Some(end) = find(start + skipped, b"endstream") else { break };
+        let data_start = start + skipped;
+        if let Some(len) = direct_length(pdf, p).filter(|len| data_start + len <= pdf.len()) {
+            out.push(crate::pdf::write::inflate(&pdf[data_start..data_start + len]));
+            at = data_start + len;
+            continue;
+        }
+        let Some(end) = find(data_start, b"endstream") else { break };
         // only the end of line before `endstream` goes: the compressed data may end in a byte that
         // looks like white space (a tab)
-        let raw = &pdf[start + skipped..end];
+        let raw = &pdf[data_start..end];
         let data = raw.strip_suffix(b"\r\n").or_else(|| raw.strip_suffix(b"\n")).or_else(|| raw.strip_suffix(b"\r")).unwrap_or(raw);
         out.push(crate::pdf::write::inflate(data));
         at = end + 9;
@@ -117,4 +146,46 @@ pub(super) fn fills_with(pdf: &[u8], rgb: [u8; 3]) -> bool {
         let words: Vec<&str> = text.split_whitespace().collect();
         words.windows(4).any(|w| w[3] == "rg" && near(&w[..3], &want)) || words.windows(5).any(|w| w[4] == "k" && near(&w[..4], &cmyk))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A short text whose deflated form ends in `\r`, found by trying numbers.
+    fn text_deflating_to_cr() -> (String, Vec<u8>) {
+        (0..100_000)
+            .map(|n| format!("{n} 0.5 0.5 0.5 rg"))
+            .map(|t| {
+                let z = miniz_oxide::deflate::compress_to_vec_zlib(t.as_bytes(), 6);
+                (t, z)
+            })
+            .find(|(_, z)| z.last() == Some(&b'\r'))
+            .expect("some text deflates to data ending in CR")
+    }
+
+    fn pdf_with(length: &str, data: &[u8]) -> Vec<u8> {
+        let mut pdf = format!("%PDF-1.5\n4 0 obj\n<< /Length {length} /Filter /FlateDecode >>\nstream\n").into_bytes();
+        pdf.extend(data);
+        pdf.extend(b"\nendstream\nendobj\n");
+        pdf
+    }
+
+    // spec: TEX-030
+    #[test]
+    fn a_stream_whose_data_ends_in_cr_is_cut_by_its_length() {
+        let (text, z) = text_deflating_to_cr();
+        assert_eq!(z.last(), Some(&b'\r'));
+        let pdf = pdf_with(&z.len().to_string(), &z);
+        assert_eq!(streams(&pdf), vec![text.into_bytes()]);
+    }
+
+    // spec: TEX-030
+    #[test]
+    fn a_stream_with_an_indirect_length_ends_at_the_end_of_line() {
+        let z = miniz_oxide::deflate::compress_to_vec_zlib(b"1 0 0 rg", 6);
+        let pdf = pdf_with("5 0 R", &z);
+        assert_eq!(direct_length(&pdf, pdf.windows(7).position(|w| w == b"\nstream").unwrap() + 1), None);
+        assert_eq!(streams(&pdf), vec![b"1 0 0 rg".to_vec()]);
+    }
 }
