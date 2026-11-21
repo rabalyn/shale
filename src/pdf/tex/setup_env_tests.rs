@@ -24,6 +24,7 @@ fn detection(engine: Engine) -> Detection {
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_the_setup_imports_the_cached_archive_takes_a_logo_and_the_details_and_makes_a_test_page_with_the_department() {
+    crate::env_lock::hold();
     // the root of the flow is the setup window, which this test stands in for (DEV-028)
     let forest = crate::dataflow::record(|| {
         let _flow = tracing::info_span!("flow.tex_setup", peer = "setup").entered();

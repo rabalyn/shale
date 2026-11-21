@@ -37,6 +37,10 @@ mod editor;
 mod editor_cache;
 mod editor_preview;
 mod embed_size;
+#[cfg(test)]
+mod env_lock;
+#[cfg(test)]
+mod env_lock_tests;
 #[cfg(any(test, target_os = "macos"))]
 mod finder_path;
 mod fold;

@@ -10,10 +10,13 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 FAILED=0
 N=0
-unset SHALE_TEX_ENV_REPOSITORY SHALE_TEX_ENV_IMAGE
+unset SHALE_TEX_ENV_REPOSITORY SHALE_TEX_ENV_IMAGE SHALE_ENV_LOCK_TOKEN
+# the build takes the machine-wide lock of the stacks (DEV-034): a lock file of this test's own
+export SHALE_ENV_LOCK_FILE="$TMP/env-stacks.lock"
 
 mkdir -p "$TMP/tree/tests/tex-env" "$TMP/tree/assets/tex" "$TMP/bin"
 cp "$ROOT/tests/tex-env/tex-env.sh" "$ROOT/tests/tex-env/Containerfile" "$ROOT/tests/tex-env/install-texlive.sh" "$TMP/tree/tests/tex-env/"
+cp "$ROOT/tests/env-lock.sh" "$TMP/tree/tests/"
 cp "$ROOT/assets/tex/texlive.profile" "$ROOT/assets/tex/packages.txt" "$TMP/tree/assets/tex/"
 # the tuda-ci sources are "there": a fake curl and sha256sum, and the generated class already in the cache
 sha=$(sed -n 's/^TUDA_SHA256=//p' "$ROOT/tests/tex-env/tex-env.sh")
@@ -50,5 +53,19 @@ SHALE_TEX_ENV_REPOSITORY=https://texlive.example.test/tlnet run_build
 check "dev_025: with SHALE_TEX_ENV_REPOSITORY the build passes --build-arg TL_REPO=<url>" '[ "$RC" = 0 ] && printf "%s" "$CALLS_TEXT" | grep -Fq "build --build-arg TL_REPO=https://texlive.example.test/tlnet -t shale-tex-env"'
 SHALE_TEX_ENV_REPOSITORY=https://texlive.example.test/tlnet run_build --refresh
 check "dev_025: --refresh and the mirror go together" '[ "$RC" = 0 ] && printf "%s" "$CALLS_TEXT" | grep -Fq "build --no-cache --build-arg TL_REPO=https://texlive.example.test/tlnet -t shale-tex-env"'
+
+# spec: DEV-034: the build waits while another checkout holds the lock of the stacks, and runs when it is free
+if command -v flock >/dev/null 2>&1; then
+  (exec 8>>"$SHALE_ENV_LOCK_FILE"; flock 8; sleep 30) &
+  HOLDER=$!
+  sleep 1
+  CALLS="$TMP/calls"; : > "$CALLS"; export CALLS
+  PATH="$TMP/bin:$PATH" SHALE_TEX_ENV_ENGINE="$TMP/bin/engine" timeout 3 sh "$TMP/tree/tests/tex-env/tex-env.sh" build > "$TMP/out" 2>&1
+  RC=$?; CALLS_TEXT=$(cat "$CALLS")
+  check "dev_034: build waits while the lock is held elsewhere (and says so)" '[ "$RC" = 124 ] && [ -z "$CALLS_TEXT" ] && grep -Fq "waiting for the podman test stacks" "$TMP/out"'
+  pkill -P "$HOLDER" sleep 2>/dev/null; kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null
+  run_build
+  check "dev_034: build runs when the lock is free" '[ "$RC" = 0 ] && printf "%s" "$CALLS_TEXT" | grep -Fq "build -t shale-tex-env"'
+fi
 
 exit "$FAILED"

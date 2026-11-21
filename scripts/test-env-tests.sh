@@ -8,6 +8,9 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 FAILED=0
 N=0
+# the tests use a lock file of their own, never the machine's (DEV-034)
+export SHALE_ENV_LOCK_FILE="$TMP/env-stacks.lock"
+unset SHALE_ENV_LOCK_TOKEN
 
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/cargo" <<'CARGO'
@@ -76,6 +79,84 @@ if [ "$(tail -n 1 "$SCENARIO/texenv.repos")" = "https://mirror.example.test/tlne
 else
   echo "not ok - dev_025: the build did not see SHALE_TEX_ENV_REPOSITORY"
   FAILED=1
+fi
+
+
+# spec: DEV-034: one checkout at a time uses the podman stacks (#420). `run` is started with fake helpers
+# (the real ones are in a copy of the tree), a fake cargo and a fake container engine.
+LT="$TMP/lt"
+mkdir -p "$LT/.forgejo/scripts" "$LT/tests/mail-env" "$LT/tests/caldav-env" "$LT/tests/tex-env" "$LT/lbin"
+cp "$SCRIPT" "$LT/.forgejo/scripts/env-tests.sh"
+cp "$(dirname "$SCRIPT")/../../tests/env-lock.sh" "$LT/tests/env-lock.sh"
+for h in mail-env caldav-env tex-env; do
+  # each helper records that it ran and whether it saw the held marker
+  cat > "$LT/tests/$h/$h.sh" <<'HELPER'
+#!/bin/sh
+echo "$(basename "$0") $* token=${SHALE_ENV_LOCK_TOKEN:-none}" >> "$LOG"
+HELPER
+done
+cat > "$LT/lbin/cargo" <<'CARGO'
+#!/bin/sh
+echo "cargo $*" >> "$LOG"
+echo "test result: ok. 1 passed; 0 failed; 0 ignored"
+CARGO
+chmod +x "$LT/lbin/cargo"
+# a helper that takes the lock the way the real ones do, to see a child under the holder
+cat > "$LT/child.sh" <<'CHILD'
+#!/bin/sh
+. "$(dirname "$0")/tests/env-lock.sh"
+shale_env_lock
+echo "child got through" >> "$LOG"
+CHILD
+
+lt_run() { # runs `env-tests.sh run podman` in the copy, in the background; $1 is the log
+  (cd "$LT" && PATH="$LT/lbin:$PATH" LOG="$1" SHALE_ENV_TESTS_TEX_THREADS=1 sh .forgejo/scripts/env-tests.sh run podman > "$1.out" 2>&1; echo $? > "$1.rc") &
+}
+lt_wait_for() { # <file> <text>: up to 10 s
+  i=0; while [ "$i" -lt 100 ]; do grep -Fq -- "$2" "$1" 2>/dev/null && return 0; i=$((i + 1)); sleep 0.1; done; return 1
+}
+lt_check() { # <name> <command>
+  N=$((N + 1))
+  if eval "$2"; then echo "ok $N - $1"; else echo "not ok $N - $1"; FAILED=1; fi
+}
+
+if command -v flock >/dev/null 2>&1; then
+  # a first holder (another checkout) has the lock
+  : > "$TMP/hold.ready"
+  (exec 8>>"$SHALE_ENV_LOCK_FILE"; flock 8; echo held > "$TMP/hold.ready"; sleep 30) &
+  HOLDER=$!
+  lt_wait_for "$TMP/hold.ready" held
+  lt_run "$TMP/second.log"
+  lt_wait_for "$TMP/second.log.out" "waiting for the podman test stacks, used by another checkout"
+  lt_check "dev_034: a second env-tests.sh run says it waits for the stacks" '[ -f "$TMP/second.log.out" ] && grep -Fq "waiting for the podman test stacks, used by another checkout" "$TMP/second.log.out"'
+  sleep 1
+  lt_check "dev_034: and has started nothing while the lock is held elsewhere" '[ ! -s "$TMP/second.log" ] && [ ! -f "$TMP/second.log.rc" ]'
+  # the other checkout lets go: the run goes on
+  pkill -P "$HOLDER" sleep 2>/dev/null; kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null
+  lt_wait_for "$TMP/second.log.rc" 0
+  lt_check "dev_034: when the lock is free the run starts and ends well" '[ "$(cat "$TMP/second.log.rc" 2>/dev/null)" = 0 ] && grep -q "^cargo " "$TMP/second.log"'
+  lt_check "dev_034: the helpers the run starts saw the held marker (they would deadlock on it otherwise)" '[ "$(grep -c "token=none" "$TMP/second.log")" = 0 ] && grep -q "mail-env.sh up token=." "$TMP/second.log"'
+  wait
+
+  # a child that takes the lock while its parent holds it does not wait for it
+  rm -f "$TMP/nest.log"
+  (. "$LT/tests/env-lock.sh"; shale_env_lock; LOG="$TMP/nest.log"; export LOG; timeout 10 sh "$LT/child.sh"; echo "rc=$?" >> "$TMP/nest.log")
+  lt_check "dev_034: a child started by the holder does not wait for its parent" 'grep -q "child got through" "$TMP/nest.log" && grep -q "rc=0" "$TMP/nest.log"'
+
+  # a stale marker (the holder is gone) and a foreign one (another holder wrote another token) skip nothing
+  rm -f "$TMP/stale.log"
+  printf 'stale-token\n' > "$SHALE_ENV_LOCK_FILE"
+  (LOG="$TMP/stale.log" SHALE_ENV_LOCK_TOKEN=stale-token timeout 10 sh "$LT/child.sh" 2> "$TMP/stale.err")
+  lt_check "dev_034: a stale marker (nobody holds the lock) is no reason to skip it: the lock is taken, with a new token" 'grep -q "child got through" "$TMP/stale.log" && [ "$(cat "$SHALE_ENV_LOCK_FILE")" != stale-token ]'
+  rm -f "$TMP/foreign.log"
+  (exec 8>>"$SHALE_ENV_LOCK_FILE"; flock 8; printf 'holder-token\n' > "$SHALE_ENV_LOCK_FILE"; sleep 30) &
+  HOLDER=$!
+  sleep 1
+  (LOG="$TMP/foreign.log" SHALE_ENV_LOCK_TOKEN=inherited-token timeout 3 sh "$LT/child.sh" 2> "$TMP/foreign.err")
+  lt_check "dev_034: an inherited marker that is not the holder's token still waits for the lock" '[ ! -s "$TMP/foreign.log" ] && grep -Fq "waiting for the podman test stacks" "$TMP/foreign.err"'
+  pkill -P "$HOLDER" sleep 2>/dev/null; kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null
+else
+  echo "ok - dev_034: skipped, flock is not installed here"
 fi
 
 exit "$FAILED"
