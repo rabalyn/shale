@@ -94,7 +94,6 @@ fn sync_063_a_repository_with_a_remote_a_link_a_lock_or_a_merge_is_never_moved()
 #[cfg(unix)]
 #[test]
 fn sync_063_a_failure_while_copying_leaves_the_vault_s_git_and_no_copy_behind() {
-    use std::os::unix::fs::PermissionsExt;
     let env = Env::new("moveout-fail");
     let (v, root) = vault_with_repo(&env);
     // a link inside .git is refused
@@ -102,21 +101,20 @@ fn sync_063_a_failure_while_copying_leaves_the_vault_s_git_and_no_copy_behind() 
     let err = move_out(&env.git, &v, &root, &TreeLock::default(), WAIT).unwrap_err();
     assert!(err.contains("is a link"), "{err}");
     fs::remove_file(v.join(".git/linked")).unwrap();
-    // an unreadable file stops the copy half way (a normal user; the root user reads everything)
-    let hook = v.join(".git/description");
-    fs::set_permissions(&hook, fs::Permissions::from_mode(0o000)).unwrap();
-    let unreadable = fs::read(&hook).is_err();
-    let result = move_out(&env.git, &v, &root, &TreeLock::default(), WAIT);
-    fs::set_permissions(&hook, fs::Permissions::from_mode(0o644)).unwrap();
-    if unreadable {
-        assert!(result.is_err());
-    }
-    if result.is_err() {
-        assert!(v.join(".git").is_dir(), "the vault keeps its repository");
-        let left: Vec<_> = fs::read_dir(&root).unwrap().map(|e| e.unwrap().file_name()).collect();
-        assert!(left.is_empty(), "no half copy is left: {left:?}");
-        assert_eq!(env.git(&v, &["log", "--format=%s"]).lines().count(), 2);
-    }
+    // a socket inside .git cannot be opened for reading, by any user (an unreadable file would
+    // not do: the root user reads everything), so the copy stops half way
+    let socket = std::os::unix::net::UnixListener::bind(v.join(".git/s")).unwrap();
+    let err = move_out(&env.git, &v, &root, &TreeLock::default(), WAIT).unwrap_err();
+    assert!(err.contains("could not copy") && err.contains(".git/s"), "{err}");
+    assert!(v.join(".git").is_dir(), "the vault keeps its repository");
+    let left: Vec<_> = fs::read_dir(&root).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert!(left.is_empty(), "no half copy is left: {left:?}");
+    assert_eq!(env.git(&v, &["log", "--format=%s"]).lines().count(), 2, "the history is intact");
+    // without the socket the same move works
+    drop(socket);
+    fs::remove_file(v.join(".git/s")).unwrap();
+    move_out(&env.git, &v, &root, &TreeLock::default(), WAIT).unwrap();
+    assert!(!v.join(".git").exists());
 }
 
 // spec: SYNC-063
