@@ -374,7 +374,7 @@ mod tests {
     }
 
     fn two_views() -> Layout {
-        Layout { ribbon: Layout::default().ribbon, views: vec![view(&[Backlinks, Outline]), view(&[Outgoing, LocalGraph, Calendar])], hidden: vec![] }
+        Layout { ribbon: Layout::default().ribbon, views: vec![view(&[Backlinks, Outline]), view(&[Outgoing, LocalGraph, Calendar, History])], hidden: vec![] }
     }
 
     fn cfg_with(ribbon: &[&str], views: &[(&[&str], &str)]) -> Config {
@@ -394,12 +394,12 @@ mod tests {
     fn lay_002_a_stored_order_with_unknown_missing_and_double_ids_is_repaired() {
         assert_eq!(Layout::from_config(&Config::default()), Layout::default(), "nothing stored: the default");
         let d = Layout::default();
-        assert_eq!((d.ribbon.len(), d.views.len(), d.views[0].icons.len(), d.views[0].active), (12, 1, 5, p(Backlinks)), "default: all five panels in one view");
+        assert_eq!((d.ribbon.len(), d.views.len(), d.views[0].icons.len(), d.views[0].active), (12, 1, 6, p(Backlinks)), "default: all six panels in one view");
         let l = Layout::from_config(&cfg_with(&["mail", "bogus", "files", "mail", "", "new-note", "panel:outline"], &[]));
         assert_eq!(&l.ribbon[..4], [Item::Mail, Item::Files, Item::NewNote, p(Outline)], "the stored order is kept");
         let rest: Vec<Item> = Item::ALL.into_iter().filter(|i| !i.is_panel() && ![Item::Mail, Item::Files, Item::NewNote].contains(i)).collect();
         assert_eq!(&l.ribbon[4..], rest.as_slice(), "icons the list lacks come at the end in default order");
-        assert_eq!(l.views, vec![view(&[Backlinks, Outgoing, LocalGraph, Calendar])], "missing panels make a view, in default order");
+        assert_eq!(l.views, vec![view(&[Backlinks, Outgoing, LocalGraph, Calendar, History])], "missing panels make a view, in default order");
         let mut c = Config::default();
         l.store(&mut c);
         assert_eq!(Layout::from_config(&c), l, "what is stored comes back as it was");
@@ -413,7 +413,7 @@ mod tests {
     fn lay_002_stored_views_are_repaired_too() {
         // a ribbon item inside a view, a double across views, an unknown id, a view that ends up empty, an active icon not in its view
         let l = Layout::from_config(&cfg_with(&["files"], &[(&["panel:outline", "mail", "panel:outline", "nope"], "panel:calendar"), (&["files", "x"], "files"), (&["panel:backlinks", "panel:outgoing"], "panel:outgoing")]));
-        assert_eq!(l.views, vec![view(&[Outline]), View::new(vec![p(Backlinks), p(Outgoing), p(LocalGraph), p(Calendar)], p(Outgoing))]);
+        assert_eq!(l.views, vec![view(&[Outline]), View::new(vec![p(Backlinks), p(Outgoing), p(LocalGraph), p(Calendar), p(History)], p(Outgoing))]);
         assert!(l.ribbon.contains(&Item::Mail) && l.ribbon.contains(&Item::Files), "a ribbon item found in a view goes back to the ribbon");
         assert!(!l.ribbon.iter().any(|i| i.is_panel()));
         every_icon_once(&l);
@@ -442,10 +442,10 @@ mod tests {
         // right to right: Outline goes to the second view, at the front, and becomes active there
         l.apply(p(Outline), Dest::Bar { view: 1, at: 0 }).unwrap();
         assert_eq!(l.views[0].icons, [p(Backlinks)]);
-        assert_eq!((l.views[1].icons.clone(), l.views[1].active), (vec![p(Outline), p(Outgoing), p(LocalGraph), p(Calendar)], p(Outline)));
+        assert_eq!((l.views[1].icons.clone(), l.views[1].active), (vec![p(Outline), p(Outgoing), p(LocalGraph), p(Calendar), p(History)], p(Outline)));
         // within a view: down moves count the icons as they were
         l.apply(p(Outline), Dest::Bar { view: 1, at: 3 }).unwrap();
-        assert_eq!(l.views[1].icons, [p(Outgoing), p(LocalGraph), p(Outline), p(Calendar)]);
+        assert_eq!(l.views[1].icons, [p(Outgoing), p(LocalGraph), p(Outline), p(Calendar), p(History)]);
         // right to left: a panel becomes a ribbon shortcut, and leaves the view
         l.apply(p(Calendar), Dest::Ribbon(2)).unwrap();
         assert_eq!(l.ribbon[2], p(Calendar));
@@ -500,7 +500,7 @@ mod tests {
     fn lay_009_a_new_view_is_made_at_the_place_of_the_drop() {
         let mut l = two_views();
         l.apply(p(Calendar), Dest::NewView { at: 1 }).unwrap();
-        assert_eq!(l.views, vec![view(&[Backlinks, Outline]), view(&[Calendar]), view(&[Outgoing, LocalGraph])]);
+        assert_eq!(l.views, vec![view(&[Backlinks, Outline]), view(&[Calendar]), view(&[Outgoing, LocalGraph, History])]);
         // from a view that disappears above the place: the place shifts up with the stack
         let mut l = Layout { ribbon: vec![], views: vec![view(&[Backlinks]), view(&[Outline]), view(&[Calendar])], hidden: vec![] };
         l.apply(p(Backlinks), Dest::NewView { at: 3 }).unwrap();
@@ -570,7 +570,7 @@ mod tests {
         every_icon_once(&l);
         // the last icon of a view takes the view with it
         assert!(l.hide(p(Outline)));
-        assert_eq!(l.views, vec![view(&[Outgoing, LocalGraph, Calendar])]);
+        assert_eq!(l.views, vec![view(&[Outgoing, LocalGraph, Calendar, History])]);
         // what is hidden stays hidden when the layout is stored and loaded
         let mut c = Config::default();
         l.store(&mut c);

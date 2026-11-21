@@ -440,3 +440,20 @@ fn hist_011_the_marks_are_drawn_in_the_colours_of_a_dark_and_a_light_theme_and_a
         assert!(w.has_text("+") && w.has_text("~"), "{name}: the glyphs are there too, so it is not colour alone");
     }
 }
+
+// spec: SYNC-045, SYNC-040
+#[test]
+fn sync_045_the_deleted_notes_dialog_lists_a_trashed_note_and_restores_it() {
+    let mut w = W::new("deleted-dialog", WIDE);
+    w.t.app.trash(Path::new("Trip.md"));
+    w.settle();
+    assert!(!w.t.vault.join("Trip.md").exists());
+    // the link of the panel opens the dialog
+    let link = w.panel_rect("deleted");
+    w.click(link.center());
+    assert!(matches!(w.t.app.modal, Some(Modal::History)));
+    assert!(w.has_text("Trip.md") && w.has_text("deleted"), "{:?}", w.hl.text);
+    let restore = w.t.app.history.deleted.rects.iter().find(|r| r.0 == "restore-deleted-0").expect("a Restore button").1;
+    w.click(restore.center());
+    assert_eq!(crate::fsutil::read_to_string(w.t.vault.join("Trip.md")).unwrap(), V3);
+}
