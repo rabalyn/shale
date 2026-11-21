@@ -372,6 +372,9 @@ The mouse wheel pans and Ctrl+wheel zooms. Hold Space and drag to pan.
 cargo test
 ```
 
+`scripts/land.sh` runs the tests with [cargo-nextest](https://nexte.st) (faster than `cargo test`),
+which it needs: `cargo install cargo-nextest --locked`. Without it a landing stops at the start and says so.
+
 The tests also run against a real vault if there is one: put notes, drawings and files into
 `notes/` next to `Cargo.toml` (it is not committed), or point `SHALE_TEST_VAULT` at a folder.
 Each test works on a copy, so the vault itself is never changed. Without such a folder those
