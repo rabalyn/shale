@@ -7,6 +7,9 @@ use crate::data_usage::{finished_text, CacheId, Finished, Kind};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+#[cfg(test)]
+mod tests;
+
 impl ShaleApp {
     /// A function that wakes the window (for the jobs).
     fn usage_wake(&self) -> impl Fn() + Send + Clone + 'static {
