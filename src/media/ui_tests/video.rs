@@ -248,13 +248,15 @@ fn in_the_editor_the_round_buttons_the_edge_and_the_picture_of_a_video_leave_the
     st.store(fx.hl.ctx(), id);
     fx.hl.frames(&mut fx.app, 3);
     let note = |fx: &Fx| fx.app.notes[Path::new("Player.md")].text.clone();
+    let typed = std::cell::RefCell::new(String::new());
     let check = |fx: &mut Fx, what: &str, c: &str| {
         fx.hl.frames(&mut fx.app, 3);
         assert!(fx.hl.ctx().memory(|m| m.has_focus(id)), "{what}: the text keeps the keyboard");
         fx.hl.frame(&mut fx.app, vec![Event::Text(c.into())]);
         fx.hl.frames(&mut fx.app, 2);
-        // (a width written into the link moves the text after it, so only the letter is looked for)
-        assert!(note(fx).contains(c), "{what}: {:?}", note(fx));
+        // the letter lands where the cursor was, behind the link, though a width written into the link moved the text (EDIT-052)
+        typed.borrow_mut().push_str(c);
+        assert!(note(fx).ends_with(&format!("\n\naf{}ter the video\n", typed.borrow())), "{what}: {:?}", note(fx));
     };
 
     // the picture of the video, beside the round play button

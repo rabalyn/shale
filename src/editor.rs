@@ -420,6 +420,19 @@ pub fn outline_job(title: &str, links: &[(LinkSpan, bool)], base: f32) -> Layout
     out
 }
 
+/// Where a cursor end at char `at` is after the link at chars `link` was rewritten to `new_len`
+/// chars (EDIT-052): before the link it stays, behind it it moves by the change in length, inside
+/// it goes to the end of the new link.
+fn after_relink(at: usize, link: &Range<usize>, new_len: usize) -> usize {
+    if at <= link.start {
+        at
+    } else if at >= link.end {
+        at - link.len() + new_len
+    } else {
+        link.start + new_len
+    }
+}
+
 /// The selection `(moving end, other end)` as the text box keeps it, so that the keyboard coming back
 /// to the text leaves the cursor at the end it was (`CCursorRange::two` takes the smaller end first).
 fn moving_first(moving: usize, other: usize) -> CCursorRange {
@@ -1822,12 +1835,33 @@ impl NoteEditor {
                 }
             }
             // the size goes into the link (`![[pic.png|300]]`, EDIT-052)
+            let mut cursor = TextEditState::load(ui.ctx(), self.id).and_then(|st| st.cursor.char_range());
+            let mut selection = self.last_selection;
+            let mut relinked = false;
             for (range, w) in resized.into_iter().rev() {
                 if text.get(range.clone()) == now_text.get(range.clone()) {
                     let link = markdown::embed_with_width(&text[range.clone()], w);
+                    // the cursor and the selection move with the text (EDIT-052)
+                    let old = markdown::byte_to_char(text, range.start)..markdown::byte_to_char(text, range.end);
+                    let new_len = link.chars().count();
+                    for c in cursor.iter_mut().flat_map(|r| [&mut r.primary, &mut r.secondary]) {
+                        *c = CCursor::new(after_relink(c.index.0, &old, new_len));
+                    }
+                    if let Some((a, b)) = selection.as_mut() {
+                        (*a, *b) = (after_relink(*a, &old, new_len), after_relink(*b, &old, new_len));
+                    }
                     text.replace_range(range, &link);
                     changed = true;
+                    relinked = true;
                 }
+            }
+            if relinked {
+                if let Some(r) = cursor {
+                    let mut state = TextEditState::load(ui.ctx(), self.id).unwrap_or_default();
+                    state.cursor.set_char_range(Some(r));
+                    state.store(ui.ctx(), self.id);
+                }
+                self.last_selection = selection;
             }
         }
         // paint the tables over their hidden text
@@ -2895,6 +2929,105 @@ mod tests {
         h.frame(&mut ed, &mut text, &v, rel, vec![esc]);
         assert!(ed.embeds.full.is_none(), "Escape closes it");
         assert_eq!(text, "intro\n![[pic.png|200]]\nafter");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// The editor's cursor as `(moving end, other end)` in chars.
+    fn cursor_of(h: &Harness, ed: &NoteEditor) -> (usize, usize) {
+        let r = egui::text_edit::TextEditState::load(&h.ctx, ed.id).and_then(|st| st.cursor.char_range()).unwrap();
+        (r.primary.index.0, r.secondary.index.0)
+    }
+
+    /// A picture 200 points wide, `![[pic.png|80]]` in `intro\n…\nafter`, with the selection `sel`
+    /// (moving end, other end) set and the 100 % button clicked: the text and the selection after it.
+    fn click_100_percent_with(sel: (usize, usize)) -> (String, (usize, usize)) {
+        let (v, d) = vault_for_tests("resize-cursor");
+        image::RgbaImage::from_pixel(200, 120, image::Rgba([200, 30, 30, 255])).save(d.join("pic.png")).unwrap();
+        let mut v = v;
+        v.rescan();
+        let rel = Path::new("Welcome.md");
+        let mut text = String::from("intro\n![[pic.png|80]]\nafter");
+        let mut ed = NoteEditor::new(egui::Id::unique("resize-cursor"));
+        ed.inline_images = true;
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+        for _ in 0..3 {
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        }
+        h.ctx.memory_mut(|m| m.request_focus(ed.id));
+        let mut st = egui::text_edit::TextEditState::load(&h.ctx, ed.id).unwrap_or_default();
+        st.cursor.set_char_range(Some(CCursorRange { primary: CCursor::new(sel.0), secondary: CCursor::new(sel.1), h_pos: None }));
+        st.store(&h.ctx, ed.id);
+        for _ in 0..2 {
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        }
+        let r = embed_rect(&ed, Vec2::new(80.0, 48.0));
+        let hundred = Pos2::new(r.right() - 27.0, r.top() + 27.0) - Vec2::new(42.0, 0.0);
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::PointerMoved(hundred)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![press(hundred, true)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![press(hundred, false)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        // the text box drops a selection while the button has the mouse; `last_selection` is what it shows again (EDIT-042)
+        let got = if sel.0 == sel.1 { cursor_of(&h, &ed) } else { ed.last_selection.unwrap() };
+        let _ = std::fs::remove_dir_all(&d);
+        (text, got)
+    }
+
+    // spec: EDIT-052
+    #[test]
+    fn a_width_written_into_a_link_moves_the_cursor_and_the_selection_like_any_edit_before_them() {
+        // the link is chars 6..21 (`![[pic.png|80]]`) and becomes 22 long: one char more
+        let (text, cur) = click_100_percent_with((22, 22));
+        assert_eq!(text, "intro\n![[pic.png|200]]\nafter");
+        assert_eq!(cur, (23, 23), "the cursor after the link stays after it");
+        assert_eq!(click_100_percent_with((2, 2)).1, (2, 2), "the cursor before the link stays");
+        assert_eq!(click_100_percent_with((4, 1)).1, (4, 1), "a selection before the link stays");
+        assert_eq!(click_100_percent_with((26, 23)).1, (27, 24), "a selection behind the link moves as a whole");
+    }
+
+    // spec: EDIT-052
+    #[test]
+    fn a_cursor_end_moves_by_the_change_in_the_links_length_and_one_inside_goes_to_its_end() {
+        let link = 6..21; // `![[pic.png|80]]`
+        for (at, longer, shorter, removed) in [(2, 2, 2, 2), (6, 6, 6, 6), (22, 23, 21, 19), (21, 22, 20, 18), (10, 22, 20, 18), (20, 22, 20, 18)] {
+            assert_eq!(after_relink(at, &link, 16), longer, "{at}: a longer link (`|1200`)");
+            assert_eq!(after_relink(at, &link, 14), shorter, "{at}: a shorter link (`|8`)");
+            assert_eq!(after_relink(at, &link, 12), removed, "{at}: a link without width");
+        }
+    }
+
+    // spec: EDIT-052
+    #[test]
+    fn a_width_dragged_into_a_link_keeps_the_cursor_after_the_link() {
+        let (v, d) = vault_for_tests("resize-cursor-drag");
+        image::RgbaImage::from_pixel(200, 120, image::Rgba([200, 30, 30, 255])).save(d.join("pic.png")).unwrap();
+        let mut v = v;
+        v.rescan();
+        let rel = Path::new("Welcome.md");
+        let mut text = String::from("intro\n![[pic.png]]\nafter");
+        let mut ed = NoteEditor::new(egui::Id::unique("resize-cursor-drag"));
+        ed.inline_images = true;
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+        for _ in 0..3 {
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        }
+        // the cursor at the start of "after"
+        let mut st = egui::text_edit::TextEditState::load(&h.ctx, ed.id).unwrap_or_default();
+        st.cursor.set_char_range(Some(CCursorRange::one(CCursor::new(19))));
+        st.store(&h.ctx, ed.id);
+        for _ in 0..2 {
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        }
+        let corner = embed_rect(&ed, Vec2::new(200.0, 120.0)).max - Vec2::splat(3.0);
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::PointerMoved(corner)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![press(corner, true)]);
+        for i in 1..=5 {
+            h.frame(&mut ed, &mut text, &v, rel, vec![Event::PointerMoved(corner + Vec2::new(20.0 * i as f32, 0.0))]);
+        }
+        h.frame(&mut ed, &mut text, &v, rel, vec![press(corner + Vec2::new(100.0, 0.0), false)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert!(text.contains("|") && text.ends_with("]]\nafter"), "{text}");
+        let start = text.chars().count() - "after".chars().count();
+        assert_eq!(cursor_of(&h, &ed), (start, start), "{text:?}");
         let _ = std::fs::remove_dir_all(&d);
     }
 
