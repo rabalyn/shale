@@ -154,6 +154,13 @@ pub fn outside(p: &Places) -> Vec<Line> {
     lines.push(folder_line("Local calendars", &p.calendars, |rel| !rel.starts_with(".calendar-trash")));
     lines.push(folder_line("Calendar trash", &p.calendar_trash, |_| true));
     lines.push(folder_line("Recovered notes", &p.recovery, |_| true));
+    // a vault with `.git` keeps its history there, which is counted with the vault (USE-002)
+    if let Some(v) = p.vault.as_ref().filter(|v| !crate::gitsync::is_repo(v)) {
+        lines.push(match crate::gitsync::history::vault_id(v) {
+            Some(id) => folder_line("File history of this vault", &p.history.join(id), |_| true),
+            None => Line { label: "File history of this vault".into(), path: Some(p.history.clone()), ..Default::default() },
+        });
+    }
     lines
 }
 

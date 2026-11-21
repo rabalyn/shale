@@ -18,7 +18,7 @@
 //! - [`deleted`]`(&Repo, &Path /* vault */, limit) -> Result<Vec<Deleted>, String>` and
 //!   [`deleted_content`]`(&Repo, &Deleted)`: the deleted notes and their last text.
 //! - [`restored_name`]`(path, taken) -> PathBuf`: a free name for a restored note.
-//! - [`size`]`(&Repo) -> u64`: the history on disk.
+//! - The size of a local-only history is a line of Data usage (USE-025, `data_usage::scan::outside`).
 //! - [`parse_message`]`(&str) -> Meta`: the trailers of a commit message ([`Reason`], device, paths).
 //!
 //! # Layout
@@ -37,7 +37,12 @@ use std::time::Duration;
 
 /// An argument list from anything that is a string or a path.
 macro_rules! osv {
-    ($($a:expr),* $(,)?) => { vec![$(OsString::from($a)),*] };
+    ($($a:expr),* $(,)?) => { [$(OsString::from($a)),*] };
+}
+
+/// Where the histories of the vaults without `.git` live: `<data folder>/shale/history`.
+pub fn default_root() -> PathBuf {
+    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("history")
 }
 
 /// The vault's ID, relative to the vault: 128 random bits in hex, one line. Synced with the vault
@@ -216,6 +221,13 @@ impl Repo {
         self.git.run(&self.vault, &refs)
     }
 
+    /// Tests: run git in the repository and return its stdout.
+    #[cfg(test)]
+    pub(crate) fn run_for_test(&self, args: &[&str]) -> String {
+        let a: Vec<OsString> = args.iter().map(OsString::from).collect();
+        String::from_utf8_lossy(&self.run(&a).unwrap().stdout).into_owned()
+    }
+
     /// Run and require success; the error is git's own message.
     fn ok(&self, args: &[OsString]) -> Result<Out, String> {
         let o = self.run(args)?;
@@ -242,9 +254,8 @@ impl Repo {
 
 /// An argument list from anything that is a string or a path.
 macro_rules! osv {
-    ($($a:expr),* $(,)?) => { vec![$(OsString::from($a)),*] };
+    ($($a:expr),* $(,)?) => { [$(OsString::from($a)),*] };
 }
-use osv;
 
 /// The ID of the vault, if it has one.
 pub fn vault_id(vault: &Path) -> Option<String> {
@@ -270,30 +281,21 @@ pub fn locate(git: &Git, vault: &Path, history_root: &Path) -> Result<Repo, Stri
     if super::is_repo(vault) {
         return Ok(Repo { git: git.clone(), vault: vault.to_path_buf(), git_dir: None });
     }
-    let mut id = vault_id(vault);
-    // a copy has the ID of a folder that is still there: at most one new ID is needed
-    for _ in 0..2 {
-        let current = match id.clone() {
-            Some(i) => i,
-            None => {
-                let i = new_id();
-                write_id(vault, &i)?;
-                id = Some(i.clone());
-                i
-            }
-        };
-        let gd = history_root.join(&current);
-        let owner = std::fs::read_to_string(gd.join(WORKTREE_FILE)).ok().map(|s| PathBuf::from(s.trim()));
-        let copied = owner.as_ref().is_some_and(|o| !same_folder(o, vault) && o.is_dir() && vault_id(o).as_deref() == Some(current.as_str()));
-        if !copied {
-            return Ok(Repo { git: git.clone(), vault: vault.to_path_buf(), git_dir: Some(gd) });
+    let mut id = match vault_id(vault) {
+        Some(i) => i,
+        None => {
+            let i = new_id();
+            write_id(vault, &i)?;
+            i
         }
-        let fresh = new_id();
-        write_id(vault, &fresh)?;
-        id = Some(fresh);
+    };
+    // a copy has the ID of a folder that is still there, and gets a new one (a new ID is not taken)
+    let owner = |id: &str| std::fs::read_to_string(history_root.join(id).join(WORKTREE_FILE)).ok().map(|s| PathBuf::from(s.trim()));
+    if owner(&id).is_some_and(|o| !same_folder(&o, vault) && o.is_dir() && vault_id(&o).as_deref() == Some(id.as_str())) {
+        id = new_id();
+        write_id(vault, &id)?;
     }
-    let gd = history_root.join(id.unwrap_or_default());
-    Ok(Repo { git: git.clone(), vault: vault.to_path_buf(), git_dir: Some(gd) })
+    Ok(Repo { git: git.clone(), vault: vault.to_path_buf(), git_dir: Some(history_root.join(id)) })
 }
 
 fn write_id(vault: &Path, id: &str) -> Result<(), String> {
@@ -435,7 +437,9 @@ fn plan(repo: &Repo, req: &Request) -> Result<Plan, String> {
         } else if !skipped(p) && !p.components().any(|c| c.as_os_str().to_string_lossy().starts_with('.')) {
             // gone: only what the repository knows can change (a deletion or the old side of a move)
             let known = repo.run(&osv!["--literal-pathspecs", "ls-files", "-z", "--", crate::vault::rel_to_string(p)])?;
-            if known.ok && !known.stdout.is_empty() {
+            let names: Vec<&[u8]> = known.stdout.split(|b| *b == 0).filter(|n| !n.is_empty()).collect();
+            let is_file = names.len() == 1 && names[0] == crate::vault::rel_to_string(p).as_bytes();
+            if known.ok && !names.is_empty() && (!is_file || tracked(p)) {
                 plan.literal.push(pathspec(p));
             }
         }
@@ -448,6 +452,8 @@ fn subject(req: &Request) -> String {
     match (req.reason, names.as_slice()) {
         (Reason::Initial, _) => "Start of the history".to_string(),
         (Reason::Rename, [a, b]) => format!("Rename {a} to {b}"),
+        // the moved path first, its new place second, then the notes whose links were updated
+        (Reason::Rename, [a, b, more @ ..]) => format!("Rename {a} to {b}, {} link update(s)", more.len()),
         (Reason::Rename, n) => format!("Rename {} file(s)", n.len()),
         (Reason::Delete, [a]) => format!("Delete {a}"),
         (Reason::Delete, n) => format!("Delete {} file(s)", n.len()),
@@ -471,13 +477,22 @@ fn busy(e: String) -> Result<Outcome, String> {
 /// lock for the time it runs and gives up after `wait` (then [`Outcome::Busy`]). A local-only
 /// repository is made first ([`ensure`]), with one [`Reason::Initial`] snapshot of the vault.
 pub fn snapshot(repo: &Repo, opts: &Options, req: &Request, tree: &TreeLock, wait: Duration) -> Result<Outcome, String> {
-    let _flow = tracing::info_span!("flow.history_snapshot", peer = "git").entered();
     let Some(_tree) = tree.hold_for(wait) else { return Ok(Outcome::Busy("the vault's files are in use".into())) };
+    snapshot_held(repo, opts, req)
+}
+
+/// Like [`snapshot`], for a caller that holds the tree lock already (the window while it moves a
+/// note to the trash).
+pub fn snapshot_held(repo: &Repo, opts: &Options, req: &Request) -> Result<Outcome, String> {
+    let _flow = tracing::info_span!("flow.history_snapshot", peer = "git").entered();
     let made = ensure(repo)?;
     if repo.git_dir.is_none() {
         if let Err(e) = ensure_idle(&repo.git, &repo.vault) {
             return Ok(Outcome::Busy(e));
         }
+    }
+    if req.reason == Reason::Initial && !made {
+        return Ok(Outcome::Unchanged); // the history has a start already (SYNC-044)
     }
     if made && req.reason != Reason::Initial {
         // the first snapshot of a new history is the vault as it is (SYNC-044), then this one
@@ -497,21 +512,21 @@ fn commit(repo: &Repo, opts: &Options, req: &Request) -> Result<Outcome, String>
     }
     let in_vault = repo.git_dir.is_none();
     if !plan.literal.is_empty() {
-        let mut a = osv!["add", "-A", "--"];
+        let mut a = osv!["add", "-A", "--"].to_vec();
         a.extend(plan.literal.iter().cloned());
         if let Err(e) = repo.ok(&a) {
             return busy(e);
         }
     }
     for g in &plan.globs {
-        let mut a = osv!["add", "-A", "--"];
+        let mut a = osv!["add", "-A", "--"].to_vec();
         a.extend(g.iter().cloned());
         let o = repo.run(&a)?;
         if !o.ok && !o.stderr.contains("did not match any files") {
             return busy(format!("git add: {}", o.stderr));
         }
     }
-    let mut d = osv!["diff", "--cached", "--name-only", "--no-renames", "-z", "--"];
+    let mut d = osv!["diff", "--cached", "--name-only", "--no-renames", "-z", "--"].to_vec();
     d.extend(specs);
     let staged: Vec<OsString> = repo.ok(&d)?.stdout.split(|b| *b == 0).filter(|s| !s.is_empty()).map(|s| OsString::from(String::from_utf8_lossy(s).into_owned())).collect();
     if staged.is_empty() {
@@ -581,7 +596,7 @@ pub fn versions(repo: &Repo, path: &Path, limit: usize) -> Result<Vec<Version>, 
     if repo.run(&osv!["rev-parse", "--verify", "--quiet", "HEAD"])?.stdout.is_empty() {
         return Ok(vec![]); // nothing committed yet
     }
-    let mut a = osv!["--literal-pathspecs", "log", "--follow", "-z", "-M", "--numstat", LOG_FORMAT];
+    let mut a = osv!["--literal-pathspecs", "log", "--follow", "-z", "-M", "--numstat", LOG_FORMAT].to_vec();
     a.extend(osv!["-n", limit.to_string(), "--", crate::vault::rel_to_string(path)]);
     let out = repo.ok(&a)?;
     let mut list = vec![];
@@ -672,11 +687,6 @@ pub fn restored_name(path: &Path, taken: impl Fn(&Path) -> bool) -> PathBuf {
     super::numbered_name(path, "restored", taken)
 }
 
-/// What the history takes on disk: the git directory of a local-only history, or the vault's `.git`.
-pub fn size(repo: &Repo) -> u64 {
-    crate::pdf::tex::engine::folder_bytes(&repo.git_dir.clone().unwrap_or_else(|| repo.vault.join(".git")))
-}
-
 /// When snapshots are due (SYNC-033): a pure schedule, with the time passed in (seconds, any
 /// origin), so tests need no sleeps.
 #[derive(Debug, Default)]
@@ -702,6 +712,7 @@ impl Schedule {
         }
     }
 
+    #[cfg(test)]
     pub fn has_pending(&self) -> bool {
         !self.pending.is_empty()
     }
@@ -746,6 +757,15 @@ impl Schedule {
     pub fn take_all(&mut self) -> Vec<PathBuf> {
         self.closed.clear();
         std::mem::take(&mut self.pending).into_keys().collect()
+    }
+
+    /// Take the pending paths at or below `prefix` (a note or a folder).
+    pub fn take_under(&mut self, prefix: &Path) -> Vec<PathBuf> {
+        let under: Vec<PathBuf> = self.pending.keys().filter(|p| p.starts_with(prefix)).cloned().collect();
+        for p in &under {
+            self.forget(p);
+        }
+        under
     }
 
     /// Forget one path (it was snapshotted by hand, or it is gone).

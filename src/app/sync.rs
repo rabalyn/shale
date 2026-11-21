@@ -75,6 +75,11 @@ impl SyncState {
         self.job.is_some()
     }
 
+    /// A Git LFS setup job is running.
+    pub fn lfs_job_running(&self) -> bool {
+        self.lfs_job.is_some()
+    }
+
     /// The git changed (SYNC-024): `git --version` is looked up again.
     pub(crate) fn forget_git_version(&mut self) {
         self.git_version = None;
@@ -100,14 +105,14 @@ impl ShaleApp {
         };
     }
 
-    fn sync_options(&self) -> gitsync::Options {
+    pub(crate) fn sync_options(&self) -> gitsync::Options {
         let s = &self.vdata.settings.sync;
         gitsync::Options { commit_prefix: s.commit_prefix.clone(), commit_suffix: s.commit_suffix.clone(), host: gitsync::host_name(), stamp: gitsync::stamp_now() }
     }
 
     /// "Store media with Git LFS": set the repository up in the background, then sync (SYNC-017).
     pub(crate) fn start_lfs_setup(&mut self) {
-        if self.sync.running() || self.sync.lfs_job.is_some() {
+        if self.sync.running() || self.sync.lfs_job.is_some() || self.history.busy() {
             return;
         }
         let Some(root) = self.vault.as_ref().map(|v| v.root.clone()) else { return };
@@ -200,7 +205,7 @@ impl ShaleApp {
         self.sync.pull = Some(PullJob { vault: root, file, rx });
     }
 
-    fn git_version(&mut self) -> Option<String> {
+    pub(crate) fn git_version(&mut self) -> Option<String> {
         if self.sync.git_version.is_none() {
             self.sync.git_version = Some(self.sync.git.version());
         }
@@ -259,7 +264,8 @@ impl ShaleApp {
 
     /// Save everything, then sync in the background.
     pub(crate) fn start_sync(&mut self) {
-        if self.sync.running() || self.sync.lfs_job.is_some() {
+        // a snapshot and the sync never run on the repository at once (SYNC-035)
+        if self.sync.running() || self.sync.lfs_job.is_some() || self.history.busy() {
             return;
         }
         let Some(root) = self.vault.as_ref().map(|v| v.root.clone()) else { return };

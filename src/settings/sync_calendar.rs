@@ -5,8 +5,9 @@ use crate::app::ShaleApp;
 use eframe::egui::Ui;
 
 impl ShaleApp {
-    pub(super) fn sync_tab(&mut self, ui: &mut Ui) -> bool {
-        self.sync_settings_ui(ui)
+    pub(super) fn sync_tab(&mut self, ui: &mut Ui, asks: &mut Asks) -> bool {
+        let sync = self.sync_settings_ui(ui);
+        self.history_settings_ui(ui, asks) | sync
     }
 
     pub(super) fn calendar_tab(&mut self, ui: &mut Ui, asks: &mut Asks) -> bool {

@@ -493,20 +493,6 @@ fn a_note_moved_to_the_trash_by_the_sync_is_a_deletion_too() {
     assert_eq!(deleted_content(&repo, &list[0]).unwrap(), b"text\n");
 }
 
-// spec: SYNC-043, USE-025
-#[test]
-fn the_size_of_the_history_is_the_git_dir_or_the_vaults_dot_git() {
-    let h = setup("hist-size");
-    write(&h.vault, "N.md", &"x".repeat(5000));
-    let repo = h.locate_only();
-    assert_eq!(size(&repo), 0, "no history yet");
-    committed(h.snap(&repo, Reason::Initial, &[]));
-    assert!(size(&repo) > 0);
-    let g = setup("hist-size-git");
-    g.env.git(&g.vault, &["init", "--quiet"]);
-    assert!(size(&g.repo()) > 0, "the vault's .git");
-}
-
 // spec: SYNC-033
 #[test]
 fn the_schedule_coalesces_saves_and_asks_again_after_idle_and_close() {
@@ -558,13 +544,22 @@ fn the_schedule_coalesces_saves_and_asks_again_after_idle_and_close() {
 
 // spec: CFG-066
 #[test]
-fn the_history_settings_default_to_on_load_from_old_files_and_stay_in_range() {
+fn the_history_settings_default_to_on_load_from_old_files_round_trip_and_stay_in_range() {
+    let c = crate::config::Config::default();
+    assert_eq!((c.history.enabled, c.history.coalesce_minutes, c.history.idle_seconds), (true, 10, 60));
+    let (old, _) = crate::vault_state::parse::<crate::config::Config>(br#"{"vault": "/tmp/v"}"#).unwrap();
+    assert_eq!(old.history, HistoryConfig::default(), "a file from before has no history settings");
+    let (c, _) = crate::vault_state::parse::<crate::config::Config>(br#"{"history": {"coalesce_minutes": 3}}"#).unwrap();
+    assert_eq!(c.history, HistoryConfig { coalesce_minutes: 3, ..HistoryConfig::default() }, "a missing field takes its default");
+    let (c, _) = crate::vault_state::parse::<crate::config::Config>(br#"{"history": {"enabled": "maybe"}}"#).unwrap();
+    assert_eq!(c.history, HistoryConfig::default(), "a value of the wrong shape loads as the default");
+    let c = crate::config::Config { history: HistoryConfig { enabled: false, coalesce_minutes: 30, idle_seconds: 9 }, ..Default::default() };
+    let text = crate::config::text::to_toml(&c);
+    assert!(text.contains("[history]") && text.contains("enabled = false") && text.contains("coalesce_minutes = 30") && text.contains("idle_seconds = 9"), "{text}");
+    let (back, _) = crate::config::Config::parse_text(&text).unwrap();
+    assert_eq!(back.history, c.history);
+    // a number out of range works as its nearest limit
     let d = HistoryConfig::default();
-    assert_eq!((d.enabled, d.coalesce_minutes, d.idle_seconds), (true, 10, 60));
-    let loaded: HistoryConfig = toml::from_str("coalesce_minutes = 3").unwrap();
-    assert_eq!(loaded, HistoryConfig { coalesce_minutes: 3, ..d.clone() });
-    let off: HistoryConfig = toml::from_str("enabled = false\nidle_seconds = 5").unwrap();
-    assert!(!off.enabled && off.idle_seconds == 5);
     assert_eq!(HistoryConfig { coalesce_minutes: 0, idle_seconds: 0, ..d.clone() }.coalesce_secs(), 60);
     assert_eq!(HistoryConfig { coalesce_minutes: 0, idle_seconds: 0, ..d.clone() }.idle_secs(), 5);
     assert_eq!(HistoryConfig { coalesce_minutes: u32::MAX, idle_seconds: u32::MAX, ..d }.coalesce_secs(), 86400);

@@ -146,6 +146,8 @@ pub struct Asks {
     pub mail: bool,
     pub social: bool,
     pub usage: bool,
+    /// Open the list of the deleted notes (SYNC-040).
+    pub history_deleted: bool,
     pub guide: bool,
     /// Open the guided setup of the LaTeX export (TEX-017).
     pub tex_setup: bool,
@@ -224,7 +226,7 @@ impl ShaleApp {
                     SettingsTab::Vim => self.vim_tab(ui, tab),
                     SettingsTab::Appearance => self.appearance_tab(ui),
                     SettingsTab::Fonts => self.fonts_tab(ui),
-                    SettingsTab::Sync => self.sync_tab(ui),
+                    SettingsTab::Sync => self.sync_tab(ui, &mut asks),
                     SettingsTab::Calendar => self.calendar_tab(ui, &mut asks),
                     SettingsTab::Mail => self.mail_tab(ui, &mut asks),
                     SettingsTab::Social => self.social_tab(ui, &mut asks),

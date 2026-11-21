@@ -110,6 +110,8 @@ pub struct Places {
     pub calendars: PathBuf,
     pub calendar_trash: PathBuf,
     pub recovery: PathBuf,
+    /// `<data folder>/shale/history`: the file histories of the vaults without `.git` (USE-025)
+    pub history: PathBuf,
     /// `<data folder>/shale/cache-cleanup.json` (USE-024)
     pub cleanup_file: PathBuf,
     /// the open vault
@@ -127,6 +129,7 @@ impl Places {
             calendars: root.join("calendars"),
             calendar_trash: root.join("calendar-trash"),
             recovery: root.join("recovery"),
+            history: root.join("history"),
             cleanup_file: root.join("cache-cleanup.json"),
             vault: None,
         }

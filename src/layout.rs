@@ -694,6 +694,10 @@ impl ShaleApp {
                             self.actions.push(Action::NewDrawing { folder, embed_into: Some(p2.clone()) });
                             ui.close();
                         }
+                        if ui.button("Versions of this note…").clicked() {
+                            self.actions.push(Action::History(p2.clone()));
+                            ui.close();
+                        }
                         if ui.button("Rename…").clicked() {
                             self.actions.push(Action::Rename(p2.clone()));
                             ui.close();
@@ -718,6 +722,10 @@ impl ShaleApp {
                     ui.menu_button(egui::RichText::new("⋯").size(16.0).color(theme::palette().muted), |ui| {
                         if ui.button("Export to PDF…").clicked() {
                             self.actions.push(Action::Export(p2.clone()));
+                            ui.close();
+                        }
+                        if ui.button("Versions of this drawing…").clicked() {
+                            self.actions.push(Action::History(p2.clone()));
                             ui.close();
                         }
                         if ui.button("Rename…").clicked() {
