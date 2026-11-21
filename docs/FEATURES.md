@@ -1008,10 +1008,24 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 ## Git sync
 
-- Needs `git` installed. In Settings → Sync, enter the URL of a git repository
+- Needs `git`; without it Shale can install one (see the next point). In Settings → Sync, enter the URL of a git repository
   (`https://…`, `ssh://…`, `git@host:notes.git` or a folder path) and press Connect (an address with a password in it, and plain `http://` or `git://` except on this computer, are refused: use a credential helper or an SSH key), or run
   `git init` in the vault folder yourself. Shale then syncs on its own: when the vault opens,
   every few minutes (default 5, changeable) and on "Sync now".
+- **Install git with one button.** Settings → Sync shows whether a git and a git-lfs are found (through `PATH`), whether Shale's
+  own git is installed, and which git is in use. Where a git is missing, **Download and install git** offers it with the
+  download size, the size on disk and the folder `<data folder>/shale/git`; nothing is downloaded before you press the
+  button. **Windows:** MinGit (the official portable Git for Windows, no administrator rights) and git-lfs, each file checked
+  against the SHA-256 pinned in Shale. **macOS:** git comes with Apple's command line tools, and the button opens Apple's
+  installer; git-lfs is downloaded. **Linux:** the page shows the install command of your distribution (apt, dnf, pacman, zypper
+  or apk) with a copy button; git-lfs is downloaded when git is there and git-lfs is not. The install is built in `git.partial`
+  and renamed when it works; Cancel or a failure leaves nothing. **Remove…** deletes that folder only. A choice
+  (**Automatic**: the git of this computer first, else Shale's; **The git of this computer**; **The git that Shale installs**)
+  says which one runs. Updates are opt-in: the setting `git.updates` (Off by default) lets Shale look for a newer release 30
+  seconds after the start and weekly, and tell you or install it; `SHALE_UPDATES=off` switches that off. See ADR-0027.
+
+  ![Settings → Sync with git found, git-lfs missing and the offer to install it](userguide/z_media/screenshots/settings-sync.png)
+
 - A sync commits every change (the `.shale/` files too, so settings and open notes follow you;
   only the undo histories in `.shale/undo/` stay on the computer),
   fetches, merges and pushes. Commit messages read `Sync from <computer>: 3 file(s)`, with an

@@ -571,17 +571,7 @@ pub fn update(env: &Env, handle: &Handle, notify: &dyn Fn()) -> Result<Done, Str
 /// (or its `.partial` twin), which is a real folder: a link is never followed, and neither is a
 /// link in the place of `<data>/shale`.
 pub fn removable(data: &Path, folder: &Path) -> Result<(), String> {
-    if folder != managed_root(data) && folder != partial_root(data) {
-        return Err(format!("{} is not the folder of the managed TeX Live", folder.display()));
-    }
-    let real_dir = |p: &Path| std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink());
-    if !real_dir(&data.join("shale")) {
-        return Err(format!("{} is not a plain folder", data.join("shale").display()));
-    }
-    if !real_dir(folder) {
-        return Err(format!("{} is not a plain folder (a link, or a file): nothing was removed", folder.display()));
-    }
-    Ok(())
+    crate::fsutil::removable_folder(data, folder, &[managed_root(data), partial_root(data)], "the managed TeX Live")
 }
 
 /// Remove the managed TeX Live (TEX-003): its folder and nothing else.

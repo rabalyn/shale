@@ -240,7 +240,7 @@ pub fn find_in_path(program: &str, path_var: Option<&OsStr>) -> Option<PathBuf> 
 }
 
 /// The size of all files below a folder; links are not followed.
-fn folder_bytes(dir: &Path) -> u64 {
+pub(crate) fn folder_bytes(dir: &Path) -> u64 {
     let mut total = 0;
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
