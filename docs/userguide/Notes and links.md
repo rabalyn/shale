@@ -7,7 +7,7 @@ Back to [[Start here]].
 
 ![[editor.png]]
 
-## Links
+# Links
 
 - `[[Note]]` is **blue** when the note exists and **red** when it does not. Click a blue link to
   open the note; click a red one to create it (next to the current note if you set
@@ -24,7 +24,7 @@ Back to [[Start here]].
 - Settings → Editor → Links: follow links only with Ctrl+click, create notes next to the
   current note, update links when renaming (see [[Settings reference]]).
 
-## Suggestions while you type
+# Suggestions while you type
 
 ![[link-suggestions.png]]
 
@@ -40,7 +40,7 @@ Back to [[Start here]].
   and with their numbers, and typing narrows it; picking one inserts the heading's text.
 - In these lists ↓ / ↑ or Ctrl+J / Ctrl+K move the highlight; Enter, Tab or a click picks the entry.
 
-## Numbered headings
+# Numbered headings
 
 The headings of a note can show numbers before their text: `#` is 1, a `##` under it 1.1, the next
 `##` 1.2, the next `#` 2. The note's title is the title line above the text ([[Editor]]), not a heading, so a `#` is
@@ -51,7 +51,7 @@ the [[PDF]]. Links stay `[[Note#Heading]]`, with the heading's text. Settings �
 headings" (on by default) switches it for all notes; put `numbered-headings: true` or `false` (or
 `yes` / `no`) in a note's front matter to decide for that note alone (see [[Settings reference]]).
 
-## Embeds
+# Embeds
 
 Pictures `![[photo.png]]`, drawings `![[Sketch.excalidraw]]` and PDFs `![[Paper.pdf]]` are shown
 inside the editor; the link text comes back while the cursor is in the link. The pictures in
@@ -65,7 +65,7 @@ link (`z_media/photo.png`), or the words you give it after a `|`: `![[photo.png|
 
 **Resizing.** Pictures and videos can be resized by dragging; see [[Editor]].
 
-## Moving and renaming
+# Moving and renaming
 
 ![[tree-drag.png]]
 
@@ -74,7 +74,7 @@ its menu. In both cases links in other notes (and in drawings) are updated, so n
 A name with a character that does not work on Windows (such as `:` or `?`) is not refused: the file gets
 a name without it and the message says so ([[Vault settings]]).
 
-## The note menu
+# The note menu
 
 ![[more-menu.png]]
 
@@ -82,7 +82,7 @@ Export to PDF ([[PDF]]), insert a new drawing, rename, or move to the trash. The
 the original folder (`.trash/<date>/<path>`), and "Restore last deleted" in the file list's
 context menu brings the last item back.
 
-## Go back and forward
+# Go back and forward
 
 Mouse side buttons or Alt+← / Alt+→ (macOS: Cmd+[ / Cmd+]). Sort the file list by name, date modified or date
 created (the sort icon above the list).

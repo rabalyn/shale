@@ -19,7 +19,7 @@ Shale keeps settings in two places:
   import folder and recent tags move from the old global settings into the vault you open.
 - Learned tag words are in `.shale/tag-words.json` ([[Tags and people]]).
 
-## Names that work on every system
+# Names that work on every system
 
 Files and folders that Shale makes get names that also work on Windows and macOS: the characters
 Windows forbids (`< > : " / \ | ? *`) and control characters become `-`, a trailing dot is dropped,

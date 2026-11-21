@@ -9,7 +9,7 @@ counts, the message list (newest first) and the message as plain text. Shale rea
 over IMAP and keeps a local copy next to the other program data (`~/.local/share/shale/mail`),
 so it works offline and search is instant. Back to [[Start here]].
 
-## Safe by design
+# Safe by design
 
 - **Syncing only reads.** Fetching never changes the server; only your own actions are written
   back: read or unread, flag, move, delete (always to Trash) and, inside Trash, delete forever.
@@ -17,7 +17,7 @@ so it works offline and search is instant. Back to [[Start here]].
 - **No HTML, no tracking.** Nothing is rendered, no pictures are fetched, no scripts run.
 - **The local copy is not encrypted** (like Thunderbird's): use full-disk encryption.
 
-## Accounts
+# Accounts
 
 ![[mail-accounts.png]]
 
@@ -28,7 +28,7 @@ with your own client ID; the provider setup steps are in the README. Folders to 
 with tick boxes; Trash, Junk and "All Mail" load on demand. New mail is fetched every 10
 minutes (0 = off). "Mark as read when opened" is on, after 2 seconds.
 
-## Changes made in another program
+# Changes made in another program
 
 While the mail view is open, Shale keeps the folder you have open and the Inbox of each account
 fresh. It asks the server to say when something changes (IMAP IDLE), so a flag you remove, a
@@ -37,7 +37,7 @@ without pressing Sync. This connection only reads. A server without IDLE is aske
 minute instead. When you leave the mail view (or open another folder), the connection of the
 folder you left is closed. The regular sync every 10 minutes still looks at all folders.
 
-## Reading and keys
+# Reading and keys
 
 Search with `/` (words, `"phrases"`, `from:`, `to:`, `subject:`, `body:`). One of the three
 panes has the keyboard and is framed; Ctrl+H / Ctrl+L (macOS: Cmd+Shift+H / Cmd+Shift+L) move it. j / k, `u` read or unread, `s`
@@ -47,7 +47,7 @@ or `f` flag, `d` delete, `m` move, `i` import to the vault ([[Import]]). All mai
 After a restart a Mail tab comes back on the folder and the message you had open (the first folder if
 that folder or account is gone), without asking for anything. See [[Tabs]].
 
-## Writing and sending
+# Writing and sending
 
 - `c` compose, `r` reply, `Shift+R` reply all, `Shift+F` forward. Plain text, with attachments
   (a file, a file of the vault or a note). To, Cc and Bcc complete from your people notes
@@ -67,7 +67,7 @@ out: Shale never sends it again by itself.
 
 - Questions before sending: no subject, no text, or "attached" but nothing attached.
 
-## Signed and encrypted mail
+# Signed and encrypted mail
 
 Shale uses the **GnuPG on your computer** (`gpg` for OpenPGP, `gpgsm` for S/MIME) with your own
 keys and passphrase dialog; it never sees a key or passphrase. A strip above a mail says what
@@ -81,7 +81,7 @@ in Accounts…, Encryption. Without it nothing is decrypted.
 The subject and addresses of an encrypted mail are not encrypted. Without GnuPG installed Shale
 says so and everything else works.
 
-### Keep the key unlocked
+## Keep the key unlocked
 
 GnuPG's agent forgets a passphrase after 10 minutes without use and after 2 hours at the latest, and
 always when it is restarted, so a signing key has to be unlocked again and again. Shale never handles

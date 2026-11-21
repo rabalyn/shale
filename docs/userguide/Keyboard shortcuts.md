@@ -48,7 +48,7 @@ Text editing keys and vim keys are fixed.
 | Tab / Shift+Tab | Indent lists or change heading levels |
 | Shift+arrows | In a table cell edited in the grid: select a block of cells (formatting buttons and Delete / Backspace work on all of them; typing ends it) |
 
-## Mail view keys
+# Mail view keys
 
 In the mail view (Ctrl+Shift+M) one of the three panes (folders, message list, message) has the
 keyboard; it has an accent-coloured frame. **Ctrl+H / Ctrl+L** (macOS: Cmd+Shift+H / Cmd+Shift+L) move it one pane left / right (from

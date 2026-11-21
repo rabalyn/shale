@@ -7,7 +7,7 @@ features:
 Settings → **Updates** decides what Shale does when a new release is out on GitHub
 (github.com/rabalyn/shale). Back to [[Start here]]; every key is in [[Settings reference]] (`updates`).
 
-## The four choices
+# The four choices
 
 Until you choose, Shale looks like **Notify**, and the first time it finds an update it asks.
 
@@ -26,7 +26,7 @@ Shale checks a short while after it starts and then every 24 hours; **Check for 
 Settings does not wait and says in words what it found ("You have the latest version, 0.6.6.", the
 new version, or why it could not look).
 
-## What is checked, and what is not
+# What is checked, and what is not
 
 The release has a `.sha256` file next to each download. Shale compares the SHA-256 of what it
 downloaded with it, and installs nothing when they differ (the download is deleted and the notice says
@@ -34,7 +34,7 @@ so). That shows the file arrived whole. It does **not** show who made it: the ch
 the same release as the file. If that matters to you, choose **Notify** or **Off** and check the
 release yourself.
 
-## How Shale was installed decides what an update does
+# How Shale was installed decides what an update does
 
 Settings → Updates shows how this copy was installed and, if it cannot update itself, why.
 
@@ -51,7 +51,7 @@ A folder you cannot write (for example `install.sh --prefix /usr/local` without 
 Download: Shale downloads and checks the update and the notice shows the command to run, with
 **Copy the command**.
 
-## Going back
+# Going back
 
 Where Shale keeps the old program it is `shale.old` next to `shale` (Linux, until the new version has run
 for half a minute; then it is removed). To go back before that, close Shale and run
