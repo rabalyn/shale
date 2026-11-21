@@ -10,6 +10,8 @@ its section from this file.
 
 ## [Unreleased]
 
+## [0.6.10] - 2026-11-21
+
 ### Added
 
 - GitHub issue forms for a bug report and a feature request, a `CONTRIBUTING.md` (how to report, how changes are made, how a pull request reaches `main`, labels, licence) and a `CODE_OF_CONDUCT.md` (#456).
@@ -41,6 +43,8 @@ its section from this file.
 - The real-server suites of the tag CI (`env-tests.sh run`) no longer fail in a fresh container where the Rust toolchain is not installed yet: one `cargo test --locked --no-run` runs first and installs it, so the suites that go at the same time do not install it together (#462).
 - The mail index's hand-back after a rebuild no longer closes a mail store that was not being rebuilt. Not reachable from the app today; a guard for later callers (#464).
 - Developers only: the test suite on Windows no longer fails in the tests of the podman stack lock. The lock (`src/env_lock.rs`) is built for Unix only, because the stacks run on Linux only and a Windows file lock is mandatory, so the token in the locked file could not be read; on other systems the ignored env tests take no lock (#465).
+- Developers only: two test fixes that blocked the first check tag of 0.6.10. The AUR package test (BUILD-026) failed for a pre-release `Cargo.toml` version such as `0.6.10-rc.1`; it now compares the version by semver, a release ranking above a pre-release of the same X.Y.Z. The TeX env test's PDF stream reader dropped a stream's last byte when it was `\r`, so a German beamer test failed on some dates; it now reads a stream by its direct `/Length` (#459, #460).
+- Developers only: `scripts/make-release.sh` and `scripts/make-tag.sh` no longer stop with "the changelog needs an update first" when `[Unreleased]` has entries. The check cut its `git show CHANGELOG.md` pipe short, and with the changelog bigger than the pipe buffer `git show` died of SIGPIPE, which `pipefail` read as "no entries"; the check now reads the whole file. `scripts/bench-tests-wanted.sh` no longer ends a `git diff` pipe early either (#466).
 
 ### Tests
 
@@ -1819,7 +1823,8 @@ First public version (published before releases were tagged).
 - Ctrl+Shift+F always focuses the search box and selects the previous search.
 - File names with `#` work in links.
 
-[Unreleased]: https://github.com/rabalyn/shale/compare/v0.6.9...HEAD
+[Unreleased]: https://github.com/rabalyn/shale/compare/v0.6.10...HEAD
+[0.6.10]: https://github.com/rabalyn/shale/compare/v0.6.9...v0.6.10
 [0.6.9]: https://github.com/rabalyn/shale/compare/v0.6.8...v0.6.9
 [0.6.8]: https://github.com/rabalyn/shale/compare/v0.6.7...v0.6.8
 [0.6.7]: https://github.com/rabalyn/shale/compare/v0.6.6...v0.6.7

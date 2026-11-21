@@ -1,0 +1,182 @@
+{
+  "schema": 2,
+  "verdict": "faster",
+  "exit_code": 0,
+  "x": {
+    "commit": "1571e6f6b2007a6a388f937682401d8b1f232e3b",
+    "describe": "v0.6.9",
+    "date": "2026-11-19T22:35:25Z",
+    "load": 5.16,
+    "cores": 28,
+    "repeats": 1
+  },
+  "y": {
+    "commit": "3967e9daeee8efb3468023af99a5d5946a18143d",
+    "describe": "v0.6.10",
+    "date": "2026-11-21T16:25:29Z",
+    "load": 2.56,
+    "cores": 28,
+    "repeats": 1
+  },
+  "busy": false,
+  "threshold_time_pct": 10.0,
+  "threshold_bytes_pct": 15.0,
+  "threshold_allocs_pct": 10.0,
+  "rows": [
+    {
+      "id": "worst.startup",
+      "status": "both",
+      "x_median_ns": 754409874,
+      "y_median_ns": 757795360,
+      "time_delta_pct": 0.4487595028481825,
+      "time_verdict": "ok",
+      "x_range_ns": [
+        752009833,
+        760141514
+      ],
+      "y_range_ns": [
+        755536976,
+        760889887
+      ],
+      "x_allocs": 5007207,
+      "y_allocs": 5007880,
+      "allocs_delta_pct": 0.013440626680702436,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 183193543,
+      "y_peak_bytes": 183189037,
+      "bytes_delta_pct": -0.0024596936803607757,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "worst.frame.idle",
+      "status": "both",
+      "x_median_ns": 2804367,
+      "y_median_ns": 2248545,
+      "time_delta_pct": -19.819873789700136,
+      "time_verdict": "faster",
+      "x_range_ns": [
+        2573075,
+        3215372
+      ],
+      "y_range_ns": [
+        2173180,
+        2424022
+      ],
+      "x_allocs": 10008,
+      "y_allocs": 10008,
+      "allocs_delta_pct": 0.0,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 19367768,
+      "y_peak_bytes": 19367768,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "worst.frame.typing",
+      "status": "both",
+      "x_median_ns": 24810146,
+      "y_median_ns": 23875722,
+      "time_delta_pct": -3.766297868621974,
+      "time_verdict": "ok",
+      "x_range_ns": [
+        24268626,
+        25564294
+      ],
+      "y_range_ns": [
+        23475975,
+        26153518
+      ],
+      "x_allocs": 145707,
+      "y_allocs": 145707,
+      "allocs_delta_pct": 0.0,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 22299293,
+      "y_peak_bytes": 22299293,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "worst.views.cycle",
+      "status": "both",
+      "x_median_ns": 145422592,
+      "y_median_ns": 139787303,
+      "time_delta_pct": -3.8751124722078942,
+      "time_verdict": "ok",
+      "x_range_ns": [
+        144610542,
+        214428046
+      ],
+      "y_range_ns": [
+        139517493,
+        209360958
+      ],
+      "x_allocs": 397974,
+      "y_allocs": 397975,
+      "allocs_delta_pct": 0.0002512726962062848,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 90851292,
+      "y_peak_bytes": 90851372,
+      "bytes_delta_pct": 0.00008805598493855211,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "worst.memory.growth",
+      "status": "both",
+      "x_median_ns": 26823028042,
+      "y_median_ns": 26632883858,
+      "time_delta_pct": -0.7088841114518043,
+      "time_verdict": "ok",
+      "x_range_ns": [
+        26823028042,
+        26823028042
+      ],
+      "y_range_ns": [
+        26632883858,
+        26632883858
+      ],
+      "x_allocs": 114459865,
+      "y_allocs": 114358175,
+      "allocs_delta_pct": -0.08884336880879598,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 59368216,
+      "y_peak_bytes": 59368296,
+      "bytes_delta_pct": 0.00013475223847049742,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    }
+  ],
+  "regressions": [],
+  "improvements": [
+    {
+      "id": "worst.frame.idle",
+      "metric": "time",
+      "x": 2804367,
+      "y": 2248545,
+      "delta_pct": -19.819873789700136,
+      "confidence": "high"
+    }
+  ],
+  "tradeoffs": [],
+  "noisy": [],
+  "changed": [],
+  "skipped": [],
+  "summary": {
+    "compared": 5,
+    "faster": 1,
+    "slower": 0,
+    "regressions": 0,
+    "noisy": 0,
+    "changed": 0,
+    "added": 0,
+    "removed": 0
+  }
+}

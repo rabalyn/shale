@@ -3900,7 +3900,7 @@ dependencies = [
 
 [[package]]
 name = "shale"
-version = "0.6.10-rc.4"
+version = "0.6.10"
 dependencies = [
  "arboard",
  "cpal",
