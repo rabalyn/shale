@@ -350,3 +350,51 @@ pub fn remove_leftovers(kind: &InstallKind, exe: &Path) {
         let _ = std::fs::remove_file(p);
     }
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn temp(tag: &str) -> PathBuf {
+        super::super::logic_tests::temp(tag)
+    }
+
+    // spec: UPD-014
+    #[test]
+    fn upd_014_remove_any_accepts_a_missing_path_and_removes_a_file_a_folder_and_only_the_link_of_a_link() {
+        let d = temp("remove-any");
+        remove_any(&d.join("nothing")).unwrap();
+        std::fs::write(d.join("file"), b"x").unwrap();
+        remove_any(&d.join("file")).unwrap();
+        assert!(!d.join("file").exists());
+        std::fs::create_dir_all(d.join("dir/sub/deeper")).unwrap();
+        std::fs::write(d.join("dir/sub/deeper/f"), b"x").unwrap();
+        remove_any(&d.join("dir")).unwrap();
+        assert!(!d.join("dir").exists(), "the folder goes with everything in it");
+        std::fs::create_dir(d.join("target")).unwrap();
+        std::fs::write(d.join("target/keep"), b"x").unwrap();
+        std::os::unix::fs::symlink(d.join("target"), d.join("link")).unwrap();
+        remove_any(&d.join("link")).unwrap();
+        assert!(std::fs::symlink_metadata(d.join("link")).is_err());
+        assert!(d.join("target/keep").exists(), "what the link pointed to stays");
+    }
+
+    // spec: UPD-014
+    #[test]
+    fn upd_014_remove_any_says_in_words_when_a_path_cannot_be_removed() {
+        let d = temp("remove-any-fail");
+        std::fs::create_dir(d.join("locked")).unwrap();
+        std::fs::write(d.join("locked/f"), b"x").unwrap();
+        std::fs::set_permissions(d.join("locked"), std::fs::Permissions::from_mode(0o555)).unwrap();
+        let can_write = std::fs::write(d.join("locked/probe"), b"x").is_ok();
+        let result = remove_any(&d.join("locked/f"));
+        std::fs::set_permissions(d.join("locked"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        if can_write {
+            return; // running as root: permissions do not stop us
+        }
+        let e = result.unwrap_err();
+        assert!(e.contains("could not remove") && e.contains("locked/f"), "{e}");
+        assert!(d.join("locked/f").exists());
+    }
+}
