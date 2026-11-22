@@ -28,6 +28,8 @@ pub mod mail_text;
 #[cfg(test)]
 mod mail_text_tests;
 pub mod people;
+#[cfg(test)]
+mod signature_tests;
 pub mod summary;
 pub mod tagwords;
 #[cfg(all(test, target_os = "linux"))]
@@ -274,9 +276,32 @@ pub fn email_item(mail: Mail, original: (String, Vec<u8>)) -> Item {
     let date = mail.date.map(local_ymd).unwrap_or_else(today_ymd);
     let subject = if mail.subject.trim().is_empty() { "(no subject)".to_string() } else { mail.subject.clone() };
     let title = safe_title(&format!("{} {subject}", ymd_text(date)));
-    // small pictures inside the text are mostly logos in signatures
-    let att_on = mail.attachments.iter().map(|a| !(a.inline && a.data.len() < 30_000)).collect();
+    let att_on = mail.attachments.iter().map(|a| attachment_starts_on(a, true)).collect();
     Item { source: Source::Email { mail, original }, include: true, title, att_on, already: None, people: vec![] }
+}
+
+/// Whether an attachment of a message starts ticked in the dialog. Small pictures inside the text
+/// are mostly logos in signatures and start unticked; so do signature parts (crypto signatures,
+/// signature pictures, IMP-059) while `skip_signatures` is on (IMP-060).
+fn attachment_starts_on(a: &mail::Attachment, skip_signatures: bool) -> bool {
+    if a.kind != mail::AttKind::Content && skip_signatures {
+        return false;
+    }
+    a.kind == mail::AttKind::CryptoSignature || !(a.inline && a.data.len() < 30_000)
+}
+
+/// The Import dialog's "Skip signatures" box (IMP-061): the signature parts of the e-mail items go
+/// back to their start state for the new value; the other attachments keep the user's ticks.
+pub fn apply_skip_signatures(items: &mut [Item], skip: bool) {
+    for it in items {
+        if let Source::Email { mail, .. } = &it.source {
+            for (a, on) in mail.attachments.iter().zip(it.att_on.iter_mut()) {
+                if a.kind != mail::AttKind::Content {
+                    *on = attachment_starts_on(a, skip);
+                }
+            }
+        }
+    }
 }
 
 /// An item for a stored message, like a dropped `.eml` file: the original is kept under

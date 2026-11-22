@@ -151,6 +151,10 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
         "import_header_list",
         "true: an imported e-mail, event or social post also gets its properties as a list (From, To, Date, When, Where, Author, Source, ...) below the title. false: the properties are only in the front matter (Settings > Import).",
     ),
+    (
+        "import_skip_signatures",
+        "true: the Import dialog starts with the signature parts of an e-mail (smime.p7s, signature.asc) and the pictures of its signature block unticked. false: they start ticked like other attachments (Settings > Import).",
+    ),
     ("social_accounts", "The Mastodon and Bluesky accounts of the feed view. Their tokens are kept in the system keyring when there is one."),
     ("social_accounts.id", "A name that identifies the account, such as \"mastodon:ada@mastodon.social\"."),
     ("social_accounts.network", "\"mastodon\" or \"bluesky\"."),

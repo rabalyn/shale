@@ -651,6 +651,31 @@ fn imp_052_the_dialog_starts_with_the_setting_and_a_ticked_box_writes_the_list()
     assert!(listed.contains("\n- **From:** ") && listed.contains("\n- **Date:** 2026-11-13 "), "{listed}");
 }
 
+// spec: IMP-061, CFG-074
+#[test]
+fn imp_061_the_dialog_starts_with_the_skip_signatures_setting() {
+    let mut w = W::new("skip-signatures");
+    let mut mail = crate::mail::parse(&crate::mail::tests::sample_eml());
+    mail.attachments.push(crate::mail::Attachment { name: "smime.p7s".into(), mime: "application/pkcs7-signature".into(), data: vec![1], inline: false, cid: String::new(), kind: crate::mail::AttKind::CryptoSignature });
+    let last = mail.attachments.len() - 1;
+    let items = vec![crate::import::email_item(mail, ("m.eml".into(), vec![]))];
+    w.app.open_import(items.clone(), vec![], None);
+    assert!(w.dialog().skip_signatures && !w.dialog().items[0].att_on[last], "on: the signature is out");
+    w.app.modal = None;
+    w.app.cfg.import_skip_signatures = false;
+    w.app.open_import(items, vec![], None);
+    assert!(!w.dialog().skip_signatures && w.dialog().items[0].att_on[last], "off: it starts ticked");
+    // a message added to the open dialog follows the box
+    let again = vec![crate::import::email_item(crate::mail::parse(&crate::mail::tests::sample_eml()), ("n.eml".into(), vec![]))];
+    let mut more = again.clone();
+    if let crate::import::Source::Email { mail, .. } = &mut more[0].source {
+        mail.attachments.push(crate::mail::Attachment { name: "signature.asc".into(), mime: "application/pgp-signature".into(), data: vec![1], inline: false, cid: String::new(), kind: crate::mail::AttKind::CryptoSignature });
+    }
+    more[0].att_on.push(false);
+    w.app.open_import(more, vec![], None);
+    assert!(w.dialog().items[1].att_on[last], "added while the box is off: ticked");
+}
+
 /// The titles of the tabs that are open, in order.
 fn tab_names(w: &W) -> Vec<String> {
     w.app.tabbar.tabs.iter().map(|t| t.view.path().map(|p| p.file_stem().unwrap().to_string_lossy().into_owned()).unwrap_or_default()).collect()

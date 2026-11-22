@@ -22,6 +22,11 @@ Turn mails, events and files into notes. Back to [[Start here]].
 - Choose the folder (one per project, for example) and tags. Small pictures from signatures are
   left out by default, and each attachment can be ticked on or off. Nothing is written until you
   press Import.
+- A signed mail has a signature file (`smime.p7s`, `signature.asc`), and a signature block has logos and
+  social icons. They start unticked, with the reason after the name ("S/MIME signature", "signature
+  picture"); tick one to bring it along. The box **Skip signatures** in the dialog (on at first; its
+  start value is **Settings → Import → Skip signatures**) lets them start ticked when it is off.
+  A real picture or file attached to the mail stays ticked. Keep the original message keeps every part.
 - Drop onto a folder in the file list to import into it, or onto a note to also add links to the
   new notes there.
 - A picture, PDF, sound or video from outside the vault has a choice in the dialog: **Copy into the

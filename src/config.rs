@@ -434,6 +434,8 @@ pub struct Config {
     pub pandoc_path: String,
     /// Imported e-mails, events and posts also get their properties as a list below the title (IMP-052).
     pub import_header_list: bool,
+    /// The Import dialog leaves out the signature parts and signature pictures of e-mails at first (IMP-061).
+    pub import_skip_signatures: bool,
     /// Mastodon and Bluesky accounts for the feed view (secrets are in the keyring).
     pub social_accounts: Vec<crate::social::SocialAccountEntry>,
     /// The account and feed shown last in the feed view.
@@ -539,6 +541,7 @@ impl Default for Config {
             docx_import: false,
             pandoc_path: String::new(),
             import_header_list: false,
+            import_skip_signatures: true,
             social_accounts: vec![],
             social_last: None,
             social_replies: false,
@@ -1002,6 +1005,16 @@ mod tests {
         let (back, _) = Config::parse_text(&text).unwrap();
         assert!(back.docx_import);
         assert_eq!(back.pandoc_path, "/opt/pandoc/bin/pandoc");
+    }
+
+    // spec: CFG-074, CFG-001
+    #[test]
+    fn the_skip_signatures_setting_is_on_by_default_loads_from_old_files_and_round_trips() {
+        let (c, _) = crate::vault_state::parse::<Config>(br#"{"toolbar_size": 120}"#).unwrap();
+        assert!(c.import_skip_signatures, "an old file: on");
+        let text = text::to_toml(&Config { import_skip_signatures: false, ..Config::default() });
+        assert!(text.contains("import_skip_signatures = false"), "{text}");
+        assert!(!Config::parse_text(&text).unwrap().0.import_skip_signatures);
     }
 
     // spec: CFG-060, CFG-001
