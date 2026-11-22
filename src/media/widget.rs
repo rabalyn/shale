@@ -157,11 +157,17 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
     // progress bar
     let bar_hit = Rect::from_min_size(Pos2::new(x0, top + 48.0), Vec2::new(width, 16.0));
     let bar = ui.interact(bar_hit, id.with("seek"), Sense::click_and_drag());
-    bar.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Slider, v.duration.is_some(), "Position"));
+    // a click before the length is known waits for it (MEDIA-005, #258)
+    let seekable = !v.unplayable && !v.external && v.download.is_none();
+    bar.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Slider, seekable, "Position"));
     let preview_id = id.with("seek-preview");
     let frac_at = |p: Pos2| ((p.x - bar_hit.left()) / bar_hit.width()).clamp(0.0, 1.0) as f64;
     let mut preview: Option<f64> = ctx.data(|d| d.get_temp(preview_id));
-    if let Some(d) = v.duration.filter(|_| !v.unplayable) {
+    if seekable {
+        let seek = |f: f64| match v.duration {
+            Some(d) => media.seek_to(&ctx, abs, owner, f * d),
+            None => media.seek_to_share(&ctx, abs, owner, f),
+        };
         if bar.dragged() {
             if let Some(p) = bar.interact_pointer_pos() {
                 preview = Some(frac_at(p));
@@ -171,23 +177,28 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
         if bar.drag_stopped() {
             // the seek happens once, when the mouse is let go (MEDIA-005)
             if let Some(f) = preview.take() {
-                media.seek_to(&ctx, abs, owner, f * d);
+                seek(f);
             }
             ctx.data_mut(|data| data.remove_temp::<f64>(preview_id));
         } else if bar.clicked() {
             if let Some(p) = bar.interact_pointer_pos() {
-                media.seek_to(&ctx, abs, owner, frac_at(p) * d);
+                seek(frac_at(p));
             }
         }
     }
-    let shown = preview.zip(v.duration).map(|(f, d)| f * d).unwrap_or(v.position);
-    let frac = v.duration.map(|d| (shown / d).clamp(0.0, 1.0) as f32).unwrap_or(0.0);
+    let share = preview.or(v.waiting_share);
+    let shown = share.zip(v.duration).map(|(f, d)| f * d).unwrap_or(v.position);
+    let frac = match (share, v.duration) {
+        (Some(f), _) => f as f32,
+        (None, Some(d)) => (shown / d).clamp(0.0, 1.0) as f32,
+        (None, None) => 0.0,
+    };
     let track = Rect::from_center_size(bar_hit.center(), Vec2::new(width, 4.0));
     painter.rect_filled(track, CornerRadius::same(2), theme::palette().faint.gamma_multiply(0.6));
     let mut filled = track;
     filled.set_right(track.left() + track.width() * frac);
     painter.rect_filled(filled, CornerRadius::same(2), theme::palette().accent);
-    if v.duration.is_some() && (bar.hovered() || preview.is_some()) {
+    if seekable && (bar.hovered() || share.is_some()) {
         painter.circle_filled(Pos2::new(filled.right(), track.center().y), 5.0, theme::palette().text_strong);
     }
     let times = egui::FontId::proportional(11.0);

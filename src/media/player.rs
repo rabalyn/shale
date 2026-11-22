@@ -44,6 +44,8 @@ struct Playback {
     want_play: bool,
     /// a jump asked for before the output was ready
     start_at: Option<f64>,
+    /// a jump asked for as a share of the bar before the length was known (MEDIA-005, #258)
+    start_share: Option<f64>,
     /// a video: the newest picture from ffmpeg, and the texture it is shown in
     frames: Arc<FrameSlot>,
     frame_tex: Option<egui::TextureHandle>,
@@ -123,6 +125,8 @@ pub struct View {
     pub video_size: Option<(u32, u32)>,
     /// the file is a Git LFS pointer: not downloaded, or downloading (SYNC-020)
     pub download: Option<Notice>,
+    /// a click on the bar that waits for the length, as a share of the bar (MEDIA-005)
+    pub waiting_share: Option<f64>,
 }
 
 fn key(abs: &Path) -> (PathBuf, Option<SystemTime>) {
@@ -221,12 +225,23 @@ impl MediaPlayer {
     pub fn seek_to(&self, ctx: &egui::Context, abs: &Path, owner: &Path, secs: f64) {
         let mut s = self.lock();
         let p = s.begin(ctx, abs, owner);
+        p.start_share = None;
         let status = p.status.clone();
         let status = status.lock().unwrap_or_else(|e| e.into_inner());
         match &*status {
             Status::Ready(shared, _) => shared.seek(secs),
             _ => p.start_at = Some(secs),
         }
+    }
+
+    /// Jump to `share` (0…1) of the length of `abs`, which is not known yet: the jump waits for
+    /// it (MEDIA-005, #258).
+    pub fn seek_to_share(&self, ctx: &egui::Context, abs: &Path, owner: &Path, share: f64) {
+        let mut s = self.lock();
+        let p = s.begin(ctx, abs, owner);
+        p.start_at = None;
+        p.start_share = Some(share.clamp(0.0, 1.0));
+        ctx.request_repaint();
     }
 
     /// What to draw for `abs` now, and housekeeping: looks at the file in the background, starts
@@ -253,6 +268,7 @@ impl MediaPlayer {
                 opacity: s.opacity,
                 video_size: None,
                 download: Some(n),
+                waiting_share: None,
             };
         }
         let slot_key = key(abs);
@@ -302,9 +318,18 @@ impl MediaPlayer {
                 _ => None,
             },
             download: None,
+            waiting_share: None,
         };
         if let Some(c) = s.current.as_mut().filter(|c| c.path == abs) {
             view.playing = c.want_play;
+            if !loading {
+                // the length is known now: a waiting click becomes a jump (or is dropped when
+                // the file has no length)
+                if let Some(share) = c.start_share.take() {
+                    c.start_at = duration.filter(|_| look_error.is_none()).map(|d| share * d);
+                }
+            }
+            view.waiting_share = c.start_share;
             match &*c.status.lock().unwrap_or_else(|e| e.into_inner()) {
                 Status::Opening => view.busy = true,
                 Status::Ready(shared, no_sound) => {
@@ -412,6 +437,12 @@ impl MediaPlayer {
         self.lock().open_output = Some(|| Err("no sound output".into()));
     }
 
+    /// Tests: the share of the bar a click is waiting at until the length is known.
+    #[cfg(test)]
+    pub fn waiting_share(&self) -> Option<f64> {
+        self.lock().current.as_ref()?.start_share
+    }
+
     /// Tests: a seek of the current file is still waiting for the mixer.
     #[cfg(test)]
     pub fn seek_pending(&self) -> bool {
@@ -486,7 +517,7 @@ impl State {
                 run_output(&path, &st, &stp, open, video);
                 ctx2.request_repaint();
             });
-            self.current = Some(Playback { path: abs.to_path_buf(), owner: owner.to_path_buf(), status, stop, want_play: false, start_at: None, frames, frame_tex: None });
+            self.current = Some(Playback { path: abs.to_path_buf(), owner: owner.to_path_buf(), status, stop, want_play: false, start_at: None, start_share: None, frames, frame_tex: None });
         }
         self.current.as_mut().expect("just set")
     }
