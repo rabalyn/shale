@@ -1284,3 +1284,171 @@ fn pandoc_is_killed_after_the_time_and_when_the_export_is_cancelled() {
     assert_eq!(export(&job_with(hang, &dir, "x\n"), &cancel).unwrap_err(), "stopped");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ---------------------------------------------------------------- DOCX-001: the dialog
+
+mod dialog_tests {
+    use super::super::dialog::{footer, show, DialogResult, DocxDialog};
+    use super::*;
+    use eframe::egui::{self, Event, Modifiers, PointerButton, Pos2, RawInput, Rect, Vec2};
+
+    struct H {
+        ctx: egui::Context,
+        t: f64,
+        last: DialogResult,
+    }
+
+    impl H {
+        fn new(d: &mut DocxDialog) -> H {
+            let mut h = H { ctx: egui::Context::default(), t: 0.0, last: DialogResult::Open };
+            h.frame(d, vec![]);
+            h.frame(d, vec![]);
+            h
+        }
+        fn frame(&mut self, d: &mut DocxDialog, events: Vec<Event>) {
+            self.t += 0.05;
+            let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 900.0))), time: Some(self.t), events, ..Default::default() };
+            let mut res = DialogResult::Open;
+            let mut out = self.ctx.run_ui(raw, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    show(ui, d);
+                    let r = footer(ui, d);
+                    if r != DialogResult::Open {
+                        res = r;
+                    }
+                });
+            });
+            out.textures_delta.clear();
+            if res != DialogResult::Open {
+                self.last = res;
+            }
+        }
+        fn click(&mut self, d: &mut DocxDialog, key: &str) {
+            let r = d.rects.iter().find(|(k, _)| k == key).map(|r| r.1).unwrap_or_else(|| panic!("no control {key}: {:?}", d.rects.iter().map(|r| &r.0).collect::<Vec<_>>()));
+            let p = r.center();
+            let b = |pressed| Event::PointerButton { pos: p, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+            self.frame(d, vec![Event::PointerMoved(p)]);
+            self.frame(d, vec![b(true)]);
+            self.frame(d, vec![b(false)]);
+            self.frame(d, vec![]);
+        }
+    }
+
+    fn has(d: &DocxDialog, key: &str) -> bool {
+        d.rects.iter().any(|r| r.0 == key)
+    }
+
+    fn dialog(pandoc: Option<&str>, original: Option<&str>) -> DocxDialog {
+        DocxDialog::new(PathBuf::from("Notes/Report.md"), "Report".into(), PathBuf::from("/v/exports/Report.docx"), pandoc.map(PathBuf::from), original.map(PathBuf::from), true)
+    }
+
+    // spec: DOCX-001
+    #[test]
+    fn the_dialog_has_the_save_path_the_table_of_contents_open_after_and_export_and_cancel() {
+        let mut d = dialog(Some("/usr/bin/pandoc"), None);
+        let mut h = H::new(&mut d);
+        assert_eq!(d.path, "/v/exports/Report.docx");
+        for key in ["path", "toc", "open-after", "export", "cancel", "pandoc"] {
+            assert!(has(&d, key), "{key}");
+        }
+        assert!(!has(&d, "use-original") && !has(&d, "working"), "the box for the original only with an original");
+        assert!(d.toc && !d.open_after && !d.use_original);
+        h.click(&mut d, "toc");
+        h.click(&mut d, "open-after");
+        assert!(!d.toc && d.open_after);
+        h.click(&mut d, "export");
+        assert_eq!(h.last, DialogResult::Export);
+        h.click(&mut d, "cancel");
+        assert_eq!(h.last, DialogResult::Cancel);
+    }
+
+    // spec: DOCX-001
+    #[test]
+    fn the_box_for_the_original_is_there_with_an_original_and_ticked() {
+        let mut d = dialog(Some("/usr/bin/pandoc"), Some("z_media/Report.docx"));
+        let mut h = H::new(&mut d);
+        assert!(has(&d, "use-original") && d.use_original, "ticked");
+        h.click(&mut d, "use-original");
+        assert!(!d.use_original);
+        h.click(&mut d, "use-original");
+        assert!(d.use_original);
+    }
+
+    // spec: DOCX-001
+    #[test]
+    fn without_pandoc_the_dialog_says_so_and_export_is_disabled() {
+        let mut d = dialog(None, None);
+        let mut h = H::new(&mut d);
+        assert!(has(&d, "pandoc"));
+        h.click(&mut d, "export");
+        assert_eq!(h.last, DialogResult::Open, "Export does nothing");
+        h.click(&mut d, "cancel");
+        assert_eq!(h.last, DialogResult::Cancel);
+        // the line says where pandoc was found
+        let mut found = dialog(Some("/opt/pandoc/bin/pandoc"), None);
+        let _ = H::new(&mut found);
+        assert_eq!(found.pandoc.as_deref(), Some(Path::new("/opt/pandoc/bin/pandoc")));
+    }
+
+    // spec: DOCX-002
+    #[cfg(unix)]
+    #[test]
+    fn the_export_runs_as_a_job_the_dialog_shows_it_and_cancel_and_closing_stop_it() {
+        let dir = temp_dir("dialog-job");
+        let default = dir.join("default.docx");
+        std::fs::write(&default, zip_of(&[("[Content_Types].xml", "<t/>"), ("word/styles.xml", &pandoc_styles())])).unwrap();
+        let slow = fake_pandoc(&dir, &format!("if [ \"$1\" = \"--print-default-data-file\" ]; then cat '{}'; exit 0; fi\nsleep 30", default.display()));
+        let mut d = dialog(Some("/usr/bin/pandoc"), None);
+        let mut h = H::new(&mut d);
+        assert!(d.poll().is_none() && !d.working());
+        d.start(job_with(slow.clone(), &dir, "x\n"), || {});
+        h.frame(&mut d, vec![]);
+        assert!(d.working() && has(&d, "working"), "the dialog shows that it works");
+        h.click(&mut d, "export");
+        assert_eq!(h.last, DialogResult::Open, "no second export beside the running one");
+        d.cancel();
+        assert!(!d.working() && d.poll().is_none());
+        // a job that has ended hands its result over once
+        let nothing = fake_pandoc(&dir, "exit 7");
+        d.start(job_with(nothing, &dir, "x\n"), || {});
+        let start = std::time::Instant::now();
+        let got = loop {
+            if let Some(g) = d.poll() {
+                break g;
+            }
+            assert!(start.elapsed() < Duration::from_secs(30), "the job ends");
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        assert!(got.unwrap_err().contains("pandoc has no default reference document") && d.poll().is_none() && !d.working());
+        // dropping the dialog stops pandoc
+        let marker = dir.join("still-running");
+        let waiting = fake_pandoc(&dir, &format!("if [ \"$1\" = \"--print-default-data-file\" ]; then cat '{}'; exit 0; fi\nsleep 3\ntouch '{}'", default.display(), marker.display()));
+        d.start(job_with(waiting, &dir, "x\n"), || {});
+        std::thread::sleep(Duration::from_millis(500));
+        drop(d);
+        std::thread::sleep(Duration::from_millis(3500));
+        assert!(!marker.exists(), "pandoc was killed with the dialog");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+// ---------------------------------------------------------------- a developer tool
+
+// A developer tool, not a test of a rule (DEV-004): `scripts/roundtrip-docx.sh` runs this ignored test, which imports the
+// Word file `SHALE_ROUNDTRIP_DOCX` into a new vault with the real pandoc, exports the note, writes the Word file to
+// `SHALE_ROUNDTRIP_OUT` and prints the share of the words that came back.
+// spec: DOCX-010
+#[test]
+#[ignore = "run by scripts/roundtrip-docx.sh"]
+fn dev_004_roundtrip_imports_and_exports_a_word_file_and_prints_the_share_of_words_that_came_back() {
+    let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from).unwrap_or_else(|| panic!("{name} is not set"));
+    let (input, out) = (var("SHALE_ROUNDTRIP_DOCX"), var("SHALE_ROUNDTRIP_OUT"));
+    let pandoc = docx::locate("").expect("pandoc is not installed");
+    let trip = round_trip("roundtrip", &input).expect("pandoc is not installed");
+    std::fs::write(&out, &trip.bytes).unwrap();
+    let (before, after) = (words_of(&pandoc, &input), words_of(&pandoc, &out));
+    let common = (share(&before, &after) * before.len() as f64).round() as usize;
+    println!("words that came back: {common} of {} ({:.1} %); the export has {}", before.len(), share(&before, &after) * 100.0, after.len());
+    println!("original: {}", input.display());
+    println!("exported: {}", out.display());
+}
