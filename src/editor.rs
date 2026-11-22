@@ -618,6 +618,9 @@ pub enum EditorAction {
     /// the pasted text has headings, all of them `##` or deeper: ask whether to lift them (EDIT-038);
     /// the text is held back and comes back with [`NoteEditor::pending_paste`]
     AskLiftHeadings(String),
+    /// the pasted text names pictures, PDFs, sounds or videos outside the vault and the setting is
+    /// Ask (MEDIA-019): nothing is written yet; the answer comes back with [`NoteEditor::pending_files`]
+    AskOutsideFiles(String),
 }
 
 #[derive(Default)]
@@ -655,6 +658,9 @@ pub struct NoteEditor {
     pub request_focus: bool,
     /// Text to paste at the cursor in the next frame: the answer to [`EditorAction::AskLiftHeadings`] (EDIT-038).
     pub pending_paste: Option<String>,
+    /// Pasted file names to bring into the note in the next frame, with what to do with them: the
+    /// answer to [`EditorAction::AskOutsideFiles`] (MEDIA-019).
+    pub pending_files: Option<(String, crate::media::intake::Choice)>,
     /// Frames left to ask again when the request was not granted (a dialog that has just closed
     /// still blocks the keyboard for the window behind it for a frame).
     focus_retry: u8,
@@ -744,6 +750,7 @@ impl NoteEditor {
             numbered_headings: false,
             request_focus: false,
             pending_paste: None,
+            pending_files: None,
             focus_retry: 0,
             last_layout: None,
             inline_images: false,
@@ -1156,6 +1163,8 @@ impl NoteEditor {
         let linewise = self.vim_enabled && self.vim.paste_pending;
         let date = crate::media::local_date();
         let mut messages: Vec<String> = Vec::new();
+        let mut asked: Option<String> = None;
+        let how = self.assist.outside.choice();
         ui.input_mut(|i| {
             i.events.retain_mut(|e| {
                 if let egui::Event::Paste(t) = e {
@@ -1176,10 +1185,17 @@ impl NoteEditor {
                             return false;
                         }
                     },
-                    egui::Event::Paste(t) => crate::media::paste_text_to_links(&vault.root, t, date).map(|(links, msg)| {
-                        messages.push(msg);
-                        links
-                    }),
+                    egui::Event::Paste(t) => {
+                        // Ask: files that could be linked are held back until the question is answered
+                        if how.is_none() && asked.is_none() && crate::media::pasted_files(t).is_some_and(|f| crate::media::intake::asks(&vault.root, &f)) {
+                            asked = Some(t.clone());
+                            return false;
+                        }
+                        crate::media::paste_text_to_links(&vault.root, vault.libraries(), t, how.unwrap_or_default(), date).map(|(links, msg)| {
+                            messages.push(msg);
+                            links
+                        })
+                    }
                     _ => None,
                 };
                 if let Some(mut links) = links {
@@ -1191,7 +1207,22 @@ impl NoteEditor {
                 true
             })
         });
+        if let Some(t) = asked {
+            return Some(EditorAction::AskOutsideFiles(t));
+        }
         (!messages.is_empty()).then(|| EditorAction::Pasted(messages.join(". ")))
+    }
+
+    /// The answer to [`EditorAction::AskOutsideFiles`]: the files are brought into the note at the cursor.
+    fn paste_files_chosen(&mut self, ui: &mut Ui, vault: &Vault) -> Option<EditorAction> {
+        let (text, how) = self.pending_files.take()?;
+        let (mut links, msg) = crate::media::paste_text_to_links(&vault.root, vault.libraries(), &text, how, crate::media::local_date())?;
+        if self.vim_enabled && self.vim.paste_pending {
+            links.push('\n');
+        }
+        ui.ctx().memory_mut(|m| m.request_focus(self.id));
+        ui.input_mut(|i| i.events.push(egui::Event::Paste(links)));
+        Some(EditorAction::Pasted(msg))
     }
 
     /// A pasted text with headings, all `##` or deeper, is not pasted yet: the editor asks the app
@@ -1493,6 +1524,9 @@ impl NoteEditor {
             action = Some(a);
         }
         if let Some(a) = self.hold_paste_without_h1(ui) {
+            action = Some(a);
+        }
+        if let Some(a) = self.paste_files_chosen(ui, vault) {
             action = Some(a);
         }
         if let Some(t) = self.pending_paste.take() {
@@ -2982,6 +3016,182 @@ mod tests {
         h.click_text(&mut ed, &mut text, &v, rel, &format!("▸ {folder}/"));
         assert_eq!(text, format!("[!/{folder}/"));
         assert!(h.ctx.memory(|m| m.has_focus(ed.id)), "the editor keeps the keyboard");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// The `[!` picker of an editor in a vault with the outside files of [`outside_files`], typed up to `file`.
+    fn picker_on(file: &str, tag: &str) -> (Harness, NoteEditor, String, Vault, std::path::PathBuf, std::path::PathBuf) {
+        let (mut v, d) = vault_for_tests(tag);
+        let out = outside_files(&d);
+        v.set_libraries(&[crate::media::outside::Library { name: "Lib".into(), path: out.join("Lib") }]);
+        let mut ed = NoteEditor::new(egui::Id::unique(tag.to_string()));
+        ed.request_focus = true;
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+        let mut text = String::new();
+        let rel = Path::new("Welcome.md");
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        let typed = format!("see [!/../{}/{file}", out.file_name().unwrap().to_string_lossy());
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text(typed)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        (h, ed, text, v, d, out)
+    }
+
+    fn key_event(key: Key, modifiers: Modifiers) -> Event {
+        Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers }
+    }
+
+    fn painted(h: &Harness, part: &str) -> bool {
+        h.texts.iter().any(|t| t.contains(part))
+    }
+
+    // spec: MEDIA-019, MEDIA-020, EDIT-003
+    #[test]
+    fn the_file_picker_copies_or_links_a_file_from_outside_as_the_setting_says() {
+        use crate::media::intake::OutsideFiles;
+        let rel = Path::new("Welcome.md");
+        let (y, m, day) = crate::media::local_date();
+        let stamp = format!("z_media/{y:04}/{m:02}/{:02}{m:02}{day:02}_", y.rem_euclid(100));
+        // Copy: as before
+        let (mut h, mut ed, mut text, v, d, out) = picker_on("doc.pdf", "picker-copy");
+        ed.assist.outside = OutsideFiles::Copy;
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert!(painted(&h, "Files from outside the vault are copied to z_media/ · Alt+Shift+L: link them instead"), "the footer says what a pick does: {:?}", h.texts);
+        let (_, a) = h.frame(&mut ed, &mut text, &v, rel, vec![key_event(Key::Enter, Modifiers::NONE)]);
+        assert_eq!(text, format!("see [[{stamp}doc.pdf]]"));
+        assert!(matches!(a, Some(EditorAction::FilesChanged)) && d.join(format!("{stamp}doc.pdf")).is_file());
+        // Link: the file stays where it is; a PDF is a plain link, no file list to refresh
+        let (mut h, mut ed, mut text, v, d, out2) = picker_on("doc.pdf", "picker-link");
+        ed.assist.outside = OutsideFiles::Link;
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert!(painted(&h, "linked where they are, other files are copied · Alt+Shift+L: copy them instead"), "{:?}", h.texts);
+        let (_, a) = h.frame(&mut ed, &mut text, &v, rel, vec![key_event(Key::Enter, Modifiers::NONE)]);
+        assert_eq!(text, format!("see [doc.pdf](<file://{}/doc.pdf>)", out2.canonicalize().unwrap().display()));
+        assert!(a.is_none() && !d.join(format!("{stamp}doc.pdf")).exists(), "nothing copied");
+        // a file under a library folder is a library link, a video is embedded
+        let (mut h, mut ed, mut text, v, d3, out3) = picker_on("Lib/song.mp3", "picker-lib");
+        ed.assist.outside = OutsideFiles::Link;
+        h.frame(&mut ed, &mut text, &v, rel, vec![key_event(Key::Enter, Modifiers::NONE)]);
+        assert_eq!(text, "see ![[@Lib/song.mp3]]");
+        // a file that is not a picture, PDF, sound or video is copied even with Link
+        let (mut h, mut ed, mut text, v, d4, out4) = picker_on("notes.txt", "picker-txt");
+        ed.assist.outside = OutsideFiles::Link;
+        h.frame(&mut ed, &mut text, &v, rel, vec![key_event(Key::Enter, Modifiers::NONE)]);
+        assert_eq!(text, format!("see [[{stamp}notes.txt]]"));
+        for p in [out, out2, out3, out4, d, d3, d4] {
+            let _ = std::fs::remove_dir_all(p);
+        }
+    }
+
+    // spec: MEDIA-019
+    #[test]
+    fn alt_shift_l_in_the_file_picker_changes_copy_and_link_for_this_pick_only() {
+        use crate::media::intake::{Choice, OutsideFiles};
+        let rel = Path::new("Welcome.md");
+        let (mut h, mut ed, mut text, v, d, out) = picker_on("a b.mp4", "picker-alt-l");
+        ed.assist.outside = OutsideFiles::Copy;
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![key_event(Key::L, Modifiers::ALT | Modifiers::SHIFT)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert_eq!(ed.assist.media.how, Some(Choice::Link));
+        assert!(painted(&h, "Alt+Shift+L: copy them instead"), "the footer follows the key: {:?}", h.texts);
+        assert_eq!(text, format!("see [!/../{}/a b.mp4", out.file_name().unwrap().to_string_lossy()), "the key is not typed");
+        // and back
+        h.frame(&mut ed, &mut text, &v, rel, vec![key_event(Key::L, Modifiers::ALT | Modifiers::SHIFT)]);
+        assert_eq!(ed.assist.media.how, Some(Choice::Copy));
+        h.frame(&mut ed, &mut text, &v, rel, vec![key_event(Key::L, Modifiers::ALT | Modifiers::SHIFT)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![key_event(Key::Enter, Modifiers::NONE)]);
+        assert!(text.starts_with("see ![](<file://"), "linked for this pick: {text}");
+        assert_eq!(ed.assist.outside, OutsideFiles::Copy, "the setting is not changed");
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert_eq!(ed.assist.media.how, None, "the next pick starts from the setting again");
+        // with Ask the first press chooses Link, so nothing is asked
+        ed.assist.outside = OutsideFiles::Ask;
+        let mut text = String::new();
+        let typed = format!("[!/../{}/a b.mp4", out.file_name().unwrap().to_string_lossy());
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text(typed)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert!(painted(&h, "you are asked to copy or link them · Alt+Shift+L: link them"), "{:?}", h.texts);
+        h.frame(&mut ed, &mut text, &v, rel, vec![key_event(Key::L, Modifiers::ALT | Modifiers::SHIFT)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![key_event(Key::Enter, Modifiers::NONE)]);
+        assert!(text.starts_with("![](<file://") && ed.assist.media.asking.is_none(), "{text}");
+        let _ = std::fs::remove_dir_all(&out);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: MEDIA-019
+    #[test]
+    fn with_ask_the_file_picker_asks_before_it_writes_and_c_l_esc_and_the_buttons_answer() {
+        let rel = Path::new("Welcome.md");
+        let (y, m, day) = crate::media::local_date();
+        let stamp = format!("z_media/{y:04}/{m:02}/{:02}{m:02}{day:02}_", y.rem_euclid(100));
+        let (mut h, mut ed, mut text, v, d, out) = picker_on("a b.mp4", "picker-ask");
+        assert_eq!(ed.assist.outside, crate::media::intake::OutsideFiles::Ask, "the default");
+        let typed = text.clone();
+        let before = walk_files(&d);
+        // Enter: the question, nothing written, the path stays in the text
+        h.frame(&mut ed, &mut text, &v, rel, vec![key_event(Key::Enter, Modifiers::NONE)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert!(ed.assist.media.asking.is_some() && text == typed && walk_files(&d) == before);
+        for part in ["“a b.mp4” is outside the vault.", "Copy into the vault", "Link where it is", "Cancel", "C copy · L link · Esc cancel"] {
+            assert!(painted(&h, part), "{part:?} on screen: {:?}", h.texts);
+        }
+        // what is typed meanwhile does not reach the text; Esc goes back to the picker
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("zz".into()), key_event(Key::Backspace, Modifiers::NONE)]);
+        assert_eq!(text, typed, "typing is held");
+        h.frame(&mut ed, &mut text, &v, rel, vec![key_event(Key::Escape, Modifiers::NONE)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert!(ed.assist.media.asking.is_none() && ed.assist.media.active && text == typed, "Esc cancels the pick, the picker stays");
+        assert!(painted(&h, "Insert file from"), "the list is back");
+        // L: linked where it is
+        h.frame(&mut ed, &mut text, &v, rel, vec![key_event(Key::Enter, Modifiers::NONE)]);
+        let (_, a) = h.frame(&mut ed, &mut text, &v, rel, vec![key_event(Key::L, Modifiers::NONE)]);
+        assert!(text.starts_with("see ![](<file://") && text.ends_with("/a b.mp4>)") && a.is_none(), "{text}");
+        assert!(!d.join(format!("{stamp}a b.mp4")).exists());
+        // C: copied (and Enter on the question too)
+        for answer in [Key::C, Key::Enter] {
+            let mut text = String::new();
+            let typed = format!("[!/../{}/a b.mp4", out.file_name().unwrap().to_string_lossy());
+            h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text(typed)]);
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+            h.frame(&mut ed, &mut text, &v, rel, vec![key_event(Key::Enter, Modifiers::NONE)]);
+            assert!(ed.assist.media.asking.is_some());
+            let (_, a) = h.frame(&mut ed, &mut text, &v, rel, vec![key_event(answer, Modifiers::NONE)]);
+            assert!(text.starts_with(&format!("![[{stamp}a b")) && matches!(a, Some(EditorAction::FilesChanged)), "{answer:?}: {text}");
+        }
+        // the buttons
+        for (button, linked) in [("Link where it is", true), ("Copy into the vault", false)] {
+            let mut text = String::new();
+            let typed = format!("[!/../{}/a b.mp4", out.file_name().unwrap().to_string_lossy());
+            h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text(typed)]);
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+            h.frame(&mut ed, &mut text, &v, rel, vec![key_event(Key::Enter, Modifiers::NONE)]);
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+            h.click_text(&mut ed, &mut text, &v, rel, button);
+            assert_eq!(text.starts_with("![](<file://"), linked, "{button}: {text}");
+            assert!(ed.assist.media.asking.is_none());
+        }
+        let mut text = String::new();
+        let typed = format!("[!/../{}/a b.mp4", out.file_name().unwrap().to_string_lossy());
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text(typed.clone())]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![key_event(Key::Enter, Modifiers::NONE)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.click_text(&mut ed, &mut text, &v, rel, "Cancel");
+        assert!(ed.assist.media.asking.is_none() && text == typed, "Cancel: {text}");
+        // nothing to ask: a file of the vault, a file that is always copied
+        std::fs::write(d.join("in.mp4"), b"v").unwrap();
+        let mut v = v;
+        v.rescan();
+        for (typed, want) in [("[!/in.mp4", "![[in.mp4]]".to_string()), (&format!("[!/../{}/notes.txt", out.file_name().unwrap().to_string_lossy()), format!("[[{stamp}notes.txt]]"))] {
+            let mut text = String::new();
+            h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text(typed.to_string())]);
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+            h.frame(&mut ed, &mut text, &v, rel, vec![key_event(Key::Enter, Modifiers::NONE)]);
+            assert_eq!(text, want);
+            assert!(ed.assist.media.asking.is_none());
+        }
+        let _ = std::fs::remove_dir_all(&out);
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -4661,6 +4871,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut t = 0.0;
         let mut ed = NoteEditor::new(egui::Id::unique("paste-ed"));
+        ed.assist.outside = crate::media::intake::OutsideFiles::Copy;
         let mut text = String::from("ab cd");
         ed.pending_cursor = Some(2);
         paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
@@ -4738,6 +4949,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut t = 0.0;
         let mut ed = NoteEditor::new(egui::Id::unique("vimpaste-ed"));
+        ed.assist.outside = crate::media::intake::OutsideFiles::Copy;
         ed.vim_enabled = true;
         let mut text = String::from("alpha\nbeta");
         ed.pending_cursor = Some(0);
@@ -4766,6 +4978,110 @@ mod tests {
         assert!(a.is_none() && text.contains("ZZ"), "{text}");
         let _ = std::fs::remove_file(&f);
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A folder next to the vault with a few media files in it: `a b.mp4`, `Lib/song.mp3` and `doc.pdf`.
+    fn outside_files(vault_dir: &Path) -> std::path::PathBuf {
+        let out = vault_dir.with_file_name(format!("{}-out", vault_dir.file_name().unwrap().to_string_lossy()));
+        let _ = std::fs::remove_dir_all(&out);
+        std::fs::create_dir_all(out.join("Lib")).unwrap();
+        for f in ["a b.mp4", "Lib/song.mp3", "doc.pdf", "notes.txt"] {
+            std::fs::write(out.join(f), f).unwrap();
+        }
+        out
+    }
+
+    fn pasted_list(out: &Path) -> String {
+        ["a b.mp4", "Lib/song.mp3"].iter().map(|n| format!("{}\n", file_uri(&out.join(n)))).collect()
+    }
+
+    // spec: MEDIA-019, MEDIA-020, EDIT-019
+    #[test]
+    fn pasting_files_from_outside_copies_or_links_them_as_the_setting_says() {
+        use crate::media::intake::OutsideFiles;
+        let (mut v, d) = vault_for_tests("paste-outside");
+        let out = outside_files(&d);
+        v.set_libraries(&[crate::media::outside::Library { name: "Lib".into(), path: out.join("Lib") }]);
+        let (y, m, day) = crate::media::local_date();
+        let stamp = format!("z_media/{y:04}/{m:02}/{:02}{m:02}{day:02}_", y.rem_euclid(100));
+        let abs = out.canonicalize().unwrap();
+        let list = pasted_list(&out);
+        let ctx = egui::Context::default();
+        let mut t = 0.0;
+        let mut ed = NoteEditor::new(egui::Id::unique("paste-outside-ed"));
+        fn start(ctx: &egui::Context, t: &mut f64, ed: &mut NoteEditor, text: &mut String, v: &Vault) {
+            ed.pending_cursor = Some(0);
+            paste_frame(ctx, t, ed, text, v, vec![]);
+            paste_frame(ctx, t, ed, text, v, vec![]);
+        }
+        // Link: the links point to the files where they are, a file in a library folder with the library's name; nothing is copied
+        ed.assist.outside = OutsideFiles::Link;
+        let mut text = String::new();
+        start(&ctx, &mut t, &mut ed, &mut text, &v);
+        let a = paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::Paste(list.clone())]);
+        assert_eq!(pasted_toast(a), "Linked 2 files where they are");
+        assert_eq!(text, format!("![](<file://{}/a b.mp4>)\n![[@Lib/song.mp3]]", abs.display()));
+        assert!(!d.join(format!("{stamp}a b.mp4")).exists(), "nothing was copied");
+        // Copy: copies, as before, also the one in the library folder (no automatic linking)
+        ed.assist.outside = OutsideFiles::Copy;
+        let mut text = String::new();
+        start(&ctx, &mut t, &mut ed, &mut text, &v);
+        let a = paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::Paste(list.clone())]);
+        assert_eq!(pasted_toast(a), "Saved 2 files to the media folder");
+        assert_eq!(text, format!("![[{stamp}a b.mp4]]\n![[{stamp}song.mp3]]"));
+        // Ask: nothing is written, the app is asked with the text; the paste is held back
+        ed.assist.outside = OutsideFiles::Ask;
+        let before = walk_files(&d);
+        let mut text = String::from("x");
+        start(&ctx, &mut t, &mut ed, &mut text, &v);
+        let a = paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::Paste(list.clone())]);
+        assert!(matches!(&a, Some(EditorAction::AskOutsideFiles(held)) if *held == list), "asked");
+        assert_eq!((text.as_str(), walk_files(&d)), ("x", before.clone()), "nothing pasted, nothing written");
+        // the answer Link: the links come at the cursor, nothing is copied
+        ed.pending_files = Some((list.clone(), crate::media::intake::Choice::Link));
+        let a = paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
+        assert_eq!(pasted_toast(a), "Linked 2 files where they are");
+        assert!(ed.pending_files.is_none());
+        paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
+        assert!(text.contains("![[@Lib/song.mp3]]") && text.contains(&format!("file://{}/a b.mp4", abs.display())), "{text}");
+        assert_eq!(walk_files(&d), before);
+        // the answer Copy: copies
+        let mut text = String::new();
+        start(&ctx, &mut t, &mut ed, &mut text, &v);
+        ed.pending_files = Some((list.clone(), crate::media::intake::Choice::Copy));
+        let a = paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
+        assert_eq!(pasted_toast(a), "Saved 2 files to the media folder");
+        paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
+        assert!(text.contains(&format!("![[{stamp}song 1.mp3]]")), "numbered after the copies of the first Copy: {text}");
+        // Ask with nothing that could be linked: pasted at once, as always
+        std::fs::write(d.join("in.mp4"), b"v").unwrap();
+        let mut text = String::new();
+        start(&ctx, &mut t, &mut ed, &mut text, &v);
+        let a = paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::Paste(file_uri(&d.join("in.mp4")))]);
+        assert_eq!(pasted_toast(a), "Saved 1 file to the media folder", "a file of the vault is linked in place");
+        assert_eq!(text, "![[in.mp4]]");
+        // a vault file with Link is still linked in place; the outside one is linked where it is
+        ed.assist.outside = OutsideFiles::Link;
+        let mut text = String::new();
+        start(&ctx, &mut t, &mut ed, &mut text, &v);
+        let mixed = format!("{}\n{}", file_uri(&d.join("in.mp4")), file_uri(&out.join("doc.pdf")));
+        let a = paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::Paste(mixed)]);
+        assert_eq!(pasted_toast(a), "Saved 1 file to the media folder; Linked 1 file where it is");
+        assert_eq!(text, format!("![[in.mp4]]\n[doc.pdf](<file://{}/doc.pdf>)", abs.display()));
+        let _ = std::fs::remove_dir_all(&out);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    fn walk_files(dir: &Path) -> Vec<std::path::PathBuf> {
+        let mut found = Vec::new();
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            found.push(e.path());
+            if e.path().is_dir() {
+                found.extend(walk_files(&e.path()));
+            }
+        }
+        found.sort();
+        found
     }
 
     /// The format of the section holding the first `needle` of `text`.

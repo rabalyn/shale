@@ -389,6 +389,9 @@ pub struct Config {
     /// and the folder on this device it stands for. Global, not in a vault, because the folder
     /// differs from one device to another.
     pub media_libraries: Vec<crate::media::outside::Library>,
+    /// What a pick, paste or import does with a picture, PDF, sound or video from outside the vault
+    /// (MEDIA-019, CFG-070): ask (the default), copy it into `z_media/` or link it where it is.
+    pub outside_files: crate::media::intake::OutsideFiles,
     /// Calendars shown in the calendar panel (local .ics files and CalDAV calendars).
     pub calendars: Vec<crate::calendar::store::CalendarSource>,
     /// Calendar weeks start on Monday (otherwise Sunday).
@@ -517,6 +520,7 @@ impl Default for Config {
             media_volume: 0.8,
             media_play_button_opacity: 0.6,
             media_libraries: vec![],
+            outside_files: Default::default(),
             calendars: vec![],
             week_starts_monday: true,
             input_log: false,
@@ -1035,6 +1039,24 @@ mod tests {
         // typed by hand, a library without a folder is kept as it is
         let (hand, _) = Config::parse_text("[[media_libraries]]\nname = \"Music\"\n").unwrap();
         assert_eq!(hand.media_libraries, vec![Library { name: "Music".into(), path: Default::default() }]);
+    }
+
+    // spec: CFG-070, CFG-001
+    #[test]
+    fn the_outside_files_setting_asks_by_default_loads_from_old_files_and_round_trips() {
+        use crate::media::intake::OutsideFiles;
+        let (c, _) = crate::vault_state::parse::<Config>(br#"{"toolbar_size": 120}"#).unwrap();
+        assert_eq!(c.outside_files, OutsideFiles::Ask, "an old file: Ask");
+        assert_eq!(c.version, 2, "a new field with a default needs no migration (CFG-001)");
+        assert_eq!(Config::default().outside_files, OutsideFiles::Ask);
+        for (value, word) in [(OutsideFiles::Ask, "Ask"), (OutsideFiles::Copy, "Copy"), (OutsideFiles::Link, "Link")] {
+            let text = text::to_toml(&Config { outside_files: value, ..Config::default() });
+            assert!(text.contains(&format!("outside_files = \"{word}\"")), "{text}");
+            assert_eq!(Config::parse_text(&text).unwrap().0.outside_files, value);
+        }
+        let (hand, _) = Config::parse_text("outside_files = \"Link\"\n").unwrap();
+        assert_eq!(hand.outside_files, OutsideFiles::Link);
+        assert!(Config::parse_text("outside_files = \"Sometimes\"\n").is_err());
     }
 
     // spec: MEDIA-007, CFG-001

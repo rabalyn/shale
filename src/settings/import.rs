@@ -67,8 +67,73 @@ impl WordProbe {
 }
 
 impl ShaleApp {
-    pub(super) fn import_tab(&mut self, ui: &mut Ui) -> bool {
+    /// "Files from outside the vault" (MEDIA-019): what a pick, paste or import does with a picture,
+    /// PDF, sound or video from outside the vault, and the library folders (CFG-069, CFG-070).
+    fn outside_files_ui(&mut self, ui: &mut Ui) -> bool {
+        use crate::media::intake::OutsideFiles;
         let mut changed = false;
+        crate::theme::section(ui, "Files from outside the vault");
+        crate::theme::hint(ui, "For a picture, PDF, sound or video that is not in the vault when you pick it with [!, paste it or import it. Other files are always copied.");
+        for value in OutsideFiles::ALL {
+            changed |= ui.radio_value(&mut self.cfg.outside_files, value, value.label()).on_hover_text(value.tip()).changed();
+        }
+        crate::theme::section(ui, "Library folders");
+        crate::theme::hint(ui, "A library folder gives a folder of this computer a name. A link like ![[@Videos/2024/a.mp4]] means that file on every computer where Videos is set up, so a big collection can stay out of the vault. Each computer has its own list, here.");
+        let names: Vec<String> = self.cfg.media_libraries.iter().map(|l| l.name.clone()).collect();
+        let mut remove = None;
+        for (i, lib) in self.cfg.media_libraries.iter_mut().enumerate() {
+            ui.horizontal(|ui| {
+                changed |= ui.add(egui::TextEdit::singleline(&mut lib.name).hint_text("Name").desired_width(120.0)).on_hover_text("The name links use after the @").changed();
+                let mut path = lib.path.to_string_lossy().into_owned();
+                let r = ui.add(egui::TextEdit::singleline(&mut path).hint_text("Folder on this computer").desired_width(300.0));
+                if r.lost_focus() {
+                    path = crate::layout::shellexpand(&path);
+                }
+                if r.changed() || r.lost_focus() {
+                    changed |= lib.path.to_string_lossy() != path.as_str();
+                    lib.path = PathBuf::from(path);
+                }
+                if ui.button("Remove").on_hover_text("Forget this library on this computer; notes that link into it show “not set up”").clicked() {
+                    remove = Some(i);
+                }
+            });
+            let others = names.iter().enumerate().filter(|(k, _)| *k != i).map(|(_, n)| n.as_str());
+            if let Some(p) = crate::media::outside::Library::name_problem(&lib.name, others) {
+                crate::theme::problem(ui, p);
+            } else if lib.path.as_os_str().is_empty() {
+                crate::theme::problem(ui, "Give the folder");
+            } else if !lib.path.is_dir() {
+                crate::theme::problem(ui, "This folder is not there");
+            }
+        }
+        if let Some(i) = remove {
+            self.cfg.media_libraries.remove(i);
+            changed = true;
+        }
+        // a new library: made when the name works and there is a folder
+        let id = ui.make_persistent_id("new-library");
+        let (mut name, mut folder): (String, String) = ui.data_mut(|d| d.get_temp(id)).unwrap_or_default();
+        let problem = crate::media::outside::Library::name_problem(&name, names.iter().map(String::as_str));
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut name).hint_text("New name").desired_width(120.0));
+            let r = ui.add(egui::TextEdit::singleline(&mut folder).hint_text("Folder, for example ~/Videos").desired_width(300.0));
+            if r.lost_focus() {
+                folder = crate::layout::shellexpand(&folder);
+            }
+            if ui.add_enabled(problem.is_none() && !folder.trim().is_empty(), egui::Button::new("Add library")).clicked() {
+                self.cfg.media_libraries.push(crate::media::outside::Library { name: std::mem::take(&mut name), path: PathBuf::from(crate::layout::shellexpand(&std::mem::take(&mut folder))) });
+                changed = true;
+            }
+        });
+        if let Some(p) = problem.filter(|_| !name.is_empty()) {
+            crate::theme::problem(ui, p);
+        }
+        ui.data_mut(|d| d.insert_temp(id, (name, folder)));
+        changed
+    }
+
+    pub(super) fn import_tab(&mut self, ui: &mut Ui) -> bool {
+        let mut changed = self.outside_files_ui(ui);
         crate::theme::section(ui, "E-mails, events and posts");
         changed |= ui
             .checkbox(&mut self.cfg.import_header_list, "Header list in the note body")

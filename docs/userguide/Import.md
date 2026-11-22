@@ -24,6 +24,16 @@ Turn mails, events and files into notes. Back to [[Start here]].
   press Import.
 - Drop onto a folder in the file list to import into it, or onto a note to also add links to the
   new notes there.
+- A picture, PDF, sound or video from outside the vault has a choice in the dialog: **Copy into the
+  vault** (a copy in `z_media/`) or **Link where it is** (nothing is copied, the note links the file
+  where it is). With two or more such files a line above the folder chooses for all of them. The
+  choice starts as **Settings → Import → Files from outside the vault** says (Ask starts at Copy: the
+  dialog is the question). A linked file keeps its name, so its title cannot be edited; the toast says
+  "Linked N files where they are", and the summary lists them under "Linked where they are". See
+  [[Sounds and videos]] for the links.
+
+  ![[import-outside.png]]
+
 - Messages that were imported before are recognised and left out unless you tick them again.
 - After an import of two or more items the window **Import summary** lists what was made: each new
   note with a line about it (an e-mail: sender and date; an event: time and place; other notes: their

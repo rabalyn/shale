@@ -1152,6 +1152,11 @@ impl DrawingDoc {
 
     /// Draw the view into `ui`: the editor, or the read-only view. `dark` = dark canvas; `vault`
     /// is used for link colours and the `[[` / `[!` helpers.
+    /// The setting for files from outside the vault (MEDIA-019), for `[!` in the text of a drawing.
+    pub fn set_outside_files(&mut self, outside: crate::media::intake::OutsideFiles) {
+        self.assist.outside = outside;
+    }
+
     pub fn ui(&mut self, ui: &mut Ui, dark: bool, vault: &crate::vault::Vault) -> Option<DrawingAction> {
         if let Some(err) = &self.error {
             ui.colored_label(Color32::from_rgb(255, 120, 120), err);

@@ -476,6 +476,99 @@ fn imp_031_pictures_and_pdfs_dropped_on_a_note_are_saved_as_files_and_linked_fro
     assert!(!root.join("cat.md").exists() && std::fs::read_dir(&root).unwrap().flatten().all(|e| !e.file_name().to_string_lossy().contains("Files")));
 }
 
+/// Drop these files on the open note and take the Import dialog, which the drop opened.
+fn dropped_on_the_note(w: &mut W, names: &[&str]) -> Box<crate::import::dialog::ImportDialog> {
+    let at = w.zone("", Some("Welcome.md"), true).center();
+    let paths: Vec<PathBuf> = names.iter().map(|n| w.file(n)).collect();
+    w.drop_files(at, &paths);
+    w.until("the Import dialog", |a| matches!(a.modal, Some(Modal::Import(_))));
+    let Some(Modal::Import(d)) = w.app.modal.take() else { panic!("no dialog") };
+    d
+}
+
+fn how_of(d: &crate::import::dialog::ImportDialog) -> Vec<crate::media::intake::Choice> {
+    d.items.iter().filter_map(|i| if let crate::import::Source::Media { how, .. } = &i.source { Some(*how) } else { None }).collect()
+}
+
+// spec: MEDIA-019, MEDIA-020, IMP-031
+#[test]
+fn media_019_the_dialog_starts_with_the_setting_and_a_linked_file_stays_where_it_is_and_is_linked_from_the_note() {
+    use crate::media::intake::{Choice, OutsideFiles};
+    for (setting, start) in [(OutsideFiles::Ask, Choice::Copy), (OutsideFiles::Copy, Choice::Copy), (OutsideFiles::Link, Choice::Link)] {
+        let mut w = W::new(&format!("media-start-{setting:?}"));
+        std::fs::write(w.file("cat.png"), b"meow").unwrap();
+        std::fs::write(w.file("plan.pdf"), b"%PDF-1.4").unwrap();
+        w.app.cfg.outside_files = setting;
+        let d = dropped_on_the_note(&mut w, &["cat.png", "plan.pdf", "first drop.md"]);
+        assert_eq!(how_of(&d), [start, start], "{setting:?}: the dialog starts from the setting (Ask is asked in the dialog itself)");
+        assert_eq!(d.root, w.app.vault.as_ref().unwrap().root);
+    }
+    // Link: nothing is copied, the open note gets the links, the toast and the summary say so
+    let mut w = W::new("media-link");
+    std::fs::write(w.file("cat.png"), b"meow").unwrap();
+    std::fs::write(w.file("plan.pdf"), b"%PDF-1.4").unwrap();
+    w.app.cfg.outside_files = OutsideFiles::Link;
+    let mut d = dropped_on_the_note(&mut w, &["cat.png", "plan.pdf"]);
+    let root = w.app.vault.as_ref().unwrap().root.clone();
+    let z_media_before = std::fs::read_dir(root.join("z_media")).map(|d| d.count()).unwrap_or(0);
+    assert!(w.app.import_action(&mut d, crate::import::dialog::ImportAction::Import));
+    w.frames(3);
+    let abs = w.out.canonicalize().unwrap();
+    let text = w.app.notes.get(Path::new("Welcome.md")).expect("the open note").text.clone();
+    assert!(text.contains(&format!("- ![](<file://{}/cat.png>)\n", abs.display())) && text.contains(&format!("- [plan.pdf](<file://{}/plan.pdf>)\n", abs.display())), "{text}");
+    assert_eq!(std::fs::read_dir(root.join("z_media")).map(|d| d.count()).unwrap_or(0), z_media_before, "nothing was copied");
+    assert!(w.app.toasts.iter().any(|(t, _)| t == "Linked 2 files where they are"), "{:?}", w.app.toasts);
+    let Some(Modal::ImportSummary(s)) = &w.app.modal else { panic!("two results: the summary") };
+    assert_eq!(s.title(), "Imported 2 linked files");
+    assert!(w.painted("Linked where they are") && w.painted("cat.png") && w.painted("plan.pdf"), "{:?}", w.hl.text);
+    // a library folder gives a library link
+    let mut w = W::new("media-library");
+    std::fs::write(w.file("cat.png"), b"meow").unwrap();
+    w.app.cfg.outside_files = OutsideFiles::Link;
+    w.app.cfg.media_libraries = vec![crate::media::outside::Library { name: "Out".into(), path: w.out.clone() }];
+    w.frames(2);
+    let mut d = dropped_on_the_note(&mut w, &["cat.png"]);
+    assert!(w.app.import_action(&mut d, crate::import::dialog::ImportAction::Import));
+    w.frames(3);
+    let text = w.app.notes.get(Path::new("Welcome.md")).expect("the open note").text.clone();
+    assert!(text.contains("- ![[@Out/cat.png]]\n"), "{text}");
+    // one linked file alone: a toast, no summary, nothing opens (it is no file of the vault)
+    assert!(w.app.modal.is_none() && w.app.toasts.iter().any(|(t, _)| t == "Linked 1 file where it is"), "{:?}", w.app.toasts);
+    assert_eq!(tab_names(&w), vec!["Welcome"]);
+}
+
+// spec: MEDIA-019, IMP-031
+#[test]
+fn media_019_one_file_can_be_copied_and_another_linked_and_a_file_of_the_vault_is_linked_in_place() {
+    use crate::media::intake::Choice;
+    let mut w = W::with_files("media-mixed", &[("in.mp3", "sound")]);
+    std::fs::write(w.file("cat.png"), b"meow").unwrap();
+    std::fs::write(w.file("plan.pdf"), b"%PDF-1.4").unwrap();
+    let root = w.app.vault.as_ref().unwrap().root.clone();
+    let mut d = dropped_on_the_note(&mut w, &["cat.png", "plan.pdf"]);
+    d.items.extend(crate::import::items_from_paths(&[root.join("in.mp3")]).0);
+    assert_eq!(how_of(&d), [Choice::Copy; 3]);
+    // the second and third ones: link (the file of the vault is not outside, so nothing changes for it)
+    if let crate::import::Source::Media { how, .. } = &mut d.items[1].source {
+        *how = Choice::Link;
+    }
+    if let crate::import::Source::Media { how, .. } = &mut d.items[2].source {
+        *how = Choice::Link;
+    }
+    assert!(w.app.import_action(&mut d, crate::import::dialog::ImportAction::Import));
+    w.frames(3);
+    let (y, m, day) = crate::media::local_date();
+    let stamp = format!("{:02}{m:02}{day:02}", y.rem_euclid(100));
+    let abs = w.out.canonicalize().unwrap();
+    let text = w.app.notes.get(Path::new("Welcome.md")).expect("the open note").text.clone();
+    for line in [format!("- ![[z_media/{y:04}/{m:02}/{stamp}_cat.png]]\n"), format!("- [plan.pdf](<file://{}/plan.pdf>)\n", abs.display()), "- ![[in.mp3]]\n".to_string()] {
+        assert!(text.contains(&line), "{line:?} in {text}");
+    }
+    assert!(w.app.toasts.iter().any(|(t, _)| t == "Saved 2 files to the media folder. Linked 1 file where it is"), "{:?}", w.app.toasts);
+    let Some(Modal::ImportSummary(s)) = &w.app.modal else { panic!("the summary") };
+    assert_eq!(s.title(), "Imported 2 files and 1 linked file");
+}
+
 // spec: IMP-035, IMP-036
 #[cfg(unix)]
 #[test]
