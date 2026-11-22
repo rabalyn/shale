@@ -267,7 +267,7 @@ pub fn find_links(text: &str) -> Vec<LinkSpan> {
 /// text then, LINK-001). A destination in `<…>` holds no `<` and ends at the first `>`, and only
 /// blanks may follow it; any other destination holds no control character and balanced
 /// parentheses, and ends at the first unmatched `)`. Spaces stay allowed in it (Shale's file
-/// links), a `[` is not (nor a `[[` in `<…>`): a link starts there.
+/// links), a `[[` is not: a wiki link starts there.
 fn md_destination_len(rest: &str) -> Option<usize> {
     let lead = rest.len() - rest.trim_start().len();
     if rest[lead..].starts_with('<') {
@@ -285,9 +285,9 @@ fn md_destination_len(rest: &str) -> Option<usize> {
             '(' => depth += 1,
             ')' if depth == 0 => return Some(p),
             ')' => depth -= 1,
-            // a `[` starts a link of its own (a wiki link, or a markdown link that may be the one a
-            // rename rewrites), which a destination does not swallow
-            c if c.is_control() || c == '[' => return None,
+            c if c.is_control() => return None,
+            // a `[[` starts a wiki link, which a destination does not swallow
+            '[' if rest[p + 1..].starts_with('[') => return None,
             _ => {}
         }
     }
@@ -1487,6 +1487,12 @@ a
         // a wiki link after the opener stays one when its name holds a `)`
         let w = find_links("[x]([[)#Head|alias]]");
         assert_eq!((w.len(), w[0].range.start, w[0].markdown_style), (1, 4, false));
+        assert!(find_links("[x]([[a]]").iter().all(|l| !l.markdown_style));
+        // single brackets in a file name are fine
+        let p = find_links("[pic](photo [1].png)");
+        assert_eq!((p.len(), p[0].target.as_str()), (1, "photo [1].png"));
+        let n = find_links("[n](Meeting [draft].md)");
+        assert_eq!((n.len(), n[0].target.as_str()), (1, "Meeting [draft]"));
     }
 
     // spec: TAG-001, LINK-006, VAULT-012
