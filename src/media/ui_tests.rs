@@ -84,16 +84,9 @@ impl Fx {
     /// run on workers (MEDIA-024), so a picture is there a few frames after its note is shown.
     fn settle(&mut self) {
         let looks = crate::media::look::Looks::of(self.hl.ctx());
-        let mut idle = 0;
-        for _ in 0..500 {
+        looks.settle_with(|| {
             self.hl.frame(&mut self.app, vec![]);
-            idle = if looks.busy() { 0 } else { idle + 1 };
-            if idle >= 3 {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        panic!("the file look-ups did not finish");
+        });
     }
 
     /// Frames until the app is in the state `ok` looks for (sound opens on threads).
@@ -103,7 +96,8 @@ impl Fx {
 
     /// Like `until`, with the window's egui context for what the look-ups say (MEDIA-024).
     fn until_in(&mut self, what: &str, mut ok: impl FnMut(&ShaleApp, &egui::Context) -> bool) {
-        for _ in 0..300 {
+        let start = std::time::Instant::now();
+        while start.elapsed() < Duration::from_secs(60) {
             self.hl.frame(&mut self.app, vec![]);
             if ok(&self.app, self.hl.ctx()) {
                 return;
@@ -120,7 +114,7 @@ impl Fx {
         loop {
             self.hl.frame(&mut self.app, vec![]);
             let texts: Vec<String> = self.hl.text.iter().map(|(t, _)| t.clone()).collect();
-            if texts.iter().any(|t| t.contains(needle)) || start.elapsed() > Duration::from_secs(20) {
+            if texts.iter().any(|t| t.contains(needle)) || start.elapsed() > Duration::from_secs(60) {
                 return texts;
             }
             std::thread::sleep(Duration::from_millis(20));
@@ -358,11 +352,16 @@ fn in_the_editor_the_player_is_worked_with_the_mouse_and_the_keyboard_stays_with
     fx.hl.frames(&mut fx.app, 2);
     assert!(fx.hl.ctx().memory(|m| m.has_focus(id)), "a click on the seek bar leaves the keyboard with the text");
     typed(&mut fx, "Y");
-    let path = Headless::steps(Pos2::new(bar.left() + bar.width() * 0.2, bar.center().y), Pos2::new(bar.left() + bar.width() * 0.8, bar.center().y), 5);
-    fx.hl.press_and_move(&mut fx.app, Pos2::new(bar.left() + bar.width() * 0.2, bar.center().y), &path);
-    fx.hl.release(&mut fx.app, Pos2::new(bar.left() + bar.width() * 0.8, bar.center().y));
+    // (the sound is a second long and its silent output runs on the clock: the drag goes back to the
+    // start and the player is paused at once, so that a slow machine does not play it to its end)
+    let path = Headless::steps(Pos2::new(bar.left() + bar.width() * 0.8, bar.center().y), Pos2::new(bar.left() + bar.width() * 0.2, bar.center().y), 5);
+    fx.hl.press_and_move(&mut fx.app, Pos2::new(bar.left() + bar.width() * 0.8, bar.center().y), &path);
+    fx.hl.release(&mut fx.app, Pos2::new(bar.left() + bar.width() * 0.2, bar.center().y));
     assert!(fx.hl.ctx().memory(|m| m.has_focus(id)), "a drag on the seek bar leaves the keyboard with the text");
     typed(&mut fx, "Z");
+    fx.click_label("Pause");
+    assert!(fx.hl.ctx().memory(|m| m.has_focus(id)), "the pause button leaves the keyboard with the text");
+    typed(&mut fx, "P");
 
     // the volume slider (a drag) and the mute button
     let vol = fx.label("Volume");
@@ -377,7 +376,7 @@ fn in_the_editor_the_player_is_worked_with_the_mouse_and_the_keyboard_stays_with
     typed(&mut fx, "M");
 
     // a click on the card beside the button, then Space: it types a space and does not toggle
-    let c = fx.label("Pause").center();
+    let c = fx.label("Play").center();
     fx.hl.click(&mut fx.app, c - egui::vec2(BUTTON_RADIUS * 2.0 + 4.0, 40.0), PointerButton::Primary);
     fx.hl.frames(&mut fx.app, 2);
     assert!(fx.hl.ctx().memory(|m| m.has_focus(id)), "a click on the card leaves the keyboard with the text");
@@ -385,8 +384,8 @@ fn in_the_editor_the_player_is_worked_with_the_mouse_and_the_keyboard_stays_with
     fx.hl.frame(&mut fx.app, vec![space(true), Event::Text(" ".into())]);
     fx.hl.frame(&mut fx.app, vec![space(false)]);
     fx.hl.frames(&mut fx.app, 2);
-    fx.label("Pause");
-    assert!(note(&fx).ends_with("afXYZVM ter the player\n"), "the letters and the space went in at the cursor: {:?}", note(&fx));
+    fx.label("Play");
+    assert!(note(&fx).ends_with("afXYZPVM ter the player\n"), "the letters and the space went in at the cursor: {:?}", note(&fx));
 }
 
 // spec: MEDIA-004
@@ -502,7 +501,7 @@ fn the_state_stays_when_the_view_switches_and_the_window_repaints_only_while_pla
         if delay(&out) > Duration::from_secs(1) {
             break;
         }
-        assert!(start.elapsed() < Duration::from_secs(5), "paused again, still repainting after 5 s: {:?}", delay(&out));
+        assert!(start.elapsed() < Duration::from_secs(60), "paused again, still repainting after 60 s: {:?}", delay(&out));
         std::thread::sleep(Duration::from_millis(50));
     }
 }

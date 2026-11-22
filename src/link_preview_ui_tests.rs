@@ -50,12 +50,7 @@ impl W {
     /// Frames until the files the window looks up in the background (MEDIA-024) are answered and drawn.
     fn looked(&mut self) {
         let looks = crate::media::look::Looks::of(self.hl.ctx());
-        let mut idle = 0;
-        while idle < 3 {
-            self.hl.frames(&mut self.app, 1);
-            idle = if looks.busy() { 0 } else { idle + 1 };
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
+        looks.settle_with(|| self.hl.frames(&mut self.app, 1));
     }
 
     fn ed(&self) -> &NoteEditor {

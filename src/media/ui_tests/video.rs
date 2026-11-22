@@ -59,7 +59,7 @@ fn the_video_player_is_in_the_editor_and_in_the_markdown_preview_as_well() {
     fx.reading(false);
     fx.label("Play");
     fx.app.cfg.live_preview = true;
-    fx.hl.frames(&mut fx.app, 4);
+    fx.settle();
     fx.label("Play");
 }
 
@@ -225,7 +225,7 @@ fn a_video_that_is_an_lfs_pointer_is_downloaded_first_even_without_ffmpeg() {
     fx.app.vault.as_mut().unwrap().rescan();
     fx.disk_changed();
     fx.reading(true);
-    fx.hl.frames(&mut fx.app, 3);
+    fx.settle();
     // the pointer is not probed: it says "not downloaded", not "ffmpeg is not installed"
     assert_eq!(fx.app.media.notice(fx.hl.ctx(), &clip).map(|n| n.line()), Some("Not downloaded (2 MB)".to_string()));
     assert!(!texts(&fx).iter().any(|t| t.contains("ffmpeg is not installed")), "{:?}", texts(&fx));
