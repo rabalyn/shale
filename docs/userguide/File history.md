@@ -29,6 +29,13 @@ Shale keeps earlier versions of your notes and drawings, so that you can go back
   history; it travels with the vault, so the same vault on two computers has the same name for its
   history and each computer keeps its own. Moving or renaming the vault folder keeps the history; a copy of
   a vault gets a history of its own.
+- When you connect a server to a vault whose history is kept on this computer ([[Turn on sync]], or Settings →
+  Sync → Advanced → **Connect**), Shale **moves** those versions into the vault's new git repository: it copies
+  them, checks the copy, and only then removes the folder in your data folder. Afterwards the versions have one
+  place, they stay in the history panel, and the first sync sends them to the server with your notes. If anything
+  fails, nothing is moved and Shale says why; the history on this computer stays as it was. From then on the
+  history is the vault's own and is no longer thinned. The file `.shale/history-id` stays in the vault; it is
+  only used again if the repository is moved out of the vault again.
 - A new history starts with a version of every note and drawing as they are. Settings → Sync shows where it is
   kept. [[Data usage and caches]] shows how big it is.
 

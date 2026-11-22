@@ -239,7 +239,8 @@ impl ShaleApp {
         }
         self.history_panel_tick();
         self.history_start_query(ctx);
-        let sync_busy = self.sync.running() || self.sync.lfs_job_running();
+        // a connection may move the local history into the vault's `.git`: nothing starts beside it (SYNC-072)
+        let sync_busy = self.sync.running() || self.sync.lfs_job_running() || self.sync.setup.joining.active();
         if self.history.job.is_none() && self.history.thin.is_none() && !sync_busy && now >= self.history.not_before {
             let cfg: HistoryConfig = self.cfg.history.clone();
             let (notes, drawings) = (&self.notes, &self.drawings);
@@ -295,7 +296,7 @@ impl ShaleApp {
     }
 
     fn history_start_query(&mut self, ctx: &egui::Context) {
-        if self.history.query.is_some() || self.history.thin.is_some() {
+        if self.history.query.is_some() || self.history.thin.is_some() || self.sync.setup.joining.active() {
             return;
         }
         let Some(query) = self.history.queries.pop_front() else { return };

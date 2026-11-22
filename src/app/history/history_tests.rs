@@ -564,3 +564,21 @@ fn a_vault_with_its_own_git_is_never_thinned_by_the_window() {
     assert!(!t.vault.join(".git/thinned").exists());
     assert!(!t.toasted("thin"));
 }
+
+// spec: SYNC-072
+#[test]
+fn nothing_of_the_history_starts_while_a_connection_moves_the_local_history_into_git() {
+    let mut t = setup("join-serial", false);
+    t.start();
+    t.settle();
+    t.app.open(Path::new("Note.md"), false);
+    let guard = t.app.sync.setup.joining.begin();
+    t.type_into("Note.md", "two\n");
+    t.app.history.panel.want = Some(PathBuf::from("Note.md"));
+    t.app.history.panel.stale = true;
+    t.app.history_tick(&t.ctx);
+    assert!(t.app.history.job.is_none() && t.app.history.thin.is_none() && t.app.history.query.is_none(), "no snapshot, thinning or read beside the move");
+    drop(guard);
+    t.settle();
+    assert_eq!(t.versions("Note.md").len(), 2, "the snapshot is made after it");
+}

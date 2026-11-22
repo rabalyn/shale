@@ -220,6 +220,20 @@ pub fn connect(git: &Git, vault: &Path, url: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// [`connect`], after the local-only history of the vault was moved into its new `.git`
+/// (SYNC-072, SYNC-073). True: a history was moved. A failure of the move connects nothing and
+/// leaves the vault without `.git` and the history where it was. Runs git for long: a job.
+pub fn connect_moving(git: &Git, vault: &Path, url: &str, history_root: &Path, tree: &TreeLock) -> Result<bool, String> {
+    check_url(url)?;
+    let moved = movein::move_in(git, vault, history_root, tree, moveout::TREE_WAIT)?.is_some();
+    if moved {
+        // like a new repository: media go to LFS from the next commit on (SYNC-017)
+        lfs::prepare_new(git, vault)?;
+    }
+    connect(git, vault, url)?;
+    Ok(moved)
+}
+
 /// What a sync should write into commit messages and conflict copy names.
 #[derive(Clone, Debug, Default)]
 pub struct Options {
@@ -651,6 +665,7 @@ pub mod install;
 pub mod install_ui;
 pub mod lfs;
 pub mod managed;
+pub mod movein;
 pub mod moveout;
 pub mod sources;
 pub mod wizard;
@@ -689,6 +704,8 @@ mod install_tests;
 mod install_ui_tests;
 #[cfg(test)]
 mod managed_tests;
+#[cfg(test)]
+mod movein_tests;
 #[cfg(test)]
 mod moveout_tests;
 #[cfg(test)]

@@ -61,6 +61,11 @@ pub fn what_happens(remote: Remote, vault_has_notes: bool) -> &'static str {
     }
 }
 
+/// What the move of a local history into the vault means for the first sync (SYNC-075).
+pub fn history_moved() -> &'static str {
+    "The versions Shale kept of your notes on this computer have moved into the vault, so they stay in the history panel. The first sync sends them to the server together with your notes."
+}
+
 /// What went wrong, told apart so the wizard can say what to do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Problem {

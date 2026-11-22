@@ -1216,6 +1216,14 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   folder is ever written into the vault. The vault id is the file `.shale/history-id` (128 random
   bits, synced with the vault); a moved or renamed vault keeps its history, a copy of a vault gets a
   new id. A new local history starts with one snapshot of every note and drawing.
+- **Connecting a server moves a local history into `.git`** (SYNC-072…SYNC-075, #485). The wizard's server
+  path and Advanced → Connect, for a vault without `.git` whose history is in the data folder, copy it to
+  `<vault>/.git.moving` in a background job under the tree lock (no snapshot, thinning, read or sync beside
+  it), check the refs, `HEAD` and `git fsck`, rename it to `.git` (`core.bare=false`, no `core.worktree`,
+  `git status` must work) and only then remove the old folder; a failure leaves the vault without `.git`
+  and the history where it was. The first sync pushes the snapshots as they are to an empty server, or merges
+  them (unrelated histories allowed) with a server that has notes. The wizard says in words that the versions
+  moved. The history is then the vault's own and is never thinned (SYNC-069).
 - **What.** Notes and drawings (`.md`, `.excalidraw`, `.excalidraw.md`, `.canvas`), not media. Never
   Shale's temporary files, the temporary and housekeeping names of cloud clients and network shares
   (`.syncthing.*.tmp`, `.stfolder`, `.stversions`, `.stignore`, `.~lock.*#`, `~$*`, `*.tmp`, `*.part`,

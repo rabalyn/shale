@@ -57,8 +57,10 @@ keeps the notes safe, and the warning says what to do if the repository breaks (
 
 3. **The repository.** For Forgejo, Gitea and GitHub the wizard lists your repositories and can **Create a private repository**. For
    GitLab and other servers it links to the website where you make one and takes its address (`owner/name` or the full address).
-4. **Test the sync.** The wizard first asks the server what its repository holds and says what will happen: an empty repository gets
-   your notes; a repository with notes and an empty vault downloads them; with notes on both sides they are merged, nothing is deleted
+4. **Test the sync.** If Shale kept versions of your notes on this computer, they move into the vault's new `.git` while the wizard asks
+   the server, and the wizard says so: they stay in the history panel and the first sync sends them to the server too (they are copied
+   and checked before the old folder is removed; if that fails, nothing is moved and you see why). The wizard asks the server what its
+   repository holds and says what will happen: an empty repository gets your notes and the versions; a repository with notes and an empty vault downloads them; with notes on both sides they are merged, nothing is deleted
    and a note that differs is kept in both versions (one as `Note (conflict …).md`). **Run the test sync** is one real sync. The result is
    in plain words: it worked; the user name or token was not accepted; no network to the server; no repository at that address; the SSH key
    was not accepted; the server's certificate cannot be checked. After a failure **Back** goes to the step that fixes it, and the remote

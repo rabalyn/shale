@@ -12,6 +12,7 @@ use crate::gitsync::managed::GitConfig;
 use crate::gitsync::{self, moveout};
 use crate::theme;
 use eframe::egui::{self, Ui};
+use std::path::PathBuf;
 use std::time::Duration;
 
 /// What a click in the dialog asked for.
@@ -247,9 +248,19 @@ impl ShaleApp {
         let key = (w.method == Method::Ssh && w.local_remote.is_none()).then(|| w.chosen_key().map(|k| k.private.clone())).flatten();
         // a key of ~/.ssh that git finds by itself needs no command of its own
         let key = key.filter(|k| k.file_name().is_some_and(|n| n.to_string_lossy().starts_with("shale_")));
+        if self.sync.running() || self.history.busy() || self.sync.lfs_job_running() {
+            w.say("A sync or a snapshot is running; try again in a moment", false);
+            return;
+        }
         w.remote = Some(url.clone());
         w.message = None;
-        self.wizard_job(w, "asking the server", ctx, move || super::connect_and_inspect(&git, &root, &url, key.as_deref()).map(|(r, n)| Msg::Inspected(r, n)));
+        // a local-only history moves into the new `.git` (SYNC-072): saved notes first, no snapshot beside it
+        self.flush_all();
+        let (tree, history_root, guard) = (self.sync.tree.clone(), self.usage.places.history.clone(), self.sync.setup.joining.begin());
+        self.wizard_job(w, "asking the server", ctx, move || {
+            let _guard = guard;
+            super::connect_and_inspect(&git, &root, &url, key.as_deref(), &history_root, &tree).map(|(r, n, m)| Msg::Inspected(r, n, m))
+        });
     }
 
     /// A finished job.
@@ -279,9 +290,10 @@ impl ShaleApp {
                 w.repos.insert(0, info);
                 w.repo = Some(0);
             }
-            Ok(Msg::Inspected(remote, notes)) => {
+            Ok(Msg::Inspected(remote, notes, moved)) => {
                 w.inspected = Some(remote);
                 w.vault_has_notes = notes;
+                w.history_moved |= moved;
                 w.test = Test::Idle;
                 w.message = None;
                 w.step = Step::Test;
@@ -295,6 +307,7 @@ impl ShaleApp {
     pub(crate) fn wizard_tick(&mut self, ctx: &egui::Context) {
         self.sync.setup.poll_detect();
         self.moveout_tick(ctx);
+        self.join_tick(ctx);
         let Some(mut w) = self.sync.setup.wizard.take() else { return };
         if let Some((_, rx)) = &w.job {
             match rx.try_recv() {
@@ -356,6 +369,60 @@ impl ShaleApp {
             },
         );
         self.sync.setup.moveout = super::MoveOut { job: Some((root, rx)), result: None };
+    }
+
+    /// Advanced → Connect for a vault with a local-only history: the move and the connection run in a
+    /// job (SYNC-072); without a local history `connect` is quick and runs at once.
+    pub(crate) fn start_join(&mut self, root: PathBuf, url: String) {
+        if self.sync.setup.joining.job.is_some() {
+            return;
+        }
+        if self.sync.running() || self.history.busy() || self.sync.lfs_job_running() {
+            self.toast("A sync or a snapshot is running; try again in a moment");
+            return;
+        }
+        self.flush_all();
+        let (git, tree, history_root, ctx) = (self.sync.git.clone(), self.sync.tree.clone(), self.usage.places.history.clone(), self.ctx.clone());
+        let (job_root, job_url, guard) = (root.clone(), url.clone(), self.sync.setup.joining.begin());
+        let rx = crate::jobs::spawn(
+            move || {
+                let _guard = guard;
+                gitsync::connect_moving(&git, &job_root, &job_url, &history_root, &tree)
+            },
+            move || {
+                if let Some(c) = ctx {
+                    c.request_repaint();
+                }
+            },
+        );
+        self.sync.setup.joining.job = Some((root, url, rx));
+    }
+
+    /// Take a finished Advanced connection (SYNC-072).
+    fn join_tick(&mut self, ctx: &egui::Context) {
+        let Some((root, url, rx)) = &self.sync.setup.joining.job else { return };
+        let r = match rx.try_recv() {
+            Ok(r) => r.unwrap_or_else(Err),
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                ctx.request_repaint_after(Duration::from_millis(100));
+                return;
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Err("the connection stopped unexpectedly".into()),
+        };
+        let (root, url) = (root.clone(), url.clone());
+        self.sync.setup.joining.job = None;
+        let same_vault = self.vault.as_ref().map(|v| v.root.as_path()) == Some(root.as_path());
+        match r {
+            Ok(moved) if same_vault => {
+                self.sync.remote = Some(url);
+                self.sync.last_start = None;
+                self.toast(if moved { "Remote set; the versions kept on this computer moved into the vault; syncing now" } else { "Remote set; syncing now" });
+                self.refresh_lfs();
+                self.start_sync();
+            }
+            Ok(_) => {}
+            Err(e) => self.toast(format!("Could not set the remote: {e}")),
+        }
     }
 
     /// Take a finished move.
@@ -608,6 +675,9 @@ fn body(ui: &mut Ui, w: &mut Wizard, cx: &Cx, managed: &mut ManagedState, gitcfg
             }
             if let Some(remote) = w.inspected {
                 theme::paragraph(ui, test_sync::what_happens(remote, w.vault_has_notes));
+            }
+            if w.history_moved {
+                theme::paragraph(ui, test_sync::history_moved());
             }
             ui.add_space(6.0);
             match &w.test {
