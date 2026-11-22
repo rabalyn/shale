@@ -1,5 +1,5 @@
 //! Tests against the real servers of the local container environment (`tests/mail-env/`,
-//! MAIL-091): Dovecot with TLS and seeded mailboxes, and a pretend OAuth2 provider. They are
+//! MAIL-091, DEV-005, DEV-011): Dovecot with TLS and seeded mailboxes, and a pretend OAuth2 provider. They are
 //! ignored unless asked for, because they need the containers:
 //!
 //! ```text
@@ -834,7 +834,7 @@ fn mail_env_signed_and_encrypted_openpgp_and_smime_mail_arrives_intact_verifies_
 
 // ------------------------------------------------------------ watching a folder (MAIL-231)
 
-// spec: MAIL-231
+// spec: MAIL-231, DEV-028
 #[test]
 #[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
 fn mail_env_a_flag_that_another_connection_sets_and_removes_shows_in_the_store_within_seconds_through_idle() {

@@ -878,7 +878,7 @@ mod tests {
         assert!(safe_name(&"x".repeat(500)).len() <= 120);
     }
 
-    // spec: SEC-006
+    // spec: SEC-006, SEC-005
     #[test]
     fn no_other_code_starts_an_opener() {
         let mut bad = Vec::new();

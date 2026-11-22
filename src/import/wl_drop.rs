@@ -524,6 +524,7 @@ impl Dispatch<wl_data_device::WlDataDevice, ()> for State {
 #[cfg(test)]
 mod fake_compositor;
 
+// spec: DEV-012
 #[cfg(test)]
 mod tests {
     use super::*;

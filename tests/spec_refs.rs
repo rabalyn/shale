@@ -1,5 +1,5 @@
 //! Every `// spec:` comment names spec rows that exist, no row ID is used twice (DEV-014, DEV-023),
-//! and every test an IS NOW row names exists (DEV-033).
+//! every test an IS NOW row names exists (DEV-033) and carries the row's ID (DEV-039).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -363,6 +363,188 @@ fn unresolved_tests(tree: &[(String, String)], specs: &[(&str, &str)]) -> Vec<St
     }
     bad.sort();
     bad
+}
+
+// ---- DEV-039: the tests a spec names are about the row ----
+
+/// Whether the name `name` carries the row `id`: `build_019_…` for `BUILD-019`, in any case.
+fn name_carries(name: &str, id: &str) -> bool {
+    let (name, id) = (name.to_ascii_lowercase(), id.to_ascii_lowercase().replace('-', "_"));
+    name.match_indices(&id).any(|(at, _)| !name[..at].ends_with(|c: char| c.is_ascii_alphanumeric()) && !name[at + id.len()..].starts_with(|c: char| c.is_ascii_digit()))
+}
+
+/// The IDs of the `// spec:` comments in the block of attributes and comments right above line `at`.
+fn ids_above(lines: &[&str], at: usize) -> Vec<String> {
+    let mut ids = Vec::new();
+    for line in lines[..at].iter().rev() {
+        let l = line.trim_start();
+        if let Some(comment) = l.strip_prefix(MARK) {
+            ids.extend(ids_in(comment).unwrap_or_default().into_iter().map(str::to_string));
+        } else if !(l.starts_with("#[") || l.starts_with("//")) {
+            break;
+        }
+    }
+    ids
+}
+
+/// The lines of `text` where `<keyword> <name>` is defined (`fn`, `mod`), or, when `name` is the
+/// start of a function (`prefix`), where a `fn` starting with it is.
+fn definition_lines(text: &str, keyword: &str, name: &str, prefix: bool) -> Vec<usize> {
+    let is_ident = |c: char| c.is_alphanumeric() || c == '_';
+    let needle = format!("{keyword} {name}");
+    text.lines().enumerate().filter(|(_, line)| line.match_indices(&needle).any(|(at, _)| !line[..at].ends_with(is_ident) && (prefix || !line[at + needle.len()..].starts_with(is_ident)))).map(|(n, _)| n).collect()
+}
+
+/// The name a definition line defines (`pub fn name(…)`, `mod name {`, a macro line `name: …`).
+fn defined_name(line: &str) -> &str {
+    let l = line.trim_start();
+    let l = l.split_once("fn ").or_else(|| l.split_once("mod ")).map_or(l, |(_, rest)| rest);
+    &l[..l.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(l.len())]
+}
+
+/// Whether the definitions of a reference in `text` carry the row `id`: the name has it, or a
+/// `// spec:` comment above lists it. For a macro that writes the function the line with the name
+/// counts.
+fn definition_carries(text: &str, reference: &TestRef, id: &str) -> bool {
+    let lines: Vec<&str> = text.lines().collect();
+    let (name, prefix) = match reference {
+        TestRef::InFile { name, prefix, .. } => (name.as_str(), *prefix),
+        TestRef::Bare(name) => (name.as_str(), true),
+        TestRef::File(_) => return false,
+    };
+    let mut at: Vec<usize> = definition_lines(text, "fn", name, prefix);
+    if !prefix {
+        at.extend(definition_lines(text, "mod", name, false));
+        if defined_by_macro(text, name) {
+            at.extend(lines.iter().enumerate().filter(|(_, l)| l.trim_start().strip_prefix(name).is_some_and(|rest| rest.starts_with(':'))).map(|(n, _)| n));
+        }
+    }
+    at.iter().any(|&n| name_carries(defined_name(lines[n]), id) || ids_above(&lines, n).iter().any(|i| i == id))
+}
+
+/// Whether a text mentions the row `id` (in a comment or a name), for a whole file or script.
+fn mentions(text: &str, id: &str) -> bool {
+    let id = id.to_ascii_lowercase();
+    let lower = text.to_ascii_lowercase();
+    [id.clone(), id.replace('-', "_")].iter().any(|form| lower.match_indices(form.as_str()).any(|(at, _)| !lower[..at].ends_with(|c: char| c.is_ascii_alphanumeric()) && !lower[at + form.len()..].starts_with(|c: char| c.is_ascii_digit())))
+}
+
+/// Whether the test a resolved reference names carries the row `id` (see `definition_carries`; a
+/// whole file or script mentions it somewhere).
+fn carries_id(tree: &[(String, String)], reference: &TestRef, id: &str) -> bool {
+    match reference {
+        TestRef::File(file) => named_files(tree, file).iter().any(|f| tree.iter().any(|(p, text)| p == f && mentions(text, id))),
+        TestRef::InFile { file, .. } => named_files(tree, file).iter().flat_map(|f| module_files(tree, f)).any(|(_, text)| definition_carries(text, reference, id)),
+        TestRef::Bare(_) => tree.iter().any(|(_, text)| definition_carries(text, reference, id)),
+    }
+}
+
+/// The references of IS NOW rows that resolve (DEV-033) but are not about their row: one line each,
+/// `ID: reference`. References that do not resolve are left to `unresolved_tests`.
+fn tests_without_their_id(tree: &[(String, String)], specs: &[(&str, &str)]) -> Vec<String> {
+    let mut bad = Vec::new();
+    for (_, text) in specs {
+        for (id, cell) in is_now_rows(text) {
+            for reference in test_refs(cell) {
+                if resolve(tree, &reference).is_err() {
+                    continue;
+                }
+                if !carries_id(tree, &reference, id) {
+                    let shown = match &reference {
+                        TestRef::InFile { file, name, prefix } => format!("{file}::{name}{}", if *prefix { "*" } else { "" }),
+                        TestRef::File(file) | TestRef::Bare(file) => file.clone(),
+                    };
+                    bad.push(format!("{id}: {shown}"));
+                }
+            }
+        }
+    }
+    bad.sort();
+    bad.dedup();
+    bad
+}
+
+/// The exceptions of DEV-039 that exist today: tests a row names that carry no ID of it yet, one
+/// `ID: reference` per line (`#` starts a comment). The list may only shrink.
+const ALLOWLIST: &str = "tests/spec_refs_allowlist.txt";
+
+/// The number of entries of `ALLOWLIST`. Lower it when you remove entries; never raise it.
+const ALLOWLIST_LEN: usize = 306;
+
+/// The entries of an allowlist text.
+fn allowlist_entries(text: &str) -> Vec<&str> {
+    text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).collect()
+}
+
+// spec: DEV-039
+#[test]
+fn dev_039_every_test_a_spec_row_names_is_about_that_row() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut paths = Vec::new();
+    files(&root.join("docs/spec"), "md", &mut paths);
+    paths.sort();
+    let texts: Vec<(String, String)> = paths.iter().map(|p| (p.display().to_string(), fs::read_to_string(p).unwrap())).collect();
+    let specs: Vec<(&str, &str)> = texts.iter().map(|(f, t)| (f.as_str(), t.as_str())).collect();
+    let tree = source_tree(root);
+    let found = tests_without_their_id(&tree, &specs);
+    let allow_text = fs::read_to_string(root.join(ALLOWLIST)).unwrap();
+    let allowed = allowlist_entries(&allow_text);
+    let new: Vec<&String> = found.iter().filter(|f| !allowed.contains(&f.as_str())).collect();
+    let how = "put `// spec: ID` above the test (or the ID in its name); the list in tests/spec_refs_allowlist.txt only shrinks";
+    assert!(new.is_empty(), "tests that spec rows name and that do not carry the row's ID ({}); {how}:\n{}", new.len(), new.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n"));
+    let fixed: Vec<&&str> = allowed.iter().filter(|a| !found.iter().any(|f| f == **a)).collect();
+    assert!(fixed.is_empty(), "entries of tests/spec_refs_allowlist.txt that are no exception any more (remove them and lower ALLOWLIST_LEN):\n{}", fixed.iter().map(|s| s.to_string()).collect::<Vec<_>>().join("\n"));
+    assert_eq!(allowed.len(), ALLOWLIST_LEN, "ALLOWLIST_LEN says how long the list is: lower it with the list, never raise it");
+}
+
+// spec: DEV-039
+#[test]
+fn dev_039_a_test_carries_its_row_by_name_or_by_a_spec_comment_above_it() {
+    let tree: Vec<(String, String)> = [
+        (
+            "src/a.rs",
+            "// spec: KEY-001\n#[test]\nfn by_comment() {}\n\n\
+             // spec: KEY-002, build_019_is_text, BUILD-019 free text\n#[test]\n/// docs\nfn by_a_list_with_text() {}\n\n\
+             // spec: KEY-001\n\nfn comment_is_not_above() {}\n\n\
+             #[test]\nfn build_019_by_name() {}\n\n#[test]\nfn xbuild_019_is_no_match() {}\n\n#[test]\nfn build_0190_is_no_match() {}\n\n\
+             // spec: MAIL-001\nmod parts {\n}\n\n\
+             macro_rules! cases { () => {}; }\ncases! {\n    // spec: NAV-001\n    made_by_a_macro: \"x\";\n}\n",
+        ),
+        ("src/b.rs", "// spec: KEY-001\nfn shared_name() {}\nfn shared_name_other() {}\n"),
+        ("scripts/test-y.sh", "# FORGE-020: the script\n"),
+    ]
+    .iter()
+    .map(|(p, t)| (p.to_string(), t.to_string()))
+    .collect();
+    let file = |n: &str| TestRef::InFile { file: "a.rs".into(), name: n.into(), prefix: false };
+    let ok = |r: &TestRef, id: &str| carries_id(&tree, r, id);
+    assert!(ok(&file("by_comment"), "KEY-001"));
+    assert!(!ok(&file("by_comment"), "KEY-002"), "another row's ID is not enough");
+    assert!(ok(&file("by_a_list_with_text"), "KEY-002") && !ok(&file("by_a_list_with_text"), "BUILD-019"), "the IDs of a comment end where its text starts");
+    assert!(!ok(&file("comment_is_not_above"), "KEY-001"), "a blank line ends the block above the test");
+    assert!(ok(&file("build_019_by_name"), "BUILD-019") && ok(&file("build_019_by_name"), "build-019"), "the name, in any case");
+    assert!(!ok(&file("xbuild_019_is_no_match"), "BUILD-019") && !ok(&file("build_0190_is_no_match"), "BUILD-019"), "a whole ID, not a part of a word or a number");
+    assert!(ok(&file("parts"), "MAIL-001"), "a module has it on its mod line");
+    assert!(ok(&file("made_by_a_macro"), "NAV-001"), "a test a macro writes has it above its line");
+    let prefix = TestRef::InFile { file: "b.rs".into(), name: "shared_name".into(), prefix: true };
+    assert!(ok(&prefix, "KEY-001"), "one function of the prefix is enough");
+    assert!(ok(&TestRef::Bare("by_comment".into()), "KEY-001") && !ok(&TestRef::Bare("by_comment".into()), "KEY-009"));
+    assert!(ok(&TestRef::File("scripts/test-y.sh".into()), "FORGE-020") && !ok(&TestRef::File("scripts/test-y.sh".into()), "FORGE-02"), "a file mentions the ID");
+    let spec = "| KEY-001 | Rule | IS NOW | `a.rs` | `a.rs::by_comment`, `a.rs::build_019_by_name` |\n| KEY-001 | Rule | SHOULD BE | `a.rs` | `a.rs::build_019_by_name` |\n";
+    assert_eq!(tests_without_their_id(&tree, &[("s.md", spec)]), ["KEY-001: a.rs::build_019_by_name"], "only IS NOW rows count, and a name that does not resolve is left to DEV-033");
+}
+
+// spec: DEV-039
+#[test]
+fn dev_039_the_allowlist_is_read_without_comments() {
+    assert_eq!(allowlist_entries("# a comment\n\nKEY-001: a.rs::b\n  MAIL-002: c.rs\n"), ["KEY-001: a.rs::b", "MAIL-002: c.rs"]);
+    let listed = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(ALLOWLIST)).unwrap();
+    let entries = allowlist_entries(&listed);
+    let mut sorted = entries.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(entries, sorted, "the list is sorted, without doubles");
+    assert!(entries.iter().all(|e| e.split_once(": ").is_some_and(|(id, _)| ids_in(id).is_some())), "every entry is `ID: reference`");
 }
 
 // spec: DEV-033

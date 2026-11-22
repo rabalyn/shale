@@ -1,4 +1,4 @@
-//! The release workflow's downloads for macOS (a dmg) and Windows (BUILD-024): the jobs pack and upload
+//! The release workflow's downloads for macOS (a dmg) and Windows (BUILD-024, BUILD-017), and what GitHub and Forgejo do with a tag (FORGE-003): the jobs pack and upload
 //! them, the final `release` job attests everything and is the only one that may write.
 //! (The workflow itself runs only on GitHub, so these tests read its text.)
 
@@ -300,7 +300,7 @@ fn excludes_tag_push(cond: &str) -> bool {
     cond.contains("!= 'push'") || (cond.contains("github.event_name == ") && !cond.contains("github.event_name == 'push'"))
 }
 
-// spec: BUILD-016
+// spec: BUILD-016, FORGE-003
 #[test]
 fn build_016_mirror_needs_every_check_job_of_a_tag_push() {
     let jobs = forgejo_jobs();

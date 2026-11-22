@@ -1,5 +1,5 @@
 #!/bin/bash
-# Tests scripts/make-tag.sh and scripts/make-release.sh (FORGE-013, FORGE-014, ADR-0018) on a
+# Tests scripts/make-tag.sh and scripts/make-release.sh (FORGE-013, FORGE-014, FORGE-020, ADR-0018) on a
 # throwaway remote and clone. The cargo checks of land.sh are replaced by LAND_CHECK_CMD, the
 # GitHub CLI by a stub that records its calls and the benchmark program (BUILD-034) by a stub
 # that writes small result files, so the test is about versions, the changelog, landing, tagging,

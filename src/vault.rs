@@ -2196,7 +2196,7 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
-    // spec: VAULT-027
+    // spec: VAULT-027, VAULT-010
     #[test]
     fn new_note_paths_are_portable_and_within_their_limit() {
         let d = temp_vault("portable-new");

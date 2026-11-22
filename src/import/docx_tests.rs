@@ -26,6 +26,7 @@ fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/testdata/docx").join(name)
 }
 
+// spec: BUILD-018
 /// The pandoc of this computer, or None with a printed note: the tests that need it skip (BUILD-018).
 fn real_pandoc() -> Option<PathBuf> {
     let found = docx::locate("");
