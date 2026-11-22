@@ -29,6 +29,8 @@ pub struct Saved {
     pub largest_files: Vec<(PathBuf, u64)>,
     pub largest_folders: Vec<(PathBuf, u64)>,
     pub outside: Vec<Line>,
+    /// the media that the vault's notes link from outside the vault (USE-026); None when it links none
+    pub linked: Option<Line>,
 }
 
 /// The kinds of the vault, in the order they are listed.
@@ -164,6 +166,20 @@ pub fn outside(p: &Places) -> Vec<Line> {
     lines
 }
 
+/// The media that the vault's notes link from outside it: the files that are there, each once, with
+/// their size, and how many are not (USE-026). None when the vault has no outside links.
+pub fn linked(p: &Places) -> Option<Line> {
+    if p.linked.links.is_empty() {
+        return None;
+    }
+    let u = crate::media::linked::usage(&crate::media::linked::look_up(&p.linked));
+    let problem = (u.missing > 0).then(|| format!("{} not found or not set up on this device", u.missing));
+    Some(Line { label: LINKED_LABEL.to_string(), path: None, files: u.files, bytes: u.bytes, problem })
+}
+
+/// The label of the line of [`linked`].
+pub const LINKED_LABEL: &str = "Outside media linked by this vault";
+
 /// Everything "Saved" shows (a background job).
 pub fn saved(p: &Places) -> Saved {
     let _flow = tracing::info_span!("flow.data_usage_scan", peer = "app").entered();
@@ -171,5 +187,5 @@ pub fn saved(p: &Places) -> Saved {
         Some(v) => vault(v),
         None => (vec![], vec![], vec![]),
     };
-    Saved { vault, largest_files, largest_folders, outside: outside(p) }
+    Saved { vault, largest_files, largest_folders, outside: outside(p), linked: linked(p) }
 }

@@ -12,6 +12,7 @@ pub mod embed;
 pub mod engine;
 pub mod ffmpeg;
 pub mod intake;
+pub mod linked;
 pub mod output;
 pub mod outside;
 pub mod player;

@@ -592,6 +592,7 @@ impl ShaleApp {
                 history: crate::gitsync::history::default_root(),
                 cleanup_file: crate::data_usage::cleanup::default_path(),
                 vault: None,
+                linked: Default::default(),
             }
         } else {
             let mut places = crate::data_usage::Places {

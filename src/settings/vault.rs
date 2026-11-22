@@ -43,6 +43,7 @@ impl ShaleApp {
         });
         crate::theme::hint(ui, "Type [[p followed by a name to pick a person from this folder (or make a new contact note).");
         self.names_check_ui(ui);
+        self.outside_check_ui(ui);
         changed
     }
 
@@ -111,5 +112,43 @@ impl ShaleApp {
         if let Some(i) = one {
             self.rename_findings(&[i]);
         }
+    }
+
+    /// The links to media outside the vault, from the same check (MEDIA-022): the libraries that
+    /// cannot be used on this device and, by note, the links that need a look.
+    fn outside_check_ui(&mut self, ui: &mut Ui) {
+        use crate::vault_check::FolderState;
+        let Some(check) = self.vault_check.outside.clone() else { return };
+        crate::theme::section(ui, "Media outside the vault");
+        if check.links == 0 {
+            ui.label("No note links a picture, PDF, sound or video from outside the vault.");
+            return;
+        }
+        let looks = check.problems();
+        ui.label(format!(
+            "{} {} to media outside the vault; the files are not synced. {}",
+            check.links,
+            if check.links == 1 { "link" } else { "links" },
+            if looks == 0 { "All of them work on this device.".to_string() } else { format!("{looks} need a look:") }
+        ));
+        for lib in &check.libraries {
+            let what = match &lib.state {
+                FolderState::NotSetUp => "is not set up on this device (Settings → Import)".to_string(),
+                FolderState::NotThere(folder) => format!("has its folder {} set, but it is not there", folder.display()),
+            };
+            crate::theme::problem(ui, format!("Library “{}” {what}: {} {}", lib.name, lib.links, if lib.links == 1 { "link" } else { "links" }));
+        }
+        egui::ScrollArea::vertical().id_salt("outside-check").max_height(260.0).auto_shrink([false, true]).show(ui, |ui| {
+            for note in &check.notes {
+                ui.label(egui::RichText::new(crate::vault::rel_to_string(&note.note)).strong());
+                for e in &note.entries {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.add_space(12.0);
+                        ui.label(&e.target);
+                        crate::theme::hint(ui, e.problem.text());
+                    });
+                }
+            }
+        });
     }
 }
