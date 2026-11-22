@@ -1857,7 +1857,7 @@ mod tests {
         assert_eq!(real.file(&v), Some((PathBuf::from("Real note.md"), v.abs(Path::new("Real note.md")))));
         assert_eq!(real.notice(), None);
         let gone = v.resolve_media("@Videos/gone.mp3", from);
-        assert_eq!((gone.file(&v), gone.notice()), (None, Some(format!("Not found: {}", d.join("Videos/gone.mp3").display()))));
+        assert_eq!((gone.file(&v), gone.notice()), (None, Some(format!("Not found: {}", d.join("Videos").join("gone.mp3").display()))));
         assert_eq!(v.resolve_media("@Music/a.mp3", from).notice().as_deref(), Some("Library “Music” is not set up on this device"));
         assert_eq!(v.resolve_media("nothing", from).notice(), None);
         let _ = fs::remove_dir_all(&d);

@@ -477,8 +477,9 @@ fn only_plain_remote_urls_are_accepted() {
 #[test]
 fn a_folder_path_may_have_spaces_an_address_may_not() {
     for ok in [
-        "/Users/ada/Library/CloudStorage/Dropbox/My notes.git",
-        "  /srv/my notes/x.git  ",
+        // a Unix path is absolute on Unix only; the Windows forms below are checked on every system
+        if cfg!(windows) { r"C:\Users\Ada\Dropbox\My notes.git" } else { "/Users/ada/Library/CloudStorage/Dropbox/My notes.git" },
+        if cfg!(windows) { r"  C:\srv\my notes\x.git  " } else { "  /srv/my notes/x.git  " },
         r"C:\Users\Ada\OneDrive - Company\notes.git",
         "C:/Users/Ada/OneDrive - Company/notes.git",
         r"\\server\my share\notes.git",

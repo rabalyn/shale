@@ -191,7 +191,7 @@ fn a_file_that_is_not_there_a_library_not_set_up_and_a_path_out_of_a_library_say
         assert!(said(fx, &format!("Not found: {}", gone.display())), "{view}: the path of the picture: {:?}", fx.hl.text);
         assert!(said(fx, "Library “Nowhere” is not set up on this device"), "{view}");
         assert!(said(fx, "leaves the library folder “Media”"), "{view}");
-        assert!(said(fx, &format!("Not found: {}", o.folder.join("2024/b.mp4").display())), "{view}");
+        assert!(said(fx, &format!("Not found: {}", o.folder.join("2024").join("b.mp4").display())), "{view}");
         assert_eq!(drawn(fx), 0, "{view}: nothing to draw");
     });
     assert_eq!(fx.app.vault.as_ref().unwrap().files.len(), before, "no note was made");
