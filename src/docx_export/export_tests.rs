@@ -1330,9 +1330,9 @@ fn pandoc_runs_in_a_folder_of_its_own_with_the_arguments_and_a_failure_writes_no
     // records its arguments, where it runs and the reference document, then makes the file after -o
     let ok = format!(
         "if [ \"$1\" = \"--print-default-data-file\" ]; then cat '{}'; exit 0; fi\n\
-         printf '%s\n' \"$@\" > '{r}/args'; pwd > '{r}/cwd'; echo 'a warning' >&2\n\
+         printf '%s\n' \"$@\" > '{r}/args'; pwd -P > '{r}/cwd'; (cd \"$(dirname \"$1\")\" && pwd -P) > '{r}/notedir'; echo 'a warning' >&2\n\
          for a in \"$@\"; do case \"$a\" in --reference-doc=*) cp \"${{a#--reference-doc=}}\" '{r}/reference.docx';; --lua-filter=*) cp \"${{a#--lua-filter=}}\" '{r}/filter.lua';; esac; done\n\
-         while [ $# -gt 0 ]; do case \"$1\" in -o) cp '{}' \"$2\";; esac; shift; done",
+         while [ $# -gt 0 ]; do case \"$1\" in -o) (cd \"$(dirname \"$2\")\" && pwd -P) > '{r}/outdir'; basename \"$2\" > '{r}/outname'; cp '{}' \"$2\";; esac; shift; done",
         default.display(),
         result.display(),
         r = record.display()
@@ -1344,20 +1344,27 @@ fn pandoc_runs_in_a_folder_of_its_own_with_the_arguments_and_a_failure_writes_no
     let made = export(&job, &AtomicBool::new(false)).unwrap();
     // the run: the argument list of DOCX-002, in a folder outside the vault that is removed afterwards
     let args: Vec<String> = std::fs::read_to_string(record.join("args")).unwrap().lines().map(String::from).collect();
-    let cwd = PathBuf::from(std::fs::read_to_string(record.join("cwd")).unwrap().trim());
+    // physical (link-free) paths, recorded by the script while the folder existed: `/var` is a link to `/private/var` on macOS (#542)
+    let recorded = |name: &str| PathBuf::from(std::fs::read_to_string(record.join(name)).unwrap().trim());
+    let (cwd, note_dir, out_dir) = (recorded("cwd"), recorded("notedir"), recorded("outdir"));
     assert!(args[0].ends_with("/note.md") && args[1] == "-f" && args[3] == "-t" && args[4] == "docx", "{args:?}");
     assert!(args[5].starts_with("--lua-filter=") && args[6] == format!("--resource-path={}", dir.display()) && args[7].starts_with("--reference-doc="), "{args:?}");
-    assert_eq!(&args[8..], ["--toc", "--toc-depth=3", "-M", "shale-text-width=6.268", "-o", &format!("{}/out.docx", cwd.display())], "{args:?}");
-    assert!(args[0].starts_with(&cwd.to_string_lossy().to_string()), "the note is in the folder pandoc runs in");
-    assert!(!cwd.starts_with(&dir) && !cwd.exists(), "outside the vault, and removed: {}", cwd.display());
+    assert_eq!(&args[8..args.len() - 1], ["--toc", "--toc-depth=3", "-M", "shale-text-width=6.268", "-o"], "{args:?}");
+    assert!(args[0].ends_with("/note.md") && args[args.len() - 1].ends_with("/out.docx"), "{args:?}");
+    assert_eq!(std::fs::read_to_string(record.join("outname")).unwrap().trim(), "out.docx", "-o names out.docx");
+    assert_eq!(out_dir, cwd, "-o names a file in the folder pandoc runs in");
+    assert_eq!(note_dir, cwd, "the note is in the folder pandoc runs in");
+    assert!(!cwd.starts_with(std::fs::canonicalize(&dir).unwrap()) && !cwd.exists(), "outside the vault, and removed: {}", cwd.display());
     assert_eq!(std::fs::read_to_string(record.join("filter.lua")).unwrap(), FILTER, "the filter is the one built in");
     let reference = Package::read(&std::fs::read(record.join("reference.docx")).unwrap()).unwrap();
     assert_eq!(attr(reference.text("word/styles.xml").unwrap(), "rPrDefault", "rPr", "rFonts", "ascii").as_deref(), Some("Courier New"), "the reference is made of the note's look");
     // the file is finished: the page of the note is in it
     assert!(part(&made, "word/document.xml").contains("<w:pgSz w:w=\"11906\" w:h=\"16838\"/>"));
     // a failure: its first line says why, nothing is made
-    let failing =
-        fake_pandoc(&dir, &format!("if [ \"$1\" = \"--print-default-data-file\" ]; then cat '{}'; exit 0; fi\npwd > '{}/cwd2'\necho >&2\necho 'pandoc: the first line' >&2\necho 'second' >&2\nexit 3", default.display(), record.display()));
+    let failing = fake_pandoc(
+        &dir,
+        &format!("if [ \"$1\" = \"--print-default-data-file\" ]; then cat '{}'; exit 0; fi\npwd -P > '{}/cwd2'\necho >&2\necho 'pandoc: the first line' >&2\necho 'second' >&2\nexit 3", default.display(), record.display()),
+    );
     let e = export(&job_with(failing, &dir, "x\n"), &AtomicBool::new(false)).unwrap_err();
     assert_eq!(e, "pandoc could not make the Word file: pandoc: the first line");
     assert!(!PathBuf::from(std::fs::read_to_string(record.join("cwd2")).unwrap().trim()).exists(), "removed after a failure too");
