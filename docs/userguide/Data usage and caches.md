@@ -10,8 +10,8 @@ on disk. Back to [[Start here]].
 - **Saved**: the vault by kind (notes, drawings, pictures, PDFs, other files, `.shale/`,
   `.trash/`, `.git/`), its 10 largest files and folders, and your data outside the vault: mail
   per account, drafts, outbox, calendars, recovered notes and, for a vault that is not a git
-  repository, its file history ([[File history]]; in a git repository it is in `.git/`, counted with the
-  vault). When the notes link pictures, PDFs, sounds or videos from outside the vault
+  repository, its file history ([[File history]]; it is thinned once a day, so its size stops growing without end; in a git repository it is in `.git/`, counted with the
+  vault and never thinned). When the notes link pictures, PDFs, sounds or videos from outside the vault
   ([[Sounds and videos]]), **Outside media linked by this vault** shows how many such files there are
   (each once) and their size, and in red how many are not found or not set up on this computer; the
   files are not in the vault and not synced. Nothing here can be deleted from this window.

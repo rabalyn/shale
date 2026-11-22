@@ -13,6 +13,7 @@
 //! (SYNC-035), reads (versions, text at a version, deleted notes) beside them.
 
 use super::{unix_now, ShaleApp};
+use crate::gitsync::history::thin;
 use crate::gitsync::history::{self, Deleted, HistoryConfig, Outcome, Reason, Repo, Request, Schedule, Version};
 use crate::gitsync::{Git, Options};
 use crate::history::compare::Loaded;
@@ -30,6 +31,10 @@ const TREE_WAIT: Duration = Duration::from_secs(2);
 const EXIT_WAIT: Duration = Duration::from_secs(3);
 /// Seconds before a snapshot that was busy or failed is tried again.
 const RETRY_SECS: u64 = 5;
+/// Seconds after a vault opened before the first thinning of its local history (SYNC-070).
+const THIN_DELAY: u64 = 60;
+/// Seconds before a thinning that found the vault busy is tried again.
+const THIN_RETRY: u64 = 30;
 /// How many versions and deleted notes the list asks for.
 const LIST_LIMIT: usize = 300;
 
@@ -55,6 +60,12 @@ struct SnapJob {
     vault: PathBuf,
     queued: Queued,
     rx: Receiver<Sent<Outcome>>,
+}
+
+/// The thinning of a local-only history (SYNC-067…SYNC-070).
+struct ThinJob {
+    vault: PathBuf,
+    rx: Receiver<Sent<thin::Outcome>>,
 }
 
 /// A read of the history.
@@ -112,6 +123,10 @@ pub struct HistoryState {
     pub sched: Schedule,
     queue: VecDeque<Queued>,
     job: Option<SnapJob>,
+    /// The thinning job; no snapshot and no read runs beside it (SYNC-070).
+    thin: Option<ThinJob>,
+    /// No thinning before this time (unix seconds).
+    thin_next: u64,
     queries: VecDeque<Query>,
     query: Option<QueryJob>,
     /// The vault the first snapshot was asked for.
@@ -147,7 +162,7 @@ impl HistoryState {
 
     /// A snapshot job is running.
     pub fn busy(&self) -> bool {
-        self.job.is_some()
+        self.job.is_some() || self.thin.is_some()
     }
 
     /// A note or drawing was saved (SYNC-033).
@@ -158,7 +173,7 @@ impl HistoryState {
 
     #[cfg(test)]
     fn quiet(&self) -> bool {
-        self.job.is_none() && self.queue.is_empty()
+        self.job.is_none() && self.thin.is_none() && self.queue.is_empty()
     }
 }
 
@@ -218,13 +233,14 @@ impl ShaleApp {
             self.history.sched = Schedule::default();
             self.history.queue.clear();
             self.history.queries.clear();
+            self.history.thin_next = now + THIN_DELAY;
             // a new local history starts with the vault as it is (SYNC-044)
             self.history.queue.push_back(Queued { req: Request::new(Reason::Initial, vec![]), then: None, scheduled: false });
         }
         self.history_panel_tick();
         self.history_start_query(ctx);
         let sync_busy = self.sync.running() || self.sync.lfs_job_running();
-        if self.history.job.is_none() && !sync_busy && now >= self.history.not_before {
+        if self.history.job.is_none() && self.history.thin.is_none() && !sync_busy && now >= self.history.not_before {
             let cfg: HistoryConfig = self.cfg.history.clone();
             let (notes, drawings) = (&self.notes, &self.drawings);
             let editing = |p: &Path| notes.get(p).is_some_and(|d| d.dirty) || drawings.get(p).is_some_and(|d| d.dirty);
@@ -239,8 +255,11 @@ impl ShaleApp {
                 self.history.queue.push_back(Queued { req: Request::new(reason, paths), then: None, scheduled: true });
             }
             if let Some(q) = self.history.queue.pop_front() {
-                self.history_start_snapshot(ctx, root, q);
+                self.history_start_snapshot(ctx, root.clone(), q);
             }
+        }
+        if self.history.job.is_none() && self.history.thin.is_none() && self.history.queue.is_empty() && self.history.query.is_none() && !sync_busy && now >= self.history.thin_next {
+            self.history_start_thin(ctx, root, now);
         }
         if let Some(secs) = self.history.sched.next_in(now, &self.cfg.history) {
             ctx.request_repaint_after(Duration::from_secs(secs.clamp(1, 30)));
@@ -260,8 +279,23 @@ impl ShaleApp {
         self.history.job = Some(SnapJob { vault, queued, rx });
     }
 
+    /// Thin the local history when a day has passed since the last time (SYNC-070). A vault with its
+    /// own `.git` is skipped by the job (SYNC-069).
+    fn history_start_thin(&mut self, ctx: &egui::Context, vault: PathBuf, now: u64) {
+        let Some((git, root, hist, _)) = self.history_job_data() else { return };
+        let (tree, repaint) = (self.sync.tree.clone(), ctx.clone());
+        let rx = crate::jobs::spawn(
+            move || {
+                let repo = history::locate(&git, &root, &hist)?;
+                thin::run_if_due(&repo, &tree, TREE_WAIT, now)
+            },
+            move || repaint.request_repaint(),
+        );
+        self.history.thin = Some(ThinJob { vault, rx });
+    }
+
     fn history_start_query(&mut self, ctx: &egui::Context) {
-        if self.history.query.is_some() {
+        if self.history.query.is_some() || self.history.thin.is_some() {
             return;
         }
         let Some(query) = self.history.queries.pop_front() else { return };
@@ -295,6 +329,21 @@ impl ShaleApp {
                 }
             }
         }
+        if let Some(job) = &self.history.thin {
+            let r = match job.rx.try_recv() {
+                Ok(r) => Some(r.unwrap_or_else(Err)),
+                Err(TryRecvError::Empty) => {
+                    ctx.request_repaint_after(Duration::from_millis(200));
+                    None
+                }
+                Err(TryRecvError::Disconnected) => Some(Err("the thinning stopped unexpectedly".into())),
+            };
+            if let Some(r) = r {
+                if let Some(job) = self.history.thin.take() {
+                    self.history_thin_done(job, r, now);
+                }
+            }
+        }
         if let Some(job) = &self.history.query {
             let r = match job.rx.try_recv() {
                 Ok(r) => Some(r.unwrap_or_else(Err)),
@@ -312,6 +361,28 @@ impl ShaleApp {
                     ctx.request_repaint();
                 }
             }
+        }
+    }
+
+    /// A thinning ended (SYNC-070): the next one is a day away, a busy one is tried again soon; the
+    /// versions the panel shows may have other commit ids now.
+    fn history_thin_done(&mut self, job: ThinJob, r: Result<thin::Outcome, String>, now: u64) {
+        let same_vault = self.vault.as_ref().map(|v| v.root.as_path()) == Some(job.vault.as_path());
+        if !same_vault {
+            return;
+        }
+        self.history.thin_next = now + thin::INTERVAL_SECS;
+        match r {
+            Ok(thin::Outcome::Busy(why)) => {
+                tracing::info!("thinning later: {why}");
+                self.history.thin_next = now + THIN_RETRY;
+            }
+            Ok(thin::Outcome::Thinned { kept, dropped }) => {
+                tracing::info!("the history was thinned: {kept} versions kept, {dropped} dropped");
+                self.history_refresh();
+            }
+            Ok(_) => {}
+            Err(e) => self.toast(format!("Could not thin the history: {e}")),
         }
     }
 
@@ -645,6 +716,9 @@ impl ShaleApp {
             return;
         }
         if let Some(job) = self.history.job.take() {
+            let _ = job.rx.recv_timeout(EXIT_WAIT);
+        }
+        if let Some(job) = self.history.thin.take() {
             let _ = job.rx.recv_timeout(EXIT_WAIT);
         }
         let mut reqs: Vec<Request> = self.history.queue.drain(..).filter(|q| q.then.is_none() && q.req.reason != Reason::Initial).map(|q| q.req).collect();
