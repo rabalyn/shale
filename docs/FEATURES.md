@@ -452,6 +452,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   and `-` are plain text. Fields limit a word in mail (`from:` `to:` `cc:` `subject:` `body:`) and posts (`from:` `text:`
   `body:` `in:` `context:` `link:` `date:`) and are plain text in notes. The mail view's own search has the words,
   phrases and fields, without wildcards.
+  ![The search window of Space f g: notes with the found text marked, mail and posts under them, and the count buttons](userguide/z_media/screenshots/picker-search.png)
+  ![The search in the sidebar with the same groups](userguide/z_media/screenshots/sidebar-search.png)
 - **Hits of notes are shown rendered** (#483): a found line is drawn with the editor's own inline rendering (bold, italic,
   strikethrough, highlight, code, links and wiki links by their shown text, tags in their colour, a task as `[ ]` / `[x]`,
   a list item with a bullet, a heading without its `#`), in the picker and the sidebar, and the **found text is marked** in
@@ -459,6 +461,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   of the query marked. Settings → Search → "Hits of notes" (`search.hit_display`): follow the editor (default: rendered with
   the Markdown preview on or the note in view in the reading view, raw otherwise), raw, or rendered. Each hit's rendering
   is made once and kept, a hit shows at most 120 characters.
+  ![Settings → Search: the sources, the look of the hits of notes and the prefix letters](userguide/z_media/screenshots/settings-search.png)
 
 ## Drawings
 

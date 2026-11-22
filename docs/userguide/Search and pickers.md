@@ -13,6 +13,8 @@ your mail is set up and open) and **Posts** (the posts of your feeds that Shale 
 group with its count (`200+` when there are more). What you can type (wildcards, `"phrases"`,
 the fields `from:`, `subject:`, `in:`, `date:` of mail and posts) is in [[Search syntax]].
 
+![[sidebar-search.png]]
+
 ## Choosing the sources: prefixes and buttons
 
 A search looks in **notes, mail and posts**, and a generic word finds a lot in mail and posts. Two
@@ -71,6 +73,8 @@ With vim-style editing on ([[Editor]]), the Space key starts these:
   Posts with their counts; the syntax is in [[Search syntax]]. Enter
   opens the hit where it belongs: the note at the found line, the mail in the mail view, the post
   in a Feeds tab.
+
+![[picker-search.png]]
 
 Both windows are bounded and never stall your typing. The search field and, right under it, a
 hint with the keys stay at the top of the window; only the list below scrolls, however many hits

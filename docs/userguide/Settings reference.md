@@ -180,6 +180,8 @@ system keyring, never in this file):
 
 ## Search ([[Search and pickers]])
 
+![[settings-search.png]]
+
 | Key | Default | Where |
 |---|---|---|
 | `search` | the group of the five keys below | Settings → Search |

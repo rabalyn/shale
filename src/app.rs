@@ -680,7 +680,7 @@ impl ShaleApp {
                 let _ = app.calendar.fill_sample(&id);
             }
             // screenshots: a made-up mail store and account (no server, no real mail)
-            if app.shot.path.is_some() && opts.view.as_deref() == Some("mail") && app.cfg.mail_accounts.is_empty() {
+            if app.shot.path.is_some() && matches!(opts.view.as_deref(), Some("mail" | "search")) && app.cfg.mail_accounts.is_empty() {
                 match crate::mail::demo::seed(&app.mail.root) {
                     Ok(()) => {
                         app.cfg.mail_accounts = vec![crate::config::MailAccount { id: crate::mail::demo::ACCOUNT.into(), name: "Demo mail".into(), host: "imap.example.com".into(), user: "ada@example.com".into(), ..Default::default() }];
@@ -694,6 +694,11 @@ impl ShaleApp {
                 Some("mail") => app.show_view(View::Mail, false),
                 Some("calendar-side") => {
                     app.side.layout.show_panel(RightPanel::Calendar);
+                }
+                // the vault as it is, with the made-up mail and posts indexed, so that a search finds all three sources
+                Some("search") => {
+                    let demo = crate::social::demo::account();
+                    app.social.index.add(&demo.account.id, "home", &crate::social::demo::posts());
                 }
                 Some("tasks") => app.show_view(View::Tasks, false),
                 Some("keybindings") => app.open_settings(SettingsTab::Keybindings),
