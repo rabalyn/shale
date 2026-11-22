@@ -14,6 +14,7 @@ How they work: [ADR-0001](../decisions/0001-spec-driven-development.md).
 | [social.md](social.md) | Mastodon and Bluesky feeds, saving posts as notes | SOC |
 | [updates.md](updates.md) | Checking GitHub releases, the checksum, notify / download / install, the install kinds, restart | UPD |
 | [engineering.md](engineering.md) | Forge and work tracking, development rules, build and release, background jobs, performance | FORGE, DEV, BUILD, JOB, PERF |
+| [busy-states.md](busy-states.md) | The inventory of every long action: where it runs, whether it can stop, what it shows, what is moved onto the busy registry (JOB-003…JOB-014) | JOB |
 | [mail.md](mail.md) | Local mail store, IMAP account and sync, flags and moves, sending, signing and encrypting | MAIL |
 | [open-points.md](open-points.md) | Undecided questions (open work: GitHub issues) | OPEN |
 

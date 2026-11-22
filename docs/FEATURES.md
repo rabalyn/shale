@@ -1250,6 +1250,24 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   `history.coalesce_minutes` (10), `history.idle_seconds` (60) and `history.show_panel` (the margin column). Without a usable git, history is off and
   the page says why. Data usage lists the size of a local history. Nothing is thinned out; see ADR-0028.
 
+## Busy states: spinner, what is happening, Cancel
+
+Whatever runs longer than a moment says what it does, cannot be started twice and shows in one place (JOB-003 to JOB-014, #397).
+
+- **A spinner and what happens.** A running action shows a spinner and a short phrase that names it
+  ("Syncing with git…", "Checking file names and links…", "Exporting “Handbook” to PDF…"). Where the work can stop, **Cancel**
+  stands next to it; a sync is not stopped half way, so it has none.
+- **No double trigger.** The buttons that start the action (Sync now, Store media with Git LFS, Check names, Export) are off
+  while it runs, and say why when you point at them; a key or the timer cannot start it a second time either.
+- **The indicator.** While anything runs in the background, a small indicator sits in the top right of the editor pane (in the
+  row of the tabs; with panes side by side, of the rightmost one): a spinner and the text of the task, or "2 tasks running".
+  Point at it, or click it to keep it open (a second click closes it): it lists every task with how long it has run and **Cancel**
+  where the work can stop. It disappears when nothing runs.
+  ![The indicator with two tasks listed](userguide/z_media/screenshots/busy-indicator.png)
+- **Moved so far:** the git sync and the Git LFS setup, the check of the vault's names (Cancel stops it) and the PDF export of a
+  folder (Cancel stops it). The other long actions follow; the list of all of them, with what each shows today, is
+  [docs/spec/busy-states.md](spec/busy-states.md).
+
 ## Keyboard
 
 Ctrl is Cmd on macOS. No default key is one that the system reserves (the app menu's Cmd+H, AltGr on Windows, the workspace keys of the Linux desktops), so macOS has other keys for six actions, named in the rows below; a key you set yourself is never refused for that reason. The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings** (Change replaces the keys of an action, Add gives it one more, Clear leaves it without a key)

@@ -401,7 +401,7 @@ fn the_export_counts_the_notes_and_can_be_stopped() {
     export_book(&v, Path::new("Handbook"), &opts(), Some(&p)).unwrap();
     assert_eq!((p.done.load(Ordering::SeqCst), p.total.load(Ordering::SeqCst)), (6, 6), "the introduction, the parts and the chapters");
     let stopped = Progress::default();
-    stopped.cancel.store(true, Ordering::SeqCst);
+    stopped.cancel.cancel();
     let e = export_book(&v, Path::new("Handbook"), &opts(), Some(&stopped)).unwrap_err();
     assert!(e.contains("cancelled"), "{e}");
     clean(&d);

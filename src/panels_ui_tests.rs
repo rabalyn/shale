@@ -929,6 +929,40 @@ fn vault_028_settings_vault_checks_names_in_the_background_and_renames_one_or_al
     assert_eq!(std::fs::read_to_string(p.dir.join("Linker.md")).unwrap(), format!("[[{a2}]] [[{c2}]]\n"));
 }
 
+// spec: JOB-012
+#[test]
+fn job_012_the_vault_check_shows_what_it_does_is_off_while_it_runs_and_cancel_stops_it() {
+    let mut p = P::with_files("names-cancel", &[("Fine.md", "F\n")]);
+    p.app.open_settings(SettingsTab::Vault);
+    p.look(Show::Modals);
+    // a check that waits until it is cancelled
+    p.app.start_vault_check_with(|_, cancel| {
+        let start = std::time::Instant::now();
+        while !cancel.is_cancelled() {
+            assert!(start.elapsed().as_secs() < 30, "Cancel reached the check");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        Err(std::io::ErrorKind::Interrupted.into())
+    });
+    assert!(p.app.vault_check.running());
+    let task = p.app.busy.info(&crate::vault_check::VAULT_CHECK).expect("a task in the registry");
+    assert_eq!((task.label.as_str(), task.cancellable), ("Checking file names and links…", true));
+    let shown = shown_labels(&mut p);
+    assert!(shown.iter().any(|l| l == "Checking file names and links…") && shown.iter().any(|l| l == "Cancel"), "{shown:?}");
+    // the button is off, and a second start does nothing
+    p.click(Show::Modals, "Check names for Windows and macOS…");
+    p.app.start_vault_check();
+    assert_eq!(p.app.busy.list().len(), 1);
+    p.click(Show::Modals, "Cancel");
+    let shown = labels_until(&mut p, "The check was cancelled.");
+    assert!(!shown.iter().any(|l| l == "Checking file names and links…") && p.app.busy.list().is_empty() && !p.app.vault_check.running(), "{shown:?}");
+    assert!(p.app.vault_check.result.is_none(), "a cancelled check leaves no result");
+    // the button is back and the real check runs to the end
+    p.click(Show::Modals, "Check names for Windows and macOS…");
+    labels_until(&mut p, "All names work on Windows and macOS.");
+    assert!(p.app.busy.list().is_empty());
+}
+
 // spec: MEDIA-022, VAULT-028
 #[test]
 fn media_022_the_vault_check_lists_outside_links_by_note_in_the_same_background_job() {

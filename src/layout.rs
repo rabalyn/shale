@@ -394,6 +394,7 @@ impl ShaleApp {
         self.panes.rects.clear();
         self.panes.borders.clear();
         if n == 1 {
+            let top = ui.available_rect_before_wrap().min.y;
             self.tab_bar(ui);
             self.view_header(ui);
             let area = ui.available_rect_before_wrap();
@@ -411,8 +412,10 @@ impl ShaleApp {
                 side.set_clip_rect(column.intersect(ui.clip_rect()));
                 self.history_margin(&mut side);
                 ui.allocate_rect(area, Sense::hover());
+                crate::busy::ui::indicator(ui.ctx(), &self.busy, Pos2::new(note.max.x, top));
             } else {
                 self.content(ui);
+                crate::busy::ui::indicator(ui.ctx(), &self.busy, Pos2::new(area.max.x, top));
             }
             return;
         }
@@ -422,6 +425,7 @@ impl ShaleApp {
         let widths = pane_widths(&self.panes.weights, total, MIN_PANE_W);
         let pressed = ui.input(|i| if i.pointer.any_pressed() { i.pointer.interact_pos() } else { None });
         let mut clicked = None;
+        let mut indicator_at = area.right_top();
         let mut x = area.min.x;
         for (i, w) in widths.iter().enumerate() {
             let rect = Rect::from_min_size(Pos2::new(x, area.min.y), Vec2::new(*w, area.height()));
@@ -433,12 +437,16 @@ impl ShaleApp {
             self.tab_bar(&mut child);
             self.view_header(&mut child);
             self.content(&mut child);
+            if i + 1 == n {
+                indicator_at = rect.right_top();
+            }
             if pressed.is_some_and(|p| rect.contains(p)) {
                 clicked = Some(i);
             }
         }
         self.enter_pane(self.panes.focused);
         ui.allocate_rect(area, Sense::hover());
+        crate::busy::ui::indicator(ui.ctx(), &self.busy, indicator_at);
         // the borders come last, so that they win where a pane reaches them
         for i in 1..n {
             let border = Rect::from_min_max(Pos2::new(self.panes.rects[i].min.x - BORDER_W, area.min.y), Pos2::new(self.panes.rects[i].min.x, area.max.y));

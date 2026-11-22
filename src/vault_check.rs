@@ -4,18 +4,23 @@
 //! links (VAULT-016).
 //!
 //! [`check`] is a pure scan of a folder; the Settings → Vault page runs it in a background job
-//! ([`VaultCheck`] holds its state) and renames through `ShaleApp::rename_path`.
+//! that Cancel can stop (a task of the busy registry, JOB-012; [`VaultCheck`] holds its state)
+//! and renames through `ShaleApp::rename_path`.
 
 mod outside;
 pub use outside::{check_outside, FolderState, OutsideCheck};
 
 use crate::app::ShaleApp;
+use crate::busy::{self, Cancel, Key};
 use crate::fsutil::{portable_name, portable_problems, TYPED_NAME_MAX};
 use crate::vault::rel_to_string;
 use std::collections::HashSet;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{Receiver, TryRecvError};
+use std::sync::mpsc::TryRecvError;
+
+/// The check of the vault's names and links as a task (JOB-012).
+pub const VAULT_CHECK: Key = Key::new("vault-check");
 
 /// Folders that are not part of the notes and are not looked at.
 const SKIPPED: [&str; 3] = [".git", ".shale", ".trash"];
@@ -38,15 +43,19 @@ pub struct Finding {
 
 /// Every file and folder of the vault at `root` that has a name that is not portable, in the order
 /// of a walk through the folders. `.git`, `.shale` and `.trash` are skipped, and symbolic links are
-/// listed but not followed.
-pub fn check(root: &Path) -> io::Result<Vec<Finding>> {
+/// listed but not followed. `cancel` stops the walk between two folders: the error is then of the
+/// kind `Interrupted`.
+pub fn check(root: &Path, cancel: &Cancel) -> io::Result<Vec<Finding>> {
     let _flow = tracing::info_span!("flow.vault_check", peer = "page").entered();
     let mut out = Vec::new();
-    walk(root, Path::new(""), &mut out)?;
+    walk(root, Path::new(""), &mut out, cancel)?;
     Ok(out)
 }
 
-fn walk(root: &Path, dir: &Path, out: &mut Vec<Finding>) -> io::Result<()> {
+fn walk(root: &Path, dir: &Path, out: &mut Vec<Finding>, cancel: &Cancel) -> io::Result<()> {
+    if cancel.is_cancelled() {
+        return Err(io::ErrorKind::Interrupted.into());
+    }
     let mut entries: Vec<(String, bool)> = Vec::new();
     let listing = tracing::info_span!("flow.vault_check.read_folder", peer = "disk").in_scope(|| std::fs::read_dir(root.join(dir)))?;
     for e in listing {
@@ -68,7 +77,7 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<Finding>) -> io::Result<()> {
             out.push(f);
         }
         if *is_dir && !fs_is_link(&root.join(&rel)) {
-            walk(root, &rel, out)?;
+            walk(root, &rel, out, cancel)?;
         }
     }
     Ok(())
@@ -157,7 +166,7 @@ pub fn free_name(name: &str, is_dir: bool, taken: impl Fn(&str) -> bool) -> Stri
 /// The state of the check on the Settings → Vault page.
 #[derive(Default)]
 pub struct VaultCheck {
-    job: Option<Receiver<Result<Checked, String>>>,
+    job: Option<busy::Job<Checked>>,
     /// the last result, `None` until the check ran
     pub result: Option<Result<Vec<Finding>, String>>,
     /// the outside links of the vault and what is the matter with them (MEDIA-022), from the same run
@@ -168,8 +177,8 @@ pub struct VaultCheck {
     pub report: Option<String>,
 }
 
-/// What the background job of the check brings: the names and the outside links.
-type Checked = (io::Result<Vec<Finding>>, OutsideCheck);
+/// What the background job of the check brings: the names and the outside links; `None`: Cancel stopped it.
+type Checked = Option<(io::Result<Vec<Finding>>, OutsideCheck)>;
 
 impl VaultCheck {
     pub fn running(&self) -> bool {
@@ -180,9 +189,13 @@ impl VaultCheck {
     pub fn poll(&mut self) -> bool {
         let Some(rx) = &self.job else { return false };
         match rx.try_recv() {
-            Ok(Ok((names, outside))) => {
+            Ok(Ok(Some((names, outside)))) => {
                 self.result = Some(names.map_err(|e| format!("The vault could not be read: {e}")));
                 self.outside = Some(outside);
+            }
+            Ok(Ok(None)) => {
+                (self.result, self.outside) = (None, None);
+                self.report = Some("The check was cancelled.".into());
             }
             Ok(Err(e)) => (self.result, self.outside) = (Some(Err(e)), None),
             Err(TryRecvError::Empty) => return true,
@@ -196,19 +209,32 @@ impl VaultCheck {
 impl ShaleApp {
     /// Run the check in the background (VAULT-028).
     pub(crate) fn start_vault_check(&mut self) {
+        self.start_vault_check_with(check);
+    }
+
+    /// [`start_vault_check`](Self::start_vault_check) with another way to list the names (a test's slow or gated one).
+    pub(crate) fn start_vault_check_with(&mut self, names: impl FnOnce(&Path, &Cancel) -> io::Result<Vec<Finding>> + Send + 'static) {
+        if self.busy.is_running(&VAULT_CHECK) {
+            return;
+        }
         self.flush_all();
         let Some((root, links)) = self.vault.as_ref().map(|v| (v.root.clone(), v.outside_links())) else { return };
         let ctx = self.ctx.clone();
         self.vault_check.confirm_all = false;
         self.vault_check.report = None;
-        self.vault_check.job = Some(crate::jobs::spawn(
-            move || (check(&root), check_outside(&links)),
+        self.vault_check.job = self.busy.spawn_cancellable(
+            VAULT_CHECK,
+            "Checking file names and links…",
+            move |cancel| {
+                let names = names(&root, cancel);
+                (!cancel.is_cancelled()).then(|| (names, check_outside(&links)))
+            },
             move || {
                 if let Some(c) = ctx {
                     c.request_repaint();
                 }
             },
-        ));
+        );
     }
 
     /// Rename the findings `which` (indexes into the last result) as VAULT-016 does: deepest
@@ -370,7 +396,7 @@ mod tests {
                 walked.extend(inner.clone());
             }
         }
-        assert_eq!(check(&d).unwrap(), walked);
+        assert_eq!(check(&d, &Cancel::default()).unwrap(), walked);
         let _ = fs::remove_dir_all(&d);
     }
 
@@ -399,7 +425,7 @@ mod tests {
         for f in ["Plan.md", "plan.md", "PLAN.md", "Other/plan.md", "Other/Notes.md"] {
             touch(&d, f, "x");
         }
-        assert_eq!(check(&d).unwrap(), names("", &root));
+        assert_eq!(check(&d, &Cancel::default()).unwrap(), names("", &root));
         let _ = fs::remove_dir_all(&d);
     }
 
@@ -429,7 +455,7 @@ mod tests {
         let rel = format!("{seg}/{seg}/{seg}/{seg}");
         touch(&d, &format!("{rel}/file.md"), "x");
         touch(&d, &format!("{rel}/inner/deeper/file.md"), "x");
-        let all = check(&d).unwrap();
+        let all = check(&d, &Cancel::default()).unwrap();
         // 60*4 + 3 slashes = 243 characters: the fourth folder is the first one over the limit
         assert_eq!(all.len(), 1, "{all:?}");
         assert_eq!(all[0].rel, PathBuf::from(&rel));
@@ -440,7 +466,7 @@ mod tests {
         let d2 = temp("longpath-file");
         let dir = format!("{seg}/{seg}/{seg}");
         touch(&d2, &format!("{dir}/{}.md", "f".repeat(80)), "x");
-        let all = check(&d2).unwrap();
+        let all = check(&d2, &Cancel::default()).unwrap();
         assert_eq!(all.len(), 1);
         let p = all[0].proposed.clone().unwrap();
         assert!(p.ends_with(".md") && p.len() == 240 - 183, "{p}");
@@ -448,7 +474,7 @@ mod tests {
         let d3 = temp("longpath-none");
         let (a, b) = ("a".repeat(119), "b".repeat(120));
         touch(&d3, &format!("{a}/{b}/c/x.md"), "x");
-        let all = check(&d3).unwrap();
+        let all = check(&d3, &Cancel::default()).unwrap();
         assert_eq!(all.len(), 1, "{all:?}");
         assert_eq!(all[0].rel, PathBuf::from(format!("{a}/{b}/c")));
         assert_eq!(all[0].proposed, None);
@@ -467,14 +493,14 @@ mod tests {
         touch(&d, "Notes/ok.md", "x");
         #[cfg(unix)]
         std::os::unix::fs::symlink(d.join("Real"), d.join("Link:dir")).unwrap();
-        let all = check(&d).unwrap();
+        let all = check(&d, &Cancel::default()).unwrap();
         let rels: Vec<String> = all.iter().map(|f| rel_to_string(&f.rel)).collect();
         let inside = format!("Real/{long}");
         #[cfg(unix)]
         assert_eq!(rels, vec!["Link:dir".to_string(), inside], "the link itself is listed, what it points to is listed once");
         #[cfg(not(unix))]
         assert_eq!(rels, vec![inside]);
-        assert!(check(&d.join("missing")).is_err());
+        assert!(check(&d.join("missing"), &Cancel::default()).is_err());
         let _ = fs::remove_dir_all(&d);
     }
 
@@ -496,6 +522,18 @@ mod tests {
 
     // The renames below use names over 200 bytes (two bytes a letter), which every system holds; in
     // the temp folder their paths are longer than Windows' 260 characters.
+
+    // spec: JOB-012
+    #[test]
+    fn job_012_cancel_stops_the_walk_between_two_folders() {
+        let d = temp("cancel-walk");
+        touch(&d, "a/b/c.md", "x\n");
+        let cancel = Cancel::default();
+        assert_eq!(check(&d, &cancel).unwrap(), vec![]);
+        cancel.cancel();
+        assert_eq!(check(&d, &cancel).unwrap_err().kind(), io::ErrorKind::Interrupted);
+        let _ = fs::remove_dir_all(&d);
+    }
 
     // spec: VAULT-028
     #[test]
@@ -567,7 +605,7 @@ mod tests {
         touch(&d, "Notes/Deep/Also fine.md", "x");
         touch(&d, "Other/bad name .md", "x");
         let flow = crate::dataflow::record(|| {
-            check(&d).unwrap();
+            check(&d, &Cancel::default()).unwrap();
         });
         crate::dataflow::verify(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/dataflow/vault-check.md"), "vault_check", &crate::dataflow::render_mermaid(&flow));
         let _ = fs::remove_dir_all(&d);

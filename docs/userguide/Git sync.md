@@ -12,7 +12,9 @@ Keep a vault on several computers with git. Back to [[Start here]]. The easy way
 - Shale then syncs on its own: when the vault opens, every few minutes (default 5; the setting
   is `sync.interval_minutes`) and on **Sync now**. "Sync this vault automatically" switches it
   off (`sync.enabled`). Those settings are in the vault's `.shale/settings.json`, so they travel
-  with it ([[Vault settings]]).
+  with it ([[Vault settings]]). While a sync runs, **Sync now** is off, a spinner says "Syncing with git…" and the
+  indicator at the top right of the editor lists it ([[Background work]]); a sync has no Cancel, because stopping it half way would
+  leave the repository between two states.
 - A sync commits every change (the `.shale/` files too, so settings and open tabs follow you),
   fetches, merges and pushes. Commit messages read `Sync from <computer>: 3 file(s)`, with an
   optional prefix and suffix, and end with the lines `Shale-Reason:` and `Shale-Device:` (the computer's name).

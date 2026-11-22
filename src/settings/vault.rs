@@ -61,13 +61,12 @@ impl ShaleApp {
         let running = self.vault_check.running();
         anchor(ui, "vault.names", |ui| {
             ui.horizontal(|ui| {
-                if ui.add_enabled(!running && self.vault.is_some(), egui::Button::new("Check names for Windows and macOS…")).on_hover_text("Lists the files and folders whose names would not work on Windows or macOS").clicked() {
+                let has_vault = self.vault.is_some();
+                let button = ui.add_enabled_ui(has_vault, |ui| crate::busy::ui::button(ui, &self.busy, &[&crate::vault_check::VAULT_CHECK], egui::Button::new("Check names for Windows and macOS…"))).inner;
+                if button.on_hover_text("Lists the files and folders whose names would not work on Windows or macOS").clicked() {
                     self.start_vault_check();
                 }
-                if running {
-                    ui.spinner();
-                    crate::theme::hint(ui, "Checking…");
-                }
+                crate::busy::ui::status(ui, &self.busy, &crate::vault_check::VAULT_CHECK);
             });
         });
         if let Some(r) = self.vault_check.report.clone() {

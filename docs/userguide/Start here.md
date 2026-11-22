@@ -31,6 +31,7 @@ Organising:
 - [[Drawings]]: sketches, Obsidian drawings and canvases.
 - [[Graph and backlinks]]: how your notes connect.
 - [[Window layout]]: ribbon, sidebars and dialogs.
+- [[Background work]]: spinners, Cancel and the indicator at the top right.
 - [[Keyboard shortcuts]]: all keys, all changeable.
 
 Your other data:
