@@ -73,3 +73,14 @@
 - **Cache from tag runs only**: never hits, see Context.
 - **Fail make-release.sh only when it can see a red run for the commit it releases**: that commit is
   not on GitHub until the release's own Forgejo run is green, so it cannot be known earlier.
+
+## Note, 2026-11-22 (#546)
+
+The `gate` job skips main-check's jobs for a commit with a release tag, so the run on a release commit
+is green without a test, and `make-release.sh` (FORGE-020) cannot see a failure that is not there.
+Commits since the last check tag that reached GitHub may never have run on macOS or Windows before the
+release; the release build is their first test. **Decided by the owner (option c)**: the release
+build's own macOS and Windows tests (`build.yml`, BUILD-017, BUILD-024) are the gate, and a failure
+there stops publishing. Rejected: (a) require a green main-check of the exact tree before the release
+(that tree reaches GitHub only with the release); (b) let main-check run on release commits too (the
+same tests would run twice, which is what the gate avoids).
