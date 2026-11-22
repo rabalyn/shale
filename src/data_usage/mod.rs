@@ -147,7 +147,7 @@ impl Places {
             CacheId::MailBackups => self.mail_root.join("index.backup-<date>.sqlite"),
             CacheId::MailBroken => self.mail_root.join("index.sqlite.broken-<date>"),
             CacheId::TagWords => self.vault.as_ref().map(|v| crate::import::tagwords::file_in(v)).unwrap_or_else(|| PathBuf::from("(no vault open)")),
-            CacheId::UndoHistories => self.vault.as_ref().map(|v| v.join(".shale").join("undo")).unwrap_or_else(|| PathBuf::from("(no vault open)")),
+            CacheId::UndoHistories => self.vault.as_ref().map(|v| crate::device_local::local_dir(v).join("undo")).unwrap_or_else(|| PathBuf::from("(no vault open)")),
             CacheId::DebugLog => self.debug_log.clone(),
         };
         p.display().to_string()

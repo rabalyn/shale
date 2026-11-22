@@ -456,6 +456,25 @@ mod tests {
         v
     }
 
+    // spec: NET-016
+    #[test]
+    fn the_histories_of_a_synced_vault_are_written_outside_the_vault_and_read_back() {
+        let (root, base) = (vault("outside-synced"), vault("outside-synced-base"));
+        assert_eq!(crate::device_local::place(&root, true, &base), None);
+        let mut a = session(&root, T0);
+        typed(&mut a, "n.md", &["a", "ab"]);
+        a.flush_all();
+        assert!(files_in(&root).is_empty(), "nothing in the vault's .shale/undo");
+        let out = crate::device_local::local_dir(&root).join("undo");
+        assert_eq!(std::fs::read_dir(&out).unwrap().count(), 1);
+        let mut t = "ab".to_string();
+        assert_eq!(session(&root, T0 + 5).of(Path::new("n.md")).undo(&mut t), Some(1));
+        // the cleanup of the cache looks there too
+        assert_eq!(super::stats_of_files(&root).entries, 1);
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     // spec: EDIT-022
     #[test]
     fn the_history_is_written_and_read_back_after_a_restart() {

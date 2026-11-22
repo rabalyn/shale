@@ -12,12 +12,12 @@ documentation or the kernel's documentation describes it, **not** observed here.
 
 | Topic | Verdict |
 |---|---|
-| Atomic save, temp files | Fine. `.shale-tmp-*` is hidden and never listed by the scan; a sync client sees it only if it scans during the few milliseconds of a save. Orphans from a crash are never swept ([#476](https://github.com/rabalyn/shale/issues/476)). |
+| Atomic save, temp files | Fine. `.shale-tmp-*` is hidden and never listed by the scan; a sync client sees it only if it scans during the few milliseconds of a save. Orphans from a crash are swept after a day (NET-016, #476). |
 | Change detection | Fine on all systems: a full rescan every 3 s, no file watcher, stamps compare mtime, size, inode, ctime. **Defect**: the rescan runs on the UI thread and freezes on a slow share ([#473](https://github.com/rabalyn/shale/issues/473)). |
 | Watching | No watcher exists, so nothing is missed on NFS/SMB; no polling to add (already 3 s). |
 | Locks | Shale takes no lock in the vault. The tree lock is in-process; the instance lock is in the local data folder. Two Shales on two machines are protected only by DATA-003. |
 | Cloud conflict files | They are ordinary notes to Shale (ran: Syncthing). Not recognised, not shown: [#475](https://github.com/rabalyn/shale/issues/475). |
-| `.shale/` from two devices | **Collides** (ran): `state.sync-conflict-…json` stays for ever, devices overwrite each other's tabs: [#476](https://github.com/rabalyn/shale/issues/476). |
+| `.shale/` from two devices | Fixed for a vault found synced (NET-016, #476): `state.json` and `undo/` live in the data folder, conflict copies are swept. (Before: `state.sync-conflict-…json` stayed for ever and devices overwrote each other's tabs.) |
 | Case and Unicode names | Case: fine (DATA-013, VAULT-026..028). NFC and NFD spellings are one name for links (NET-014, [#474](https://github.com/rabalyn/shale/issues/474)); Syncthing even renames the local file. |
 | A repository in a synced folder | Unsafe, confirmed by how git works and by the clients' behaviour; local-only history must live outside the vault (owner decision #467). |
 
@@ -58,7 +58,7 @@ uploaded, then deleted a moment later: harmless but noisy, and with a large file
 take long. **No data is at risk**: the final name appears only through the rename, as one complete file.
 iCloud Drive on macOS uploads the final file once complete (*documented*: it works on closed files, via a file
 coordinator).
-**Defect**: a `.shale-tmp-*` that a crash left is never removed ([#476](https://github.com/rabalyn/shale/issues/476)).
+A `.shale-tmp-*` that a crash left is swept after a day (NET-016, #476).
 
 ## 2. Fingerprints and external change detection
 
@@ -143,8 +143,8 @@ Shale loads the winner without a problem and the file is not a note. Nothing rem
 (the cleanup of USE-023 prunes undo files only) and the devices overwrite each other's tabs and panes. The undo
 histories (EDIT-022: `.shale/undo/<hash of the note path>.json`, one file per note, the same name on both
 devices) collide the same way (*code*; same mechanism). Git sync leaves `undo/` out (SYNC-006), a cloud client does not.
-**Consequence: defect** ([#476](https://github.com/rabalyn/shale/issues/476)): keep device-local state outside the
-synced folder for such vaults, and sweep conflict files.
+**Consequence** (fixed, NET-016, #476): device-local state is kept outside the synced folder for such vaults, and
+conflict files of it are swept.
 
 ## 7. Case-insensitive and normalising file systems; names illegal elsewhere
 

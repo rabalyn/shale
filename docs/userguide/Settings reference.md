@@ -8,7 +8,8 @@ Two files hold settings:
 - **Global**: `~/.config/shale/config.toml` (this computer, all vaults). On Windows and macOS
   the program's config folder; the settings file tab shows the path.
 - **Vault**: `<vault>/.shale/settings.json` (travels with the vault) and
-  `<vault>/.shale/state.json` (session state).
+  `<vault>/.shale/state.json` (session state; in a vault found in a cloud-synced or network folder it is
+  kept in Shale's data folder instead, see [[Vaults in cloud and network folders]]).
 
 A value of the wrong shape in the file loads as its default; fields Shale does not know are kept.
 The "Where" column says which window changes a value. The global file is meant to be edited
@@ -322,6 +323,9 @@ and folders whose names would break on Windows or macOS and renames them on requ
 the links to media outside the vault ([[Vault settings]]).
 
 # Vault session state (`<vault>/.shale/state.json`)
+
+In a vault that Shale finds in a cloud-synced or network folder, this file (and the undo histories) is in
+Shale's data folder, under the vault's ID, so each computer keeps its own.
 
 Kept by Shale as you work, so a vault opens as you left it ([[Tabs]], [[Import]]).
 
