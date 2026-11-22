@@ -105,10 +105,23 @@ pub fn meta_line(m: &Meta) -> Option<String> {
     (!parts.is_empty()).then(|| format!("<!-- {META_TAG} {} -->", parts.join(" ")))
 }
 
+/// Where the code span opened by a backtick ends: the index, in `rest` (the characters after the
+/// opening backtick), of the next backtick that is not escaped (`\``), if there is one.
+fn span_close(rest: impl Iterator<Item = char>) -> Option<usize> {
+    let mut prev = '`';
+    for (at, c) in rest.enumerate() {
+        if c == '`' && prev != '\\' {
+            return Some(at);
+        }
+        prev = c;
+    }
+    None
+}
+
 /// The cells of one table line as they are written: byte ranges between the separating pipes
 /// (spaces included), and whether the line has an outer pipe at the start and at the end. The
 /// ranges are in `line`; `end` is where the line's text ends (before trailing blanks and `\r`).
-/// `\|` and pipes inside code spans do not separate.
+/// `\|` and pipes inside code spans do not separate; `\`` is a backtick that opens no code span.
 struct RawLine {
     cells: Vec<Range<usize>>,
     trailing: bool,
@@ -127,11 +140,11 @@ fn raw_line(line: &str) -> RawLine {
     let mut i = 0;
     while i < chars.len() {
         let (at, c) = chars[i];
-        if c == '\\' && chars.get(i + 1).is_some_and(|x| x.1 == '|') {
+        if c == '\\' && chars.get(i + 1).is_some_and(|x| x.1 == '|' || x.1 == '`') {
             i += 2;
         } else if c == '`' {
             // a code span runs to the next backtick on the line; without one it is a plain character
-            match chars[i + 1..].iter().position(|x| x.1 == '`') {
+            match span_close(chars[i + 1..].iter().map(|x| x.1)) {
                 Some(e) => i += e + 2,
                 None => i += 1,
             }
@@ -156,17 +169,18 @@ pub fn cell_ranges(line: &str) -> Vec<Range<usize>> {
     raw_line(line).cells
 }
 
-/// The text of a cell as it is shown: `\|` is a pipe (but not inside a code span), trimmed.
+/// The text of a cell as it is shown: `\|` is a pipe and `\`` a backtick (but not inside a code
+/// span), trimmed.
 fn cell_text(raw: &str) -> String {
     let chars: Vec<char> = raw.chars().collect();
     let mut out = String::new();
     let mut i = 0;
     while i < chars.len() {
-        if chars[i] == '\\' && chars.get(i + 1) == Some(&'|') {
-            out.push('|');
+        if chars[i] == '\\' && matches!(chars.get(i + 1), Some('|' | '`')) {
+            out.push(chars[i + 1]);
             i += 2;
         } else if chars[i] == '`' {
-            let n = chars[i + 1..].iter().position(|&x| x == '`').map_or(1, |e| e + 2);
+            let n = span_close(chars[i + 1..].iter().copied()).map_or(1, |e| e + 2);
             out.extend(&chars[i..i + n]);
             i += n;
         } else {
@@ -354,18 +368,24 @@ pub fn edit_source(src: &str, edit: Edit) -> Option<String> {
 }
 
 /// A cell's text as it is written between its pipes: a pipe outside a code span becomes `\\|`, a
-/// line break a blank (EDIT-030).
+/// backtick with no partner in the cell `\\``, a line break a blank (EDIT-030).
 fn escape_cell(text: &str) -> String {
     let chars: Vec<char> = text.chars().map(|c| if c == '\n' || c == '\r' { ' ' } else { c }).collect();
     let mut out = String::new();
     let mut i = 0;
     while i < chars.len() {
         match chars[i] {
-            '`' => {
-                let n = chars[i + 1..].iter().position(|&x| x == '`').map_or(1, |e| e + 2);
-                out.extend(&chars[i..i + n]);
-                i += n;
-            }
+            '`' => match span_close(chars[i + 1..].iter().copied()).filter(|_| i == 0 || chars[i - 1] != '\\') {
+                Some(e) => {
+                    out.extend(&chars[i..i + e + 2]);
+                    i += e + 2;
+                }
+                // a lone backtick would pair with one in a neighbouring cell
+                None => {
+                    out.push_str("\\`");
+                    i += 1;
+                }
+            },
             '|' => {
                 out.push_str("\\|");
                 i += 1;
@@ -763,6 +783,26 @@ mod tests {
         assert_eq!(cells(r"| [[Note\|alias]] | c |"), ["[[Note|alias]]", "c"], "a wikilink alias");
         assert_eq!(cells("| a ` b | c |"), ["a ` b", "c"], "a lone backtick is no code span");
         assert_eq!(cells("| ünï | 日本 |"), ["ünï", "日本"]);
+    }
+
+    // spec: EDIT-030
+    #[test]
+    fn a_lone_backtick_set_in_a_cell_does_not_pair_with_one_in_the_next_cell() {
+        let src = "| a | b |\n|---|---|\n| x | y |\n";
+        let one = set_cell(src, 1, 0, "`").unwrap();
+        assert_eq!(one.lines().nth(2), Some(r"| \` | y |"));
+        assert_eq!(cells(one.lines().nth(2).unwrap()), ["`", "y"]);
+        // both cells set to a lone backtick: still two cells
+        let two = set_cell(&one, 1, 1, "`").unwrap();
+        assert_eq!(cells(two.lines().nth(2).unwrap()), ["`", "`"]);
+        // an old lone backtick is not closed by the escaped one written after it
+        assert_eq!(cells(set_cell("|a|b|\n|---|---|\n|`\n", 1, 1, "`").unwrap().lines().nth(2).unwrap()), ["`", "`"]);
+        // a backslash before a backtick is kept as text
+        let slash = set_cell(src, 1, 0, r"\`a`").unwrap();
+        assert_eq!(cells(slash.lines().nth(2).unwrap()), [r"\`a`", "y"]);
+        // a pair inside one cell stays a code span and keeps its pipe
+        let span = set_cell(src, 1, 0, "`a|b`").unwrap();
+        assert_eq!(cells(span.lines().nth(2).unwrap()), ["`a|b`", "y"]);
     }
 
     // spec: EDIT-024

@@ -25,10 +25,9 @@ fn cell_input() -> impl Strategy<Value = String> {
     prop::collection::vec(piece, 0..8).prop_map(|p| p.concat())
 }
 
-/// A cell already in a table: plain text with escaped pipes, no backtick (a lone backtick would
-/// open a code span that runs on into the next cell, which is not what these tests are about).
+/// A cell already in a table: plain text with escaped pipes, and backticks, lone or in pairs.
 fn old_cell() -> impl Strategy<Value = String> {
-    prop::collection::vec(prop_oneof![3 => "[a-z0-9é日]{1,3}", 1 => Just("\\|".to_string()), 1 => Just(" ".to_string())], 0..4).prop_map(|p| p.concat())
+    prop::collection::vec(prop_oneof![3 => "[a-z0-9é日]{1,3}", 1 => Just("\\|".to_string()), 1 => Just("`".to_string()), 1 => Just(" ".to_string())], 0..4).prop_map(|p| p.concat())
 }
 
 /// A table source: a header, a delimiter row and rows with the same or a different number of
