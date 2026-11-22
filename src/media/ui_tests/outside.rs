@@ -461,3 +461,38 @@ fn an_outside_picture_that_is_not_there_has_no_copy_action_and_the_menu_entry_is
     plain.hl.click(&mut plain.app, at + egui::vec2(8.0, 6.0), PointerButton::Primary);
     assert!(plain.app.outside_copy.is_none() && plain.app.toasts.iter().all(|(t, _)| !t.contains("Copying")), "it does nothing when it is off");
 }
+
+/// Hover over `at` for long enough that a tooltip shows, and say whether `what` is on the screen.
+fn tooltip_shows(fx: &mut Fx, at: Pos2, what: &str) -> bool {
+    fx.hl.frame(&mut fx.app, vec![egui::Event::PointerMoved(at)]);
+    for _ in 0..30 {
+        fx.hl.frame(&mut fx.app, vec![]);
+        if said(fx, what) {
+            return true;
+        }
+    }
+    false
+}
+
+// spec: MEDIA-023
+#[test]
+fn the_caption_and_the_name_of_an_outside_file_say_it_is_not_synced_and_those_of_the_vault_do_not() {
+    let o = Outside::new("not-synced");
+    o.picture("a.png");
+    let mut fx = window("o-not-synced", "![[@Media/a.png]]\n\n![[inside.png]]\n", o.library());
+    std::fs::copy(o.folder.join("a.png"), fx.dir.join("inside.png")).unwrap();
+    fx.app.vault.as_mut().unwrap().rescan();
+    fx.hl.frames(&mut fx.app, 3);
+    // the editor: the caption of the outside picture, not that of the picture of the vault
+    fx.reading(false);
+    let outside = fx.hl.text.iter().find(|(t, _)| t == "@Media/a.png").map(|(_, p)| *p).expect("the caption of the outside picture");
+    let inside = fx.hl.text.iter().find(|(t, _)| t == "inside.png").map(|(_, p)| *p).expect("the caption of the picture of the vault");
+    assert!(!tooltip_shows(&mut fx, inside + egui::vec2(6.0, 5.0), crate::media::outside::NOT_SYNCED), "a file of the vault is synced");
+    fx.hl.frame(&mut fx.app, vec![egui::Event::PointerMoved(Pos2::new(5.0, 5.0))]);
+    assert!(tooltip_shows(&mut fx, outside + egui::vec2(6.0, 5.0), crate::media::outside::NOT_SYNCED), "{:?}", fx.hl.text);
+    // the reading view: the name in the header of the frame
+    fx.reading(true);
+    fx.hl.frame(&mut fx.app, vec![egui::Event::PointerMoved(Pos2::new(5.0, 5.0))]);
+    let name = fx.hl.text.iter().find(|(t, _)| t == "a.png").map(|(_, p)| *p).expect("the name of the outside picture");
+    assert!(tooltip_shows(&mut fx, name + egui::vec2(4.0, 4.0), crate::media::outside::NOT_SYNCED), "{:?}", fx.hl.text);
+}

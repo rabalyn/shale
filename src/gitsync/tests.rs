@@ -186,6 +186,41 @@ fn two_vaults_sync_through_a_bare_remote() {
     assert_eq!(env.git(&a, &["rev-parse", "HEAD"]), env.git(&b, &["rev-parse", "HEAD"]));
 }
 
+// spec: MEDIA-023, SYNC-007
+#[test]
+fn a_vault_with_outside_links_syncs_only_its_own_files_and_leaves_the_outside_files_alone() {
+    let env = Env::new("outside-media");
+    let remote = env.bare();
+    let a = env.vault("a", &remote);
+    // the library folder and a loose file sit next to the vault, never inside it
+    let videos = env.folder("Videos");
+    write(&videos, "2024/clip.mp4", "outside video");
+    let loose = env.folder("loose");
+    write(&loose, "pic.png", "outside picture");
+    let file_link = crate::media::testdata::file_address(&loose.join("pic.png"));
+    let note = format!("# Trip\n\n![[@Videos/2024/clip.mp4]]\n\n![]({file_link})\n");
+    write(&a, "Trip.md", &note);
+    write(&a, "z_media/2026/11/261122_inside.png", "a copy in the vault");
+    let outside_before = (read(&videos, "2024/clip.mp4"), read(&loose, "pic.png"), fs::metadata(videos.join("2024/clip.mp4")).unwrap().modified().unwrap());
+    let r = env.sync(&a);
+    assert!(r.pushed && r.remote);
+    let tracked: Vec<String> = env.git(&a, &["ls-files"]).lines().map(String::from).collect();
+    assert_eq!(tracked, ["Trip.md", "z_media/2026/11/261122_inside.png"], "the links are text; the files they name are not in the history");
+    assert!(env.git(&remote, &["ls-tree", "-r", "--name-only", "main"]).lines().all(|f| !f.contains("clip.mp4") && !f.contains("pic.png")), "nor on the server");
+    // another device gets the note with its links, and not the files
+    let b = env.vault("b", &remote);
+    env.sync(&b);
+    assert_eq!(read(&b, "Trip.md"), note);
+    assert!(!b.join("2024").exists() && !b.join("Videos").exists() && !b.join("pic.png").exists() && !b.join("clip.mp4").exists());
+    // a change of the note on the second device comes back; the outside files were never touched
+    write(&b, "Trip.md", &format!("{note}\nmore\n"));
+    env.sync(&b);
+    env.sync(&a);
+    assert!(read(&a, "Trip.md").ends_with("more\n"));
+    assert_eq!(outside_before, (read(&videos, "2024/clip.mp4"), read(&loose, "pic.png"), fs::metadata(videos.join("2024/clip.mp4")).unwrap().modified().unwrap()), "read-only: content and time are as they were");
+    assert!(!videos.join(".git").exists() && !loose.join(".git").exists());
+}
+
 // spec: SYNC-008
 #[test]
 fn edits_on_both_sides_become_a_conflict_copy() {

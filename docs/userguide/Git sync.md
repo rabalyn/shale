@@ -20,6 +20,10 @@ Keep a vault on several computers with git. Back to [[Start here]]. The easy way
 - Besides the sync's commits, Shale makes a small commit of a note when you save it, stop typing or close it,
   so that you can go back to an earlier version ([[File history]]). The sync pushes them as they are, and
   a vault without a git repository gets the same history on this computer, outside the vault.
+- Only the files of the vault are synced. A picture, PDF, sound or video that a note links from
+  outside the vault ([[Sounds and videos]]) stays where it is: it is not committed or uploaded, and
+  another computer shows "Not found" or "Library … is not set up" until it has the file or the library
+  folder. Settings → Sync says how many files the vault links from outside.
 
 # Installing git
 

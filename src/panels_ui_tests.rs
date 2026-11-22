@@ -958,6 +958,29 @@ fn media_022_the_vault_check_lists_outside_links_by_note_in_the_same_background_
     let _ = std::fs::remove_dir_all(&outside);
 }
 
+// spec: MEDIA-023
+#[test]
+fn media_023_settings_sync_says_how_many_media_files_are_linked_from_outside_and_not_synced() {
+    let mut p = P::with_files("outside-sync-note", &[("Trip.md", "![[@Videos/a.mp4]] ![[@Videos/a.mp4|200]] [[@Videos/b.pdf]]\n"), ("Other.md", "![](<file:///elsewhere/pic.png>) [[Trip]]\n")]);
+    p.app.open_settings(SettingsTab::Sync);
+    let shown = shown_labels(&mut p);
+    let note = shown.iter().find(|l| l.contains("linked from outside the vault")).unwrap_or_else(|| panic!("{shown:?}"));
+    assert!(note.starts_with("3 media files are linked from outside the vault and are not synced"), "each file once, however often it is linked: {note}");
+    assert!(note.contains("file history"), "{note}");
+    assert!(shown.iter().any(|l| l.contains("Settings → Import")), "the way to set the library up: {shown:?}");
+    // one file: the singular
+    let mut q = P::with_files("outside-sync-note-one", &[("Trip.md", "![[@Videos/a.mp4]]\n")]);
+    q.app.open_settings(SettingsTab::Sync);
+    assert!(shown_labels(&mut q).iter().any(|l| l.starts_with("1 media file is linked from outside the vault and is not synced")));
+    // no links: no note; and the count follows the notes
+    let mut r = P::with_files("outside-sync-note-none", &[("Plain.md", "no media\n")]);
+    r.app.open_settings(SettingsTab::Sync);
+    assert!(!shown_labels(&mut r).iter().any(|l| l.contains("linked from outside the vault")));
+    std::fs::write(r.dir.join("Plain.md"), "![[@Videos/c.mp4]]\n").unwrap();
+    r.app.vault.as_mut().unwrap().rescan();
+    assert!(labels_until(&mut r, "1 media file is linked from outside the vault").len() > 1);
+}
+
 /// The text boxes on screen, top to bottom and left to right.
 fn text_boxes(p: &mut P) -> Vec<Rect> {
     let mut boxes: Vec<Rect> = p.look(Show::Modals).into_iter().filter(|(r, _, _)| matches!(r, Role::TextInput | Role::MultilineTextInput)).map(|(_, _, rect)| rect).collect();

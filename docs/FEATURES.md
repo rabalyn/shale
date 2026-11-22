@@ -160,14 +160,23 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   export. A missing file, or a library that is not set up here, says so in place of the embed. A click
   opens the file with your system's program and never makes a note; such links are not red, not in the
   graph and not offered by "Fix link". Only these four kinds of file are opened this way, and nothing
-  outside the vault is ever written. Outside files are not synced.
+  outside the vault is ever written. Outside files are not synced or kept in the file history
+  (MEDIA-023): Settings → Sync says how many files the vault links from outside, and the caption of such
+  a file says "Outside the vault: not synced" on hover.
   **Settings → Import → Files from outside the vault** says what a pick with `[!`, a paste or an import
   does with a picture, PDF, sound or video that is not in the vault: **Ask** (the start value), **Copy
   into the vault** or **Link where they are** (MEDIA-019); the library folders of this computer (a name
   and a folder each) are set on the same page. A linked file under a library folder is written
   `![[@Videos/2024/a.mp4]]`, any other `![](<file:///…>)` (MEDIA-020). Nothing is linked because it lies
-  in a library folder: every entry point follows the setting. "Copy into the vault" for links that exist
-  follows (#501). The Import tab of Settings is shown under "Importing e-mails, events and files".
+  in a library folder: every entry point follows the setting. An outside embed that is there has **Copy
+  into the vault** (the right end of its caption in the editor and the preview, a button or a line in the
+  reading view), and the note's ⋯ menu has **Copy outside media into the vault** for all of its links: the
+  files go to `z_media/` in the background and the links are rewritten (width and alias kept, one undo step,
+  MEDIA-021). **Settings → Vault → Check names for Windows and macOS…** also lists the vault's outside
+  links by note (a file that is not found, a library not set up on this computer or whose folder is not
+  there, file links that work on this computer only; MEDIA-022), and **Data usage** counts the outside
+  files the vault links and their size (USE-026), both in background jobs. The Import tab of Settings is
+  shown under "Importing e-mails, events and files".
 
 ![Reading view](userguide/z_media/screenshots/reading.png)
 
@@ -1039,7 +1048,9 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   `.trash/`, `.git/`), its 10 largest files and folders (a click opens the file or shows the
   folder), and your data outside the vault: mail per account, drafts, outbox, mail trash, local
   calendars, calendar trash, recovered notes and the file history of a vault that has no `.git` (with `.git` it is
-  counted in the vault's `.git/`). Nothing in this part can be deleted here.
+  counted in the vault's `.git/`), and, when notes link media from outside the vault, **Outside media linked by this
+  vault**: the files that are there, each once, with their size, and how many are not found or not set up (USE-026).
+  Nothing in this part can be deleted here.
 - **Caches** are what Shale can build or fetch again: social pictures, the social post index,
   the mail index, its daily backups, damaged copies of the mail index, the learned tag words, the
   undo histories of the notes of the open vault and the keyboard debug log. Each row shows its size, entries, oldest entry and last cleanup, and
