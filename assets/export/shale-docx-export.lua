@@ -2,7 +2,7 @@
 -- sees it, back into the Word formatting the docx import (IMP-037 to IMP-046) made Markdown of.
 -- Shale prepares the text first (DOCX-003): the front matter is gone and every embed names its file by its
 -- vault path. What the docx writer cannot say itself is left as marks that Shale finishes after pandoc
--- (DOCX-011): a zero-length bookmark `_shale_jc_<align>` in an aligned paragraph, and character styles named
+-- (DOCX-009): a zero-length bookmark `_shale_jc_<align>` in an aligned paragraph, and character styles named
 -- `Shale colour RRGGBB`, `Shale colour RRGGBB on RRGGBB` and `Shale on RRGGBB` for text and highlight colours.
 
 -- the width of the editor's text column an embed's size is a share of (PDF-005, embed_size::DEFAULT_COLUMN)
