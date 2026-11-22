@@ -40,6 +40,54 @@ fn toasted(app: &ShaleApp, part: &str) -> bool {
     app.toasts.iter().any(|(t, _)| t.contains(part))
 }
 
+/// Type into the buffer of `rel` as `type_text` does, but the last edit was `ago` ago.
+fn edited_ago(app: &mut ShaleApp, rel: &str, text: &str, ago: Duration) {
+    type_text(app, rel, text);
+    app.notes.get_mut(Path::new(rel)).unwrap().last_edit = Instant::now() - ago;
+}
+
+// spec: DATA-001
+#[test]
+fn data_001_a_note_is_saved_by_the_autosave_only_after_0_8_s_without_an_edit() {
+    let (mut app, d) = app_in("data-001-autosave", &[("N.md", b"base\n")]);
+    app.open(Path::new("N.md"), false);
+    // the clock is the age of the last edit: well before 0.8 s nothing is written, well after it is
+    edited_ago(&mut app, "N.md", "just typed\n", Duration::ZERO);
+    app.autosave();
+    assert_eq!(read(&d, "N.md"), "base\n", "an edit that has just been made is not saved yet");
+    edited_ago(&mut app, "N.md", "a moment ago\n", Duration::from_millis(600));
+    app.autosave();
+    assert_eq!(read(&d, "N.md"), "base\n", "0.6 s are not enough");
+    assert!(app.notes[Path::new("N.md")].dirty);
+    edited_ago(&mut app, "N.md", "a while ago\n", Duration::from_millis(1000));
+    app.autosave();
+    assert_eq!(read(&d, "N.md"), "a while ago\n", "after more than 0.8 s the note is saved");
+    assert!(!app.notes[Path::new("N.md")].dirty);
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+// spec: DATA-001
+#[test]
+fn data_001_a_note_is_saved_at_once_when_its_tab_closes_and_at_exit() {
+    let (mut app, d) = app_in("data-001-close", &[("N.md", b"base\n"), ("M.md", b"base\n")]);
+    app.open(Path::new("N.md"), false);
+    app.open(Path::new("M.md"), true);
+    // edited just now: the autosave would not write it
+    edited_ago(&mut app, "N.md", "closed with its tab\n", Duration::ZERO);
+    app.autosave();
+    assert_eq!(read(&d, "N.md"), "base\n");
+    let tab = app.tabbar.tabs.iter().position(|t| t.view == View::Note(PathBuf::from("N.md"))).unwrap();
+    app.close_tab(tab);
+    assert_eq!(read(&d, "N.md"), "closed with its tab\n", "closing the tab saves");
+    // an edit just made to the note that stays open waits for the autosave, until the exit
+    edited_ago(&mut app, "M.md", "left open at exit\n", Duration::ZERO);
+    app.autosave();
+    assert_ne!(read(&d, "M.md"), "left open at exit\n");
+    eframe::App::on_exit(&mut app);
+    assert_eq!(read(&d, "M.md"), "left open at exit\n", "the exit saves");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 // spec: DATA-008
 #[test]
 fn a_note_that_cannot_be_read_opens_read_only_and_is_never_overwritten() {

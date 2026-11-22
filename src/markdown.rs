@@ -1165,7 +1165,7 @@ pub fn sanitize_note_name(name: &str) -> String {
 
 /// [`sanitize_note_name`] cut to `max_bytes`.
 pub fn sanitize_note_name_max(name: &str, max_bytes: usize) -> String {
-    let name = name.trim().trim_start_matches('.');
+    let name = name.trim_start_matches(|c: char| c == '.' || c.is_whitespace());
     crate::fsutil::portable_name(name, max_bytes).trim().to_string()
 }
 
