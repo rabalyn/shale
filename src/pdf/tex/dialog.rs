@@ -399,6 +399,21 @@ fn compile_job(engine: &Engine, set: &SetInfo, doc: &Arc<Document>, cancel: Arc<
     }
 }
 
+/// The `README.txt` of a saved `.tex` (TEX-016): the command that points `TEXINPUTS` at the set's
+/// `tex` folder (`tex_dir`, the trailing `//` searches its folders) for the system, which is
+/// `windows` here so both forms can be tested: cmd and PowerShell take no `VAR=… command`, and
+/// kpathsea separates with `;` there (`compile::SEARCH_PATH_SEP`).
+pub(crate) fn readme_text(tex_dir: &str, windows: bool) -> String {
+    let how = if windows {
+        format!("In cmd:\n\n  set \"TEXINPUTS={tex_dir}//;\"\n  lualatex main.tex\n\nIn PowerShell:\n\n  $env:TEXINPUTS=\"{tex_dir}//;\"\n  lualatex main.tex\n")
+    } else {
+        format!("  TEXINPUTS=\"{tex_dir}//:\" lualatex main.tex\n")
+    };
+    format!(
+        "This is what Shale wrote for the export that failed: main.tex and the files it uses.\n\nTo compile it with your own TeX, point TEXINPUTS at the template set (the trailing // searches its folders), then run LuaLaTeX and biber:\n\n{how}\nIf the set needs a logo (tuda_logo.pdf) that is not in its logo folder, put a PDF of that name next to main.tex.\n"
+    )
+}
+
 /// "Save the .tex": `main.tex` and its pictures in a folder next to the PDF (`name-tex`), and a
 /// note on how to compile it with the template set. Returns the folder.
 pub fn save_tex(failure: &Failure, pdf_path: &Path) -> Result<PathBuf, String> {
@@ -410,10 +425,7 @@ pub fn save_tex(failure: &Failure, pdf_path: &Path) -> Result<PathBuf, String> {
     for (name, bytes) in &failure.document.files {
         write(name, bytes)?;
     }
-    let readme = format!(
-        "This is what Shale wrote for the export that failed: main.tex and the files it uses.\n\nTo compile it with your own TeX, point TEXINPUTS at the template set (the trailing // searches its folders), then run LuaLaTeX and biber:\n\n  TEXINPUTS=\"{}//:\" lualatex main.tex\n\nIf the set needs a logo (tuda_logo.pdf) that is not in its logo folder, put a PDF of that name next to main.tex.\n",
-        failure.set_dir.join("tex").display()
-    );
+    let readme = readme_text(&failure.set_dir.join("tex").display().to_string(), cfg!(windows));
     write("README.txt", readme.as_bytes())?;
     Ok(dir)
 }
