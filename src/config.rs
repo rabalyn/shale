@@ -1115,7 +1115,7 @@ mod tests {
         assert_eq!(old.social_check_minutes, 5, "files from before the checks use the default");
     }
 
-    // spec: CFG-002
+    // spec: CFG-002, DATA-014
     #[test]
     fn private_files_are_owner_only_and_replaced_whole() {
         let dir = std::env::temp_dir().join(format!("shale-private-{}", std::process::id()));

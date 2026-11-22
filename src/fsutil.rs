@@ -878,7 +878,7 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
-    // spec: DATA-004
+    // spec: DATA-004, DATA-014
     #[cfg(unix)]
     #[test]
     fn private_files_are_owner_only() {
