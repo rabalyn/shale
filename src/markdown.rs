@@ -267,7 +267,7 @@ pub fn find_links(text: &str) -> Vec<LinkSpan> {
 /// text then, LINK-001). A destination in `<…>` holds no `<` and ends at the first `>`, and only
 /// blanks may follow it; any other destination holds no control character and balanced
 /// parentheses, and ends at the first unmatched `)`. Spaces stay allowed in it (Shale's file
-/// links), a `[[` is not: a wiki link starts there.
+/// links), a `[[` (a wiki link) and a `](` (a nested link) are not.
 fn md_destination_len(rest: &str) -> Option<usize> {
     let lead = rest.len() - rest.trim_start().len();
     if rest[lead..].starts_with('<') {
@@ -288,6 +288,8 @@ fn md_destination_len(rest: &str) -> Option<usize> {
             c if c.is_control() => return None,
             // a `[[` starts a wiki link, which a destination does not swallow
             '[' if rest[p + 1..].starts_with('[') => return None,
+            // a nested link is no target
+            ']' if rest[p + 1..].starts_with('(') => return None,
             _ => {}
         }
     }
@@ -1488,6 +1490,14 @@ a
         let w = find_links("[x]([[)#Head|alias]]");
         assert_eq!((w.len(), w[0].range.start, w[0].markdown_style), (1, 4, false));
         assert!(find_links("[x]([[a]]").iter().all(|l| !l.markdown_style));
+        // a nested link is no destination: the inner one is found, before and after the replacing
+        for t in ["[x]([f](A))", "[x]([f](file:///tmp/a.png))"] {
+            let l = find_links(t);
+            assert_eq!((l.len(), l[0].range.start), (1, 4), "{t}");
+            let new = format!("{}{}{}", &t[..l[0].target_range.start], replace_target(t, &l[0], "B"), &t[l[0].target_range.end..]);
+            let after = find_links(&new);
+            assert_eq!((after.len(), after[0].range.start), (1, 4), "{new}");
+        }
         // single brackets in a file name are fine
         let p = find_links("[pic](photo [1].png)");
         assert_eq!((p.len(), p[0].target.as_str()), (1, "photo [1].png"));
