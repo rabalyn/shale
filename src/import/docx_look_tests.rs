@@ -335,6 +335,38 @@ fn the_zip_of_the_tagged_copy_reads_back_with_every_file_and_the_content_types_f
     assert_eq!(std::fs::read(&again).unwrap(), bytes);
 }
 
+// spec: IMP-047, DEV-038
+#[test]
+fn a_part_nested_too_deeply_is_refused_with_a_message_and_no_function_that_reads_it_aborts() {
+    let deep = |inner: &str| doc(&format!("{}{inner}{}", "<w:sdt>".repeat(5000), "</w:sdt>".repeat(5000)));
+    let text = deep("<w:p/>");
+    assert!(read(&text, None, None).props().is_empty(), "no look");
+    assert!(tag_runs(&text, None, None).is_none() && mark_breaks(&text, None).is_none() && mark_aligns(&text, None, true).is_none());
+    let plain = read(&doc("<w:p/>"), None, None).props();
+    assert_eq!(read(&doc("<w:p/>"), Some(&"<w:styles>".repeat(5000)), Some(&"<a:theme>".repeat(5000))).props(), plain, "deep styles and theme are left out like unreadable ones");
+    // the file is refused, whichever of its parts is the deep one
+    let work = scratch("deep");
+    for (name, part) in [("word/document.xml", "document"), ("word/styles.xml", "styles"), ("word/theme/theme1.xml", "theme")] {
+        let parts = scratch(&format!("deep-parts-{part}"));
+        let mut files = vec![("[Content_Types].xml", "<Types/>".to_string())];
+        if name != "word/document.xml" {
+            files.push(("word/document.xml", doc("<w:p/>")));
+        }
+        files.push((name, deep("")));
+        for (n, t) in &files {
+            let p = parts.join(n);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, t).unwrap();
+        }
+        let docx = work.join(format!("{part}.docx"));
+        write_zip(&parts, &docx).unwrap();
+        let a = analyse(&docx, &work.join(format!("w-{part}")));
+        let error = a.error.unwrap_or_else(|| panic!("{part} is nested too deeply"));
+        assert!(error.starts_with(&format!("{name}: the XML is nested too deeply (more than 256 levels)")), "{error}");
+        assert!(a.tagged.is_none() && a.look.props().is_empty());
+    }
+}
+
 // spec: IMP-040, IMP-041
 #[test]
 fn a_file_that_is_no_zip_gives_no_look_and_no_copy_and_a_real_one_gives_both() {
@@ -342,7 +374,7 @@ fn a_file_that_is_no_zip_gives_no_look_and_no_copy_and_a_real_one_gives_both() {
     let bad = work.join("bad.docx");
     std::fs::write(&bad, b"PK fake docx").unwrap();
     let a = analyse(&bad, &work.join("w1"));
-    assert!(a.look.props().is_empty() && a.tagged.is_none());
+    assert!(a.look.props().is_empty() && a.tagged.is_none() && a.error.is_none());
     let a = analyse(&work.join("missing.docx"), &work.join("w2"));
     assert!(a.look.props().is_empty() && a.tagged.is_none());
     // a small file of our own: the document with a coloured run and a page

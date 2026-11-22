@@ -25,13 +25,13 @@ fn twips(mm: f32) -> String {
 /// `docx`, finished: the alignment, the colour styles, the page of the note and no pictures that nothing uses.
 pub fn finish(docx: &[u8], look: &PrintLook) -> Result<Vec<u8>, String> {
     let mut file = Package::read(docx).map_err(|e| format!("pandoc's file cannot be finished: {e}"))?;
-    let broken = |what: &str, e: roxmltree::Error| format!("pandoc's file cannot be finished: {what} cannot be read: {e}");
+    let broken = |what: &str, e: String| format!("pandoc's file cannot be finished: {what} cannot be read: {e}");
     let document = file.text(DOCUMENT)?.to_string();
     let styles = file.text(STYLES)?.to_string();
-    let doc = Document::parse(&document).map_err(|e| broken(DOCUMENT, e))?;
+    let doc = crate::xml_limits::parse(&document).map_err(|e| broken(DOCUMENT, e))?;
     let mut edits = alignment(&document, &doc);
     edits.extend(page(&document, &doc, look));
-    let sty = Document::parse(&styles).map_err(|e| broken(STYLES, e))?;
+    let sty = crate::xml_limits::parse(&styles).map_err(|e| broken(STYLES, e))?;
     let new_styles = apply(&styles, colour_styles(&styles, &sty));
     if let Some(text) = new_styles {
         file.set(STYLES, text);
@@ -155,14 +155,14 @@ fn prune_media(file: &mut Package) -> Result<(), String> {
     let mut named: HashSet<String> = HashSet::new();
     for rels in all.iter().filter(|n| n.ends_with(".rels")) {
         let text = file.text(rels)?.to_string();
-        let broken = |e: roxmltree::Error| format!("pandoc's file cannot be finished: {rels} cannot be read: {e}");
-        let doc = Document::parse(&text).map_err(broken)?;
+        let broken = |e: String| format!("pandoc's file cannot be finished: {rels} cannot be read: {e}");
+        let doc = crate::xml_limits::parse(&text).map_err(broken)?;
         // the part the relationships belong to, `word/document.xml` for `word/_rels/document.xml.rels`
         let partner = rels.rsplit_once("/_rels/").map(|(dir, name)| format!("{dir}/{}", name.trim_end_matches(".rels"))).filter(|p| all.contains(p));
         let used: Option<HashSet<String>> = match partner {
             Some(p) => {
                 let part = file.text(&p)?;
-                let d = Document::parse(part).map_err(|e| format!("pandoc's file cannot be finished: {p} cannot be read: {e}"))?;
+                let d = crate::xml_limits::parse(part).map_err(|e| format!("pandoc's file cannot be finished: {p} cannot be read: {e}"))?;
                 Some(d.descendants().flat_map(|n| n.attributes().filter(|a| a.namespace() == Some(RELATIONSHIPS)).map(|a| a.value().to_string()).collect::<Vec<_>>()).collect())
             }
             None => None,

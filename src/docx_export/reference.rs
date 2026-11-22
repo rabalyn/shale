@@ -43,8 +43,8 @@ fn name_of(style: Node) -> Option<String> {
 /// dropped (the original has its defaults), and a `w:basedOn`, `w:next` or `w:link` naming a style of pandoc's
 /// that the original has under another id names that id.
 pub fn merge_styles(original: &str, default: &str) -> Result<String, String> {
-    let o = Document::parse(original).map_err(|e| format!("its styles cannot be read: {e}"))?;
-    let d = Document::parse(default).map_err(|e| format!("pandoc's default styles cannot be read: {e}"))?;
+    let o = crate::xml_limits::parse(original).map_err(|e| format!("its styles cannot be read: {e}"))?;
+    let d = crate::xml_limits::parse(default).map_err(|e| format!("pandoc's default styles cannot be read: {e}"))?;
     let styles = |doc: &'_ Document<'_>| doc.root_element().children().filter(|n| is_w(*n, "style")).filter_map(|n| Some((val(n, "styleId")?.to_string(), name_of(n)?, n.id()))).collect::<Vec<_>>();
     let have = styles(&o);
     let have_ids: HashSet<String> = have.iter().map(|(id, ..)| id.to_lowercase()).collect();
@@ -138,7 +138,7 @@ fn headings(upto: usize) -> impl Iterator<Item = String> {
 /// The styles with `look` laid into them (DOCX-008): the defaults and the styles Word's own names for headings
 /// have. A style that is not there is not changed.
 pub fn lay_props(styles: &str, look: &PrintLook) -> Result<String, String> {
-    let doc = Document::parse(styles).map_err(|e| format!("pandoc's default styles cannot be read: {e}"))?;
+    let doc = crate::xml_limits::parse(styles).map_err(|e| format!("pandoc's default styles cannot be read: {e}"))?;
     let root = doc.root_element();
     // (where, which properties element) → what is done to it
     let mut plan: Vec<((Holder, &'static str), Vec<Op>)> = Vec::new();
@@ -219,7 +219,7 @@ pub fn text_width(reference: &[u8], look: &PrintLook) -> f32 {
     const TWIPS_PER_INCH: f32 = 1440.0;
     let section = Package::read(reference).ok().and_then(|p| {
         let document = p.text("word/document.xml").ok()?;
-        let doc = Document::parse(document).ok()?;
+        let doc = crate::xml_limits::parse(document).ok()?;
         let sect = doc.descendants().find(|n| is_w(*n, "sectPr"))?;
         let get = |part: &str, attr: &str| child(sect, part).and_then(|n| val(n, attr)).and_then(|v| v.parse::<f32>().ok());
         Some((get("pgSz", "w"), get("pgMar", "left"), get("pgMar", "right")))

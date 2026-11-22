@@ -15,6 +15,8 @@ mod xml;
 
 #[cfg(test)]
 mod export_tests;
+#[cfg(test)]
+mod schema_check;
 
 use crate::pdf::tex::compile::WorkDir;
 use crate::pdf::tex::proc::{self, Ending};

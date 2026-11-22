@@ -878,6 +878,9 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   out, compressed). Docx → note → docx keeps what the import kept: the words of the fixtures come back (all of them, 95 % of `text.docx`);
   merged cells, figure and table numbers, tab stops, line spacing of single paragraphs, small caps and all but the last section's page are lost
   at import. `scripts/roundtrip-docx.sh <file.docx>` prints the share of the words of any Word file that comes back.
+  `scripts/validate-docx.sh <file.docx>…` checks a Word file against Microsoft's WordprocessingML schema (the export tests do it for every file they
+  write) and `scripts/docx-corpus.sh` runs the round trip, the schema check and a page count on 50 real-world Word files (developer tools). A Word
+  file whose XML is nested more than 256 levels is refused at import with a message instead of crashing the program.
 
 - Choose the folder (one per project, for example) and tags. Small pictures from signatures are
   left out by default, and each attachment can be ticked on or off.

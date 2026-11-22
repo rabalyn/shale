@@ -307,7 +307,7 @@ impl Base {
 /// (the last two optional). A part that does not parse counts as missing.
 pub fn read(document: &str, styles: Option<&str>, theme: Option<&str>) -> Look {
     let mut look = Look::default();
-    let Ok(doc) = Document::parse(document) else { return look };
+    let Ok(doc) = crate::xml_limits::parse(document) else { return look };
     look.title_off = true;
     look.toc = has_toc(&doc);
     // the last section holds the page setup of the document
@@ -326,8 +326,8 @@ pub fn read(document: &str, styles: Option<&str>, theme: Option<&str>) -> Look {
             look.margins = sides.map(|s| s.join(" "));
         }
     }
-    let theme = theme.and_then(|t| Document::parse(t).ok());
-    let Some(styles) = styles.and_then(|s| Document::parse(s).ok()) else { return look };
+    let theme = theme.and_then(|t| crate::xml_limits::parse(t).ok());
+    let Some(styles) = styles.and_then(|s| crate::xml_limits::parse(s).ok()) else { return look };
     let fonts = theme.as_ref().map(theme_fonts).unwrap_or((None, None));
     let mut base = Base::default();
     if let Some(defaults) = styles.descendants().find(|n| is_w(*n, "docDefaults")) {
@@ -535,8 +535,8 @@ impl<'a, 'i> Palette<'a, 'i> {
 /// outside, so that Markdown emphasis still works. `None` when there is nothing to tag or the text
 /// does not parse.
 pub fn tag_runs(document: &str, styles: Option<&str>, theme: Option<&str>) -> Option<String> {
-    let doc = Document::parse(document).ok()?;
-    let (styles, theme) = (styles.and_then(|s| Document::parse(s).ok()), theme.and_then(|t| Document::parse(t).ok()));
+    let doc = crate::xml_limits::parse(document).ok()?;
+    let (styles, theme) = (styles.and_then(|s| crate::xml_limits::parse(s).ok()), theme.and_then(|t| crate::xml_limits::parse(t).ok()));
     let palette = Palette { styles: styles.as_ref(), theme: theme.as_ref() };
     let mut edits: Vec<Edit> = Vec::new();
     for run in doc.descendants().filter(|n| is_w(*n, "r")) {
@@ -636,8 +636,8 @@ fn style_page_break(styles: &Document, style: Node) -> Option<bool> {
 /// `w:sectPr` of a section that begins on a new page. Not in tables, text boxes and deleted text,
 /// which have no page of their own. `None` when there is none or the text does not parse.
 pub fn mark_breaks(document: &str, styles: Option<&str>) -> Option<String> {
-    let doc = Document::parse(document).ok()?;
-    let styles = styles.and_then(|s| Document::parse(s).ok());
+    let doc = crate::xml_limits::parse(document).ok()?;
+    let styles = styles.and_then(|s| crate::xml_limits::parse(s).ok());
     let nested = |n: Node| n.ancestors().any(|a| is_w(a, "tc") || is_w(a, "txbxContent") || is_w(a, "del"));
     let mut edits: Vec<Edit> = Vec::new();
     for n in doc.descendants().filter(|n| is_w(*n, "br") && val(*n, "type") == Some("page")) {
@@ -740,8 +740,8 @@ fn paragraph_align(p: Node, styles: Option<&Document>) -> crate::markdown::Align
 /// text does not parse.
 pub fn mark_aligns(document: &str, styles: Option<&str>, body_justify: bool) -> Option<String> {
     use crate::markdown::Align;
-    let doc = Document::parse(document).ok()?;
-    let styles = styles.and_then(|s| Document::parse(s).ok());
+    let doc = crate::xml_limits::parse(document).ok()?;
+    let styles = styles.and_then(|s| crate::xml_limits::parse(s).ok());
     let body = if body_justify { Align::Justify } else { Align::Left };
     let mut edits: Vec<Edit> = Vec::new();
     for p in doc.descendants().filter(|n| is_w(*n, "p")) {
@@ -997,17 +997,19 @@ pub fn zip_bytes(files: &[(String, Vec<u8>)], deflate: bool) -> Result<Vec<u8>, 
     Ok(out)
 }
 
-/// What one Word file gives: its look, and the path of a tagged copy when there was a colour to tag.
+/// What one Word file gives: its look, and the path of a tagged copy when there was a colour to tag. `error` says why the
+/// file is refused: a part nested too deeply to be read safely (IMP-047, DEV-038).
 pub struct Analysis {
     pub look: Look,
     pub tagged: Option<PathBuf>,
+    pub error: Option<String>,
 }
 
 /// Read the look of `docx` and, when it has coloured runs or page breaks, write the tagged copy `tagged.docx`
 /// in `work` (an existing folder). The original is not touched. Never fails: what cannot be done
-/// is left out.
+/// is left out, except a part that is nested too deeply, which is the `error` of the result.
 pub fn analyse(docx: &Path, work: &Path) -> Analysis {
-    let none = Analysis { look: Look::default(), tagged: None };
+    let none = Analysis { look: Look::default(), tagged: None, error: None };
     let Ok(bytes) = crate::fsutil::read(docx) else { return none };
     let dir = work.join("unzipped");
     if std::fs::create_dir_all(&dir).is_err() || archive::extract(&bytes, &dir).is_err() {
@@ -1016,6 +1018,12 @@ pub fn analyse(docx: &Path, work: &Path) -> Analysis {
     let part = |p: &str| crate::fsutil::read_to_string(dir.join(p)).ok();
     let Some(document) = part("word/document.xml") else { return none };
     let (styles, theme) = (part("word/styles.xml"), part("word/theme/theme1.xml"));
+    let too_deep = [("word/document.xml", Some(&document)), ("word/styles.xml", styles.as_ref()), ("word/theme/theme1.xml", theme.as_ref())]
+        .into_iter()
+        .find_map(|(name, text)| crate::xml_limits::check_depth(text?).err().map(|e| format!("{name}: {e}")));
+    if too_deep.is_some() {
+        return Analysis { error: too_deep, ..none };
+    }
     let look = read(&document, styles.as_deref(), theme.as_deref());
     let marked = mark_breaks(&document, styles.as_deref());
     let aligned = mark_aligns(marked.as_deref().unwrap_or(&document), styles.as_deref(), look.align == Some("justify"));
@@ -1026,5 +1034,5 @@ pub fn analyse(docx: &Path, work: &Path) -> Analysis {
         write_zip(&dir, &to).ok()?;
         Some(to)
     });
-    Analysis { look, tagged }
+    Analysis { look, tagged, error: None }
 }

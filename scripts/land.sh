@@ -8,7 +8,7 @@
 #
 # A branch is a local branch if one has the name, else `origin/<branch>`, else any commit.
 # The checks: every new commit names an issue (FORGE-008), `cargo fmt --check`, clippy with
-# `-D warnings` for Linux (also with `--features bench`), and for macOS and Windows (`scripts/cross-check.sh`), `cargo nextest run --locked --no-fail-fast` (#451; cargo-nextest is required, a landing without it stops at the start; `--test-threads` from RUST_TEST_THREADS or the cargo config's [env], because nextest does not read it itself; also `cargo test --features bench bench::` when the change touches the harness or the build, `scripts/bench-tests-wanted.sh` (BUILD-035, #449), or with --release, and also `cargo test --release` with --release), and the real-server
+# `-D warnings` for Linux (also with `--features bench`), and for macOS and Windows (`scripts/cross-check.sh`), the Word schemas of the docx tests fetched into their cache (`scripts/validate-docx.sh --fetch`, DEV-036), `cargo nextest run --locked --no-fail-fast` (#451; cargo-nextest is required, a landing without it stops at the start; `--test-threads` from RUST_TEST_THREADS or the cargo config's [env], because nextest does not read it itself; also `cargo test --features bench bench::` when the change touches the harness or the build, `scripts/bench-tests-wanted.sh` (BUILD-035, #449), or with --release, and also `cargo test --release` with --release), and the real-server
 # suites of tests/caldav-env, tests/mail-env and tests/forgejo-env and the LuaLaTeX suite of tests/tex-env, each only when the
 # change touches its code or environment (`.forgejo/scripts/env-tests.sh suites`, #447); --no-env-tests skips them and
 # says so. A merge conflict is not resolved here: merge `origin/main` into the branch, resolve
@@ -207,6 +207,9 @@ checks() {
   # RUST_TEST_THREADS (only NEXTEST_TEST_THREADS), so the thread budget is passed on: the variable,
   # else the `RUST_TEST_THREADS = "N"` of the cargo config's [env] (which only `cargo test` applies
   # to libtest, so this shell does not have it), else nextest's default (all cores)
+  # the Word schemas the docx tests check against (DEV-036): without them those checks skip, so a landing
+  # fetches them once into the cache (about 1 s; nothing to do after that) and stops when it cannot
+  step "Word schemas (scripts/validate-docx.sh --fetch)" bash scripts/validate-docx.sh --fetch || return 1
   local nextest_threads=() threads=${RUST_TEST_THREADS:-}
   if [ -z "$threads" ]; then
     threads=$(command grep -hs -m1 '^[[:space:]]*RUST_TEST_THREADS[[:space:]]*=' "${CARGO_HOME:-$HOME/.cargo}/config.toml" .cargo/config.toml | sed 's/[^0-9]//g' | head -n 1 || true)

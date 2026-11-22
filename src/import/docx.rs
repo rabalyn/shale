@@ -220,6 +220,9 @@ pub fn prepare(c: &Convert, reserved: &mut HashSet<String>) -> Result<Prepared, 
     drop(folder_step);
     // pandoc runs on a copy with the colours tagged (IMP-041), and on the original when there is none or it fails
     let analysis = tracing::info_span!("flow.import_docx.analyse", peer = "source").in_scope(|| docx_look::analyse(c.docx, &dir.join("look")));
+    if let Some(e) = &analysis.error {
+        return Err(format!("“{file}” cannot be imported: {e}"));
+    }
     let absolute = |p: &Path| std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
     let mut inputs = vec![absolute(c.docx)];
     if let Some(t) = &analysis.tagged {
