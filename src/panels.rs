@@ -266,6 +266,7 @@ impl ShaleApp {
                 FileKind::Drawing if crate::drawing::canvas::is_canvas_path(&rel) => "canvas",
                 FileKind::Drawing => "drawing",
                 FileKind::Other => rel.extension().and_then(|e| e.to_str()).unwrap_or(""),
+                FileKind::Note if self.vault.as_ref().is_some_and(|v| v.conflict_of(&rel).is_some()) => "conflict",
                 FileKind::Note => "",
             };
             let color = if kind == FileKind::Other { theme::palette().muted } else { theme::palette().text };
@@ -830,6 +831,7 @@ impl ShaleApp {
             | Modal::DataUsage
             | Modal::History
             | Modal::Changes
+            | Modal::Conflict(_)
             | Modal::SyncWizard => {}
             Modal::ConvertCanvas { rel, new_tab, always, existing } => {
                 let resp = crate::dialog::Dialog::new("convert-canvas", "Convert to an editable drawing?").width(460.0).show(&ctx, |ui| {
@@ -940,6 +942,9 @@ impl ShaleApp {
         }
         if let Modal::Changes = &modal {
             keep = self.history_changes_dialog(&ctx);
+        }
+        if let Modal::Conflict(v) = &mut modal {
+            keep &= self.conflict_dialog(&ctx, v);
         }
         if let Modal::SyncWizard = &modal {
             keep = self.sync_wizard_dialog(&ctx);

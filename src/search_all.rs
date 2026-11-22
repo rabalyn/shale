@@ -158,7 +158,7 @@ pub fn note_hits(vault: &Vault, query: &Query) -> Vec<Hit> {
         return vec![];
     }
     let mut out = Vec::new();
-    for f in &vault.files {
+    for f in vault.files.iter().filter(|f| !vault.is_shadow_copy(&f.rel)) {
         let name = f.display_name();
         let before = out.len();
         if let Some(n) = vault.notes.get(&f.rel) {

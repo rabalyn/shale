@@ -190,6 +190,8 @@ pub struct Vault {
     name_index: HashMap<String, Vec<PathBuf>>,
     /// Key ([`name_key`]) of a vault path (`projects/plan.md` and `projects/plan`) -> file.
     path_index: HashMap<String, PathBuf>,
+    /// The notes that are a cloud client's or Shale's own conflict copy (NET-015), built with the name index.
+    conflicts: HashMap<PathBuf, crate::conflict::Conflict>,
     /// Path -> position in `files`, for [`Vault::file`] (PERF-002). Built with the name index, which
     /// is rebuilt whenever the set of files changes; a rescan that only changes times keeps the order.
     file_pos: HashMap<PathBuf, usize>,
@@ -652,7 +654,12 @@ impl Vault {
         self.name_index.clear();
         self.path_index.clear();
         self.file_pos = self.files.iter().enumerate().map(|(i, f)| (f.rel.clone(), i)).collect();
+        self.conflicts = self.find_conflicts();
         for f in &self.files {
+            // a copy next to its original is no second note of that name (NET-015)
+            if self.is_shadow_copy(&f.rel) {
+                continue;
+            }
             self.name_index.entry(name_key(&f.link_name)).or_default().push(f.rel.clone());
             // also allow the full file name (`Note.md`, `Plan.excalidraw.md`)
             let full = f.rel.file_name().map(|n| name_key(&n.to_string_lossy())).unwrap_or_default();
@@ -670,6 +677,28 @@ impl Vault {
                 self.path_index.insert(path, f.rel.clone());
             }
         }
+    }
+
+    /// The conflict copies among the notes, each with its original when that file exists in the same folder.
+    fn find_conflicts(&self) -> HashMap<PathBuf, crate::conflict::Conflict> {
+        let mut out = HashMap::new();
+        for f in self.files.iter().filter(|f| f.kind != FileKind::Other) {
+            let Some((client, name)) = f.rel.file_name().and_then(|n| crate::conflict::original_of(&n.to_string_lossy())) else { continue };
+            let original = f.rel.with_file_name(name);
+            let original = self.file_pos.contains_key(&original).then_some(original);
+            out.insert(f.rel.clone(), crate::conflict::Conflict { client, original });
+        }
+        out
+    }
+
+    /// The conflict copy `rel` is (NET-015): a note, with the client that made it and its original.
+    pub fn conflict_of(&self, rel: &Path) -> Option<&crate::conflict::Conflict> {
+        self.conflicts.get(rel)
+    }
+
+    /// A conflict copy whose original exists: left out of links, graph, search, tasks and tags (NET-015).
+    pub fn is_shadow_copy(&self, rel: &Path) -> bool {
+        self.conflicts.get(rel).is_some_and(|c| c.original.is_some())
     }
 
     fn reparse_all(&mut self) {
@@ -720,6 +749,11 @@ impl Vault {
     /// Notes and drawings with their link index.
     fn linkers(&self) -> impl Iterator<Item = (&PathBuf, &NoteIndex)> {
         self.notes.iter().chain(self.drawings.iter())
+    }
+
+    /// [`Vault::linkers`] without the conflict copies that have an original (NET-015).
+    fn visible_linkers(&self) -> impl Iterator<Item = (&PathBuf, &NoteIndex)> {
+        self.linkers().filter(|(p, _)| !self.is_shadow_copy(p))
     }
 
     fn reparse(&mut self, rel: &Path) {
@@ -886,7 +920,7 @@ impl Vault {
     /// the line is the text of the element with the link.
     pub fn backlinks(&self, rel: &Path) -> Vec<(PathBuf, Vec<(usize, String)>)> {
         let mut out = Vec::new();
-        for (src, n) in self.linkers() {
+        for (src, n) in self.visible_linkers() {
             let mut lines = Vec::new();
             for (l, r) in n.links.iter().zip(n.resolved.iter()) {
                 if r.as_deref() == Some(rel) && src != rel {
@@ -914,7 +948,7 @@ impl Vault {
         }
         let mut out = Vec::new();
         for (src, n) in &self.notes {
-            if src == rel {
+            if src == rel || self.is_shadow_copy(src) {
                 continue;
             }
             // most notes do not have the name anywhere: one pass over an ASCII text finds that out
@@ -992,7 +1026,7 @@ impl Vault {
 
     /// Every task in every note, sorted by note path.
     pub fn all_tasks(&self) -> Vec<(PathBuf, Task)> {
-        let mut notes: Vec<(String, &PathBuf, &NoteIndex)> = self.notes.iter().filter(|(_, n)| !n.tasks.is_empty()).map(|(p, n)| (sort_key(p), p, n)).collect();
+        let mut notes: Vec<(String, &PathBuf, &NoteIndex)> = self.notes.iter().filter(|(p, n)| !n.tasks.is_empty() && !self.is_shadow_copy(p)).map(|(p, n)| (sort_key(p), p, n)).collect();
         notes.sort_by(|a, b| a.0.cmp(&b.0));
         let mut out = Vec::with_capacity(notes.iter().map(|n| n.2.tasks.len()).sum());
         for (_, p, n) in notes {
@@ -1005,7 +1039,7 @@ impl Vault {
 
     pub fn all_tags(&self) -> Vec<(String, usize)> {
         let mut m: HashMap<String, usize> = HashMap::new();
-        for n in self.notes.values() {
+        for n in self.notes.iter().filter(|(p, _)| !self.is_shadow_copy(p)).map(|(_, n)| n) {
             for t in &n.tags {
                 *m.entry(t.clone()).or_default() += 1;
             }
@@ -1418,7 +1452,7 @@ impl Vault {
         let mut nodes: Vec<GraphNode> = Vec::new();
         let mut idx: HashMap<String, usize> = HashMap::new();
         for f in &self.files {
-            if f.kind == FileKind::Other {
+            if f.kind == FileKind::Other || self.is_shadow_copy(&f.rel) {
                 continue;
             }
             idx.insert(rel_to_string(&f.rel), nodes.len());
@@ -1426,7 +1460,7 @@ impl Vault {
         }
         let mut edges = HashSet::new();
         // in the order of the paths: the missing notes get the same places in the graph every start
-        let mut linkers: Vec<_> = self.linkers().collect();
+        let mut linkers: Vec<_> = self.visible_linkers().collect();
         linkers.sort_by(|a, b| a.0.cmp(b.0));
         for (src, n) in linkers {
             let Some(&a) = idx.get(&rel_to_string(src)) else { continue };
@@ -2739,5 +2773,66 @@ mod tests {
         }
         assert_eq!(snapshot(&v), parallel);
         let _ = fs::remove_dir_all(&d);
+    }
+
+    /// A vault with `Plan.md` and its Syncthing copy in `Work/`, an orphan copy, and a note linking `Plan`.
+    fn conflict_vault(tag: &str) -> (PathBuf, Vault) {
+        let d = temp_vault(tag);
+        fs::create_dir_all(d.join("Work")).unwrap();
+        fs::write(d.join("Work/Plan.md"), "# Plan\n- [ ] ship #alpha\nzebrafish original\n").unwrap();
+        fs::write(d.join("Work/Plan.sync-conflict-20261121-142440-7JJWLPP.md"), "# Plan\n- [ ] copytask #beta [[Other]]\nzebrafish copy\n").unwrap();
+        fs::write(d.join("Work/Lost (conflict 2026-11-21 1424).md"), "orphan text\n").unwrap();
+        fs::write(d.join("Other.md"), "see [[Plan]] and [[Plan.sync-conflict-20261121-142440-7JJWLPP]]\n").unwrap();
+        let v = Vault::open(&d).unwrap();
+        (d, v)
+    }
+
+    // spec: NET-015
+    #[test]
+    fn net_015_a_copy_is_paired_with_its_original_in_the_same_folder() {
+        let (d, v) = conflict_vault("net015-pair");
+        let copy = Path::new("Work/Plan.sync-conflict-20261121-142440-7JJWLPP.md");
+        let c = v.conflict_of(copy).unwrap();
+        assert_eq!((c.client, c.original.as_deref()), (crate::conflict::Client::Syncthing, Some(Path::new("Work/Plan.md"))));
+        let lost = v.conflict_of(Path::new("Work/Lost (conflict 2026-11-21 1424).md")).unwrap();
+        assert_eq!((lost.client, lost.original.clone()), (crate::conflict::Client::Shale, None), "no original: an orphan");
+        assert!(v.conflict_of(Path::new("Work/Plan.md")).is_none() && v.conflict_of(Path::new("Other.md")).is_none());
+        assert!(v.is_shadow_copy(copy) && !v.is_shadow_copy(Path::new("Work/Lost (conflict 2026-11-21 1424).md")));
+        // the original in another folder is no original
+        fs::create_dir_all(d.join("Elsewhere")).unwrap();
+        fs::write(d.join("Elsewhere/Plan.md"), "x").unwrap();
+        fs::remove_file(d.join("Work/Plan.md")).unwrap();
+        let mut v = v;
+        v.rescan();
+        assert_eq!(v.conflict_of(copy).unwrap().original, None);
+        let _ = fs::remove_dir_all(d);
+    }
+
+    // spec: NET-015
+    #[test]
+    fn net_015_a_copy_with_an_original_is_left_out_of_links_graph_search_tasks_and_tags() {
+        let (d, v) = conflict_vault("net015-exclude");
+        let copy = Path::new("Work/Plan.sync-conflict-20261121-142440-7JJWLPP.md");
+        // links name the original; a link to the copy's own name finds nothing
+        assert_eq!(v.resolve("Plan", None), Some(PathBuf::from("Work/Plan.md")));
+        assert_eq!(v.resolve("Plan.sync-conflict-20261121-142440-7JJWLPP", None), None);
+        assert_eq!(v.resolve("Work/Plan.sync-conflict-20261121-142440-7JJWLPP", None), None);
+        assert_eq!(v.ambiguity("Plan", None), None);
+        // the copy's own links are not backlinks, and it has no backlinks
+        assert!(v.backlinks(Path::new("Other.md")).is_empty());
+        assert_eq!(v.backlinks(Path::new("Work/Plan.md")).len(), 1);
+        let (nodes, edges) = v.graph(true);
+        assert!(!nodes.iter().any(|n| n.rel.as_deref() == Some(copy)), "not in the graph");
+        assert!(nodes.iter().any(|n| n.rel.as_deref() == Some(Path::new("Work/Lost (conflict 2026-11-21 1424).md"))), "an orphan is");
+        assert_eq!(edges.len(), 2, "Other to Plan, and to the missing name of the copy, nothing from the copy");
+        assert!(v.unlinked_mentions(Path::new("Work/Plan.md")).iter().all(|(p, _)| p != copy));
+        let tasks: Vec<String> = v.all_tasks().into_iter().map(|(_, t)| t.text).collect();
+        assert_eq!(tasks.len(), 1, "{tasks:?}");
+        let tags: Vec<String> = v.all_tags().into_iter().map(|(t, _)| t).collect();
+        assert!(tags.iter().any(|t| t.contains("alpha")) && !tags.iter().any(|t| t.contains("beta")), "{tags:?}");
+        let hits = crate::search_all::note_hits(&v, &crate::search_all::Query::picker("zebrafish"));
+        assert_eq!(hits.len(), 1, "only the original is found");
+        assert!(!crate::search_all::note_hits(&v, &crate::search_all::Query::picker("orphan")).is_empty());
+        let _ = fs::remove_dir_all(d);
     }
 }

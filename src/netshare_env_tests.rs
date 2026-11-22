@@ -383,7 +383,7 @@ fn syncthing_env_saves_arrive_on_the_other_device_and_no_temp_file_leaks() {
     assert_eq!(names(&p.b), ["N.md"], "nothing but the note is in B's folder");
 }
 
-// spec: NET-007
+// spec: NET-007, NET-015
 #[test]
 #[ignore = "needs the Syncthing pair: tests/syncthing-env/syncthing-env.sh up"]
 fn syncthing_env_an_edit_on_both_devices_gives_a_sync_conflict_file_that_shale_lists() {
@@ -414,7 +414,12 @@ fn syncthing_env_an_edit_on_both_devices_gives_a_sync_conflict_file_that_shale_l
         let mut texts: Vec<String> = v.files.iter().map(|f| fsutil::read_to_string(dir.join(&f.rel)).unwrap()).collect();
         texts.sort();
         assert_eq!(texts, ["from A\n", "from B\n"], "both versions survive and are notes of the vault: {:?}", v.files.iter().map(|f| &f.rel).collect::<Vec<_>>());
-        assert!(v.notes.contains_key(Path::new(&name)), "the conflict file is an ordinary note (the vault lists it)");
+        assert!(v.notes.contains_key(Path::new(&name)), "the conflict file is a note (the vault lists it)");
+        // NET-015: and Shale knows it is Syncthing's copy of N.md, and leaves it out of the links
+        let c = v.conflict_of(Path::new(&name)).expect("the real Syncthing name is recognised");
+        assert_eq!((c.client, c.original.as_deref()), (crate::conflict::Client::Syncthing, Some(Path::new("N.md"))));
+        assert!(v.is_shadow_copy(Path::new(&name)) && v.conflict_of(Path::new("N.md")).is_none());
+        assert_eq!(v.resolve("N", None), Some(PathBuf::from("N.md")));
     }
 }
 

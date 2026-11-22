@@ -152,6 +152,9 @@ pub enum RightPanel {
 mod busy_jobs;
 #[cfg(test)]
 mod calendar_action_tests;
+pub mod conflict;
+#[cfg(test)]
+mod conflict_ui_tests;
 mod docx_export;
 mod drops;
 #[cfg(all(test, target_os = "linux"))]
@@ -224,6 +227,8 @@ pub enum Modal {
     History,
     /// the comparison of two versions of a note (HIST-008); its state is `ShaleApp::history.changes`
     Changes,
+    /// a conflict copy next to its original (NET-015)
+    Conflict(Box<conflict::View>),
     /// the "Turn on sync" wizard (SYNC-047); its state is `ShaleApp::sync.setup.wizard`
     SyncWizard,
     Export(Box<crate::pdf::export_dialog::ExportDialog>),
@@ -263,6 +268,13 @@ pub enum Action {
     Export(PathBuf),
     /// open the "Export to Word" dialog for a note (DOCX-001)
     ExportDocx(PathBuf),
+    /// open the comparison of a conflict copy with its original (NET-015)
+    OpenConflict(PathBuf),
+    /// settle a conflict copy: its text over the original (`this`), or the original stays (NET-015)
+    KeepConflict {
+        copy: PathBuf,
+        this: bool,
+    },
     /// open the "Export to PDF" dialog for a folder as one PDF, a book; the empty path is the vault (BOOK-010)
     ExportFolder(PathBuf),
     Open {
@@ -2452,6 +2464,9 @@ impl ShaleApp {
                 }
                 Action::History(rel) => self.history_show(&rel),
                 Action::Trash(rel) => self.modal = Some(Modal::ConfirmTrash { rel }),
+                Action::OpenConflict(copy) => self.open_conflict(&copy),
+                Action::KeepConflict { copy, this: true } => self.conflict_keep_this(&copy),
+                Action::KeepConflict { copy, this: false } => self.conflict_keep_other(&copy),
                 Action::RestoreTrashed => self.restore_trashed(),
                 Action::NewFolder(parent) => self.modal = Some(Modal::NewFolder { parent, name: String::new() }),
                 Action::OpenVault(p) => self.open_vault(&p),

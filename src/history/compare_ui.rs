@@ -355,7 +355,7 @@ fn span_format(span: &Span, font: &FontId, colour: Color32) -> TextFormat {
 }
 
 /// One block of the track-changes view: a gutter mark and the text (HIST-009, HIST-011).
-fn draw_row(ui: &mut Ui, row: &Row) -> Rect {
+pub(crate) fn draw_row(ui: &mut Ui, row: &Row) -> Rect {
     let p = theme::palette();
     let top = ui.cursor().min;
     let (font, colour) = match &row.kind {
@@ -411,7 +411,7 @@ const MARK_W: f32 = 18.0;
 
 /// The Markdown side by side, with line numbers, tinted changed lines, a mark between the sides and
 /// the changed words underlined or struck through (HIST-012). Only the rows in view are drawn.
-fn source_view(ui: &mut Ui, rows: &[Side], jump_to: Option<usize>) {
+pub(crate) fn source_view(ui: &mut Ui, rows: &[Side], jump_to: Option<usize>) {
     let mut area = egui::ScrollArea::both().id_salt("history-source-body").auto_shrink([false, false]);
     if let Some(row) = jump_to {
         area = area.vertical_scroll_offset((row as f32 * LINE_H - 60.0).max(0.0));
