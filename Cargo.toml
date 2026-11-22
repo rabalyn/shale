@@ -46,6 +46,7 @@ bench = []
 [dev-dependencies]
 # the time zone database that Windows builds bundle (below): the tests read it on every system
 jiff-tzdb = "1"
+proptest = { version = "1.12.0", default-features = false, features = ["std"] }
 # self-signed certificate for the pretend mail server in tests
 rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
 # the recorder of the dataflow diagrams is a layer of this (DEV-026)

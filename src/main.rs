@@ -110,6 +110,8 @@ mod properties;
 mod properties_ui;
 #[cfg(test)]
 mod properties_ui_tests;
+#[cfg(test)]
+mod property_test_support;
 mod reader;
 mod recorder;
 mod recovery;
@@ -157,6 +159,8 @@ mod vault;
 mod vault_cache;
 mod vault_check;
 mod vault_path;
+#[cfg(test)]
+mod vault_path_tests;
 mod vault_state;
 mod vim;
 mod virtual_list;
