@@ -1,0 +1,206 @@
+{
+  "schema": 2,
+  "verdict": "regression",
+  "exit_code": 1,
+  "x": {
+    "commit": "46743a10996d8aea29d81e8099bfbdfa5c1a72ae",
+    "describe": "v0.7.2",
+    "date": "2026-11-22T15:54:42Z",
+    "load": 4.75,
+    "cores": 28,
+    "repeats": 1
+  },
+  "y": {
+    "commit": "05f22efb72a42f462e8ff0ca4b92367d1aad0e91",
+    "describe": "v0.7.3",
+    "date": "2026-11-22T19:43:30Z",
+    "load": 48.19,
+    "cores": 28,
+    "repeats": 1
+  },
+  "busy": true,
+  "threshold_time_pct": 10.0,
+  "threshold_bytes_pct": 15.0,
+  "threshold_allocs_pct": 10.0,
+  "rows": [
+    {
+      "id": "worst.startup",
+      "status": "both",
+      "x_median_ns": 778703084,
+      "y_median_ns": 756352263,
+      "time_delta_pct": -2.870262293708856,
+      "time_verdict": "ok",
+      "x_range_ns": [
+        774619350,
+        780380228
+      ],
+      "y_range_ns": [
+        750587170,
+        756829275
+      ],
+      "x_allocs": 5012777,
+      "y_allocs": 5018333,
+      "allocs_delta_pct": 0.11083676772375871,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 183198310,
+      "y_peak_bytes": 183204991,
+      "bytes_delta_pct": 0.0036468677030918025,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "worst.frame.idle",
+      "status": "both",
+      "x_median_ns": 2770269,
+      "y_median_ns": 2592318,
+      "time_delta_pct": -6.423600018626351,
+      "time_verdict": "noisy",
+      "x_range_ns": [
+        2648417,
+        2913395
+      ],
+      "y_range_ns": [
+        2278509,
+        4690607
+      ],
+      "x_allocs": 10010,
+      "y_allocs": 10010,
+      "allocs_delta_pct": 0.0,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 19368344,
+      "y_peak_bytes": 19368344,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "worst.frame.typing",
+      "status": "both",
+      "x_median_ns": 25074427,
+      "y_median_ns": 78536062,
+      "time_delta_pct": 213.21179143994,
+      "time_verdict": "REGRESSION",
+      "x_range_ns": [
+        24276343,
+        26280058
+      ],
+      "y_range_ns": [
+        68818954,
+        101253521
+      ],
+      "x_allocs": 146076,
+      "y_allocs": 146076,
+      "allocs_delta_pct": 0.0,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 22299869,
+      "y_peak_bytes": 23321630,
+      "bytes_delta_pct": 4.581914808557844,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "worst.views.cycle",
+      "status": "both",
+      "x_median_ns": 147551864,
+      "y_median_ns": 603373869,
+      "time_delta_pct": 308.9232441007997,
+      "time_verdict": "REGRESSION",
+      "x_range_ns": [
+        145825137,
+        219082457
+      ],
+      "y_range_ns": [
+        493685004,
+        766195036
+      ],
+      "x_allocs": 397999,
+      "y_allocs": 504702,
+      "allocs_delta_pct": 26.809866356448133,
+      "allocs_verdict": "REGRESSION",
+      "x_peak_bytes": 90851868,
+      "y_peak_bytes": 90851868,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "worst.memory.growth",
+      "status": "both",
+      "x_median_ns": 27707455353,
+      "y_median_ns": 63024533440,
+      "time_delta_pct": 127.4641703362921,
+      "time_verdict": "REGRESSION",
+      "x_range_ns": [
+        27707455353,
+        27707455353
+      ],
+      "y_range_ns": [
+        63024533440,
+        63024533440
+      ],
+      "x_allocs": 114599208,
+      "y_allocs": 115774044,
+      "allocs_delta_pct": 1.0251693886051987,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 59371576,
+      "y_peak_bytes": 59371576,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    }
+  ],
+  "regressions": [
+    {
+      "id": "worst.views.cycle",
+      "metric": "time",
+      "x": 147551864,
+      "y": 603373869,
+      "delta_pct": 308.9232441007997,
+      "confidence": "high"
+    },
+    {
+      "id": "worst.frame.typing",
+      "metric": "time",
+      "x": 25074427,
+      "y": 78536062,
+      "delta_pct": 213.21179143994,
+      "confidence": "high"
+    },
+    {
+      "id": "worst.memory.growth",
+      "metric": "time",
+      "x": 27707455353,
+      "y": 63024533440,
+      "delta_pct": 127.4641703362921,
+      "confidence": "high"
+    },
+    {
+      "id": "worst.views.cycle",
+      "metric": "allocs",
+      "x": 397999,
+      "y": 504702,
+      "delta_pct": 26.809866356448133,
+      "confidence": "high"
+    }
+  ],
+  "improvements": [],
+  "tradeoffs": [],
+  "noisy": [],
+  "changed": [],
+  "skipped": [],
+  "summary": {
+    "compared": 5,
+    "faster": 0,
+    "slower": 0,
+    "regressions": 3,
+    "noisy": 1,
+    "changed": 0,
+    "added": 0,
+    "removed": 0
+  }
+}
