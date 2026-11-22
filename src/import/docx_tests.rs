@@ -306,6 +306,7 @@ fn a_file_nested_too_deeply_is_refused_before_pandoc_runs_and_leaves_nothing_in_
     assert_eq!(std::fs::read_dir(&root).unwrap().flat_map(|d| walk(&d.unwrap().path())).filter(|p| p.is_file()).count(), 0, "no file in the vault");
 }
 
+#[cfg(unix)]
 fn walk(p: &Path) -> Vec<PathBuf> {
     let mut all = vec![p.to_path_buf()];
     if p.is_dir() {
