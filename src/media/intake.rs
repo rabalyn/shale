@@ -109,8 +109,8 @@ pub fn bring(vault_root: &Path, libraries: &[Library], src: &Path, how: Choice, 
         return Ok(Taken::InVault(rel.to_path_buf()));
     }
     if how == Choice::Link && media_kind(&file).is_some() {
-        let libraries: Vec<Library> = libraries.iter().map(|l| Library { name: l.name.clone(), path: l.path.canonicalize().map(plain).unwrap_or_else(|_| l.path.clone()) }).collect();
-        let file = plain(file);
+        let libraries: Vec<Library> = libraries.iter().map(|l| Library { name: l.name.clone(), path: l.path.canonicalize().map(crate::fsutil::plain_path).unwrap_or_else(|_| l.path.clone()) }).collect();
+        let file = crate::fsutil::plain_path(file);
         return Ok(Taken::Linked { link: link_text(&file, &libraries), path: file });
     }
     import_file(vault_root, src, date).map(Taken::Copied)
@@ -121,24 +121,6 @@ pub fn bring(vault_root: &Path, libraries: &[Library], src: &Path, how: Choice, 
 pub fn asks(vault_root: &Path, files: &[PathBuf]) -> bool {
     let root = vault_root.canonicalize().unwrap_or_else(|_| vault_root.to_path_buf());
     files.iter().any(|f| media_kind(f).is_some() && f.canonicalize().is_ok_and(|c| !c.starts_with(&root)))
-}
-
-/// A path as Windows programs write it: `canonicalize` makes `\\?\C:\x` of `C:\x`.
-fn plain(path: PathBuf) -> PathBuf {
-    if cfg!(windows) {
-        if let Some(p) = without_verbatim(&path.to_string_lossy()) {
-            return PathBuf::from(p);
-        }
-    }
-    path
-}
-
-/// `C:\x` for `\\?\C:\x` and `\\server\share\x` for `\\?\UNC\server\share\x`; None for any other path.
-fn without_verbatim(p: &str) -> Option<String> {
-    if let Some(unc) = p.strip_prefix(r"\\?\UNC\") {
-        return Some(format!(r"\\{unc}"));
-    }
-    p.strip_prefix(r"\\?\").map(str::to_string)
 }
 
 /// The text that links `path`, a picture, PDF, sound or video outside the vault (MEDIA-020): a
@@ -153,7 +135,7 @@ pub fn link_text(path: &Path, libraries: &[Library]) -> String {
     if let Some((name, rest)) = library_path(path, libraries) {
         return format!("{}[[@{name}/{rest}]]", if embed { "!" } else { "" });
     }
-    let uri = file_uri_for(&path.to_string_lossy(), cfg!(windows));
+    let uri = file_uri(path);
     if embed {
         format!("![](<{uri}>)")
     } else {
@@ -179,6 +161,12 @@ fn library_path<'a>(path: &Path, libraries: &'a [Library]) -> Option<(&'a str, S
         }
     }
     best.map(|(_, name, rest)| (name, rest))
+}
+
+/// The `file://` address of `path` on this system (see [`file_uri_for`]): the one builder of the
+/// addresses that Shale writes into a note, so no writer makes `file://C:\…` or keeps `\\?\`.
+pub fn file_uri(path: &Path) -> String {
+    file_uri_for(&crate::fsutil::plain_path(path.to_path_buf()).to_string_lossy(), cfg!(windows))
 }
 
 /// The `file://` address of a path as the markdown link `![](<…>)` holds it, the form that
@@ -273,9 +261,6 @@ mod tests {
         assert_eq!(file_uri_for("/h/a\nb\u{85}.mp4", false), "file:///h/a%0Ab%C2%85.mp4", "controls, also those of two bytes");
         assert_eq!(file_uri_for(r"C:\Users\ada\My Videos\a.mp4", true), "file:///C:/Users/ada/My Videos/a.mp4");
         assert_eq!(file_uri_for(r"\\nas\share\a.mp4", true), "file:////nas/share/a.mp4");
-        assert_eq!(without_verbatim(r"\\?\C:\Users\a.mp4").as_deref(), Some(r"C:\Users\a.mp4"));
-        assert_eq!(without_verbatim(r"\\?\UNC\nas\share\a.mp4").as_deref(), Some(r"\\nas\share\a.mp4"));
-        assert_eq!(without_verbatim(r"C:\Users\a.mp4"), None);
         // and the system's own reader gives the path back
         for (path, windows) in [(r"C:\Users\ada\My 100% (1) Videos\a.mp4", true), (r"\\nas\share\a.mp4", true), ("/h/a (1) 100%.mp4", false)] {
             let uri = file_uri_for(path, windows);
@@ -290,7 +275,8 @@ mod tests {
         let dir = tmp("roundtrip");
         let lib_dir = dir.join("Videos Library");
         fs::create_dir_all(lib_dir.join("2024")).unwrap();
-        let other = dir.join("loose (copy) 100% <x>");
+        // `<` and `>` are no characters of a Windows file name (error 123); the address encodes them elsewhere
+        let other = dir.join(if cfg!(windows) { "loose (copy) 100%" } else { "loose (copy) 100% <x>" });
         fs::create_dir_all(&other).unwrap();
         let libs = [Library { name: "Videos".into(), path: lib_dir.clone() }];
         let mut files = vec![lib_dir.join("2024/a b.mp4"), lib_dir.join("doc.pdf"), lib_dir.join("pic.png"), other.join("clip (1) 100%.mp4"), other.join("Plan (2).pdf"), other.join("song.mp3")];
@@ -340,8 +326,8 @@ mod tests {
         // Link: nothing is written into the vault
         let before: Vec<_> = walk(&vault);
         let linked = bring(&vault, &libs, &outside.join("a.mp4"), Choice::Link, date).unwrap();
-        let abs = outside.join("a.mp4").canonicalize().unwrap();
-        assert_eq!(linked, Taken::Linked { link: format!("![](<file://{}>)", abs.display()), path: abs });
+        let abs = crate::fsutil::plain_path(outside.join("a.mp4").canonicalize().unwrap());
+        assert_eq!(linked, Taken::Linked { link: format!("![](<{}>)", file_uri(&abs)), path: abs });
         let in_lib = bring(&vault, &libs, &lib_dir.join("b.png"), Choice::Link, date).unwrap();
         assert_eq!(in_lib.link(), "![[@Lib/b.png]]");
         assert_eq!(walk(&vault), before, "linking writes nothing");

@@ -448,6 +448,29 @@ fn renameat2_noreplace(_: &Path, _: &Path) -> Option<io::Result<()>> {
     None
 }
 
+/// A path as people and Windows programs write it: `canonicalize` makes `\\?\C:\x` of `C:\x`, and
+/// Shale never stores or shows that prefix. On other systems the path is returned as it is.
+pub fn plain_path(path: PathBuf) -> PathBuf {
+    if cfg!(windows) {
+        if let Some(p) = without_verbatim(&path.to_string_lossy()) {
+            return PathBuf::from(p);
+        }
+    }
+    path
+}
+
+/// `C:\x` for `\\?\C:\x` and `\\server\share\x` for `\\?\UNC\server\share\x`; None for any other
+/// path (also for the verbatim names of devices and volume GUIDs, which have no ordinary form).
+/// Pure text, so it can be tested on every system.
+pub fn without_verbatim(p: &str) -> Option<String> {
+    if let Some(unc) = p.strip_prefix(r"\\?\UNC\") {
+        return Some(format!(r"\\{unc}"));
+    }
+    let drive = p.strip_prefix(r"\\?\")?;
+    let b = drive.as_bytes();
+    (b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':').then(|| drive.to_string())
+}
+
 // ---- internals ----
 
 /// An error that says which file it is about.
@@ -1109,6 +1132,20 @@ mod tests {
         assert_eq!(v(r"\\server\share\vault\note.md"), r"\\?\UNC\server\share\vault\note.md");
         assert_eq!(v(r"\\?\C:\already"), r"\\?\C:\already");
         assert_eq!(v(r"\\.\pipe\x"), r"\\.\pipe\x");
+    }
+
+    // spec: MEDIA-020
+    #[test]
+    fn the_verbatim_prefix_of_a_canonical_windows_path_is_removed_where_the_rest_is_an_ordinary_path() {
+        assert_eq!(without_verbatim(r"\\?\C:\Users\a.mp4").as_deref(), Some(r"C:\Users\a.mp4"));
+        assert_eq!(without_verbatim(r"\\?\d:\").as_deref(), Some(r"d:\"));
+        assert_eq!(without_verbatim(r"\\?\UNC\nas\share\a.mp4").as_deref(), Some(r"\\nas\share\a.mp4"));
+        for same in [r"C:\Users\a.mp4", r"\\nas\share\a.mp4", r"\\?\Volume{0f1e}\a", r"\\?\pipe\x", r"\\.\C:\x", r"\\?\C", "/home/ada/a.mp4", ""] {
+            assert_eq!(without_verbatim(same), None, "{same}");
+        }
+        // plain_path acts on Windows only: a Unix name may well start with a backslash
+        let odd = PathBuf::from(r"\\?\C:\x");
+        assert_eq!(plain_path(odd.clone()), if cfg!(windows) { PathBuf::from(r"C:\x") } else { odd });
     }
 
     // spec: DATA-004
