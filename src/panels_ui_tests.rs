@@ -188,6 +188,18 @@ pub(super) fn opened(a: &[Action]) -> Vec<String> {
         .collect()
 }
 
+// spec: NET-014
+#[test]
+fn net_014_the_quick_switcher_finds_a_note_typed_in_the_other_normal_form_and_offers_no_duplicate() {
+    let mut p = P::with_files("quick-nfc", &[("Cafe\u{301}.md", "")]);
+    p.app.modal = Some(Modal::QuickSwitch { query: String::new(), sel: 0 });
+    p.look(Show::Modals);
+    p.type_text(Show::Modals, "Caf\u{e9}");
+    let shown = p.look(Show::Modals);
+    assert!(shown.iter().any(|(_, l, _)| l.starts_with("Cafe\u{301}")), "the note is listed: {:?}", shown.iter().map(|x| &x.1).collect::<Vec<_>>());
+    assert!(!shown.iter().any(|(_, l, _)| l.contains("Create")), "the same name is no new note");
+}
+
 // spec: VAULT-023, NAV-005
 #[test]
 fn panel_quick_switcher_finds_opens_creates_and_closes() {

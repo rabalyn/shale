@@ -40,8 +40,11 @@ computer and removes `.git` from the vault, after checking the copy.
 - **Files that only exist online** (OneDrive Files On-Demand, iCloud, Dropbox Smart Sync): Shale
   has to download one to read it, and waits. Mark the vault folder "always keep on this device".
 - **Names that differ only in letter case, or in accents typed differently** (`Café` made on a Mac
-  and on Linux). They can look like the same name and be two files. [[Vault settings]] has a check
-  for names that break on Windows and macOS.
+  and on Linux). They can look like the same name and be two files. Links do not mind the accent
+  form: `[[Café]]` finds the note whichever way its name was typed, and Shale never renames the
+  file for that. If both spellings exist as two files, a link opens the one in its own folder, else
+  the first by path, and the tooltip says that two notes share the name. [[Vault settings]] has a
+  check for names that break on Windows and macOS.
 
 # Things you may notice
 
