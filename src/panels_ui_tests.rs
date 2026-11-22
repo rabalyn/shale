@@ -645,6 +645,18 @@ fn labels_until(p: &mut P, text: &str) -> Vec<String> {
     }
 }
 
+/// Frames until the job of the vault check is done and its answer is taken in (the page keeps showing the last answer while a new check runs).
+fn wait_for_vault_check(p: &mut P) {
+    crate::ui_test_support::settle_within(std::time::Duration::from_secs(60), || {
+        p.frame(Show::Modals, vec![]);
+        if p.app.vault_check.running() {
+            vec!["the vault check"]
+        } else {
+            vec![]
+        }
+    });
+}
+
 // spec: IMP-036
 #[test]
 fn imp_036_the_import_tab_has_the_word_setting_and_says_where_pandoc_is_or_how_to_install_it() {
@@ -969,6 +981,8 @@ fn media_022_the_vault_check_lists_outside_links_by_note_in_the_same_background_
     p.app.cfg.media_libraries = vec![crate::media::outside::Library { name: "Media".into(), path: outside.join("unplugged") }];
     p.app.vault.as_mut().unwrap().set_libraries(&p.app.cfg.media_libraries);
     p.click(Show::Modals, "Check names for Windows and macOS…");
+    // the page still shows the answer of the first check until the new job is done: the label of it is no sign of the new one
+    wait_for_vault_check(&mut p);
     let shown = labels_until(&mut p, "4 links to media outside the vault");
     assert!(shown.iter().any(|l| l.starts_with("Library “Media” has its folder ") && l.contains("unplugged") && l.contains("but it is not there: 2 links")), "{shown:?}");
     let _ = std::fs::remove_dir_all(&outside);

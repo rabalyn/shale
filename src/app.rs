@@ -149,6 +149,8 @@ pub enum RightPanel {
 }
 
 #[cfg(test)]
+mod busy_jobs;
+#[cfg(test)]
 mod calendar_action_tests;
 mod docx_export;
 mod drops;

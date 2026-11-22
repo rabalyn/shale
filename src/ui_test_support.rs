@@ -4,6 +4,25 @@
 
 use crate::app::ShaleApp;
 use eframe::egui::{self, Event, Modifiers, PointerButton, Pos2, RawInput, Rect, Vec2};
+use std::time::{Duration, Instant};
+
+/// How long `settle` waits for the background jobs before it fails.
+const SETTLE_LIMIT: Duration = Duration::from_secs(60);
+
+/// Run `step` (one frame of the window, then the names of the jobs still running, as
+/// `ShaleApp::busy_jobs` gives them) until no job is left; fail naming the jobs when `limit` is
+/// over. The one wait for background jobs of the headless tests (DEV-041).
+pub(crate) fn settle_within(limit: Duration, mut step: impl FnMut() -> Vec<&'static str>) {
+    let deadline = Instant::now() + limit;
+    loop {
+        let busy = step();
+        if busy.is_empty() {
+            return;
+        }
+        assert!(Instant::now() < deadline, "background jobs still running after {limit:?}: {}", busy.join(", "));
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
 
 pub(crate) struct Headless {
     ctx: egui::Context,
@@ -75,6 +94,17 @@ impl Headless {
     /// The place of a widget with this accessibility label (an icon button: its tooltip).
     pub fn find_label(&mut self, app: &mut ShaleApp, label: &str) -> Rect {
         self.try_label(app, label).unwrap_or_else(|| panic!("no {label:?} on screen"))
+    }
+
+    /// Frames until no background job of the window is left (`ShaleApp::busy_jobs`: the tag
+    /// learner that writes `.shale/tag-words.json`, the rescan, the vault check, …), so that no
+    /// file or state changes in the middle of a test that looks at it. Call it after `build`
+    /// and before looking at the vault's files; it fails after 60 s, naming what still runs.
+    pub fn settle(&mut self, app: &mut ShaleApp) {
+        settle_within(SETTLE_LIMIT, || {
+            self.frame(app, vec![]);
+            app.busy_jobs()
+        });
     }
 
     pub fn frames(&mut self, app: &mut ShaleApp, n: usize) {

@@ -357,10 +357,23 @@ impl TagLearner {
         self.at = None;
     }
 
+    /// Whether the vault changed since the last job started and the last one is old enough (or
+    /// there was none): the next `tick` starts a job.
+    fn due(&self, v: &crate::vault::Vault) -> bool {
+        self.job.is_none() && v.generation != self.generation && self.at.map(|t| t.elapsed() > std::time::Duration::from_secs(120)).unwrap_or(true)
+    }
+
     /// Whether a learning job is running.
     #[cfg(test)]
     pub(crate) fn running(&self) -> bool {
         self.job.is_some()
+    }
+
+    /// Whether a job runs or the next `tick` starts one (it learns the words of a vault it has not
+    /// seen yet): the file `.shale/tag-words.json` may still be written (#272).
+    #[cfg(test)]
+    pub(crate) fn pending(&self, vault: Option<&crate::vault::Vault>) -> bool {
+        self.job.is_some() || vault.is_some_and(|v| self.root.as_deref() != Some(v.root.as_path()) || self.due(v))
     }
 
     /// Learn the words again now and then (in the background), and keep them in the vault.
@@ -393,8 +406,7 @@ impl TagLearner {
             self.generation = u64::MAX;
             self.at = None;
         }
-        let due = self.job.is_none() && v.generation != self.generation && self.at.map(|t| t.elapsed() > std::time::Duration::from_secs(120)).unwrap_or(true);
-        if due {
+        if self.due(v) {
             self.generation = v.generation;
             self.at = Some(std::time::Instant::now());
             let notes: Vec<(String, Vec<String>)> = v.notes.values().map(|n| (n.text.clone(), n.tags.clone())).collect();
