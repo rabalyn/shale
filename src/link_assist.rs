@@ -9,6 +9,7 @@
 
 use crate::editor::EditorAction;
 use crate::markdown;
+use crate::media::intake::{Choice, OutsideFiles};
 use crate::theme;
 use crate::vault::Vault;
 use eframe::egui::{self, Key, Modifiers, Ui, Vec2};
@@ -32,6 +33,12 @@ pub(crate) struct MediaPicker {
     /// byte where the `[!` of the shown picker starts
     start: Option<usize>,
     error: Option<String>,
+    /// what to do with files from outside the vault for this pick, set with Alt+Shift+L (MEDIA-019);
+    /// None: what the setting says
+    pub(crate) how: Option<Choice>,
+    /// a media file from outside the vault was picked and the setting is Ask: the picker asks
+    /// whether to copy or link it
+    pub(crate) asking: Option<std::path::PathBuf>,
 }
 
 /// What [`LinkAssist::take_keys`] did this frame.
@@ -55,6 +62,8 @@ pub struct LinkAssist {
     pub people_dir: String,
     /// the setting for numbered headings (CFG-042): the heading list shows the numbers
     pub numbered_headings: bool,
+    /// the setting for files from outside the vault (MEDIA-019): what a pick does with them
+    pub outside: OutsideFiles,
     pub(crate) ac_active: bool,
     /// byte where the `[[` of the open suggestions starts
     ac_start: Option<usize>,
@@ -91,6 +100,7 @@ impl LinkAssist {
             id,
             people_dir: crate::import::people::DEFAULT_DIR.into(),
             numbered_headings: true,
+            outside: OutsideFiles::default(),
             ac_active: false,
             ac_start: None,
             ac_dismissed: None,
@@ -129,6 +139,12 @@ impl LinkAssist {
         )
     }
 
+    /// Where the cursor is in a `[!path` that is being typed: (cursor byte, byte where the `[!` starts, the path so far).
+    fn media_context(&self, ui: &Ui, text: &str) -> Option<(usize, usize, String)> {
+        let cur = egui::text_edit::TextEditState::load(ui.ctx(), self.id).and_then(|st| st.cursor.char_range()).filter(|r| r.is_empty()).map(|r| markdown::char_to_byte(text, r.primary.index.0)).or(self.media.cursor)?;
+        crate::media::media_query(text, cur).map(|(start, typed)| (cur, start, typed))
+    }
+
     fn set_cursor_byte(&self, ui: &Ui, text: &str, byte: usize) {
         let c = markdown::byte_to_char(text, byte);
         let mut state = egui::text_edit::TextEditState::load(ui.ctx(), self.id).unwrap_or_default();
@@ -162,6 +178,43 @@ impl LinkAssist {
 
         // `[!path` file picker: Tab completes, arrows choose, Enter picks, Esc closes.
         let home = dirs::home_dir().unwrap_or_default();
+        // the question "copy or link?" for a file that was just picked: C, L, Esc and nothing else
+        if let Some(src) = self.media.asking.clone() {
+            let (copy, link, esc) = ui.input_mut(|i| {
+                let keys = (i.consume_key(Modifiers::NONE, Key::C) || i.consume_key(Modifiers::NONE, Key::Enter), i.consume_key(Modifiers::NONE, Key::L), i.consume_key(Modifiers::NONE, Key::Escape));
+                // what else is typed does not reach the text
+                i.events.retain(|e| match e {
+                    egui::Event::Text(_) | egui::Event::Paste(_) | egui::Event::Ime(_) => false,
+                    egui::Event::Key { key, modifiers, pressed: true, .. } => {
+                        modifiers.any() || !matches!(key, Key::Tab | Key::Backspace | Key::Delete | Key::ArrowDown | Key::ArrowUp | Key::ArrowLeft | Key::ArrowRight | Key::Home | Key::End)
+                    }
+                    _ => true,
+                });
+                keys
+            });
+            out.handled = true;
+            out.picker_open = true;
+            let how = if copy {
+                Some(Choice::Copy)
+            } else if link {
+                Some(Choice::Link)
+            } else {
+                None
+            };
+            if esc {
+                self.media.asking = None;
+            } else if let Some(how) = how {
+                match self.media_context(ui, text) {
+                    Some((cb, start, typed)) => {
+                        let (c, a) = self.media_finish(ui, text, &MediaTyped { vault, home: &home, start, cursor: cb, typed: &typed }, &src, how);
+                        out.changed |= c;
+                        out.action = a;
+                    }
+                    None => self.media.asking = None,
+                }
+            }
+            return out;
+        }
         // Esc closes the picker whenever it was on screen, whatever state the cursor is in.
         if self.media.shown && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
             self.media.dismissed = self.media.start;
@@ -170,9 +223,20 @@ impl LinkAssist {
             out.handled = true;
         }
         if self.media.active {
-            let cur = egui::text_edit::TextEditState::load(ui.ctx(), self.id).and_then(|st| st.cursor.char_range()).filter(|r| r.is_empty()).map(|r| markdown::char_to_byte(text, r.primary.index.0)).or(self.media.cursor);
-            if let Some((cb, (start, typed))) = cur.and_then(|cb| crate::media::media_query(text, cb).map(|q| (cb, q))) {
+            if let Some((cb, start, typed)) = self.media_context(ui, text) {
                 let n = self.media.items.len();
+                // Alt+Shift+L: for this pick, files from outside the vault are linked where they are, or copied (MEDIA-019)
+                let toggle = ui.input_mut(|i| {
+                    let pressed = i.consume_key(Modifiers::ALT | Modifiers::SHIFT, Key::L);
+                    if pressed {
+                        // Option+Shift+L is a letter on a Mac: not typed
+                        i.events.retain(|e| !matches!(e, egui::Event::Text(_)));
+                    }
+                    pressed
+                });
+                if toggle {
+                    self.media.how = Some(self.media.how.or(self.outside.choice()).map_or(Choice::Link, Choice::toggled));
+                }
                 let (down, up, tab, enter, esc) =
                     ui.input_mut(|i| (n > 0 && down_key(i), n > 0 && up_key(i), i.consume_key(Modifiers::NONE, Key::Tab), n > 0 && i.consume_key(Modifiers::NONE, Key::Enter), i.consume_key(Modifiers::NONE, Key::Escape)));
                 if down {
@@ -198,7 +262,7 @@ impl LinkAssist {
                     }
                 }
                 // only count as handled when the picker actually took a key
-                out.handled = down || up || tab || enter || esc;
+                out.handled = down || up || tab || enter || esc || toggle;
                 out.picker_open = true;
             } else {
                 self.media.active = false;
@@ -371,8 +435,20 @@ impl LinkAssist {
                 };
                 let r = output.galley.pos_from_cursor(CCursor::new(markdown::byte_to_char(text, cb)));
                 let pos = output.galley_pos + r.left_bottom().to_vec2() + Vec2::new(0.0, 4.0);
-                let (clicked, close) = self.picker_popup(ui, pos, &shown_dir, typed.is_empty());
-                if close {
+                let (clicked, close, answer) = self.picker_popup(ui, pos, &shown_dir, typed.is_empty());
+                if let Some(answer) = answer {
+                    match (answer, self.media.asking.clone()) {
+                        (Some(how), Some(src)) => {
+                            let (c, a) = self.media_finish(ui, text, &MediaTyped { vault, home: &home, start, cursor: cb, typed: &typed }, &src, how);
+                            changed |= c;
+                            if a.is_some() {
+                                action = a;
+                            }
+                        }
+                        _ => self.media.asking = None,
+                    }
+                    ui.ctx().memory_mut(|m| m.request_focus(self.id));
+                } else if close {
                     self.media.dismissed = Some(start);
                     self.media.active = false;
                     self.media.shown = false;
@@ -406,6 +482,10 @@ impl LinkAssist {
         // hand Tab / Enter over as typed text.
         if self.is_open() {
             ui.ctx().output_mut(|o| o.ime = None);
+        }
+        if !self.media.active {
+            self.media.asking = None;
+            self.media.how = None;
         }
         if ui.input(|i| i.key_pressed(Key::Escape)) && self.media.shown {
             // an Esc that arrived after the popup was drawn this frame: close on the next frame
@@ -514,10 +594,22 @@ impl LinkAssist {
         clicked
     }
 
-    /// Draw the `[!` picker at `pos`; returns (entry clicked, close clicked).
-    fn picker_popup(&self, ui: &Ui, pos: egui::Pos2, shown_dir: &str, nothing_typed: bool) -> (Option<crate::media::Entry>, bool) {
+    /// What the footer of the `[!` picker says about files from outside the vault (MEDIA-019): what
+    /// a pick does with them now, and the key that changes it for this pick.
+    fn outside_hint(&self) -> String {
+        match self.media.how.or(self.outside.choice()) {
+            Some(Choice::Copy) => "Files from outside the vault are copied to z_media/ · Alt+Shift+L: link them instead".into(),
+            Some(Choice::Link) => "Pictures, PDFs, sound and video from outside the vault are linked where they are, other files are copied · Alt+Shift+L: copy them instead".into(),
+            None => "Files from outside the vault: you are asked to copy or link them · Alt+Shift+L: link them".into(),
+        }
+    }
+
+    /// Draw the `[!` picker at `pos`; returns (entry clicked, close clicked, the answer to the
+    /// question about the file picked: `Some(Some(how))` or `Some(None)` for Cancel).
+    fn picker_popup(&self, ui: &Ui, pos: egui::Pos2, shown_dir: &str, nothing_typed: bool) -> (Option<crate::media::Entry>, bool, Option<Option<Choice>>) {
         let mut clicked: Option<crate::media::Entry> = None;
         let mut close = false;
+        let mut answer = None;
         egui::Area::new(self.id.with("media")).order(egui::Order::Foreground).fixed_pos(pos).show(ui.ctx(), |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
                 ui.set_min_width(320.0);
@@ -529,6 +621,23 @@ impl LinkAssist {
                         }
                     });
                 });
+                if let Some(src) = &self.media.asking {
+                    let name = src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    ui.label(egui::RichText::new(format!("“{name}” is outside the vault.")).color(theme::palette().text));
+                    ui.horizontal(|ui| {
+                        if ui.button(egui::RichText::new("Copy into the vault").strong()).on_hover_text("C or Enter").clicked() {
+                            answer = Some(Some(Choice::Copy));
+                        }
+                        if ui.button("Link where it is").on_hover_text("L").clicked() {
+                            answer = Some(Some(Choice::Link));
+                        }
+                        if ui.button("Cancel").on_hover_text("Esc").clicked() {
+                            answer = Some(None);
+                        }
+                    });
+                    ui.label(egui::RichText::new("C copy · L link · Esc cancel").small().color(theme::palette().faint));
+                    return;
+                }
                 if nothing_typed {
                     ui.label(egui::RichText::new("Type / for the vault or ~/ for your home folder").small().color(theme::palette().faint));
                 }
@@ -556,10 +665,10 @@ impl LinkAssist {
                     ui.colored_label(theme::palette().link_missing, err);
                 }
                 ui.label(egui::RichText::new("Tab completes the path · ↑↓ or Ctrl+J/K choose · Enter picks · Esc closes").small().color(theme::palette().faint));
-                ui.label(egui::RichText::new("Files from outside the vault are copied to z_media/").small().color(theme::palette().faint));
+                ui.label(egui::RichText::new(self.outside_hint()).small().color(theme::palette().faint));
             });
         });
-        (clicked, close)
+        (clicked, close, answer)
     }
 
     /// Tab in the `[!` picker: only ever completes the path, never finishes the link.
@@ -586,7 +695,8 @@ impl LinkAssist {
         }
     }
 
-    /// Pick an entry in the `[!` picker: folders open, files are brought into the vault and linked.
+    /// Pick an entry in the `[!` picker: folders open, files are brought into the vault or linked
+    /// where they are (MEDIA-019): by what Alt+Shift+L or the setting says, or after asking.
     fn media_accept(&mut self, ui: &Ui, text: &mut String, m: &MediaTyped, e: &crate::media::Entry) -> (bool, Option<EditorAction>) {
         let MediaTyped { vault, home, start, cursor, typed } = *m;
         let (dir, _partial, typed_dir) = crate::media::split_typed(typed, &vault.root, home);
@@ -596,9 +706,23 @@ impl LinkAssist {
             self.set_cursor_byte(ui, text, start + 2 + done.len());
             return (true, None);
         }
-        match crate::media::import_file(&vault.root, &dir.join(&e.name), crate::media::local_date()) {
-            Ok(rel) => {
-                let link = crate::media::link_for(&rel);
+        let src = dir.join(&e.name);
+        match self.media.how.or(self.outside.choice()) {
+            Some(how) => self.media_finish(ui, text, m, &src, how),
+            None if crate::media::intake::asks(&vault.root, std::slice::from_ref(&src)) => {
+                self.media.asking = Some(src);
+                (false, None)
+            }
+            None => self.media_finish(ui, text, m, &src, Choice::Copy),
+        }
+    }
+
+    /// Bring the picked file `src` into the vault as `how` says and put its link in the text.
+    fn media_finish(&mut self, ui: &Ui, text: &mut String, m: &MediaTyped, src: &Path, how: Choice) -> (bool, Option<EditorAction>) {
+        let MediaTyped { vault, start, cursor, .. } = *m;
+        match crate::media::intake::bring(&vault.root, vault.libraries(), src, how, crate::media::local_date()) {
+            Ok(taken) => {
+                let link = taken.link();
                 // `[[!…` written as the start marker: replace the extra `[` too
                 let begin = if start > 0 && text[..start].ends_with('[') { start - 1 } else { start };
                 // swallow closing brackets right after the path (`]` or `]]`)
@@ -615,9 +739,11 @@ impl LinkAssist {
                 self.set_cursor_byte(ui, text, begin + link.len());
                 self.media.active = false;
                 self.media.key = None;
-                (true, Some(EditorAction::FilesChanged))
+                self.media.asking = None;
+                (true, (!matches!(taken, crate::media::intake::Taken::Linked { .. })).then_some(EditorAction::FilesChanged))
             }
             Err(err) => {
+                self.media.asking = None;
                 self.media.error = Some(format!("Could not add the file: {err}"));
                 (false, None)
             }

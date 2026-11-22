@@ -10,6 +10,7 @@ pub mod download;
 pub mod embed;
 pub mod engine;
 pub mod ffmpeg;
+pub mod intake;
 pub mod output;
 pub mod outside;
 pub mod player;
@@ -136,7 +137,7 @@ pub fn file_uri_path_for(uri: &str, windows: bool) -> Option<PathBuf> {
 
 /// The media files of pasted text: every non-empty line is a `file://` address or an absolute
 /// path of an existing image, PDF, audio or video file (what a file manager copies). None for any other text.
-fn pasted_files(text: &str) -> Option<Vec<PathBuf>> {
+pub fn pasted_files(text: &str) -> Option<Vec<PathBuf>> {
     let mut out = Vec::new();
     for l in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
         let p = if l.starts_with("file://") { file_uri_path(l)? } else { PathBuf::from(l) };
@@ -157,31 +158,44 @@ fn png_bytes(img: &eframe::egui::ColorImage) -> Result<Vec<u8>, String> {
     Ok(out.into_inner())
 }
 
-/// What pasting text or a picture into a note does (EDIT-019): saves the media into the vault.
-/// `Some((text to insert, message))` if the paste was media (the message names what was saved,
-/// or what failed); None for a paste that is just text.
-pub fn paste_text_to_links(vault_root: &Path, text: &str, date: (i32, u32, u32)) -> Option<(String, String)> {
+/// What pasting text or a picture into a note does (EDIT-019): saves the media into the vault, or
+/// links it where it is (`how`, MEDIA-019, for a file from outside the vault).
+/// `Some((text to insert, message))` if the paste was media (the message names what was saved or
+/// linked, or what failed); None for a paste that is just text.
+pub fn paste_text_to_links(vault_root: &Path, libraries: &[outside::Library], text: &str, how: intake::Choice, date: (i32, u32, u32)) -> Option<(String, String)> {
     let files = pasted_files(text)?;
     let mut links = Vec::new();
+    let mut saved = 0;
+    let mut linked = 0;
     let mut failed = Vec::new();
     for f in &files {
-        match import_file(vault_root, f, date) {
-            Ok(rel) => links.push(link_for(&rel)),
+        match intake::bring(vault_root, libraries, f, how, date) {
+            Ok(taken) => {
+                links.push(taken.link());
+                if matches!(taken, intake::Taken::Linked { .. }) {
+                    linked += 1;
+                } else {
+                    saved += 1;
+                }
+            }
             Err(e) => failed.push(format!("“{}”: {e}", f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())),
         }
     }
-    let mut msg = match links.len() {
-        0 => String::new(),
-        1 => "Saved 1 file to the media folder".to_string(),
-        n => format!("Saved {n} files to the media folder"),
-    };
-    if !failed.is_empty() {
-        if !msg.is_empty() {
-            msg.push_str("; ");
-        }
-        msg.push_str(&format!("could not copy {}", failed.join(", ")));
+    let mut parts = Vec::new();
+    match saved {
+        0 => {}
+        1 => parts.push("Saved 1 file to the media folder".to_string()),
+        n => parts.push(format!("Saved {n} files to the media folder")),
     }
-    Some((links.join("\n"), msg))
+    match linked {
+        0 => {}
+        1 => parts.push("Linked 1 file where it is".to_string()),
+        n => parts.push(format!("Linked {n} files where they are")),
+    }
+    if !failed.is_empty() {
+        parts.push(format!("could not copy {}", failed.join(", ")));
+    }
+    Some((links.join("\n"), parts.join("; ")))
 }
 
 /// True if pasted text is nothing but one `<img …>` tag: what a browser puts on the clipboard next
@@ -546,6 +560,32 @@ mod tests {
         assert_eq!(link_for(Path::new("z_media/a b.MP3")), "![[z_media/a b.MP3]]");
         assert_eq!(link_for(Path::new("clip.mp4")), "![[clip.mp4]]");
         let _ = fs::remove_dir_all(&home);
+        let _ = fs::remove_dir_all(&vault);
+    }
+
+    // spec: MEDIA-019, EDIT-019
+    #[test]
+    fn pasted_files_are_copied_or_linked_and_what_cannot_be_copied_is_named() {
+        let src = tmp("paste-src");
+        let vault = tmp("paste-vault");
+        fs::write(src.join("a.png"), b"p").unwrap();
+        fs::write(src.join("b b.mp4"), b"v").unwrap();
+        let list = format!("{}\n{}", src.join("a.png").display(), src.join("b b.mp4").display());
+        let date = (2026, 11, 22);
+        let (links, msg) = paste_text_to_links(&vault, &[], &list, intake::Choice::Copy, date).unwrap();
+        assert_eq!((links.as_str(), msg.as_str()), ("![[z_media/2026/11/261122_a.png]]\n![[z_media/2026/11/261122_b b.mp4]]", "Saved 2 files to the media folder"));
+        let abs = src.canonicalize().unwrap();
+        let (links, msg) = paste_text_to_links(&vault, &[], &list, intake::Choice::Link, date).unwrap();
+        assert_eq!(links, format!("![](<file://{0}/a.png>)\n![](<file://{0}/b b.mp4>)", abs.display()));
+        assert_eq!(msg, "Linked 2 files where they are");
+        let (_, msg) = paste_text_to_links(&vault, &[], &src.join("a.png").to_string_lossy(), intake::Choice::Link, date).unwrap();
+        assert_eq!(msg, "Linked 1 file where it is");
+        // a vault that cannot take a copy: the file is named; a link needs no copy
+        let blocked = src.join("a.png");
+        let (links, msg) = paste_text_to_links(&blocked, &[], &src.join("b b.mp4").to_string_lossy(), intake::Choice::Copy, date).unwrap();
+        assert!(links.is_empty() && msg.starts_with("could not copy “b b.mp4”: "), "{msg}");
+        assert!(paste_text_to_links(&blocked, &[], &src.join("b b.mp4").to_string_lossy(), intake::Choice::Link, date).unwrap().1.starts_with("Linked 1 file"));
+        let _ = fs::remove_dir_all(&src);
         let _ = fs::remove_dir_all(&vault);
     }
 

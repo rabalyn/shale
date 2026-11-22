@@ -914,3 +914,166 @@ fn vault_028_settings_vault_checks_names_in_the_background_and_renames_one_or_al
     assert!(p.dir.join(format!("{c2}.md")).exists() && !p.dir.join(&c_md).exists());
     assert_eq!(std::fs::read_to_string(p.dir.join("Linker.md")).unwrap(), format!("[[{a2}]] [[{c2}]]\n"));
 }
+
+/// The text boxes on screen, top to bottom and left to right.
+fn text_boxes(p: &mut P) -> Vec<Rect> {
+    let mut boxes: Vec<Rect> = p.look(Show::Modals).into_iter().filter(|(r, _, _)| matches!(r, Role::TextInput | Role::MultilineTextInput)).map(|(_, _, rect)| rect).collect();
+    boxes.sort_by(|a, b| (a.min.y.round(), a.min.x).partial_cmp(&(b.min.y.round(), b.min.x)).unwrap());
+    boxes
+}
+
+/// Click into text box number `n` and replace its text.
+fn type_into(p: &mut P, n: usize, text: &str) {
+    let r = text_boxes(p)[n];
+    p.click_rect(Show::Modals, r, PointerButton::Primary);
+    p.select_all(Show::Modals);
+    if text.is_empty() {
+        p.key(Show::Modals, Key::Backspace);
+    } else {
+        p.type_text(Show::Modals, text);
+    }
+}
+
+// spec: MEDIA-019, CFG-070
+#[test]
+fn media_019_the_import_tab_has_the_setting_for_files_from_outside_the_vault_and_it_asks_by_default() {
+    use crate::media::intake::OutsideFiles;
+    let mut p = P::new("settings-outside", &[]);
+    assert_eq!(p.app.cfg.outside_files, OutsideFiles::Ask, "Ask by default");
+    p.app.open_settings(SettingsTab::Import);
+    for l in ["Files from outside the vault", "Ask", "Copy into the vault", "Link where they are", "Library folders", "Add library"] {
+        assert!(p.shows(Show::Modals, l), "{l:?} is on the Import tab");
+    }
+    p.click(Show::Modals, "Link where they are");
+    assert_eq!(p.app.cfg.outside_files, OutsideFiles::Link);
+    p.click(Show::Modals, "Copy into the vault");
+    assert_eq!(p.app.cfg.outside_files, OutsideFiles::Copy);
+    p.click(Show::Modals, "Ask");
+    assert_eq!(p.app.cfg.outside_files, OutsideFiles::Ask);
+    // another tab does not have it
+    p.app.open_settings(SettingsTab::Appearance);
+    assert!(!p.shows(Show::Modals, "Link where they are"));
+}
+
+// spec: MEDIA-019, CFG-069
+#[test]
+fn media_019_library_folders_are_added_renamed_and_removed_in_settings_and_a_bad_name_is_said() {
+    use crate::media::outside::Library;
+    let mut p = P::new("settings-libraries", &[]);
+    let folder = p.dir.join("..").join(format!("shale-libs-{}", std::process::id()));
+    std::fs::create_dir_all(folder.join("Videos")).unwrap();
+    let videos = folder.join("Videos").to_string_lossy().into_owned();
+    p.app.open_settings(SettingsTab::Import);
+    assert!(p.app.cfg.media_libraries.is_empty());
+    // nothing to add yet: the button is off
+    let add = |p: &mut P| p.click(Show::Modals, "Add library");
+    add(&mut p);
+    assert!(p.app.cfg.media_libraries.is_empty(), "no name, no folder");
+    // a name that is no name: said, and not added even with a folder
+    for (bad, said) in [("a/b", "A name has no / in it"), ("a|b", "A name has none of # | ^ [ ]"), ("CON", "reserved name on Windows")] {
+        type_into(&mut p, 0, bad);
+        type_into(&mut p, 1, &videos);
+        assert!(p.shows(Show::Modals, said), "{bad:?}: {said:?}");
+        add(&mut p);
+        assert!(p.app.cfg.media_libraries.is_empty(), "{bad:?} is not added");
+    }
+    // a good name and a folder
+    type_into(&mut p, 0, "Videos");
+    assert!(!p.shows(Show::Modals, "A name has"), "the message is gone");
+    add(&mut p);
+    assert_eq!(p.app.cfg.media_libraries, vec![Library { name: "Videos".into(), path: PathBuf::from(&videos) }]);
+    assert!(!p.shows(Show::Modals, "This folder is not there") && !p.shows(Show::Modals, "Give the folder"));
+    // the same name again, in another case: refused
+    type_into(&mut p, 2, "VIDEOS");
+    type_into(&mut p, 3, &videos);
+    assert!(p.shows(Show::Modals, "Another library has this name"));
+    add(&mut p);
+    assert_eq!(p.app.cfg.media_libraries.len(), 1);
+    // a second library
+    type_into(&mut p, 2, "Pics");
+    type_into(&mut p, 3, &folder.join("nowhere").to_string_lossy());
+    add(&mut p);
+    assert_eq!(p.app.cfg.media_libraries.iter().map(|l| l.name.as_str()).collect::<Vec<_>>(), ["Videos", "Pics"]);
+    assert!(p.shows(Show::Modals, "This folder is not there"), "a folder that is not there is said");
+    // rename: in place; a name taken by the other library or an empty one is said, and a path can be changed
+    type_into(&mut p, 0, "pics");
+    assert!(p.shows(Show::Modals, "Another library has this name"));
+    type_into(&mut p, 0, "Films");
+    assert_eq!(p.app.cfg.media_libraries[0].name, "Films");
+    assert!(!p.shows(Show::Modals, "Another library has this name"));
+    type_into(&mut p, 0, "");
+    assert!(p.shows(Show::Modals, "Give the library a name"));
+    type_into(&mut p, 0, "Films");
+    type_into(&mut p, 3, &videos);
+    assert_eq!(p.app.cfg.media_libraries[1].path, PathBuf::from(&videos));
+    assert!(!p.shows(Show::Modals, "This folder is not there"));
+    type_into(&mut p, 3, "");
+    assert!(p.shows(Show::Modals, "Give the folder"));
+    // remove the first
+    let mut removes: Vec<Rect> = p.look(Show::Modals).into_iter().filter(|(r, l, _)| *r == Role::Button && l == "Remove").map(|x| x.2).collect();
+    removes.sort_by(|a, b| a.min.y.total_cmp(&b.min.y));
+    assert_eq!(removes.len(), 2);
+    p.click_rect(Show::Modals, removes[0], PointerButton::Primary);
+    assert_eq!(p.app.cfg.media_libraries.iter().map(|l| l.name.as_str()).collect::<Vec<_>>(), ["Pics"]);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+// spec: MEDIA-019, EDIT-019
+#[test]
+fn media_019_the_question_for_pasted_files_copies_links_or_cancels_and_the_answer_reaches_the_editor() {
+    use crate::media::intake::Choice;
+    let mut p = P::new("outside-ask", &[]);
+    let out = p.dir.join("..").join(format!("shale-ask-{}", std::process::id()));
+    std::fs::create_dir_all(&out).unwrap();
+    for f in ["a.mp4", "b.pdf"] {
+        std::fs::write(out.join(f), f).unwrap();
+    }
+    let one = out.join("a.mp4").to_string_lossy().into_owned();
+    let two = format!("{one}\n{}", out.join("b.pdf").to_string_lossy());
+    let answers = |a: Vec<Action>| match a.as_slice() {
+        [] => None,
+        [Action::PasteFiles(t, how)] => Some((t.clone(), *how)),
+        other => panic!("{} actions", other.len()),
+    };
+    // the editor's question reaches the app and opens the dialog, which names the files
+    p.app.actions.push(Action::AskOutsideFiles(one.clone()));
+    p.app.process_actions();
+    assert!(matches!(&p.app.modal, Some(Modal::OutsideFiles { text }) if *text == one));
+    assert!(p.shows(Show::Modals, "“a.mp4” is outside the vault."));
+    for l in ["Copy into the vault", "Link where they are", "Cancel", "C copy · L link · Esc cancel"] {
+        assert!(p.shows(Show::Modals, l), "{l:?}");
+    }
+    p.click(Show::Modals, "Copy into the vault");
+    assert!(p.app.modal.is_none());
+    assert_eq!(answers(p.actions()), Some((one.clone(), Choice::Copy)));
+    // several files, each answer on its own
+    for (how, press) in [(Choice::Link, "button"), (Choice::Link, "key"), (Choice::Copy, "key"), (Choice::Copy, "enter")] {
+        p.app.modal = Some(Modal::OutsideFiles { text: two.clone() });
+        assert!(p.shows(Show::Modals, "2 files outside the vault: a.mp4, b.pdf."));
+        match (how, press) {
+            (Choice::Link, "button") => p.click(Show::Modals, "Link where they are"),
+            (Choice::Link, _) => p.key(Show::Modals, Key::L),
+            (Choice::Copy, "enter") => p.key(Show::Modals, Key::Enter),
+            _ => p.key(Show::Modals, Key::C),
+        }
+        assert!(p.app.modal.is_none(), "{how:?} {press}");
+        assert_eq!(answers(p.actions()), Some((two.clone(), how)));
+    }
+    // Esc and Cancel: nothing happens
+    p.app.modal = Some(Modal::OutsideFiles { text: one.clone() });
+    p.look(Show::Modals);
+    p.key(Show::Modals, Key::Escape);
+    assert!(p.app.modal.is_none() && p.actions().is_empty(), "Esc");
+    p.app.modal = Some(Modal::OutsideFiles { text: one.clone() });
+    p.click(Show::Modals, "Cancel");
+    assert!(p.app.modal.is_none() && p.actions().is_empty(), "Cancel");
+    // the editor's question becomes the app's action; the answer is handed to the editor of the open note
+    let mut asked = vec![];
+    crate::app::handle_editor_action(&mut asked, crate::editor::EditorAction::AskOutsideFiles(one.clone()), Path::new("Welcome.md"));
+    assert!(matches!(asked.as_slice(), [Action::AskOutsideFiles(t)] if *t == one));
+    p.app.open(Path::new("Welcome.md"), false);
+    p.app.actions.push(Action::PasteFiles(one.clone(), Choice::Link));
+    p.app.process_actions();
+    assert_eq!(p.app.tabbar.tabs[p.app.tabbar.active].editor.pending_files, Some((one, Choice::Link)));
+    let _ = std::fs::remove_dir_all(&out);
+}
