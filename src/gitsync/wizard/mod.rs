@@ -14,7 +14,8 @@ mod ui;
 
 pub(crate) use ui::warnings_ui;
 
-#[cfg(all(test, unix))]
+// Linux only: its keyring is a pretend `secret-tool`, the one backend a separate process can fake.
+#[cfg(all(test, target_os = "linux"))]
 mod forgejo_env_tests;
 #[cfg(test)]
 mod parts_tests;
@@ -22,7 +23,7 @@ mod parts_tests;
 mod ui_tests;
 
 /// Tests: a hermetic git (no user or system configuration, branch `main`, no git-lfs) for a test folder.
-#[cfg(all(test, unix))]
+#[cfg(all(test, target_os = "linux"))]
 fn ui_git(_root: &Path) -> Git {
     let env = [("GIT_CONFIG_GLOBAL", "/dev/null"), ("GIT_CONFIG_NOSYSTEM", "1"), ("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "init.defaultBranch"), ("GIT_CONFIG_VALUE_0", "main")];
     let mut git = Git { program: "git".into(), env: env.iter().map(|(k, v)| (std::ffi::OsString::from(k), std::ffi::OsString::from(v))).collect() };

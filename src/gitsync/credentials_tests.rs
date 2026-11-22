@@ -35,6 +35,7 @@ fn sync_054_servers_and_users_are_read_from_addresses_and_prompts() {
 fn sync_054_only_a_password_prompt_with_a_user_and_a_stored_token_is_answered() {
     let lookup = |server: &str, user: &str| (server == "https://git.test" && user == "ada").then(|| Secret::new("tok"));
     assert_eq!(answer("Password for 'https://ada@git.test': ", lookup).map(|s| s.expose().to_string()), Some("tok".into()));
+    assert_eq!(answer("Password for 'https://ada@GIT.TEST:443': ", lookup).map(|s| s.expose().to_string()), Some("tok".into()), "host case and the default port do not matter");
     assert!(answer("Password for 'https://bob@git.test': ", lookup).is_none());
     assert!(answer("Password for 'https://ada@other.test': ", lookup).is_none());
     assert!(answer("Password for 'https://git.test': ", lookup).is_none(), "no user, no token");
