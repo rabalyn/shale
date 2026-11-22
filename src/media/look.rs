@@ -405,7 +405,8 @@ pub(crate) mod tests {
         gate.open();
         assert_eq!(until_known(&looks, &ctx, a, |_| true), facts_of(7));
         assert_eq!(until_known(&looks, &ctx, b, |_| true), facts_of(7));
-        assert!(repaints.load(Ordering::Relaxed) > before, "the window is woken when the answer is there");
+        // the worker stores the answer first and wakes the window after it, so the wake may come a moment later
+        until("the window is woken when the answer is there", || repaints.load(Ordering::Relaxed) > before);
         until("the checks end", || !looks.busy());
         assert_eq!(asked.load(Ordering::Relaxed), 2, "an answer that is young is trusted");
     }
