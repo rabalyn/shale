@@ -110,11 +110,13 @@ pub struct NoteDoc {
     pub unreadable: Option<String>,
     /// Why the last save failed; the buffer stays dirty and the tab is marked (DATA-009).
     pub save_error: Option<String>,
+    /// the bar for headings that skip levels: hidden for this note or not (EDIT-117)
+    pub heading_bar: crate::heading_levels::Bar,
 }
 
 impl NoteDoc {
     pub fn loaded(text: String, unreadable: Option<String>) -> NoteDoc {
-        NoteDoc { base: crate::vault::Stamp::of(&text), text, dirty: false, last_edit: Instant::now(), unreadable, save_error: None }
+        NoteDoc { base: crate::vault::Stamp::of(&text), text, dirty: false, last_edit: Instant::now(), unreadable, save_error: None, heading_bar: Default::default() }
     }
 
     /// Take the text now on disk (the buffer had no edits to keep, or they are saved elsewhere).
@@ -348,6 +350,8 @@ pub enum Action {
     },
     /// the pasted text has no `#` heading: ask whether to lift its headings (EDIT-038)
     AskLiftHeadings(String),
+    /// the button of the bar for headings that skip levels: move all headings of the note up (EDIT-116)
+    ShiftHeadings(PathBuf),
     /// paste this text into the open note's editor (the answer to the question above)
     PasteText(String),
     /// the pasted text names media files outside the vault and the setting is Ask: copy or link? (MEDIA-019)
@@ -2444,6 +2448,7 @@ impl ShaleApp {
                     self.convert_canvas(&rel, new_tab);
                 }
                 Action::AskLiftHeadings(text) => self.modal = Some(Modal::LiftPaste { text }),
+                Action::ShiftHeadings(rel) => self.shift_headings(&rel),
                 Action::AskOutsideFiles(text) => self.modal = Some(Modal::OutsideFiles { text }),
                 Action::PasteFiles(text, how) => {
                     if let Some(tab) = self.tabbar.tabs.get_mut(self.tabbar.active) {

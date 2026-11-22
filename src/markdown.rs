@@ -751,10 +751,17 @@ pub fn front_matter_values(text: &str) -> Vec<(String, Vec<String>)> {
     out
 }
 
-/// Headings: (line number, level, title). Fenced code and front matter hold none.
+/// Headings: (line number, level, title). Fenced code, `$$` math blocks and front matter hold none.
 pub fn find_headings(text: &str) -> Vec<(usize, usize, String)> {
-    let code = fenced_code_lines(text);
+    let mut code = fenced_code_lines(text);
     let front = front_matter_lines(text);
+    if text.contains("$$") {
+        for m in find_math(text).into_iter().filter(|m| m.block) {
+            for line in m.lines {
+                code[line] = true;
+            }
+        }
+    }
     let mut out = Vec::new();
     for (li, (_, line)) in lines_with_offsets(text).into_iter().enumerate() {
         if li < front || code.get(li).copied().unwrap_or(false) {
@@ -1452,6 +1459,16 @@ a
     fn headings() {
         let h = find_headings("# A\ntext\n## B\n#notheading\n```\n# code\n```");
         assert_eq!(h, vec![(0, 1, "A".into()), (2, 2, "B".into())]);
+    }
+
+    // spec: EDIT-116
+    #[test]
+    fn edit_116_a_heading_in_a_math_block_is_no_heading() {
+        let text = "# A\n$$\n# comment\nx = 1\n$$\n## B\n```math\n# not either\n```\n$$ # one line $$\n### C\n";
+        let h: Vec<_> = find_headings(text).into_iter().map(|h| (h.0, h.1)).collect();
+        assert_eq!(h, vec![(0, 1), (5, 2), (10, 3)]);
+        assert_eq!(lift_headings("## A\n$$\n## in math\n$$\n### B").as_deref(), Some("# A\n$$\n## in math\n$$\n## B"), "the shift leaves the math alone");
+        assert_eq!(find_headings("$$\n# no closing line\n").len(), 1, "a $$ that is never closed is no math block");
     }
 
     // spec: EDIT-001, PERF-004

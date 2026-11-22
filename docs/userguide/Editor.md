@@ -89,6 +89,23 @@ Pasting text whose headings are all `##` or deeper asks "The pasted text has no 
 headings?": **Lift** moves them up so that the highest becomes `#`, **Paste as it is** (or Esc) pastes
 the text unchanged. Text without headings, or with a `#`, is pasted at once.
 
+# Heading levels
+
+A note whose headings skip levels gets a thin bar above its text, below the toolbar, in the editor and in the
+[[Reading view]]. It names what is missing, from the shallowest heading found to the deepest: "Headings: no level 1
+heading" for a note that starts at `##`, "Headings: level 2 is skipped" for a `#` followed by a `###`, or both
+("Headings: no level 1 heading, level 3 is skipped" for `##` and `####`). A note without headings, and one whose levels
+run from `#` to the deepest with none missing, shows nothing. Headings in code blocks, in `$$` math blocks and in the
+front matter are not counted; only `#` headings are (a title underlined with `===` is none).
+
+When the highest heading is deeper than `#`, the bar has a button **Move all up by 1** (or 2, …: the highest level found
+minus one) that takes that many `#` off the start of every heading, so `##` and `###` become `#` and `##`. It is one
+undo step (Ctrl+Z, or `u` with Vim-style editing), and it works the same in the reading view. A gap in the middle is only
+warned about: the button moves all headings by the same amount, and if a gap is left the bar stays and names it. The
+**×** at the right hides the bar for this note, until you quit Shale; it is not written anywhere.
+
+![[editor-heading-bar.png]]
+
 # Formatting toolbar
 
 ![[editor-colours.png]]

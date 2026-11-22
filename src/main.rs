@@ -66,6 +66,9 @@ mod galley_index;
 mod gitsync;
 mod graph;
 mod graph_tree;
+mod heading_levels;
+#[cfg(test)]
+mod heading_levels_ui_tests;
 mod history;
 mod import;
 #[cfg(test)]
