@@ -2114,6 +2114,88 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    // spec: VAULT-001
+    #[test]
+    fn vault_001_opening_a_path_that_does_not_exist_creates_it() {
+        let d = temp_vault("vault-001");
+        let root = d.join("not/yet/there");
+        assert!(!root.exists());
+        let v = Vault::open(&root).unwrap();
+        assert!(root.is_dir(), "the folder, and the folders above it, are created");
+        assert!(v.files.is_empty());
+        // an existing folder is opened as it is, with its files
+        fs::write(root.join("A.md"), "# A\n").unwrap();
+        let v = Vault::open(&root).unwrap();
+        assert_eq!(v.files.len(), 1);
+        // a path that cannot be made (below a file) is an error
+        assert!(Vault::open(&root.join("A.md/inside")).is_err());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-003
+    #[test]
+    fn vault_003_files_and_folders_starting_with_a_dot_are_ignored() {
+        let d = temp_vault("vault-003");
+        for dir in [".git", ".obsidian", ".trash", ".shale", ".hidden/deeper", "Visible/.cache", "Visible"] {
+            fs::create_dir_all(d.join(dir)).unwrap();
+        }
+        for file in [".git/config.md", ".obsidian/app.md", ".trash/Old.md", ".shale/state.md", ".hidden/deeper/Note.md", ".dotfile.md", "Visible/.cache/Note.md", "Visible/.private.md", "Shown.md", "Visible/Shown too.md"] {
+            fs::write(d.join(file), "x\n").unwrap();
+        }
+        let v = Vault::open(&d).unwrap();
+        let mut files: Vec<String> = v.files.iter().map(|f| rel_to_string(&f.rel)).collect();
+        files.sort();
+        assert_eq!(files, ["Shown.md", "Visible/Shown too.md"]);
+        assert_eq!(v.folders, [PathBuf::from("Visible")], "no folder starting with a dot is listed");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-007
+    #[cfg(unix)]
+    #[test]
+    fn vault_007_symbolic_links_are_skipped_silently() {
+        let d = temp_vault("vault-007");
+        let outside = temp_vault("vault-007-outside");
+        fs::write(outside.join("Elsewhere.md"), "x\n").unwrap();
+        fs::create_dir_all(d.join("Real")).unwrap();
+        fs::write(d.join("Real/Note.md"), "x\n").unwrap();
+        fs::write(d.join("Plain.md"), "x\n").unwrap();
+        std::os::unix::fs::symlink(d.join("Plain.md"), d.join("Link to file.md")).unwrap();
+        std::os::unix::fs::symlink(outside.join("Elsewhere.md"), d.join("Link outside.md")).unwrap();
+        std::os::unix::fs::symlink(&outside, d.join("Link to folder")).unwrap();
+        std::os::unix::fs::symlink(&d, d.join("Real/Loop")).unwrap();
+        std::os::unix::fs::symlink(d.join("Missing.md"), d.join("Broken.md")).unwrap();
+        let v = Vault::open(&d).unwrap();
+        let mut files: Vec<String> = v.files.iter().map(|f| rel_to_string(&f.rel)).collect();
+        files.sort();
+        assert_eq!(files, ["Plain.md", "Real/Note.md"], "no link, to a file or a folder, is listed, and no link is followed");
+        assert_eq!(v.folders, [PathBuf::from("Real")]);
+        let _ = fs::remove_dir_all(&d);
+        let _ = fs::remove_dir_all(&outside);
+    }
+
+    // spec: VAULT-010
+    #[test]
+    fn vault_010_new_note_names_lose_forbidden_characters_dots_and_spaces() {
+        // each of the nine characters becomes `-`, NUL too
+        assert_eq!(markdown::sanitize_note_name("a\\b:c*d?e\"f<g>h|i\0j"), "a-b-c-d-e-f-g-h-i-j");
+        // leading and trailing dots and spaces are removed
+        assert_eq!(markdown::sanitize_note_name("  . ..Name. . "), "Name");
+        assert_eq!(markdown::sanitize_note_name(".hidden"), "hidden");
+        assert_eq!(markdown::sanitize_note_name("in.side"), "in.side", "dots inside stay");
+        assert_eq!(markdown::sanitize_note_name(" . . "), "", "nothing left");
+        // the same through the path of a new note, where an empty name becomes Untitled
+        let d = temp_vault("vault-010");
+        let v = Vault::open(&d).unwrap();
+        let at = |name: &str| v.new_note_path(Path::new(""), name);
+        assert_eq!(at("a\\b:c*d?e\"f<g>h|i\0j"), PathBuf::from("a-b-c-d-e-f-g-h-i-j.md"));
+        assert_eq!(at("  ..Name.. "), PathBuf::from("Name.md"));
+        assert_eq!(at(""), PathBuf::from("Untitled.md"));
+        assert_eq!(at(" . . "), PathBuf::from("Untitled.md"));
+        assert_eq!(at("..."), PathBuf::from("Untitled.md"));
+        let _ = fs::remove_dir_all(&d);
+    }
+
     // spec: VAULT-027
     #[test]
     fn new_note_paths_are_portable_and_within_their_limit() {
