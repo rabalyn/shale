@@ -408,3 +408,177 @@ fn the_settings_switch_history_and_set_its_times_and_open_the_deleted_list() {
         assert!(t.app.sync.rects.iter().any(|r| r.0 == key), "{key}");
     }
 }
+
+/// The texts a frame of the history settings painted.
+fn settings_text(t: &mut T) -> Vec<String> {
+    let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1100.0, 900.0))), time: Some(1.0), ..Default::default() };
+    let ctx = t.ctx.clone();
+    let mut asks = crate::settings::Asks::default();
+    let mut out = ctx.run_ui(raw, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| t.app.history_settings_ui(ui, &mut asks));
+    });
+    out.textures_delta.clear();
+    out.shapes
+        .iter()
+        .filter_map(|s| match &s.shape {
+            egui::epaint::Shape::Text(ts) => Some(ts.galley.text().to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+// spec: SYNC-071
+#[test]
+fn the_settings_say_whether_old_versions_are_thinned() {
+    let thinned = "Older versions are thinned: all of today, one per hour for a month, one per day before that";
+    let kept = "Versions in this vault's repository are kept as they are";
+    assert_eq!(crate::app::history_ui::thinning_note(true), thinned);
+    assert_eq!(crate::app::history_ui::thinning_note(false), kept);
+
+    let mut local = setup("thin-line-local", false);
+    local.start();
+    let text = settings_text(&mut local);
+    assert!(text.iter().any(|s| s == thinned) && !text.iter().any(|s| s == kept), "{text:?}");
+
+    let mut own = setup("thin-line-own", true);
+    own.start();
+    let text = settings_text(&mut own);
+    assert!(text.iter().any(|s| s == kept) && !text.iter().any(|s| s == thinned), "{text:?}");
+}
+
+const DAY_SECS: i64 = 86_400;
+
+/// Commits of `Note.md` dated `40 + d` days before `base`, `per_day` a day, oldest first; they go
+/// into the repository the window uses, through the engine.
+fn old_commits(t: &T, base: i64, days: i64, per_day: i64) {
+    let (git, root, hist, opts) = t.app.history_job_data().unwrap();
+    let repo = history::locate(&git, &root, &hist).unwrap();
+    for d in (0..days).rev() {
+        for k in 0..per_day {
+            let mut r = repo.clone();
+            let date = format!("{} +0000", base - (40 + d) * DAY_SECS + k * 600);
+            for key in ["GIT_AUTHOR_DATE", "GIT_COMMITTER_DATE"] {
+                r.git.env.push((key.into(), date.clone().into()));
+            }
+            write(&t.vault, "Note.md", &format!("day {d} edit {k}\n"));
+            history::snapshot(&r, &opts, &Request::new(Reason::Save, vec![PathBuf::from("Note.md")]), &crate::gitsync::TreeLock::default(), Duration::from_secs(5)).unwrap();
+        }
+    }
+}
+
+fn commit_count(t: &T) -> usize {
+    t.repo().run_for_test(&["rev-list", "--count", "HEAD"]).trim().parse().unwrap()
+}
+
+fn stamp(t: &T) -> Option<String> {
+    std::fs::read_to_string(t.repo().git_dir.unwrap().join("thinned")).ok().map(|s| s.trim().to_string())
+}
+
+// spec: SYNC-070, SYNC-069
+#[test]
+fn a_local_history_is_thinned_a_minute_after_start_and_then_once_a_day() {
+    let mut t = setup("thin-daily", false);
+    t.start();
+    let base = unix_now() as i64 + 200 * DAY_SECS;
+    old_commits(&t, base, 3, 4);
+    let n = commit_count(&t);
+    assert_eq!(n, 13, "the start of the history and 12 old snapshots");
+
+    // within the first minute nothing runs
+    t.at(1_000 + 59);
+    t.settle();
+    assert_eq!((commit_count(&t), stamp(&t)), (n, None));
+    // a minute after the vault was opened
+    t.at(base as u64);
+    t.settle();
+    assert_eq!(stamp(&t), Some(base.to_string()));
+    assert_eq!(commit_count(&t), 1 + 3, "the start and the newest of each day");
+    assert!(!t.toasted("thin"), "no message");
+
+    // the same day: nothing more, also with new old snapshots
+    old_commits(&t, base, 1, 4);
+    let n = commit_count(&t);
+    t.at(base as u64 + 3_600);
+    t.settle();
+    assert_eq!((commit_count(&t), stamp(&t)), (n, Some(base.to_string())));
+    // a day later: once more
+    t.at(base as u64 + 86_400 + 5);
+    t.settle();
+    assert_eq!(stamp(&t), Some((base + 86_400 + 5).to_string()));
+    assert!(commit_count(&t) < n);
+    // and the panel reads the list again afterwards
+    assert!(t.app.history.panel.stale);
+}
+
+// spec: SYNC-070
+#[test]
+fn thinning_never_runs_beside_a_snapshot_or_a_read_and_a_snapshot_waits_for_it() {
+    let mut t = setup("thin-serial", false);
+    t.start();
+    let base = unix_now() as i64 + 200 * DAY_SECS;
+    t.app.open(Path::new("Note.md"), false);
+
+    // a snapshot is due when thinning is: the snapshot goes first, the thinning after it
+    t.at(base as u64);
+    t.type_into("Note.md", "two\n");
+    t.app.history_tick(&t.ctx);
+    assert!(t.app.history.job.is_some() && t.app.history.thin.is_none(), "one at a time");
+    t.settle();
+    assert_eq!(stamp(&t), Some(base.to_string()), "then the thinning ran");
+
+    // thinning runs (it waits for the tree here) and a save that is due waits for it
+    t.at(base as u64 + 2 * 86_400);
+    let tree = t.app.sync.tree.clone();
+    let held = tree.try_hold().expect("the tree is free");
+    t.app.history_tick(&t.ctx);
+    assert!(t.app.history.thin.is_some());
+    t.type_into("Note.md", "three\n");
+    t.app.history_tick(&t.ctx);
+    assert!(t.app.history.job.is_none(), "no snapshot beside the thinning");
+    t.app.history.panel.want = Some(PathBuf::from("Note.md"));
+    t.app.history.panel.stale = true;
+    t.app.history_tick(&t.ctx);
+    assert!(t.app.history.query.is_none(), "no read beside the thinning");
+    drop(held);
+    t.settle();
+    assert_eq!(stamp(&t), Some((base + 2 * 86_400).to_string()));
+    assert!(t.reasons().contains(&Some(Reason::Save)) && t.messages().len() >= 3, "the save was made after it: {:?}", t.reasons());
+    assert_eq!(t.versions("Note.md").len(), 3, "the start, two and three");
+}
+
+// spec: SYNC-069, SYNC-070
+#[test]
+fn a_vault_with_its_own_git_is_never_thinned_by_the_window() {
+    let mut t = setup("thin-own", true);
+    t.start();
+    let base = unix_now() as i64 + 200 * DAY_SECS;
+    old_commits(&t, base, 3, 4);
+    let (n, tip) = (commit_count(&t), t.repo().run_for_test(&["rev-parse", "HEAD"]));
+    assert_eq!(n, 12, "12 snapshots, no start of the history in a repository that was there");
+    t.at(base as u64);
+    t.settle();
+    t.at(base as u64 + 3 * 86_400);
+    t.settle();
+    assert_eq!((commit_count(&t), t.repo().run_for_test(&["rev-parse", "HEAD"])), (n, tip));
+    assert!(t.repo().git_dir.is_none());
+    assert!(!t.vault.join(".git/thinned").exists());
+    assert!(!t.toasted("thin"));
+}
+
+// spec: SYNC-072
+#[test]
+fn nothing_of_the_history_starts_while_a_connection_moves_the_local_history_into_git() {
+    let mut t = setup("join-serial", false);
+    t.start();
+    t.settle();
+    t.app.open(Path::new("Note.md"), false);
+    let guard = t.app.sync.setup.joining.begin();
+    t.type_into("Note.md", "two\n");
+    t.app.history.panel.want = Some(PathBuf::from("Note.md"));
+    t.app.history.panel.stale = true;
+    t.app.history_tick(&t.ctx);
+    assert!(t.app.history.job.is_none() && t.app.history.thin.is_none() && t.app.history.query.is_none(), "no snapshot, thinning or read beside the move");
+    drop(guard);
+    t.settle();
+    assert_eq!(t.versions("Note.md").len(), 2, "the snapshot is made after it");
+}

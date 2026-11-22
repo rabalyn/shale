@@ -3,7 +3,7 @@
 - **Status**: Accepted and implemented in #469; the points under "Open for the owner" are reversible defaults
 - **Date**: 2026-11-21
 - **Specs**: SYNC-047…SYNC-066, NET-017 ([`docs/spec/vault-and-files.md`](../spec/vault-and-files.md))
-- **Issues**: #469 (this), #467 (umbrella), #480 (the provider sign-in flows, open), #485 (local history into `.git`, open)
+- **Issues**: #469 (this), #467 (umbrella), #480 (the provider sign-in flows, open), #485 (local history into `.git`, done)
 - **Builds on**: [ADR-0008](0008-git-sync.md) (git sync), [ADR-0027](0027-managed-git.md) (the selected git), [ADR-0028](0028-file-history.md) (file history), `docs/storage-on-shares.md` (the lists the detection uses)
 
 ## Context
@@ -74,7 +74,7 @@ store safely, and a warning when the vault is on a network share or in a cloud-s
   Shale ships) and a decision for self-hosted servers. Not built; the token path is the default.
 - **Keys without a passphrase** (decision 5) and **trusting a new SSH host on first use** are reversible
   defaults; the alternative is a passphrase field and an explicit host-key confirmation step.
-- **Connecting a server to a vault that has a local-only history** starts the history of `.git` empty
-  (ADR-0028 open point); moving the local commits into `.git` is not built (#485).
+- **Connecting a server to a vault that has a local-only history** moves that history into `.git`
+  (decided by the owner on 2026-11-22, ADR-0028 amendment, #485, SYNC-072…SYNC-075).
 - **Without a keyring there is no token sign-in.** A session-only token would need the token in the
   helper's environment; the owner can decide that is acceptable.

@@ -1217,6 +1217,14 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   folder is ever written into the vault. The vault id is the file `.shale/history-id` (128 random
   bits, synced with the vault); a moved or renamed vault keeps its history, a copy of a vault gets a
   new id. A new local history starts with one snapshot of every note and drawing.
+- **Connecting a server moves a local history into `.git`** (SYNC-072…SYNC-075, #485). The wizard's server
+  path and Advanced → Connect, for a vault without `.git` whose history is in the data folder, copy it to
+  `<vault>/.git.moving` in a background job under the tree lock (no snapshot, thinning, read or sync beside
+  it), check the refs, `HEAD` and `git fsck`, rename it to `.git` (`core.bare=false`, no `core.worktree`,
+  `git status` must work) and only then remove the old folder; a failure leaves the vault without `.git`
+  and the history where it was. The first sync pushes the snapshots as they are to an empty server, or merges
+  them (unrelated histories allowed) with a server that has notes. The wizard says in words that the versions
+  moved. The history is then the vault's own and is never thinned (SYNC-069).
 - **What.** Notes and drawings (`.md`, `.excalidraw`, `.excalidraw.md`, `.canvas`), not media. Never
   Shale's temporary files, the temporary and housekeeping names of cloud clients and network shares
   (`.syncthing.*.tmp`, `.stfolder`, `.stversions`, `.stignore`, `.~lock.*#`, `~$*`, `*.tmp`, `*.part`,
@@ -1259,7 +1267,8 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   make their own snapshots, so the history stays connected.
 - **Settings** (Settings → Sync, **File history**): on by default for every vault (`history.enabled`),
   `history.coalesce_minutes` (10), `history.idle_seconds` (60) and `history.show_panel` (the margin column). Without a usable git, history is off and
-  the page says why. Data usage lists the size of a local history. Nothing is thinned out; see ADR-0028.
+  the page says why. Data usage lists the size of a local history.
+- **Thinning** (#479, SYNC-067…SYNC-071): a history on this computer is thinned once a day (60 s after a vault opens, then every 24 h, in a background job beside no snapshot): all versions of the last 24 h, the newest of each hour up to 30 days, the newest of each day before that (UTC); restore, delete and rename snapshots, the commit before a deletion, the newest and the first stay. The rewrite builds a new history with `git commit-tree`, moves `main` with a compare-and-swap `update-ref`, then expires the reflog and runs `git gc --prune=now`. A vault's own `.git` is never rewritten. Settings → Sync says which rule applies; there is no setting. See ADR-0028.
 
 ## Busy states: spinner, what is happening, Cancel
 

@@ -17,7 +17,7 @@ use std::time::Duration;
 pub const TREE_WAIT: Duration = Duration::from_secs(10);
 
 /// A lock file inside a git directory means some git process is working in it.
-fn lock_file_in(dir: &Path) -> Option<PathBuf> {
+pub(super) fn lock_file_in(dir: &Path) -> Option<PathBuf> {
     for e in std::fs::read_dir(dir).ok()?.flatten() {
         let p = e.path();
         let name = e.file_name().to_string_lossy().into_owned();
@@ -37,7 +37,7 @@ fn lock_file_in(dir: &Path) -> Option<PathBuf> {
 }
 
 /// Copy a git directory. A link inside it is refused (git makes none, and a link could lead out).
-fn copy_dir(from: &Path, to: &Path) -> Result<(), String> {
+pub(super) fn copy_dir(from: &Path, to: &Path) -> Result<(), String> {
     std::fs::create_dir_all(to).map_err(|e| format!("could not make {}: {e}", to.display()))?;
     for e in std::fs::read_dir(from).map_err(|e| format!("could not read {}: {e}", from.display()))? {
         let e = e.map_err(|e| e.to_string())?;
@@ -55,7 +55,7 @@ fn copy_dir(from: &Path, to: &Path) -> Result<(), String> {
 }
 
 /// What a git directory says: `HEAD` and every ref, for the comparison of the original and the copy.
-fn fingerprint(git: &Git, vault: &Path, git_dir: Option<&Path>) -> Result<String, String> {
+pub(super) fn fingerprint(git: &Git, vault: &Path, git_dir: Option<&Path>) -> Result<String, String> {
     let dir_arg = git_dir.map(|d| {
         let mut a = std::ffi::OsString::from("--git-dir=");
         a.push(d);

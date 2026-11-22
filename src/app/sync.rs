@@ -46,7 +46,7 @@ pub struct SyncState {
     /// The "could not wait for the sync" message was shown and nothing was saved since.
     tree_told: bool,
     /// When the last sync started (None = sync as soon as possible).
-    last_start: Option<Instant>,
+    pub(crate) last_start: Option<Instant>,
     /// The last result: (local time, summary or error).
     pub last: Option<(String, Result<String, String>)>,
     /// Is git-lfs installed, does this vault store media with it (SYNC-016).
@@ -496,14 +496,19 @@ impl ShaleApp {
                 self.sync.rects.push(("connect", b.rect));
                 if b.clicked() {
                     let url = self.sync.url.trim().to_string();
-                    match gitsync::connect(&self.sync.git, &root, &url) {
-                        Ok(()) => {
-                            self.sync.remote = Some(url);
-                            self.sync.last_start = None;
-                            self.toast("Remote set; syncing now");
-                            self.start_sync();
+                    if crate::gitsync::movein::local_history_of(&root, &self.usage.places.history).is_some() {
+                        // the versions kept on this computer move into the vault first: a job (SYNC-072)
+                        self.start_join(root.clone(), url);
+                    } else {
+                        match gitsync::connect(&self.sync.git, &root, &url) {
+                            Ok(()) => {
+                                self.sync.remote = Some(url);
+                                self.sync.last_start = None;
+                                self.toast("Remote set; syncing now");
+                                self.start_sync();
+                            }
+                            Err(e) => self.toast(format!("Could not set the remote: {e}")),
                         }
-                        Err(e) => self.toast(format!("Could not set the remote: {e}")),
                     }
                 }
             });

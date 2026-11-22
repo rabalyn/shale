@@ -32,14 +32,16 @@ fn ui_git(_root: &Path) -> Git {
 }
 
 use super::detect::Finding;
-use super::{connect, credentials, Git};
+use super::{connect_moving, credentials, Git, TreeLock};
 use crate::secret::Secret;
 use api::RepoInfo;
 use eframe::egui;
 use provider::{Kind, Server};
 use ssh::Key;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::Receiver;
+use std::sync::Arc;
 use test_sync::{Problem, Remote};
 
 /// The steps of the wizard.
@@ -97,7 +99,8 @@ pub enum Msg {
     Key(Key),
     Created(RepoInfo),
     /// What the server's repository holds, and whether the vault has notes.
-    Inspected(Remote, bool),
+    /// What the server holds, whether the vault has notes, and whether a local history moved in (SYNC-072).
+    Inspected(Remote, bool, bool),
 }
 
 type Job = Receiver<Result<Result<Msg, String>, String>>;
@@ -126,6 +129,8 @@ pub struct Wizard {
     pub remote: Option<String>,
     pub inspected: Option<Remote>,
     pub vault_has_notes: bool,
+    /// The versions kept on this computer moved into the vault's `.git` when it was connected (SYNC-075).
+    pub history_moved: bool,
     pub test: Test,
     /// What the last step said went wrong (or right), in words.
     pub message: Option<(String, bool)>,
@@ -157,6 +162,7 @@ impl Default for Wizard {
             remote: None,
             inspected: None,
             vault_has_notes: false,
+            history_moved: false,
             test: Test::Idle,
             message: None,
             job: None,
@@ -231,9 +237,43 @@ pub struct MoveOut {
     pub result: Option<(String, bool)>,
 }
 
+/// Where the result of an Advanced connection arrives: whether a history moved (the outer error: the job died).
+type JoinJob = Receiver<Result<Result<bool, String>, String>>;
+
+/// Connecting that may move a local-only history into the vault (SYNC-072): while one runs, no
+/// snapshot, thinning or read of the history starts, and Advanced → Connect keeps its job here.
+#[derive(Default)]
+pub struct Joining {
+    count: Arc<AtomicUsize>,
+    pub(super) job: Option<(PathBuf, String, JoinJob)>,
+}
+
+/// Counts a connecting job as running until it is dropped (also when the job panics).
+pub struct JoinGuard(Arc<AtomicUsize>);
+
+impl Drop for JoinGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+impl Joining {
+    /// A connecting job runs.
+    pub fn active(&self) -> bool {
+        self.count.load(Ordering::SeqCst) > 0
+    }
+
+    /// Count a job that starts now; the job holds the guard.
+    pub fn begin(&self) -> JoinGuard {
+        self.count.fetch_add(1, Ordering::SeqCst);
+        JoinGuard(self.count.clone())
+    }
+}
+
 /// The wizard, the detection and the move, as one sub-state of the sync state.
 #[derive(Default)]
 pub struct Setup {
+    pub joining: Joining,
     pub wizard: Option<Wizard>,
     pub detect: Detect,
     pub moveout: MoveOut,
@@ -323,10 +363,11 @@ pub fn sign_in(server: &Server, user_hint: &str, token: &Secret) -> Result<Signe
     Ok(SignedIn { login, repos })
 }
 
-/// Make the vault a repository whose `origin` is `url`, set the SSH command for a key, and ask the
-/// server what its repository holds (SYNC-057).
-pub fn connect_and_inspect(git: &Git, vault: &Path, url: &str, ssh_key: Option<&Path>) -> Result<(Remote, bool), String> {
-    connect(git, vault, url)?;
+/// Make the vault a repository whose `origin` is `url` (a local-only history moves into its `.git`
+/// first, SYNC-072), set the SSH command for a key, and ask the server what its repository holds
+/// (SYNC-057). The last value: a history moved.
+pub fn connect_and_inspect(git: &Git, vault: &Path, url: &str, ssh_key: Option<&Path>, history_root: &Path, tree: &TreeLock) -> Result<(Remote, bool, bool), String> {
+    let moved = connect_moving(git, vault, url, history_root, tree)?;
     if let Some(cmd) = ssh::ssh_command(ssh_key, false) {
         // the key is part of the repository's configuration (a path, nothing secret)
         if ssh_key.is_some() {
@@ -338,7 +379,7 @@ pub fn connect_and_inspect(git: &Git, vault: &Path, url: &str, ssh_key: Option<&
         probe.env.push(("GIT_SSH_COMMAND".into(), cmd.into()));
     }
     let remote = test_sync::inspect(&probe, vault).map_err(|e| test_sync::classify(&e).words())?;
-    Ok((remote, test_sync::vault_has_notes(vault)))
+    Ok((remote, test_sync::vault_has_notes(vault), moved))
 }
 
 fn args_of<'a>(a: &'a [&'a str]) -> Vec<&'a std::ffi::OsStr> {

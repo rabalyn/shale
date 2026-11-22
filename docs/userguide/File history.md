@@ -11,7 +11,14 @@ Shale keeps earlier versions of your notes and drawings, so that you can go back
   Only saved text is kept, never what is still being typed. Two saves with the same text make one version.
 - Notes and drawings are kept; sounds, videos and pictures are not (they are big, and they do not change).
   Temporary files of cloud folders and network shares are never kept.
-- Nothing is deleted from the history: Shale never thins it out or rewrites it.
+- A history kept on this computer is **thinned** once a day: every version of the last day stays, of the
+  last month one per hour (the newest of each hour), and before that one per day. Versions that you restored,
+  the version before a deleted note's deletion, and renames always stay, so a deleted note can still be
+  restored and a restored text never disappears. The start of the history and the newest version stay too.
+  Days and hours are counted in UTC. Thinning makes the history smaller ([[Data usage and caches]]) and never
+  touches your notes.
+- A vault's own git repository ([[Git sync]]) is **never** thinned or rewritten: its versions go to the server
+  as they are, and stay there. Settings → Sync says which of the two applies to the open vault.
 
 # Where it is kept
 
@@ -22,6 +29,13 @@ Shale keeps earlier versions of your notes and drawings, so that you can go back
   history; it travels with the vault, so the same vault on two computers has the same name for its
   history and each computer keeps its own. Moving or renaming the vault folder keeps the history; a copy of
   a vault gets a history of its own.
+- When you connect a server to a vault whose history is kept on this computer ([[Turn on sync]], or Settings →
+  Sync → Advanced → **Connect**), Shale **moves** those versions into the vault's new git repository: it copies
+  them, checks the copy, and only then removes the folder in your data folder. Afterwards the versions have one
+  place, they stay in the history panel, and the first sync sends them to the server with your notes. If anything
+  fails, nothing is moved and Shale says why; the history on this computer stays as it was. From then on the
+  history is the vault's own and is no longer thinned. The file `.shale/history-id` stays in the vault; it is
+  only used again if the repository is moved out of the vault again.
 - A new history starts with a version of every note and drawing as they are. Settings → Sync shows where it is
   kept. [[Data usage and caches]] shows how big it is.
 
@@ -79,6 +93,6 @@ that were deleted or moved to the trash, newest first. **Restore** writes the la
 
 Settings → Sync, **File history** ([[Settings reference]]): switch it off, or change how often versions are kept
 (`history.enabled`, `history.coalesce_minutes`, `history.idle_seconds`, and `history.show_panel` for the column beside the note). Without git the history is off and the
-page says so ([[Git sync]] explains how Shale can install one).
+page says so ([[Git sync]] explains how Shale can install one). Thinning has no setting: the rules above are fixed.
 
 #userguide #git

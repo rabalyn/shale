@@ -577,3 +577,131 @@ fn sync_061_the_detection_runs_in_a_job_when_the_page_is_shown_for_a_new_vault()
     assert_eq!(t.app.sync.setup.findings(&t.vault)[0].kind, Found::Cloud(Cloud::Syncthing));
     assert!(t.shows("a Syncthing folder"), "{:?}", t.painted());
 }
+
+/// Give the vault a local-only history of three snapshots of `Note.md` in a data folder of the test.
+fn local_history(t: &mut T) -> Vec<String> {
+    let hist = t.root.join("data/history");
+    t.app.usage.places.history = hist.clone();
+    let repo = gitsync::history::locate(&t.app.sync.git, &t.vault, &hist).unwrap();
+    gitsync::history::ensure(&repo).unwrap();
+    let opts = gitsync::Options { host: "laptop".into(), stamp: "2026-11-14 1200".into(), ..Default::default() };
+    for text in ["one\n", "two\n", "three\n"] {
+        crate::fsutil::write_atomic(&t.vault.join("Note.md"), text.as_bytes()).unwrap();
+        let req = gitsync::history::Request::new(gitsync::history::Reason::Save, vec![PathBuf::from("Note.md")]);
+        gitsync::history::snapshot(&repo, &opts, &req, &gitsync::TreeLock::default(), Duration::from_secs(5)).unwrap();
+    }
+    let v = gitsync::history::versions(&repo, Path::new("Note.md"), 10).unwrap();
+    assert_eq!(v.len(), 3);
+    v.into_iter().map(|v| v.commit).collect()
+}
+
+fn remote_commits(remote: &Path) -> String {
+    let o = std::process::Command::new("git").arg("-C").arg(remote).args(["rev-list", "main"]).envs(hermetic().env.iter().cloned()).output().unwrap();
+    String::from_utf8_lossy(&o.stdout).into_owned()
+}
+
+// spec: SYNC-072, SYNC-075
+#[test]
+fn sync_075_the_server_path_moves_a_local_history_into_the_vault_and_says_so() {
+    let mut t = T::new("move-in");
+    let commits = local_history(&mut t);
+    let hist = t.app.usage.places.history.clone();
+    let id = gitsync::history::vault_id(&t.vault).unwrap();
+    assert!(hist.join(&id).join("HEAD").is_file() && !gitsync::is_repo(&t.vault));
+    let remote = t.bare();
+    t.open_wizard();
+    t.click("Sync with a server");
+    t.click("Next");
+    type_address(&mut t, remote.to_str().unwrap());
+    t.click("Next");
+    t.settle();
+    // moved: the vault's repository holds the snapshots, the data folder's copy is gone
+    assert!(t.vault.join(".git/HEAD").is_file(), "the vault has its own repository");
+    assert!(!hist.join(&id).exists(), "the old folder is removed");
+    let repo = gitsync::history::locate(&t.app.sync.git, &t.vault, &hist).unwrap();
+    assert!(repo.git_dir.is_none());
+    let versions: Vec<String> = gitsync::history::versions(&repo, Path::new("Note.md"), 10).unwrap().into_iter().map(|v| v.commit).collect();
+    assert_eq!(versions, commits, "the same versions");
+    assert_eq!(t.wizard().step, Step::Test);
+    assert!(t.wizard().history_moved);
+    // the words say it, together with what the first sync does
+    assert!(t.shows("The versions Shale kept of your notes on this computer have moved into the vault"), "{:?}", t.painted());
+    assert!(t.shows("The first sync sends them to the server together with your notes."));
+    assert!(t.shows("The repository on the server is empty, so your notes will be uploaded to it."));
+    // the test sync pushes them
+    t.click("Run the test sync");
+    t.settle();
+    assert!(matches!(t.wizard().test, Test::Worked(_)), "{:?}", t.wizard().test);
+    let on_remote = remote_commits(&remote);
+    assert!(commits.iter().all(|c| on_remote.contains(c.as_str())), "the versions are on the server: {on_remote}");
+}
+
+// spec: SYNC-075
+#[test]
+fn sync_075_a_vault_without_a_local_history_gets_no_such_words() {
+    let mut t = T::new("move-in-none");
+    t.app.usage.places.history = t.root.join("data/history");
+    let remote = t.bare();
+    t.open_wizard();
+    t.click("Sync with a server");
+    t.click("Next");
+    type_address(&mut t, remote.to_str().unwrap());
+    t.click("Next");
+    t.settle();
+    assert_eq!(t.wizard().step, Step::Test);
+    assert!(!t.wizard().history_moved);
+    assert!(!t.shows("have moved into the vault"), "{:?}", t.painted());
+    assert!(!t.vault.join(".shale/history-id").exists(), "no ID was made for a vault that had no history");
+}
+
+// spec: SYNC-072
+#[test]
+fn sync_072_advanced_connect_moves_a_local_history_in_a_job_and_syncs() {
+    let mut t = T::new("move-in-advanced");
+    let commits = local_history(&mut t);
+    let hist = t.app.usage.places.history.clone();
+    let id = gitsync::history::vault_id(&t.vault).unwrap();
+    let remote = t.bare();
+    t.open_sync_settings();
+    t.app.sync.setup.advanced = true;
+    t.app.sync.url = remote.to_str().unwrap().to_string();
+    t.hl.frames(&mut t.app, 3);
+    t.click("Connect");
+    // a job: it runs beside the frames, and nothing of the history starts beside it
+    let start = Instant::now();
+    while t.app.sync.setup.joining.job.is_some() || t.app.sync.running() {
+        assert!(start.elapsed() < Duration::from_secs(60), "the connection did not end");
+        t.hl.frames(&mut t.app, 1);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    t.hl.frames(&mut t.app, 3);
+    assert!(!t.app.sync.setup.joining.active());
+    assert!(t.vault.join(".git/HEAD").is_file() && !hist.join(&id).exists());
+    assert_eq!(gitsync::remote_url(&t.app.sync.git, &t.vault).as_deref(), remote.to_str());
+    assert!(t.app.toasts.iter().any(|(m, _)| m.contains("moved into the vault")), "{:?}", t.app.toasts);
+    let on_remote = remote_commits(&remote);
+    assert!(commits.iter().all(|c| on_remote.contains(c.as_str())), "the first sync pushed the versions: {on_remote}");
+}
+
+// spec: SYNC-072, SYNC-073
+#[test]
+fn sync_073_a_failed_move_connects_nothing_and_says_why() {
+    let mut t = T::new("move-in-fail");
+    local_history(&mut t);
+    let hist = t.app.usage.places.history.clone();
+    let id = gitsync::history::vault_id(&t.vault).unwrap();
+    // a socket in the history cannot be copied, by any user
+    let _socket = std::os::unix::net::UnixListener::bind(hist.join(&id).join("s")).unwrap();
+    let remote = t.bare();
+    t.open_wizard();
+    t.click("Sync with a server");
+    t.click("Next");
+    type_address(&mut t, remote.to_str().unwrap());
+    t.click("Next");
+    t.settle();
+    assert!(!t.vault.join(".git").exists(), "the vault has no .git");
+    assert!(hist.join(&id).join("HEAD").is_file(), "the local history is where it was");
+    assert_eq!(t.wizard().step, Step::Server);
+    assert!(t.shows("could not copy"), "{:?}", t.painted());
+    assert!(!t.wizard().history_moved);
+}

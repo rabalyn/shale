@@ -75,9 +75,10 @@ calls.
     lines added and removed or the `binary` flag, the path at that version), the text at a version, the
     deleted notes. Binary files and LFS pointers have no counts (git's
     numstat prints `-`).
-11. **Retention: keep everything.** Thinning (hourly after a day, daily after a month) would rewrite history,
-    so it is not done; follow-up issue #479. The size of a local-only history is shown in Data usage (USE-025);
-    an in-vault `.git` is already counted as vault data (`.git/`, USE-002).
+11. **Retention.** A history in a vault's own `.git` is kept as it is (no thinning: it is pushed, SYNC-012).
+    A local-only history is thinned, see the amendment of 2026-11-22 below (SYNC-067…SYNC-071). The size of
+    a local-only history is shown in Data usage (USE-025); an in-vault `.git` is already counted as vault
+    data (`.git/`, USE-002).
 12. **Entry points until #472.** The ⋯ menu of a note or drawing has "Versions of this note…" and Settings →
     Sync has "Restore a deleted note…"; both open one plain list dialog that #472 replaces. There is no
     command palette in Shale, and no key action was added (they are part of the keyboard reference and its
@@ -86,17 +87,75 @@ calls.
 ## Rejected
 
 - A gitfile or `.git` link in the vault (breaks on synced folders); one shared repository for all vaults
-  (one broken vault ruins the others); thinning by rewriting; an embedded git library (owner decision).
+  (one broken vault ruins the others); thinning a history that is pushed (a rewrite needs a force push); an embedded git library (owner decision).
 
 ## Open for the owner
 
 Defaults implemented now, each reversible:
 
 - Local history does not track media (only notes and drawings).
-- Old snapshots are never thinned out (follow-up issue #479).
+- Thinning: see the amendment below (decided by the owner, #479).
 - A copied vault gets a new ID and a history of its own.
-- A vault that later gets `.git` continues in that repository; the old local history is not merged in
-  (it stays in the data folder and is shown in Data usage until removed).
+- A vault that later gets `.git`: decided, see the amendment of 2026-11-22 (#485) below.
 - A new local history starts with a snapshot of the vault as it is.
 - History is on by default.
 - The sync pushes snapshots without squashing them.
+
+## Amendment 2026-11-22: thinning a local-only history (#479)
+
+Owner decision: thin **only** local-only histories (the git directory in the data folder). Every snapshot
+is kept for a day, hourly ones for a month, daily ones after that. A vault's own `.git` is never rewritten
+(SYNC-012: no history rewrite, no force push). This replaces "keep everything" of item 11 and the open
+default above.
+
+- **Which commits stay** (`history::keep`, pure: commits newest first with time and message, plus "now"):
+  younger than 24 h: all; 24 h up to 30 days: the newest of each hour; older: the newest of each day; always
+  the newest commit and the root ("Start of the history"). **Buckets are UTC**: the same result on every
+  machine and in every test, no daylight-saving hours with 0 or 2 slots; the cost is that a "day" starts
+  at another hour than the person's midnight, which nobody sees in a thinned history older than a month.
+- **Never dropped**: snapshots with `Shale-Reason: restore`, `delete` or `rename` (a restored version
+  must not vanish, a rename keeps `git log --follow` working), every commit that deletes a path (the sync's
+  and other tools' too), and **the commit before a deleting commit**: the deleted note's last text is the
+  parent of the deleting commit (`deleted_content`), so without the parent a note would come back with an
+  older text or not at all. The extra commits are few (one per deletion).
+- **The rewrite** (`gitsync::history::thin`): under the tree lock, read `main` (the old tip) and its
+  first-parent commits; build a new linear history oldest first with `git commit-tree` (same tree, same
+  message, same author and committer with their dates through the `GIT_AUTHOR_*` and `GIT_COMMITTER_*`
+  variables of a `Git` clone, parent = the previous kept new commit). Then `git update-ref refs/heads/main
+  <new tip> <old tip>`: **compare-and-swap**, so a branch that moved or any failure before leaves the old
+  history whole (nothing was written to a ref until then; the new objects are unreachable and are removed by
+  the next gc). Then `git reflog expire --expire=now --all` and `git gc --prune=now` (not `--auto`: `--auto`
+  does nothing below its thresholds, and the point is that Data usage shrinks; the repository is small and
+  the run is a background job once a day). No `filter-branch`, no new dependency. The vault's files are
+  never touched. `Shale-Restored:` trailers name commits that may be gone; they are information, nothing
+  reads them back.
+- **When**: at most once a day per vault, 60 s after a vault opens and then every 24 h, only while no
+  snapshot, sync or read runs (a read of an old commit would fail when gc removed it); the time of the last
+  run is the file `thinned` in the git directory. No setting: the owner gave fixed rules (a setting can be
+  added when someone asks). Settings → Sync says which rule applies.
+- Not thinned: a vault with `.git`. A person who wants a small history there can use a local history
+  (SYNC-049).
+
+## Amendment 2026-11-22: connecting a server moves the local history into `.git` (#485)
+
+Owner decision: when a server is connected to a vault whose history is kept on this computer, that
+history is **moved** into the vault's `.git` (copy, check, remove: the reverse of the move-out of #469,
+SYNC-063), so the versions have one source. This replaces the open default "continues in that repository,
+the old local history is not merged in" (SYNC-072…SYNC-075).
+
+- **When**: in the job that connects (the wizard's "asking the server" step, or Advanced → Connect), before
+  `git init` and `origin`; only for a vault without `.git` whose git directory has a `HEAD`. Under the tree
+  lock, with no snapshot, thinning, read or sync running.
+- **How**: copy `<data>/shale/history/<id>` to `<vault>/.git.moving`; the refs and `HEAD` must equal and
+  `git fsck` must pass; rename it to `.git`; `core.bare=false`, no `core.worktree`; `git status` must work.
+  Any failure removes the copy and leaves the vault without `.git` and the local history untouched.
+- **The old folder is removed right after the checked copy**, not kept as `<id>.moved` until the first sync
+  succeeded. Reasons: the copy is verified and renamed atomically, the first sync never rewrites it
+  (SYNC-012), so the history in `.git` cannot get worse by a failing sync, and a kept second copy would be
+  shown in Data usage as a second history and could diverge (snapshots, thinning). The only thing a kept
+  copy would protect against is a bug in the check itself.
+- **The first sync** is the ordinary one: an empty server gets the history as it is (no rewrite); a server
+  with content is merged with `--allow-unrelated-histories`, both histories stay in the graph.
+- **After the move** the history is the vault's own repository: pushed as it is, never thinned (SYNC-069).
+  `.shale/history-id` stays (a synced file); it names a history that is gone until the repository is moved
+  out again.
