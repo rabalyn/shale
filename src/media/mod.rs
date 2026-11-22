@@ -13,6 +13,7 @@ pub mod engine;
 pub mod ffmpeg;
 pub mod intake;
 pub mod linked;
+pub mod look;
 pub mod output;
 pub mod outside;
 pub mod player;
@@ -249,30 +250,26 @@ pub fn is_image(p: &Path) -> bool {
     p.extension().and_then(|e| e.to_str()).map(|e| IMAGE_EXTS.contains(&e.to_ascii_lowercase().as_str())).unwrap_or(false)
 }
 
-/// A picture from disk as a texture, loaded once per file version and kept in egui's memory.
-/// Large pictures are scaled down to at most 2048 px. None if it can't be read.
-pub fn texture(ctx: &eframe::egui::Context, abs: &Path) -> Option<eframe::egui::TextureHandle> {
-    use eframe::egui;
-    let mtime = fs::metadata(abs).and_then(|m| m.modified()).ok();
-    let id = egui::Id::unique(("shale-image", abs.to_path_buf(), mtime));
-    if let Some(cached) = ctx.data(|d| d.get_temp::<Option<egui::TextureHandle>>(id)) {
-        return cached;
-    }
-    let loaded = image::open(abs).ok().map(|img| {
-        let img = if img.width() > 2048 || img.height() > 2048 { img.thumbnail(2048, 2048) } else { img };
-        let rgba = img.to_rgba8();
-        let size = [rgba.width() as usize, rgba.height() as usize];
-        let color = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
-        ctx.load_texture(abs.to_string_lossy(), color, egui::TextureOptions::LINEAR)
-    });
-    ctx.data_mut(|d| d.insert_temp(id, loaded.clone()));
-    loaded
+/// A picture file for a frame, at once (MEDIA-024): `Loading` while the file is looked up and
+/// decoded on a worker, then its texture, loaded once per file version. Large pictures are scaled
+/// down to at most 2048 px. `Broken` if it is not there or can't be read.
+pub fn picture(ctx: &eframe::egui::Context, abs: &Path) -> look::Pic {
+    look::Looks::of(ctx).picture(ctx, abs)
 }
 
-/// An image widget for a picture file, fitted into max_w × max_h.
+/// The texture of a picture file once it is loaded; None while it loads and when it can't be read.
+pub fn texture(ctx: &eframe::egui::Context, abs: &Path) -> Option<eframe::egui::TextureHandle> {
+    picture(ctx, abs).ready()
+}
+
+/// An image widget for a loaded picture, fitted into max_w × max_h.
+pub fn fitted(tex: &eframe::egui::TextureHandle, max_w: f32, max_h: f32) -> eframe::egui::Image<'static> {
+    eframe::egui::Image::from_texture(eframe::egui::load::SizedTexture::from_handle(tex)).max_width(max_w).max_height(max_h)
+}
+
+/// An image widget for a picture file, fitted into max_w × max_h; None while it loads and when it can't be read.
 pub fn image_widget(ctx: &eframe::egui::Context, abs: &Path, max_w: f32, max_h: f32) -> Option<eframe::egui::Image<'static>> {
-    let tex = texture(ctx, abs)?;
-    Some(eframe::egui::Image::from_texture(eframe::egui::load::SizedTexture::from_handle(&tex)).max_width(max_w).max_height(max_h))
+    texture(ctx, abs).map(|tex| fitted(&tex, max_w, max_h))
 }
 
 /// If the cursor sits after an unfinished `[!path`, returns (byte where `[!` starts, typed path).

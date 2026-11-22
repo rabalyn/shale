@@ -163,7 +163,7 @@ fn a_video_outside_the_vault_without_ffmpeg_opens_in_the_system_player() {
     let shown = fx.until_text("ffmpeg is not installed");
     assert!(shown.iter().any(|t| t.contains("ffmpeg is not installed")), "{shown:?}");
     fx.click_label("Play");
-    fx.hl.frames(&mut fx.app, 3);
+    fx.until("the file is opened in the background", |a| a.outside_opens.is_empty());
     assert_eq!(fx.app.media.current(), None, "nothing plays inside Shale");
     let o = opened.lock().unwrap();
     assert_eq!(o.len(), 1, "{o:?}");
@@ -204,6 +204,7 @@ fn a_click_on_an_outside_link_opens_the_file_with_the_system_program_and_never_m
         fx.hl.frames(&mut fx.app, 2);
         let at = fx.hl.text.iter().find(|(t, _)| t.contains(text)).map(|(_, p)| *p).unwrap_or_else(|| panic!("{text:?} is not on the screen: {:?}", fx.hl.text));
         fx.hl.click(&mut fx.app, at + egui::vec2(6.0, 6.0), PointerButton::Primary);
+        fx.until("the file is looked for and opened in the background", |a| a.outside_opens.is_empty());
     };
     click_on(&mut fx, "@Media/tone.wav");
     assert_eq!(opened.lock().unwrap().len(), 1);
@@ -231,6 +232,7 @@ fn a_click_on_the_caption_of_an_outside_picture_in_the_editor_opens_it_too() {
     fx.hl.frames(&mut fx.app, 4);
     let at = fx.hl.text.iter().find(|(t, _)| t == "@Media/a.png").map(|(_, p)| *p).expect("the caption of the picture");
     fx.hl.click(&mut fx.app, Pos2::new(at.x + 6.0, at.y + 5.0), PointerButton::Primary);
+    fx.until("the file is opened in the background", |a| a.outside_opens.is_empty());
     assert!(opened.lock().unwrap().iter().any(|p| p.ends_with("a.png")), "{:?} {:?}", opened.lock().unwrap(), fx.app.toasts);
 }
 
@@ -495,4 +497,157 @@ fn the_caption_and_the_name_of_an_outside_file_say_it_is_not_synced_and_those_of
     fx.hl.frame(&mut fx.app, vec![egui::Event::PointerMoved(Pos2::new(5.0, 5.0))]);
     let name = fx.hl.text.iter().find(|(t, _)| t == "a.png").map(|(_, p)| *p).expect("the name of the outside picture");
     assert!(tooltip_shows(&mut fx, name + egui::vec2(4.0, 4.0), crate::media::outside::NOT_SYNCED), "{:?}", fx.hl.text);
+}
+
+/// A drive that does not answer: every look-up of a file waits for the gate, and the paths that were asked are noted.
+fn held_drive(ctx: &egui::Context) -> (Arc<crate::media::look::tests::Gate>, Arc<Mutex<Vec<PathBuf>>>) {
+    let (gate, asked) = (Arc::new(crate::media::look::tests::Gate::default()), Arc::new(Mutex::new(Vec::new())));
+    let (g, a) = (gate.clone(), asked.clone());
+    crate::media::look::Looks::of(ctx).use_stat(move |p| {
+        a.lock().unwrap().push(p.to_path_buf());
+        g.pass();
+        crate::media::look::Facts::of(p)
+    });
+    (gate, asked)
+}
+
+/// Frames until one draws `n` pictures, or a generous deadline passes.
+fn until_drawn(fx: &mut Fx, n: usize) -> usize {
+    let start = std::time::Instant::now();
+    loop {
+        let out = fx.hl.frame(&mut fx.app, vec![]);
+        if pictures(&out) == n || start.elapsed() > std::time::Duration::from_secs(20) {
+            return pictures(&out);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+// spec: MEDIA-024
+#[test]
+fn a_drive_that_does_not_answer_does_not_stop_the_window_it_shows_loading_and_the_picture_comes_when_it_answers() {
+    let o = Outside::new("held-picture");
+    o.picture("a.png");
+    let note = "# Pictures\n\n![[@Media/a.png]]\n\n![[@Media/gone.png]]\n\n![[@Nowhere/b.png]]\n\nafter\n";
+    let mut drive = None;
+    let mut fx = Fx::start("o-held-pic", note, &[], |app, ctx| {
+        app.cfg.media_libraries = o.library();
+        drive = Some(held_drive(ctx));
+    });
+    let (gate, asked) = drive.unwrap();
+    let start = std::time::Instant::now();
+    for (reading, view) in [(true, "the reading view"), (false, "the editor")] {
+        fx.show(reading);
+        assert!(said(&fx, "Loading a.png…"), "{view} shows a quiet loading state: {:?}", fx.hl.text);
+        assert!(said(&fx, "Loading gone.png…") && !said(&fx, "Not found"), "{view}: a file that is not there is not known to be missing before the drive answered");
+        assert!(said(&fx, "Library “Nowhere” is not set up on this device"), "{view}: what needs no disk is said at once");
+        assert_eq!(drawn(&mut fx), 0, "{view}: no picture yet");
+    }
+    assert!(start.elapsed() < std::time::Duration::from_secs(10), "the frames did not wait for the drive");
+    let mut asked = asked.lock().unwrap().clone();
+    asked.sort();
+    assert_eq!(asked, vec![o.folder.join("a.png"), o.folder.join("gone.png")], "one check for each file, none for the library that is not set up, however many frames and views");
+    gate.open();
+    fx.settle();
+    assert_eq!(drawn(&mut fx), 1, "the editor shows the picture once the drive answered");
+    assert!(!said(&fx, "Loading"), "{:?}", fx.hl.text);
+    assert!(said(&fx, &format!("Not found: {}", o.folder.join("gone.png").display())), "the other file is missing after the check: {:?}", fx.hl.text);
+    fx.show(true);
+    assert_eq!(drawn(&mut fx), 1, "so does the reading view");
+}
+
+// spec: MEDIA-024
+#[test]
+fn a_picture_that_is_decoded_slowly_is_loading_in_a_strip_and_does_not_stop_the_window() {
+    let o = Outside::new("held-decode");
+    o.picture("a.png");
+    let gate = Arc::new(crate::media::look::tests::Gate::default());
+    let g = gate.clone();
+    let mut fx = Fx::start("o-held-decode", "![[@Media/a.png]]\n\nafter\n", &[], |app, ctx| {
+        app.cfg.media_libraries = o.library();
+        crate::media::look::Looks::of(ctx).use_decode(move |p| {
+            g.pass();
+            image::open(p).ok().map(|i| egui::ColorImage::from_rgba_unmultiplied([i.width() as usize, i.height() as usize], i.to_rgba8().as_raw()))
+        });
+    });
+    for reading in [true, false] {
+        fx.show(reading);
+        assert!(said(&fx, "Loading a.png…"), "{:?}", fx.hl.text);
+        assert_eq!(drawn(&mut fx), 0);
+    }
+    gate.open();
+    assert_eq!(until_drawn(&mut fx, 1), 1, "the picture is drawn when it is decoded");
+    assert!(!said(&fx, "Loading"));
+}
+
+// spec: MEDIA-024, MEDIA-016
+#[test]
+fn a_file_that_is_not_there_says_so_after_the_check_and_is_found_when_it_appears_and_lost_when_it_goes() {
+    let o = Outside::new("appears");
+    let mut fx = window("o-appears", "![[@Media/later.png]]\n\nafter\n", o.library());
+    fx.show(true);
+    let gone = format!("Not found: {}", o.folder.join("later.png").display());
+    assert!(said(&fx, &gone), "{:?}", fx.hl.text);
+    // the answers are trusted for a moment only: a file that appears is noticed without any other change
+    crate::media::look::Looks::of(fx.hl.ctx()).recheck_after(std::time::Duration::from_millis(40));
+    o.picture("later.png");
+    assert_eq!(until_drawn(&mut fx, 1), 1, "the picture appears");
+    assert!(!said(&fx, "Not found"));
+    std::fs::remove_file(o.folder.join("later.png")).unwrap();
+    let start = std::time::Instant::now();
+    while !said(&fx, &gone) && start.elapsed() < std::time::Duration::from_secs(20) {
+        fx.hl.frame(&mut fx.app, vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(said(&fx, &gone), "the file is gone again: {:?}", fx.hl.text);
+}
+
+// spec: MEDIA-024
+#[test]
+fn a_player_shows_a_busy_card_while_its_file_is_looked_at_and_plays_when_the_drive_answered() {
+    let o = Outside::new("held-player");
+    o.fixture("tone.wav", "tone.wav");
+    let mut drive = None;
+    let mut fx = Fx::start("o-held-player", "![[@Media/tone.wav]]\n\n![[tone-cover.mp3]]\n", &["tone-cover.mp3"], |app, ctx| {
+        app.cfg.media_libraries = o.library();
+        app.media.use_silent_output();
+        drive = Some(held_drive(ctx));
+    });
+    let (gate, _) = drive.unwrap();
+    fx.show(true);
+    assert!(said(&fx, "Loading tone.wav…"), "the outside sound is a strip until its file is found: {:?}", fx.hl.text);
+    // the sound of the vault is a card at once, of its usual size, but a click on Play waits for what the disk says
+    fx.label("Play");
+    assert!(said(&fx, "tone-cover.mp3"), "{:?}", fx.hl.text);
+    fx.click_label("Play");
+    assert_eq!(fx.app.media.current(), None, "too early: nothing plays");
+    gate.open();
+    fx.settle();
+    assert!(!said(&fx, "Loading"));
+    fx.click_label("Play");
+    assert!(fx.app.media.current().is_some(), "now it plays");
+}
+
+// spec: MEDIA-024, MEDIA-017
+#[test]
+fn a_click_on_an_outside_link_does_not_stop_the_window_while_the_file_is_handed_to_the_program() {
+    let o = Outside::new("held-click");
+    o.fixture("tone.wav", "tone.wav");
+    let gate = Arc::new(crate::media::look::tests::Gate::default());
+    let opened = Arc::new(Mutex::new(Vec::new()));
+    let (g, sink) = (gate.clone(), opened.clone());
+    let _guard = crate::opener::install_test_browser(Box::new(move |t| {
+        g.pass();
+        sink.lock().unwrap().push(t.to_string());
+    }));
+    let mut fx = window("o-held-click", "[[@Media/tone.wav]]\n", o.library());
+    fx.reading(true);
+    let at = fx.hl.text.iter().find(|(t, _)| t.contains("@Media/tone.wav")).map(|(_, p)| *p).expect("the link");
+    fx.hl.click(&mut fx.app, at + egui::vec2(6.0, 6.0), PointerButton::Primary);
+    assert_eq!(fx.app.outside_opens.len(), 1, "the file is being handed to the program in the background");
+    fx.hl.frames(&mut fx.app, 5);
+    assert!(opened.lock().unwrap().is_empty(), "the program has not been given it yet");
+    gate.open();
+    fx.until("the file is opened", |a| a.outside_opens.is_empty());
+    assert!(opened.lock().unwrap().iter().any(|p| p.ends_with("tone.wav")), "{:?}", opened.lock().unwrap());
 }

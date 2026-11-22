@@ -24,14 +24,14 @@ enum Source {
 }
 
 /// The `fileId` of every picture the scene uses, with its source.
-fn sources(scene: &Scene, vault: &Vault, rel: &Path) -> Vec<(String, Source)> {
+fn sources(scene: &Scene, vault: &Vault, resolve: impl Fn(&str) -> crate::vault::Shown) -> Vec<(String, Source)> {
     let mut out: Vec<(String, Source)> = Vec::new();
     let used: Vec<&str> = scene.live().filter(|e| e.kind == "image").filter_map(|e| e.extra.get("fileId").and_then(|v| v.as_str())).collect();
     for id in used {
         if out.iter().any(|(k, _)| k == id) {
             continue;
         }
-        let file = scene.embedded.iter().find(|(k, _)| k == id).and_then(|(_, target)| vault.resolve_media(target, Some(rel)).file(vault)).filter(|(p, _)| crate::media::is_image(p));
+        let file = scene.embedded.iter().find(|(k, _)| k == id).and_then(|(_, target)| resolve(target).file(vault)).filter(|(p, _)| crate::media::is_image(p));
         if let Some((_, abs)) = file {
             out.push((id.to_string(), Source::File(abs)));
         } else if let Some(url) = scene.files.get(id).and_then(|f| f.get("dataURL")).and_then(|v| v.as_str()) {
@@ -44,7 +44,7 @@ fn sources(scene: &Scene, vault: &Vault, rel: &Path) -> Vec<(String, Source)> {
 /// Textures for the scene's pictures (loaded once, then kept by egui).
 pub fn textures(ctx: &egui::Context, scene: &Scene, vault: &Vault, rel: &Path) -> Pictures {
     let mut out = Pictures::new();
-    for (id, src) in sources(scene, vault, rel) {
+    for (id, src) in sources(scene, vault, |t| vault.look_media(ctx, t, Some(rel))) {
         let tex = match src {
             Source::File(abs) => crate::media::texture(ctx, &abs),
             Source::Data(url) => {
@@ -73,7 +73,7 @@ pub fn textures(ctx: &egui::Context, scene: &Scene, vault: &Vault, rel: &Path) -
 
 /// The scene's pictures as images (for PDF export), by `fileId`.
 pub fn images(scene: &Scene, vault: &Vault, rel: &Path) -> HashMap<String, image::RgbaImage> {
-    sources(scene, vault, rel)
+    sources(scene, vault, |t| vault.resolve_media(t, Some(rel)))
         .into_iter()
         .filter_map(|(id, src)| {
             let img = match src {
@@ -196,7 +196,15 @@ mod tests {
         assert_eq!(imgs["f1"].get_pixel(1, 0).0, [0, 0, 255, 255]);
         assert_eq!(imgs["f2"].get_pixel(0, 0).0, [255, 0, 0, 255]);
         let ctx = egui::Context::default();
-        let tex = textures(&ctx, &scene, &v, Path::new("Sketch.excalidraw"));
+        // the file's picture is looked up and decoded on a worker (MEDIA-024); the data URL's is made at once
+        let mut tex = textures(&ctx, &scene, &v, Path::new("Sketch.excalidraw"));
+        for _ in 0..500 {
+            if tex.len() == 2 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            tex = textures(&ctx, &scene, &v, Path::new("Sketch.excalidraw"));
+        }
         assert!(tex.contains_key("f1") && tex.contains_key("f2") && !tex.contains_key("gone"));
         // painted as a picture where there is one, as a dashed box where there is none
         let painter = egui::Painter::new(ctx.clone(), egui::LayerId::background(), egui::Rect::EVERYTHING);

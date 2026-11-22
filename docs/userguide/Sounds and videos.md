@@ -76,6 +76,12 @@ this computer it says "Library “Videos” is not set up on this device". Nothi
 on such a link opens the file in your system's program, and nothing else than pictures, PDFs,
 sounds and videos is ever opened this way. These links are not red, and they are not in the graph.
 
+Such files often live on a NAS, a network share or a USB disk. Shale never waits for the disk: it
+looks at the file in the background, and until it has an answer the embed says "Loading …" in a quiet
+strip (a picture is decoded in the background too). It asks again every few seconds, so a file that
+appears or goes is noticed without anything else changing, and the window keeps working while a
+drive does not answer.
+
 Files outside the vault are not part of it: they are not synced with [[Git sync]] and not in
 the [[File history]], and a backup of the vault does not hold them. Shale says so where it matters:
 the caption of such a picture or player has the tooltip "Outside the vault: not synced", the reading

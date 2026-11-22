@@ -2,6 +2,7 @@
 //! MEDIA-003…008). The sound goes into a thread that only keeps time (`use_silent_output`), so
 //! the tests need no sound card and make no noise.
 
+use super::look::{Look, Looks};
 use super::testdata::fixture;
 use super::widget::BUTTON_RADIUS;
 use crate::app::{Options, SettingsTab, ShaleApp};
@@ -27,6 +28,18 @@ impl Fx {
 
     /// Like `new`, with `setup` run on the app before the note is opened.
     fn new_with(tag: &str, note: &str, sounds: &[&str], setup: impl FnOnce(&mut ShaleApp)) -> Fx {
+        Fx::new_in(tag, note, sounds, |a, _| setup(a))
+    }
+
+    /// Like `new_with`, with the window's egui context too (to put a look-up of its own into it, MEDIA-024).
+    fn new_in(tag: &str, note: &str, sounds: &[&str], setup: impl FnOnce(&mut ShaleApp, &egui::Context)) -> Fx {
+        let mut fx = Fx::start(tag, note, sounds, setup);
+        fx.settle();
+        fx
+    }
+
+    /// Like `new_in`, without waiting for the look-ups of the files (a test that holds them back).
+    fn start(tag: &str, note: &str, sounds: &[&str], setup: impl FnOnce(&mut ShaleApp, &egui::Context)) -> Fx {
         let dir = std::env::temp_dir().join(format!("shale-media-ui-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -42,24 +55,57 @@ impl Fx {
         std::fs::write(dir.join("Player.md"), note).unwrap();
         let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
         app.media.use_silent_output();
-        setup(&mut app);
-        app.open(Path::new("Player.md"), false);
         let mut hl = Headless::new();
+        setup(&mut app, hl.ctx());
+        app.open(Path::new("Player.md"), false);
         hl.frames(&mut app, 4);
         Fx { app, hl, dir }
     }
 
     fn reading(&mut self, on: bool) {
+        self.show(on);
+        self.settle();
+    }
+
+    /// The note in the reading view or the editor, a few frames, without waiting for the look-ups.
+    fn show(&mut self, reading: bool) {
         let a = self.app.tabbar.active;
-        self.app.tabbar.tabs[a].reading = on;
+        self.app.tabbar.tabs[a].reading = reading;
         self.hl.frames(&mut self.app, 3);
+    }
+
+    /// A test changed files behind the window's back: the look-ups ask the disk again, and the window settles.
+    fn disk_changed(&mut self) {
+        crate::media::look::Looks::of(self.hl.ctx()).expire();
+        self.settle();
+    }
+
+    /// Frames until the file look-ups and the pictures the window asked for are done and drawn: they
+    /// run on workers (MEDIA-024), so a picture is there a few frames after its note is shown.
+    fn settle(&mut self) {
+        let looks = crate::media::look::Looks::of(self.hl.ctx());
+        let mut idle = 0;
+        for _ in 0..500 {
+            self.hl.frame(&mut self.app, vec![]);
+            idle = if looks.busy() { 0 } else { idle + 1 };
+            if idle >= 3 {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        panic!("the file look-ups did not finish");
     }
 
     /// Frames until the app is in the state `ok` looks for (sound opens on threads).
     fn until(&mut self, what: &str, mut ok: impl FnMut(&ShaleApp) -> bool) {
+        self.until_in(what, |a, _| ok(a));
+    }
+
+    /// Like `until`, with the window's egui context for what the look-ups say (MEDIA-024).
+    fn until_in(&mut self, what: &str, mut ok: impl FnMut(&ShaleApp, &egui::Context) -> bool) {
         for _ in 0..300 {
             self.hl.frame(&mut self.app, vec![]);
-            if ok(&self.app) {
+            if ok(&self.app, self.hl.ctx()) {
                 return;
             }
             std::thread::sleep(Duration::from_millis(20));
@@ -510,16 +556,17 @@ fn a_sound_that_is_an_lfs_pointer_says_not_downloaded_and_the_download_link_asks
     let mut fx = Fx::new("pointer", "![[Song.mp3]]\n", &[]);
     std::fs::write(fx.dir.join("Song.mp3"), pointer_text(12_345_678)).unwrap();
     fx.app.vault.as_mut().unwrap().rescan();
+    fx.disk_changed();
     fx.reading(true);
-    let notice = fx.app.media.notice(&fx.dir.join("Song.mp3")).expect("a pointer file");
+    let notice = fx.app.media.notice(fx.hl.ctx(), &fx.dir.join("Song.mp3")).expect("a pointer file");
     assert_eq!(notice.line(), "Not downloaded (12 MB)");
     fx.label("Download");
     assert_eq!(fx.app.media.current(), None, "nothing was decoded or played");
     // the vault is no repository here, so the download says so in words, in the player
     fx.click_label("Download");
     let song = fx.dir.join("Song.mp3");
-    fx.until("the download failed", |a| a.media.notice(&song).is_some_and(|n| n.error.is_some()));
-    let n = fx.app.media.notice(&song).unwrap();
+    fx.until_in("the download failed", |a, ctx| a.media.notice(ctx, &song).is_some_and(|n| n.error.is_some()));
+    let n = fx.app.media.notice(fx.hl.ctx(), &song).unwrap();
     assert!(!n.running && n.line().starts_with("Download failed: ") && n.line().contains("not a git repository"), "{}", n.line());
     // "Download" offers it again, and playing does not decode the pointer
     fx.label("Download");
@@ -534,18 +581,20 @@ fn pressing_play_on_a_pointer_downloads_first_and_plays_when_the_file_is_there()
     let song = fx.dir.join("Song.mp3");
     std::fs::write(&song, pointer_text(1_000)).unwrap();
     fx.app.vault.as_mut().unwrap().rescan();
+    fx.disk_changed();
     fx.reading(true);
-    let ctx = egui::Context::default();
+    let ctx = fx.hl.ctx().clone();
     fx.app.media.toggle(&ctx, &song, Path::new("Player.md"));
     assert_eq!(fx.app.media.current(), None, "asked, nothing plays yet");
-    assert!(fx.app.media.notice(&song).unwrap().running);
+    assert!(fx.app.media.notice(fx.hl.ctx(), &song).unwrap().running);
     assert_eq!(fx.app.media.take_download_requests(), vec![song.clone()]);
     // the download brought the real file
     std::fs::copy(fixture("tone-cover.mp3"), &song).unwrap();
     fx.app.media.download_done(&ctx, &song, Ok(()));
     assert_eq!(fx.app.media.current(), Some(song.clone()));
     fx.until("the sound runs", |a| a.media.position().is_some());
-    assert_eq!(fx.app.media.notice(&song), None);
+    fx.until_in("the look-up knows the real file", |_, ctx| matches!(Looks::of(ctx).facts(ctx, &song), Look::Known(Some(f)) if f.pointer.is_none()));
+    assert_eq!(fx.app.media.notice(fx.hl.ctx(), &song), None);
 }
 
 // spec: SYNC-020
@@ -554,14 +603,16 @@ fn a_picture_that_is_an_lfs_pointer_says_not_downloaded_in_the_reading_view_and_
     let mut fx = Fx::new("pointer-picture", "Look:\n\n![[Photo.png]]\n\nafter\n", &[]);
     std::fs::write(fx.dir.join("Photo.png"), pointer_text(2_500_000)).unwrap();
     fx.app.vault.as_mut().unwrap().rescan();
+    fx.disk_changed();
     let photo = fx.dir.join("Photo.png");
     fx.reading(true);
     fx.label("Download");
-    assert_eq!(fx.app.media.notice(&photo).unwrap().line(), "Not downloaded (2 MB)");
+    assert_eq!(fx.app.media.notice(fx.hl.ctx(), &photo).unwrap().line(), "Not downloaded (2 MB)");
     fx.reading(false);
     fx.click_label("Download");
-    fx.until("asked and failed in words (the vault is no repository)", |a| a.media.notice(&photo).is_some_and(|n| n.error.is_some()));
+    fx.until_in("asked and failed in words (the vault is no repository)", |a, ctx| a.media.notice(ctx, &photo).is_some_and(|n| n.error.is_some()));
     // a real file is no business of this
     std::fs::write(fx.dir.join("Other.png"), vec![1u8; 3000]).unwrap();
-    assert_eq!(fx.app.media.notice(&fx.dir.join("Other.png")), None);
+    fx.disk_changed();
+    assert_eq!(fx.app.media.notice(fx.hl.ctx(), &fx.dir.join("Other.png")), None);
 }

@@ -159,6 +159,7 @@ mod history_ui;
 mod link_preview;
 mod mail;
 mod outside_copy;
+mod outside_open;
 pub mod panes;
 mod rescan;
 mod screenshot;
@@ -416,6 +417,8 @@ pub struct ShaleApp {
     pub usage: crate::data_usage::DataUsage,
     /// the files of a note's outside links being copied into the vault (MEDIA-021)
     pub(crate) outside_copy: Option<outside_copy::OutsideCopy>,
+    /// outside files a click is opening, in background jobs (MEDIA-017, MEDIA-024)
+    pub(crate) outside_opens: Vec<outside_open::Opening>,
     /// the check of the vault's names for other systems (VAULT-028)
     pub vault_check: crate::vault_check::VaultCheck,
     /// the LaTeX page of the settings: the TeX found, the managed TeX Live and its jobs (TEX-001)
@@ -671,6 +674,7 @@ impl ShaleApp {
             link_preview: Default::default(),
             usage: crate::data_usage::DataUsage::new(places),
             outside_copy: None,
+            outside_opens: Vec::new(),
             vault_check: Default::default(),
             tex: crate::pdf::tex::settings_ui::TexState::new(persist, &tag),
             update: if persist { crate::update::UpdateState::for_running_program() } else { Default::default() },
@@ -796,9 +800,13 @@ impl ShaleApp {
         }
         // videos that cannot play here (no ffmpeg) go to the system's player (MEDIA-010)
         for abs in self.media.take_open_requests() {
-            let opened = self.vault.as_ref().map(|v| if abs.starts_with(&v.root) { crate::opener::open_vault_file(&abs, &v.root) } else { crate::opener::open_outside_media(&abs) });
-            if let Some(Err(e)) = opened {
-                self.toast(e);
+            match self.vault.as_ref().filter(|v| abs.starts_with(&v.root)) {
+                Some(v) => {
+                    if let Err(e) = crate::opener::open_vault_file(&abs, &v.root) {
+                        self.toast(e);
+                    }
+                }
+                None => self.open_outside_file(abs),
             }
         }
     }
@@ -1213,15 +1221,8 @@ impl ShaleApp {
             return;
         }
         // a library link or a file link to a media file is opened by the system's program, and is never a note (MEDIA-017)
-        let shown = v.resolve_media(target, from.as_deref());
-        if let crate::vault::Shown::Outside(outside) = shown {
-            let opened = match &outside {
-                crate::media::outside::Outside::Found { abs, .. } => crate::opener::open_outside_media(abs),
-                other => Err(other.notice().unwrap_or_default()),
-            };
-            if let Err(e) = opened {
-                self.toast(e);
-            }
+        if let Some(spot) = crate::media::outside::spot(target) {
+            self.open_outside(spot);
             return;
         }
         let t = target.trim();
@@ -2931,6 +2932,7 @@ impl ShaleApp {
         let ctx = ui.ctx().clone();
         self.media_tick(&ctx);
         self.outside_copy_tick();
+        self.outside_open_tick();
         self.tex.poll(&ctx);
         self.git_tick(&ctx);
         self.update_tick(&ctx);

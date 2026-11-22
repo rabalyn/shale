@@ -1249,10 +1249,16 @@ impl<'a> Writer<'a> {
     fn inline_pictures(&mut self, vault: &Vault, rel: &Path, text: &str) -> HashMap<String, crate::reader::InlinePicture> {
         let links = Self::links_of(vault, rel, text);
         let (doc, images) = (&mut self.doc, &mut self.inline_images);
-        crate::reader::pictures_in_lines(text, &links, vault, rel, |abs| {
-            let known = images.entry(abs.to_path_buf()).or_insert_with(|| image::open(abs).ok().map(|img| (doc.add_image(pdf_image(&img.to_rgba8())), Vec2::new(img.width() as f32, img.height() as f32))));
-            known.map(|(_, size)| (size, None))
-        })
+        crate::reader::pictures_in_lines(
+            text,
+            &links,
+            vault,
+            |t| vault.resolve_media(t, Some(rel)),
+            |abs| {
+                let known = images.entry(abs.to_path_buf()).or_insert_with(|| image::open(abs).ok().map(|img| (doc.add_image(pdf_image(&img.to_rgba8())), Vec2::new(img.width() as f32, img.height() as f32))));
+                known.map(|(_, size)| (size, None))
+            },
+        )
     }
 
     pub(super) fn line_size(&self, line: &[Piece]) -> f32 {

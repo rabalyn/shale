@@ -400,21 +400,27 @@ pub enum Content {
     },
     /// a library link or a file link (MEDIA-016): a picture, or what the file is; or why it cannot be shown
     Outside(Outside),
+    /// an outside file that is still looked up (MEDIA-024): `refresh` asks again in each frame until the answer is there
+    Checking {
+        abs: PathBuf,
+        kind: crate::media::Kind,
+    },
     /// a link that has nothing to preview, in words
     Plain(String),
 }
 
 /// The content for a link of the note `from`; `note_text` gives the text of a note (the open buffer
-/// when the note is open).
-pub fn content_for(target: &Target, vault: &Vault, note_text: &dyn Fn(&Path) -> Option<String>, numbered: bool) -> Content {
+/// when the note is open). An outside file is looked up in the background (`ctx`, MEDIA-024).
+pub fn content_for(ctx: &egui::Context, target: &Target, vault: &Vault, note_text: &dyn Fn(&Path) -> Option<String>, numbered: bool) -> Content {
     let (link, heading, from) = match target {
         Target::Web { url } if url.to_ascii_lowercase().starts_with("mailto:") => return Content::Plain(format!("A mail to {}. Enter opens your mail program.", url[7..].split('?').next().unwrap_or(""))),
         Target::Web { url } => return Content::Web { url: fetchable(url) },
         Target::Link { target, heading, from } => (target, heading, from),
     };
-    let rel = match vault.resolve_media(link, Some(from)) {
+    let rel = match vault.look_media(ctx, link, Some(from)) {
         crate::vault::Shown::Vault(rel) => rel,
         crate::vault::Shown::Outside(outside) => return Content::Outside(outside),
+        crate::vault::Shown::Checking { abs, kind } => return Content::Checking { abs, kind },
         crate::vault::Shown::Nothing => return Content::Missing(link.clone()),
     };
     match vault.file(&rel).map(|f| f.kind) {
@@ -430,6 +436,37 @@ pub fn content_for(target: &Target, vault: &Vault, note_text: &dyn Fn(&Path) -> 
         _ => {
             let kind = if rel.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf")) { "PDF" } else { "File" };
             Content::File { rel, kind }
+        }
+    }
+}
+
+impl Content {
+    /// An outside file that was still looked up when the content was made becomes what the look-up
+    /// says now, as soon as it says something (MEDIA-024).
+    pub fn refresh(&mut self, ctx: &egui::Context) {
+        if let Content::Checking { abs, kind } = self {
+            if let crate::media::outside::Seen::Is(outside) = crate::media::outside::looked(ctx, abs.clone(), *kind) {
+                *self = Content::Outside(outside);
+            }
+        }
+    }
+}
+
+/// What the preview shows of an outside file (MEDIA-016): the picture, or what the file is and
+/// where it is; or why it cannot be shown. `room` is the space the content has.
+fn outside_content(ui: &mut Ui, outside: &Outside, room: Vec2) {
+    match outside {
+        Outside::Found { abs, kind } => match (*kind == crate::media::Kind::Image).then_some(abs).and_then(|abs| crate::media::image_widget(ui.ctx(), abs, room.x, room.y - 16.0)) {
+            Some(img) => {
+                ui.add(img);
+            }
+            None => {
+                ui.label(egui::RichText::new(abs.to_string_lossy()).strong().color(theme::palette().text));
+                ui.label(egui::RichText::new(format!("{}, outside the vault. Enter opens it", kind.label())).color(theme::palette().muted));
+            }
+        },
+        other => {
+            ui.label(egui::RichText::new(other.notice().unwrap_or_default()).strong().color(theme::palette().link_missing));
         }
     }
 }
@@ -655,20 +692,10 @@ impl LinkPreview {
                     ui.label(egui::RichText::new(rel.to_string_lossy()).strong().color(theme::palette().text));
                     ui.label(egui::RichText::new(format!("{kind}. Enter opens it")).color(theme::palette().muted));
                 }
-                Content::Outside(outside) => match outside {
-                    Outside::Found { abs, kind } => match (*kind == crate::media::Kind::Image).then_some(abs).and_then(|abs| crate::media::image_widget(ui.ctx(), abs, room.x, room.y - 16.0)) {
-                        Some(img) => {
-                            ui.add(img);
-                        }
-                        None => {
-                            ui.label(egui::RichText::new(abs.to_string_lossy()).strong().color(theme::palette().text));
-                            ui.label(egui::RichText::new(format!("{}, outside the vault. Enter opens it", kind.label())).color(theme::palette().muted));
-                        }
-                    },
-                    other => {
-                        ui.label(egui::RichText::new(other.notice().unwrap_or_default()).strong().color(theme::palette().link_missing));
-                    }
-                },
+                Content::Outside(outside) => outside_content(ui, outside, room),
+                Content::Checking { abs, .. } => {
+                    crate::media::widget::show_loading(ui, &abs.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+                }
                 Content::Plain(m) => {
                     ui.label(egui::RichText::new(m.as_str()).color(theme::palette().text));
                 }
@@ -831,11 +858,11 @@ mod tests {
         let v = Vault::open(&d).unwrap();
         let text = |_: &Path| std::fs::read_to_string(d.join("Roadmap.md")).ok();
         let target = |h: &str| Target::Link { target: "Roadmap".into(), heading: Some(h.into()), from: "Welcome.md".into() };
-        let Content::Note { text: shown, numbers, .. } = content_for(&target("Two"), &v, &text, true) else { panic!("a note") };
+        let Content::Note { text: shown, numbers, .. } = content_for(&egui::Context::default(), &target("Two"), &v, &text, true) else { panic!("a note") };
         assert!(shown.starts_with("## Two"));
         assert_eq!(numbers.get(&0).map(String::as_str), Some("1.2"), "Two is number 1.2 although the preview starts there");
         assert_eq!(numbers.get(&1).map(String::as_str), Some("1.2.1"));
-        let Content::Note { numbers, .. } = content_for(&target("Two"), &v, &text, false) else { panic!("a note") };
+        let Content::Note { numbers, .. } = content_for(&egui::Context::default(), &target("Two"), &v, &text, false) else { panic!("a note") };
         assert!(numbers.is_empty(), "numbering off");
         let _ = std::fs::remove_dir_all(&d);
     }

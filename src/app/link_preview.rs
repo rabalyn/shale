@@ -81,7 +81,7 @@ impl ShaleApp {
             tab.editor.vim.message = Some("No link under the cursor".into());
             return;
         };
-        let content = content_for(&target, vault, &|r| self.notes.get(r).map(|d| d.text.clone()).or_else(|| vault.notes.get(r).map(|n| n.text.clone())), self.cfg.numbered_headings);
+        let content = content_for(ctx, &target, vault, &|r| self.notes.get(r).map(|d| d.text.clone()).or_else(|| vault.notes.get(r).map(|n| n.text.clone())), self.cfg.numbered_headings);
         let anchor = tab.editor.vim_cursor_rect.unwrap_or_else(|| Rect::from_min_size(ctx.content_rect().center(), Vec2::ZERO));
         let state = (tab_id, cursor, hash_text(text));
         if let crate::link_preview::Content::Web { url } = &content {
@@ -122,6 +122,7 @@ impl ShaleApp {
         let fonts = self.fonts.editor();
         let (base, dark) = (fonts.rendered.size, self.cfg.dark_canvas);
         let Some(open) = self.link_preview.open.as_mut() else { return };
+        open.content.refresh(&ctx);
         open.focused |= inside;
         let screen = ctx.content_rect();
         open.size = clamp_size(open.size, screen.size());

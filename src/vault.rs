@@ -790,16 +790,29 @@ impl Vault {
 
     /// Where a link of a note shows a media file, to be displayed or opened (MEDIA-014, MEDIA-015).
     /// A file of the vault wins (`resolve`), so a link that worked keeps working; otherwise a library
-    /// link or a file link to a media file is looked up outside the vault. Never use the result to
-    /// write: an outside path is for the players, the picture loader and `opener` only (VAULT-018).
+    /// link or a file link to a media file is looked up outside the vault, **asking the disk now**:
+    /// for jobs (exports, the vault check) and tests. A frame calls [`Vault::look_media`] instead.
+    /// Never use the result to write: an outside path is for the players, the picture loader and
+    /// `opener` only (VAULT-018).
     pub fn resolve_media(&self, target: &str, from: Option<&Path>) -> Shown {
+        self.shown(target, from, |spot| Shown::Outside(outside::resolve(spot, &self.libraries)))
+    }
+
+    /// [`Vault::resolve_media`] for a frame (MEDIA-024): an outside file is looked up on a worker and
+    /// the answer kept, so the window never waits for its drive; until the first answer the link is
+    /// `Shown::Checking`.
+    pub fn look_media(&self, ctx: &eframe::egui::Context, target: &str, from: Option<&Path>) -> Shown {
+        self.shown(target, from, |spot| match outside::look(ctx, spot, &self.libraries) {
+            outside::Seen::Is(o) => Shown::Outside(o),
+            outside::Seen::Checking { abs, kind } => Shown::Checking { abs, kind },
+        })
+    }
+
+    fn shown(&self, target: &str, from: Option<&Path>, outside: impl FnOnce(&outside::Spot) -> Shown) -> Shown {
         if let Some(rel) = self.resolve(target, from) {
             return Shown::Vault(rel);
         }
-        match outside::spot(target) {
-            Some(spot) => Shown::Outside(outside::resolve(&spot, &self.libraries)),
-            None => Shown::Nothing,
-        }
+        outside::spot(target).map_or(Shown::Nothing, |spot| outside(&spot))
     }
 
     /// For a link by name that several files share: how many, and the one it opens (LINK-008).
@@ -1436,6 +1449,9 @@ pub enum Shown {
     Vault(PathBuf),
     /// A library link or a file link: found, missing, or a library not set up here.
     Outside(Outside),
+    /// An outside file whose first look is still on its way (MEDIA-024, only from `look_media`): a
+    /// frame shows a quiet loading state.
+    Checking { abs: PathBuf, kind: crate::media::Kind },
     /// Neither: a note that does not exist, or a link of no media kind.
     Nothing,
 }
@@ -1447,6 +1463,14 @@ impl Shown {
         match self {
             Shown::Vault(rel) => Some((rel.clone(), vault.abs(rel))),
             Shown::Outside(Outside::Found { abs, .. }) => Some((abs.clone(), abs.clone())),
+            _ => None,
+        }
+    }
+
+    /// The outside file whose first look is still on its way: a frame shows a quiet loading state (MEDIA-024).
+    pub fn checking(&self) -> Option<&Path> {
+        match self {
+            Shown::Checking { abs, .. } => Some(abs),
             _ => None,
         }
     }
@@ -1760,6 +1784,47 @@ mod tests {
         assert!(matches!(v.resolve_media("@videos/2024/b.mp4", Some(from)), Shown::Outside(Outside::Missing { .. })));
         v.set_libraries(&[]);
         assert_eq!(v.resolve_media("@Videos/2024/b.mp4", Some(from)), Shown::Outside(Outside::NoLibrary("Videos".into())));
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: MEDIA-024
+    #[test]
+    fn a_frame_looks_a_link_up_in_the_background_and_a_job_asks_the_disk() {
+        let (v, d, loose) = outside_fixture("media-look");
+        let from = Some(Path::new("Links.md"));
+        let ctx = eframe::egui::Context::default();
+        let looks = crate::media::look::Looks::of(&ctx);
+        let gate = std::sync::Arc::new(crate::media::look::tests::Gate::default());
+        let g = gate.clone();
+        looks.use_stat(move |p| {
+            g.pass();
+            crate::media::look::Facts::of(p)
+        });
+        let video = d.join("Videos/2024/a.mp4");
+        // the disk is held: a link of the vault and one that needs no disk are answered at once, an outside file is being checked
+        assert_eq!(v.look_media(&ctx, "Real note", from), Shown::Vault(PathBuf::from("Real note.md")));
+        assert!(matches!(v.look_media(&ctx, "@Music/a.mp3", from), Shown::Outside(Outside::NoLibrary(_))));
+        assert_eq!(v.look_media(&ctx, "nothing", from), Shown::Nothing);
+        let checking = v.look_media(&ctx, "@Videos/2024/a.mp4", from);
+        assert_eq!(checking, Shown::Checking { abs: video.clone(), kind: crate::media::Kind::Video });
+        assert_eq!((checking.checking(), checking.file(&v), checking.notice()), (Some(video.as_path()), None, None));
+        assert_eq!(v.resolve_media("@Videos/2024/a.mp4", from), Shown::Outside(Outside::Found { abs: video.clone(), kind: crate::media::Kind::Video }), "a job asks the disk itself and does not wait for the look-up");
+        // the disk answers: found, and missing
+        gate.open();
+        let answered = |target: &str| {
+            for _ in 0..1000 {
+                let shown = v.look_media(&ctx, target, from);
+                if shown.checking().is_none() {
+                    return shown;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            panic!("no answer for {target}");
+        };
+        assert_eq!(answered("@Videos/2024/a.mp4"), Shown::Outside(Outside::Found { abs: video, kind: crate::media::Kind::Video }));
+        assert!(matches!(answered("@Videos/gone.mp3"), Shown::Outside(Outside::Missing { .. })));
+        let uri = crate::media::testdata::file_address(&loose);
+        assert_eq!(answered(&uri), Shown::Outside(Outside::Found { abs: loose, kind: crate::media::Kind::Image }));
         let _ = fs::remove_dir_all(&d);
     }
 

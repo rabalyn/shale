@@ -598,6 +598,13 @@ enum Art {
     Download(std::path::PathBuf),
     /// an outside file that cannot be shown: what is wrong, in a strip in its place (MEDIA-016)
     Notice(String),
+    /// a file that is still looked up or decoded on a worker: a quiet strip with its name (MEDIA-024)
+    Loading(String),
+}
+
+/// The name of a file, for the strip that stands in for it.
+fn file_name_of(abs: &std::path::Path) -> String {
+    abs.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
 /// What the editor asks the app to do.
@@ -1727,29 +1734,44 @@ impl NoteEditor {
                 if inside || raw_line || fold.view.is_hidden(line) {
                     continue;
                 }
-                let shown = vault.resolve_media(&l.target, Some(rel));
-                let outside = matches!(shown, crate::vault::Shown::Outside(_));
-                if let crate::vault::Shown::Outside(o) = &shown {
-                    outside_embeds.push((l.range.clone(), matches!(o, crate::media::outside::Outside::Found { .. })));
+                let shown = vault.look_media(ui.ctx(), &l.target, Some(rel));
+                let outside = matches!(shown, crate::vault::Shown::Outside(_) | crate::vault::Shown::Checking { .. });
+                if outside {
+                    outside_embeds.push((l.range.clone(), matches!(shown, crate::vault::Shown::Outside(crate::media::outside::Outside::Found { .. }))));
                 }
                 let Some((p, abs)) = shown.file(vault) else {
-                    if let Some(text) = shown.notice() {
+                    // a quiet strip while the file is looked for, the reason when it is not there (MEDIA-016, MEDIA-024)
+                    let art = match (shown.notice(), shown.checking()) {
+                        (Some(text), _) => Some(Art::Notice(text)),
+                        (None, Some(abs)) => Some(Art::Loading(file_name_of(abs))),
+                        (None, None) => None,
+                    };
+                    if let Some(art) = art {
                         let size = crate::embed_size::not_downloaded(max_w);
-                        images.push((l.range.clone(), size.y + 6.0 + caption_h, Art::Notice(text), size));
+                        images.push((l.range.clone(), size.y + 6.0 + caption_h, art, size));
                     }
                     continue;
                 };
                 // the width the link asks for, or the one a drag is giving it right now
                 let asked = self.embeds.dragging(l.range.start).or(l.embed_width());
                 if crate::media::is_image(&p) {
-                    if self.media.notice(&abs).is_some() && !outside {
+                    if self.media.notice(ui.ctx(), &abs).is_some() && !outside {
                         let size = crate::embed_size::not_downloaded(max_w);
                         images.push((l.range.clone(), size.y + 6.0 + caption_h, Art::Download(abs.clone()), size));
                         continue;
                     }
-                    let Some(tex) = crate::media::texture(ui.ctx(), &abs) else { continue };
-                    let size = crate::embed_size::picture(tex.size_vec2(), asked, max_w);
-                    images.push((l.range.clone(), size.y + 6.0 + caption_h, Art::Tex(tex), size));
+                    match crate::media::picture(ui.ctx(), &abs) {
+                        crate::media::look::Pic::Ready(tex) => {
+                            let size = crate::embed_size::picture(tex.size_vec2(), asked, max_w);
+                            images.push((l.range.clone(), size.y + 6.0 + caption_h, Art::Tex(tex), size));
+                        }
+                        // the size is not known before the picture is: the strip of the other placeholders (MEDIA-024)
+                        crate::media::look::Pic::Loading => {
+                            let size = crate::embed_size::not_downloaded(max_w);
+                            images.push((l.range.clone(), size.y + 6.0 + caption_h, Art::Loading(file_name_of(&abs)), size));
+                        }
+                        crate::media::look::Pic::Broken => continue,
+                    }
                 } else if crate::drawing::excalidraw_md::is_drawing_path(&p) {
                     let Some(scene) = crate::reader::scene_cached(ui.ctx(), &abs) else { continue };
                     let Some(b) = scene.bounds() else { continue };
@@ -1960,6 +1982,9 @@ impl NoteEditor {
                     Art::Notice(text) => {
                         ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| crate::media::widget::show_notice(ui, text));
                     }
+                    Art::Loading(name) => {
+                        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| crate::media::widget::show_loading(ui, name));
+                    }
                     Art::Pdf(tex, total) => {
                         painter.image(tex.id(), rect, uv, Color32::WHITE);
                         painter.rect_stroke(rect, 0.0, Stroke::new(1.0, theme::palette().border), egui::StrokeKind::Outside);
@@ -2168,7 +2193,7 @@ impl NoteEditor {
                     let tip = if *exists { format!("Open “{}”", l.target) } else { format!("Create note “{}”", l.target) };
                     let hint = if ctrl_to_follow { "Ctrl+click to follow" } else { "Ctrl+click to edit the link text" };
                     let colour = if *exists { theme::palette().link } else { theme::palette().link_missing };
-                    let image = vault.resolve_media(&l.target, Some(rel)).file(vault).filter(|(p, _)| crate::media::is_image(p)).map(|(_, abs)| abs);
+                    let image = vault.look_media(ui.ctx(), &l.target, Some(rel)).file(vault).filter(|(p, _)| crate::media::is_image(p)).map(|(_, abs)| abs);
                     // several files share the name, or a red path has several candidates (LINK-008, LINK-012)
                     let note = vault.link_hint(&l.target, Some(rel));
                     resp.clone().on_hover_ui_at_pointer(|ui| {
@@ -2419,6 +2444,21 @@ mod tests {
     }
 
     impl Harness {
+        /// Frames until the pictures the editor asked for are looked up and decoded (on workers, MEDIA-024).
+        fn settle(&mut self, ed: &mut NoteEditor, text: &mut String, vault: &Vault, rel: &Path) {
+            let looks = crate::media::look::Looks::of(&self.ctx);
+            let mut idle = 0;
+            for _ in 0..500 {
+                self.frame(ed, text, vault, rel, vec![]);
+                idle = if looks.busy() { 0 } else { idle + 1 };
+                if idle >= 3 {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            panic!("the pictures did not load");
+        }
+
         fn frame(&mut self, ed: &mut NoteEditor, text: &mut String, vault: &Vault, rel: &Path, events: Vec<Event>) -> (bool, Option<EditorAction>) {
             self.time += 0.05;
             let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 700.0))), time: Some(self.time), events, ..Default::default() };
@@ -3279,9 +3319,7 @@ mod tests {
         let mut ed = NoteEditor::new(egui::Id::unique("caption"));
         ed.inline_images = true;
         let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
-        for _ in 0..3 {
-            h.frame(&mut ed, &mut text, &v, rel, vec![]);
-        }
+        h.settle(&mut ed, &mut text, &v, rel);
         let find = |h: &Harness, t: &str| h.rects.iter().find(|(s, _)| s == t).map(|(_, r)| *r);
         let pic = find(&h, "pic.png").expect("the link target is the caption");
         let other = find(&h, "Sea at dusk").expect("the alias words are the caption");
@@ -3300,9 +3338,7 @@ mod tests {
         assert!(find(&h, "pic.png").is_some(), "the click did not put the cursor into the link");
         // with the cursor in the link there is no picture and no caption: the link text is shown
         ed.pending_cursor = Some(9);
-        for _ in 0..3 {
-            h.frame(&mut ed, &mut text, &v, rel, vec![]);
-        }
+        h.settle(&mut ed, &mut text, &v, rel);
         assert!(find(&h, "pic.png").is_none(), "no caption while the link is edited");
         // a picture that cannot be shown keeps its link text, without a caption
         let mut broken = String::from("![[missing.png]]");
@@ -3327,9 +3363,7 @@ mod tests {
         let mut ed = NoteEditor::new(egui::Id::unique("resize"));
         ed.inline_images = true;
         let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
-        for _ in 0..3 {
-            h.frame(&mut ed, &mut text, &v, rel, vec![]);
-        }
+        h.settle(&mut ed, &mut text, &v, rel);
         let r = embed_rect(&ed, Vec2::new(200.0, 120.0));
         // the bottom right corner, dragged 100 points to the right
         let corner = r.max - Vec2::splat(3.0);
@@ -3394,9 +3428,7 @@ mod tests {
         let mut ed = NoteEditor::new(egui::Id::unique("resize-cursor"));
         ed.inline_images = true;
         let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
-        for _ in 0..3 {
-            h.frame(&mut ed, &mut text, &v, rel, vec![]);
-        }
+        h.settle(&mut ed, &mut text, &v, rel);
         h.ctx.memory_mut(|m| m.request_focus(ed.id));
         let mut st = egui::text_edit::TextEditState::load(&h.ctx, ed.id).unwrap_or_default();
         st.cursor.set_char_range(Some(CCursorRange { primary: CCursor::new(sel.0), secondary: CCursor::new(sel.1), h_pos: None }));
@@ -3451,9 +3483,7 @@ mod tests {
         let mut ed = NoteEditor::new(egui::Id::unique("resize-cursor-drag"));
         ed.inline_images = true;
         let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
-        for _ in 0..3 {
-            h.frame(&mut ed, &mut text, &v, rel, vec![]);
-        }
+        h.settle(&mut ed, &mut text, &v, rel);
         // the cursor at the start of "after"
         let mut st = egui::text_edit::TextEditState::load(&h.ctx, ed.id).unwrap_or_default();
         st.cursor.set_char_range(Some(CCursorRange::one(CCursor::new(19))));
@@ -3487,9 +3517,7 @@ mod tests {
         let mut ed = NoteEditor::new(egui::Id::unique("resize-video"));
         ed.inline_images = true;
         let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
-        for _ in 0..3 {
-            h.frame(&mut ed, &mut text, &v, rel, vec![]);
-        }
+        h.settle(&mut ed, &mut text, &v, rel);
         let card = crate::media::widget::card_size(&d.join("clip.mp4"), 880.0, None);
         let r = embed_rect(&ed, card);
         let corner = r.max - Vec2::splat(3.0);
@@ -3527,8 +3555,7 @@ mod tests {
         let mut ed = NoteEditor::new(egui::Id::unique("t9"));
         ed.inline_images = true;
         let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
-        h.frame(&mut ed, &mut text, &v, rel, vec![]);
-        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.settle(&mut ed, &mut text, &v, rel);
         let tall = ed.last_layout.as_ref().unwrap().0.size().y;
         assert!(tall > 120.0, "image row should make room for the picture, height {tall}");
         // put the cursor inside the link: the text comes back, the row is normal again
@@ -3727,9 +3754,7 @@ mod tests {
             assert!(tall > 120.0, "{what} is shown inline, height {tall}");
             // with the cursor in the link, the link text is back
             ed.pending_cursor = Some(9);
-            for _ in 0..3 {
-                h.frame(&mut ed, &mut text, &v, rel, vec![]);
-            }
+            h.settle(&mut ed, &mut text, &v, rel);
             assert!(ed.last_layout.as_ref().unwrap().0.size().y < 100.0, "{what}: link text while editing it");
         }
         let _ = std::fs::remove_dir_all(&d);
@@ -3750,9 +3775,7 @@ mod tests {
         ed.inline_images = true;
         ed.pending_cursor = Some(text.chars().count()); // cursor at the end, outside the link
         let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
-        for _ in 0..3 {
-            h.frame(&mut ed, &mut text, &v, rel, vec![]);
-        }
+        h.settle(&mut ed, &mut text, &v, rel);
         let tall = ed.last_layout.as_ref().unwrap().0.size().y;
         assert!(tall > 120.0);
         for (i, ch) in ["x", "y", "z"].iter().enumerate() {
@@ -4175,9 +4198,7 @@ mod tests {
         assert_eq!(text.matches('\n').count(), 7, "the text is untouched");
         // a click on the grid puts the cursor into the table, which turns into raw text
         h.click_text(&mut ed, &mut text, &v, rel, "What");
-        for _ in 0..3 {
-            h.frame(&mut ed, &mut text, &v, rel, vec![]);
-        }
+        h.settle(&mut ed, &mut text, &v, rel);
         let (galley, _) = ed.last_layout.clone().unwrap();
         let cursor = egui::text_edit::TextEditState::load(&h.ctx, ed.id).and_then(|st| st.cursor.char_range()).unwrap().primary.index.0;
         let lo = markdown::byte_to_char(&text, text.find("| Where").unwrap());
@@ -4189,9 +4210,7 @@ mod tests {
         assert!(raw_h < table_h, "raw lines take their own room");
         // the cursor leaves: the grid is back
         ed.pending_cursor = Some(after);
-        for _ in 0..3 {
-            h.frame(&mut ed, &mut text, &v, rel, vec![]);
-        }
+        h.settle(&mut ed, &mut text, &v, rel);
         assert!(h.texts.iter().any(|t| t == "Where") && hidden(&ed, &text), "the grid is back: {:?}", h.texts);
         // the preview off: raw, always
         ed.live_preview = false;
@@ -5513,9 +5532,7 @@ mod tests {
         ed.inline_images = true;
         ed.pending_cursor = Some(text.find("after").unwrap() + 2);
         let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
-        for _ in 0..4 {
-            h.frame(&mut ed, &mut text, &v, rel, vec![]);
-        }
+        h.settle(&mut ed, &mut text, &v, rel);
         let labels = h.rects.iter().filter(|(t, _)| t == crate::media::outside::COPY_LABEL).count();
         assert_eq!(labels, 1, "the picture that is there has the action; the one that is not and the one of the vault have none: {:?}", h.rects.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>());
         let (_, button) = h.rects.iter().find(|(t, _)| t == crate::media::outside::COPY_LABEL).unwrap();
@@ -5552,9 +5569,7 @@ mod tests {
             let mut ed = NoteEditor::new(egui::Id::unique("relink"));
             ed.pending_cursor = Some(from);
             let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
-            for _ in 0..3 {
-                h.frame(&mut ed, &mut text, &v, rel, vec![]);
-            }
+            h.settle(&mut ed, &mut text, &v, rel);
             let mut st = TextEditState::load(&h.ctx, ed.id).unwrap_or_default();
             st.cursor.set_char_range(Some(CCursorRange::two(CCursor::new(from), CCursor::new(to))));
             st.store(&h.ctx, ed.id);
