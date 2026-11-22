@@ -5,8 +5,10 @@
 //! reports what that folder's file system did:
 //!
 //! - on a local folder, always (`net_001_…`: the baseline);
-//! - on a mounted Samba share and a mounted NFS export, ignored unless asked for
-//!   (`tests/smb-env/`, `tests/nfs-env/`: the stack needs a kernel mount, which needs root);
+//! - on the Samba share mounted rootless through rclone FUSE (`smb_fuse_env_*`, ignored unless asked for, run by the `smb_fuse_env`
+//!   suite of `.forgejo/scripts/env-tests.sh`; rclone's client, NOT the kernel CIFS client, so its observations say so);
+//! - on a share or export mounted by the kernel (`smb_env_*`, `nfs_env_*`, ignored: `tests/smb-env/`, `tests/nfs-env/`; a kernel
+//!   mount needs root, so the owner runs them by hand, `docs/storage-on-shares.md`);
 //! - between two devices that keep a folder in sync, through the Syncthing pair of
 //!   `tests/syncthing-env/` (rootless):
 //!
@@ -245,9 +247,9 @@ fn net_001_the_storage_checks_pass_on_a_local_folder() {
     let _ = fs::remove_dir_all(&base);
 }
 
-/// The folder a mount helper (`smb-env.sh dir`, `nfs-env.sh dir`) prints.
-fn mounted_dir(stack: &str, script: &str) -> PathBuf {
-    let out = Command::new("sh").arg(env_dir(stack).join(script)).arg("dir").output().expect("cannot start the helper script");
+/// The folder a mount helper (`smb-env.sh dir`, `smb-env.sh fuse-dir`, `nfs-env.sh dir`) prints.
+fn mounted_dir(stack: &str, script: &str, command: &str) -> PathBuf {
+    let out = Command::new("sh").arg(env_dir(stack).join(script)).arg(command).output().expect("cannot start the helper script");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     PathBuf::from(String::from_utf8_lossy(&out.stdout).trim())
 }
@@ -257,16 +259,31 @@ fn mounted_dir(stack: &str, script: &str) -> PathBuf {
 #[ignore = "needs a mounted Samba share: tests/smb-env/smb-env.sh up, then mount"]
 fn smb_env_storage_checks() {
     crate::env_lock::hold();
-    let dir = mounted_dir("smb-env", "smb-env.sh");
+    let dir = mounted_dir("smb-env", "smb-env.sh", "dir");
     storage_checks("smb", &dir, false);
+}
+
+/// The label of the rootless stand-in: its observations are rclone's SMB client and VFS layer, not the kernel CIFS client's.
+const SMB_FUSE_LABEL: &str = "smb, rclone FUSE, not the kernel CIFS client";
+
+// spec: NET-006, NET-011, NET-018
+#[test]
+#[ignore = "needs the Samba share mounted by rclone: tests/smb-env/smb-env.sh up, then fuse-mount (rootless)"]
+fn smb_fuse_env_storage_checks() {
+    crate::env_lock::hold();
+    let dir = mounted_dir("smb-env", "smb-env.sh", "fuse-dir");
+    // The lock EXCLUDES here, unlike the kernel CIFS client's (smb_env_storage_checks, which only reports): a FUSE file system
+    // that does not implement `flock` gets the kernel's local lock emulation, so two processes of this machine exclude each
+    // other and rclone takes no lock on the server, which no other client would see. Expected per client, not a finding about SMB.
+    storage_checks(SMB_FUSE_LABEL, &dir, true);
 }
 
 // spec: NET-006, NET-012
 #[test]
-#[ignore = "needs a mounted NFS export: tests/nfs-env/nfs-env.sh up, then mount"]
+#[ignore = "kernel mount by hand, no rootless stand-in (rclone has no NFS client, no sound FUSE NFS client exists, and the kernel nfsd server needs root too): sudo tests/nfs-env/nfs-env.sh up, then mount (#477)"]
 fn nfs_env_storage_checks() {
     crate::env_lock::hold();
-    let dir = mounted_dir("nfs-env", "nfs-env.sh");
+    let dir = mounted_dir("nfs-env", "nfs-env.sh", "dir");
     storage_checks("nfs", &dir, false);
 }
 
@@ -283,7 +300,15 @@ fn detect_network_on(dir: &Path, fs_names: &[&str]) {
 #[ignore = "needs a mounted Samba share: tests/smb-env/smb-env.sh up, then mount"]
 fn smb_env_detect_sees_the_mounted_share_as_a_network_folder() {
     crate::env_lock::hold();
-    detect_network_on(&mounted_dir("smb-env", "smb-env.sh"), &["cifs", "smb3", "smb2", "smbfs"]);
+    detect_network_on(&mounted_dir("smb-env", "smb-env.sh", "dir"), &["cifs", "smb3", "smb2", "smbfs"]);
+}
+
+// spec: SYNC-059, NET-018
+#[test]
+#[ignore = "needs the Samba share mounted by rclone: tests/smb-env/smb-env.sh up, then fuse-mount (rootless)"]
+fn smb_fuse_env_detect_sees_the_fuse_mounted_share_as_a_network_folder() {
+    crate::env_lock::hold();
+    detect_network_on(&mounted_dir("smb-env", "smb-env.sh", "fuse-dir"), &["fuse.rclone"]);
 }
 
 // spec: SYNC-059, NET-012
@@ -291,7 +316,7 @@ fn smb_env_detect_sees_the_mounted_share_as_a_network_folder() {
 #[ignore = "needs a mounted NFS export: tests/nfs-env/nfs-env.sh up, then mount"]
 fn nfs_env_detect_sees_the_mounted_export_as_a_network_folder() {
     crate::env_lock::hold();
-    detect_network_on(&mounted_dir("nfs-env", "nfs-env.sh"), &["nfs", "nfs4"]);
+    detect_network_on(&mounted_dir("nfs-env", "nfs-env.sh", "dir"), &["nfs", "nfs4"]);
 }
 
 // ---- two devices through Syncthing ----

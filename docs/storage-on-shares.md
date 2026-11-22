@@ -2,7 +2,8 @@
 
 Findings of rabalyn/shale#470 (part of the umbrella #467). Spec rows: `NET-*` in
 [`spec/vault-and-files.md`](spec/vault-and-files.md). Test stacks: `tests/syncthing-env/` (ran),
-`tests/smb-env/` and `tests/nfs-env/` (the mount step needs root: not run, see "Limits of the evidence").
+`tests/smb-env/` (rootless through rclone FUSE: *ran*, a stand-in, not the kernel client; the kernel mount needs root: not run) and
+`tests/nfs-env/` (kernel mount, root: not run; see "Limits of the evidence").
 
 **Evidence is labelled.** *Ran* = a test in this repository observed it on a real system (Shale's own code against
 a real Syncthing pair, or against the local file system). *Documented* = well-known behaviour of the system as its
@@ -191,15 +192,80 @@ outside the vault** (`<data folder>/shale/history/<vault-id>`, separate git-dir)
 `.git` inside the vault, on a folder no cloud client syncs. The detection of #469 (`gitsync/detect.rs`, SYNC-059…SYNC-063)
 warns when a vault with `.git` is in such a folder, and moves the repository out when the vault has no server.
 
+## SMB through rclone FUSE (rootless stand-in, not the kernel client)
+
+[#477](https://github.com/rabalyn/shale/issues/477), spec NET-018. `tests/smb-env/smb-env.sh fuse-mount` mounts the Samba share of the test
+server (smbd 4.12, SMB 3, user `shale`) with `rclone mount` (rclone v1.70.3, taken from the pinned image `docker.io/rclone/rclone:1.70.3`,
+or a system rclone) on a folder of the user: no root, only `/dev/fuse` and `fusermount3`. The suite is `smb_fuse_env`
+(`.forgejo/scripts/env-tests.sh run`, run by `scripts/land.sh` for a change of the storage code; the Forgejo job container has no
+`/dev/fuse`, so the tag CI skips it with a note). Everything below is *ran* on this client, and **only this client**: it is rclone's SMB client
+and its VFS layer behind FUSE, not the Linux kernel's CIFS client. It says what Shale's own code does on a share served by a real
+smbd; it says nothing about CIFS-specific behaviour (oplocks and leases, `RENAME_NOREPLACE` returning `EINVAL`, the kernel's
+attribute cache, byte-range locks sent to the server, the real mount options). Those stay *documented* until the manual run below.
+
+Mount options (the reasons are in the header of `smb-env.sh`): `--vfs-cache-mode writes` (a file opened for writing is buffered locally and
+uploaded at close, which makes writes at an offset and Shale's temp file then rename work; `off` cannot write at an offset, `full` would cache
+reads and hide another client's change), `--vfs-write-back 0s`, `--dir-cache-time 1s`, `--attr-timeout 1s`, `--vfs-cache-max-age 1m`.
+
+**Observed** (`cargo test --bin shale -- --ignored smb_fuse_env --nocapture`; all five checks pass):
+
+| Check | Observation |
+|---|---|
+| Atomic save (NET-001) | 40 saves leave no temp file; `.shale-tmp-*` is not listed. Passes. |
+| Outside change (NET-002, NET-003) | An in-place change of the same length and an atomic replace of the same length are both found by the next scan, and a save over a change by "another device" is a conflict copy. Modification time is finer than a second (millisecond parts seen); file time minus the local clock: about -0.001 s (same host). |
+| Lock (NET-004) | A second `flock` by the same process is refused, and so is one from another process. This is the kernel's local lock emulation for a FUSE file system that implements no `flock`: rclone takes **no lock on the server**, so another client of the share would not be excluded. The test expects exclusion here for that reason (`storage_checks(…, true)`); the kernel client's check only reports (`false`). |
+| Names (NET-005) | Letter case is **kept** (`Plan.md` and `plan.md` are two files), and NFC and NFD spellings of `Café.md` are the same file (the second create fails with `AlreadyExists`, one note in the vault). A case-only rename works. |
+| Detection (SYNC-059) | `detect_real` reports the mount as a network folder, file system `fuse.rclone`. |
+
+**Differences from the kernel CIFS client that matter for Shale:**
+
+- **Write-back.** rclone uploads a closed file after `--vfs-write-back` (default 5 s). With the default, an in-place change of the same length keeps
+  the old modification time until the upload, so the next scan in the same tick missed it (`an in-place change of the same length is detected` failed
+  on the first run). `--vfs-write-back 0s` removes that; the kernel client writes through at close. A vault on rclone's own mount with the
+  default would see a change after the upload and the next 3 s scan: late, never lost (NET-003 compares content).
+- **Locks.** No byte-range or `flock` lock reaches the server (above); the kernel client sends them. So `check_lock` expects exclusion here and only reports there.
+- **Letter case.** Kept here. The kernel client may differ (the server's `case sensitive` setting and the client's `nocase` option decide); the manual run observes it. Shale handles both (NET-005, DATA-013).
+- **Unicode.** NFC and NFD names are one file here (rclone's SMB backend or the server folds them); not yet observed with the kernel client. Shale handles both (NET-005, NET-014).
+- **Caches.** rclone's directory cache (1 s) and the FUSE attribute timeout (1 s) stand in for the kernel client's attribute cache (`actimeo`, 1 s by default); other
+  clients' changes show up after about a second, inside Shale's 3 s rescan.
+
+## Kernel mounts, to run by hand
+
+The kernel CIFS and NFS mounts need root, so nothing runs them by itself. Run them once, record the `NET observation:` lines here, and
+flip NET-011 and NET-012 to a test result (then close [#477](https://github.com/rabalyn/shale/issues/477)). Each stack is one at a time (the stacks share a
+machine-wide lock); both leave nothing behind after `down`.
+
+```sh
+# SMB, kernel CIFS client (the server is rootless, only the mount asks for sudo)
+tests/smb-env/smb-env.sh up
+tests/smb-env/smb-env.sh mount                      # sudo mount -t cifs … -o vers=3.0; SHALE_SMB_ENV_VERS=2.1 mounts another protocol version
+cargo test --bin shale -- --ignored smb_env --nocapture --test-threads=1 2>&1 | tee /tmp/smb-kernel.txt
+tests/smb-env/smb-env.sh status                     # shows the cifs mount and its options
+tests/smb-env/smb-env.sh down                       # sudo umount, stop the server
+
+# NFS, kernel client against the kernel nfsd (the nfsd module must be loaded: sudo modprobe nfsd)
+tests/nfs-env/nfs-env.sh up                         # sudo podman run … (privileged)
+tests/nfs-env/nfs-env.sh mount                      # sudo mount -t nfs4 …; SHALE_NFS_ENV_OPTS=actimeo=60 (or noac, vers=3, nolock) for other options
+cargo test --bin shale -- --ignored nfs_env --nocapture --test-threads=1 2>&1 | tee /tmp/nfs-kernel.txt
+tests/nfs-env/nfs-env.sh down
+```
+
+`smb_env` matches `smb_env_storage_checks` and `smb_env_detect_…` (not the FUSE tests); `nfs_env` the two NFS tests. The NFS stack has **never been
+started**: expect to fix details of the image's options on the first run. The interesting NFS runs repeat with `SHALE_NFS_ENV_OPTS=actimeo=60` and
+`noac`. What to record: the observation lines (modification time granularity and skew, lock refused or granted, case and Unicode), the mount options
+from `status`, and any failed assertion with its message. A failing assertion on the kernel client is a finding, not a test to weaken.
+
+There is no rootless stand-in for NFS: rclone has no NFS client, and a FUSE NFS client (libnfs's `fuse-nfs`) is not packaged for most distributions,
+would be built from source (a download of unpinned code), and would still need the kernel's nfsd on the other side, which needs root and a privileged
+container anyway. `nfs_env_storage_checks` stays ignored, with that reason in its `#[ignore]` text.
+
 ## Limits of the evidence
 
-- **SMB and NFS were not mounted.** A kernel CIFS or NFS mount needs root (`sudo mount`); a user namespace cannot
-  do it, and `mount.cifs` has no `/etc/fstab` entry. The environment of #470 offered passwordless `sudo`, but a mount
-  changes the machine and nobody had asked for it, so none was done. What exists and was run: the Samba server in
-  its container (`smb-env.sh up`: smbd answers an `smbclient` upload) and the checks themselves on a local folder.
-  `smb-env.sh mount` followed by `cargo test --bin shale -- --ignored smb_env` is the one step still to run, with `sudo`;
-  `nfs-env.sh` (server needs a privileged `sudo podman`) was written and syntax-checked, **never started**.
-  See [#477](https://github.com/rabalyn/shale/issues/477). All SMB and NFS statements above are therefore *documented*, not *ran*.
+- **The kernel SMB and NFS mounts did not run.** A kernel CIFS or NFS mount needs root (`sudo mount`); a user namespace cannot
+  do it, and `mount.cifs` has no `/etc/fstab` entry. SMB ran through the rootless stand-in (rclone FUSE, a different client: see the section above);
+  the kernel mounts are a manual run, prepared in "Kernel mounts, to run by hand" ([#477](https://github.com/rabalyn/shale/issues/477)). `nfs-env.sh`
+  (server needs a privileged `sudo podman`) was written and syntax-checked, **never started**. The statements about the kernel CIFS client and about NFS
+  above are therefore *documented*, not *ran*.
 - Syncthing is one cloud-client model (event-driven, content-addressed, renames local files on conflict). Nextcloud,
   Dropbox, OneDrive and iCloud differ in how they pick up changes and in their placeholder files; their rows above are *documented*.
 - The Syncthing tests exercise one pair on one Linux machine (ext4/btrfs-class timestamps).

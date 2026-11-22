@@ -416,8 +416,38 @@ pub struct ScanInput {
     root: PathBuf,
     uid: u64,
     epoch: u64,
-    notes: HashMap<PathBuf, Option<FileStamp>>,
-    drawings: HashMap<PathBuf, Option<FileStamp>>,
+    notes: KnownStamps,
+    drawings: KnownStamps,
+}
+
+/// The stamps the index holds, for the scan's worker: all paths in one buffer (no allocation per
+/// path, no spare capacity) and a sorted list of spans into it, looked up by binary search (#521).
+#[derive(Default)]
+struct KnownStamps {
+    paths: Vec<u8>,
+    /// (start, end, stamp), sorted by the path bytes
+    entries: Vec<(usize, usize, Option<FileStamp>)>,
+}
+
+impl KnownStamps {
+    fn new<'a>(items: impl ExactSizeIterator<Item = (&'a Path, Option<FileStamp>)> + Clone) -> Self {
+        let mut paths = Vec::with_capacity(items.clone().map(|(p, _)| p.as_os_str().len()).sum());
+        let mut entries = Vec::with_capacity(items.len());
+        for (p, stamp) in items {
+            let start = paths.len();
+            paths.extend_from_slice(p.as_os_str().as_encoded_bytes());
+            entries.push((start, paths.len(), stamp));
+        }
+        entries.sort_unstable_by(|a, b| paths[a.0..a.1].cmp(&paths[b.0..b.1]));
+        Self { paths, entries }
+    }
+
+    /// The stamp held for `rel`; None when unknown or without a stamp.
+    fn get(&self, rel: &Path) -> Option<FileStamp> {
+        let key = rel.as_os_str().as_encoded_bytes();
+        let i = self.entries.binary_search_by(|(s, e, _)| self.paths[*s..*e].cmp(key)).ok()?;
+        self.entries[i].2
+    }
 }
 
 /// A note the scan had to read, with the stamp the index held when the scan began.
@@ -476,13 +506,13 @@ impl ScanInput {
         for f in &files {
             match f.kind {
                 FileKind::Drawing => {
-                    let known = self.drawings.get(&f.rel).copied().flatten();
+                    let known = self.drawings.get(&f.rel);
                     if let Some(read) = read_drawing(&self.root, &f.rel, known) {
                         drawings.insert(f.rel.clone(), read);
                     }
                 }
                 FileKind::Note => {
-                    let known = self.notes.get(&f.rel).copied().flatten();
+                    let known = self.notes.get(&f.rel);
                     let abs = self.root.join(&f.rel);
                     let stamp = FileStamp::of(&abs);
                     if known.is_some() && known == stamp {
@@ -558,8 +588,8 @@ impl Vault {
             root: self.root.clone(),
             uid: self.uid,
             epoch: self.rescan_epoch,
-            notes: self.notes.iter().map(|(r, n)| (r.clone(), known_stamp(n))).collect(),
-            drawings: self.drawings.iter().map(|(r, d)| (r.clone(), d.mtime)).collect(),
+            notes: KnownStamps::new(self.notes.iter().map(|(r, n)| (r.as_path(), known_stamp(n)))),
+            drawings: KnownStamps::new(self.drawings.iter().map(|(r, d)| (r.as_path(), d.mtime))),
         }
     }
 
@@ -1671,6 +1701,31 @@ pub fn write_sample_vault(root: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // spec: NET-013 (the scan's copy of the known stamps finds each path, and only those)
+    #[test]
+    fn known_stamps_lookup_finds_each_path() {
+        let stamp = |len| {
+            Some(FileStamp {
+                modified: None,
+                len,
+                #[cfg(unix)]
+                ino: 1,
+                #[cfg(unix)]
+                ctime: (0, 0),
+                #[cfg(windows)]
+                id: None,
+            })
+        };
+        let items = [("b/Zed.md", stamp(3)), ("a.md", stamp(1)), ("b/a.md", None), ("ä.md", stamp(4)), ("b", stamp(2))];
+        let known = KnownStamps::new(items.iter().map(|(p, s)| (Path::new(p), *s)));
+        for (p, s) in &items {
+            assert_eq!(known.get(Path::new(p)), *s, "{p}");
+        }
+        assert_eq!(known.get(Path::new("b/Zed")), None);
+        assert_eq!(known.get(Path::new("missing.md")), None);
+        assert_eq!(KnownStamps::default().get(Path::new("a.md")), None);
+    }
 
     fn temp_vault(tag: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("shale-test-{tag}-{}", std::process::id()));

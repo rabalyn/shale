@@ -6,9 +6,10 @@
 # the Forgejo stack for it (SHALE_FORGEJO_ENV_SH) and takes it down again. Usage:
 #   env-tests.sh suites <base> <head>
 #       prints the suites the change from <base> to <head> needs, space separated (empty: none):
+#       `smb_fuse_env` for `src/netshare_env_tests.rs`, `src/fsutil.rs`, `src/vault.rs` and `tests/smb-env/` (NET-018),
 #       `calendar::env_tests` for `src/calendar/` and `tests/caldav-env/`, `mail_env` for `src/mail*` and
 #       `tests/mail-env/`, `tex_env` for `src/pdf/tex`, `assets/tex/` and `tests/tex-env/`; all three when
-#       `.forgejo/workflows/ci.yml` or this script changes; scripts/land.sh runs those suites locally
+#       `.forgejo/workflows/ci.yml` or this script changes (all five); scripts/land.sh runs those suites locally
 #       (FORGE-011, #447)
 #   env-tests.sh wanted <base> <head>
 #       prints "yes" or "no": whether `suites` names any suite for the same change
@@ -29,7 +30,7 @@
 #       uses the given engine (the one the detect step found; detected again when left out),
 #       runs the suites of SHALE_ENV_TESTS_SUITES (space separated, from `suites`; unset: all three, as the
 #       tag CI runs them; empty or an unknown name: `run` fails at once) and starts only the stacks they need
-#       (CalDAV for `calendar::env_tests`, mail for `mail_env`) and builds the TeX image only when a TeX suite
+#       (CalDAV for `calendar::env_tests`, mail for `mail_env`, the Samba server mounted by rclone over FUSE for `smb_fuse_env`) and builds the TeX image only when a TeX suite
 #       (`tex_env`, `tex_install`, `tex_import`) runs: `cargo test -- --ignored calendar::env_tests`,
 #       `… mail_env` and `… tex_env` (SHALE_TEX_ENV_REPOSITORY and SHALE_TEX_INSTALL_REPOSITORY, when set (the CI job sets them for v* tags from vars.SHALE_TEX_MIRROR, DEV-025), reach the TeX build and the tex_install test through the environment; the TeX image is built with --refresh when SHALE_ENV_TESTS_TEX_REFRESH=yes, as the weekly run of the CI job does, not tags, ADR-0021, ADR-0026, so a change of the current TeX Live shows up; `… tex_install` with SHALE_ENV_TESTS_TEX_INSTALL=yes and `… tex_import` with SHALE_ENV_TESTS_TEX_IMPORT=yes), and always takes the stacks down again; exits 1 if a stack or a test fails or no test ran
 #       the stacks and the TeX image build start at the same time (background jobs, a log each), then the suites run at
@@ -40,6 +41,10 @@
 #       only when it fails: `run` exits 1 and no suite starts): in a fresh container it installs the toolchain of
 #       rust-toolchain.toml and builds the test binary once, so the suites that follow, at the same time, never install it
 #       together (#462); `tex-suite` alone runs one cargo and needs none
+#       `smb_fuse_env` (NET-018, #477) needs a FUSE mount, rootless (`tests/smb-env/smb-env.sh fuse-mount`: rclone, `/dev/fuse` and
+#       `fusermount3`): where the machine has no usable `/dev/fuse` (SHALE_FUSE_DEVICE names it) or no `fusermount3`, `run` says
+#       "SKIPPED: smb_fuse_env …" and leaves the suite out (the Forgejo job container has neither: it gets no `--device /dev/fuse`,
+#       and the runner's own configuration decides what a job container may take), so the tag CI skips it and scripts/land.sh runs it
 #       The suites run with one test thread (CalDAV, mail, `tex_install` and `tex_import` share one stack or
 #       one install); `tex_env` shares nothing and runs with ${SHALE_ENV_TESTS_TEX_THREADS:-4} test threads (a
 #       positive integer, else `run` fails at once with a message; DEV-011, #370)
@@ -70,7 +75,7 @@ case "${1:-}" in
   suites)
     files=$(git diff --name-only "$2" "$3")
     if printf '%s\n' "$files" | grep -Eq '^\.forgejo/(workflows/ci\.yml|scripts/env-tests\.sh)$'; then
-      echo "calendar::env_tests mail_env tex_env forgejo_env"
+      echo "calendar::env_tests mail_env tex_env forgejo_env smb_fuse_env"
       exit 0
     fi
     out=""
@@ -78,6 +83,7 @@ case "${1:-}" in
     if printf '%s\n' "$files" | grep -Eq '^(src/mail|tests/mail-env/)'; then out="$out mail_env"; fi
     if printf '%s\n' "$files" | grep -Eq '^(src/pdf/tex|assets/tex/|tests/tex-env/)'; then out="$out tex_env"; fi
     if printf '%s\n' "$files" | grep -Eq '^(src/gitsync/wizard/|src/gitsync/credentials\.rs|tests/forgejo-env/|tests/askpass)'; then out="$out forgejo_env"; fi
+    if printf '%s\n' "$files" | grep -Eq '^(src/netshare_env_tests\.rs|src/fsutil\.rs|src/vault\.rs|tests/smb-env/)'; then out="$out smb_fuse_env"; fi
     echo "${out# }"
     ;;
 
@@ -148,10 +154,11 @@ case "${1:-}" in
     esac
 
     # the suites to run: the list of `suites` (land.sh), unset = all (the tag CI)
-    suites=${SHALE_ENV_TESTS_SUITES-calendar::env_tests mail_env tex_env forgejo_env}
-    need_caldav=no; need_mail=no; need_tex=no; need_forgejo=no
+    suites=${SHALE_ENV_TESTS_SUITES-calendar::env_tests mail_env tex_env forgejo_env smb_fuse_env}
+    need_caldav=no; need_mail=no; need_tex=no; need_forgejo=no; need_smb=no
     for suite in $suites; do
       case $suite in
+        smb_fuse_env) need_smb=yes ;;
         calendar::env_tests) need_caldav=yes ;;
         mail_env) need_mail=yes ;;
         forgejo_env) need_forgejo=yes ;;
@@ -160,6 +167,15 @@ case "${1:-}" in
       esac
     done
     if [ -z "$suites" ]; then echo "SHALE_ENV_TESTS_SUITES is empty: no suite to run" >&2; exit 1; fi
+    # the FUSE mount of the Samba share needs /dev/fuse and fusermount3 (rootless, NET-018): a machine without them skips the suite, loudly
+    if [ "$need_smb" = yes ] && { [ ! -c "${SHALE_FUSE_DEVICE:-/dev/fuse}" ] || ! command -v fusermount3 >/dev/null 2>&1; }; then
+      echo "SKIPPED: smb_fuse_env: this machine has no usable /dev/fuse and fusermount3 (the job container of the CI gets neither), so the SMB storage checks through rclone did NOT run here (NET-018, tests/smb-env/README.md)."
+      need_smb=no
+      kept=""
+      for suite in $suites; do if [ "$suite" != smb_fuse_env ]; then kept="$kept $suite"; fi; done
+      suites=${kept# }
+      if [ -z "$suites" ]; then echo "No other suite to run."; exit 0; fi
+    fi
     # the real install of TeX Live downloads about 100 MB and takes minutes: only when asked for
     if [ "${SHALE_ENV_TESTS_TEX_INSTALL:-no}" = yes ]; then suites="$suites tex_install"; need_tex=yes; fi
     # the real downloads of the template sets (GitHub, CTAN) need the network: only when asked for
@@ -167,6 +183,7 @@ case "${1:-}" in
     caldav_sh=${SHALE_CALDAV_ENV_SH:-tests/caldav-env/caldav-env.sh}
     mail_sh=${SHALE_MAIL_ENV_SH:-tests/mail-env/mail-env.sh}
     forgejo_sh=${SHALE_FORGEJO_ENV_SH:-tests/forgejo-env/forgejo-env.sh}
+    smb_sh=${SHALE_SMB_ENV_SH:-tests/smb-env/smb-env.sh}
     texenv=${SHALE_TEX_ENV_SH:-tests/tex-env/tex-env.sh}
 
     # a second `podman info` right after the first can fail where the first worked: trust the
@@ -180,7 +197,8 @@ case "${1:-}" in
         SHALE_FORGEJO_ENV_COMPOSE=${SHALE_FORGEJO_ENV_COMPOSE:-docker-compose}
         SHALE_MAIL_ENV_ENGINE=docker
         SHALE_TEX_ENV_ENGINE=docker
-        export SHALE_CALDAV_ENV_COMPOSE SHALE_MAIL_ENV_COMPOSE SHALE_FORGEJO_ENV_COMPOSE SHALE_MAIL_ENV_ENGINE SHALE_TEX_ENV_ENGINE
+        SHALE_SMB_ENV_ENGINE=docker
+        export SHALE_CALDAV_ENV_COMPOSE SHALE_MAIL_ENV_COMPOSE SHALE_FORGEJO_ENV_COMPOSE SHALE_MAIL_ENV_ENGINE SHALE_TEX_ENV_ENGINE SHALE_SMB_ENV_ENGINE
         ;;
       *) echo "no container engine is usable here" >&2; exit 1 ;;
     esac
@@ -248,6 +266,7 @@ case "${1:-}" in
       if [ "$need_caldav" = yes ]; then sh "$caldav_sh" reset >/dev/null 2>&1 || true; fi
       if [ "$need_mail" = yes ]; then sh "$mail_sh" reset >/dev/null 2>&1 || true; fi
       if [ "$need_forgejo" = yes ]; then sh "$forgejo_sh" reset >/dev/null 2>&1 || true; fi
+      if [ "$need_smb" = yes ]; then sh "$smb_sh" reset >/dev/null 2>&1 || true; fi
     }
     cleanup() {
       # an interrupt: a background job ignores SIGINT, so stop the jobs and what they started
@@ -269,6 +288,9 @@ case "${1:-}" in
     if [ "$need_caldav" = yes ]; then start_job up-caldav sh "$caldav_sh" up; stacks="$stacks up-caldav"; fi
     if [ "$need_mail" = yes ]; then start_job up-mail sh "$mail_sh" up; stacks="$stacks up-mail"; fi
     if [ "$need_forgejo" = yes ]; then start_job up-forgejo sh "$forgejo_sh" up; stacks="$stacks up-forgejo"; fi
+    # the Samba server, then its rootless FUSE mount (rclone): one job, the mount needs the server
+    smb_up() { sh "$smb_sh" up && sh "$smb_sh" fuse-mount; }
+    if [ "$need_smb" = yes ]; then start_job up-smb smb_up; stacks="$stacks up-smb"; fi
     prepare=$stacks
     if [ "$need_tex" = yes ]; then start_job tex-build sh "$texenv" build $refresh; prepare="$prepare tex-build"; fi
     # shellcheck disable=SC2086 # the names are words
@@ -280,6 +302,7 @@ case "${1:-}" in
       if [ "$need_caldav" = yes ]; then sh "$caldav_sh" status || true; fi
       if [ "$need_mail" = yes ]; then sh "$mail_sh" status || true; fi
       if [ "$need_forgejo" = yes ]; then sh "$forgejo_sh" status || true; fi
+      if [ "$need_smb" = yes ]; then sh "$smb_sh" status || true; fi
       exit 1
     fi
     if [ "$need_tex" = yes ] && [ -n "$(failed_of tex-build)" ]; then

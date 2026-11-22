@@ -809,5 +809,7 @@ impl Schedule {
     }
 }
 
+pub mod thin;
+
 #[cfg(test)]
 mod history_tests;

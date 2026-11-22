@@ -54,6 +54,15 @@ fn deleted_body(ui: &mut Ui, dlg: &mut DeletedList) -> Option<Deleted> {
     asked
 }
 
+/// The line of Settings → Sync that says what happens to old versions (SYNC-071, #479).
+pub(crate) fn thinning_note(local_only: bool) -> &'static str {
+    if local_only {
+        "Older versions are thinned: all of today, one per hour for a month, one per day before that"
+    } else {
+        "Versions in this vault's repository are kept as they are"
+    }
+}
+
 impl ShaleApp {
     /// The "File history" part of Settings → Sync (SYNC-032, CFG-066). Returns whether a setting changed.
     pub(crate) fn history_settings_ui(&mut self, ui: &mut Ui, asks: &mut crate::settings::Asks) -> bool {
@@ -69,11 +78,10 @@ impl ShaleApp {
                 theme::hint(ui, why);
             }
             None => {
-                let place = match self.vault.as_ref() {
-                    Some(v) if crate::gitsync::is_repo(&v.root) => "in the git repository of the vault (the .git folder)".to_string(),
-                    _ => format!("on this computer, outside the vault, in {}", self.usage.places.history.display()),
-                };
+                let own = self.vault.as_ref().is_some_and(|v| crate::gitsync::is_repo(&v.root));
+                let place = if own { "in the git repository of the vault (the .git folder)".to_string() } else { format!("on this computer, outside the vault, in {}", self.usage.places.history.display()) };
                 theme::hint(ui, format!("Versions are kept {place}. Nothing is written into the vault except a small file .shale/history-id."));
+                theme::hint(ui, thinning_note(!own));
             }
         }
         let timing = ui.horizontal_wrapped(|ui| {
