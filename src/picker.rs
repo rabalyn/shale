@@ -289,9 +289,10 @@ pub fn show(ctx: &Context, p: &mut Picker, data: &Ctx, keymap: &Keymap, cfg: &mu
                     job.append(&format!("    {}", h.detail), 0.0, egui::TextFormat { font_id: FontId::proportional(size), color: theme::palette().muted, ..Default::default() });
                 }
                 let resp = ui.selectable_label(i == p.sel, job.clone());
-                // (the text sits at the left padding, centred in the row)
-                let pad = ui.spacing().button_padding.x;
-                crate::search_render::paint_task_boxes(ui, &job, |g| egui::pos2(resp.rect.min.x + pad, resp.rect.center().y - g.size().y / 2.0));
+                // (the text sits at the left padding, centred in the row when it is one, at the top when it wraps)
+                let pad = ui.spacing().button_padding;
+                let wrapped = resp.rect.height() > ui.spacing().interact_size.y + 1.0;
+                crate::search_render::paint_task_boxes(ui, &job, |g| egui::pos2(resp.rect.min.x + pad.x, if wrapped { resp.rect.min.y + pad.y } else { resp.rect.center().y - g.size().y / 2.0 }));
                 if i == p.sel && (keys.down || keys.up) {
                     resp.scroll_to_me(None);
                 }

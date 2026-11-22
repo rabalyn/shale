@@ -39,8 +39,8 @@ struct Fmt {
     strike: bool,
     quote: bool,
     marker: bool,
-    /// the marker of a task the preview draws as a painted box: hidden, with room for the box (EDIT-016)
-    task: bool,
+    /// the marker of a task or bullet the preview draws as a painted box or dot: hidden, with room for it (EDIT-016)
+    painted: bool,
     highlight: bool,
     /// markup (`#`, `**`, `[[`, …) that the markdown preview hides; cleared again in the layout
     syn: bool,
@@ -2716,8 +2716,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
-    /// The editor in the preview with the cursor at char `cursor`, drawn for a few frames; the boxes of the last one.
-    fn preview_boxes(ed: &mut NoteEditor, h: &mut Harness, text: &mut String, v: &Vault, cursor: usize) -> Vec<(Rect, bool)> {
+    /// The editor in the preview with the cursor at char `cursor`, drawn for a few frames; the boxes and dots of the last one.
+    fn preview_painted(ed: &mut NoteEditor, h: &mut Harness, text: &mut String, v: &Vault, cursor: usize) -> Vec<(Rect, crate::task_box::Kind)> {
         let rel = Path::new("Welcome.md");
         ed.live_preview = true;
         ed.pending_cursor = Some(cursor);
@@ -2727,6 +2727,12 @@ mod tests {
         crate::task_box::take_painted();
         h.frame(ed, text, v, rel, vec![]);
         crate::task_box::take_painted()
+    }
+
+    /// The boxes of [`preview_painted`], with whether each is ticked.
+    fn preview_boxes(ed: &mut NoteEditor, h: &mut Harness, text: &mut String, v: &Vault, cursor: usize) -> Vec<(Rect, bool)> {
+        let done = |k| matches!(k, crate::task_box::Kind::Box { done: true });
+        preview_painted(ed, h, text, v, cursor).into_iter().filter(|(_, k)| matches!(k, crate::task_box::Kind::Box { .. })).map(|(r, k)| (r, done(k))).collect()
     }
 
     // spec: EDIT-016
@@ -2756,6 +2762,48 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: EDIT-016
+    #[test]
+    fn a_bullet_away_from_the_cursor_is_a_painted_dot_filled_and_hollow_by_level() {
+        use crate::task_box::Kind;
+        let (v, d) = vault_for_tests("bullet-dot");
+        let mut text = String::from("first\n- one\n    * two\n        + three\n1. numbered\n---\n**bold** start\n*italic* start\n- [ ] task\n```\n- in code\n```\n-no space");
+        let before = text.clone();
+        let mut ed = NoteEditor::new(egui::Id::unique("bullet-dot"));
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+        let painted = preview_painted(&mut ed, &mut h, &mut text, &v, 0);
+        let kinds: Vec<_> = painted.iter().map(|p| p.1).collect();
+        assert_eq!(
+            kinds,
+            [Kind::Bullet { level: 0 }, Kind::Bullet { level: 1 }, Kind::Bullet { level: 2 }, Kind::Box { done: false }],
+            "three nested bullets alternate, then the task keeps its box; rules, bold, italic, numbers, code are none"
+        );
+        assert_eq!(text, before, "the markup stays in the text");
+        // each dot stands left of its text, on its row
+        let (galley, pos) = ed.last_layout.clone().unwrap();
+        for ((rect, _), word) in painted.iter().zip(["one", "two", "three"]) {
+            let at = galley.pos_from_cursor(CCursor::new(markdown::byte_to_char(&text, text.find(word).unwrap())));
+            let (x, row) = (pos.x + at.min.x, (pos.y + at.min.y, pos.y + at.max.y));
+            assert!(rect.max.x < x && x - rect.max.x < 12.0, "the dot is just before {word}: {rect:?} vs {x}");
+            assert!(rect.min.y >= row.0 - 1.0 && rect.max.y <= row.1 + 1.0, "the dot is on the row of {word}");
+        }
+        // the cursor in the first bullet: its line is raw, the other dot stays
+        let kinds: Vec<_> = preview_painted(&mut ed, &mut h, &mut text, &v, 8).iter().map(|p| p.1).collect();
+        assert_eq!(kinds, [Kind::Bullet { level: 1 }, Kind::Bullet { level: 2 }, Kind::Box { done: false }]);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: EDIT-016
+    #[test]
+    fn the_bullets_of_front_matter_are_not_dots() {
+        let (v, d) = vault_for_tests("bullet-front");
+        let mut text = String::from("---\ntags:\n  - a\n---\nbody\n- item");
+        let mut ed = NoteEditor::new(egui::Id::unique("bullet-front"));
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+        assert_eq!(preview_painted(&mut ed, &mut h, &mut text, &v, 4).len(), 1, "the item below the front matter only");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     // spec: EDIT-007
     #[test]
     fn clicking_the_painted_box_in_the_preview_ticks_the_task() {
@@ -2776,7 +2824,7 @@ mod tests {
         assert_eq!(range(), Some((0, 0)), "the cursor did not move to the clicked line");
         crate::task_box::take_painted();
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
-        assert_eq!(crate::task_box::take_painted().iter().map(|b| b.1).collect::<Vec<_>>(), [true, true], "the line is not raw");
+        assert_eq!(crate::task_box::take_painted().iter().map(|b| b.1).collect::<Vec<_>>(), [crate::task_box::Kind::Box { done: true }; 2], "the line is not raw");
         assert_eq!(ed.selection_chars(&h.ctx), Some((0, 0)));
         // a ticked box unticks (the first line is raw while it has the cursor: back to the top first)
         let boxes = preview_boxes(&mut ed, &mut h, &mut text, &v, 0);

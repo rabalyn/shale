@@ -400,7 +400,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   is in (and, with "Raw lines around the cursor", that many lines before and after, or all the
   lines of a selection) shows the raw markdown. The note stays editable; links still open with a
   click and task boxes still tick (a task away from the cursor is drawn with a painted checkbox in place of its
-  `- [ ]`, EDIT-016). A **table** away from the cursor is drawn as a real grid (also
+  `- [ ]`, and a list item with a dot, filled and hollow by level, in place of its `-`, `*` or `+`, EDIT-016). A **table** away from the cursor is drawn as a real grid (also
   in the reading view): borders, a bold header row, aligned columns, formatted cell text, long
   text wrapping in its own column. Click a cell to edit it right in the grid (Tab, Enter and
   their Shift versions move between cells, so do the arrow keys at the edge of a cell's text;
@@ -457,7 +457,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   ![The search in the sidebar with the same groups](userguide/z_media/screenshots/sidebar-search.png)
 - **Hits of notes are shown rendered** (#483): a found line is drawn with the editor's own inline rendering (bold, italic,
   strikethrough, highlight, code, links and wiki links by their shown text, tags in their colour, a task with a painted checkbox,
-  a list item with a bullet, a heading without its `#`), in the picker and the sidebar, and the **found text is marked** in
+  a list item with a painted dot, a heading without its `#`), in the picker and the sidebar, and the **found text is marked** in
   raw and rendered lines (also a wildcard match, over its whole length). Mail and post hits stay plain text with the words
   of the query marked (where a word of the text starts with them). Settings → Search → "Hits of notes" (`search.hit_display`): follow the editor (default: rendered with
   the Markdown preview on or the note in view in the reading view, raw otherwise), raw, or rendered. Each hit's rendering

@@ -463,16 +463,19 @@ fn format_chunk(text: &str, input: &Input, defined: &HashSet<String>, fonts: &Ed
             f.syn = false
         });
     }
-    // the tasks of the lines the preview draws: the marker is hidden, with room for the painted box (EDIT-016)
+    // the tasks and bullets of the lines the preview draws: the marker is hidden, with room for the painted box or dot (EDIT-016)
     if let Some(rl) = raw_lines.as_ref() {
         let in_code = markdown::fenced_code_lines(text);
+        let front = markdown::front_matter_lines(text);
         for (li, (off, line)) in markdown::lines_with_offsets(text).into_iter().enumerate() {
-            if rl.contains(&li) || in_code.get(li).copied().unwrap_or(false) {
+            if rl.contains(&li) || li < front || in_code.get(li).copied().unwrap_or(false) {
                 continue;
             }
             if let Some(m) = crate::task_box::marker_range(line) {
                 set(&mut fmts, off + m.start..off + m.end, |f| {
-                    f.task = true;
+                    // (one format over the whole marker, so that it is one run: the room is before its second character)
+                    f.marker = true;
+                    f.painted = true;
                     f.hidden = true;
                     f.rendered = true
                 });
@@ -563,7 +566,7 @@ fn format_chunk(text: &str, input: &Input, defined: &HashSet<String>, fonts: &Ed
                             start = at;
                             (f.layout.width, crate::math::paint::hidden_format(f, m.em))
                         }
-                        _ if c.task => {
+                        _ if c.painted => {
                             // the first character is a section of its own: the room is before the rest, as a section that begins a row loses it
                             let at = start + text[start..].chars().next().map_or(0, char::len_utf8);
                             let format = to_format(c, fonts);
