@@ -96,8 +96,7 @@ Defaults implemented now, each reversible:
 - Local history does not track media (only notes and drawings).
 - Thinning: see the amendment below (decided by the owner, #479).
 - A copied vault gets a new ID and a history of its own.
-- A vault that later gets `.git` continues in that repository; the old local history is not merged in
-  (it stays in the data folder and is shown in Data usage until removed).
+- A vault that later gets `.git`: decided, see the amendment of 2026-11-22 (#485) below.
 - A new local history starts with a snapshot of the vault as it is.
 - History is on by default.
 - The sync pushes snapshots without squashing them.
@@ -136,3 +135,27 @@ default above.
   added when someone asks). Settings → Sync says which rule applies.
 - Not thinned: a vault with `.git`. A person who wants a small history there can use a local history
   (SYNC-049).
+
+## Amendment 2026-11-22: connecting a server moves the local history into `.git` (#485)
+
+Owner decision: when a server is connected to a vault whose history is kept on this computer, that
+history is **moved** into the vault's `.git` (copy, check, remove: the reverse of the move-out of #469,
+SYNC-063), so the versions have one source. This replaces the open default "continues in that repository,
+the old local history is not merged in" (SYNC-072…SYNC-075).
+
+- **When**: in the job that connects (the wizard's "asking the server" step, or Advanced → Connect), before
+  `git init` and `origin`; only for a vault without `.git` whose git directory has a `HEAD`. Under the tree
+  lock, with no snapshot, thinning, read or sync running.
+- **How**: copy `<data>/shale/history/<id>` to `<vault>/.git.moving`; the refs and `HEAD` must equal and
+  `git fsck` must pass; rename it to `.git`; `core.bare=false`, no `core.worktree`; `git status` must work.
+  Any failure removes the copy and leaves the vault without `.git` and the local history untouched.
+- **The old folder is removed right after the checked copy**, not kept as `<id>.moved` until the first sync
+  succeeded. Reasons: the copy is verified and renamed atomically, the first sync never rewrites it
+  (SYNC-012), so the history in `.git` cannot get worse by a failing sync, and a kept second copy would be
+  shown in Data usage as a second history and could diverge (snapshots, thinning). The only thing a kept
+  copy would protect against is a bug in the check itself.
+- **The first sync** is the ordinary one: an empty server gets the history as it is (no rewrite); a server
+  with content is merged with `--allow-unrelated-histories`, both histories stay in the graph.
+- **After the move** the history is the vault's own repository: pushed as it is, never thinned (SYNC-069).
+  `.shale/history-id` stays (a synced file); it names a history that is gone until the repository is moved
+  out again.
