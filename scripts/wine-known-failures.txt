@@ -22,3 +22,10 @@ gitsync::tests::without_git_the_sync_reports_it  # checks that the real git is t
 # Wine's own versions of Windows services behave differently.
 secrets::wincred::tests::credential_manager_refuses_what_it_cannot_hold  # Wine's credential manager takes blobs over CRED_MAX_CREDENTIAL_BLOB_SIZE
 fsutil::tests::concurrent_writers_never_produce_a_torn_file  # under Wine an atomic replace can fail while another thread replaces the same file
+
+# Wine keeps no access list of its own on a file: it makes one from the Unix mode, so a protected list with only the user and SYSTEM (DATA-014) is read back as another one.
+fsutil::tests::private_files_on_windows_carry_no_access_entry_for_other_users  # the access list set by SetNamedSecurityInfoW is not kept
+fsutil::tests::private_files_on_windows_have_a_protected_access_list_for_the_user_and_system_only  # the access list set by SetNamedSecurityInfoW is not kept
+fsutil::winacl::tests::data_014_a_file_gets_a_protected_list_for_the_user_and_system_without_inheritance_flags  # the access list set by SetNamedSecurityInfoW is not kept
+fsutil::winacl::tests::data_014_a_folder_passes_the_list_on_and_a_file_made_in_it_has_only_the_two_entries  # the access list set by SetNamedSecurityInfoW is not kept
+fsutil::winacl::tests::data_014_a_folder_that_was_open_to_others_is_closed_and_the_user_sid_is_known  # the access list set by SetNamedSecurityInfoW is not kept
