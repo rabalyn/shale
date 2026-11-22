@@ -445,7 +445,7 @@ impl ShaleApp {
         if self.git_version().is_none() {
             crate::theme::paragraph(ui, "git is not installed. Install git to keep a history of this vault or to sync it with a git repository.");
             // the wizard's first step is the install (SYNC-048)
-            let b = ui.button("Turn on sync…");
+            let b = crate::settings::anchor::anchor(ui, "sync.turn_on", |ui| ui.button("Turn on sync…"));
             self.sync.rects.push(("turn-on", b.rect));
             if b.clicked() {
                 self.open_sync_wizard();
@@ -469,7 +469,7 @@ impl ShaleApp {
         }
         if self.sync.remote.is_none() {
             crate::theme::hint(ui, "Keep your notes safe with a history on this device, or sync them with a server (Forgejo, Gitea, GitHub, GitLab or any git address). Shale asks what you need and does the rest.");
-            let b = ui.button("Turn on sync…");
+            let b = crate::settings::anchor::anchor(ui, "sync.turn_on", |ui| ui.button("Turn on sync…"));
             self.sync.rects.push(("turn-on", b.rect));
             if b.clicked() {
                 self.open_sync_wizard();
@@ -482,7 +482,7 @@ impl ShaleApp {
             self.sync.setup.advanced = !advanced;
         }
         if advanced {
-            ui.horizontal(|ui| {
+            let remote = ui.horizontal(|ui| {
                 let r = ui.add(egui::TextEdit::singleline(&mut self.sync.url).hint_text("https://… or git@host:notes.git").desired_width(300.0));
                 self.sync.rects.push(("url", r.rect));
                 let label = if self.sync.remote.is_some() { "Change remote" } else { "Connect" };
@@ -501,11 +501,12 @@ impl ShaleApp {
                     }
                 }
             });
+            crate::settings::anchor::mark(ui, "sync.remote", remote.response.rect);
         }
         if !repo {
             return changed;
         }
-        self.lfs_settings_ui(ui);
+        crate::settings::anchor::anchor(ui, "sync.lfs", |ui| self.lfs_settings_ui(ui));
         let writable = self.vdata.settings_writable();
         let lfs_installed = self.sync.lfs.version.is_some();
         let rects = ui.add_enabled_ui(writable, |ui| {
@@ -514,12 +515,13 @@ impl ShaleApp {
             changed |= r.changed();
             let enabled_rect = r.rect;
             let mut prefix_rect = egui::Rect::NOTHING;
-            ui.horizontal(|ui| {
+            let every = ui.horizontal(|ui| {
                 ui.label("Every");
                 changed |= ui.add(egui::DragValue::new(&mut s.interval_minutes).range(1..=1440)).changed();
                 ui.label("minutes");
             });
-            ui.horizontal(|ui| {
+            crate::settings::anchor::mark(ui, "sync.automatic", enabled_rect.union(every.response.rect));
+            let commit = ui.horizontal(|ui| {
                 ui.label("Commit message prefix");
                 let r = ui.add(egui::TextEdit::singleline(&mut s.commit_prefix).desired_width(120.0));
                 changed |= r.changed();
@@ -527,6 +529,7 @@ impl ShaleApp {
                 ui.label("suffix");
                 changed |= ui.add(egui::TextEdit::singleline(&mut s.commit_suffix).desired_width(120.0)).changed();
             });
+            crate::settings::anchor::mark(ui, "sync.commit_message", commit.response.rect);
             crate::theme::hint(ui, format!("Commits look like: {}Sync from {}: 3 file(s){}", s.commit_prefix, gitsync::host_name(), s.commit_suffix));
             let mut rects = vec![("enabled", enabled_rect), ("prefix", prefix_rect)];
             if lfs_installed {
@@ -537,12 +540,13 @@ impl ShaleApp {
                     s.lfs_download = if always { LfsDownload::Always } else { LfsDownload::OnDemand };
                     changed = true;
                 }
+                crate::settings::anchor::mark(ui, "sync.lfs_download", r.rect);
                 rects.push(("lfs-always", r.rect));
             }
             rects
         });
         self.sync.rects.extend(rects.inner);
-        ui.horizontal(|ui| {
+        let now = ui.horizontal(|ui| {
             let b = ui.add_enabled(!self.sync.running(), egui::Button::new("Sync now"));
             self.sync.rects.push(("sync-now", b.rect));
             if b.clicked() {
@@ -559,6 +563,7 @@ impl ShaleApp {
             };
             ui.label(status.size(12.0));
         });
+        crate::settings::anchor::mark(ui, "sync.now", now.response.rect);
         changed
     }
 

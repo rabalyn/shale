@@ -46,8 +46,9 @@ pub fn entries<'a>(families: &'a [String], query: &str) -> Vec<Option<&'a str>> 
 }
 
 /// What happened in the picker in this frame.
-#[derive(Default)]
 pub struct Outcome {
+    /// where the button of the picker is
+    pub rect: egui::Rect,
     /// a font was picked
     pub picked: bool,
     /// while the list is open: the entry that is highlighted (`None` in it: "Default")
@@ -141,7 +142,7 @@ pub fn show(ui: &mut Ui, salt: &str, current: &mut Option<String>, families: &[S
             Popup::close_id(ui.ctx(), popup_id);
         }
     });
-    Outcome { picked, highlighted: if picked { None } else { highlighted } }
+    Outcome { rect: button.rect, picked, highlighted: if picked { None } else { highlighted } }
 }
 
 #[cfg(test)]

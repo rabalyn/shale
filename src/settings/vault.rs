@@ -1,5 +1,6 @@
 //! The Vault tab: the folder, closing it and the people folder.
 
+use super::anchor::anchor;
 use super::Asks;
 use crate::app::{Action, ShaleApp};
 use eframe::egui::{self, Ui};
@@ -8,21 +9,23 @@ use std::path::PathBuf;
 impl ShaleApp {
     pub(super) fn vault_tab(&mut self, ui: &mut Ui, vault_path: &mut String, asks: &mut Asks) -> bool {
         let mut changed = false;
-        ui.label("Vault folder");
-        ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(vault_path).desired_width(320.0));
-            if ui.button("Open").clicked() {
-                let p = PathBuf::from(crate::layout::shellexpand(vault_path));
-                if p.is_dir() {
-                    self.actions.push(Action::OpenVault(p));
-                    asks.close = true;
-                } else {
-                    self.toasts.push(("That folder doesn't exist".into(), std::time::Instant::now()));
+        anchor(ui, "vault.folder", |ui| {
+            ui.label("Vault folder");
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(vault_path).desired_width(320.0));
+                if ui.button("Open").clicked() {
+                    let p = PathBuf::from(crate::layout::shellexpand(vault_path));
+                    if p.is_dir() {
+                        self.actions.push(Action::OpenVault(p));
+                        asks.close = true;
+                    } else {
+                        self.toasts.push(("That folder doesn't exist".into(), std::time::Instant::now()));
+                    }
                 }
-            }
+            });
         });
         crate::theme::section_break(ui);
-        if ui.button("Close this vault (back to the start screen)").clicked() {
+        if anchor(ui, "vault.close", |ui| ui.button("Close this vault (back to the start screen)").clicked()) {
             self.flush_all();
             self.remember_open_files();
             self.save_config();
@@ -34,12 +37,14 @@ impl ShaleApp {
             asks.close = true;
         }
         crate::theme::section(ui, "People");
-        ui.horizontal(|ui| {
-            ui.label("People folder");
-            changed |= ui
-                .add(egui::TextEdit::singleline(&mut self.vdata.settings.people_dir).hint_text(crate::import::people::DEFAULT_DIR).desired_width(220.0))
-                .on_hover_text("Contact notes live here. Type [[p and a name to link a person; imported e-mails and events find their people here.")
-                .changed();
+        changed |= anchor(ui, "vault.people_dir", |ui| {
+            ui.horizontal(|ui| {
+                ui.label("People folder");
+                ui.add(egui::TextEdit::singleline(&mut self.vdata.settings.people_dir).hint_text(crate::import::people::DEFAULT_DIR).desired_width(220.0))
+                    .on_hover_text("Contact notes live here. Type [[p and a name to link a person; imported e-mails and events find their people here.")
+                    .changed()
+            })
+            .inner
         });
         crate::theme::hint(ui, "Type [[p followed by a name to pick a person from this folder (or make a new contact note).");
         self.names_check_ui(ui);
@@ -54,14 +59,16 @@ impl ShaleApp {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
         }
         let running = self.vault_check.running();
-        ui.horizontal(|ui| {
-            if ui.add_enabled(!running && self.vault.is_some(), egui::Button::new("Check names for Windows and macOS…")).on_hover_text("Lists the files and folders whose names would not work on Windows or macOS").clicked() {
-                self.start_vault_check();
-            }
-            if running {
-                ui.spinner();
-                crate::theme::hint(ui, "Checking…");
-            }
+        anchor(ui, "vault.names", |ui| {
+            ui.horizontal(|ui| {
+                if ui.add_enabled(!running && self.vault.is_some(), egui::Button::new("Check names for Windows and macOS…")).on_hover_text("Lists the files and folders whose names would not work on Windows or macOS").clicked() {
+                    self.start_vault_check();
+                }
+                if running {
+                    ui.spinner();
+                    crate::theme::hint(ui, "Checking…");
+                }
+            });
         });
         if let Some(r) = self.vault_check.report.clone() {
             crate::theme::hint(ui, r);

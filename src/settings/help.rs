@@ -1,5 +1,6 @@
 //! The Help tab: the user guide and the troubleshooting switches.
 
+use super::anchor::anchor;
 use super::Asks;
 use crate::app::ShaleApp;
 use eframe::egui::Ui;
@@ -7,11 +8,11 @@ use eframe::egui::Ui;
 impl ShaleApp {
     pub(super) fn help_tab(&mut self, ui: &mut Ui, asks: &mut Asks) -> bool {
         let mut changed = false;
-        if ui.button("Open user guide (F1)").on_hover_text("The guide is a vault: a copy of it is made in Shale's data folder, once per version, and opened").clicked() {
+        if anchor(ui, "help.guide", |ui| ui.button("Open user guide (F1)").on_hover_text("The guide is a vault: a copy of it is made in Shale's data folder, once per version, and opened").clicked()) {
             asks.guide = true;
         }
         crate::theme::section(ui, "Troubleshooting");
-        if ui.checkbox(&mut self.cfg.input_log, "Record keyboard input to a file (to find keyboard problems)").changed() {
+        if anchor(ui, "help.input_log", |ui| ui.checkbox(&mut self.cfg.input_log, "Record keyboard input to a file (to find keyboard problems)").changed()) {
             if self.cfg.input_log {
                 self.start_input_log();
             }

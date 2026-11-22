@@ -1,5 +1,6 @@
 //! The Appearance tab: how notes, drawings and media look.
 
+use super::anchor::anchor;
 use crate::app::ShaleApp;
 use crate::theme;
 use eframe::egui::{self, Ui};
@@ -8,21 +9,23 @@ impl ShaleApp {
     pub(super) fn appearance_tab(&mut self, ui: &mut Ui) -> bool {
         let mut changed = self.theme_section(ui);
         theme::section_break(ui);
-        changed |= ui.checkbox(&mut self.cfg.readable_width, "Readable line length").changed();
-        changed |= ui.checkbox(&mut self.cfg.dark_canvas, "Dark drawing canvas").changed();
-        changed |= properties_combo(ui, "Properties in the editor", "properties-editor", &mut self.cfg.properties_in_editor);
-        changed |= properties_combo(ui, "Properties in the reading view", "properties-reader", &mut self.cfg.properties_in_reader);
-        changed |= ui.checkbox(&mut self.cfg.inline_images, "Show embedded images and players inside the editor (the link text appears while the cursor is on it)").changed();
-        ui.horizontal(|ui| {
-            ui.label("Play button over the artwork of a sound or video");
-            changed |= ui
-                .add(
+        changed |= anchor(ui, "appearance.readable_width", |ui| ui.checkbox(&mut self.cfg.readable_width, "Readable line length").changed());
+        changed |= anchor(ui, "appearance.dark_canvas", |ui| ui.checkbox(&mut self.cfg.dark_canvas, "Dark drawing canvas").changed());
+        changed |= anchor(ui, "appearance.properties_editor", |ui| properties_combo(ui, "Properties in the editor", "properties-editor", &mut self.cfg.properties_in_editor));
+        changed |= anchor(ui, "appearance.properties_reader", |ui| properties_combo(ui, "Properties in the reading view", "properties-reader", &mut self.cfg.properties_in_reader));
+        changed |= anchor(ui, "appearance.inline_images", |ui| ui.checkbox(&mut self.cfg.inline_images, "Show embedded images and players inside the editor (the link text appears while the cursor is on it)").changed());
+        changed |= anchor(ui, "appearance.play_button", |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Play button over the artwork of a sound or video");
+                ui.add(
                     egui::Slider::new(&mut self.cfg.media_play_button_opacity, 0.0..=1.0)
                         .custom_formatter(|v, _| format!("{:.0} %", v * 100.0))
                         .custom_parser(|t| t.trim().trim_end_matches('%').trim().parse::<f64>().ok().map(|v| v / 100.0)),
                 )
                 .on_hover_text("How opaque the round button is; it is fully opaque while the mouse is over it")
-                .changed();
+                .changed()
+            })
+            .inner
         });
         // videos are decoded by the system's ffmpeg (MEDIA-010)
         match self.media.ffmpeg() {
@@ -81,37 +84,50 @@ impl ShaleApp {
         let mut changed = false;
         let themes = self.themes.themes().clone();
         let cfg = &mut self.cfg.theme;
-        changed |= ui.checkbox(&mut cfg.follow_system, "Follow the system's light or dark mode").on_hover_text("Use one theme while the system is in light mode and another while it is in dark mode").changed();
+        changed |= anchor(ui, "appearance.follow_system", |ui| {
+            ui.checkbox(&mut cfg.follow_system, "Follow the system's light or dark mode").on_hover_text("Use one theme while the system is in light mode and another while it is in dark mode").changed()
+        });
         if cfg.follow_system {
-            ui.horizontal(|ui| {
-                ui.label("Light theme");
-                changed |= theme_combo(ui, "theme-light", &themes, &mut cfg.light);
+            changed |= anchor(ui, "appearance.theme_light", |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Light theme");
+                    theme_combo(ui, "theme-light", &themes, &mut cfg.light)
+                })
+                .inner
             });
-            ui.horizontal(|ui| {
-                ui.label("Dark theme");
-                changed |= theme_combo(ui, "theme-dark", &themes, &mut cfg.dark);
+            changed |= anchor(ui, "appearance.theme_dark", |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Dark theme");
+                    theme_combo(ui, "theme-dark", &themes, &mut cfg.dark)
+                })
+                .inner
             });
         } else {
-            ui.horizontal(|ui| {
-                ui.label("Theme");
-                changed |= theme_combo(ui, "theme", &themes, &mut cfg.name);
+            changed |= anchor(ui, "appearance.theme", |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Theme");
+                    theme_combo(ui, "theme", &themes, &mut cfg.name)
+                })
+                .inner
             });
         }
         let missing: Vec<&String> = if cfg.follow_system { vec![&cfg.light, &cfg.dark] } else { vec![&cfg.name] };
         for name in missing.into_iter().filter(|n| themes.get(n).is_none()) {
             theme::problem(ui, format!("There is no theme called \"{name}\", so Shale's own theme is used."));
         }
-        ui.horizontal(|ui| {
-            if ui.button("Open themes folder").on_hover_text(THEME_HELP).clicked() {
-                match self.themes.dir().map(crate::opener::open_themes_folder) {
-                    Some(Ok(())) => {}
-                    Some(Err(e)) => self.toast(e),
-                    None => self.toast("There is no themes folder"),
+        anchor(ui, "appearance.themes_folder", |ui| {
+            ui.horizontal(|ui| {
+                if ui.button("Open themes folder").on_hover_text(THEME_HELP).clicked() {
+                    match self.themes.dir().map(crate::opener::open_themes_folder) {
+                        Some(Ok(())) => {}
+                        Some(Err(e)) => self.toast(e),
+                        None => self.toast("There is no themes folder"),
+                    }
                 }
-            }
-            if ui.button("Reload themes").on_hover_text("Read the themes folder again").clicked() {
-                self.themes.reload();
-            }
+                if ui.button("Reload themes").on_hover_text("Read the themes folder again").clicked() {
+                    self.themes.reload();
+                }
+            });
         });
         for e in &themes.errors {
             theme::problem(ui, format!("Theme file skipped: {e}"));

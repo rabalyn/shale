@@ -345,19 +345,21 @@ pub(crate) fn show(ui: &mut Ui, st: &mut ManagedState, cfg: &mut GitConfig) -> b
         }
         (Some(d), false) => detection_lines(ui, d),
     }
-    ui.label("Git to use");
-    for c in GitChoice::ALL {
-        if ui.radio_value(&mut cfg.choice, c, c.label()).changed() {
-            changed = true;
+    crate::settings::anchor::anchor(ui, "sync.git_choice", |ui| {
+        ui.label("Git to use");
+        for c in GitChoice::ALL {
+            if ui.radio_value(&mut cfg.choice, c, c.label()).changed() {
+                changed = true;
+            }
         }
-    }
-    ui.horizontal(|ui| {
-        if ui.add_enabled(st.detecting.is_none() && st.task.is_none(), egui::Button::new("Check again")).on_hover_text("Look for git again").clicked() {
-            st.check_again(&ctx, cfg.choice);
-        }
+        ui.horizontal(|ui| {
+            if ui.add_enabled(st.detecting.is_none() && st.task.is_none(), egui::Button::new("Check again")).on_hover_text("Look for git again").clicked() {
+                st.check_again(&ctx, cfg.choice);
+            }
+        });
     });
     theme::section(ui, "Shale's own git");
-    managed_section(ui, st, cfg, &ctx, &mut changed);
+    crate::settings::anchor::anchor(ui, "sync.git_install", |ui| managed_section(ui, st, cfg, &ctx, &mut changed));
     if let Some(n) = &st.notice {
         if n.ok {
             ui.label(&n.text);

@@ -2,6 +2,7 @@
 //! are drawn and the letters of the prefixes that name one source in the query (`f:`, `m:`, `s:`,
 //! NAV-050…NAV-054).
 
+use super::anchor::anchor;
 use crate::app::ShaleApp;
 use crate::search_sources::{check_prefixes, HitDisplay, Kind};
 use eframe::egui::{self, Id, Ui};
@@ -13,26 +14,30 @@ impl ShaleApp {
         crate::theme::section(ui, "Sources");
         crate::theme::hint(ui, "A search without a prefix looks in and lists these sources. The buttons above the results change what is listed for a moment (a click) or this selection (Shift+click).");
         let selection = self.cfg.search.selection();
-        for kind in Kind::ALL {
-            let mut on = selection.contains(kind);
-            // the last source stays: a search with no source finds nothing
-            let r = ui.add_enabled(!on || selection.toggled(kind).is_some(), egui::Checkbox::new(&mut on, kind.group()));
-            if r.changed() {
-                if let Some(sel) = selection.toggled(kind) {
-                    self.cfg.search.set_selection(sel);
-                    changed = true;
+        anchor(ui, "search.sources", |ui| {
+            for kind in Kind::ALL {
+                let mut on = selection.contains(kind);
+                // the last source stays: a search with no source finds nothing
+                let r = ui.add_enabled(!on || selection.toggled(kind).is_some(), egui::Checkbox::new(&mut on, kind.group()));
+                if r.changed() {
+                    if let Some(sel) = selection.toggled(kind) {
+                        self.cfg.search.set_selection(sel);
+                        changed = true;
+                    }
                 }
             }
-        }
+        });
         crate::theme::section(ui, "Hits of notes");
         crate::theme::hint(ui, "How the lines of notes that a search found are drawn: rendered like the editor draws a line (bold, links by their text, tags, task boxes), as the markdown is written, or like the editor shows notes now (rendered when the Markdown preview is on or the note in view is in the reading view). The found text is marked in all of them.");
         let shown = self.cfg.search.display();
-        for display in HitDisplay::ALL {
-            if ui.radio(shown == display, display.label()).clicked() && shown != display {
-                self.cfg.search.hit_display = display.id().into();
-                changed = true;
+        anchor(ui, "search.hit_display", |ui| {
+            for display in HitDisplay::ALL {
+                if ui.radio(shown == display, display.label()).clicked() && shown != display {
+                    self.cfg.search.hit_display = display.id().into();
+                    changed = true;
+                }
             }
-        }
+        });
         crate::theme::section(ui, "Prefixes");
         crate::theme::hint(
             ui,
@@ -46,11 +51,13 @@ impl ShaleApp {
             letters = [cfg.prefix_notes.clone(), cfg.prefix_mail.clone(), cfg.prefix_posts.clone()];
         }
         let mut edited = false;
-        ui.horizontal(|ui| {
-            for (label, letter) in ["Notes", "Mail", "Posts"].into_iter().zip(letters.iter_mut()) {
-                ui.label(label);
-                edited |= ui.add(egui::TextEdit::singleline(letter).desired_width(24.0)).changed();
-            }
+        anchor(ui, "search.prefixes", |ui| {
+            ui.horizontal(|ui| {
+                for (label, letter) in ["Notes", "Mail", "Posts"].into_iter().zip(letters.iter_mut()) {
+                    ui.label(label);
+                    edited |= ui.add(egui::TextEdit::singleline(letter).desired_width(24.0)).changed();
+                }
+            });
         });
         if edited {
             match check_prefixes(&letters[0], &letters[1], &letters[2]) {

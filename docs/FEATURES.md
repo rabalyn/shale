@@ -420,6 +420,12 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   the first pane, then pane by pane; it stays in the last one). Ctrl+Shift+B opens
   the file list with the open note selected: j / k go from file to file, Ctrl+J / Ctrl+K from
   folder to folder, Space opens or closes a folder, Enter opens a file.
+- The Keybindings tab has a filter field (Ctrl+F or `/` focuses it): it keeps the actions whose name or
+  keys fit what you type, such as `ctrl+h` or `F6`, hides the groups with no match and says "No
+  action matches" when nothing does. Change, Add, Clear and Reset work on the rows shown; Reset all still
+  resets every action.
+
+  ![The Keybindings tab filtered by ctrl+h](userguide/z_media/screenshots/keybindings-filter.png)
 - Every shortcut of this section can be changed in Settings → Keybindings; a key that another
   action already uses asks “Overwrite it?” (Yes takes it from that action and leaves it without a key, No
   changes nothing; Enter answers No), and a binding can be a sequence of keys. While you record, a note
@@ -1023,6 +1029,14 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 - **Settings** (Ctrl+, or the ribbon button) has a tab per domain in a list on the left: Vault, Editor,
   Appearance, Fonts, Sync, Calendar, Mail, Feeds, Data, Help and Keybindings. It opens on the short Vault
   page, and later on the tab you used last.
+- **A search over all settings** sits at the top of Settings (Ctrl+F, or `/`, focuses it). It finds a
+  setting by its name, its description (the one in the settings file) or its tab, and a key action
+  by its name or its keys (`ctrl+h`, `F6`). ↓ / ↑ and Enter, or a click, go to the result: the tab
+  is shown, the page scrolls to the setting and a box pulses around it for a moment (it stands
+  still where animations are off). Every setting of the dialog is in one table (`settings/registry.rs`)
+  that tests keep complete.
+
+  ![Settings with the search for "cursor" and its results, each with its tab](userguide/z_media/screenshots/settings-find.png)
 - The settings of the program itself are one text file, `~/.config/shale/config.toml`, with a
   description above every setting. "Open settings file" (top right of Settings) opens it in a tab (no note, no
   vault file); saving applies the values at once, a change from another editor is picked up within a
