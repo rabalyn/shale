@@ -791,6 +791,14 @@ impl Vault {
         self.outgoing_links(rel).into_iter().filter(|(l, r)| r.is_none() && l.is_outside()).map(|(l, _)| (l.display(), l.target.clone())).collect()
     }
 
+    /// The links of the note `rel`, whose text is `text`, to media outside the vault (MEDIA-021): each
+    /// target once, as written, in the order of the text. A link that a file of the vault answers
+    /// to is not one (MEDIA-014).
+    pub fn outside_targets(&self, text: &str, rel: &Path) -> Vec<String> {
+        let mut seen = HashSet::new();
+        markdown::find_links(text).into_iter().filter(|l| l.is_outside() && self.resolve(&l.target, Some(rel)).is_none() && seen.insert(l.target.clone())).map(|l| l.target).collect()
+    }
+
     /// The links of a note or drawing, each target once, with what it resolves to.
     fn outgoing_links(&self, rel: &Path) -> Vec<(&LinkSpan, Option<PathBuf>)> {
         let Some(n) = self.notes.get(rel).or_else(|| self.drawings.get(rel)) else { return vec![] };
