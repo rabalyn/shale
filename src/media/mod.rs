@@ -32,8 +32,16 @@ use std::path::{Path, PathBuf};
 
 pub const MEDIA_DIR: &str = "z_media";
 const IMAGE_EXTS: [&str; 6] = ["png", "jpg", "jpeg", "webp", "gif", "bmp"];
-const AUDIO_EXTS: [&str; 8] = ["mp3", "ogg", "oga", "opus", "m4a", "aac", "wav", "flac"];
-const VIDEO_EXTS: [&str; 7] = ["mp4", "m4v", "webm", "mkv", "mov", "avi", "ogv"];
+/// The one list of media file extensions (lower case): sounds. Import (IMP-031), the player
+/// (MEDIA-001) and the Git LFS patterns (SYNC-017) all come from `AUDIO_EXTS` and `VIDEO_EXTS` (#206).
+pub const AUDIO_EXTS: [&str; 8] = ["mp3", "ogg", "oga", "opus", "m4a", "aac", "wav", "flac"];
+/// The video half of the one list; every one of them has a player (MEDIA-009), decoded by ffmpeg.
+pub const VIDEO_EXTS: [&str; 7] = ["mp4", "m4v", "webm", "mkv", "mov", "avi", "ogv"];
+
+/// Every audio and video extension, lower case, in the order of the two lists.
+pub fn media_extensions() -> impl Iterator<Item = &'static str> {
+    AUDIO_EXTS.into_iter().chain(VIDEO_EXTS)
+}
 
 /// What a media file is (imports and pastes bring these in as files, IMP-031, EDIT-019).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -233,12 +241,10 @@ pub fn is_audio(p: &Path) -> bool {
     p.extension().and_then(|e| e.to_str()).map(|e| AUDIO_EXTS.contains(&e.to_ascii_lowercase().as_str())).unwrap_or(false)
 }
 
-/// The video files that get a player when they are embedded (MEDIA-001, MEDIA-009); fewer than
-/// the import list `VIDEO_EXTS` (one list: raba/shale#206).
-const PLAYABLE_VIDEO_EXTS: [&str; 5] = ["mp4", "m4v", "mov", "webm", "mkv"];
-
+/// The video files that get a player when they are embedded (MEDIA-001, MEDIA-009): all of
+/// `VIDEO_EXTS`, the import list.
 pub fn is_video(p: &Path) -> bool {
-    p.extension().and_then(|e| e.to_str()).map(|e| PLAYABLE_VIDEO_EXTS.contains(&e.to_ascii_lowercase().as_str())).unwrap_or(false)
+    p.extension().and_then(|e| e.to_str()).map(|e| VIDEO_EXTS.contains(&e.to_ascii_lowercase().as_str())).unwrap_or(false)
 }
 
 /// A sound or a video: what the media player shows.

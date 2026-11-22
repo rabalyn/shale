@@ -642,8 +642,8 @@ fn stored_pointer(env: &Env, vault: &Path, rev_path: &str) -> Option<lfs::Pointe
 fn shales_block_keeps_the_users_lines_and_is_written_the_same_every_time() {
     let block = lfs::with_block("").unwrap();
     assert!(block.starts_with("# shale-media-begin\n") && block.ends_with("# shale-media-end\n"));
-    assert_eq!(block.lines().count(), 2 + 26);
-    for e in lfs::MEDIA_EXTENSIONS {
+    assert_eq!(block.lines().count(), 2 + 2 * crate::media::media_extensions().count());
+    for e in crate::media::media_extensions() {
         assert!(block.contains(&format!("\n*.{e} filter=lfs diff=lfs merge=lfs -text\n")), "{e}");
         assert!(block.contains(&format!("\n*.{} filter=lfs diff=lfs merge=lfs -text\n", e.to_ascii_uppercase())), "{e}");
     }
@@ -659,6 +659,28 @@ fn shales_block_keeps_the_users_lines_and_is_written_the_same_every_time() {
     assert!(lfs::with_block("# shale-media-begin\n*.mp3 filter=lfs\n").unwrap_err().contains("shale-media-end"));
     assert!(lfs::has_block(&once) && !lfs::has_block(mine));
     assert!(lfs::uses_lfs(&once) && !lfs::uses_lfs(mine) && !lfs::uses_lfs("# *.mp3 filter=lfs\n"));
+}
+
+// spec: SYNC-017, MEDIA-001
+#[test]
+fn the_lfs_patterns_cover_exactly_the_extensions_that_have_a_player() {
+    // one list (#206): every pattern is a media file that gets a player, in lower and upper case ...
+    let patterns = lfs::patterns();
+    for p in &patterns {
+        let name = p.replace('*', "file");
+        assert!(crate::media::is_media(Path::new(&name)), "{p} has no player");
+    }
+    // ... and every extension with a player is routed to LFS, in both cases
+    let mut want: Vec<String> = Vec::new();
+    for e in ["mp3", "ogg", "oga", "opus", "flac", "m4a", "aac", "wav", "mp4", "m4v", "mov", "webm", "mkv", "avi", "ogv"] {
+        assert!(crate::media::is_media(Path::new(&format!("x.{e}"))), "{e}");
+        want.push(format!("*.{e}"));
+        want.push(format!("*.{}", e.to_ascii_uppercase()));
+    }
+    let mut got = patterns;
+    got.sort();
+    want.sort();
+    assert_eq!(got, want);
 }
 
 #[test]

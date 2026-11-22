@@ -31,7 +31,7 @@ Embed a sound like a picture, with `![[file.mp3]]`. Here is one:
 
 # Videos
 
-Embed a video with `![[clip.mp4]]` (mp4, m4v, mov, webm and mkv). It has the same player as a
+Embed a video with `![[clip.mp4]]` (mp4, m4v, mov, webm, mkv, avi and ogv). It has the same player as a
 sound, with a 16:9 picture (the first frame until you play) and the controls below it. While it
 plays, the picture shows the video and the sound goes through the same output as sound files.
 A click on the progress bar restarts the video at that place. A click before the video's length

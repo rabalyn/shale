@@ -27,11 +27,11 @@ fn texts(fx: &Fx) -> Vec<String> {
 // spec: MEDIA-001, MEDIA-009
 #[test]
 fn a_video_is_found_by_its_extension_in_any_case_and_the_player_shows_the_first_frame() {
-    for name in ["a.mp4", "b.M4V", "c.Mov", "d.WEBM", "e.mkv"] {
+    for name in ["a.mp4", "b.M4V", "c.Mov", "d.WEBM", "e.mkv", "f.AVI", "g.ogv"] {
         assert!(crate::media::is_video(Path::new(name)) && crate::media::is_media(Path::new(name)), "{name}");
         assert!(!crate::media::is_audio(Path::new(name)), "{name}");
     }
-    for name in ["a.mp3", "b.avi", "c.mp4.txt", "d"] {
+    for name in ["a.mp3", "b.avi.txt", "c.mp4.txt", "d"] {
         assert!(!crate::media::is_video(Path::new(name)), "{name}");
     }
     if !have_ffmpeg() {
@@ -47,6 +47,26 @@ fn a_video_is_found_by_its_extension_in_any_case_and_the_player_shows_the_first_
     fx.hl.frames(&mut fx.app, 3);
     assert!(texts(&fx).iter().any(|t| t == "0:01"), "the length shows: {:?}", texts(&fx));
     assert_eq!(fx.app.media.current(), None, "nothing starts by itself");
+}
+
+// spec: MEDIA-009
+#[test]
+fn an_avi_and_an_ogv_file_play_like_the_others() {
+    if !have_ffmpeg() {
+        return;
+    }
+    for clip in ["clip.avi", "clip.ogv"] {
+        let mut fx = Fx::new("v-avi-ogv", &format!("![[{clip}]]\n"), &[clip]);
+        fx.reading(true);
+        let abs = fx.dir.join(clip);
+        fx.until("the look is done", |a| a.media.thumbnail_size(&abs).is_some());
+        assert_eq!(fx.app.media.thumbnail_size(&abs), Some([160, 90]), "{clip}");
+        fx.click_label("Play");
+        fx.until("a frame of the video is shown", |a| a.media.picture_size().is_some());
+        assert_eq!(fx.app.media.picture_size(), Some([160, 90]), "{clip}");
+        fx.until("the video runs", |a| a.media.position().is_some_and(|p| p > 0.15));
+        fx.click_label("Pause");
+    }
 }
 
 // spec: MEDIA-001
