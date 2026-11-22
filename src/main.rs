@@ -327,6 +327,9 @@ fn main() -> eframe::Result {
         }
     }
 
+    // the code grammars compile in the background, so the first block of TypeScript does not stall a frame (EDIT-118)
+    syntax::prewarm_in_background();
+
     // a recording is a screenshot run that ends in a clip; ffmpeg must be there before a window opens (BUILD-018)
     if record.is_some() {
         if let Err(e) = recorder::probe(recorder::FFMPEG) {
