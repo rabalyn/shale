@@ -23,6 +23,8 @@ pub struct ImportDialog {
     pub keep_docx: bool,
     /// also write the header of an e-mail / event / post as a list in the note (IMP-052)
     pub header_list: bool,
+    /// leave out the crypto signature parts and the signature pictures of e-mails (IMP-061)
+    pub skip_signatures: bool,
     /// pandoc runs for the Word files that are going on in a job (IMP-035)
     pub converting: Option<Receiver<Result<Vec<Converted>, String>>>,
     /// set when the dialog is let go: a pandoc run that is still going stops
@@ -63,6 +65,7 @@ impl ImportDialog {
             keep_original: true,
             keep_docx: true,
             header_list: false,
+            skip_signatures: true,
             converting: None,
             cancel: Arc::new(AtomicBool::new(false)),
             link_into,
@@ -261,7 +264,7 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
             }
             if let Source::Email { mail, .. } = &it.source {
                 for (k, (a, on)) in mail.attachments.iter().zip(it.att_on.iter_mut()).enumerate() {
-                    let label = format!("{}  ({}, {}{})", a.name, a.mime, size_text(a.data.len()), if a.inline { ", in the text" } else { "" });
+                    let label = format!("{}  ({}, {}{}{})", a.name, a.mime, size_text(a.data.len()), if a.inline { ", in the text" } else { "" }, crate::mail::signature::reason(a).map(|r| format!(", {r}")).unwrap_or_default());
                     rec(format!("att:{i}:{k}"), ui.checkbox(on, egui::RichText::new(label).size(12.5)));
                 }
             }
@@ -366,6 +369,13 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
     });
     if d.items.iter().any(|i| matches!(i.source, Source::Email { .. } | Source::Event { .. })) {
         rec("keep".into(), ui.checkbox(&mut d.keep_original, "Keep the original message / calendar file with the attachments"));
+    }
+    if d.items.iter().any(|i| matches!(i.source, Source::Email { .. }))
+        && rec("skip-signatures".into(), ui.checkbox(&mut d.skip_signatures, "Skip signatures"))
+            .on_hover_text("Leave out the signature parts of signed mail (smime.p7s, signature.asc) and the pictures of signature blocks (logos, social icons); you can still tick each one below. Settings → Import sets the start value")
+            .changed()
+    {
+        import::apply_skip_signatures(&mut d.items, d.skip_signatures);
     }
     if d.items.iter().any(|i| matches!(i.source, Source::Email { .. } | Source::Event { .. } | Source::Social { .. })) {
         rec("header-list".into(), ui.checkbox(&mut d.header_list, "Header list in the note body"))
@@ -589,6 +599,27 @@ mod tests {
         h.frame(vec![], &mut d, &[], &[]);
         assert!(d.rects.iter().any(|r| r.0 == "header-list"), "a post has a header list too");
         assert!(!d.rects.iter().any(|r| r.0 == "keep"), "but no original file to keep");
+    }
+
+    // spec: IMP-061
+    #[test]
+    fn the_skip_signatures_box_is_there_for_messages_and_flips_the_signature_attachments() {
+        let mut mail = crate::mail::parse(&crate::mail::tests::sample_eml());
+        mail.attachments.push(crate::mail::Attachment { name: "smime.p7s".into(), mime: "application/pkcs7-signature".into(), data: vec![1, 2, 3], inline: false, cid: String::new(), kind: crate::mail::AttKind::CryptoSignature });
+        let last = mail.attachments.len() - 1;
+        let mut d = ImportDialog::new(vec![import::email_item(mail, ("m.eml".into(), vec![]))], vec![], String::new(), String::new(), None, false);
+        let mut h = H { ctx: egui::Context::default(), t: 0.0 };
+        h.frame(vec![], &mut d, &[], &[]);
+        assert!(d.skip_signatures, "on at first");
+        assert!(!d.items[0].att_on[last], "the signature starts unticked");
+        h.click("skip-signatures", &mut d, &[], &[]);
+        assert!(!d.skip_signatures);
+        assert!(d.items[0].att_on[last], "off: it is ticked like the others");
+        h.click("skip-signatures", &mut d, &[], &[]);
+        assert!(!d.items[0].att_on[last]);
+        let mut d = ImportDialog::new(vec![import::markdown_item("Top.md".into(), "# A\n".into())], vec![], String::new(), String::new(), None, false);
+        h.frame(vec![], &mut d, &[], &[]);
+        assert!(!d.rects.iter().any(|r| r.0 == "skip-signatures"), "no signatures in a Markdown note");
     }
 
     // spec: IMP-034

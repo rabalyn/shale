@@ -152,6 +152,11 @@ impl ShaleApp {
                 .on_hover_text("An imported e-mail or event always has its From, To, Date, When, Where … in the note's properties. Ticked: they are also written as a list below the title, for programs that do not show properties. The Import dialog starts with this choice")
                 .changed()
         });
+        changed |= anchor(ui, "import.skip_signatures", |ui| {
+            ui.checkbox(&mut self.cfg.import_skip_signatures, "Skip signatures")
+                .on_hover_text("A signed e-mail has a signature file (smime.p7s, signature.asc), and a signature block has logos and social icons. Ticked: the Import dialog starts with them unticked, and you can tick each one. The Import dialog starts with this choice")
+                .changed()
+        });
         self.word.poll();
         if self.word.result.is_none() && !self.word.running() {
             self.word.start(self.cfg.pandoc_path.clone());
