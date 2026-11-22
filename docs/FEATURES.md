@@ -451,8 +451,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   **Mail and posts** (full-text index) need all the words in any order, ignoring case and accents; every word matches the start of a word
   (`meet` finds "meeting", #491), `"phrases"` stay exact, a wildcard only cuts the word (`mee?ing` is `mee*`) and a word that starts with one is dropped; `AND`, `OR`, `NOT`
   and `-` are plain text. Fields limit a word in mail (`from:` `to:` `cc:` `subject:` `body:`) and posts (`from:` `text:`
-  `body:` `in:` `context:` `link:` `date:`) and are plain text in notes. The mail view's own search has the words,
-  phrases and fields, without wildcards or word starts.
+  `body:` `in:` `context:` `link:` `date:`) and are plain text in notes. The mail view's own search reads the text
+  the same way as mail here (#490).
   ![The search window of Space f g: notes with the found text marked, mail and posts under them, and the count buttons](userguide/z_media/screenshots/picker-search.png)
   ![The search in the sidebar with the same groups](userguide/z_media/screenshots/sidebar-search.png)
 - **Hits of notes are shown rendered** (#483): a found line is drawn with the editor's own inline rendering (bold, italic,
@@ -690,8 +690,9 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   not synced automatically**: when you open one, its list is loaded from the server, and a
   message is downloaded when you press **Load this message**. The same button appears for a
   message over the size limit (200 MB).
-- **Search** (the field above the list, or `/`): words, `"phrases"`, `from:`, `to:`, `subject:`
-  and `body:`; ignores case and accents. Choose all folders or only the open one.
+- **Search** (the field above the list, or `/`): words, `"phrases"`, `from:`, `to:`, `cc:`, `subject:`
+  and `body:`; ignores case and accents; every word matches the start of a word (`meet` finds
+  "meeting") and `*` / `?` work as in Space f g. Choose all folders or only the open one.
 - **Import to vault** (button, or `i`) hands the mail to the same Import dialog as a dragged
   `.eml` file: attachments, people and tags work the same, a mail that was imported before is
   recognised, and nothing is written until you press Import. Mark several mails (Space or

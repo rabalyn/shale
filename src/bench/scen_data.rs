@@ -83,7 +83,7 @@ fn mail_search(fx: &mut Fixtures) -> Prep {
     Ok(Box::new(move || {
         let r = store.reader().expect("a reader");
         black_box(r.search("project invoice", None, 50, 0).expect("a search"));
-        black_box(crate::mail::db::search_wild(r.conn(), "garden*", 50).expect("a wildcard search"));
+        black_box(r.search("garden*", None, 50, 0).expect("a wildcard search"));
     }))
 }
 

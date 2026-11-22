@@ -199,7 +199,7 @@ fn shown_marks(shown: &str, range: Range<usize>) -> Vec<Range<usize>> {
 }
 
 pub fn mail_hits(db: &Connection, query: &Query) -> Vec<Hit> {
-    crate::mail::db::search_wild(db, query.text, query.limit)
+    crate::mail::db::search(db, query.text, None, query.limit, 0)
         .unwrap_or_default()
         .into_iter()
         .map(|m| {
