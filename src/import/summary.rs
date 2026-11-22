@@ -22,6 +22,8 @@ pub struct ImportSummary {
     pub notes: Vec<Entry>,
     /// the files saved as they are (pictures, PDFs, audio, video)
     pub files: Vec<PathBuf>,
+    /// the media files that stay where they are (MEDIA-019)
+    pub linked: Vec<crate::import::Linked>,
     pub errors: Vec<String>,
     /// "the vault" or "“Folder”": where the notes are
     pub place: String,
@@ -37,7 +39,7 @@ pub enum SummaryAction {
 }
 
 impl ImportSummary {
-    pub fn new(vault: &Vault, notes: &[PathBuf], files: &[PathBuf], errors: Vec<String>, place: String) -> Self {
+    pub fn new(vault: &Vault, notes: &[PathBuf], files: &[PathBuf], linked: &[crate::import::Linked], errors: Vec<String>, place: String) -> Self {
         let notes = notes
             .iter()
             .map(|rel| {
@@ -46,7 +48,7 @@ impl ImportSummary {
                 Entry { rel: rel.clone(), name, line }
             })
             .collect();
-        ImportSummary { notes, files: files.to_vec(), errors, place }
+        ImportSummary { notes, files: files.to_vec(), linked: linked.to_vec(), errors, place }
     }
 
     /// "Imported 3 notes and 2 files"
@@ -59,7 +61,13 @@ impl ImportSummary {
         if !self.files.is_empty() {
             parts.push(plural(self.files.len(), "file", "files"));
         }
-        format!("Imported {}", parts.join(" and "))
+        if !self.linked.is_empty() {
+            parts.push(plural(self.linked.len(), "linked file", "linked files"));
+        }
+        match parts.split_last() {
+            Some((last, first)) if !first.is_empty() => format!("Imported {} and {last}", first.join(", ")),
+            _ => format!("Imported {}", parts.join("")),
+        }
     }
 }
 
@@ -122,6 +130,12 @@ pub fn show(ui: &mut Ui, s: &ImportSummary) -> Option<SummaryAction> {
                 ui.add(egui::Label::new(egui::RichText::new(file_name(f)).size(12.5)).wrap()).on_hover_text(rel_to_string(f));
             }
         }
+        if !s.linked.is_empty() {
+            theme::section(ui, "Linked where they are");
+            for l in &s.linked {
+                ui.add(egui::Label::new(egui::RichText::new(file_name(&l.path)).size(12.5)).wrap()).on_hover_text(l.path.display().to_string());
+            }
+        }
         if !s.errors.is_empty() {
             theme::section(ui, "Went wrong");
             for e in &s.errors {
@@ -166,9 +180,19 @@ mod tests {
     // spec: IMP-056
     #[test]
     fn the_title_counts_notes_and_files() {
-        let s = |n: usize, f: usize| ImportSummary { notes: (0..n).map(|_| Entry { rel: PathBuf::new(), name: String::new(), line: String::new() }).collect(), files: vec![PathBuf::new(); f], errors: vec![], place: String::new() };
-        assert_eq!(s(1, 0).title(), "Imported 1 note");
-        assert_eq!(s(3, 1).title(), "Imported 3 notes and 1 file");
-        assert_eq!(s(0, 2).title(), "Imported 2 files");
+        let s = |n: usize, f: usize, l: usize| ImportSummary {
+            notes: (0..n).map(|_| Entry { rel: PathBuf::new(), name: String::new(), line: String::new() }).collect(),
+            files: vec![PathBuf::new(); f],
+            linked: vec![crate::import::Linked { link: String::new(), path: PathBuf::new() }; l],
+            errors: vec![],
+            place: String::new(),
+        };
+        assert_eq!(s(1, 0, 0).title(), "Imported 1 note");
+        assert_eq!(s(3, 1, 0).title(), "Imported 3 notes and 1 file");
+        assert_eq!(s(0, 2, 0).title(), "Imported 2 files");
+        // MEDIA-019: files that stay where they are are counted apart
+        assert_eq!(s(0, 0, 1).title(), "Imported 1 linked file");
+        assert_eq!(s(0, 0, 3).title(), "Imported 3 linked files");
+        assert_eq!(s(3, 2, 1).title(), "Imported 3 notes, 2 files and 1 linked file");
     }
 }

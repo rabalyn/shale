@@ -95,6 +95,7 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
     ("media_libraries", "The library folders of this computer: media outside the vault that notes link as ![[@Name/folder/file.mp4]]. The same name on another computer can be another folder."),
     ("media_libraries.name", "The name notes use in the link, after the @ (letters and digits; capitals do not matter)."),
     ("media_libraries.path", "The folder on this computer that the name stands for."),
+    ("outside_files", "What a picked, pasted or imported picture, PDF, sound or video from outside the vault gets: Ask, Copy (a copy in the media folder) or Link (the link points to the file where it is). Other files are always copied."),
     ("calendars", "The calendars of the calendar panel: files on this computer and CalDAV calendars."),
     ("calendars.id", "A name that identifies the calendar; do not reuse it."),
     ("calendars.name", "What the calendar is called in the window."),
@@ -437,6 +438,7 @@ mod tests {
             social_accounts: vec![SocialAccountEntry { account: Account::new(Network::Bluesky, "https://bsky.social", "ada.bsky.social", "Ada"), secret: "tok".into() }],
             social_last: Some(("a".into(), "home".into())),
             media_volume: 0.8,
+            outside_files: crate::media::intake::OutsideFiles::Link,
             media_libraries: vec![Library { name: "Videos".into(), path: "/media/ada/Videos".into() }, Library { name: "Pictures".into(), path: "/home/ada/Pictures".into() }],
             ..Config::default()
         };

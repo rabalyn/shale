@@ -18,6 +18,9 @@
 #      build attestation. A red macOS or Windows job stops the release.
 #    - workflow_dispatch: the same builds and attestation without publishing, to try the
 #      workflow (the files are workflow artifacts). It is not a test run for Linux: see below.
+#    - after the release page is up, the job `bench` (BUILD-041) runs the `full` benchmark profile
+#      on each system and compares it with the previous release's result of that system; statistics
+#      in the job summary, never a gate, and nothing waits for it.
 #    The attestation (BUILD-014) is keyless: GitHub signs it through Sigstore with a short-lived
 #    certificate naming this repository, this workflow and the tag, so there is no key to keep.
 # 2. macOS and Windows (BUILD-005, BUILD-017, BUILD-024): the homelab cannot run those systems, so
@@ -419,3 +422,101 @@ jobs:
           else
             gh release create "$GITHUB_REF_NAME" release/* --title "Shale $VERSION" --notes-file release-notes.md --verify-tag
           fi
+
+  # Benchmark statistics (BUILD-041, #408): after the release page is up, each system builds the
+  # benchmark binary, runs the `full` profile once, keeps the result as an asset of the release and
+  # compares it with the previous release's asset of the same system; what is odd goes into the job
+  # summary. Statistics only, never a gate (the gate is the owner's workstation, BUILD-034): the job
+  # is not needed by anything, may fail without failing the workflow (`continue-on-error` here and on
+  # every step) and so cannot hold up or stop the release. It writes only assets of the release: the
+  # result of each system and, from Linux, the flamegraphs of the flagged and the slowest scenarios
+  # as shale-flamegraphs-<version>.tar.gz (#400; docs/perf/index.html links to it).
+  bench:
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    continue-on-error: true
+    permissions:
+      contents: write # the benchmark result is an asset of the release page
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            system: linux-x86_64
+          - runner: macos-latest
+            system: macos-arm64
+          - runner: windows-latest
+            system: windows-x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        continue-on-error: true
+
+      - name: Libraries for the window (Linux)
+        if: matrix.system == 'linux-x86_64'
+        continue-on-error: true
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libasound2-dev libwayland-dev libxkbcommon-dev libx11-dev \
+            libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev libegl1-mesa-dev curl git-lfs ffmpeg
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        continue-on-error: true
+        with:
+          toolchain: 1.100.0
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        continue-on-error: true
+        with:
+          # a tag run restores the cache that main-check.yml saved on `main` and saves nothing (#452)
+          shared-key: release-${{ runner.os }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # #400: the flamegraphs of the release are made here, on Linux, and attached to the release (they
+      # are not kept in git): perf (the one of the generic kernel tools, the runner's own kernel has
+      # none), user-space sampling with a software clock, and inferno for the graphs
+      - name: perf and inferno (Linux)
+        id: perf
+        if: matrix.system == 'linux-x86_64'
+        continue-on-error: true
+        run: |
+          sudo apt-get install -y linux-tools-common linux-tools-generic
+          sudo ln -sf "$(ls /usr/lib/linux-tools/*/perf | tail -n 1)" /usr/local/bin/perf
+          sudo sysctl -w kernel.perf_event_paranoid=1
+          perf --version
+          cargo install inferno --locked --version 0.12.8
+
+      - name: Benchmark and compare with the previous release
+        id: bench
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FLAMES: ${{ matrix.system == 'linux-x86_64' && steps.perf.outcome == 'success' && '--flamegraphs' || '' }}
+        run: scripts/bench-github.sh "$GITHUB_REF_NAME" "${{ matrix.system }}" $FLAMES --out bench-out
+
+      - name: Keep the result as an asset of the release
+        if: steps.bench.outputs.result != ''
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ steps.bench.outputs.result }}
+        run: gh release upload "$GITHUB_REF_NAME" "$RESULT" --clobber
+
+      - name: Attach the flamegraphs to the release (Linux)
+        if: steps.bench.outputs.flamegraphs != ''
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FLAMEGRAPHS: ${{ steps.bench.outputs.flamegraphs }}
+        run: gh release upload "$GITHUB_REF_NAME" "$FLAMEGRAPHS" --clobber
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.bench.outputs.result != ''
+        continue-on-error: true
+        with:
+          name: bench-${{ matrix.system }}
+          path: bench-out/*.json

@@ -23,6 +23,33 @@ pub struct Library {
     pub path: PathBuf,
 }
 
+impl Library {
+    /// What is wrong with `name` as the name of a library, in a sentence; None when it works. A name
+    /// is one part of a link (`@Name/…`), so it is not empty, has no `/` and none of the characters
+    /// that break a `[[link]]` (`#`, `|`, `^`, brackets), works on Windows too, and is not the name
+    /// of another library (any case). `others`: the names of the other libraries.
+    pub fn name_problem<'a>(name: &str, mut others: impl Iterator<Item = &'a str>) -> Option<String> {
+        if name.trim().is_empty() {
+            return Some("Give the library a name".into());
+        }
+        if name.contains('/') {
+            return Some("A name has no / in it".into());
+        }
+        if crate::markdown::link_safe_name(name) != name {
+            return Some("A name has none of # | ^ [ ], no double spaces and none at its ends".into());
+        }
+        if let Some(p) = crate::fsutil::portable_problems(name, crate::fsutil::MADE_NAME_MAX).into_iter().next() {
+            return Some(format!("Not a name that works everywhere: {p}"));
+        }
+        others.any(|o| o.eq_ignore_ascii_case(name)).then(|| "Another library has this name".into())
+    }
+
+    /// A library that links can be written with: a name that is fine and a folder.
+    pub(crate) fn usable(&self) -> bool {
+        Self::name_problem(&self.name, std::iter::empty()).is_none() && !self.path.as_os_str().is_empty()
+    }
+}
+
 /// What a link target says, before anything is looked up.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Spot {
@@ -229,6 +256,28 @@ mod tests {
         assert!(matches!(resolve(&library("Videos", "notes.txt"), &libs), Outside::Missing { .. }));
         assert!(matches!(resolve(&Spot::File(library_dir.join("notes.txt")), &[]), Outside::Missing { .. }));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: MEDIA-019, MEDIA-014
+    #[test]
+    fn a_library_name_is_one_portable_part_of_a_link_and_not_taken() {
+        let ok = |n: &str, others: &[&str]| Library::name_problem(n, others.iter().copied());
+        for fine in ["Videos", "Meine Filme", "Übungen 2024", "a-b_c.d", "@x"] {
+            assert_eq!(ok(fine, &["Music"]), None, "{fine:?}");
+        }
+        assert_eq!(ok("", &[]).as_deref(), Some("Give the library a name"));
+        assert_eq!(ok("   ", &[]).as_deref(), Some("Give the library a name"));
+        assert_eq!(ok("a/b", &[]).as_deref(), Some("A name has no / in it"));
+        for bad in ["a#b", "a|b", "a^b", "a[b", "a]b", "a  b", " a", "a "] {
+            assert!(ok(bad, &[]).is_some_and(|p| p.starts_with("A name has none of")), "{bad:?}: {:?}", ok(bad, &[]));
+        }
+        for bad in ["a:b", "a*b", "CON", "name."] {
+            assert!(ok(bad, &[]).is_some_and(|p| p.starts_with("Not a name that works everywhere")), "{bad:?}: {:?}", ok(bad, &[]));
+        }
+        assert_eq!(ok("videos", &["Music", "Videos"]).as_deref(), Some("Another library has this name"), "any case");
+        assert_eq!(ok("Videos", &[]), None, "itself is not another one");
+        // what links are written with: a good name and a folder
+        assert!(lib("Videos", "/v").usable() && !lib("Videos", "").usable() && !lib("a|b", "/v").usable() && !lib("", "/v").usable());
     }
 
     // spec: CFG-069, CFG-001

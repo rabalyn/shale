@@ -778,6 +778,46 @@ impl ShaleApp {
                     keep = false;
                 }
             }
+            Modal::OutsideFiles { text } => {
+                // the keyboard belongs to the question, not to the note behind it
+                if let Some(id) = ctx.memory(|m| m.focused()) {
+                    ctx.memory_mut(|m| m.surrender_focus(id));
+                }
+                let names: Vec<String> = crate::media::pasted_files(text).unwrap_or_default().iter().filter_map(|f| f.file_name().map(|n| n.to_string_lossy().into_owned())).collect();
+                let mut answer = None;
+                let resp = crate::dialog::Dialog::new("outside-files", "Files from outside the vault").width(460.0).show(&ctx, |ui| {
+                    crate::theme::paragraph(ui, if names.len() == 1 { format!("“{}” is outside the vault.", names[0]) } else { format!("{} files outside the vault: {}.", names.len(), names.join(", ")) });
+                    crate::theme::hint(ui, "A copy goes to the media folder and is synced with the vault. A link points to the file where it is: nothing is copied, and the file is not synced.");
+                    ui.horizontal(|ui| {
+                        if ui.button(egui::RichText::new("Copy into the vault").strong()).on_hover_text("C or Enter").clicked() {
+                            answer = Some(Some(crate::media::intake::Choice::Copy));
+                        }
+                        if ui.button("Link where they are").on_hover_text("L").clicked() {
+                            answer = Some(Some(crate::media::intake::Choice::Link));
+                        }
+                        if ui.button("Cancel").on_hover_text("Esc").clicked() {
+                            answer = Some(None);
+                        }
+                    });
+                    ui.label(egui::RichText::new("C copy · L link · Esc cancel").small().color(theme::palette().faint));
+                    ui.input_mut(|i| {
+                        if i.consume_key(Modifiers::NONE, Key::C) || i.consume_key(Modifiers::NONE, Key::Enter) {
+                            answer = Some(Some(crate::media::intake::Choice::Copy));
+                        } else if i.consume_key(Modifiers::NONE, Key::L) {
+                            answer = Some(Some(crate::media::intake::Choice::Link));
+                        }
+                    });
+                });
+                if resp.should_close() && answer.is_none() {
+                    answer = Some(None);
+                }
+                if let Some(how) = answer {
+                    if let Some(how) = how {
+                        self.actions.push(Action::PasteFiles(std::mem::take(text), how));
+                    }
+                    keep = false;
+                }
+            }
             Modal::TexSetup
             | Modal::Export(_)
             | Modal::ExportDocx(_)

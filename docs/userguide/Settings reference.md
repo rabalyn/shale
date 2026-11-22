@@ -62,7 +62,7 @@ change within a second.
 | `inline_images` | on | Appearance, "Show embedded images and players inside the editor" |
 | `media_play_button_opacity` | 0.6 (range 0 to 1) | Settings → Appearance, "Play button over the artwork of a sound or video"; global config; the 100% and fullscreen buttons over pictures and videos use it too |
 | `media_volume` | 0.8 (range 0 to 1) | the volume slider of any sound player; one volume for all players; global config |
-| `media_libraries` | none (a list of `[[media_libraries]]` tables with `name` and `path`) | the library folders of this computer, for links like `![[@Videos/a.mp4]]` to media outside the vault; global config, not in the vault because the folder differs from computer to computer; edited in the settings file for now (a Settings page follows); see [[Sounds and videos]] |
+| `media_libraries` | none (a list of `[[media_libraries]]` tables with `name` and `path`) | the library folders of this computer, for links like `![[@Videos/a.mp4]]` to media outside the vault; global config, not in the vault because the folder differs from computer to computer; Settings → Import, "Library folders" (a name and a folder per line, Add library, Remove); see [[Sounds and videos]] |
 | `settings_tab_width` | left out (as wide as the longest tab name; 60 points at least, half of the window at most) | the border between the tab list and the page of the Settings window: drag it to set the width, double-click it to go back to automatic |
 | `left_sidebar_width` | left out (260 points; 170 at least, 520 at most) | the border between the left sidebar and the notes: drag it to set the width; it is kept after a restart; "Reset layout" in the ribbon's menu goes back to the default |
 | `right_sidebar_width` | left out (290 points; 200 at least, 560 at most) | the border between the notes and the right sidebar: drag it to set the width; it is kept after a restart; "Reset layout" goes back to the default |
@@ -199,6 +199,7 @@ cannot use are shown with the reason in Settings → Search, and read as `f`, `m
 
 | Key | Default | Where |
 |---|---|---|
+| `outside_files` | `"Ask"` (`"Copy"`, `"Link"`) | Settings → Import, "Files from outside the vault": what a `[!` pick, a paste or an import does with a picture, PDF, sound or video that is not in the vault: ask, copy it into `z_media/` or link it where it is; the start value of the Copy / Link choice in the Import dialog (Ask starts at Copy); other files are always copied; global config; see [[Sounds and videos]] |
 | `docx_import` | off | Settings → Import, "Import Word files as notes (needs pandoc)"; global config |
 | `import_header_list` | off | Settings → Import, "Header list in the note body" (e-mails, events and saved posts); the start value of the box of the same name in the Import dialog |
 | `pandoc_path` | empty (search `PATH`, then `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, and on Windows `%LOCALAPPDATA%\Pandoc` and `%ProgramFiles%\Pandoc`) | Settings → Import, "pandoc program" (the Word export looks for pandoc the same way) |

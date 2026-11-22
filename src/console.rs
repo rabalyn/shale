@@ -1,4 +1,4 @@
-//! The console of a Windows release build (BUILD-041).
+//! The console of a Windows release build (BUILD-042).
 //!
 //! A release `shale.exe` is a program of the "windows" subsystem, so starting it from Explorer
 //! opens no console window. Started from a terminal it has no console either, so `main` calls
@@ -42,18 +42,18 @@ pub fn attach_parent() {
 mod tests {
     use super::*;
 
-    // spec: BUILD-041
+    // spec: BUILD-042
     #[test]
-    fn build_041_a_stream_without_a_handle_is_missing_and_one_with_a_handle_is_not() {
+    fn build_042_a_stream_without_a_handle_is_missing_and_one_with_a_handle_is_not() {
         assert!(is_missing(std::ptr::null_mut()));
         assert!(is_missing(INVALID_HANDLE_VALUE));
         let file = std::fs::File::open("NUL").expect("the null device opens");
         assert!(!is_missing(std::os::windows::io::AsRawHandle::as_raw_handle(&file)));
     }
 
-    // spec: BUILD-041
+    // spec: BUILD-042
     #[test]
-    fn build_041_attaching_without_a_parent_console_changes_nothing() {
+    fn build_042_attaching_without_a_parent_console_changes_nothing() {
         // the test runner may or may not have a console; either way the call must neither
         // panic nor close a stream that has a handle
         let before = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };

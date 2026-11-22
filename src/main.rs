@@ -10,11 +10,11 @@
 //!   shale --record out.webm --keys '…'   (the same run as a short video, encoded by ffmpeg; docs/screenshots/regen-clips.sh)
 //!   shale --screenshot out.png --size 1400x900   (window size; docs/screenshots/regen.sh makes all pictures)
 //!
-//! A release build on Windows has no console window of its own (BUILD-041): it attaches to the one of the terminal it was started from, if any.
+//! A release build on Windows has no console window of its own (BUILD-042): it attaches to the one of the terminal it was started from, if any.
 //!
 //! An unknown option or a missing value is an error (exit code 2), never a vault folder.
 
-// no console window next to the app on Windows (BUILD-041); a debug build keeps its console
+// no console window next to the app on Windows (BUILD-042); a debug build keeps its console
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 #[cfg(test)]
@@ -268,7 +268,7 @@ fn read_args(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
 }
 
 fn main() -> eframe::Result {
-    // first of all: nothing below prints before the streams point at the terminal (BUILD-041)
+    // first of all: nothing below prints before the streams point at the terminal (BUILD-042)
     #[cfg(windows)]
     console::attach_parent();
     // the benchmark harness (BUILD-038): modes of their own, before the process is hardened (perf cannot attach to an undumpable one)
@@ -416,9 +416,9 @@ mod tests {
         }
     }
 
-    // spec: BUILD-041 (#328: a release build opened a console window next to the app on Windows)
+    // spec: BUILD-042 (#328: a release build opened a console window next to the app on Windows)
     #[test]
-    fn build_041_a_release_build_is_a_windows_program_that_attaches_to_the_console_of_its_terminal_first() {
+    fn build_042_a_release_build_is_a_windows_program_that_attaches_to_the_console_of_its_terminal_first() {
         let source = include_str!("main.rs");
         let code = source.split("\nmod tests {").next().expect("the program part");
         assert!(code.contains("#![cfg_attr(not(debug_assertions), windows_subsystem = \"windows\")]"), "no console window in a release build, a console in a debug build");

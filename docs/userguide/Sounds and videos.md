@@ -77,9 +77,33 @@ on such a link opens the file in your system's program, and nothing else than pi
 sounds and videos is ever opened this way. These links are not red, and they are not in the graph.
 
 Files outside the vault are not part of it: they are not synced with [[Git sync]] and not in
-the [[File history]], and a backup of the vault does not hold them. The setting that chooses between
-copying and linking when you import or paste a file, and the Settings page for library folders,
-come with the next versions.
+the [[File history]], and a backup of the vault does not hold them.
+
+## Linking instead of copying
+
+**Settings → Import → Files from outside the vault** says what happens to a picture, PDF, sound or
+video that is not in the vault when you pick it with `[!`, paste it or import it:
+
+- **Ask** (the start value): a small question each time, "Copy into the vault" or "Link where they
+  are". In the Import dialog every such file has the choice itself, starting at Copy.
+- **Copy into the vault**: a copy goes to `z_media/` as always, and is synced with the vault.
+- **Link where they are**: nothing is copied; the note gets a link to the file.
+
+Shale never links a file by itself because it lies in a library folder: it follows the setting
+every time. Other files (notes, documents, anything that is not a picture, PDF, sound or video) are
+always copied, and so are the pictures of a post or of a Word file, which are not files from outside.
+
+What a link looks like: a file under one of your **library folders** becomes `![[@Videos/2024/a.mp4]]`
+(`[[@Videos/doc.pdf]]` for a PDF), any other file `![](<file:///home/ada/Videos/a.mp4>)` (`[doc.pdf](<file:///…>)` for a
+PDF); the folder with the most parts wins when library folders lie inside each other. Names that
+`[[ ]]` cannot hold (a `#`, `|`, `^`, a bracket in a folder or file name) get the second form. Obsidian
+reads the second form as well.
+
+The library folders are in the same place in Settings: a name and a folder per line, **Add library**
+at the end and **Remove** on each line. The name has no `/` and none of `# | ^ [ ]`, works on Windows and is
+not the name of another library; Shale says what is wrong in red, and also when the folder is not
+there. A library only exists on this computer: set up the same name on your other computers, with
+their own folders, and the same note shows the same file on each.
 
 # Media from other computers
 
