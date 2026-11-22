@@ -2,6 +2,7 @@
 //! chosen with the Import button): what to import, the folder, tags and a few options.
 
 use crate::import::{self, docx, Item, Source};
+use crate::media::intake::Choice;
 use crate::theme;
 use eframe::egui::{self, Rect, Ui};
 use std::path::PathBuf;
@@ -41,6 +42,8 @@ pub struct ImportDialog {
     pub suggested: Vec<(String, Vec<String>)>,
     /// the people folder (shown in the people list)
     pub people_dir: String,
+    /// the vault's folder: files from outside it can be copied or linked (MEDIA-019)
+    pub root: PathBuf,
 }
 
 #[derive(Debug, PartialEq)]
@@ -71,6 +74,7 @@ impl ImportDialog {
             auto_tags: vec![],
             suggested: vec![],
             people_dir: crate::import::people::DEFAULT_DIR.into(),
+            root: PathBuf::new(),
         }
     }
 
@@ -175,6 +179,10 @@ pub(crate) fn size_text(n: usize) -> String {
     }
 }
 
+/// The Copy / Link choice of a file from outside the vault: key, label, value, tooltip.
+const OUTSIDE_CHOICES: [(&str, &str, Choice, &str); 2] =
+    [("copy", "Copy into the vault", Choice::Copy, "A copy goes to the media folder (z_media/)"), ("link", "Link where it is", Choice::Link, "The note links the file where it is; nothing is copied")];
+
 /// `folders`: the vault's folders; `tag_choices`: recently used and common tags.
 pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: &[String]) -> Option<ImportAction> {
     let mut rects: Vec<(String, Rect)> = Vec::new();
@@ -188,16 +196,37 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
     if d.items.is_empty() {
         crate::theme::prose(ui, muted("Nothing to import yet. Drop e-mails, calendar events, pictures or other files on the window, or add a file below."));
     }
+    let outside: Vec<bool> = d.items.iter().map(|it| it.outside_media(&d.root)).collect();
     for (i, it) in d.items.iter_mut().enumerate() {
+        let outside_media = outside[i];
         egui::Frame::new().fill(theme::palette().bg_secondary).corner_radius(6).inner_margin(8).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 rec(format!("include:{i}"), ui.checkbox(&mut it.include, "")).on_hover_text("Import this one");
                 ui.label(egui::RichText::new(it.kind()).size(11.0).color(theme::palette().accent));
-                let tip = if matches!(it.source, Source::Media { .. }) { "File name in the media folder" } else { "Name of the new note" };
-                rec(format!("title:{i}"), ui.add(egui::TextEdit::singleline(&mut it.title).desired_width(470.0))).on_hover_text(tip);
+                let linked = outside_media && matches!(it.source, Source::Media { how: Choice::Link, .. });
+                let tip = if linked {
+                    "A file that is linked where it is keeps its name"
+                } else if matches!(it.source, Source::Media { .. }) {
+                    "File name in the media folder"
+                } else {
+                    "Name of the new note"
+                };
+                rec(format!("title:{i}"), ui.add_enabled(!linked, egui::TextEdit::singleline(&mut it.title).desired_width(470.0))).on_hover_text(tip);
             });
             ui.label(muted(&it.detail()));
+            if let Source::Media { how, .. } = &mut it.source {
+                if outside_media {
+                    ui.horizontal(|ui| {
+                        ui.label(muted("Outside the vault"));
+                        for (key, label, want, tip) in OUTSIDE_CHOICES {
+                            if rec(format!("how:{i}:{key}"), ui.selectable_label(*how == want, label)).on_hover_text(tip).clicked() {
+                                *how = want;
+                            }
+                        }
+                    });
+                }
+            }
             if let Some(p) = &it.already {
                 ui.label(
                     egui::RichText::new(format!("Imported before as “{}”. Tick it to import it again.", crate::markdown::strip_md_ext(&p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())))
@@ -258,6 +287,23 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
             action = Some(ImportAction::AddPath);
         }
     });
+    // ---- files from outside the vault: one choice for all of them (MEDIA-019)
+    let chosen: Vec<usize> = (0..d.items.len()).filter(|i| outside[*i] && d.items[*i].include).collect();
+    if chosen.len() >= 2 {
+        let all = |d: &ImportDialog, want: Choice| chosen.iter().all(|i| matches!(d.items[*i].source, Source::Media { how, .. } if how == want));
+        ui.horizontal(|ui| {
+            ui.label(muted(&format!("All {} files from outside the vault", chosen.len())));
+            for (key, label, want, tip) in OUTSIDE_CHOICES {
+                if rec(format!("how-all:{key}"), ui.selectable_label(all(d, want), label)).on_hover_text(tip).clicked() {
+                    for i in &chosen {
+                        if let Source::Media { how, .. } = &mut d.items[*i].source {
+                            *how = want;
+                        }
+                    }
+                }
+            }
+        });
+    }
     ui.separator();
     // ---- where and how
     egui::Grid::new("import-opts").num_columns(2).spacing([10.0, 8.0]).show(ui, |ui| {
@@ -334,6 +380,9 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
     }
     let included = || d.items.iter().filter(|i| i.include);
     let media = included().filter(|i| matches!(i.source, Source::Media { .. })).count();
+    if included().any(|i| i.outside_media(&d.root)) {
+        ui.label(muted("Copy puts a copy of a file from outside the vault in the media folder. Link keeps it where it is: nothing is copied, and the file is not synced with the vault."));
+    }
     if media > 0 {
         let what = if media == included().count() {
             "Pictures, PDFs and audio files are saved as files in the media folder (no note, no folder or tags)."
@@ -419,6 +468,56 @@ mod tests {
             self.frame(vec![end], d, folders, tags);
             self.frame(vec![Ev::Text(text.into())], d, folders, tags);
         }
+    }
+
+    // spec: MEDIA-019
+    #[test]
+    fn a_file_from_outside_has_a_copy_or_link_choice_and_two_or_more_have_one_for_all() {
+        use crate::import::MediaData;
+        use crate::media::intake::Choice;
+        use crate::media::Kind;
+        let base = std::env::temp_dir().join(format!("shale-dialog-outside-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (vault, out) = (base.join("vault"), base.join("outside"));
+        std::fs::create_dir_all(&vault).unwrap();
+        std::fs::create_dir_all(&out).unwrap();
+        for f in ["outside/a.png", "outside/b.mp4", "vault/in.pdf"] {
+            std::fs::write(base.join(f), b"x").unwrap();
+        }
+        let items = vec![
+            import::media_item(Kind::Image, "a.png".into(), MediaData::Path(out.join("a.png"))),
+            import::media_item(Kind::Video, "b.mp4".into(), MediaData::Path(out.join("b.mp4"))),
+            import::media_item(Kind::Pdf, "in.pdf".into(), MediaData::Path(vault.join("in.pdf"))),
+            import::media_item(Kind::Image, "web.png".into(), MediaData::Bytes(b"png".to_vec())),
+        ];
+        let mut d = ImportDialog::new(items, vec![], String::new(), String::new(), None, false);
+        d.root = vault.clone();
+        let (folders, tags): (Vec<String>, Vec<String>) = (vec![], vec![]);
+        let mut h = H { ctx: egui::Context::default(), t: 0.0 };
+        h.frame(vec![], &mut d, &folders, &tags);
+        h.frame(vec![], &mut d, &folders, &tags);
+        let keys = |d: &ImportDialog, prefix: &str| d.rects.iter().map(|r| r.0.clone()).filter(|k| k.starts_with(prefix)).collect::<Vec<_>>();
+        assert_eq!(keys(&d, "how:"), ["how:0:copy", "how:0:link", "how:1:copy", "how:1:link"], "only the two files from outside have the choice, not one of the vault or one that was downloaded");
+        assert_eq!(keys(&d, "how-all:"), ["how-all:copy", "how-all:link"]);
+        let how = |d: &ImportDialog| d.items.iter().map(|i| if let Source::Media { how, .. } = &i.source { *how } else { panic!() }).collect::<Vec<_>>();
+        assert_eq!(how(&d), [Choice::Copy; 4], "Copy first");
+        // one file
+        h.click("how:0:link", &mut d, &folders, &tags);
+        assert_eq!(how(&d), [Choice::Link, Choice::Copy, Choice::Copy, Choice::Copy]);
+        // a linked file keeps its name: the title is not to be edited; a copy's is
+        h.typ("title:0", "x", &mut d, &folders, &tags);
+        h.typ("title:1", "x", &mut d, &folders, &tags);
+        assert_eq!((d.items[0].title.as_str(), d.items[1].title.as_str()), ("a.png", "b.mp4x"));
+        // all of them
+        h.click("how-all:link", &mut d, &folders, &tags);
+        assert_eq!(how(&d), [Choice::Link, Choice::Link, Choice::Copy, Choice::Copy], "the file of the vault is not touched");
+        h.click("how-all:copy", &mut d, &folders, &tags);
+        assert_eq!(how(&d)[..2], [Choice::Copy, Choice::Copy]);
+        // with one file left there is no choice for all
+        h.click("include:1", &mut d, &folders, &tags);
+        h.frame(vec![], &mut d, &folders, &tags);
+        assert!(keys(&d, "how-all:").is_empty() && keys(&d, "how:1:").len() == 2, "the file is still ticked off, its own choice stays");
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     // spec: IMP-001

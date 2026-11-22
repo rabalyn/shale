@@ -1020,6 +1020,52 @@ mod tests {
         assert_eq!(w.app.notes[Path::new("A.md")].text, "# A\n");
     }
 
+    // spec: DATA-001
+    #[test]
+    fn data_001_ctrl_s_saves_a_note_that_was_edited_just_now() {
+        let mut w = W::new("ctrl-s");
+        let doc = w.app.notes.get_mut(Path::new("A.md")).unwrap();
+        doc.text = "# A\nedited\n".to_string();
+        doc.dirty = true;
+        doc.last_edit = std::time::Instant::now();
+        w.frame(vec![]);
+        assert_eq!(std::fs::read_to_string(w.dir.join("A.md")).unwrap(), "# A\n", "the autosave waits 0.8 s");
+        w.press(Key::S, CTRL);
+        assert_eq!(std::fs::read_to_string(w.dir.join("A.md")).unwrap(), "# A\nedited\n", "Ctrl+S saves at once");
+        assert!(!w.app.notes[Path::new("A.md")].dirty);
+    }
+
+    // spec: NAV-005
+    #[test]
+    fn nav_005_ctrl_o_opens_the_quick_switcher_that_finds_or_creates_a_note() {
+        let mut w = W::new("quick-switcher");
+        w.app.cfg.date_prefix_new_notes = false;
+        assert!(w.app.modal.is_none());
+        w.press(Key::O, CTRL);
+        settle(&mut w);
+        assert!(matches!(w.app.modal, Some(Modal::QuickSwitch { .. })), "Ctrl+O opens the quick switcher");
+        // a name that is a note: Enter opens it in the current tab
+        w.frame(vec![Event::Text("road".to_string())]);
+        settle(&mut w);
+        w.press(Key::Enter, Modifiers::NONE);
+        settle(&mut w);
+        assert!(w.app.modal.is_none());
+        assert_eq!((views(&w), w.app.tabbar.tabs.len()), (vec!["projects/Roadmap.md".to_string()], 1));
+        // a name that is no note: the last entry creates it
+        assert!(!w.dir.join("Zebra.md").exists());
+        w.press(Key::O, CTRL);
+        settle(&mut w);
+        w.frame(vec![Event::Text("Zebra".to_string())]);
+        settle(&mut w);
+        assert!(w.texts.iter().any(|t| t.contains("Create “Zebra”")), "a name that is no note offers to create it");
+        w.press(Key::ArrowDown, Modifiers::NONE);
+        w.press(Key::Enter, Modifiers::NONE);
+        settle(&mut w);
+        assert!(w.app.modal.is_none());
+        assert!(w.dir.join("Zebra.md").exists(), "the note is created");
+        assert_eq!(views(&w), ["Zebra.md"]);
+    }
+
     /// Open the file picker over a vault of 40 files in a window of 900 x 420 points, so the list is taller than the window.
     fn long_picker(tag: &str) -> W {
         let mut w = vim_note(tag);

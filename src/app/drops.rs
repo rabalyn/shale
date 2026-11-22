@@ -110,6 +110,8 @@ impl ShaleApp {
         import::word_items(&mut items, &self.word_import());
         import::mark_duplicates(v, &mut items);
         import::find_people(v, &self.vdata.settings.people_dir, &mut items);
+        // files from outside the vault start with what the setting says (Ask: Copy, the dialog asks)
+        import::preset_how(&mut items, self.cfg.outside_files.preset());
         if let Some(Modal::Import(mut d)) = self.modal.take() {
             d.items.extend(items);
             d.notes.extend(notes);
@@ -139,6 +141,7 @@ impl ShaleApp {
         };
         let mut d = Box::new(ImportDialog::new(items, notes, folder, String::new(), link_into, link_on));
         d.people_dir = self.vdata.settings.people_dir.clone();
+        d.root = v.root.clone();
         d.header_list = self.cfg.import_header_list;
         self.suggest_tags(&mut d);
         self.modal = Some(Modal::Import(d));
@@ -189,6 +192,7 @@ impl ShaleApp {
                 let p = PathBuf::from(crate::layout::shellexpand(&d.add_path));
                 let (mut items, notes) = import::items_from_paths(&[p]);
                 import::word_items(&mut items, &self.word_import());
+                import::preset_how(&mut items, self.cfg.outside_files.preset());
                 if let Some(v) = &self.vault {
                     import::mark_duplicates(v, &mut items);
                 }
@@ -220,15 +224,15 @@ impl ShaleApp {
                 if d.converting.is_none() && d.start_conversion(v.root.clone()) {
                     return false;
                 }
-                let import::Imported { notes: made, files, errors } = import::import(v, &d.items, &opts);
-                if made.is_empty() && files.is_empty() {
+                let import::Imported { notes: made, files, linked, errors } = import::import(v, &d.items, &opts);
+                if made.is_empty() && files.is_empty() && linked.is_empty() {
                     d.error = Some(if errors.is_empty() { "Nothing was imported.".into() } else { errors.join("\n") });
                     d.forget_conversions();
                     return false;
                 }
                 if d.link_on {
                     if let Some(note) = d.link_into.clone() {
-                        self.add_links(&note, &made, &files);
+                        self.add_links(&note, &made, &files, &linked);
                     }
                 }
                 // remember the folder and tags for next time
@@ -267,32 +271,39 @@ impl ShaleApp {
                     1 => "Saved 1 file to the media folder".to_string(),
                     n => format!("Saved {n} files to the media folder"),
                 };
-                self.toast([note_text, file_text].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join(". "));
+                let linked_text = match linked.len() {
+                    0 => String::new(),
+                    1 => "Linked 1 file where it is".to_string(),
+                    n => format!("Linked {n} files where they are"),
+                };
+                self.toast([note_text, file_text, linked_text].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join(". "));
                 // two or more results: a window says what was made (IMP-056); else the one is opened
-                let summary = made.len() + files.len() >= 2;
+                let summary = made.len() + files.len() + linked.len() >= 2;
                 let mut errors = errors;
                 if !summary {
                     for e in errors.drain(..) {
                         self.toast(e);
                     }
                 }
-                // the folder of the notes, or the folder of the first file
-                let shown = if made.is_empty() { files[0].parent().unwrap_or(Path::new("")).to_path_buf() } else { folder.clone() };
-                self.tree.expanded.insert(shown.clone());
-                let mut p = shown.parent();
-                while let Some(x) = p {
-                    if !x.as_os_str().is_empty() {
-                        self.tree.expanded.insert(x.to_path_buf());
+                // the folder of the notes, or the folder of the first file (none for files that stay outside)
+                let shown = if !made.is_empty() { Some(folder.clone()) } else { files.first().map(|f| f.parent().unwrap_or(Path::new("")).to_path_buf()) };
+                if let Some(shown) = shown {
+                    self.tree.expanded.insert(shown.clone());
+                    let mut p = shown.parent();
+                    while let Some(x) = p {
+                        if !x.as_os_str().is_empty() {
+                            self.tree.expanded.insert(x.to_path_buf());
+                        }
+                        p = x.parent();
                     }
-                    p = x.parent();
                 }
                 self.actions.push(Action::Rescan);
                 if summary {
                     if let Some(v) = &self.vault {
-                        self.modal = Some(Modal::ImportSummary(Box::new(crate::import::summary::ImportSummary::new(v, &made, &files, errors, place))));
+                        self.modal = Some(Modal::ImportSummary(Box::new(crate::import::summary::ImportSummary::new(v, &made, &files, &linked, errors, place))));
                     }
-                } else {
-                    self.actions.push(Action::Open { rel: made.first().or(files.first()).cloned().unwrap_or_default(), new_tab: false });
+                } else if let Some(rel) = made.first().or(files.first()) {
+                    self.actions.push(Action::Open { rel: rel.clone(), new_tab: false });
                 }
                 true
             }
@@ -300,10 +311,12 @@ impl ShaleApp {
     }
 
     /// Add "- [[note]]" lines for the new notes and "- ![[file]]" / "- [[file]]" lines for the saved
-    /// media files at the end of `note` (also when it is open).
-    fn add_links(&mut self, note: &Path, made: &[PathBuf], files: &[PathBuf]) {
+    /// media files, and a line with the link of each file that stays where it is, at the end of
+    /// `note` (also when it is open).
+    fn add_links(&mut self, note: &Path, made: &[PathBuf], files: &[PathBuf], linked: &[import::Linked]) {
         let mut lines: String = made.iter().map(|m| format!("- [[{}]]\n", crate::markdown::strip_md_ext(&m.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()))).collect();
         lines.extend(files.iter().map(|f| format!("- {}\n", crate::media::link_for(f))));
+        lines.extend(linked.iter().map(|l| format!("- {}\n", l.link)));
         let join = |text: &str| -> String {
             let mut t = text.to_string();
             if !t.is_empty() && !t.ends_with('\n') {

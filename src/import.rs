@@ -56,11 +56,13 @@ pub enum Source {
     },
     Files(Vec<PathBuf>),
     /// an image, PDF or audio file, saved as a file in the media folder, no note (IMP-031);
-    /// `name`: its file name as it came
+    /// `name`: its file name as it came; `how`: for a file from outside the vault, a copy in the
+    /// media folder or a link to the file where it is (MEDIA-019)
     Media {
         kind: media::Kind,
         name: String,
         data: MediaData,
+        how: media::intake::Choice,
     },
     /// a Markdown file, imported as a note with its text as it is (IMP-033); `lift`: its headings
     /// move up so the highest is `#` (IMP-034), only when it has none and the box is ticked
@@ -116,6 +118,12 @@ pub struct Item {
 }
 
 impl Item {
+    /// Whether it is a picture, PDF, sound or video file from outside the vault `root`: what can
+    /// be linked where it is instead of copied (MEDIA-019).
+    pub fn outside_media(&self, root: &Path) -> bool {
+        matches!(&self.source, Source::Media { data: MediaData::Path(p), .. } if media::intake::asks(root, std::slice::from_ref(p)))
+    }
+
     pub fn kind(&self) -> std::borrow::Cow<'static, str> {
         match &self.source {
             Source::Email { .. } => "E-mail".into(),
@@ -338,7 +346,7 @@ pub fn markdown_item(name: String, text: String) -> Item {
 
 /// An item for a picture, PDF or audio file; its title is the file name the file is saved under.
 pub fn media_item(kind: media::Kind, name: String, data: MediaData) -> Item {
-    Item { source: Source::Media { kind, name: name.clone(), data }, include: true, title: name, att_on: vec![], already: None, people: vec![] }
+    Item { source: Source::Media { kind, name: name.clone(), data, how: Default::default() }, include: true, title: name, att_on: vec![], already: None, people: vec![] }
 }
 
 fn calendar_items(ics: &[u8], calendar: &str, file_name: &str) -> Vec<Item> {
@@ -627,6 +635,23 @@ pub fn event_note(e: &Event, calendar: &str, tags: &[String], original: Option<&
     s
 }
 
+/// A file that stays where it is: the link to it and the file (MEDIA-019).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Linked {
+    pub link: String,
+    pub path: PathBuf,
+}
+
+/// Every media file of `items` that comes from a file on this computer gets `how` (the start of
+/// the Copy / Link choice of the Import dialog, MEDIA-019).
+pub fn preset_how(items: &mut [Item], how: media::intake::Choice) {
+    for it in items {
+        if let Source::Media { data: MediaData::Path(_), how: h, .. } = &mut it.source {
+            *h = how;
+        }
+    }
+}
+
 /// What an import made.
 #[derive(Debug, Default)]
 pub struct Imported {
@@ -634,6 +659,8 @@ pub struct Imported {
     pub notes: Vec<PathBuf>,
     /// the files that were saved as they are in the media folder (IMP-031)
     pub files: Vec<PathBuf>,
+    /// the media files that stay where they are, linked (MEDIA-019)
+    pub linked: Vec<Linked>,
     /// messages about anything that failed
     pub errors: Vec<String>,
 }
@@ -671,20 +698,24 @@ fn files_note(root: &Path, paths: &[PathBuf], title: &str, tags: &[String]) -> R
 pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
     let mut made = Vec::new();
     let mut files = Vec::new();
+    let mut linked = Vec::new();
     let mut errors = Vec::new();
     let root = vault.root.clone();
     for it in items.iter().filter(|i| i.include) {
-        if let Source::Media { name, data, .. } = &it.source {
+        if let Source::Media { name, data, how, .. } = &it.source {
             let file = media_file_name(&it.title, name);
             let date = today_ymd();
+            let copied = |rel| Ok(media::intake::Taken::Copied(rel));
+            // a linked file keeps its name: the title does not rename it
             let saved = match data {
-                MediaData::Path(p) if file == *name => media::import_file(&root, p, date),
-                MediaData::Path(p) => crate::fsutil::read(p).and_then(|b| media::save_bytes(&root, &file, &b, date)),
+                MediaData::Path(p) if file == *name || *how == media::intake::Choice::Link => media::intake::bring(&root, vault.libraries(), p, *how, date),
+                MediaData::Path(p) => crate::fsutil::read(p).and_then(|b| media::save_bytes(&root, &file, &b, date)).and_then(copied),
                 #[cfg(any(target_os = "linux", test))]
-                MediaData::Bytes(b) => media::save_bytes(&root, &file, b, date),
+                MediaData::Bytes(b) => media::save_bytes(&root, &file, b, date).and_then(copied),
             };
             match saved {
-                Ok(rel) => files.push(rel),
+                Ok(media::intake::Taken::Linked { link, path }) => linked.push(Linked { link, path }),
+                Ok(media::intake::Taken::InVault(rel) | media::intake::Taken::Copied(rel)) => files.push(rel),
                 Err(e) => errors.push(format!("could not save “{file}”: {e}")),
             }
             continue;
@@ -779,7 +810,7 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
             Err(e) => errors.push(format!("“{title}”: {e}")),
         }
     }
-    Imported { notes: made, files, errors }
+    Imported { notes: made, files, linked, errors }
 }
 
 #[cfg(test)]
@@ -1099,7 +1130,7 @@ mod tests {
         items[1].title = "anim.gif".into();
         let o = Options { folder: PathBuf::from("Projekte"), tags: vec!["x".into()], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false };
         items.truncate(5);
-        let Imported { notes, files, errors } = import(&mut v, &items, &o);
+        let Imported { notes, files, errors, .. } = import(&mut v, &items, &o);
         assert!(errors.is_empty() && notes.is_empty(), "no note for media: {errors:?} {notes:?}");
         let names: Vec<String> = files.iter().map(|f| rel_to_string(f)).collect();
         let (y, m, d) = media::local_date();
@@ -1149,7 +1180,7 @@ mod tests {
         ];
         items.extend(items_from_paths(std::slice::from_ref(&file)).0);
         let o = Options { folder: PathBuf::from("In"), tags: vec![], keep_original: true, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false };
-        let Imported { notes, files, errors } = import(&mut v, &items, &o);
+        let Imported { notes, files, errors, .. } = import(&mut v, &items, &o);
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(notes.len(), 4, "{notes:?}");
         for n in notes.iter().chain(&files) {
@@ -1169,6 +1200,61 @@ mod tests {
         assert!(text(em).contains("_Mail- original-.eml]]"), "{}", text(em));
         let fl = notes.iter().find(|n| n.to_string_lossy().contains("Notes- 1-")).unwrap();
         assert!(text(fl).contains("_Notes- 1-.txt]]"), "{}", text(fl));
+        let _ = std::fs::remove_dir_all(&src);
+    }
+    // spec: MEDIA-019, MEDIA-020, IMP-031
+    #[test]
+    fn a_media_file_from_outside_is_copied_or_stays_where_it_is_and_the_title_does_not_rename_a_linked_one() {
+        use crate::media::intake::Choice;
+        let mut v = temp_vault("link-media");
+        let src = v.root.join("..").join(format!("shale-import-linksrc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&src);
+        std::fs::create_dir_all(src.join("Lib")).unwrap();
+        for n in ["cat.png", "Lib/song.mp3", "Plan.pdf"] {
+            std::fs::write(src.join(n), n).unwrap();
+        }
+        std::fs::write(v.root.join("in.mp4"), b"v").unwrap();
+        v.set_libraries(&[crate::media::outside::Library { name: "Lib".into(), path: src.join("Lib") }]);
+        let abs = src.canonicalize().unwrap();
+        let o = Options { folder: PathBuf::new(), tags: vec![], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false };
+        let item = |kind, name: &str, path: PathBuf, how| {
+            let mut it = media_item(kind, name.into(), MediaData::Path(path));
+            if let Source::Media { how: h, .. } = &mut it.source {
+                *h = how;
+            }
+            it
+        };
+        let mut items = vec![
+            item(media::Kind::Image, "cat.png", src.join("cat.png"), Choice::Link),
+            item(media::Kind::Audio, "song.mp3", src.join("Lib/song.mp3"), Choice::Link),
+            item(media::Kind::Pdf, "Plan.pdf", src.join("Plan.pdf"), Choice::Copy),
+            item(media::Kind::Video, "in.mp4", v.root.join("in.mp4"), Choice::Link),
+        ];
+        items[0].title = "A cat".into();
+        let before = std::fs::read_dir(v.root.join("z_media")).map(|d| d.count()).unwrap_or(0);
+        let Imported { notes, files, linked, errors } = import(&mut v, &items, &o);
+        assert!(notes.is_empty() && errors.is_empty(), "{notes:?} {errors:?}");
+        // a linked file keeps its name (no "A cat"), a library link where there is a library
+        assert_eq!(linked, vec![Linked { link: format!("![](<file://{}/cat.png>)", abs.display()), path: abs.join("cat.png") }, Linked { link: "![[@Lib/song.mp3]]".into(), path: abs.join("Lib/song.mp3") }]);
+        // the copy is in the media folder, the file of the vault where it was
+        let names: Vec<String> = files.iter().map(|f| rel_to_string(f)).collect();
+        assert_eq!(names.len(), 2, "{names:?}");
+        assert!(names[0].starts_with("z_media/") && names[0].ends_with("_Plan.pdf") && names[1] == "in.mp4", "{names:?}");
+        assert_eq!(std::fs::read_dir(v.root.join("z_media")).unwrap().count(), before.max(1), "only the one copy is new");
+        // a title renames a copy, as before
+        let mut renamed = vec![item(media::Kind::Pdf, "Plan.pdf", src.join("Plan.pdf"), Choice::Copy)];
+        renamed[0].title = "Quarter plan".into();
+        let Imported { files, .. } = import(&mut v, &renamed, &o);
+        assert!(rel_to_string(&files[0]).ends_with("_Quarter plan.pdf"), "{files:?}");
+        // a file that is not there is an error, linked or not
+        let gone = vec![item(media::Kind::Video, "gone.mp4", src.join("gone.mp4"), Choice::Link)];
+        let Imported { linked, errors, .. } = import(&mut v, &gone, &o);
+        assert!(linked.is_empty() && errors.len() == 1 && errors[0].starts_with("could not save “gone.mp4”"), "{errors:?}");
+        // the start of the dialog's choice
+        let mut again = vec![item(media::Kind::Video, "x.mp4", src.join("cat.png"), Choice::Copy), media_item(media::Kind::Image, "b.png".into(), MediaData::Bytes(vec![1]))];
+        preset_how(&mut again, Choice::Link);
+        assert!(matches!(again[0].source, Source::Media { how: Choice::Link, .. }) && matches!(again[1].source, Source::Media { how: Choice::Copy, .. }), "downloads have no choice");
+        assert!(again[0].outside_media(&v.root) && !again[1].outside_media(&v.root));
         let _ = std::fs::remove_dir_all(&src);
     }
 }

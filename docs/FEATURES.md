@@ -119,11 +119,14 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - Type `[[` to get matching notes; ↑/↓ or Ctrl+J/Ctrl+K move through the list, Enter, Tab or a
   click picks an entry, and the last entry creates a new note. Esc closes the list.
 - Type `[!` to pick a file: `/` starts at the vault, `~/` at your home folder, and Tab completes
-  like a shell; ↑/↓ or Ctrl+J/Ctrl+K choose, Enter or a click picks. Files from outside the vault
-  are copied to `z_media/<year>/<month>/`.
+  like a shell; ↑/↓ or Ctrl+J/Ctrl+K choose, Enter or a click picks. A file from outside the vault is
+  copied to `z_media/<year>/<month>/`, or (a picture, PDF, sound or video) linked where it is, or
+  asked about, as Settings → Import → Files from outside the vault says; the last line of the picker
+  shows what a pick does and **Alt+Shift+L** changes it for this pick (MEDIA-019).
 - Paste a picture (Ctrl+V, or `p` in vim mode) and it is saved in the media folder as
   `Pasted image.png` with a link at the cursor; paste files copied in a file manager (pictures, PDFs,
-  audio, video) and they are copied there and linked, one link per line. Other text pastes as usual.
+  audio, video) and they are copied there and linked, one link per line, or linked where they are,
+  or a small question asks which (the same setting). Other text pastes as usual.
 
 - **Sound players.** `![[song.mp3]]` shows a small player instead of a link, in the editor, the
   markdown preview and the reading view (mp3, ogg, oga, flac, m4a, aac and wav play; opus files
@@ -157,8 +160,14 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   export. A missing file, or a library that is not set up here, says so in place of the embed. A click
   opens the file with your system's program and never makes a note; such links are not red, not in the
   graph and not offered by "Fix link". Only these four kinds of file are opened this way, and nothing
-  outside the vault is ever written. Outside files are not synced. The setting that asks whether to copy
-  or link, the library folders in Settings, and "Copy into the vault" follow (#500, #501).
+  outside the vault is ever written. Outside files are not synced.
+  **Settings → Import → Files from outside the vault** says what a pick with `[!`, a paste or an import
+  does with a picture, PDF, sound or video that is not in the vault: **Ask** (the start value), **Copy
+  into the vault** or **Link where they are** (MEDIA-019); the library folders of this computer (a name
+  and a folder each) are set on the same page. A linked file under a library folder is written
+  `![[@Videos/2024/a.mp4]]`, any other `![](<file:///…>)` (MEDIA-020). Nothing is linked because it lies
+  in a library folder: every entry point follows the setting. "Copy into the vault" for links that exist
+  follows (#501). The Import tab of Settings is shown under "Importing e-mails, events and files".
 
 ![Reading view](userguide/z_media/screenshots/reading.png)
 
@@ -841,8 +850,12 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   or `.ics` files, or any other files (plans, PDFs…) onto the window. The ribbon's Import button
   opens the same dialog.
 - Pictures, PDFs, audio and video files are not made into notes: each is its own item (Image, PDF,
-  Audio, Video) and is saved as a file in the media folder (`z_media/YYYY/MM/YYMMDD_name`). Dropped
-  on a note, the note gets a link line for each. An image dragged out of a web browser (Wayland) is
+  Audio, Video) and is saved as a file in the media folder (`z_media/YYYY/MM/YYMMDD_name`), or, when it
+  comes from outside the vault, linked where it is: each such file has a **Copy into the vault / Link
+  where it is** choice (and one for all of them), starting as the setting says (MEDIA-019). Dropped
+  on a note, the note gets a link line for each.
+
+  ![The Import dialog with the choice for files from outside the vault](userguide/z_media/screenshots/import-outside.png) An image dragged out of a web browser (Wayland) is
   saved the same way, from the picture the browser hands over or downloaded from its address.
 - A dropped or picked `.md` / `.markdown` file becomes a note (its text unchanged, listed as
   "Markdown note"), not an attachment (IMP-033). When it has headings but no `#`, a box "Lift headings
