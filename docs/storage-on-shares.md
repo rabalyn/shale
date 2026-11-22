@@ -86,17 +86,17 @@ cause a lost update or a false conflict; the save-time check does not look at ti
 - **Cloud clients** (*ran*, Syncthing): a note that arrives from the other device is found by the next scan of
   the open vault (the test saw it the moment the file was there), and a `.syncthing.*.tmp` of the client is not a note.
   Dropbox/OneDrive/iCloud placeholder files (*documented*): a file that is only online is a stub; reading it makes
-  the client download it, on Shale's UI thread today ([#473](https://github.com/rabalyn/shale/issues/473)).
+  the client download it; the rescan reads it on a worker thread (NET-013, [#473](https://github.com/rabalyn/shale/issues/473)), only the first read at start is on the UI thread.
 
 ## 3. File watching
 
 *Code*: Shale has **no file watcher** (no `notify`); `ShaleApp::run_frame` rescans every 3 s. inotify/FSEvents
 would miss other machines' changes on NFS/SMB (*documented*: the kernel only reports changes made through this
 client; an inotify watch on a cifs/nfs mount sees local writes only), so polling is the only correct choice, and
-it is what exists. Nothing to add except moving the scan off the UI thread and backing off when it is slow
-([#473](https://github.com/rabalyn/shale/issues/473)). A scan costs a directory walk and one `stat` per file:
+it is what exists. The scan runs on a worker thread and backs off to ten times its duration when it is slow
+(NET-013, [#473](https://github.com/rabalyn/shale/issues/473)); `Vault::open` at start is still synchronous. A scan costs a directory walk and one `stat` per file:
 local microseconds, a LAN share about a millisecond per file (*documented* round trips), so a vault of 5 000
-notes needs seconds per scan on SMB, and the window freezes for that time.
+notes needs seconds per scan on SMB; the window no longer waits for it.
 
 ## 4. Locks
 
