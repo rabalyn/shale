@@ -125,8 +125,7 @@ proptest! {
         // the link still reads as one link, now pointing to the new target, and the others are as they were
         let after = find_links(&new);
         prop_assert_eq!(after.len(), links.len(), "{:?} -> {:?}", text, new);
-        // (an unclosed `[x](` before the link can take it into its own target now: that is the text before, not the replacing)
-        prop_assume!(after[i].range.start == link.range.start);
+        prop_assert_eq!(after[i].range.start, link.range.start, "{:?} -> {:?}", text, new);
         prop_assert_eq!(written_target(&new, &after[i]), target.clone(), "{:?} -> {:?}", text, new);
         prop_assert_eq!(&after[i].heading, &link.heading);
         prop_assert_eq!(&after[i].alias, &link.alias);

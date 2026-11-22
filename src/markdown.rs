@@ -222,7 +222,7 @@ pub fn find_links(text: &str) -> Vec<LinkSpan> {
                     let text_end = i + 1 + close_rel;
                     let label = &line[i + 1..text_end];
                     if !label.contains('[') && !label.contains(']') {
-                        if let Some(paren_rel) = line[text_end + 2..].find(')') {
+                        if let Some(paren_rel) = md_destination_len(&line[text_end + 2..]) {
                             let t_start = text_end + 2;
                             let t_end = t_start + paren_rel;
                             let raw = line[t_start..t_end].trim();
@@ -260,6 +260,38 @@ pub fn find_links(text: &str) -> Vec<LinkSpan> {
         }
     }
     out
+}
+
+/// The length of a markdown link's destination: `rest` is the text after `](`, the result ends
+/// where the closing `)` stands, or is `None` when no valid destination closes (the `[x](` is plain
+/// text then, LINK-001). A destination in `<…>` holds no `<` and ends at the first `>`, and only
+/// blanks may follow it; any other destination holds no control character and balanced
+/// parentheses, and ends at the first unmatched `)`. Spaces stay allowed in it (Shale's file
+/// links), a `[` is not (nor a `[[` in `<…>`): a link starts there.
+fn md_destination_len(rest: &str) -> Option<usize> {
+    let lead = rest.len() - rest.trim_start().len();
+    if rest[lead..].starts_with('<') {
+        let close = rest[lead + 1..].find(['<', '>'])? + lead + 1;
+        if rest.as_bytes()[close] != b'>' || rest[..close].contains("[[") {
+            return None;
+        }
+        let after = &rest[close + 1..];
+        let blanks = after.len() - after.trim_start().len();
+        return after[blanks..].starts_with(')').then_some(close + 1 + blanks);
+    }
+    let mut depth = 0usize;
+    for (p, c) in rest.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' if depth == 0 => return Some(p),
+            ')' => depth -= 1,
+            // a `[` starts a link of its own (a wiki link, or a markdown link that may be the one a
+            // rename rewrites), which a destination does not swallow
+            c if c.is_control() || c == '[' => return None,
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Find `- [ ]` / `* [x]` / `1. [ ]` tasks, skipping fenced code.
@@ -1436,6 +1468,25 @@ a
         assert_eq!(back[1].heading.as_deref(), Some("Intro"));
         assert_eq!(back[2].target, "New (1)");
         assert_eq!(back[3].target, "../a%b");
+    }
+
+    // spec: LINK-001
+    #[test]
+    fn an_unclosed_link_opener_does_not_take_in_a_later_link() {
+        let t = "[x]([a](b.md)";
+        let l = find_links(t);
+        assert_eq!(l.len(), 1);
+        assert_eq!((l[0].target.as_str(), l[0].range.start), ("b", 4));
+        // the same after the target is replaced
+        let new = format!("{}{}{}", &t[..l[0].target_range.start], replace_target(t, &l[0], "c d.md"), &t[l[0].target_range.end..]);
+        let after = find_links(&new);
+        assert_eq!((after.len(), after[0].target.as_str(), after[0].range.start), (1, "c d", 4));
+        assert!(find_links("[x](a [b](c.md").is_empty());
+        assert!(find_links("[x](<a<b>)").is_empty());
+        assert_eq!(find_links("[x](New (1).md)")[0].target, "New (1)");
+        // a wiki link after the opener stays one when its name holds a `)`
+        let w = find_links("[x]([[)#Head|alias]]");
+        assert_eq!((w.len(), w[0].range.start, w[0].markdown_style), (1, 4, false));
     }
 
     // spec: TAG-001, LINK-006, VAULT-012
