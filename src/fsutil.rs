@@ -1298,7 +1298,8 @@ mod tests {
                     continue;
                 }
                 let name = p.file_name().unwrap().to_string_lossy().into_owned();
-                if !name.ends_with(".rs") || name == "fsutil.rs" {
+                // console.rs opens the devices of the terminal (`CONOUT$`), not user data (BUILD-042)
+                if !name.ends_with(".rs") || name == "fsutil.rs" || name == "console.rs" {
                     continue;
                 }
                 let text = fs::read_to_string(&p).unwrap();

@@ -211,7 +211,8 @@ This guide is such a book: "Start here" is its folder note, and `scripts/usergui
 (every release has it as `shale-userguide-<version>.pdf`).
 On the command line, `shale --export-pdf <folder> <file.pdf>` writes the book of a folder without opening
 a window (A4, numbered headings, title page, contents, each note on a new page); it ends with 0, or with 1
-and the reason on stderr.
+and the reason on stderr. On Windows `shale.exe` has no console of its own, so `cmd.exe` does not wait for it: use
+`start /wait shale.exe --export-pdf …` (PowerShell: `Start-Process -Wait`) when you need the exit code.
 
 # Read
 
