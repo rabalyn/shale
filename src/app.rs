@@ -14,7 +14,7 @@ use crate::theme;
 use crate::vault::{self, rel_to_string, FileKind, Saved, Vault};
 use crate::vault_path::VaultPath;
 use eframe::egui::{self, Key, Modifiers, Ui};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
@@ -160,6 +160,7 @@ mod link_preview;
 mod mail;
 mod outside_copy;
 pub mod panes;
+mod rescan;
 mod screenshot;
 mod social;
 mod sync;
@@ -434,7 +435,7 @@ pub struct ShaleApp {
     pub toasts: Vec<(String, Instant)>,
     /// What this session moved to the trash, newest last: where it is in `.trash/` (VAULT-020).
     pub trashed: Vec<PathBuf>,
-    last_scan: Instant,
+    rescan: rescan::RescanState,
     /// When the session state was last looked at for a change to write, and what the file was
     /// then (NAV-041).
     pub(crate) state_tick: (Instant, Option<crate::vault_state::VaultState>),
@@ -655,7 +656,7 @@ impl ShaleApp {
             actions: vec![],
             toasts: vec![],
             trashed: vec![],
-            last_scan: Instant::now(),
+            rescan: rescan::RescanState::new(),
             state_tick: (Instant::now(), None),
             welcome_path: default_welcome.to_string_lossy().into_owned(),
             shot: screenshot::ScreenshotRun::new(screenshot),
@@ -1556,50 +1557,6 @@ impl ShaleApp {
         let drawings: Vec<PathBuf> = self.drawings.iter().filter(|(_, d)| d.dirty && d.last_edit.elapsed() > wait).map(|(r, _)| r.clone()).collect();
         for rel in drawings {
             self.save_drawing(&rel);
-        }
-    }
-
-    /// Pick up changes made by other programs: notes and drawings without unsaved edits are
-    /// reloaded (DATA-002); one with unsaved edits keeps them and becomes a conflict copy when
-    /// it is saved (DATA-003).
-    fn rescan(&mut self) {
-        let Some(v) = self.vault.as_mut() else { return };
-        let changed = v.rescan();
-        for rel in changed {
-            if let Some(doc) = self.notes.get_mut(&rel) {
-                if !doc.dirty {
-                    if let Some(n) = v.notes.get(&rel) {
-                        doc.reload(n.text.clone(), n.unreadable.clone());
-                    }
-                }
-            }
-        }
-        for (rel, d) in self.drawings.iter_mut() {
-            if d.dirty {
-                continue;
-            }
-            let meta = std::fs::metadata(v.abs(rel)).ok().map(|m| (m.modified().ok(), m.len()));
-            if meta == d.seen && d.error.is_none() {
-                continue;
-            }
-            d.seen = meta;
-            match crate::fsutil::read_to_string(v.abs(rel)) {
-                Ok(text) if crate::vault::Stamp::of(&text) != d.base || d.error.is_some() => {
-                    let fresh = DrawingDoc::new(rel.clone(), &text);
-                    self.scenes.put(rel, fresh.scene.clone());
-                    *d = fresh;
-                }
-                _ => {}
-            }
-        }
-        // tabs pointing at files that vanished
-        let files: HashSet<PathBuf> = v.files.iter().map(|f| f.rel.clone()).collect();
-        for t in self.all_tabs_mut() {
-            if let Some(p) = t.view.path() {
-                if !files.contains(p) {
-                    t.view = View::Empty;
-                }
-            }
         }
     }
 
@@ -3007,10 +2964,7 @@ impl ShaleApp {
         if self.calendar.is_loading() {
             ui.ctx().request_repaint_after(Duration::from_millis(250));
         }
-        if self.last_scan.elapsed() > Duration::from_secs(3) {
-            self.last_scan = Instant::now();
-            self.rescan();
-        }
+        self.rescan_tick(ui.ctx());
         if self.notes.values().any(|d| d.dirty) || self.drawings.values().any(|d| d.dirty) {
             ui.ctx().request_repaint_after(Duration::from_millis(300));
         }
@@ -3114,6 +3068,8 @@ pub fn muted(t: impl Into<String>) -> egui::RichText {
 mod data_fuzz_tests;
 #[cfg(test)]
 mod data_tests;
+#[cfg(test)]
+mod rescan_tests;
 
 #[cfg(test)]
 pub(crate) mod tests {

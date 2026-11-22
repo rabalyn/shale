@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FileKind {
@@ -198,6 +198,8 @@ pub struct Vault {
     pub generation: u64,
     /// A number of its own for every vault that was opened in this run.
     pub uid: u64,
+    /// Bumped whenever a scan is merged into the index; a scan that started before is stale (NET-013).
+    rescan_epoch: u64,
     /// Notes the last rename or move could not update: (path after the change, reason). Reset by
     /// every rename and move; the notes that were updated are the call's result (VAULT-016).
     pub failed_rewrites: Vec<(PathBuf, String)>,
@@ -386,6 +388,120 @@ fn link_name_of(path: &Path, kind: FileKind) -> String {
     }
 }
 
+/// The stamp a note was indexed with; None when it must be read again at the next scan (a note
+/// that could not be read is tried again every time, the cause may be gone).
+fn known_stamp(n: &NoteIndex) -> Option<FileStamp> {
+    n.mtime.filter(|_| n.unreadable.is_none())
+}
+
+/// What a scan starts from: the vault folder and the stamps the index holds (see [`Vault::scan_input`]).
+pub struct ScanInput {
+    root: PathBuf,
+    uid: u64,
+    epoch: u64,
+    notes: HashMap<PathBuf, Option<FileStamp>>,
+    drawings: HashMap<PathBuf, Option<FileStamp>>,
+}
+
+/// A note the scan had to read, with the stamp the index held when the scan began.
+struct ReadNote {
+    known: Option<FileStamp>,
+    stamp: Option<FileStamp>,
+    text: Result<String, String>,
+}
+
+/// A drawing the scan had to read, with the stamp the index held when the scan began.
+struct ReadDrawing {
+    known: Option<FileStamp>,
+    stamp: Option<FileStamp>,
+    links: String,
+}
+
+/// The result of walking the vault folder: all the file system work of a rescan, nothing of the
+/// index. Made by [`ScanInput::run`], put into the index by [`Vault::apply_scan`].
+pub struct Scan {
+    uid: u64,
+    epoch: u64,
+    files: Vec<FileEntry>,
+    folders: Vec<PathBuf>,
+    folder_times: HashMap<PathBuf, (Option<SystemTime>, Option<SystemTime>)>,
+    notes: HashMap<PathBuf, ReadNote>,
+    drawings: HashMap<PathBuf, ReadDrawing>,
+    /// How long the walk, the stats and the reads took
+    pub took: Duration,
+}
+
+impl ScanInput {
+    /// The vault folder this scan walks.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// Walk the folder, stat every file and read the notes and drawings whose stamp changed. Slow
+    /// on a network share: not for the UI thread.
+    pub fn run(self) -> Scan {
+        let began = Instant::now();
+        let mut files = Vec::new();
+        let mut folders = Vec::new();
+        walk(&self.root, Path::new(""), &mut files, &mut folders);
+        let folder_times = folders
+            .iter()
+            .map(|f: &PathBuf| {
+                let m = fs::metadata(self.root.join(f)).ok();
+                let modified = m.as_ref().and_then(|m| m.modified().ok());
+                (f.clone(), (m.as_ref().and_then(|m| m.created().ok()).or(modified), modified))
+            })
+            .collect();
+        files.sort_by_cached_key(|f: &FileEntry| sort_key(&f.rel));
+        folders.sort_by_cached_key(|f| sort_key(f));
+        let mut notes = HashMap::new();
+        let mut drawings = HashMap::new();
+        for f in &files {
+            match f.kind {
+                FileKind::Drawing => {
+                    let known = self.drawings.get(&f.rel).copied().flatten();
+                    if let Some(read) = read_drawing(&self.root, &f.rel, known) {
+                        drawings.insert(f.rel.clone(), read);
+                    }
+                }
+                FileKind::Note => {
+                    let known = self.notes.get(&f.rel).copied().flatten();
+                    let abs = self.root.join(&f.rel);
+                    let stamp = FileStamp::of(&abs);
+                    if known.is_some() && known == stamp {
+                        continue;
+                    }
+                    let text = fsutil::read_to_string(&abs).map_err(|e| e.to_string());
+                    notes.insert(f.rel.clone(), ReadNote { known, stamp, text });
+                }
+                _ => {}
+            }
+        }
+        Scan { uid: self.uid, epoch: self.epoch, files, folders, folder_times, notes, drawings, took: began.elapsed() }
+    }
+}
+
+/// Read a drawing's links if its stamp is not `known`; None when it is unchanged.
+fn read_drawing(root: &Path, rel: &Path, known: Option<FileStamp>) -> Option<ReadDrawing> {
+    let abs = root.join(rel);
+    let stamp = FileStamp::of(&abs);
+    if known.is_some() && known == stamp {
+        return None;
+    }
+    // an unreadable drawing simply has no links
+    let links = fsutil::read_to_string(&abs).ok().and_then(|t| crate::drawing::Scene::from_file_text(rel, &t).ok()).map(|s| crate::drawing::link_lines(&s)).unwrap_or_default();
+    Some(ReadDrawing { known, stamp, links })
+}
+
+/// How long to wait before the next rescan after one that took `last`: the 3 s of DATA-002, or
+/// ten times the scan if that is longer, so a slow share is not scanned all the time (NET-013).
+pub fn rescan_interval(last: Duration) -> Duration {
+    RESCAN_EVERY.max(last.saturating_mul(10))
+}
+
+/// The time between rescans (DATA-002).
+pub const RESCAN_EVERY: Duration = Duration::from_secs(3);
+
 impl Vault {
     pub fn open(root: &Path) -> io::Result<Vault> {
         if !root.is_dir() {
@@ -411,22 +527,41 @@ impl Vault {
         Ok(self.root.join(rel))
     }
 
-    /// Walk the folder again. Files whose modification time did not change are not re-read.
-    /// Returns the notes whose content changed on disk.
+    /// Walk the folder again, here and now. Files whose stamp did not change are not re-read.
+    /// Returns the notes whose content changed on disk. The window uses [`Vault::scan_input`]
+    /// and [`Vault::apply_scan`] instead, so the file system is not touched on the UI thread (NET-013).
     pub fn rescan(&mut self) -> Vec<PathBuf> {
-        let mut files = Vec::new();
-        let mut folders = Vec::new();
-        walk(&self.root, Path::new(""), &mut files, &mut folders);
-        self.folder_times = folders
-            .iter()
-            .map(|f: &PathBuf| {
-                let m = fs::metadata(self.root.join(f)).ok();
-                let modified = m.as_ref().and_then(|m| m.modified().ok());
-                (f.clone(), (m.as_ref().and_then(|m| m.created().ok()).or(modified), modified))
-            })
-            .collect();
-        files.sort_by_cached_key(|f: &FileEntry| sort_key(&f.rel));
-        folders.sort_by_cached_key(|f| sort_key(f));
+        let scan = self.scan_input().run();
+        self.merge(scan)
+    }
+
+    /// What a scan needs to know of the index, copied so the scan can run on another thread.
+    pub fn scan_input(&self) -> ScanInput {
+        ScanInput {
+            root: self.root.clone(),
+            uid: self.uid,
+            epoch: self.rescan_epoch,
+            notes: self.notes.iter().map(|(r, n)| (r.clone(), known_stamp(n))).collect(),
+            drawings: self.drawings.iter().map(|(r, d)| (r.clone(), d.mtime)).collect(),
+        }
+    }
+
+    /// Put the result of a scan into the index. `None` (nothing changed) when the result is stale:
+    /// it belongs to another vault, or the vault was scanned or changed in structure (created,
+    /// renamed, moved, trashed) after the scan started. A note or drawing that was saved or
+    /// re-read after the scan started keeps what the index has (NET-013).
+    pub fn apply_scan(&mut self, scan: Scan) -> Option<Vec<PathBuf>> {
+        if scan.uid != self.uid || scan.epoch != self.rescan_epoch {
+            return None;
+        }
+        Some(self.merge(scan))
+    }
+
+    fn merge(&mut self, mut scan: Scan) -> Vec<PathBuf> {
+        self.rescan_epoch += 1;
+        let files = std::mem::take(&mut scan.files);
+        let folders = std::mem::take(&mut scan.folders);
+        self.folder_times = std::mem::take(&mut scan.folder_times);
         let mut changed = Vec::new();
         let mut seen = HashSet::new();
         let mut drawings_changed = Vec::new();
@@ -436,8 +571,15 @@ impl Vault {
         for f in &files {
             if f.kind == FileKind::Drawing {
                 seen_drawings.insert(f.rel.clone());
-                if self.index_drawing(&f.rel) {
-                    drawings_changed.push(f.rel.clone());
+                if let Some(read) = scan.drawings.remove(&f.rel) {
+                    if self.current_drawing_stamp(&f.rel) == read.known {
+                        let entry = self.drawings.entry(f.rel.clone()).or_default();
+                        entry.mtime = read.stamp;
+                        if entry.text != read.links {
+                            entry.text = read.links;
+                            drawings_changed.push(f.rel.clone());
+                        }
+                    }
                 }
                 continue;
             }
@@ -445,24 +587,23 @@ impl Vault {
                 continue;
             }
             seen.insert(f.rel.clone());
-            let abs = self.root.join(&f.rel);
-            let mtime = FileStamp::of(&abs);
-            // a note that could not be read is tried again every time (the cause may be gone)
-            let up_to_date = self.notes.get(&f.rel).map(|n| n.mtime == mtime && mtime.is_some() && n.unreadable.is_none()).unwrap_or(false);
-            if !up_to_date {
-                // never an empty text for a file that could not be read (DATA-008)
-                let (text, unreadable) = match fsutil::read_to_string(&abs) {
-                    Ok(t) => (t, None),
-                    Err(e) => (String::new(), Some(e.to_string())),
-                };
-                let differs = self.notes.get(&f.rel).map(|n| n.text != text || n.unreadable != unreadable).unwrap_or(true);
-                let entry = self.notes.entry(f.rel.clone()).or_default();
-                entry.mtime = mtime;
-                if differs {
-                    entry.text = text;
-                    entry.unreadable = unreadable;
-                    changed.push(f.rel.clone());
-                }
+            let Some(read) = scan.notes.remove(&f.rel) else { continue };
+            // saved or read again since the scan began: what the index holds is newer
+            if self.notes.get(&f.rel).and_then(known_stamp) != read.known {
+                continue;
+            }
+            // never an empty text for a file that could not be read (DATA-008)
+            let (text, unreadable) = match read.text {
+                Ok(t) => (t, None),
+                Err(e) => (String::new(), Some(e)),
+            };
+            let differs = self.notes.get(&f.rel).map(|n| n.text != text || n.unreadable != unreadable).unwrap_or(true);
+            let entry = self.notes.entry(f.rel.clone()).or_default();
+            entry.mtime = read.stamp;
+            if differs {
+                entry.text = text;
+                entry.unreadable = unreadable;
+                changed.push(f.rel.clone());
             }
         }
         let before = self.notes.len() + self.drawings.len();
@@ -488,6 +629,10 @@ impl Vault {
             self.generation += 1;
         }
         changed
+    }
+
+    fn current_drawing_stamp(&self, rel: &Path) -> Option<FileStamp> {
+        self.drawings.get(rel).and_then(|d| d.mtime)
     }
 
     fn rebuild_name_index(&mut self) {
@@ -537,17 +682,12 @@ impl Vault {
 
     /// Read a drawing's links again if the file changed. Returns true if its links changed.
     fn index_drawing(&mut self, rel: &Path) -> bool {
-        let abs = self.root.join(rel);
-        let mtime = FileStamp::of(&abs);
-        if self.drawings.get(rel).is_some_and(|d| d.mtime == mtime && mtime.is_some()) {
-            return false;
-        }
-        // an unreadable drawing simply has no links
-        let text = fsutil::read_to_string(&abs).ok().and_then(|t| crate::drawing::Scene::from_file_text(rel, &t).ok()).map(|s| crate::drawing::link_lines(&s)).unwrap_or_default();
+        let known = self.current_drawing_stamp(rel);
+        let Some(read) = read_drawing(&self.root, rel, known) else { return false };
         let entry = self.drawings.entry(rel.to_path_buf()).or_default();
-        entry.mtime = mtime;
-        let differs = entry.text != text;
-        entry.text = text;
+        entry.mtime = read.stamp;
+        let differs = entry.text != read.links;
+        entry.text = read.links;
         differs
     }
 
@@ -1702,6 +1842,74 @@ mod tests {
             let missing: Vec<&str> = nodes.iter().filter(|n| n.rel.is_none()).map(|n| n.label.as_str()).collect();
             assert_eq!(missing, ["Zeta", "Mu", "Alpha", "Kappa", "Beta"]);
         }
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: NET-013
+    #[test]
+    fn net_013_the_wait_is_at_least_ten_times_the_last_scan_and_never_below_3_s() {
+        let ms = Duration::from_millis;
+        assert_eq!(rescan_interval(ms(0)), Duration::from_secs(3));
+        assert_eq!(rescan_interval(ms(5)), Duration::from_secs(3));
+        assert_eq!(rescan_interval(ms(300)), Duration::from_secs(3), "10 x 0.3 s is exactly 3 s");
+        assert_eq!(rescan_interval(ms(301)), ms(3010));
+        assert_eq!(rescan_interval(Duration::from_secs(2)), Duration::from_secs(20));
+        assert_eq!(rescan_interval(Duration::from_secs(60)), Duration::from_secs(600));
+        assert_eq!(rescan_interval(Duration::MAX), Duration::MAX, "no overflow");
+    }
+
+    // spec: NET-013, DATA-002
+    #[test]
+    fn net_013_a_scan_reads_only_the_files_whose_stamp_changed() {
+        let d = temp_vault("scan-reads");
+        write_sample_vault(&d).unwrap();
+        let mut v = Vault::open(&d).unwrap();
+        let scan = v.scan_input().run();
+        assert!(scan.notes.is_empty() && scan.drawings.is_empty(), "nothing changed: nothing is read");
+        assert!(!scan.files.is_empty());
+        fs::write(d.join("Daily log.md"), "changed [[New]]").unwrap();
+        let scan = v.scan_input().run();
+        assert_eq!(scan.notes.keys().collect::<Vec<_>>(), vec![Path::new("Daily log.md")], "only the changed note is read");
+        assert_eq!(v.apply_scan(scan), Some(vec![PathBuf::from("Daily log.md")]));
+        assert_eq!(v.notes[Path::new("Daily log.md")].text, "changed [[New]]");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: NET-013
+    #[test]
+    fn net_013_a_scan_from_before_a_rescan_or_from_another_vault_is_stale() {
+        let d = temp_vault("scan-stale");
+        write_sample_vault(&d).unwrap();
+        let mut v = Vault::open(&d).unwrap();
+        fs::write(d.join("Daily log.md"), "outside").unwrap();
+        let before = v.generation;
+        let scan = v.scan_input().run();
+        // anything that scans the vault in between (a create, a rename, a trash) makes it stale
+        v.create_file(Path::new("Made.md"), "x").unwrap();
+        assert!(v.apply_scan(scan).is_none());
+        assert_eq!(v.notes[Path::new("Daily log.md")].text, "outside", "the rescan inside create_file read it");
+        assert!(v.generation > before && v.notes.contains_key(Path::new("Made.md")));
+        let scan = v.scan_input().run();
+        let mut other = Vault::open(&d).unwrap();
+        assert!(other.apply_scan(scan).is_none(), "another vault of the same folder");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: NET-013
+    #[test]
+    fn net_013_a_note_saved_after_the_scan_began_keeps_the_saved_text() {
+        let d = temp_vault("scan-saved");
+        write_sample_vault(&d).unwrap();
+        let mut v = Vault::open(&d).unwrap();
+        fs::write(d.join("Daily log.md"), "outside").unwrap();
+        let scan = v.scan_input().run();
+        let rel = Path::new("Daily log.md");
+        let base = Stamp::of("outside");
+        assert!(matches!(v.save_checked(rel, "mine", base).unwrap(), Saved::Written(_)));
+        let changed = v.apply_scan(scan).expect("the vault itself did not change in structure");
+        assert!(changed.is_empty(), "the older read is not applied");
+        assert_eq!(v.notes[rel].text, "mine");
+        assert!(v.rescan().is_empty(), "and the index agrees with the disk");
         let _ = fs::remove_dir_all(&d);
     }
 
