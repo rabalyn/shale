@@ -57,7 +57,7 @@ pub(super) fn oldest_kept(now: u64, keep_days: Option<u32>) -> Option<u64> {
 }
 
 fn dir(root: &Path) -> PathBuf {
-    root.join(".shale").join("undo")
+    crate::device_local::local_dir(root).join("undo")
 }
 
 /// The path as the file holds it: vault-relative with '/' on every system.

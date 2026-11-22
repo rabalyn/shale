@@ -38,6 +38,7 @@ mod data_usage;
 mod dataflow;
 #[cfg(test)]
 mod dataflow_tests;
+mod device_local;
 mod dialog;
 mod docx_export;
 mod download;

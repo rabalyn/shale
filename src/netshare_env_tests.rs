@@ -469,6 +469,37 @@ fn syncthing_env_vault_state_written_on_both_devices_at_once_leaves_a_conflict_f
     }
 }
 
+// spec: NET-016
+#[test]
+#[ignore = "needs the Syncthing pair: tests/syncthing-env/syncthing-env.sh up"]
+fn syncthing_env_device_local_state_of_a_synced_vault_leaves_no_conflict_file() {
+    crate::env_lock::hold();
+    let p = Pair::new("local");
+    let bases = (std::env::temp_dir().join(format!("shale-net016-a-{}", std::process::id())), std::env::temp_dir().join(format!("shale-net016-b-{}", std::process::id())));
+    // the ID file of A reaches B, so both devices name the same vault; each keeps its own folder
+    assert_eq!(crate::device_local::place(&p.a, true, &bases.0), None);
+    wait_until(60, "the vault ID to reach B", || p.b.join(crate::gitsync::history::ID_FILE).is_file());
+    assert_eq!(crate::device_local::place(&p.b, true, &bases.1), None);
+    st("pause");
+    let mut da = VaultData::load(&p.a).0;
+    da.state.recent_tags = vec!["from-a".into()];
+    da.save().unwrap();
+    let mut db = VaultData::load(&p.b).0;
+    db.state.recent_tags = vec!["from-b".into()];
+    db.save().unwrap();
+    st("resume");
+    std::thread::sleep(Duration::from_secs(15));
+    for d in [&p.a, &p.b] {
+        let shale = names(&d.join(".shale"));
+        observe("syncthing", &format!(".shale/ after both devices saved the state: {shale:?}"));
+        assert!(shale.iter().all(|n| !n.starts_with("state")), "no state file travels: {shale:?}");
+    }
+    assert_eq!(VaultData::load(&p.a).0.state.recent_tags, ["from-a"]);
+    assert_eq!(VaultData::load(&p.b).0.state.recent_tags, ["from-b"]);
+    let _ = fs::remove_dir_all(&bases.0);
+    let _ = fs::remove_dir_all(&bases.1);
+}
+
 // spec: SYNC-060, NET-010
 #[test]
 #[ignore = "needs the Syncthing pair: tests/syncthing-env/syncthing-env.sh up"]

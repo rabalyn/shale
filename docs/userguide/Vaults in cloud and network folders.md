@@ -48,8 +48,10 @@ computer and removes `.git` from the vault, after checking the copy.
 
 # Things you may notice
 
-- A file named `state.sync-conflict-….json` in the vault's `.shale` folder: two computers saved the open
-  tabs at the same time. Delete it; the open tabs follow the last computer that saved.
+- Your open tabs and the undo histories are not in the vault's `.shale` folder when Shale finds the
+  vault in such a folder: each computer keeps its own in Shale's data folder, so two computers do not
+  overwrite each other's tabs. The first time, Shale moves what an older version left in `.shale`
+  there. A file named `state.sync-conflict-….json` from the time before is removed by Shale.
 - Hidden files starting with `.shale-tmp-` (only for a moment while Shale saves, or after a crash).
-  Safe to delete when Shale is closed. To keep them out of your sync app, add `.shale-tmp-*` to its
+  Shale removes one that is older than a day when it opens the vault. To keep them out of your sync app, add `.shale-tmp-*` to its
   ignore list (Syncthing: `.stignore`, Nextcloud: the exclude list).
