@@ -301,7 +301,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   link to a heading of the note jumps there in the PDF (links to other notes are link-coloured text). A failure shows the file and line of the error or the package that is missing,
   and **Save the .tex** writes the document and its pictures into a folder for debugging with your own
   TeX. The dialog remembers the last engine, set and kind per vault, and a note can name its template
-  with `latex-template: tuda/thesis`; a template the vault does not have is said in the dialog (TEX-008 to
+  with `latex-template: tuda/thesis`; a template the vault does not have, or a kind a folder's book cannot use, is said in the dialog (TEX-008 to
   TEX-016, TEX-018, TEX-019, TEX-030 to TEX-033).
 
   ![The export dialog with the LaTeX template engine](userguide/z_media/screenshots/pdf-export-dialog-latex.png)

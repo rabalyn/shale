@@ -86,8 +86,8 @@ pub struct TexExport {
     pub setup_requested: Option<Step>,
     /// The dialog of a folder: only the kinds of the article and book family (BOOK-013).
     pub folder: bool,
-    /// The note's `latex-template:` names a set or kind the vault does not have: what was not
-    /// found and what is used instead (TEX-033). Gone once the person picks a set or kind.
+    /// The note's `latex-template:` names a set or kind the vault does not have, or one a folder
+    /// cannot use: what was not found and what is used instead (TEX-033). Gone once the person picks a set or kind.
     pub template_warning: Option<String>,
 }
 
@@ -125,8 +125,9 @@ impl TexExport {
         t
     }
 
-    /// What the note's `latex-template:` asks for that the vault does not have, and what the
-    /// dialog uses instead (TEX-033); None when it names nothing, or a set and kind that are there.
+    /// What the note's `latex-template:` asks for that the vault does not have or a folder cannot
+    /// use, and what the dialog uses instead (TEX-033, BOOK-013); None when it names nothing, or a
+    /// set and kind that are there and can be used.
     fn unknown_template(&self) -> Option<String> {
         let raw = self.props.iter().find(|(k, _)| k == "latex-template")?.1.first()?.trim().to_string();
         let set = self.current_set()?;
@@ -137,7 +138,10 @@ impl TexExport {
         match self.sets.iter().find(|s| s.id == want_set) {
             None => Some(format!("The note's latex-template asks for the set “{want_set}”, which this vault does not have: using {using} instead.")),
             Some(s) if !s.kinds.iter().any(|(id, _)| *id == want_kind) => Some(format!("The set “{}” has no kind “{want_kind}”, which the note's latex-template asks for: using {using} instead.", s.meta.name)),
-            Some(_) => None,
+            Some(s) => {
+                let kind = s.kinds.iter().find(|(id, _)| *id == want_kind).map(|(_, k)| k)?;
+                (!self.allows(kind)).then(|| format!("The note's latex-template asks for “{}”, which takes a single note, not a folder: using {using} instead.", kind.name))
+            }
         }
     }
 
