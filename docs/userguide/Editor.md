@@ -220,6 +220,11 @@ A task (`- [ ] text` or `- [x] text`, also numbered and indented) away from the 
 real checkbox instead of its `- [ ]`, ticked for a done task; click the box to tick or untick it
 (the cursor stays where it was; the line with the cursor shows the `[ ]` as written).
 
+A list item (`- `, `* ` or `+ `, at any indent) away from the cursor is drawn with a dot instead of its
+dash or star: filled on the first level, hollow on the next (each four spaces of indent is a level),
+filled again on the third, and so on. Numbered items keep their numbers, a task keeps its box, and
+the line with the cursor shows the marker as written.
+
 A table (`| a | b |` rows with a `|---|---|` line below the header) away from the cursor is drawn as
 a real grid: borders, a bold header row, columns aligned as `:---`, `:---:` or `---:` say, code,
 bold and links inside the cells, and long text wrapping inside its own column.

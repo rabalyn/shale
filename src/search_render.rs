@@ -95,35 +95,12 @@ pub fn rendered_job(line: &str, marks: &[Range<usize>], size: f32) -> LayoutJob 
     if job.sections.iter().any(|s| crate::math::paint::is_hidden_formula(&s.format)) {
         return raw_job(line, marks, size, theme::palette().text);
     }
-    // the bullet of a list item is drawn another way: where it is written and what is drawn (a task's
-    // marker is a gap in the text, with the box painted in it: see `task_box`)
-    let indent = line.len() - line.trim_start().len();
-    let bullet = markdown::parse_task_line(line).is_none() && ["- ", "* ", "+ "].iter().any(|m| line[indent..].starts_with(m));
-    let marker = bullet.then_some((indent..indent + 1, "\u{2022}"));
+    // the marker of a task or bullet is a gap in the text, with the box or dot painted in it (see `task_box`)
     let mut pieces = Vec::new();
-    let mut glyph_done = false;
     for (s, source) in job.sections.iter().zip(sources) {
         let text = &job.text[s.byte_range.start.0..s.byte_range.end.0];
-        if s.leading_space > 0.0 {
-            // the marker of a task: hidden, after the room for its box
-            pieces.push(Piece { source, text: text.into(), cuttable: false, room: s.leading_space, format: s.format.clone() });
-            continue;
-        }
-        // a section is cut where the marker starts and ends, so that the glyph replaces the marker only
-        let mut cuts = vec![source.start];
-        cuts.extend(marker.iter().flat_map(|(m, _)| [m.start, m.end]).filter(|c| *c > source.start && *c < source.end));
-        cuts.push(source.end);
-        for w in cuts.windows(2) {
-            let (a, b) = (w[0], w[1]);
-            let piece = &text[a - source.start..b - source.start];
-            let inside = marker.as_ref().is_some_and(|(m, _)| a >= m.start && b <= m.end);
-            // (the first piece of the marker is the glyph, the others have no text)
-            let (text, cuttable) = match &marker {
-                Some((_, glyph)) if inside => (if std::mem::replace(&mut glyph_done, true) { "" } else { glyph }, false),
-                _ => (piece, true),
-            };
-            pieces.push(Piece { source: a..b, text: text.to_string(), cuttable, room: 0.0, format: s.format.clone() });
-        }
+        // (a marker is hidden text after the room for its box, which must not be cut)
+        pieces.push(Piece { source, text: text.into(), cuttable: s.leading_space == 0.0, room: s.leading_space, format: s.format.clone() });
     }
     job_of(pieces, marks)
 }
@@ -276,7 +253,7 @@ mod tests {
         assert_eq!(open.text, "- [ ] buy milk", "the marker stays in the text, hidden, with a gap for the box");
         let done = rendered_job("- [x] done **it**", &[], 12.5);
         assert_eq!(done.text, "- [x] done it");
-        assert_eq!(rendered_job("* an item", &[], 12.5).text, "\u{2022} an item");
+        assert_eq!(rendered_job("* an item", &[], 12.5).text, "* an item", "the marker stays in the text, hidden, with a gap for the dot");
         assert_eq!(rendered_job("1. first", &[], 12.5).text, "1. first", "a numbered item keeps its number");
         let head = rendered_job("## A heading", &[], 12.5);
         assert_eq!(head.text, "A heading");
@@ -288,11 +265,14 @@ mod tests {
     #[test]
     fn a_task_has_a_gap_for_its_box_and_the_view_paints_the_box_in_it() {
         use eframe::egui;
-        let gaps = |line: &str| crate::task_box::gaps(&rendered_job(line, &[], 12.5)).into_iter().map(|g| g.done).collect::<Vec<_>>();
-        assert_eq!(gaps("- [ ] buy milk"), [false]);
-        assert_eq!(gaps("  * [x] done"), [true]);
-        assert_eq!(gaps("1. [X] numbered"), [true]);
-        assert!(gaps("- plain item").is_empty() && gaps("a [ ] in a sentence").is_empty());
+        let gaps = |line: &str| crate::task_box::gaps(&rendered_job(line, &[], 12.5)).into_iter().map(|g| g.kind).collect::<Vec<_>>();
+        use crate::task_box::Kind::{Box, Bullet};
+        assert_eq!(gaps("- [ ] buy milk"), [Box { done: false }]);
+        assert_eq!(gaps("  * [x] done"), [Box { done: true }]);
+        assert_eq!(gaps("1. [X] numbered"), [Box { done: true }]);
+        assert_eq!(gaps("- plain item"), [Bullet { level: 0 }], "a bullet has a gap for its dot");
+        assert_eq!(gaps("        + deep"), [Bullet { level: 2 }]);
+        assert!(gaps("1. numbered").is_empty() && gaps("a [ ] in a sentence").is_empty() && gaps("---").is_empty());
         assert!(crate::task_box::gaps(&raw_job("- [ ] raw", &[], 12.5, Color32::PLACEHOLDER)).is_empty(), "a raw hit stays raw");
         assert_eq!(rendered_job("1. [ ] first", &[], 12.5).text, "1. [ ] first", "a numbered task keeps its number");
         // painted in a view
@@ -311,7 +291,7 @@ mod tests {
         done.textures_delta.clear();
         let painted = crate::task_box::take_painted();
         assert_eq!(painted.len(), 1);
-        assert!(painted[0].1, "ticked");
+        assert_eq!(painted[0].1, Box { done: true }, "ticked");
         assert!(painted[0].0.min.x >= 10.0 && painted[0].0.max.x < text_x, "the box is in the gap before the text: {:?} {text_x}", painted[0].0);
     }
 
