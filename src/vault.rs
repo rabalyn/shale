@@ -192,6 +192,8 @@ pub struct Vault {
     path_index: HashMap<String, PathBuf>,
     /// The notes that are a cloud client's or Shale's own conflict copy (NET-015), built with the name index.
     conflicts: HashMap<PathBuf, crate::conflict::Conflict>,
+    /// Original -> its conflict copies, in path order (NET-015).
+    copies: HashMap<PathBuf, Vec<PathBuf>>,
     /// Path -> position in `files`, for [`Vault::file`] (PERF-002). Built with the name index, which
     /// is rebuilt whenever the set of files changes; a rescan that only changes times keeps the order.
     file_pos: HashMap<PathBuf, usize>,
@@ -655,6 +657,13 @@ impl Vault {
         self.path_index.clear();
         self.file_pos = self.files.iter().enumerate().map(|(i, f)| (f.rel.clone(), i)).collect();
         self.conflicts = self.find_conflicts();
+        self.copies.clear();
+        for (copy, c) in &self.conflicts {
+            if let Some(o) = &c.original {
+                self.copies.entry(o.clone()).or_default().push(copy.clone());
+            }
+        }
+        self.copies.values_mut().for_each(|v| v.sort_by_cached_key(|p| sort_key(p)));
         for f in &self.files {
             // a copy next to its original is no second note of that name (NET-015)
             if self.is_shadow_copy(&f.rel) {
@@ -694,6 +703,30 @@ impl Vault {
     /// The conflict copy `rel` is (NET-015): a note, with the client that made it and its original.
     pub fn conflict_of(&self, rel: &Path) -> Option<&crate::conflict::Conflict> {
         self.conflicts.get(rel)
+    }
+
+    /// The conflict copies of the note `rel` that exist (NET-015).
+    pub fn copies_of(&self, rel: &Path) -> &[PathBuf] {
+        self.copies.get(rel).map_or(&[], |v| v.as_slice())
+    }
+
+    /// Put `text` into today's trash as a file next to where `rel` was, named `Name (label).md` (a
+    /// number after it when taken): the way to keep a text that is about to be replaced (NET-015).
+    pub fn trash_text(&self, rel: &Path, label: &str, text: &str) -> io::Result<PathBuf> {
+        let day = Path::new(TRASH_DIR).join(crate::mail::store::today_string());
+        let want = day.join(rel);
+        let mut tried: Vec<PathBuf> = Vec::new();
+        loop {
+            let dest = crate::gitsync::numbered_name(&want, label, |p| self.abs(p).exists() || tried.contains(&p.to_path_buf()));
+            if let Some(parent) = self.abs(&dest).parent() {
+                fs::create_dir_all(parent)?;
+            }
+            match fsutil::create_new(&self.abs(&dest), text.as_bytes()) {
+                Ok(()) => return Ok(dest),
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => tried.push(dest),
+                Err(e) => return Err(e),
+            }
+        }
     }
 
     /// A conflict copy whose original exists: left out of links, graph, search, tasks and tags (NET-015).
@@ -2798,6 +2831,13 @@ mod tests {
         assert_eq!((lost.client, lost.original.clone()), (crate::conflict::Client::Shale, None), "no original: an orphan");
         assert!(v.conflict_of(Path::new("Work/Plan.md")).is_none() && v.conflict_of(Path::new("Other.md")).is_none());
         assert!(v.is_shadow_copy(copy) && !v.is_shadow_copy(Path::new("Work/Lost (conflict 2026-11-21 1424).md")));
+        assert_eq!(v.copies_of(Path::new("Work/Plan.md")), [copy.to_path_buf()]);
+        assert!(v.copies_of(Path::new("Other.md")).is_empty() && v.copies_of(Path::new("Work/Lost.md")).is_empty());
+        // a text put in the trash keeps its name with a label, and a second one a number
+        let first = v.trash_text(Path::new("Work/Plan.md"), "before", "one").unwrap();
+        let second = v.trash_text(Path::new("Work/Plan.md"), "before", "two").unwrap();
+        assert!(first.starts_with(TRASH_DIR) && first.ends_with("Work/Plan (before).md") && second.ends_with("Work/Plan (before 2).md"), "{first:?} {second:?}");
+        assert_eq!((fs::read_to_string(v.abs(&first)).unwrap(), fs::read_to_string(v.abs(&second)).unwrap()), ("one".to_string(), "two".to_string()));
         // the original in another folder is no original
         fs::create_dir_all(d.join("Elsewhere")).unwrap();
         fs::write(d.join("Elsewhere/Plan.md"), "x").unwrap();

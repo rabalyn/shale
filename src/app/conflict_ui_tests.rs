@@ -79,6 +79,24 @@ impl W {
     }
 }
 
+impl W {
+    /// The texts of the files in the trash whose name starts with `prefix`.
+    fn trash_texts(&self, prefix: &str) -> Vec<String> {
+        let mut out = vec![];
+        let mut stack = vec![self.root.join(".trash")];
+        while let Some(d) = stack.pop() {
+            for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+                if e.path().is_dir() {
+                    stack.push(e.path());
+                } else if e.file_name().to_string_lossy().starts_with(prefix) {
+                    out.push(std::fs::read_to_string(e.path()).unwrap());
+                }
+            }
+        }
+        out
+    }
+}
+
 impl Drop for W {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.root);
@@ -89,12 +107,12 @@ impl Drop for W {
 #[test]
 fn net_015_the_file_tree_marks_a_conflict_copy_and_the_note_has_a_banner() {
     let mut w = W::new("banner");
-    assert!(w.hl.text.iter().filter(|(s, _)| s == "conflict").count() == 2, "a badge on the copy and on the orphan: {:?}", w.hl.text);
+    assert!(w.hl.text.iter().filter(|(s, _)| s == "conflict").count() == 3, "a badge on the copy, on the orphan and on the original: {:?}", w.hl.text);
     w.open(COPY);
     assert!(w.has_text("Another device changed this note at the same time"), "{:?}", w.hl.text);
     assert!(w.hl.try_label(&mut w.app, "Compare").is_some() && w.hl.try_label(&mut w.app, "Keep this one").is_some() && w.hl.try_label(&mut w.app, "Keep the other").is_some());
     // an ordinary note has none
-    w.open("Plan.md");
+    w.open("Other.md");
     assert!(!w.has_text("Another device changed") && w.hl.try_label(&mut w.app, "Compare").is_none());
 }
 
@@ -136,6 +154,7 @@ fn net_015_keep_this_one_puts_the_copys_text_in_the_original_and_trashes_the_cop
     w.press("Keep this copy");
     assert_eq!(w.read("Plan.md"), COPY_TEXT);
     assert!(!w.root.join(COPY).exists() && w.in_trash(COPY), "the copy is in the trash, not deleted");
+    assert_eq!(w.trash_texts("Plan (before"), ["# Plan\n\nunsaved edit\n"], "the old text of the original, with its unsaved edit, is in the trash too");
     assert_eq!(w.view().as_deref(), Some(Path::new("Plan.md")));
     let doc = &w.app.notes[Path::new("Plan.md")];
     assert!(doc.text == COPY_TEXT && !doc.dirty, "the open buffer has the text and is saved");
@@ -151,6 +170,7 @@ fn net_015_keep_this_one_takes_the_edited_text_of_the_open_copy_and_writes_an_un
     w.edit(COPY, "# Plan\n\nedited in the copy\n");
     w.press("Keep this one");
     assert_eq!(w.read("Plan.md"), "# Plan\n\nedited in the copy\n");
+    assert_eq!(w.trash_texts("Plan (before"), [ORIGINAL_TEXT], "the old text of the unopened original is in the trash");
     assert!(!w.root.join(COPY).exists() && w.in_trash(COPY));
     assert_eq!(w.view().as_deref(), Some(Path::new("Plan.md")));
     assert!(w.has_text("edited in the copy"), "the original is shown with the text: {:?}", w.hl.text);
@@ -176,4 +196,35 @@ fn net_015_keep_the_other_leaves_the_original_and_trashes_the_copy() {
     w.press("Keep the original");
     assert!(w.app.modal.is_none() && !w.root.join(LATER).exists());
     assert_eq!(w.read("Plan.md"), ORIGINAL_TEXT);
+}
+
+// spec: NET-015
+#[test]
+fn net_015_the_original_has_a_banner_too_and_its_buttons_mean_the_same_from_its_side() {
+    let mut w = W::new("from-original");
+    w.open("Plan.md");
+    assert!(w.has_text("Another device changed this note at the same time") && w.has_text("is its copy"), "{:?}", w.hl.text);
+    assert!(w.has_text("Plan (conflict 2026-11-21 1424)"), "it names the copy");
+    // Compare opens the same dialog
+    w.press("Compare");
+    assert!(matches!(w.app.modal, Some(Modal::Conflict(_))));
+    w.app.modal = None;
+    w.hl.frames(&mut w.app, 2);
+    // keep this one: this note stays, the copy goes
+    w.press("Keep this one");
+    assert_eq!(w.read("Plan.md"), ORIGINAL_TEXT);
+    assert!(!w.root.join(COPY).exists() && w.in_trash(COPY));
+    assert!(w.trash_texts("Plan (before").is_empty(), "nothing was replaced");
+    w.hl.frames(&mut w.app, 3);
+    assert!(!w.has_text("Another device changed"), "no banner once it is settled");
+    // keep the other: the copy's text replaces this note, and the old text is kept in the trash
+    std::fs::write(w.root.join(LATER), COPY_TEXT).unwrap();
+    w.app.vault.as_mut().unwrap().rescan();
+    w.open("Plan.md");
+    w.hl.frames(&mut w.app, 3);
+    w.press("Keep the other");
+    assert_eq!(w.read("Plan.md"), COPY_TEXT);
+    assert!(!w.root.join(LATER).exists() && w.in_trash(LATER));
+    assert_eq!(w.trash_texts("Plan (before"), [ORIGINAL_TEXT]);
+    assert_eq!(w.view().as_deref(), Some(Path::new("Plan.md")));
 }

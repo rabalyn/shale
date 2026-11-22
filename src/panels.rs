@@ -266,7 +266,7 @@ impl ShaleApp {
                 FileKind::Drawing if crate::drawing::canvas::is_canvas_path(&rel) => "canvas",
                 FileKind::Drawing => "drawing",
                 FileKind::Other => rel.extension().and_then(|e| e.to_str()).unwrap_or(""),
-                FileKind::Note if self.vault.as_ref().is_some_and(|v| v.conflict_of(&rel).is_some()) => "conflict",
+                FileKind::Note if self.vault.as_ref().is_some_and(|v| v.conflict_of(&rel).is_some() || !v.copies_of(&rel).is_empty()) => "conflict",
                 FileKind::Note => "",
             };
             let color = if kind == FileKind::Other { theme::palette().muted } else { theme::palette().text };

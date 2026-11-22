@@ -24,41 +24,79 @@ pub struct View {
 
 /// What the banner and the dialog ask for.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Ask {
+enum Ask {
     Compare,
     KeepThis,
     KeepOther,
 }
 
-/// The banner above a conflict copy: what it is, and the buttons when its original exists.
-pub(crate) fn banner(ui: &mut Ui, client: &str, original: Option<&Path>) -> Option<Ask> {
+/// What the banner above a note says: it is a conflict copy, or it has one.
+pub(crate) struct Notice {
+    message: String,
+    /// The copy the buttons are about; None: only the message (an orphan copy).
+    copy: Option<PathBuf>,
+    /// The note shown is the copy (else its original): "this one" is then the copy.
+    on_copy: bool,
+}
+
+/// The banner of the note `rel`, if it is a conflict copy or has one (NET-015).
+pub(crate) fn notice(v: &crate::vault::Vault, rel: &Path) -> Option<Notice> {
+    let short = |p: &Path| p.file_name().map(|n| crate::markdown::strip_md_ext(&n.to_string_lossy()).to_string()).unwrap_or_default();
+    if let Some(c) = v.conflict_of(rel) {
+        let label = c.client.label();
+        return Some(match &c.original {
+            Some(o) => Notice {
+                message: format!("Another device changed this note at the same time. This is the copy {label} kept next to \u{201c}{}\u{201d}; it is left out of search, links and the graph until you choose.", short(o)),
+                copy: Some(rel.to_path_buf()),
+                on_copy: true,
+            },
+            None => Notice { message: format!("This looks like a conflict copy made by {label}, but the note it belongs to is not in this folder, so it is an ordinary note."), copy: None, on_copy: true },
+        });
+    }
+    let copy = v.copies_of(rel).first()?;
+    let more = v.copies_of(rel).len() - 1;
+    let also = if more > 0 { format!(" (and {more} more)") } else { String::new() };
+    Some(Notice {
+        message: format!("Another device changed this note at the same time: \u{201c}{}\u{201d}{also} is its copy. The copy is left out of search, links and the graph until you choose.", short(copy)),
+        copy: Some(copy.clone()),
+        on_copy: false,
+    })
+}
+
+/// The banner above a note, and what a click on it asks for.
+pub(crate) fn banner(ui: &mut Ui, n: &Notice) -> Option<Action> {
     let mut asked = None;
     let p = theme::palette();
     egui::Frame::new().fill(p.faint_bg).stroke(egui::Stroke::new(1.0, p.border)).corner_radius(6.0).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        match original {
-            Some(o) => {
-                let name = o.file_name().map(|n| crate::markdown::strip_md_ext(&n.to_string_lossy()).to_string()).unwrap_or_default();
-                theme::paragraph(ui, format!("Another device changed this note at the same time. This is the copy {client} kept next to “{name}”; it is left out of search, links and the graph until you choose."));
-                ui.horizontal(|ui| {
-                    if ui.button("Compare").clicked() {
-                        asked = Some(Ask::Compare);
-                    }
-                    if ui.button("Keep this one").on_hover_text("Its text replaces the original; the copy goes to the trash").clicked() {
-                        asked = Some(Ask::KeepThis);
-                    }
-                    if ui.button("Keep the other").on_hover_text("The original stays as it is; the copy goes to the trash").clicked() {
-                        asked = Some(Ask::KeepOther);
-                    }
-                });
-            }
-            None => {
-                theme::paragraph(ui, format!("This looks like a conflict copy made by {client}, but the note it belongs to is not in this folder, so it is an ordinary note."));
-            }
+        theme::paragraph(ui, n.message.clone());
+        if n.copy.is_some() {
+            ui.horizontal(|ui| {
+                if ui.button("Compare").clicked() {
+                    asked = Some(Ask::Compare);
+                }
+                let (this, other) = if n.on_copy {
+                    ("Its text replaces the original; the old text and the copy go to the trash", "The original stays as it is; the copy goes to the trash")
+                } else {
+                    ("This note stays as it is; the copy goes to the trash", "The copy's text replaces this note; the old text and the copy go to the trash")
+                };
+                if ui.button("Keep this one").on_hover_text(this).clicked() {
+                    asked = Some(Ask::KeepThis);
+                }
+                if ui.button("Keep the other").on_hover_text(other).clicked() {
+                    asked = Some(Ask::KeepOther);
+                }
+            });
         }
     });
     ui.add_space(4.0);
-    asked
+    let copy = n.copy.clone()?;
+    asked.map(|a| match a {
+        Ask::Compare => Action::OpenConflict(copy),
+        // from the original, "this one" is the original: the copy goes
+        Ask::KeepThis => Action::KeepConflict { copy, this: n.on_copy },
+        Ask::KeepOther => Action::KeepConflict { copy, this: !n.on_copy },
+    })
 }
 
 impl ShaleApp {
@@ -109,6 +147,17 @@ impl ShaleApp {
         }
         {
             let Some(_tree) = self.hold_sync_tree() else { return };
+            // what the original says now (saved by the flush) goes to the trash first: nothing is lost
+            let old = match self.notes.get(&original) {
+                Some(d) if d.unreadable.is_some() => None,
+                Some(d) => Some(d.text.clone()),
+                None => self.vault.as_ref().and_then(|v| crate::fsutil::read_to_string(v.abs(&original)).ok()),
+            };
+            let kept = old.and_then(|old| self.vault.as_ref()?.trash_text(&original, "before the copy replaced it", &old).ok());
+            if kept.is_none() {
+                self.toast(format!("The text of \u{201c}{name}\u{201d} could not be put in the trash first, so nothing is changed"));
+                return;
+            }
             let saved = if let Some(doc) = self.notes.get_mut(&original) {
                 if doc.unreadable.is_some() {
                     self.toast(format!("“{name}” could not be read, so it is not changed"));
@@ -140,7 +189,7 @@ impl ShaleApp {
         }
         self.open(&original, false);
         self.trash(copy);
-        self.toast(format!("“{name}” has the text of the copy now; the copy is in the trash"));
+        self.toast(format!("“{name}” has the text of the copy now; the copy and its old text are in the trash"));
     }
 
     /// Draw the comparison and do what was clicked; false: close it.

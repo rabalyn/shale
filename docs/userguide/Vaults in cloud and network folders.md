@@ -13,9 +13,10 @@ iCloud or Syncthing syncs. Back to [[Start here]].
 - **The sync app's own conflict copies** (`Note.sync-conflict-….md`, `Note (… conflicted copy …).md`,
   `Note_conflict-….md`, `Note (SFConflict …).md`, and Shale's own `Note (conflict …).md`) are
   recognised. In the file list they carry a "conflict" badge. Open one and a banner says another
-  device changed the note at the same time: **Compare** shows the two texts (the changes, or the
+  device changed the note at the same time (the original note shows the same banner): **Compare** shows the two texts (the changes, or the
   Markdown side by side), **Keep this one** puts the copy's text into the original, **Keep the
-  other** leaves the original as it is. Either way the copy goes to the trash. While the original
+  other** leaves the original as it is. Either way the copy goes to the trash, and when the copy's text replaces the original, the
+  original's old text goes to the trash too. While the original
   exists, the copy is left out of search, links, the graph, tasks and tags. Copies that
   OneDrive, iCloud and Google Drive make (`Note 2.md`, `Note (1).md`) look like real notes by
   name, so Shale cannot tell and shows them as ordinary notes.
