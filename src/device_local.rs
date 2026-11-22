@@ -19,6 +19,8 @@ static OUTSIDE: Mutex<Option<HashMap<PathBuf, PathBuf>>> = Mutex::new(None);
 const TMP_PREFIX: &str = ".shale-tmp-";
 /// The part of a Syncthing conflict copy's name between the file's name and its extension.
 const CONFLICT: &str = ".sync-conflict-";
+/// The file in the outside folder that says the files of the vault were moved out.
+const MIGRATED: &str = ".migrated";
 /// A temporary file younger than this may belong to a save that is still running.
 const STALE: Duration = Duration::from_secs(24 * 3600);
 
@@ -63,7 +65,9 @@ pub fn place(root: &Path, synced: bool, base: &Path) -> Option<String> {
         register(root, None);
         return Some(format!("Could not make {}: {e}", dir.display()));
     }
-    let moved = migrate(&root.join(".shale"), &dir);
+    // only the first placement on this device moves: later, a state.json in the vault belongs to another device
+    let marker = dir.join(MIGRATED);
+    let moved = if marker.exists() { Ok(()) } else { migrate(&root.join(".shale"), &dir).and_then(|()| crate::fsutil::write_atomic(&marker, b"").map_err(|e| format!("could not write {}: {e}", marker.display()))) };
     register(root, Some(dir));
     moved.err()
 }
@@ -230,6 +234,13 @@ mod tests {
         assert!(!root.join(".shale/undo").exists(), "the empty folder goes too");
         assert!(root.join(".shale/settings.json").is_file());
         assert_eq!(std::fs::read_to_string(root.join("note.md")).unwrap(), "text");
+        assert_eq!(VaultData::load(&root).0.state.recent_tags, ["old"]);
+        // later opens leave what appears in the vault alone: it belongs to another device
+        put(&root.join(".shale/state.json"), r#"{"version":2,"recent_tags":["other-device"]}"#);
+        put(&root.join(".shale/undo/cccc.json"), "u3");
+        assert_eq!(place(&root, true, &base), None);
+        assert!(std::fs::read_to_string(root.join(".shale/state.json")).unwrap().contains("other-device"));
+        assert!(root.join(".shale/undo/cccc.json").is_file());
         assert_eq!(VaultData::load(&root).0.state.recent_tags, ["old"]);
     }
 
