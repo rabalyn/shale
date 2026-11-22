@@ -63,6 +63,24 @@ Shale is a native Rust notes app. These rules are binding; the full versions are
     hand, never move or delete a pushed tag: a red run is fixed in a branch, landed, then the next
     tag is made.
 
+## Sessions side by side (FORGE-021, FORGE-022)
+
+This file is read by opencode and by Claude desktop alike; several sessions of both may run at once.
+
+- **The main checkout stays on `main`.** Never edit, commit or switch branches in it; it is where
+  sessions start and where `land.sh` fast-forwards `main`.
+- **One issue, one branch, one worktree**: branch `claude/<topic>-<N>` from the current
+  `origin/main`, in a worktree below `.claude/worktrees/` (the tool's own worktree is fine). Taking
+  up another issue in the same session: a new branch from `origin/main`, not the old one.
+- **Claim before you start**: check the issue for a claim (a comment or a branch naming it); if
+  none, comment "Working on this in `<branch>`". If another session holds it, pick other work or
+  ask.
+- **Removing worktrees**: only one that is no process's working directory, has no uncommitted
+  change, and whose branch is in `origin/main` (or whose issue was closed another way). Remove the
+  worktrees you made for subagents after landing; leave your own to the tool or the owner.
+- **A batch of issues**: load the `lead` skill (`.claude/skills/lead/SKILL.md`) and orchestrate
+  subagents from one session instead of opening one session per issue.
+
 ## Specs first (ADR-0001)
 
 - Change the spec in `docs/spec/` before the code; flip `SHOULD BE` → `IS NOW` in the change
