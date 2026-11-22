@@ -83,7 +83,7 @@ a small pointer and the file itself lives in the remote's LFS store. See [[Sound
   history as a plain file.
 - **Store media with Git LFS.** The button in Settings → Sync switches it on for
   this repository: audio and video files (mp3, ogg, oga, opus, flac, m4a, aac, wav, mp4, m4v, mov,
-  webm, mkv) are sent to LFS, and media already tracked are converted in one commit. Repositories
+  webm, mkv, avi, ogv) are sent to LFS, and media already tracked are converted in one commit. Repositories
   Shale creates itself are set up this way from the start. Shale only changes this repository,
   never your global git configuration, and keeps your own lines in `.gitattributes`.
 - **Old versions stay.** Files committed before that stay in the history as they were; Shale

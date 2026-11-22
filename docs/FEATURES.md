@@ -141,7 +141,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 ![A sound player in a note](userguide/z_media/screenshots/sound-player.png)
 
-- **Video players.** `![[clip.mp4]]` (mp4, m4v, mov, webm, mkv) shows the same player with the
+- **Video players.** `![[clip.mp4]]` (mp4, m4v, mov, webm, mkv, avi, ogv) shows the same player with the
   first frame as its picture; the picture is wider (16:9) and the controls sit below it. While it
   plays the picture shows the video, and the sound goes through the same output as sound files.
   A click on the progress bar restarts the video at that place; a click before the length is
@@ -1183,7 +1183,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   has the button **Store media with Git LFS**. The settings show whether git-lfs is installed
   (and where to get it if not) and whether the repository uses it. Shale sets LFS up in this
   repository only (never your global git configuration), routes mp3, ogg, oga, opus, flac, m4a,
-  aac, wav, mp4, m4v, mov, webm and mkv (any case) to it with a block in `.gitattributes` (your
+  aac, wav, mp4, m4v, mov, webm, mkv, avi and ogv (any case) to it with a block in `.gitattributes` (your
   own lines there stay), and converts media already in the repository in one commit; the old
   versions stay in the history (`git lfs migrate` removes them, by hand). Every sync uploads the
   files to the remote's LFS store before it pushes. Other computers get small pointer files and

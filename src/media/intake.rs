@@ -243,7 +243,7 @@ mod tests {
         assert_eq!(link_text(Path::new("/media/ada/Videos/doc.PDF"), &libs), "[[@Videos/doc.PDF]]", "a PDF is a plain link as in EDIT-003");
         assert_eq!(link_text(Path::new("/media/ada/Videos/p.png"), &libs), "![[@Videos/p.png]]");
         assert_eq!(link_text(Path::new("/media/ada/Videos/s.mp3"), &libs), "![[@Videos/s.mp3]]");
-        assert_eq!(link_text(Path::new("/media/ada/Videos/old.avi"), &libs), "[[@Videos/old.avi]]", "a video without a player is a plain link");
+        assert_eq!(link_text(Path::new("/media/ada/Videos/old.avi"), &libs), "![[@Videos/old.avi]]", "an avi has a player like the other videos");
     }
 
     // spec: MEDIA-020

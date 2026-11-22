@@ -5,7 +5,7 @@
 #
 #   sh scripts/make-media-fixtures.sh
 #
-# Needs ffmpeg (with libmp3lame, libvorbis, libopus, libx264) and python3 (for the Vorbis picture tag,
+# Needs ffmpeg (with libmp3lame, libvorbis, libopus, libx264, mpeg4, libtheora) and python3 (for the Vorbis picture tag,
 # which ffmpeg cannot write itself). The files stay under 30 KB each.
 set -eu
 cd "$(dirname "$0")/.." || exit 1
@@ -54,4 +54,10 @@ pics="-f lavfi -i color=c=red:s=160x90:r=15:d=0.5 -f lavfi -i color=c=blue:s=160
 vid="-filter_complex concat=n=2:v=1:a=0[v] -map [v] -c:v libx264 -preset veryfast -crf 35 -pix_fmt yuv420p"
 ff $pics $tone $vid -map 2:a -c:a aac -b:a 32k -ac 1 -shortest "$out/clip.mp4"
 ff $pics $vid "$out/clip-silent.mp4"
+# the two other import types (#206): clip.avi (MPEG-4 part 2 and MP3) and clip.ogv (Theora and Vorbis),
+# the same picture and sound; the player decodes both through ffmpeg like the others
+avi="-filter_complex concat=n=2:v=1:a=0[v] -map [v] -c:v mpeg4 -q:v 12 -pix_fmt yuv420p"
+ff $pics $tone $avi -map 2:a -c:a libmp3lame -b:a 48k -ac 1 -shortest "$out/clip.avi"
+ogv="-filter_complex concat=n=2:v=1:a=0[v] -map [v] -c:v libtheora -q:v 3 -pix_fmt yuv420p"
+ff $pics $tone $ogv -map 2:a -c:a libvorbis -q:a 0 -ac 1 -shortest "$out/clip.ogv"
 ls -l "$out"

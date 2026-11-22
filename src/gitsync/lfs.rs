@@ -10,8 +10,6 @@ use super::*;
 pub const BEGIN: &str = "# shale-media-begin";
 /// Last line of Shale's block in `.gitattributes`.
 pub const END: &str = "# shale-media-end";
-/// The audio and video extensions of MEDIA-001, in lower case (the block lists upper case too).
-pub const MEDIA_EXTENSIONS: [&str; 13] = ["mp3", "ogg", "oga", "opus", "flac", "m4a", "aac", "wav", "mp4", "m4v", "mov", "webm", "mkv"];
 const ATTRIBUTES: &str = ".gitattributes";
 const POINTER_VERSION: &str = "version https://git-lfs.github.com/spec/v1";
 /// Bigger local objects are left as pointer files when a conflict copy is written.
@@ -51,9 +49,9 @@ pub fn configured(git: &Git, vault: &Path) -> bool {
     git.run(vault, args!["config", "--get", "filter.lfs.clean"]).is_ok_and(|o| o.ok && !o.text().is_empty())
 }
 
-/// The patterns Shale routes to LFS: `*.mp3`, `*.MP3`, ….
+/// The patterns Shale routes to LFS, one per extension of the media list (`media::media_extensions`, #206): `*.mp3`, `*.MP3`, ….
 pub fn patterns() -> Vec<String> {
-    MEDIA_EXTENSIONS.iter().flat_map(|e| [format!("*.{e}"), format!("*.{}", e.to_ascii_uppercase())]).collect()
+    crate::media::media_extensions().flat_map(|e| [format!("*.{e}"), format!("*.{}", e.to_ascii_uppercase())]).collect()
 }
 
 /// Shale's block, ready to write.

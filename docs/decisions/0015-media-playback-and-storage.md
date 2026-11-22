@@ -63,7 +63,7 @@ on its own when Shale's connect creates a new repository, SYNC-004):
 3. Write Shale's block into `.gitattributes` (created if missing), between the lines
    `# shale-media-begin` and `# shale-media-end`, one line per pattern:
    `*.<ext> filter=lfs diff=lfs merge=lfs -text` for mp3 ogg oga opus flac m4a aac wav mp4 m4v
-   mov webm mkv, upper case too. Lines outside the block are the user's and are kept.
+   mov webm mkv avi ogv, upper case too (avi and ogv were added with #206). Lines outside the block are the user's and are kept.
 4. Existing media: `git add --renormalize -- <patterns>`, then one commit
    `<prefix>Store media files with Git LFS<suffix>`. History is **not** rewritten: the old
    versions stay in it. Removing them is `git lfs migrate import` plus a force push, which
