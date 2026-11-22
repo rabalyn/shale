@@ -18,7 +18,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   Every shown embed has its link as a one-line caption below it (the words of an alias,
   `![[photo.png|Sea at dusk]]`, else the file's link); a click on the caption opens the file.
   A picture embedded inside a line of text (`an icon ![[icon.png]] here`) is drawn in the line in the reading view and the
-  PDF export, 0.9 of the line high and sitting on its baseline, as in the LaTeX export; the editor shows it as a picture of its own size.
+  PDF export, 0.9 of the line high and set a little below its baseline like a letter, as in the LaTeX export; the editor shows it as a picture of its own size.
 
 ![A picture with its resize buttons](userguide/z_media/screenshots/image-resize.png)
 
