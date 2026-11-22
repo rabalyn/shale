@@ -154,6 +154,8 @@ mod themes;
 #[cfg(test)]
 mod ui_test_support;
 mod undo;
+#[cfg(test)]
+mod undo_tests;
 mod update;
 mod userguide;
 #[cfg(test)]
