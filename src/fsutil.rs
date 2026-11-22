@@ -19,6 +19,9 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+#[cfg(windows)]
+mod winacl;
+
 /// Permission bits of a new file before the umask is applied (what `fs::write` uses).
 #[cfg(unix)]
 const DEFAULT_MODE: u32 = 0o666;
@@ -138,8 +141,9 @@ pub fn file_identity(path: &Path) -> Option<(u32, u64)> {
     Some((info.dwVolumeSerialNumber, (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow)))
 }
 
-/// Make a folder (and its parents) that only the owner can enter (mode 0700). A folder that
-/// exists gets its permissions tightened.
+/// Make a folder (and its parents) that only the owner can enter (mode 0700; on Windows a
+/// protected access list for the user and `SYSTEM`, DATA-014). A folder that exists gets its
+/// permissions tightened.
 pub fn ensure_private_dir(path: &Path) -> io::Result<()> {
     fs::create_dir_all(path)?;
     #[cfg(unix)]
@@ -147,6 +151,8 @@ pub fn ensure_private_dir(path: &Path) -> io::Result<()> {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
     }
+    #[cfg(windows)]
+    winacl::restrict_to_owner(path, true).map_err(|e| named(path, e))?;
     Ok(())
 }
 
@@ -160,10 +166,16 @@ pub fn create_private_dir_new(path: &Path) -> io::Result<()> {
         b.mode(0o700);
         b
     };
-    // Windows: the new folder inherits the access list of its place (DATA-014)
     #[cfg(not(unix))]
     let b = fs::DirBuilder::new();
-    b.create(path).map_err(|e| named(path, e))
+    b.create(path).map_err(|e| named(path, e))?;
+    // Windows: the folder is empty while it still has the access list of its place (DATA-014)
+    #[cfg(windows)]
+    if let Err(e) = winacl::restrict_to_owner(path, true) {
+        let _ = fs::remove_dir(path);
+        return Err(named(path, e));
+    }
+    Ok(())
 }
 
 /// May `folder` be removed as the managed folder of a tool Shale installs below `<data>/shale`
@@ -228,6 +240,8 @@ pub fn try_lock_file(path: &Path) -> io::Result<Option<File>> {
         o.mode(PRIVATE_MODE);
     }
     let f = o.open(path).map_err(|e| named(path, e))?;
+    #[cfg(windows)]
+    winacl::restrict_to_owner(path, false).map_err(|e| named(path, e))?;
     match f.try_lock() {
         Ok(()) => Ok(Some(f)),
         Err(fs::TryLockError::WouldBlock) => Ok(None),
@@ -258,7 +272,12 @@ pub fn open_private_log(path: &Path, append: bool) -> io::Result<File> {
         Ok(f)
     }
     #[cfg(not(unix))]
-    o.open(path)
+    {
+        let f = o.open(path)?;
+        #[cfg(windows)]
+        winacl::restrict_to_owner(path, false)?;
+        Ok(f)
+    }
 }
 
 /// Move a file or folder to `to`, which must not exist (`AlreadyExists` otherwise). Unlike a
@@ -483,9 +502,17 @@ fn make_temp(target: &Path, perms: Perms) -> io::Result<(File, PathBuf)> {
             use std::os::unix::fs::OpenOptionsExt;
             o.mode(if perms == Perms::Private { PRIVATE_MODE } else { DEFAULT_MODE });
         }
-        #[cfg(not(unix))]
-        let _ = perms;
         match o.open(&tmp) {
+            // Windows: still empty, so nothing is readable before the access list is owner-only (DATA-014)
+            #[cfg(windows)]
+            Ok(f) if perms == Perms::Private => match winacl::restrict_to_owner(&tmp, false) {
+                Ok(()) => return Ok((f, tmp)),
+                Err(e) => {
+                    drop(f);
+                    let _ = fs::remove_file(&tmp);
+                    return Err(named(target, e));
+                }
+            },
             Ok(f) => return Ok((f, tmp)),
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(named(target, e)),
@@ -1168,7 +1195,65 @@ mod tests {
                 assert!(!text.contains(other), "{} gives access to {other}:\n{text}", path.display());
             }
         }
+        // and since DATA-014 the list is Shale's own: protected, the user and SYSTEM only
+        for path in [&p, p.parent().unwrap(), &root] {
+            winacl::assert_owner_only(path);
+        }
         let _ = fs::remove_dir(&root);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: DATA-014
+    #[cfg(windows)]
+    #[test]
+    fn private_files_on_windows_have_a_protected_access_list_for_the_user_and_system_only() {
+        use winacl::{assert_only_user_and_system, assert_owner_only};
+        let d = tmp("acl-own");
+        // an empty folder that exists has the list of its place (open to others as far as that goes): it is closed
+        let old = d.join("old");
+        fs::create_dir(&old).unwrap();
+        ensure_private_dir(&old).unwrap();
+        assert_owner_only(&old);
+        // a file made by an atomic save is protected itself, and keeps the list over a second save
+        let settings = old.join("settings.json");
+        write_atomic_private(&settings, b"one").unwrap();
+        write_atomic_private(&settings, b"two").unwrap();
+        assert_owner_only(&settings);
+        assert_eq!(fs::read(&settings).unwrap(), b"two");
+        // a folder made in one go; what is made in it has the same two entries, inherited
+        let made = d.join("made");
+        create_private_dir_new(&made).unwrap();
+        assert_owner_only(&made);
+        fs::write(made.join("in.txt"), b"x").unwrap();
+        assert_only_user_and_system(&made.join("in.txt"), false);
+        assert!(create_private_dir_new(&made).is_err(), "one that is there is never adopted");
+        // the lock file with its folder, and a log, also one that existed with the list of its place
+        let lock = d.join("data").join("instance.lock");
+        let held = try_lock_file(&lock).unwrap().expect("the lock is free");
+        assert_owner_only(&lock);
+        assert_owner_only(lock.parent().unwrap());
+        drop(held);
+        let log = d.join("logs").join("a.log");
+        drop(open_private_log(&log, false).unwrap());
+        assert_owner_only(&log);
+        let old_log = d.join("old.log");
+        fs::write(&old_log, "old").unwrap();
+        drop(open_private_log(&old_log, true).unwrap());
+        assert_owner_only(&old_log);
+        // the private temp root
+        let root = private_temp_root("shale-acl-own-test").unwrap();
+        assert_owner_only(&root);
+        let _ = fs::remove_dir(&root);
+        // a folder that has files keeps its list (setting one would walk over everything in it)
+        let full = d.join("full");
+        fs::create_dir(&full).unwrap();
+        fs::write(full.join("a.md"), b"x").unwrap();
+        ensure_private_dir(&full).unwrap();
+        assert!(!winacl::entries(&full).0, "a folder with files keeps the list of its place");
+        // an ordinary save does not change the list of its place
+        let plain = d.join("plain.md");
+        write_atomic(&plain, b"note").unwrap();
+        assert!(!winacl::entries(&plain).0, "an ordinary file keeps the list of its place");
         let _ = fs::remove_dir_all(&d);
     }
 

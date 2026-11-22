@@ -145,7 +145,7 @@ Dependencies of the whole app are only `eframe`/egui (window and UI), `serde`/`s
 
 - Linux, macOS and Windows are supported (BUILD-005). The system-specific code is small and sits in
   few places, each with a `cfg` and a test: `fsutil.rs` (no-replace rename: `renameat2` / `renamex_np` /
-  `MoveFileExW`, DATA-013; locks through `File::try_lock`; owner-only files, DATA-014), `secret.rs`
+  `MoveFileExW`, DATA-013; locks through `File::try_lock`; owner-only files, DATA-014; on Windows a protected access list, `fsutil/winacl.rs`), `secret.rs`
   (`mlock` / `VirtualLock`, hardening, SEC-023), `opener.rs` (`xdg-open` / `open` / `ShellExecuteW`,
   SEC-022), `calendar/time.rs` (local zone, CAL-018), `gitsync.rs` (computer name), `secrets.rs` (keyring: `secret-tool`,
   Keychain, Credential Manager, SEC-003, SEC-024, SEC-025) and the Wayland-only drop code (`import/wl_drop.rs`, `import/tb_store.rs`,
