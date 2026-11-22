@@ -2,8 +2,38 @@
 //! (IMP-036). A window program often has a shorter `PATH` than a shell (macOS apps get none of
 //! the shell's), so after `PATH` the usual places are searched too.
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
+
+/// A command for the external program `program` (BUILD-043). Every start of an external program
+/// in Shale's own code is made with this and not with `Command::new`: on Windows a program with a
+/// window (the release build is of the "windows" subsystem, BUILD-042) that starts a console
+/// program gets a console window flashing up for each run unless `CREATE_NO_WINDOW` is set, which
+/// this does. Elsewhere it is `Command::new`. `tests/no_console_window.rs` checks that nothing
+/// else calls `Command::new`.
+pub fn command(program: impl AsRef<OsStr>) -> Command {
+    let mut cmd = Command::new(program);
+    hide_console(&mut cmd);
+    cmd
+}
+
+#[cfg(windows)]
+fn hide_console(cmd: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    cmd.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn hide_console(_: &mut Command) {}
+
+/// The one exception to [`command`] (BUILD-043): a command that starts Shale itself again after
+/// an update. The new Shale is a program with a window of its own and no console to hide (a debug
+/// build keeps the console it is started with, BUILD-042); on macOS the program is `open`.
+pub fn relaunch_command(program: impl AsRef<OsStr>) -> Command {
+    Command::new(program)
+}
 
 /// Start `cmd`. A program file that was written a moment ago can be "text file busy" (Unix
 /// `ETXTBSY`) while another thread's `fork` still holds it open for writing, which test stand-ins

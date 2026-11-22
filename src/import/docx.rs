@@ -11,7 +11,6 @@ use crate::vault::{rel_to_string, Vault};
 use std::collections::HashSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -46,7 +45,7 @@ pub fn locate(chosen: &str) -> Option<PathBuf> {
 
 /// The first line of `pandoc --version` ("pandoc 3.14"), or why it could not be had.
 pub fn version(pandoc: &Path) -> Result<String, String> {
-    let mut cmd = Command::new(pandoc);
+    let mut cmd = crate::program::command(pandoc);
     cmd.arg("--version");
     let run = proc::run(cmd, Duration::from_secs(20), None, |_| {}).map_err(|e| format!("could not start {}: {e}", pandoc.display()))?;
     match run.tail.iter().find(|l| !l.trim().is_empty()) {
@@ -230,7 +229,7 @@ pub fn prepare(c: &Convert, reserved: &mut HashSet<String>) -> Result<Prepared, 
     }
     let mut last = None;
     for input in &inputs {
-        let mut cmd = Command::new(c.pandoc);
+        let mut cmd = crate::program::command(c.pandoc);
         cmd.args(args(input, &filter, &rel_to_string(&folder), &out)).current_dir(&files);
         let run = tracing::info_span!("flow.import_docx.pandoc", peer = "pandoc").in_scope(|| proc::run(cmd, c.timeout, Some(c.cancel), |_| {})).map_err(|e| format!("pandoc could not be started: {e}"))?;
         match run.ending {

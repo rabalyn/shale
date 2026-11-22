@@ -33,7 +33,7 @@ fn protos(r: &Request) -> &'static str {
 
 /// The curl command of a request (without the output file).
 fn command(r: &Request) -> Command {
-    let mut c = Command::new("curl");
+    let mut c = crate::program::command("curl");
     c.args(["-q", "-sS", "-f", "-L", "--max-redirs", "5", "--proto", protos(r), "--proto-redir", "=https", "--connect-timeout", "20", "--max-filesize"]).arg(r.max_bytes.to_string());
     for h in r.headers {
         c.arg("-H").arg(h);

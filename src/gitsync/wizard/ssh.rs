@@ -3,7 +3,7 @@
 
 use crate::gitsync::Git;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 /// A key pair on this computer.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,7 +69,7 @@ pub fn generate(git: &Git, home: &Path, host: &str, computer: &str) -> Result<Ke
     }
     let path = new_key_path(home, host);
     let comment = format!("Shale on {computer}");
-    let mut c = Command::new("ssh-keygen");
+    let mut c = crate::program::command("ssh-keygen");
     c.args(["-q", "-t", "ed25519", "-N", "", "-C", &comment, "-f"]).arg(&path).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     // the selected tool set's folders (the managed git brings its own ssh-keygen on Windows)
     if let Some((_, v)) = git.env.iter().find(|(k, _)| k == "PATH") {

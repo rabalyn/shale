@@ -103,7 +103,7 @@ impl Engine {
             c.args(rest).arg(program);
             return c;
         }
-        let mut c = if self.bin_dir.as_os_str().is_empty() { Command::new(program) } else { Command::new(self.bin_dir.join(program)) };
+        let mut c = if self.bin_dir.as_os_str().is_empty() { crate::program::command(program) } else { crate::program::command(self.bin_dir.join(program)) };
         if !self.bin_dir.as_os_str().is_empty() {
             c.env("PATH", path_with(&self.bin_dir));
         }

@@ -10,7 +10,6 @@ use crate::pdf::tex::archive::{self, Limits};
 use crate::pdf::tex::proc::{self, Ending};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
@@ -205,7 +204,7 @@ fn run_op(op: &Op, cancel: &AtomicBool) -> Result<(), String> {
         }
         Op::Remove(path) => remove_any(path),
         Op::Run { program, args } => {
-            let mut c = Command::new(program);
+            let mut c = crate::program::command(program);
             c.args(args);
             let run = proc::run(c, RUN_TIMEOUT, Some(cancel), |_| {}).map_err(|e| format!("could not run {program} ({e})"))?;
             match run.ending {
@@ -242,7 +241,7 @@ pub const RESTARTED: &str = "--restarted";
 impl Relaunch {
     /// Start it, detached from this process.
     pub fn spawn(&self) -> Result<(), String> {
-        let mut c = Command::new(&self.program);
+        let mut c = crate::program::relaunch_command(&self.program);
         c.args(&self.args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
         crate::program::spawn(&mut c).map(|_| ()).map_err(|e| format!("could not start {} ({e})", self.program.display()))
     }

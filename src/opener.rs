@@ -465,7 +465,7 @@ fn launch_program(target: &std::ffi::OsStr) -> Result<(), String> {
         let program = "xdg-open";
         #[cfg(target_os = "macos")]
         let program = "open";
-        let mut command = std::process::Command::new(program);
+        let mut command = crate::program::command(program);
         // tests: a recording fake on this thread only (`FakeXdgOpen`), so parallel tests never see it
         #[cfg(test)]
         if let Some(fake) = fake_opener_command() {
@@ -898,7 +898,7 @@ mod tests {
                 let code = text.split("#[cfg(test)]").next().unwrap_or("");
                 for (i, line) in code.lines().enumerate() {
                     let l = line.trim_start();
-                    if !l.starts_with("//") && (l.contains("\"xdg-open\"") || l.contains("Command::new(\"open\")") || l.contains("\"/C\"") || l.contains("ShellExecute")) {
+                    if !l.starts_with("//") && (l.contains("\"xdg-open\"") || l.contains("Command::new(\"open\")") || l.contains("command(\"open\")") || l.contains("\"/C\"") || l.contains("ShellExecute")) {
                         bad.push(format!("{name}:{}: {l}", i + 1));
                     }
                 }

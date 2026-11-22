@@ -12,7 +12,6 @@ use crate::pdf::write::{FontKind, Rgba};
 use roxmltree::{Document, Node};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::process::Command;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
@@ -22,7 +21,7 @@ const STYLES: &str = "word/styles.xml";
 pub fn default_reference(pandoc: &Path, dir: &Path, cancel: Option<&AtomicBool>) -> Result<Vec<u8>, String> {
     let path = dir.join("default-reference.docx");
     let out = crate::fsutil::open_private_log(&path, false).map_err(|e| format!("could not make a file in the temporary folder: {e}"))?;
-    let mut cmd = Command::new(pandoc);
+    let mut cmd = crate::program::command(pandoc);
     cmd.args(["--print-default-data-file", "reference.docx"]);
     let run = proc::run_to_file(cmd, out, Duration::from_secs(20), cancel).map_err(|e| format!("pandoc could not be started: {e}"))?;
     match run.ending {

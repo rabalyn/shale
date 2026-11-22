@@ -345,7 +345,7 @@ pub(super) fn resolve_mirror(handle: &Handle, repo: &str) -> Result<String, Stri
     let probe = format!("{repo}/{MIRROR_PROBE}");
     // an https repository is only ever left for https; an http one is not made safer by refusing http
     let protos = if repo.starts_with("http://") { "=http,https" } else { "=https" };
-    let mut c = Command::new("curl");
+    let mut c = crate::program::command("curl");
     c.args(["-q", "-sS", "-f", "-L", "--max-redirs", "5", "--proto", protos, "--proto-redir", protos, "--connect-timeout", "20", "--max-filesize", "1048576", "-w", "%{url_effective}\n", "-o"]).arg(work.path().join("probe")).arg(&probe);
     let run = proc::run(c, Duration::from_secs(120), Some(&handle.cancel), |_| {}).map_err(|e| format!("could not run curl ({e}) — is curl installed?"))?;
     match run.ending {
@@ -396,7 +396,7 @@ pub fn perl_problem() -> Option<String> {
 
 /// Whether this program runs as perl does.
 pub(super) fn check_perl_program(program: &str) -> Result<(), String> {
-    let mut c = Command::new(program);
+    let mut c = crate::program::command(program);
     c.args(["-e", "1"]);
     match proc::run(c, Duration::from_secs(20), None, |_| {}) {
         Ok(r) if r.success() => Ok(()),
@@ -514,17 +514,17 @@ fn install_into(env: &Env, partial: &Path, handle: &Handle, notify: &dyn Fn()) -
     let mut mirrors = vec![mirror.clone()];
     download(handle, &format!("{mirror}/{}", installer_archive()), &archive)?;
     // the system's tar: bsdtar on Windows 10 and later reads the zip as well
-    let mut tar = Command::new("tar");
+    let mut tar = crate::program::command("tar");
     tar.arg("-xf").arg(&archive).arg("-C").arg(&inst).arg("--strip-components=1");
     step(handle, notify, Stage::Unpack, "tar", tar).map_err(|e| format!("the installer could not be unpacked: {e}"))?;
     let profile_file = work.path().join("texlive.profile");
     crate::fsutil::create_new(&profile_file, profile(partial, platform).as_bytes()).map_err(|e| format!("the install profile could not be written ({e})"))?;
     let mut install_tl = if cfg!(windows) {
-        let mut c = Command::new(inst.join("install-tl-windows.bat"));
+        let mut c = crate::program::command(inst.join("install-tl-windows.bat"));
         c.arg("-no-gui");
         c
     } else {
-        let mut c = Command::new("perl");
+        let mut c = crate::program::command("perl");
         c.arg(inst.join("install-tl"));
         c
     };
@@ -532,7 +532,7 @@ fn install_into(env: &Env, partial: &Path, handle: &Handle, notify: &dyn Fn()) -
     step(handle, notify, Stage::Base, "install-tl", install_tl)?;
     let bin = bin_dir_with(partial, tlmgr_name()).ok_or("install-tl made no tlmgr")?;
     let used = tlmgr_on_mirror(handle, notify, Stage::Packages, repo, mirror, |m| {
-        let mut tlmgr = Command::new(bin.join(tlmgr_name()));
+        let mut tlmgr = crate::program::command(bin.join(tlmgr_name()));
         tlmgr.env("PATH", engine::path_with(&bin)).args(["--repository", m, "install"]).args(packages());
         tlmgr
     })?;

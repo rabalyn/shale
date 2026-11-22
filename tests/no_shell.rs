@@ -4,6 +4,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// The calls that start a program: `Command::new(…)`, and `program::command(…)` which wraps it (BUILD-043).
+const STARTS: [&str; 2] = ["Command::new(", "program::command("];
+
 /// The shells and command interpreters; as the program of a `Command::new(…)`.
 const SHELLS: [&str; 10] = ["sh", "bash", "zsh", "dash", "fish", "cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh"];
 
@@ -22,7 +25,7 @@ fn shell_start(line: &str) -> Option<String> {
     if l.starts_with("//") {
         return None;
     }
-    for at in l.match_indices("Command::new(").map(|(i, _)| i + "Command::new(".len()) {
+    for at in STARTS.iter().flat_map(|start| l.match_indices(start).map(move |(i, _)| i + start.len())) {
         let arg = l[at..].trim_start_matches('&');
         if arg.starts_with("format!") {
             return Some("a program name built with format!".into());
@@ -83,7 +86,7 @@ fn sec_005_no_code_starts_a_shell() {
     sources(&root.join("src"), &mut paths);
     paths.sort();
     let files: Vec<(String, String)> = paths.iter().map(|p| (p.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/"), fs::read_to_string(p).unwrap())).collect();
-    let programs = files.iter().filter(|(rel, t)| !is_test_file(rel) && production(t).contains("Command::new(")).count();
+    let programs = files.iter().filter(|(rel, t)| !is_test_file(rel) && production(t).contains("program::command(")).count();
     assert!(programs >= 8, "the code that starts programs is found ({programs} files)");
     let bad = shell_starts(&files);
     assert!(bad.is_empty(), "programs are started with an argument list, never through a shell (SEC-005):\n{}", bad.join("\n"));
@@ -100,6 +103,8 @@ fn sec_005_the_scan_finds_a_shell_and_leaves_argument_lists_alone() {
         r#"Command::new("cmd.exe")"#,
         r#"let c = Command::new(&format!("{dir}/tool"));"#,
         r#"Command::new("powershell").arg("-Command")"#,
+        r#"let c = crate::program::command("sh");"#,
+        r#"program::command(&format!("{dir}/tool"))"#,
         r#"x.args(["/C", "start"])"#,
         r#"let line = format!("sh -c 'open {path}'");"#,
     ] {
@@ -107,6 +112,7 @@ fn sec_005_the_scan_finds_a_shell_and_leaves_argument_lists_alone() {
     }
     for ok in [
         r#"let mut c = Command::new("curl");"#,
+        r#"let mut c = crate::program::command("curl");"#,
         r#"Command::new(&self.program).args(["-c", "user.name=Shale"])"#,
         r#"Command::new(program).arg("sh")"#,
         r#"Command::new("shasum").arg("-a")"#,

@@ -162,7 +162,7 @@ pub fn parse_probe(json: &str) -> Result<Info, String> {
 
 impl Tools {
     fn command(program: &Path, args: &[OsString]) -> Command {
-        let mut c = Command::new(program);
+        let mut c = crate::program::command(program);
         c.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         c
     }
