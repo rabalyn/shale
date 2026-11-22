@@ -258,6 +258,21 @@ impl Looks {
         g.facts.values().any(|e| e.flying) || g.pictures.values().any(|s| s.loading)
     }
 
+    /// Tests: run `frame` until no check and no decode has been under way for 3 frames in a row
+    /// (the frames ask for what a view needs, and the workers answer a few frames later, MEDIA-024).
+    /// The deadline is far beyond a slow, instrumented build; past it the test fails, naming this wait.
+    #[cfg(test)]
+    pub fn settle_with(&self, mut frame: impl FnMut()) {
+        let start = Instant::now();
+        let mut idle = 0;
+        while idle < 3 {
+            assert!(start.elapsed() < Duration::from_secs(60), "the file look-ups and picture decodes did not finish within 60 s");
+            frame();
+            idle = if self.busy() { 0 } else { idle + 1 };
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
     /// Tests: every answer is old enough to be looked up again by the next frame (a test changed
     /// files behind the window's back), the old answers stay until the new ones are there.
     #[cfg(test)]
@@ -270,7 +285,8 @@ impl Looks {
     /// Tests: wait for the first answer about `path` (a test that has no frames to wait in).
     #[cfg(test)]
     pub fn wait_for(&self, ctx: &egui::Context, path: &Path) -> Option<Facts> {
-        for _ in 0..500 {
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(60) {
             if let Look::Known(f) = self.facts(ctx, path) {
                 return f;
             }
@@ -341,7 +357,8 @@ pub(crate) mod tests {
 
     /// Ask until the look-up has something to say (the workers are quick when they are not held).
     fn until_known(looks: &Looks, ctx: &egui::Context, path: &Path, ok: impl Fn(&Option<Facts>) -> bool) -> Option<Facts> {
-        for _ in 0..1000 {
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(60) {
             if let Look::Known(f) = looks.facts(ctx, path) {
                 if ok(&f) {
                     return f;
@@ -353,7 +370,8 @@ pub(crate) mod tests {
     }
 
     fn until(what: &str, mut ok: impl FnMut() -> bool) {
-        for _ in 0..1000 {
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(60) {
             if ok() {
                 return;
             }

@@ -71,12 +71,7 @@ fn read(text: &str, frames: Vec<Vec<Event>>) -> Frame {
     };
     // the pictures are looked up and decoded on workers (MEDIA-024): the first frames wait for them
     let looks = crate::media::look::Looks::of(&ctx2);
-    let mut idle = 0;
-    while idle < 3 {
-        last = run(Vec::new());
-        idle = if looks.busy() { 0 } else { idle + 1 };
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    looks.settle_with(|| last = run(Vec::new()));
     for events in frames.into_iter().chain(std::iter::repeat_with(Vec::new).take(10)) {
         last = run(events);
     }

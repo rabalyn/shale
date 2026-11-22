@@ -75,8 +75,15 @@ fn pictures(out: &egui::FullOutput) -> usize {
     n
 }
 
+/// How many pictures the window draws once the workers of MEDIA-024 are done (they look files up and
+/// decode pictures a few frames after the window asked), so a picture is not missed on a slow build.
 fn drawn(fx: &mut Fx) -> usize {
-    fx.hl.frames(&mut fx.app, 3);
+    fx.settle();
+    drawn_now(fx)
+}
+
+/// How many pictures the next frame draws, without waiting for any worker (a test that holds them back).
+fn drawn_now(fx: &mut Fx) -> usize {
     let out = fx.hl.frame(&mut fx.app, vec![]);
     pictures(&out)
 }
@@ -92,7 +99,7 @@ fn views(fx: &mut Fx, mut check: impl FnMut(&mut Fx, &str)) {
     fx.reading(false);
     check(fx, "the editor");
     fx.app.cfg.live_preview = true;
-    fx.hl.frames(&mut fx.app, 4);
+    fx.settle();
     check(fx, "the markdown preview");
 }
 
@@ -180,7 +187,7 @@ fn a_file_that_is_not_there_a_library_not_set_up_and_a_path_out_of_a_library_say
     let mut fx = window("o-states", &note, o.library());
     let before = fx.app.vault.as_ref().unwrap().files.len();
     views(&mut fx, |fx, view| {
-        fx.hl.frames(&mut fx.app, 3);
+        fx.settle();
         assert!(said(fx, &format!("Not found: {}", gone.display())), "{view}: the path of the picture: {:?}", fx.hl.text);
         assert!(said(fx, "Library “Nowhere” is not set up on this device"), "{view}");
         assert!(said(fx, "leaves the library folder “Media”"), "{view}");
@@ -229,7 +236,7 @@ fn a_click_on_the_caption_of_an_outside_picture_in_the_editor_opens_it_too() {
     o.picture("a.png");
     let mut fx = window("o-caption", "![[@Media/a.png]]\n", o.library());
     fx.reading(false);
-    fx.hl.frames(&mut fx.app, 4);
+    fx.settle();
     let at = fx.hl.text.iter().find(|(t, _)| t == "@Media/a.png").map(|(_, p)| *p).expect("the caption of the picture");
     fx.hl.click(&mut fx.app, Pos2::new(at.x + 6.0, at.y + 5.0), PointerButton::Primary);
     fx.until("the file is opened in the background", |a| a.outside_opens.is_empty());
@@ -244,7 +251,7 @@ fn the_outgoing_links_panel_lists_outside_media_apart_and_not_as_missing_notes()
     let note = "[[@Media/a.png]] and [[@Nowhere/b.mp3]] and [[Missing note]]\n";
     let mut fx = window("o-panel", note, o.library());
     fx.app.side.layout.show_panel(crate::app::RightPanel::Outgoing);
-    fx.hl.frames(&mut fx.app, 4);
+    fx.settle();
     assert!(said(&fx, "Outside the vault  2"), "{:?}", fx.hl.text);
     assert!(said(&fx, "Not created yet  1"), "only the missing note is one: {:?}", fx.hl.text);
     assert!(said(&fx, "@Media/a.png") && said(&fx, "@Nowhere/b.mp3"));
@@ -257,7 +264,7 @@ fn showing_media_from_outside_changes_nothing_there_and_adds_nothing_to_the_vaul
     o.picture("a.png");
     let before: Vec<_> = std::fs::read_dir(&o.folder).unwrap().flatten().map(|e| (e.file_name(), e.metadata().unwrap().len())).collect();
     let mut fx = window("o-readonly", "![[@Media/a.png]] ![[@Media/../x.png]]\n\n![](<file:///nowhere/x.png>)\n", o.library());
-    views(&mut fx, |fx, _| fx.hl.frames(&mut fx.app, 3));
+    views(&mut fx, |fx, _| fx.settle());
     let after: Vec<_> = std::fs::read_dir(&o.folder).unwrap().flatten().map(|e| (e.file_name(), e.metadata().unwrap().len())).collect();
     assert_eq!(before.len(), after.len());
     assert!(fx.app.vault.as_ref().unwrap().files.iter().all(|f| !f.rel.starts_with("..") && !f.rel.is_absolute()), "the vault's files are the vault's");
@@ -270,7 +277,7 @@ fn note_text(fx: &Fx) -> String {
 /// Frames until the copy into the vault has ended and the note has been changed by it.
 fn copied(fx: &mut Fx) {
     fx.until("the copy into the vault ends", |a| a.outside_copy.is_none());
-    fx.hl.frames(&mut fx.app, 4);
+    fx.settle();
 }
 
 fn toast_with(fx: &Fx, what: &str) -> bool {
@@ -311,7 +318,8 @@ fn copy_into_the_vault_on_the_caption_copies_the_file_keeps_the_width_and_is_one
     assert!(o.folder.join("2024/a.png").is_file(), "the original stays where it is");
     assert!(toast_with(&fx, "Copied 1 file into the vault"), "{:?}", fx.app.toasts);
     // the picture is shown from the vault now, and its caption has no action any more
-    assert!(!said(&fx, crate::media::outside::COPY_LABEL) && drawn(&mut fx) == 1);
+    assert_eq!(drawn(&mut fx), 1, "one picture");
+    assert!(!said(&fx, crate::media::outside::COPY_LABEL), "{:?}", fx.hl.text);
     // the cursor stands where it stood in the text, and the note is saved by the usual save
     let at = egui::text_edit::TextEditState::load(fx.hl.ctx(), id).and_then(|st| st.cursor.char_range()).map(|r| r.primary.index.0).unwrap();
     assert!(text.chars().skip(at).collect::<String>().starts_with("ter the picture"), "the cursor moved with the text: {at}");
@@ -484,7 +492,7 @@ fn the_caption_and_the_name_of_an_outside_file_say_it_is_not_synced_and_those_of
     let mut fx = window("o-not-synced", "![[@Media/a.png]]\n\n![[inside.png]]\n", o.library());
     std::fs::copy(o.folder.join("a.png"), fx.dir.join("inside.png")).unwrap();
     fx.app.vault.as_mut().unwrap().rescan();
-    fx.hl.frames(&mut fx.app, 3);
+    fx.settle();
     // the editor: the caption of the outside picture, not that of the picture of the vault
     fx.reading(false);
     let outside = fx.hl.text.iter().find(|(t, _)| t == "@Media/a.png").map(|(_, p)| *p).expect("the caption of the outside picture");
@@ -516,7 +524,7 @@ fn until_drawn(fx: &mut Fx, n: usize) -> usize {
     let start = std::time::Instant::now();
     loop {
         let out = fx.hl.frame(&mut fx.app, vec![]);
-        if pictures(&out) == n || start.elapsed() > std::time::Duration::from_secs(20) {
+        if pictures(&out) == n || start.elapsed() > std::time::Duration::from_secs(60) {
             return pictures(&out);
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
@@ -541,7 +549,7 @@ fn a_drive_that_does_not_answer_does_not_stop_the_window_it_shows_loading_and_th
         assert!(said(&fx, "Loading a.png…"), "{view} shows a quiet loading state: {:?}", fx.hl.text);
         assert!(said(&fx, "Loading gone.png…") && !said(&fx, "Not found"), "{view}: a file that is not there is not known to be missing before the drive answered");
         assert!(said(&fx, "Library “Nowhere” is not set up on this device"), "{view}: what needs no disk is said at once");
-        assert_eq!(drawn(&mut fx), 0, "{view}: no picture yet");
+        assert_eq!(drawn_now(&mut fx), 0, "{view}: no picture yet");
     }
     assert!(start.elapsed() < std::time::Duration::from_secs(10), "the frames did not wait for the drive");
     let mut asked = asked.lock().unwrap().clone();
@@ -573,7 +581,7 @@ fn a_picture_that_is_decoded_slowly_is_loading_in_a_strip_and_does_not_stop_the_
     for reading in [true, false] {
         fx.show(reading);
         assert!(said(&fx, "Loading a.png…"), "{:?}", fx.hl.text);
-        assert_eq!(drawn(&mut fx), 0);
+        assert_eq!(drawn_now(&mut fx), 0);
     }
     gate.open();
     assert_eq!(until_drawn(&mut fx, 1), 1, "the picture is drawn when it is decoded");
@@ -595,7 +603,7 @@ fn a_file_that_is_not_there_says_so_after_the_check_and_is_found_when_it_appears
     assert!(!said(&fx, "Not found"));
     std::fs::remove_file(o.folder.join("later.png")).unwrap();
     let start = std::time::Instant::now();
-    while !said(&fx, &gone) && start.elapsed() < std::time::Duration::from_secs(20) {
+    while !said(&fx, &gone) && start.elapsed() < std::time::Duration::from_secs(60) {
         fx.hl.frame(&mut fx.app, vec![]);
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
