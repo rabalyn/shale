@@ -1,8 +1,13 @@
 //! Git's askpass helper, the real Shale executable against the real git (SYNC-054, ADR-0029).
 //! A pretend `secret-tool` (tests/askpass/secret-tool) is the keyring, so the token is read
 //! the way a Linux desktop reads it, from a process that is not the test.
+//!
+//! Linux only: `secret-tool` is the one keyring backend a separate process can fake. macOS uses
+//! the Keychain API and Windows the Credential Manager; there the helper's prompt parsing and
+//! lookup are covered by the unit tests in `src/gitsync/credentials_tests.rs` with an injected
+//! keyring.
 
-#![cfg(unix)]
+#![cfg(target_os = "linux")]
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
