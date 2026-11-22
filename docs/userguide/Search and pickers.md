@@ -2,7 +2,7 @@ Back to [[Start here]].
 
 # Quick switcher
 
-**Ctrl+O** finds a note by name, or creates it when nothing matches.
+**Ctrl+O** finds a note by name, or creates it when nothing matches. A hint under the field shows the keys that move, open and close, as they are bound now.
 
 # Search all notes
 
@@ -23,6 +23,11 @@ With vim-style editing on ([[Editor]]), the Space key starts these:
   opens the hit where it belongs: the note at the found line, the mail in the mail view, the post
   in a Feeds tab.
 
-Both windows are bounded and never stall your typing. The keys are in [[Keyboard shortcuts]].
+Both windows are bounded and never stall your typing. The search field and, right under it, a
+hint with the keys stay at the top of the window; only the list below scrolls, however many hits
+there are. The hint shows the keys as they are bound now: the four keys of these windows and of
+the quick switcher (next line, previous line, open, close; ↓ / Ctrl+J, ↑ / Ctrl+K, Enter, Esc) can
+be changed in **Settings → Keybindings** under "List windows", and the hint follows. The keys are
+in [[Keyboard shortcuts]].
 
 #userguide #search

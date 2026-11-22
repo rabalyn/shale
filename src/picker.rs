@@ -5,11 +5,12 @@
 
 use crate::app::Action;
 use crate::dialog::Dialog;
+use crate::keys::{Action as KeyAction, Keymap};
 use crate::markdown;
 use crate::search_all::{self, Ctx};
 use crate::theme;
 use crate::vault::rel_to_string;
-use eframe::egui::{self, Context, FontId, Key, Modifiers, RichText, Ui};
+use eframe::egui::{self, Context, FontId, RichText, Ui};
 use std::time::{Duration, Instant};
 
 /// How many hits are listed at most.
@@ -134,7 +135,8 @@ fn group_headers(hits: &[Hit]) -> Vec<(&'static str, String)> {
     out.into_iter().map(|(g, n)| (g, format!("{g}  {n}{}", if n >= search_all::GROUP_LIMIT { "+" } else { "" }))).collect()
 }
 
-/// The keys every list window of the app reads: ↓ / ↑ (also Ctrl+J / Ctrl+K), Enter, Esc.
+/// The keys every list window of the app reads (NAV-049): the actions of the scope
+/// `Scope::ListWindow` of the keymap, by default ↓ / Ctrl+J, ↑ / Ctrl+K, Enter and Esc.
 pub struct ListKeys {
     pub down: bool,
     pub up: bool,
@@ -143,13 +145,18 @@ pub struct ListKeys {
 }
 
 impl ListKeys {
-    pub fn take(ui: &mut Ui) -> ListKeys {
-        ui.input_mut(|i| ListKeys {
-            down: i.consume_key(Modifiers::NONE, Key::ArrowDown) | i.consume_key(Modifiers::COMMAND, Key::J),
-            up: i.consume_key(Modifiers::NONE, Key::ArrowUp) | i.consume_key(Modifiers::COMMAND, Key::K),
-            enter: i.consume_key(Modifiers::NONE, Key::Enter),
-            esc: i.consume_key(Modifiers::NONE, Key::Escape),
-        })
+    pub fn take(ui: &mut Ui, keymap: &Keymap) -> ListKeys {
+        ui.input_mut(|i| ListKeys { down: keymap.take(i, KeyAction::ListNext), up: keymap.take(i, KeyAction::ListPrev), enter: keymap.take(i, KeyAction::ListOpen), esc: keymap.take(i, KeyAction::ListClose) })
+    }
+
+    /// The hint of the window, from the keys as they are bound now (NAV-049, like MAIL-072): "↓ / Ctrl+J
+    /// next · ↑ / Ctrl+K previous · Enter open · Esc close"; an action without a key is left out.
+    pub fn hint(keymap: &Keymap) -> String {
+        [(KeyAction::ListNext, "next"), (KeyAction::ListPrev, "previous"), (KeyAction::ListOpen, "open"), (KeyAction::ListClose, "close")]
+            .into_iter()
+            .filter_map(|(a, what)| keymap.hint(a).map(|k| format!("{k} {what}")))
+            .collect::<Vec<_>>()
+            .join(" · ")
     }
 
     /// Move the selection among `n` lines, wrapping around.
@@ -173,45 +180,60 @@ pub struct Outcome {
     pub close: bool,
 }
 
-/// Draw the window.
-pub fn show(ctx: &Context, p: &mut Picker, data: &Ctx) -> Outcome {
+/// What the header of the window passes to its list: the keys it took this frame.
+struct Frame<'a> {
+    p: &'a mut Picker,
+    keys: ListKeys,
+}
+
+/// Draw the window: the field and the key hint are its header (NAV-049, they stay in view), the
+/// list scrolls below them.
+pub fn show(ctx: &Context, p: &mut Picker, data: &Ctx, keymap: &Keymap) -> Outcome {
     let mut out = Outcome { pick: None, close: false };
-    let resp = Dialog::new("picker", p.source.title()).width(520.0).show(ctx, |ui| {
-        let r = ui.add(egui::TextEdit::singleline(&mut p.query).hint_text(p.source.hint()).desired_width(f32::INFINITY).font(FontId::proportional(16.0)));
-        r.request_focus();
-        let keys = ListKeys::take(ui);
-        // Enter means the list of what is typed, not of what was typed before
-        if p.refresh(data, keys.enter) {
-            ui.ctx().request_repaint_after(DEBOUNCE);
-        }
-        keys.select(&mut p.sel, p.hits.len());
-        ui.add_space(6.0);
-        let mut pick = (keys.enter && !p.hits.is_empty()).then_some(p.sel);
-        let headers = group_headers(&p.hits);
-        let mut last = "";
-        for (i, h) in p.hits.iter().enumerate() {
-            if h.group != last {
-                last = h.group;
-                if let Some((_, text)) = headers.iter().find(|(g, _)| *g == last) {
-                    ui.label(RichText::new(text).color(theme::palette().muted).size(12.0));
+    let mut frame = Frame { p, keys: ListKeys { down: false, up: false, enter: false, esc: false } };
+    let title = frame.p.source.title();
+    let resp = Dialog::new("picker", title).width(520.0).show_with_header(
+        ctx,
+        &mut frame,
+        |ui, f| {
+            let r = ui.add(egui::TextEdit::singleline(&mut f.p.query).hint_text(f.p.source.hint()).desired_width(f32::INFINITY).font(FontId::proportional(16.0)));
+            r.request_focus();
+            f.keys = ListKeys::take(ui, keymap);
+            theme::prose(ui, RichText::new(ListKeys::hint(keymap)).color(theme::palette().muted).size(11.5));
+        },
+        |ui, f| {
+            let (p, keys) = (&mut *f.p, &f.keys);
+            // Enter means the list of what is typed, not of what was typed before
+            if p.refresh(data, keys.enter) {
+                ui.ctx().request_repaint_after(DEBOUNCE);
+            }
+            keys.select(&mut p.sel, p.hits.len());
+            let mut pick = (keys.enter && !p.hits.is_empty()).then_some(p.sel);
+            let headers = group_headers(&p.hits);
+            let mut last = "";
+            for (i, h) in p.hits.iter().enumerate() {
+                if h.group != last {
+                    last = h.group;
+                    if let Some((_, text)) = headers.iter().find(|(g, _)| *g == last) {
+                        ui.label(RichText::new(text).color(theme::palette().muted).size(12.0));
+                    }
+                }
+                let label = if h.detail.is_empty() { h.title.clone() } else { format!("{}    {}", h.title, h.detail) };
+                let resp = ui.selectable_label(i == p.sel, label);
+                if i == p.sel && (keys.down || keys.up) {
+                    resp.scroll_to_me(None);
+                }
+                if resp.clicked() {
+                    pick = Some(i);
                 }
             }
-            let label = if h.detail.is_empty() { h.title.clone() } else { format!("{}    {}", h.title, h.detail) };
-            let resp = ui.selectable_label(i == p.sel, label);
-            if i == p.sel && (keys.down || keys.up) {
-                resp.scroll_to_me(None);
+            if p.hits.is_empty() && p.made_for.is_some() {
+                ui.label(RichText::new("Nothing found").color(theme::palette().muted).size(12.5));
             }
-            if resp.clicked() {
-                pick = Some(i);
-            }
-        }
-        if p.hits.is_empty() && p.made_for.is_some() {
-            ui.label(RichText::new("Nothing found").color(theme::palette().muted).size(12.5));
-        }
-        ui.label(RichText::new("↑↓ or Ctrl+J / Ctrl+K to move · Enter to open · Esc to close").color(theme::palette().muted).size(11.5));
-        out.pick = pick.map(|i| p.hits.swap_remove(i));
-        out.close = keys.esc;
-    });
+            out.pick = pick.map(|i| p.hits.swap_remove(i));
+            out.close = keys.esc;
+        },
+    );
     out.close |= resp.should_close();
     out
 }
