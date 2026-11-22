@@ -28,7 +28,7 @@ Code looks as on screen: fenced code blocks and inline code are printed in their
 Pictures, drawings and PDFs embedded with `![[…]]` on a line of their own are drawn as
 thumbnails with their link as a small caption below (the same caption as in the editor, see
 [[Notes and links]]); so are the first frame of a video (needs ffmpeg) and the cover of a sound.
-An embed with nothing to show keeps its link text.
+An embed with nothing to show keeps its link text. A **picture inside a line** of text (`an icon ![[icon.png]] here`, also in a table cell, a list or a footnote) is drawn in the line, as in the reading view: 0.9 of the line high and sitting on its baseline like a letter, never wider than the line (a wider one is made smaller with its proportions kept); the line is no taller for it. A picture that cannot be read, any other embed inside a line (a drawing, a PDF, a sound or video) and every picture while the embeds checkbox is off stay their link text.
 
 The size is the one you see in the note, in proportion to the text (measured against the width
 of the editor's text column as it is on your screen, so a wider or narrower window gives the

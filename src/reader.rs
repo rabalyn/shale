@@ -153,6 +153,83 @@ pub(crate) struct MathAt {
     pub size: f32,
 }
 
+/// A picture embed that is drawn inside a line of text instead of its link text (EDIT-114,
+/// PDF-030): where the file is, its own size in pixels and, on the screen, its texture.
+#[derive(Clone)]
+pub(crate) struct InlinePicture {
+    pub path: PathBuf,
+    pub size: Vec2,
+    pub texture: Option<egui::TextureId>,
+}
+
+/// How high a picture inside a line is, in lines (EDIT-114, TEX-031).
+pub(crate) const PICTURE_HEIGHT: f32 = 0.9;
+
+/// How far the bottom of a picture inside a line is below the baseline, in lines.
+pub(crate) const PICTURE_DROP: f32 = 0.2;
+
+/// The size of a picture inside a line `line` points high: [`PICTURE_HEIGHT`] of it high, as wide
+/// as its proportions say, scaled down with them to fit `max_width`.
+pub(crate) fn inline_picture_size(natural: Vec2, line: f32, max_width: f32) -> Vec2 {
+    let height = line * PICTURE_HEIGHT;
+    let width = height * natural.x / natural.y.max(1.0);
+    let k = if width > max_width { max_width / width } else { 1.0 };
+    Vec2::new(width * k, height * k)
+}
+
+#[derive(Default)]
+struct PicturesInScope {
+    by_target: HashMap<String, InlinePicture>,
+    max_width: f32,
+}
+
+thread_local! {
+    /// The pictures that are drawn inside lines of the note being laid out (EDIT-114).
+    static PICTURES: RefCell<PicturesInScope> = RefCell::new(PicturesInScope::default());
+}
+
+/// The pictures of a note by the target of the embed as written, and the width a picture is at
+/// most, in force while this value lives: [`painted`] leaves the room of a picture in the line for
+/// an embed named here, and shows every other as its link text. Without one nothing is named, so
+/// the LaTeX export, the task list and the outline keep the link text. The pictures before come
+/// back when it is dropped.
+pub(crate) struct InlinePictures(PicturesInScope);
+
+impl InlinePictures {
+    pub fn set(by_target: HashMap<String, InlinePicture>, max_width: f32) -> Self {
+        InlinePictures(PICTURES.with(|p| std::mem::replace(&mut *p.borrow_mut(), PicturesInScope { by_target, max_width })))
+    }
+}
+
+impl Drop for InlinePictures {
+    fn drop(&mut self) {
+        PICTURES.with(|p| *p.borrow_mut() = std::mem::take(&mut self.0));
+    }
+}
+
+/// The picture the embed of `target` is drawn as inside a line, and the width it is at most (see [`InlinePictures`]).
+pub(crate) fn inline_picture(target: &str) -> Option<(InlinePicture, f32)> {
+    PICTURES.with(|p| {
+        let p = p.borrow();
+        p.by_target.get(target).map(|pic| (pic.clone(), p.max_width))
+    })
+}
+
+/// The link text of a picture inside a line as hidden text of a row `line` points high, with
+/// `room` points for the picture before it. The first character is a section of its own: the room
+/// is the leading space of the rest, which the text layout drops at the start of a row. A blank
+/// is no place to break the text, and the text is two characters at least.
+fn append_picture_room(job: &mut LayoutJob, shown: &str, room: f32, line: f32) {
+    let mut text: String = shown.chars().map(|c| if c.is_whitespace() { '_' } else { c }).collect();
+    while text.chars().count() < 2 {
+        text.push('_');
+    }
+    let format = TextFormat { font_id: FontId::proportional(crate::math::paint::HIDDEN_SIZE), color: Color32::TRANSPARENT, line_height: Some(line), ..Default::default() };
+    let first = crate::math::paint::room_starts(&text);
+    job.append(&text[..first], 0.0, format.clone());
+    job.append(&text[first..], room, format);
+}
+
 /// A line as a layout job, the links in it and its formulas.
 pub(crate) type InlineJob = (LayoutJob, Vec<(Range<usize>, LinkSpan, bool)>, Vec<MathAt>);
 
@@ -318,11 +395,16 @@ fn painted(line: &str, links: &[(LinkSpan, bool)], size: f32, base_color: Color3
         if let Some((l, ok)) = links.iter().chain(web.iter()).find(|(l, _)| l.range.start == i) {
             let shown = l.display();
             let start = job.text.len();
-            let color = if *ok { theme::palette().link } else { theme::palette().link_missing };
-            let mut f = fmt(&st, color);
-            f.color = if st.strike { theme::palette().done } else { color };
-            f.underline = Stroke::new(1.0, color.gamma_multiply(0.5));
-            job.append(&shown, 0.0, f);
+            if let Some((pic, max_width)) = l.embed.then(|| inline_picture(&l.target)).flatten() {
+                // a picture inside the line: its link text stays, hidden, with room for the picture before it (EDIT-114)
+                append_picture_room(&mut job, &shown, inline_picture_size(pic.size, size * 1.5, max_width).x, size * 1.5);
+            } else {
+                let color = if *ok { theme::palette().link } else { theme::palette().link_missing };
+                let mut f = fmt(&st, color);
+                f.color = if st.strike { theme::palette().done } else { color };
+                f.underline = Stroke::new(1.0, color.gamma_multiply(0.5));
+                job.append(&shown, 0.0, f);
+            }
             link_spans.push((start..job.text.len(), l.clone(), *ok));
             i = l.range.end;
             continue;
@@ -473,6 +555,7 @@ fn inline_block_aligned(ui: &mut Ui, job: LayoutJob, spans: &[(Range<usize>, Lin
     };
     ui.painter().galley(anchor, galley.clone(), theme::palette().text);
     paint_maths(ui, &galley, anchor, maths);
+    paint_pictures(ui.painter(), &galley, anchor, spans);
     if let Some(hp) = ui.input(|i| i.pointer.hover_pos()).filter(|p| rect.contains(*p)) {
         if let Some(c) = char_under(&galley, anchor, hp) {
             let byte = markdown::char_to_byte(&galley.job.text, c);
@@ -492,6 +575,23 @@ pub(crate) fn paint_maths(ui: &Ui, galley: &Galley, pos: Pos2, maths: &[MathAt])
             let at = markdown::byte_to_char(&galley.job.text, m.range.start.min(galley.job.text.len()));
             crate::math::paint::paint_in_galley(ui.painter(), galley, pos, at, f, m.color);
         }
+    }
+}
+
+/// Draw the pictures of a laid-out line in the room their hidden link text has (EDIT-114): the
+/// spans of the line say where they are. A picture is [`PICTURE_HEIGHT`] of the row's line high,
+/// its bottom [`PICTURE_DROP`] of it below the baseline of the text of the row.
+pub(crate) fn paint_pictures(painter: &egui::Painter, galley: &Galley, pos: Pos2, spans: &[(Range<usize>, LinkSpan, bool)]) {
+    for (range, l, _) in spans.iter().filter(|(_, l, _)| l.embed) {
+        let Some((pic, max_width)) = inline_picture(&l.target) else { continue };
+        let Some(texture) = pic.texture else { continue };
+        let Some(line) = galley.job.format_at_byte(egui::text::ByteIndex(range.start)).line_height else { continue };
+        let at = markdown::byte_to_char(&galley.job.text, range.start.min(galley.job.text.len()));
+        let Some((x, baseline)) = crate::math::paint::place_in_row(galley, at, |height| height * 0.75) else { continue };
+        let size = inline_picture_size(pic.size, line, max_width);
+        let bottom = pos.y + baseline + line * PICTURE_DROP;
+        let rect = egui::Rect::from_min_size(Pos2::new(pos.x + x, bottom - size.y), size);
+        painter.image(texture, rect, egui::Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
     }
 }
 
@@ -572,6 +672,32 @@ pub fn inline_line(ui: &mut Ui, text: &str, vault: &Vault, from: &Path, base: f3
     (out, plain_click)
 }
 
+/// Whether the embed at `range` of `text` has text around it on its line: one that is alone on its
+/// line is a block of its own, which is not drawn inside a line (EDIT-114, PDF-030).
+pub(crate) fn embed_is_in_a_line(text: &str, range: &Range<usize>) -> bool {
+    let start = text[..range.start].rfind('\n').map_or(0, |p| p + 1);
+    let end = text[range.end..].find('\n').map_or(text.len(), |p| range.end + p);
+    text[start..end].trim().len() != range.len()
+}
+
+/// The picture embeds of `text` that stand inside a line and can be shown there, by their target:
+/// a picture of the vault (EDIT-114, PDF-030). `load` is given its file and says its size in pixels
+/// and its texture; one it cannot read is left out and stays its link text.
+pub(crate) fn pictures_in_lines(text: &str, links: &[(LinkSpan, bool)], vault: &Vault, rel: &Path, mut load: impl FnMut(&Path) -> Option<(Vec2, Option<egui::TextureId>)>) -> HashMap<String, InlinePicture> {
+    let mut out = HashMap::new();
+    for (l, _) in links.iter().filter(|(l, ok)| l.embed && *ok) {
+        if out.contains_key(&l.target) || !embed_is_in_a_line(text, &l.range) {
+            continue;
+        }
+        let Some(file) = vault.resolve(&l.target, Some(rel)).filter(|f| crate::media::is_image(f)) else { continue };
+        let path = vault.abs(&file);
+        if let Some((size, texture)) = load(&path) {
+            out.insert(l.target.clone(), InlinePicture { path, size, texture });
+        }
+    }
+    out
+}
+
 /// A click on a footnote mark waiting for the next frame: where it goes and the label.
 fn jump_id() -> egui::Id {
     egui::Id::unique("shale-footnote-jump")
@@ -639,6 +765,8 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
             (l, ok)
         })
         .collect();
+    let pictures = pictures_in_lines(text, &all_links, vault, rel, |abs| crate::media::texture(ui.ctx(), abs).map(|t| (t.size_vec2(), Some(t.id()))));
+    let _pictures = InlinePictures::set(pictures, ui.available_width());
     let fenced = markdown::fenced_code_lines(text);
     let lines = markdown::lines_with_offsets(text);
     let mut i = 0;
@@ -1440,5 +1568,94 @@ mod tests {
         let (job, _, _) = inline_job(line, &[], 15.0, theme::palette().text, false);
         assert_eq!(at(&job, "bold").font_id.family, FontFamily::Proportional);
         assert!(at(&job, "bold").extra_letter_spacing > 0.0 && at(&job, "it").italics);
+    }
+
+    fn icon_scope(max_width: f32) -> InlinePictures {
+        InlinePictures::set([("icon.png".to_string(), InlinePicture { path: PathBuf::from("/vault/icon.png"), size: Vec2::new(40.0, 30.0), texture: None })].into(), max_width)
+    }
+
+    fn embed_links(line: &str) -> Vec<(LinkSpan, bool)> {
+        markdown::find_links(line).into_iter().map(|l| (l, true)).collect()
+    }
+
+    // spec: EDIT-114
+    #[test]
+    fn edit_114_inline_pictures_hide_the_link_text_and_keep_room_for_the_picture() {
+        let line = "an icon ![[icon.png]] here";
+        let links = embed_links(line);
+        let _scope = icon_scope(500.0);
+        let (job, spans, _, _) = inline_painted(line, &links, 14.0, theme::palette().text, false);
+        let hidden: Vec<_> = job.sections.iter().filter(|s| crate::math::paint::is_hidden_formula(&s.format)).collect();
+        assert_eq!(hidden.len(), 2, "the link text is two hidden sections: {:?}", job.sections);
+        let text = |s: &egui::text::LayoutSection| &job.text[s.byte_range.start.0..s.byte_range.end.0];
+        assert_eq!((text(hidden[0]), text(hidden[1])), ("i", "con.png"));
+        // the room is the picture's width at 0.9 of the line (1.5 text sizes) of 14 points: 40 x 30 px
+        let room = 14.0 * 1.5 * PICTURE_HEIGHT * 40.0 / 30.0;
+        assert_eq!((hidden[0].leading_space, hidden[1].leading_space), (0.0, room));
+        assert!(hidden.iter().all(|s| s.format.line_height == Some(21.0)), "the row is no taller for it");
+        assert_eq!(&job.text[spans[0].0.clone()], "icon.png", "the link still has its span");
+        assert!(spans[0].1.embed);
+        // the other text is as it was
+        assert!(job.text.starts_with("an icon ") && job.text.ends_with(" here"));
+        // a link that is no embed, and an embed of something else, are link text
+        let (job, ..) = inline_painted("a [[icon.png]] b ![[other.png]] c", &embed_links("a [[icon.png]] b ![[other.png]] c"), 14.0, theme::palette().text, false);
+        assert!(job.sections.iter().all(|s| !crate::math::paint::is_hidden_formula(&s.format) && s.leading_space == 0.0));
+    }
+
+    // spec: EDIT-114
+    #[test]
+    fn edit_114_a_wide_picture_is_scaled_down_to_the_width_and_a_short_name_keeps_its_room() {
+        let wide = |max| {
+            let _scope = InlinePictures::set([("w.png".to_string(), InlinePicture { path: PathBuf::new(), size: Vec2::new(1000.0, 10.0), texture: None })].into(), max);
+            let line = "x ![[w.png|q]] y";
+            let (job, ..) = inline_painted(line, &embed_links(line), 14.0, theme::palette().text, false);
+            let hidden: Vec<_> = job.sections.iter().filter(|s| crate::math::paint::is_hidden_formula(&s.format)).map(|s| (job.text[s.byte_range.start.0..s.byte_range.end.0].to_string(), s.leading_space)).collect();
+            hidden
+        };
+        assert_eq!(wide(80.0), [("q".to_string(), 0.0), ("_".to_string(), 80.0)], "never wider than the line; one character is padded to two");
+        let size = inline_picture_size(Vec2::new(1000.0, 10.0), 21.0, 80.0);
+        assert!((size.x / size.y - 100.0).abs() < 0.01 && size.x == 80.0, "proportions kept: {size:?}");
+        assert_eq!(inline_picture_size(Vec2::new(30.0, 30.0), 20.0, 500.0), Vec2::splat(18.0), "0.9 of the line, square");
+        let blank = {
+            let _scope = icon_scope(500.0);
+            let line = "x ![[icon.png|a b]] y";
+            let (job, ..) = inline_painted(line, &embed_links(line), 14.0, theme::palette().text, false);
+            job.sections.iter().filter(|s| crate::math::paint::is_hidden_formula(&s.format)).map(|s| job.text[s.byte_range.start.0..s.byte_range.end.0].to_string()).collect::<Vec<_>>()
+        };
+        assert_eq!(blank, ["a", "_b"], "a blank is no place to break the line");
+    }
+
+    // spec: EDIT-114
+    #[test]
+    fn edit_114_without_a_scope_an_embed_in_a_line_is_its_link_text() {
+        let line = "an icon ![[icon.png]] here";
+        let links = embed_links(line);
+        let plain = |links: &[(LinkSpan, bool)]| {
+            let (job, spans, ..) = inline_painted(line, links, 14.0, theme::palette().text, false);
+            assert!(job.text.contains("icon.png") && job.sections.iter().all(|s| !crate::math::paint::is_hidden_formula(&s.format) && s.leading_space == 0.0), "link text, no room: {:?}", job.sections);
+            assert_eq!(spans.len(), 1);
+        };
+        plain(&links);
+        // the scope ends with its guard, and the one before it comes back
+        {
+            let _outer = icon_scope(500.0);
+            assert!(inline_picture("icon.png").is_some());
+            {
+                let _inner = InlinePictures::set(HashMap::new(), 10.0);
+                assert!(inline_picture("icon.png").is_none());
+            }
+            assert_eq!(inline_picture("icon.png").map(|(_, max)| max), Some(500.0));
+        }
+        assert!(inline_picture("icon.png").is_none());
+        plain(&links);
+    }
+
+    // spec: EDIT-114
+    #[test]
+    fn edit_114_an_embed_alone_on_its_line_is_no_picture_in_a_line() {
+        let t = "![[a.png]]\n\ntext ![[a.png]]\n\n - ![[b.png]]\n  ![[c.png|x]]  \n";
+        let links = markdown::find_links(t);
+        let in_line: Vec<bool> = links.iter().map(|l| embed_is_in_a_line(t, &l.range)).collect();
+        assert_eq!(in_line, [false, true, true, false]);
     }
 }

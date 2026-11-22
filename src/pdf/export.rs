@@ -494,27 +494,41 @@ pub(super) struct Piece {
     jump: Option<String>,
     /// a typeset formula that takes the place of the text (PDF-012)
     math: Option<std::sync::Arc<crate::math::Formula>>,
+    /// a picture that takes the place of the text (PDF-030)
+    picture: Option<LinePicture>,
+}
+
+/// A picture inside a line (PDF-030): the image of the document, its size in points and how far
+/// its bottom is below the baseline of the line.
+#[derive(Clone)]
+struct LinePicture {
+    image: usize,
+    w: f32,
+    h: f32,
+    drop: f32,
 }
 
 impl Piece {
     /// Plain sans text of a colour, bold or not.
     pub(super) fn plain(text: &str, size: f32, color: Rgba, bold: bool) -> Piece {
-        Piece { text: text.to_string(), kind: FontKind::Sans, size, color, bg: None, italic: false, bold, underline: false, strike: false, link: None, script: 0, jump: None, math: None }
+        Piece { text: text.to_string(), kind: FontKind::Sans, size, color, bg: None, italic: false, bold, underline: false, strike: false, link: None, script: 0, jump: None, math: None, picture: None }
     }
 }
 
 fn piece_width(p: &Piece) -> f32 {
-    match &p.math {
-        Some(f) => f.layout.width,
-        None => crate::pdf::write::text_width(p.kind, p.size, &p.text),
+    match (&p.math, &p.picture) {
+        (Some(f), _) => f.layout.width,
+        (_, Some(pic)) => pic.w,
+        _ => crate::pdf::write::text_width(p.kind, p.size, &p.text),
     }
 }
 
-/// The width of a piece without the blanks at its end (a formula has none).
+/// The width of a piece without the blanks at its end (a formula and a picture have none).
 fn trimmed_width(p: &Piece) -> f32 {
-    match &p.math {
-        Some(f) => f.layout.width,
-        None => crate::pdf::write::text_width(p.kind, p.size, p.text.trim_end()),
+    match (&p.math, &p.picture) {
+        (Some(f), _) => f.layout.width,
+        (_, Some(pic)) => pic.w,
+        _ => crate::pdf::write::text_width(p.kind, p.size, p.text.trim_end()),
     }
 }
 
@@ -523,8 +537,8 @@ pub(super) fn wrap_pieces(pieces: &[Piece], avail: f32) -> Vec<Vec<Piece>> {
     // split into words (keeping the trailing spaces with each word)
     let mut words: Vec<Piece> = Vec::new();
     for p in pieces {
-        if p.math.is_some() {
-            // a formula is one word
+        if p.math.is_some() || p.picture.is_some() {
+            // a formula and a picture are one word
             words.push(p.clone());
             continue;
         }
@@ -550,7 +564,12 @@ pub(super) fn wrap_pieces(pieces: &[Piece], avail: f32) -> Vec<Vec<Piece>> {
     let width = piece_width;
     let mut lines: Vec<Vec<Piece>> = vec![vec![]];
     let mut line_w = 0.0;
-    for wd in words {
+    for mut wd in words {
+        if let Some(pic) = wd.picture.as_mut().filter(|pic| pic.w > avail) {
+            // a picture is never wider than its line: scaled down with its proportions (PDF-030)
+            let k = avail / pic.w;
+            (pic.w, pic.h) = (pic.w * k, pic.h * k);
+        }
         if wd.text == "\n" {
             lines.push(vec![]);
             line_w = 0.0;
@@ -560,11 +579,11 @@ pub(super) fn wrap_pieces(pieces: &[Piece], avail: f32) -> Vec<Vec<Piece>> {
         if line_w + ww > avail && !lines.last().unwrap().is_empty() {
             lines.push(vec![]);
             line_w = 0.0;
-            if wd.text.trim().is_empty() {
+            if wd.text.trim().is_empty() && wd.math.is_none() && wd.picture.is_none() {
                 continue;
             }
         }
-        if ww > avail && wd.math.is_none() {
+        if ww > avail && wd.math.is_none() && wd.picture.is_none() {
             // a very long word: break it by characters
             let mut part = String::new();
             for c in wd.text.chars() {
@@ -668,6 +687,8 @@ pub(super) struct Writer<'a> {
     pub(super) running: Option<String>,
     /// the links to footnote definitions drawn so far: page, the box and the label (PDF-011)
     pub(super) jumps: Vec<(usize, [f32; 4], String)>,
+    /// the pictures drawn inside lines by file: their image of the document and size in pixels (PDF-030); none for one that cannot be read
+    inline_images: HashMap<PathBuf, Option<(usize, Vec2)>>,
 }
 
 impl<'a> Writer<'a> {
@@ -676,7 +697,7 @@ impl<'a> Writer<'a> {
         let mut doc = Doc::new(title);
         let page = doc.add_page(w, h);
         let [top, right, bottom, left] = opts.margins();
-        Writer { doc, opts, w, h, top, right, bottom, left, page, y: top, members: None, book_links: vec![], heads: vec![PageHead::default()], running: None, jumps: Vec::new() }
+        Writer { doc, opts, w, h, top, right, bottom, left, page, y: top, members: None, book_links: vec![], heads: vec![PageHead::default()], running: None, jumps: Vec::new(), inline_images: HashMap::new() }
     }
     pub(super) fn cw(&self) -> f32 {
         self.w - self.left - self.right
@@ -711,8 +732,22 @@ impl<'a> Writer<'a> {
         if self.y > self.top + 0.5 {
             self.y += base * 0.8;
         }
-        let head =
-            vec![Piece { text: "Contents".into(), kind: self.opts.font, size: base * 1.5, color: Rgba(0, 0, 0, 255), bg: None, italic: false, bold: true, underline: false, strike: false, link: None, script: 0, jump: None, math: None }];
+        let head = vec![Piece {
+            text: "Contents".into(),
+            kind: self.opts.font,
+            size: base * 1.5,
+            color: Rgba(0, 0, 0, 255),
+            bg: None,
+            italic: false,
+            bold: true,
+            underline: false,
+            strike: false,
+            link: None,
+            script: 0,
+            jump: None,
+            math: None,
+            picture: None,
+        }];
         let (x, cw) = (self.left, self.cw());
         self.paragraph(&head, x, cw);
         self.y += base * 0.6;
@@ -927,6 +962,9 @@ impl<'a> Writer<'a> {
         // the footnotes (PDF-011): a reference with a definition is a mark that links to it
         let notes = markdown::find_footnotes(text);
         let _defined = markdown::DefinedFootnotes::set(notes.defined());
+        // the pictures that stand inside lines are drawn there (PDF-030)
+        let inline = if opts.embeds { self.inline_pictures(vault, rel, text) } else { HashMap::new() };
+        let _pictures = crate::reader::InlinePictures::set(inline, f32::INFINITY);
         let mut footnote_places: HashMap<String, Dest> = HashMap::new();
         let first_jump = self.jumps.len();
         // the page-break markers (PDF-020)
@@ -1130,6 +1168,7 @@ impl<'a> Writer<'a> {
                             script: 0,
                             jump: None,
                             math: None,
+                            picture: None,
                         },
                     );
                 }
@@ -1205,6 +1244,17 @@ impl<'a> Writer<'a> {
         places
     }
 
+    /// The pictures of `text` that stand inside a line and can be read: each is made an image of
+    /// the document once (PDF-030). The others stay their link text.
+    fn inline_pictures(&mut self, vault: &Vault, rel: &Path, text: &str) -> HashMap<String, crate::reader::InlinePicture> {
+        let links = Self::links_of(vault, rel, text);
+        let (doc, images) = (&mut self.doc, &mut self.inline_images);
+        crate::reader::pictures_in_lines(text, &links, vault, rel, |abs| {
+            let known = images.entry(abs.to_path_buf()).or_insert_with(|| image::open(abs).ok().map(|img| (doc.add_image(pdf_image(&img.to_rgba8())), Vec2::new(img.width() as f32, img.height() as f32))));
+            known.map(|(_, size)| (size, None))
+        })
+    }
+
     pub(super) fn line_size(&self, line: &[Piece]) -> f32 {
         line.iter().map(|p| p.size).fold(self.opts.font_pt, f32::max)
     }
@@ -1240,6 +1290,11 @@ impl<'a> Writer<'a> {
             let pw = piece_width(p);
             if let Some(f) = &p.math {
                 self.p().math(&f.layout, x, base, p.color);
+                x += pw;
+                continue;
+            }
+            if let Some(pic) = &p.picture {
+                self.p().image(pic.image, x, base + pic.drop - pic.h, pic.w, pic.h);
                 x += pw;
                 continue;
             }
@@ -1317,6 +1372,23 @@ impl<'a> Writer<'a> {
         for s in &job.sections {
             let r = s.byte_range.start.0..s.byte_range.end.0;
             let f = &s.format;
+            // a picture inside the line: one piece for the whole link, in place of its hidden text (PDF-030)
+            if let Some((sr, pic)) = spans.iter().find(|(sr, l, _)| l.embed && sr.start <= r.start && r.end <= sr.end).and_then(|(sr, l, _)| crate::reader::inline_picture(&l.target).map(|(pic, _)| (sr, pic))) {
+                if r.start == sr.start {
+                    if let Some(Some((image, natural))) = self.inline_images.get(&pic.path) {
+                        let text_size = f.line_height.unwrap_or(f.font_id.size * 1.5) / 1.5;
+                        let line = 1.45 * text_size * self.line_scale();
+                        let at = crate::reader::inline_picture_size(*natural, line, f32::INFINITY);
+                        out.push(Piece {
+                            text: String::new(),
+                            size: text_size,
+                            picture: Some(LinePicture { image: *image, w: at.x, h: at.y, drop: line * crate::reader::PICTURE_DROP }),
+                            ..Piece::plain("", text_size, Rgba(0, 0, 0, 255), false)
+                        });
+                    }
+                }
+                continue;
+            }
             // a formula that was typeset: drawn in place of its TeX (PDF-012)
             if let Some((m, done)) = maths.iter().find_map(|m| m.formula.as_ref().ok().filter(|_| m.range.start <= r.start && r.end <= m.range.end).map(|d| (m, d))) {
                 // the hidden TeX is two sections: the formula is drawn in place of the first
@@ -1337,6 +1409,7 @@ impl<'a> Writer<'a> {
                     script: 0,
                     jump: None,
                     math: Some(done.clone()),
+                    picture: None,
                 });
                 continue;
             }
@@ -1386,6 +1459,7 @@ impl<'a> Writer<'a> {
                     _ => None,
                 }),
                 math: None,
+                picture: None,
             });
         }
         out
@@ -1590,7 +1664,22 @@ fn export_note_in_shale(vault: &Vault, rel: &Path, text: &str, opts: &ExportOpti
     // a first heading `# Title` that says the same as the title makes the title a second print of it (PDF-008)
     let said_by_heading = heads.first().is_some_and(|(_, level, title, _)| *level == 1 && markdown::heading_plain(title).to_lowercase() == markdown::heading_plain(&name).to_lowercase());
     if opts.title && !said_by_heading {
-        let pieces = vec![Piece { text: name.clone(), kind: opts.font, size: base * 2.0, color: Rgba(0, 0, 0, 255), bg: None, italic: false, bold: true, underline: false, strike: false, link: None, script: 0, jump: None, math: None }];
+        let pieces = vec![Piece {
+            text: name.clone(),
+            kind: opts.font,
+            size: base * 2.0,
+            color: Rgba(0, 0, 0, 255),
+            bg: None,
+            italic: false,
+            bold: true,
+            underline: false,
+            strike: false,
+            link: None,
+            script: 0,
+            jump: None,
+            math: None,
+            picture: None,
+        }];
         let x = w.left;
         let cw = w.cw();
         w.paragraph(&pieces, x, cw);
@@ -2761,6 +2850,162 @@ pub(crate) mod tests {
         let y = page_h - y_of(&c, "one");
         let (l, r) = ink_columns(&page, y - 14.0..y + 8.0).unwrap();
         assert!(ink(&page, (l + (r - l) / 2.0 + 2.0)..r - 2.0, y - 12.0..y + 6.0) > 15, "the formula is drawn in the second cell: {l} {r}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-012
+    #[test]
+    fn a_formula_that_wraps_to_the_start_of_a_line_is_still_drawn() {
+        let (v, d) = vault();
+        let glyphs = |n: usize| {
+            let bytes = export_note(&v, Path::new("Welcome.md"), &format!("{}$x^2+y$ end\n", "word ".repeat(n)), &ExportOptions { title: false, toc: false, ..ExportOptions::for_note() }).unwrap();
+            contents(&bytes).matches(" f Q").count()
+        };
+        let drawn: std::collections::BTreeSet<usize> = (20..60).map(glyphs).collect();
+        assert_eq!(drawn.len(), 1, "the formula is there wherever the line breaks: {drawn:?}");
+        assert!(drawn.into_iter().all(|n| n > 0));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // ---------------------------------------------------------------- a picture inside a line (PDF-030)
+
+    /// The images drawn on the pages of `bytes`: (width, height, x, y of the bottom edge from the page's bottom), in points.
+    fn image_boxes(bytes: &[u8]) -> Vec<[f32; 4]> {
+        contents(bytes)
+            .lines()
+            .filter(|l| l.starts_with("q ") && l.contains(" cm /Im"))
+            .map(|l| {
+                let n: Vec<f32> = l.split_whitespace().skip(1).take(6).filter_map(|v| v.parse().ok()).collect();
+                [n[0], n[3], n[4], n[5]]
+            })
+            .collect()
+    }
+
+    fn images_in_file(bytes: &[u8]) -> usize {
+        String::from_utf8_lossy(bytes).matches("/Subtype /Image").count()
+    }
+
+    fn export_in_line(v: &Vault, text: &str) -> Vec<u8> {
+        export_note(v, Path::new("Welcome.md"), text, &ExportOptions { title: false, toc: false, ..ExportOptions::for_note() }).unwrap()
+    }
+
+    // spec: PDF-030
+    #[test]
+    fn pdf_030_a_picture_inside_a_line_is_drawn_in_the_line_at_the_height_of_its_text() {
+        let (v, d) = media_vault();
+        let o = ExportOptions::for_note();
+        let line = 1.45 * o.font_pt;
+        let bytes = export_in_line(&v, "an icon ![[pic.png]] here\n\nnext line\n");
+        let c = page_streams(&bytes).remove(0);
+        let boxes = image_boxes(&bytes);
+        assert_eq!(boxes.len(), 1, "one picture: {boxes:?}");
+        let [w, h, x, bottom] = boxes[0];
+        near(h, 0.9 * line, "0.9 of the line high");
+        near(w, 0.9 * line * 40.0 / 30.0, "as wide as its proportions say");
+        let base = y_of(&c, "icon ");
+        near(base - bottom, 0.2 * line, "its bottom is 0.2 of the line below the baseline");
+        // between the words around it
+        let after = crate::pdf::write::text_width(o.font, o.font_pt, "icon ");
+        assert!((x - (x_of(&c, "icon ") + after)).abs() < 0.6, "right after 'icon ': {x}");
+        assert!((x_of(&c, "here") - (x + w)).abs() < o.font_pt * 0.6, "the text goes on after it: {} {}", x_of(&c, "here"), x + w);
+        assert!(!c.contains(&hex("pic.png")) && !c.contains(&hex("![[")), "the link text is not printed");
+        // the lines are as far apart as without the picture
+        let plain = page_streams(&export_in_line(&v, "an icon x here\n\nnext line\n")).remove(0);
+        near(y_of(&c, "an ") - y_of(&c, "next "), y_of(&plain, "an ") - y_of(&plain, "next "), "the line spacing");
+        // with the note's own line spacing
+        let spaced = |t: &str| {
+            let b = export_note(&v, Path::new("Welcome.md"), &format!("---\nprint-line-spacing: 2\n---\n{t}"), &ExportOptions { title: false, toc: false, ..ExportOptions::for_note() }).unwrap();
+            (image_boxes(&b), page_streams(&b).remove(0))
+        };
+        let (boxes, c2) = spaced("an icon ![[pic.png]] here\n\nnext line\n");
+        let (_, plain2) = spaced("an icon x here\n\nnext line\n");
+        near(y_of(&c2, "an ") - y_of(&c2, "next "), y_of(&plain2, "an ") - y_of(&plain2, "next "), "the spaced line is no taller either");
+        assert!(boxes[0][1] > h * 1.2, "the picture follows the stretched line: {} {h}", boxes[0][1]);
+        // a heading is as big as its text
+        let head = image_boxes(&export_in_line(&v, "# Big ![[pic.png]] head\n"));
+        near(head[0][1], h * crate::editor::heading_scale(1), "a heading's picture is as high as its line");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-030
+    #[test]
+    fn pdf_030_the_same_picture_twice_is_one_image_and_a_wide_one_is_scaled_to_the_line() {
+        let (v, d) = media_vault();
+        image::RgbaImage::from_pixel(3000, 30, image::Rgba([20, 20, 230, 255])).save(d.join("wide.png")).unwrap();
+        let mut v = v;
+        v.rescan();
+        let once = export_in_line(&v, "a ![[pic.png]] b\n");
+        let twice = export_in_line(&v, "a ![[pic.png]] b ![[pic.png]] c\n\n- d ![[pic.png]] e\n");
+        assert_eq!((image_boxes(&once).len(), image_boxes(&twice).len()), (1, 3));
+        assert_eq!(images_in_file(&once), images_in_file(&twice), "one image of the file in the document however often it is drawn");
+        // wider than the text: scaled down to it with the proportions kept
+        let bytes = export_in_line(&v, "see ![[wide.png]] there\n");
+        let [w, h, x, _] = image_boxes(&bytes)[0];
+        near(w, text_width(), "as wide as the line");
+        near(w / h, 100.0, "with its proportions");
+        assert!(x >= ExportOptions::for_note().margins()[3] - 0.5, "from the margin on: {x}");
+        // in a list item the line is shorter by the indent
+        let [w, ..] = image_boxes(&export_in_line(&v, "- see ![[wide.png]] there\n"))[0];
+        assert!(w < text_width() - 10.0 && w > text_width() * 0.8, "narrower than the text: {w}");
+        // a picture that wraps to a line of its own is not lost
+        for n in 30..60 {
+            let boxes = image_boxes(&export_in_line(&v, &format!("{}![[pic.png]] end\n", "word ".repeat(n))));
+            assert_eq!(boxes.len(), 1, "{n} words before it");
+        }
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-030, PDF-004
+    #[test]
+    fn pdf_030_what_cannot_be_drawn_in_the_line_keeps_its_link_text() {
+        let (v, d) = media_vault();
+        std::fs::write(v.abs(Path::new("broken.png")), b"no picture").unwrap();
+        let mut v = v;
+        v.rescan();
+        for link in ["![[nothing.png]]", "![[broken.png]]", "![[Sketch.excalidraw]]", "![[doc.pdf]]", "![[tone.wav]]"] {
+            let bytes = export_in_line(&v, &format!("before {link} after\n"));
+            let c = contents(&bytes);
+            let name = link.trim_start_matches("![[").trim_end_matches("]]");
+            assert!(!c.contains("/Im"), "{link}: no image");
+            assert!(c.contains(&hex(name)), "{link}: its link text");
+        }
+        // with the embeds box off a picture is its link text too
+        let off = ExportOptions { embeds: false, title: false, toc: false, ..ExportOptions::for_note() };
+        let c = contents(&export_note(&v, Path::new("Welcome.md"), "before ![[pic.png]] after\n", &off).unwrap());
+        assert!(!c.contains("/Im") && c.contains(&hex("pic.png")));
+        // a picture alone on its line is a thumbnail with a caption as before (PDF-004)
+        let (bytes, c) = export_text(&v, "![[pic.png]]\n");
+        assert_eq!(image_boxes(&bytes).len(), 1);
+        assert!(c.contains(&hex("pic.png")), "its caption");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-030
+    #[test]
+    fn pdf_030_a_picture_in_a_table_cell_or_a_list_is_drawn_in_its_line() {
+        let (v, d) = media_vault();
+        let o = ExportOptions::for_note();
+        let bytes = export_in_line(&v, "| A | B |\n|---|---|\n| one | go ![[pic.png]] on |\n");
+        let c = page_streams(&bytes).remove(0);
+        let boxes = image_boxes(&bytes);
+        assert_eq!(boxes.len(), 1, "{boxes:?}");
+        near(boxes[0][1], 0.9 * 1.45 * o.font_pt, "0.9 of the line of the cell");
+        near(y_of(&c, "go ") - boxes[0][3], 0.2 * 1.45 * o.font_pt, "lowered below the baseline of the cell's text");
+        assert!(boxes[0][2] > x_of(&c, "one") + 10.0, "in the second column");
+        assert!(!c.contains(&hex("pic.png")));
+        // a list item, a task and a quote
+        for line in ["- item ![[pic.png]] end", "1. item ![[pic.png]] end", "- [ ] item ![[pic.png]] end", "> item ![[pic.png]] end"] {
+            let bytes = export_in_line(&v, &format!("{line}\n"));
+            let boxes = image_boxes(&bytes);
+            assert_eq!(boxes.len(), 1, "{line}");
+            near(boxes[0][1], 0.9 * 1.45 * o.font_pt, line);
+            assert!(!contents(&bytes).contains(&hex("pic.png")), "{line}");
+        }
+        // in a footnote
+        let bytes = export_in_line(&v, "text[^1]\n\n[^1]: note ![[pic.png]] end\n");
+        let boxes = image_boxes(&bytes);
+        assert_eq!(boxes.len(), 1);
+        near(boxes[0][1], 0.9 * 1.45 * o.font_pt * crate::editor::FOOTNOTE_TEXT, "a footnote's text is smaller");
         let _ = std::fs::remove_dir_all(&d);
     }
 

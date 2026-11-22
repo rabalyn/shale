@@ -685,13 +685,14 @@ pub fn paint(painter: &egui::Painter, origin: Pos2, laid: &Laid) {
             let cell_painter = painter.with_clip_rect(rect);
             let anchor = laid.anchor(origin, r, c);
             cell_painter.galley(anchor, cell.galley.clone(), Color32::PLACEHOLDER);
-            // the formulas of the cell, in the room their hidden TeX has (EDIT-048)
+            // the formulas and the pictures of the cell, in the room their hidden text has (EDIT-048, EDIT-114)
             for m in &cell.maths {
                 if let Ok(f) = &m.formula {
                     let at = markdown::byte_to_char(&cell.galley.job.text, m.range.start.min(cell.galley.job.text.len()));
                     crate::math::paint::paint_in_galley(&cell_painter, &cell.galley, anchor, at, f, m.color);
                 }
             }
+            crate::reader::paint_pictures(&cell_painter, &cell.galley, anchor, &cell.spans);
             x += laid.widths[c];
             if c + 1 < row.len() {
                 painter.line_segment([Pos2::new(x, origin.y), Pos2::new(x, origin.y + size.y)], line);
