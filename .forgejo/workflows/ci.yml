@@ -125,6 +125,14 @@ jobs:
           echo "last published release: ${SHALE_PREV_PUBLISHED:-none}"
           sh .github/check-release.sh "${GITHUB_REF_NAME#v}"
 
+      # jq: the test of scripts/report-advisories.sh runs the script (BUILD-021), and the release script
+      # tests (scripts/test-release.sh) filter JSON with it, so this runs before them (#522)
+      - name: Libraries for the window (Wayland, X11, OpenGL) and jq
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends pkg-config libasound2-dev libwayland-dev libxkbcommon-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl-dev libegl-dev jq git-lfs ffmpeg >/dev/null
+
       - name: Test the release and commit checks
         run: |
           sh .github/test-check-release.sh
@@ -140,13 +148,6 @@ jobs:
         run: |
           sh .github/check-ai-notice.sh
           sh .github/test-check-ai-notice.sh
-
-      # jq: the test of scripts/report-advisories.sh runs the script (BUILD-021)
-      - name: Libraries for the window (Wayland, X11, OpenGL) and jq
-        run: |
-          apt-get update -qq
-          apt-get install -y -qq --no-install-recommends pkg-config libasound2-dev libwayland-dev libxkbcommon-dev \
-            libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl-dev libegl-dev jq git-lfs ffmpeg >/dev/null
 
       - name: Toolchain
         run: |
