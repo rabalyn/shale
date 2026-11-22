@@ -367,7 +367,7 @@ mod tests {
         assert!(items.is_empty() && notes[0].contains(".eml"));
         let _ = std::fs::remove_file(&p);
     }
-    // spec: IMP-014
+    // spec: IMP-014, DEV-012
     #[test]
     fn imp_014_a_uri_list_is_read_line_by_line() {
         let text = "# a comment\r\nfile:///tmp/a%20b.md\r\n\r\n  file://localhost/tmp/c.md  \nfile:///tmp/%C3%A4%C3%B6.md\nfile://otherhost/tmp/d.md\nhttps://example.org/x\nhttps://example.org/x\nimap-message://ada@mail/INBOX#1\nfile:///tmp/bad%zz.md\nfile:///tmp/end%41";

@@ -162,7 +162,7 @@ fn tex_env_slides_have_a_page_for_the_title_and_one_for_every_frame() {
     }
 }
 
-// spec: TEX-013, TEX-027
+// spec: TEX-013, TEX-027, DEV-028
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_a_letter_has_its_recipient_subject_and_text() {

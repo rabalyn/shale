@@ -27,6 +27,6 @@ How they work: [ADR-0001](../decisions/0001-spec-driven-development.md).
 - Tests that check a rule carry its ID in the name or a `// spec: ID` comment; a test checks that
   every such comment names an existing row (DEV-014, `tests/spec_refs.rs`).
 - The Test column of an `IS NOW` row names tests that exist (`file.rs::test_fn`, a `cargo test` filter or a script),
-  or starts with `process`, `CI` or `untested`; a test checks this (DEV-033, `tests/spec_refs.rs`).
+  or starts with `process`, `CI` or `untested`; a test checks this (DEV-033, `tests/spec_refs.rs`). A test a row names carries that row's ID in its name or in a `// spec: ID` comment above it (DEV-039; the exceptions of today are in `tests/spec_refs_allowlist.txt` and only shrink).
 - A `SHOULD BE` row with planned work names its GitHub issue (`#N`; `raba/shale#N` in older rows is the same number); open work is
   tracked in the issues, not in these files (FORGE-004, FORGE-007).

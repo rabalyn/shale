@@ -188,7 +188,7 @@ pub(super) fn opened(a: &[Action]) -> Vec<String> {
         .collect()
 }
 
-// spec: VAULT-023
+// spec: VAULT-023, NAV-005
 #[test]
 fn panel_quick_switcher_finds_opens_creates_and_closes() {
     let mut p = P::new("quick", &[]);

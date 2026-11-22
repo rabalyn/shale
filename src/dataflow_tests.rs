@@ -279,7 +279,7 @@ fn raw_flow(root: &str, children: Vec<Raw>) -> Raw {
     Raw::new(root, "sync", children)
 }
 
-// spec: DEV-026
+// spec: DEV-026, DEV-028
 #[test]
 fn dev_026_a_root_below_another_root_is_found() {
     let forest = canonical(&[raw_flow("flow.outer", vec![Raw::new("flow.outer.a", "imap", vec![raw_flow("flow.t", vec![leaf("flow.t.x", "store")])])])]);

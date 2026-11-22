@@ -451,7 +451,7 @@ mod tests {
         serde_json::to_value(c).unwrap()
     }
 
-    // spec: CFG-009
+    // spec: CFG-009, CFG-070
     #[test]
     fn cfg_009_every_key_of_the_file_has_a_description() {
         let (text, missing, keys) = render(&full());

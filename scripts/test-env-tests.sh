@@ -1,5 +1,5 @@
 #!/bin/bash
-# Tests the retry of `.forgejo/scripts/env-tests.sh tex-suite` (spec DEV-011, #327): a fake `cargo`
+# Tests the retry of `.forgejo/scripts/env-tests.sh tex-suite` (spec DEV-011, DEV-035, #327): a fake `cargo`
 # prints what each run of the tex_env suite says, a fake `tex-env.sh` records what is asked of it.
 #   bash scripts/test-env-tests.sh
 set -u

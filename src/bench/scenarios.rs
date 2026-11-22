@@ -633,7 +633,7 @@ mod tests {
         assert_eq!(Profile::parse("slow"), None);
     }
 
-    // spec: BUILD-028
+    // spec: BUILD-028, BUILD-031
     #[test]
     fn every_scenario_runs_or_says_why_it_is_skipped_on_tiny_data() {
         let _alone = runner::SERIAL.lock().unwrap_or_else(|e| e.into_inner());

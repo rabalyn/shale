@@ -1,5 +1,5 @@
 #!/bin/sh
-# Tests for check-coverage.sh (DEV-003): the ratchet's pass and fail cases.
+# Tests for check-coverage.sh (DEV-003, DEV-010): the ratchet's pass and fail cases.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d)

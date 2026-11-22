@@ -1,5 +1,5 @@
 //! Tests against the real CalDAV server of the local container environment
-//! (`tests/caldav-env/`, CALENV-001): Radicale behind TLS with a seeded user and calendars. They
+//! (`tests/caldav-env/`, CALENV-001, DEV-005, DEV-011): Radicale behind TLS with a seeded user and calendars. They
 //! are ignored unless asked for, because they need the containers:
 //!
 //! ```text
@@ -145,7 +145,7 @@ fn finish(store: &mut CalendarStore, job: &crate::calendar::store::Job, ids: &[&
     r
 }
 
-// spec: CALENV-002
+// spec: CALENV-002, DEV-005
 #[test]
 #[ignore = "needs the containers: tests/caldav-env/caldav-env.sh up"]
 fn caldav_env_discovers_and_loads_the_seeded_calendars() {
@@ -322,7 +322,7 @@ fn caldav_env_moves_an_event_to_another_calendar_and_deletes_it() {
     crate::dataflow::verify_flow(&forest, "caldav_move", &crate::dataflow::doc("caldav-edit.md"));
 }
 
-// spec: CALENV-002
+// spec: CALENV-002, DEV-028
 #[test]
 #[ignore = "needs the containers: tests/caldav-env/caldav-env.sh up"]
 fn caldav_env_a_change_on_the_server_meanwhile_is_not_overwritten() {
