@@ -254,9 +254,9 @@ Other options:
 
 - `--screenshot out.png` starts with a temporary demo vault, draws about 120 frames, saves a
   picture of the window and exits. Automated checks use it.
-- `--view tasks|graph|drawing|reading|calendar|mail|social|social-import|keybindings|data-usage` (with `--screenshot`) chooses which
+- `--view tasks|graph|drawing|reading|calendar|mail|social|social-import|search|keybindings|data-usage` (with `--screenshot`) chooses which
   view to capture; `mail` uses a made-up mail store (no server, no real mail), `social` and
-  `social-import` made-up posts; `open:<file>` opens a file of the vault, `read-only:<file>.canvas`
+  `social-import` made-up posts; `search` the vault with the made-up mail and posts indexed, for the search windows; `open:<file>` opens a file of the vault, `read-only:<file>.canvas`
   shows a canvas without the question, and `convert:<file>.canvas` converts it first.
 - `--size 1360x840` (with `--screenshot`) sets the window size, and `--keys 'step|step|…'` scripts typing,
   keys and the mouse (`click:@Sync`, `rclick:347,21`, `drag:@Ideas>@Projects`, `waitfor:@Reply`; the
@@ -287,7 +287,7 @@ Text editing keys and vim keys are fixed.
 | Ctrl+N | New note |
 | Ctrl+O | Quick switcher (find or create a note) |
 | Ctrl+E | Switch between editing and reading view |
-| Ctrl+Shift+F | Search all notes |
+| Ctrl+Shift+F | Search notes, mail and posts |
 | Ctrl+H / Ctrl+L | Keyboard one place left / right: through the split panes in screen order, left of the first pane into the left sidebar, from there into the first pane (macOS: Cmd+Shift+H / Cmd+Shift+L, because Cmd+H hides the app) |
 | Ctrl+PageUp / Ctrl+PageDown | Previous / next tab (from the last tab on to the first), wherever the keyboard is (macOS: Cmd+Opt+← / Cmd+Opt+→) |
 | Ctrl+\ | Split right: open this tab in a new pane to the right (panes sit side by side, each with its own tabs) |
@@ -295,7 +295,8 @@ Text editing keys and vim keys are fixed.
 | Ctrl+Shift+W | Close the pane with all its tabs (macOS: Cmd+Shift+W) |
 | Ctrl+Shift+M | Mail view (its keys are listed below) |
 | Ctrl+Shift+B | File list with the keyboard in it: j / k (or ↓ / ↑) next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
-| ↓ or Enter in the search box | Browse the results: j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
+| ↓ or Enter in the search box | Browse the results (notes, mail and posts): j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K first hit of the next / previous file or group, Enter opens the hit, Esc back to the box |
+| Tab / Shift+Tab | In the search over everything (the sidebar search, in its box and while you browse the results, and the picker of Space f g): list only the next / previous source (Notes, Mail, Posts), then the default sources again. Not while the query starts with a prefix (`f:`, `m:`, `s:`). Both can be changed in Settings → Keybindings ("Search results", "List windows") |
 | Ctrl+S | Save now (notes also save automatically) |
 | Ctrl+W | Close tab |
 | Drag a tab | Reorder tabs; a marker shows where it lands |
@@ -313,7 +314,8 @@ Text editing keys and vim keys are fixed.
 | Space Tab | Vim-style editing, normal mode: back to the view this tab showed just before (note, calendar, Feeds, …); again: forward to this one |
 | Space … | A started key sequence (e.g. `Space f`) shows in the status bar and is dropped after 1.5 s without a key |
 | Space f f | Vim-style editing, normal mode: find a file by name (↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens it in this tab, Esc closes) |
-| Space f g | Vim-style editing, normal mode: search the text of notes, mail and posts (`*` and `?` are wildcards; results grouped with counts; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the hit where it belongs, Esc closes) |
+| Space f g | Vim-style editing, normal mode: search the text of notes, mail and posts (`*` and `?` are wildcards; `f:` `m:` `s:` at the start look in notes, mail or posts only; results grouped with counts; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the hit where it belongs, Esc closes) |
+| ↓ or Ctrl+J, ↑ or Ctrl+K, Enter, Esc | In a picker window (Space f f, Space f g), the quick switcher (Ctrl+O) and the font list: next line, previous line, open, close. The hint between the search field and the list shows the keys as they are bound now; all four can be changed in Settings → Keybindings ("List windows") |
 | Shift+K | Vim-style editing, normal mode: preview the link under the cursor (a note as in the reading view, a web page's title and text; press it again to move the keyboard into the preview: j / k or ↓ / ↑ scroll, Enter opens the link like `gt`, Ctrl+Enter opens it in a new pane on the right, Esc closes). Definable, e.g. as Space Space |
 | Ctrl+, | Settings |
 | Ctrl+Shift+D | Data usage: what Shale keeps on disk, and its caches |

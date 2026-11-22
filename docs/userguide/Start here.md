@@ -20,6 +20,7 @@ Writing and finding:
 - [[Editor]]: line numbers, Markdown preview, vim-style editing, lists.
 - [[Reading view]]: the note without the markup.
 - [[Search and pickers]]: find notes, text, mail and posts.
+- [[Search syntax]]: what you can type in a search, for notes, mail and posts.
 - [[Tabs]]: reorder, pin, come back later.
 - [[Tags and people]]: tags, tag suggestions and contact notes.
 - [[Sounds and videos]]: players for audio and video in your notes.

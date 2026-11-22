@@ -7,12 +7,12 @@ To regenerate it after a change: `SHALE_UPDATE_DATAFLOW=1 cargo test dataflow_va
 <!-- dataflow:begin vault_search -->
 ```mermaid
 sequenceDiagram
-    participant picker
+    participant search_view
     participant vault
     participant mail_index
     participant post_index
-    picker->>vault: search_notes
-    picker->>mail_index: search_mail
-    picker->>post_index: search_posts
+    search_view->>vault: search_notes
+    search_view->>mail_index: search_mail
+    search_view->>post_index: search_posts
 ```
 <!-- dataflow:end vault_search -->

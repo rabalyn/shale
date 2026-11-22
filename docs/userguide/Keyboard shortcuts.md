@@ -20,14 +20,15 @@ Text editing keys and vim keys are fixed.
 | F1 | Open the user guide (built into Shale, unpacked into its data folder and opened as a vault) |
 | Ctrl+S | Save now (notes also save automatically) |
 | Ctrl+W | Close tab |
-| Ctrl+Shift+F | Search all notes |
+| Ctrl+Shift+F | Search notes, mail and posts |
 | Ctrl+H / Ctrl+L | Keyboard one place left / right: through the split panes in screen order, left of the first pane into the left sidebar, from there into the first pane (macOS: Cmd+Shift+H / Cmd+Shift+L, because Cmd+H hides the app) |
 | Ctrl+PageUp / Ctrl+PageDown | Previous / next tab (from the last tab on to the first), wherever the keyboard is (macOS: Cmd+Opt+← / Cmd+Opt+→) |
 | Ctrl+\ | Split right: open this tab in a new pane to the right (panes sit side by side, each with its own tabs) |
 | F6 / Shift+F6 | Focus the next / previous pane |
 | Ctrl+Shift+W | Close the pane with all its tabs (macOS: Cmd+Shift+W) |
 | Ctrl+Shift+B | File list with the keyboard in it: j / k (or ↓ / ↑) next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
-| ↓ or Enter in the search box | Browse the results: j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
+| ↓ or Enter in the search box | Browse the results (notes, mail and posts): j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K first hit of the next / previous file or group, Enter opens the hit, Esc back to the box |
+| Tab / Shift+Tab | In the search over everything (the sidebar search, in its box and while you browse the results, and the picker of Space f g): list only the next / previous source (Notes, Mail, Posts), then the default sources again. Not while the query starts with a prefix (`f:`, `m:`, `s:`). Both can be changed in Settings → Keybindings ("Search results", "List windows") |
 | Ctrl+Shift+M | Mail view (its keys are listed below) |
 | Alt+← / Alt+→ | Back / forward (macOS: Cmd+[ / Cmd+], because Option+← / → move by word in text) |
 | Alt+B, Alt+I, Alt+S, Alt+H, Alt+C, Alt+Y, Alt+F, Alt+Shift+Y, Alt+Shift+F, Alt+E, Alt+U, Alt+O, Alt+T, Alt+Q, Alt+K, Alt+R, Alt+J, Alt+A, Alt+L, Alt+W, Alt+M, Alt+X | The buttons of the formatting toolbar of a note, each doing what a click on it does (the keyboard stays in the text and nothing is typed): Bold, Italic, Strikethrough, Highlight, Inline code, Highlight colour and Font colour (apply the current colour: the main part of the split button; Alt+Shift+Y and Alt+Shift+F open the palette, the ▾ part, where the digits 1 to 8 pick a swatch and 0 picks none, shown as ⇧Y and ⇧F while Alt is held), Heading level (opens its menu), Bullet list, Numbered list, Task, Quote, Code block, Horizontal rule, Table, Link to a note, Web link, Embed, Clear formatting. A key whose button is not there (reading view) or is greyed out (in a table cell) does nothing |
@@ -42,7 +43,8 @@ Text editing keys and vim keys are fixed.
 | Space Tab | Vim-style editing, normal mode: back to the view this tab showed just before (note, calendar, Feeds, …); again: forward to this one |
 | Space … | A started key sequence (e.g. `Space f`) shows in the status bar and is dropped after 1.5 s without a key |
 | Space f f | Vim-style editing, normal mode: find a file by name (↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens it in this tab, Esc closes) |
-| Space f g | Vim-style editing, normal mode: search the text of notes, mail and posts (`*` and `?` are wildcards; results grouped with counts; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the hit where it belongs, Esc closes) |
+| Space f g | Vim-style editing, normal mode: search the text of notes, mail and posts (`*` and `?` are wildcards; `f:` `m:` `s:` at the start look in notes, mail or posts only; results grouped with counts; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the hit where it belongs, Esc closes) |
+| ↓ or Ctrl+J, ↑ or Ctrl+K, Enter, Esc | In a picker window (Space f f, Space f g), the quick switcher (Ctrl+O) and the font list: next line, previous line, open, close. The hint between the search field and the list shows the keys as they are bound now; all four can be changed in Settings → Keybindings ("List windows"; a bare key must be an arrow, Enter, Esc or similar, as the field has the keyboard) |
 | Shift+K | Vim-style editing, normal mode: preview the link under the cursor (a note as in the reading view, a web page's title and text; press it again to move the keyboard into the preview: j / k or ↓ / ↑ scroll, Enter opens the link like `gt`, Ctrl+Enter opens it in a new pane on the right, Esc closes). Definable, e.g. as Space Space |
 | Alt+↑ / Alt+↓ | Move the current line |
 | Tab / Shift+Tab | Indent lists or change heading levels |

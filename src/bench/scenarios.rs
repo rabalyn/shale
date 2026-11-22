@@ -356,7 +356,22 @@ fn editor_layout_long(fx: &mut Fixtures) -> Body {
 fn search_sidebar_large(fx: &mut Fixtures) -> Body {
     let v = open(&fx.vault(Size::Large));
     Box::new(move || {
-        black_box(v.search("garden"));
+        black_box(crate::search_all::note_hits(&v, &crate::search_all::Query::sidebar("garden")));
+    })
+}
+
+/// What the sidebar does with the hits of a note search when it first draws them (NAV-060): the job of every hit, rendered.
+fn search_render_sidebar_large(fx: &mut Fixtures) -> Body {
+    let v = open(&fx.vault(Size::Large));
+    let hits = crate::search_all::note_hits(&v, &crate::search_all::Query::sidebar("garden"));
+    let mut n = 0u32;
+    Box::new(move || {
+        // a size that is a little different every time: a hit keeps its job for a look, so each round makes them again
+        n += 1;
+        let look = crate::search_render::Look { rendered: true, size: 12.5 + n as f32 * 0.001, raw_colour: crate::theme::palette().muted };
+        for h in &hits {
+            black_box(h.job(look));
+        }
     })
 }
 
@@ -364,7 +379,7 @@ fn search_sidebar_large(fx: &mut Fixtures) -> Body {
 fn search_all(fx: &mut Fixtures, query: &'static str) -> Body {
     let v = open(&fx.vault(Size::Large));
     Box::new(move || {
-        black_box(crate::search_all::note_hits(&v, query));
+        black_box(crate::search_all::note_hits(&v, &crate::search_all::Query::picker(query)));
     })
 }
 
@@ -472,6 +487,7 @@ fn core() -> Vec<Scenario> {
         p("editor.highlight.long", 20, true, editor_highlight_long),
         p("editor.layout.long", 10, false, editor_layout_long),
         p("search.sidebar.large", 10, true, search_sidebar_large),
+        p("search.render.sidebar.large", 10, false, search_render_sidebar_large),
         p("search.all.large", 10, false, |fx| search_all(fx, "qqqxz")),
         p("search.all.hit.large", 10, false, |fx| search_all(fx, "garden")),
         p("search.all.wild.large", 5, false, |fx| search_all(fx, "g*qqz")),

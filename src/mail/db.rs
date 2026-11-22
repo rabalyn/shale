@@ -853,7 +853,7 @@ pub fn missing_uids(c: &Connection, folder: i64, uidvalidity: u32) -> Result<Vec
 // ---------------------------------------------------------------- search text
 
 /// The fields a search term can be limited to: `from:anna`, `subject:"year end"`.
-const FIELDS: [(&str, &str); 5] = [("from", "from_addr"), ("to", "to_addr"), ("cc", "cc_addr"), ("subject", "subject"), ("body", "body")];
+pub(crate) const FIELDS: [(&str, &str); 5] = [("from", "from_addr"), ("to", "to_addr"), ("cc", "cc_addr"), ("subject", "subject"), ("body", "body")];
 /// At most this many terms and characters of a search are used.
 const MAX_TERMS: usize = 24;
 const MAX_QUERY_CHARS: usize = 512;

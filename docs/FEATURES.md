@@ -393,7 +393,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   under the keys says which action they would clash with.
 - Ctrl+PageUp / Ctrl+PageDown (macOS: Cmd+Opt+← / Cmd+Opt+→) switch to the previous / next tab, also from the file list and from
   mail, calendar and Feeds; after the last tab comes the first.
-- In the search results j / k go from hit to hit and Ctrl+J / Ctrl+K from file to file.
+- In the search results j / k go from hit to hit and Ctrl+J / Ctrl+K from file to file (in the mail and posts groups from group to group).
 - **Markdown preview** (Settings → Editor, or the eye icon in the top right of the editor;
   off by default): every line is drawn rendered, with headings at their size, bold, italic,
   strike and code without their markers, links as just their text, and only the line the cursor
@@ -440,6 +440,28 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   leader key of its own list in the Keybindings tab; **Space f f** opens a window to find a file by its
   name (it never creates a note, unlike Ctrl+O); **Space f g** searches the text of notes, mail
   and posts in one list grouped by source (`*` and `?` are wildcards); the vim keys themselves cannot be rebound.
+- **Choose the sources of the search** (the sidebar search, Ctrl+Shift+F, and `Space f g`): a prefix at the start of
+  the query limits it (`f:` notes, `m:` mail, `s:` posts, also combined: `fm:`), and a button per source with its
+  count (**Notes 12 · Mail 20+ · Posts 4**, a switched-off source is counted, in grey) lists only that source on a
+  click (again: back), or goes in and out of the default selection on Shift+click. Tab / Shift+Tab step through the
+  sources. The default selection is saved; the letters are in Settings → Search.
+- **Search syntax** (user guide: *Search syntax*): the sources read the same text differently. **Notes** look for the whole
+  query as one piece of text inside a line, ignoring case, with `*` (any characters) and `?` (one character) as wildcards.
+  **Mail and posts** (full-text index) need all the words in any order, ignoring case and accents; `"phrases"` work, a
+  wildcard only makes the word a prefix (`mee?ing` is `mee*`) and a word that starts with one is dropped; `AND`, `OR`, `NOT`
+  and `-` are plain text. Fields limit a word in mail (`from:` `to:` `cc:` `subject:` `body:`) and posts (`from:` `text:`
+  `body:` `in:` `context:` `link:` `date:`) and are plain text in notes. The mail view's own search has the words,
+  phrases and fields, without wildcards.
+  ![The search window of Space f g: notes with the found text marked, mail and posts under them, and the count buttons](userguide/z_media/screenshots/picker-search.png)
+  ![The search in the sidebar with the same groups](userguide/z_media/screenshots/sidebar-search.png)
+- **Hits of notes are shown rendered** (#483): a found line is drawn with the editor's own inline rendering (bold, italic,
+  strikethrough, highlight, code, links and wiki links by their shown text, tags in their colour, a task as `[ ]` / `[x]`,
+  a list item with a bullet, a heading without its `#`), in the picker and the sidebar, and the **found text is marked** in
+  raw and rendered lines (also a wildcard match, over its whole length). Mail and post hits stay plain text with the words
+  of the query marked. Settings → Search → "Hits of notes" (`search.hit_display`): follow the editor (default: rendered with
+  the Markdown preview on or the note in view in the reading view, raw otherwise), raw, or rendered. Each hit's rendering
+  is made once and kept, a hit shows at most 120 characters.
+  ![Settings → Search: the sources, the look of the hits of notes and the prefix letters](userguide/z_media/screenshots/settings-search.png)
 
 ## Drawings
 
@@ -892,7 +914,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 - **Search the posts you loaded**: every post a feed brings in is kept in a search index
   (`~/.local/share/shale/social-posts.db`, the same for every vault: text, author, date, links
   and the thread around it). The sidebar search (Ctrl+Shift+F) lists the posts that match under
-  the notes; click one to open a new Feeds tab scrolled to it, also when the feed no longer has
+  the notes and mail (as `Space f g` does); click one to open a new Feeds tab scrolled to it, also when the feed no longer has
   it. `from:ada`, `text:`, `in:` (quote, link card, the post answered, who boosted), `link:` and
   `date:2026-11` limit a word to one part. At most 10 000 posts per account and one year are
   kept; removing an account removes its posts. Posts you save to the vault (the thread and the
@@ -1163,14 +1185,15 @@ Text editing keys and vim keys are fixed.
 | F1 | Open the user guide (built into Shale, unpacked into its data folder and opened as a vault) |
 | Ctrl+S | Save now (notes also save automatically) |
 | Ctrl+W | Close tab |
-| Ctrl+Shift+F | Search all notes |
+| Ctrl+Shift+F | Search notes, mail and posts |
 | Ctrl+H / Ctrl+L | Keyboard one place left / right: through the split panes in screen order, left of the first pane into the left sidebar, from there into the first pane (macOS: Cmd+Shift+H / Cmd+Shift+L, because Cmd+H hides the app) |
 | Ctrl+PageUp / Ctrl+PageDown | Previous / next tab (from the last tab on to the first), wherever the keyboard is (macOS: Cmd+Opt+← / Cmd+Opt+→) |
 | Ctrl+\ | Split right: open this tab in a new pane to the right (panes sit side by side, each with its own tabs) |
 | F6 / Shift+F6 | Focus the next / previous pane |
 | Ctrl+Shift+W | Close the pane with all its tabs (macOS: Cmd+Shift+W) |
 | Ctrl+Shift+B | File list with the keyboard in it: j / k (or ↓ / ↑) next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
-| ↓ or Enter in the search box | Browse the results: j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
+| ↓ or Enter in the search box | Browse the results (notes, mail and posts): j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K first hit of the next / previous file or group, Enter opens the hit, Esc back to the box |
+| Tab / Shift+Tab | In the search over everything (the sidebar search, in its box and while you browse the results, and the picker of Space f g): list only the next / previous source (Notes, Mail, Posts), then the default sources again. Not while the query starts with a prefix (`f:`, `m:`, `s:`). Both can be changed in Settings → Keybindings ("Search results", "List windows") |
 | Ctrl+Shift+M | Mail view (its keys are listed below) |
 | Alt+← / Alt+→ | Back / forward (macOS: Cmd+[ / Cmd+], because Option+← / → move by word in text) |
 | Alt+B, Alt+I, Alt+S, Alt+H, Alt+C, Alt+Y, Alt+F, Alt+Shift+Y, Alt+Shift+F, Alt+E, Alt+U, Alt+O, Alt+T, Alt+Q, Alt+K, Alt+R, Alt+J, Alt+A, Alt+L, Alt+W, Alt+M, Alt+X | The buttons of the formatting toolbar of a note, each doing what a click on it does (the keyboard stays in the text and nothing is typed): Bold, Italic, Strikethrough, Highlight, Inline code, Highlight colour and Font colour (apply the current colour: the main part of the split button; Alt+Shift+Y and Alt+Shift+F open the palette, the ▾ part, where the digits 1 to 8 pick a swatch and 0 picks none, shown as ⇧Y and ⇧F while Alt is held), Heading level (opens its menu), Bullet list, Numbered list, Task, Quote, Code block, Horizontal rule, Table, Link to a note, Web link, Embed, Clear formatting. A key whose button is not there (reading view) or is greyed out (in a table cell) does nothing |
@@ -1185,7 +1208,8 @@ Text editing keys and vim keys are fixed.
 | Space Tab | Vim-style editing, normal mode: back to the view this tab showed just before (note, calendar, Feeds, …); again: forward to this one |
 | Space … | A started key sequence (e.g. `Space f`) shows in the status bar and is dropped after 1.5 s without a key |
 | Space f f | Vim-style editing, normal mode: find a file by name (↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens it in this tab, Esc closes) |
-| Space f g | Vim-style editing, normal mode: search the text of notes, mail and posts (`*` and `?` are wildcards; results grouped with counts; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the hit where it belongs, Esc closes) |
+| Space f g | Vim-style editing, normal mode: search the text of notes, mail and posts (`*` and `?` are wildcards; `f:` `m:` `s:` at the start look in notes, mail or posts only; results grouped with counts; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the hit where it belongs, Esc closes) |
+| ↓ or Ctrl+J, ↑ or Ctrl+K, Enter, Esc | In a picker window (Space f f, Space f g), the quick switcher (Ctrl+O) and the font list: next line, previous line, open, close. The hint between the search field and the list shows the keys as they are bound now; all four can be changed in Settings → Keybindings ("List windows") |
 | Shift+K | Vim-style editing, normal mode: preview the link under the cursor (a note as in the reading view, a web page's title and text; press it again to move the keyboard into the preview: j / k or ↓ / ↑ scroll, Enter opens the link like `gt`, Ctrl+Enter opens it in a new pane on the right, Esc closes). Definable, e.g. as Space Space |
 | Alt+↑ / Alt+↓ | Move the current line |
 | Tab / Shift+Tab | Indent lists or change heading levels |

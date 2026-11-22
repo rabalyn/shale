@@ -593,7 +593,8 @@ fn send_end_to_end(acct: &MailAccount, smtp: EnvSmtp, imap: EnvConnector, tag: &
     let raw = curl(&[&format!("{MAILPIT}/message/{}/raw", m["ID"].as_str().expect("an id"))]);
     let our_head_end = eml.windows(4).position(|w| w == b"\r\n\r\n").expect("headers end") + 2;
     let our_head = &eml[..our_head_end];
-    assert!(!String::from_utf8_lossy(our_head).to_lowercase().contains("bcc"), "Shale's own headers have no Bcc");
+    // a header line, not any "bcc" (the random boundary and Message-ID are hex, #488)
+    assert!(!String::from_utf8_lossy(our_head).to_lowercase().lines().any(|l| l.starts_with("bcc:")), "Shale's own headers have no Bcc");
     // the headers Shale built arrive byte for byte. The sink (Mailpit) and Dovecot add their own lines in front
     // (Return-Path, Received, and Mailpit shows the envelope's Bcc recipients as a Bcc line): none of that is Shale's.
     let at = raw.windows(our_head.len()).position(|w| w == our_head).expect("Shale's header block arrived unchanged");

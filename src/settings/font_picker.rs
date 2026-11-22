@@ -5,6 +5,7 @@
 //! the chosen font, the mouse highlights the entry it moves over, and the highlighted entry is
 //! handed back for the sample text of the row (CFG-040).
 
+use crate::keys::Keymap;
 use crate::markdown;
 use crate::picker::ListKeys;
 use eframe::egui::{self, Popup, PopupCloseBehavior, Ui};
@@ -55,7 +56,7 @@ pub struct Outcome {
 
 /// The picker for `current` (`None`: Shale's own font). `families` is the list of installed
 /// fonts; `searching` says it is not complete yet.
-pub fn show(ui: &mut Ui, salt: &str, current: &mut Option<String>, families: &[String], searching: bool) -> Outcome {
+pub fn show(ui: &mut Ui, salt: &str, current: &mut Option<String>, families: &[String], searching: bool, keymap: &Keymap) -> Outcome {
     let id = ui.make_persistent_id(("font-picker", salt));
     let shown = current.as_deref().unwrap_or(DEFAULT_ENTRY);
     let button = ui.add(egui::Button::new(format!("{shown}  ⏷")).min_size(egui::vec2(220.0, 0.0))).on_hover_text("Choose the font; type to search the installed fonts");
@@ -73,7 +74,7 @@ pub fn show(ui: &mut Ui, salt: &str, current: &mut Option<String>, families: &[S
         ui.set_min_width(260.0);
         let mut st: State = ui.data(|d| d.get_temp(id)).unwrap_or_default();
         let opened = st.fresh;
-        let keys = ListKeys::take(ui);
+        let keys = ListKeys::take(ui, keymap);
         let list = entries(families, &st.query);
         let before = st.sel;
         keys.select(&mut st.sel, list.len());

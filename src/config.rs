@@ -450,6 +450,10 @@ pub struct Config {
     /// What Shale does about new releases (UPD-001).
     #[serde(deserialize_with = "lenient")]
     pub updates: crate::update::UpdateConfig,
+    /// The search over notes, mail and posts: the letters of the source prefixes and the default
+    /// selection of the sources (NAV-050…NAV-054, CFG-067).
+    #[serde(deserialize_with = "lenient")]
+    pub search: crate::search_sources::SearchConfig,
     /// Keybindings the user changed: action id -> bindings as text (KEY-007). Missing = defaults.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub keybindings: std::collections::BTreeMap<String, Vec<String>>,
@@ -535,6 +539,7 @@ impl Default for Config {
             git: Default::default(),
             history: Default::default(),
             updates: Default::default(),
+            search: Default::default(),
             keybindings: Default::default(),
             legacy_open_files: None,
             legacy_last_import_folder: None,
@@ -872,6 +877,66 @@ mod tests {
         let c: Config = serde_json::from_str(r#"{"format_toolbar": false, "toolbar_size": 150, "font_colours": [[1, 2, 3]], "highlight_colours": []}"#).unwrap();
         let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
         assert_eq!((back.format_toolbar, back.toolbar_size, back.font_colours, back.highlight_colours), (false, 150, vec![[1, 2, 3]], vec![]));
+    }
+
+    // spec: CFG-067, NAV-054
+    #[test]
+    fn cfg_067_the_search_settings_default_to_all_sources_round_trip_and_load_from_old_files() {
+        use crate::search_sources::{Kind, Prefixes, SearchConfig, Selection};
+        let c = Config::default();
+        assert_eq!((c.search.prefixes(), c.search.selection()), (Prefixes::default(), Selection::ALL));
+        let (old, _) = crate::vault_state::parse::<Config>(br#"{"toolbar_size": 120}"#).unwrap();
+        assert_eq!(old.search, SearchConfig::default(), "a file from before: f, m, s and all sources");
+        assert_eq!(old.version, 2, "a new field with a default needs no migration (CFG-001)");
+        let (c, _) = crate::vault_state::parse::<Config>(br#"{"search": {"sources": ["mail"]}}"#).unwrap();
+        assert_eq!((c.search.selection(), c.search.prefix_notes.as_str()), (Selection::only(Kind::Mail), "f"), "a missing field takes its default");
+        let (c, _) = crate::vault_state::parse::<Config>(br#"{"search": {"sources": []}}"#).unwrap();
+        assert_eq!(c.search.selection(), Selection::ALL, "an empty list reads as all sources");
+        let (c, _) = crate::vault_state::parse::<Config>(br#"{"search": "everything"}"#).unwrap();
+        assert_eq!(c.search, SearchConfig::default(), "a value of the wrong shape loads as the default");
+        // the file: TOML and back
+        let mut c = Config::default();
+        c.search.prefix_notes = "n".into();
+        c.search.set_selection(Selection::only(Kind::Notes).toggled(Kind::Posts).unwrap());
+        let text = text::to_toml(&c);
+        assert!(text.contains("[search]") && text.contains("prefix_notes = \"n\"") && text.contains("sources = [\"notes\", \"posts\"]"), "{text}");
+        let (back, _) = Config::parse_text(&text).unwrap();
+        assert_eq!(back.search, c.search);
+        assert_eq!(back.search.selection().kinds().collect::<Vec<_>>(), [Kind::Notes, Kind::Posts]);
+    }
+
+    // spec: CFG-068, NAV-058
+    #[test]
+    fn cfg_068_the_hit_display_defaults_to_follow_round_trips_and_loads_from_old_files() {
+        use crate::search_sources::HitDisplay;
+        assert_eq!(Config::default().search.display(), HitDisplay::Follow);
+        let (old, _) = crate::vault_state::parse::<Config>(br#"{"search": {"sources": ["mail"]}}"#).unwrap();
+        assert_eq!(old.search.display(), HitDisplay::Follow, "a file from before has the default");
+        let (old, _) = crate::vault_state::parse::<Config>(br#"{"toolbar_size": 120}"#).unwrap();
+        assert_eq!(old.search.display(), HitDisplay::Follow);
+        for (word, want) in [("raw", HitDisplay::Raw), ("rendered", HitDisplay::Rendered), ("Rendered", HitDisplay::Rendered), ("follow", HitDisplay::Follow), ("nonsense", HitDisplay::Follow)] {
+            let json = format!(r#"{{"search": {{"hit_display": "{word}", "prefix_notes": "n"}}}}"#);
+            let (c, _) = crate::vault_state::parse::<Config>(json.as_bytes()).unwrap();
+            assert_eq!((c.search.display(), c.search.prefix_notes.as_str()), (want, "n"), "{word}: the other settings are kept");
+        }
+        let mut c = Config::default();
+        c.search.hit_display = HitDisplay::Rendered.id().into();
+        let text = text::to_toml(&c);
+        assert!(text.contains("hit_display = \"rendered\""), "{text}");
+        let (back, _) = Config::parse_text(&text).unwrap();
+        assert_eq!(back.search.display(), HitDisplay::Rendered);
+    }
+
+    // spec: NAV-058
+    #[test]
+    fn nav_058_follow_the_editor_is_rendered_with_the_preview_or_the_reading_view_and_raw_otherwise() {
+        use crate::search_sources::HitDisplay::{Follow, Raw, Rendered};
+        // (live_preview, reading view of the active note)
+        for (preview, reading, follow) in [(false, false, false), (true, false, true), (false, true, true), (true, true, true)] {
+            assert_eq!(Follow.rendered(preview, reading), follow, "preview {preview}, reading {reading}");
+            assert!(!Raw.rendered(preview, reading));
+            assert!(Rendered.rendered(preview, reading));
+        }
     }
 
     // spec: EDIT-037, CFG-001
