@@ -566,7 +566,7 @@ impl VaultData {
     }
 
     pub fn state_path(root: &Path) -> PathBuf {
-        root.join(".shale").join(STATE_FILE)
+        crate::device_local::local_dir(root).join(STATE_FILE)
     }
 
     /// Load both files of the vault at `root`; problems are returned for the user.

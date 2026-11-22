@@ -856,7 +856,13 @@ impl ShaleApp {
     /// Load the vault's own settings and state; the first vault opened after an upgrade takes
     /// over the per-vault fields of the old global config (CFG-008).
     fn load_vault_data(&mut self, root: &Path) {
-        let (mut d, problems) = tracing::info_span!("flow.vault_open.load_state", peer = "disk").in_scope(|| crate::vault_state::VaultData::load(root));
+        // before the state is read: a synced vault keeps it outside the folder (NET-016)
+        let synced = !crate::gitsync::detect::detect_real(root).is_empty();
+        let mut problems: Vec<String> = crate::device_local::place(root, synced, &crate::device_local::default_base()).into_iter().collect();
+        let sweep_root = root.to_path_buf();
+        crate::jobs::run(move || crate::device_local::sweep(&sweep_root, std::time::SystemTime::now()), |_| {});
+        let (mut d, load_problems) = tracing::info_span!("flow.vault_open.load_state", peer = "disk").in_scope(|| crate::vault_state::VaultData::load(root));
+        problems.extend(load_problems);
         for p in problems {
             self.toast(p);
         }

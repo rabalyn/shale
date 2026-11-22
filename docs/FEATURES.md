@@ -1055,7 +1055,9 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   session in `.shale/state.json` (open notes, last import folder, recent tags), so a vault
   behaves the same on every computer. The undo histories of the notes (`u` in vim-style editing)
   are kept for 30 days (a setting) in `.shale/undo/`, one file per note; that folder stays on the computer
-  and is not committed by git sync. Settings of the program itself (appearance, calendars,
+  and is not committed by git sync. In a vault in a cloud-synced or network folder, `state.json` and the undo
+  histories are kept outside the vault, in Shale's data folder, so two computers do not overwrite each other's
+  tabs, and leftover `.shale-tmp-*` files and `state.sync-conflict-*` copies are removed. Settings of the program itself (appearance, calendars,
   recent vaults) stay in `~/.config/shale/config.toml`.
 - The files carry a format version and are upgraded on load. A settings file that can't be read
   is kept as `….broken-<date>` and you are told; a file from a newer Shale is used but not

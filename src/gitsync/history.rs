@@ -266,6 +266,16 @@ pub fn vault_id(vault: &Path) -> Option<String> {
     (id.len() == 32 && id.chars().all(|c| c.is_ascii_hexdigit())).then(|| id.to_ascii_lowercase())
 }
 
+/// The ID of the vault; a vault without one gets one (written to [`ID_FILE`]).
+pub fn ensure_vault_id(vault: &Path) -> Result<String, String> {
+    if let Some(i) = vault_id(vault) {
+        return Ok(i);
+    }
+    let i = new_id();
+    write_id(vault, &i)?;
+    Ok(i)
+}
+
 fn new_id() -> String {
     crate::mail::compose::random_hex(16)
 }
