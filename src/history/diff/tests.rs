@@ -233,6 +233,11 @@ mod properties {
         prop::collection::vec(0u8..4, 0..24)
     }
 
+    /// A cell limit so small that many middle parts are above it (0, 1 and a few cells).
+    fn tiny_limit() -> impl Strategy<Value = usize> {
+        prop_oneof![Just(0usize), Just(1), Just(4), Just(9), 0usize..40]
+    }
+
     /// Text made of a few words, runs of white space (also a newline and a non-ASCII word).
     fn word_text() -> impl Strategy<Value = String> {
         let piece = prop::sample::select(vec!["a", "b", "ab", "é", " ", "  ", "\t", "\n", "x y"]);
@@ -401,6 +406,76 @@ mod properties {
         fn hist_016_equal_sequences_are_all_common(a in seq()) {
             let e = edits(&a, &a);
             prop_assert_eq!(e, (0..a.len()).map(|i| Edit::Same(i, i)).collect::<Vec<_>>());
+        }
+
+        // spec: HIST-016
+        #[test]
+        fn hist_016_with_a_tiny_cell_limit_the_edit_script_still_turns_a_into_b_with_every_element_once_and_in_order(a in seq(), b in seq(), limit in tiny_limit()) {
+            let e = edits_within(&a, &b, limit);
+            let (mut next_a, mut next_b) = (0, 0);
+            let mut built = vec![];
+            for x in &e {
+                match *x {
+                    Edit::Same(i, j) => {
+                        prop_assert_eq!((i, j), (next_a, next_b));
+                        prop_assert_eq!(a[i], b[j]);
+                        built.push(a[i]);
+                        next_a += 1;
+                        next_b += 1;
+                    }
+                    Edit::Del(i) => {
+                        prop_assert_eq!(i, next_a);
+                        next_a += 1;
+                    }
+                    Edit::Ins(j) => {
+                        prop_assert_eq!(j, next_b);
+                        built.push(b[j]);
+                        next_b += 1;
+                    }
+                }
+            }
+            prop_assert_eq!((next_a, next_b), (a.len(), b.len()));
+            prop_assert_eq!(built, b);
+        }
+
+        // spec: HIST-016
+        #[test]
+        fn hist_016_with_a_tiny_cell_limit_removed_elements_still_come_before_inserted_ones(a in seq(), b in seq(), limit in tiny_limit()) {
+            let e = edits_within(&a, &b, limit);
+            prop_assert!(!e.windows(2).any(|w| matches!((w[0], w[1]), (Edit::Ins(_), Edit::Del(_)))), "{:?}", e);
+        }
+
+        // spec: HIST-016
+        #[test]
+        fn hist_016_with_a_tiny_cell_limit_the_common_start_and_end_are_still_common(a in seq(), b in seq(), limit in tiny_limit()) {
+            let e = edits_within(&a, &b, limit);
+            let start = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+            let end = a[start..].iter().rev().zip(b[start..].iter().rev()).take_while(|(x, y)| x == y).count();
+            prop_assert!(e[..start].iter().enumerate().all(|(k, x)| *x == Edit::Same(k, k)));
+            let (ta, tb) = (a.len() - end, b.len() - end);
+            prop_assert!(e[e.len() - end..].iter().enumerate().all(|(k, x)| *x == Edit::Same(ta + k, tb + k)));
+        }
+
+        // spec: HIST-016
+        #[test]
+        fn hist_016_a_middle_part_above_the_limit_is_removed_and_inserted_whole(a in seq(), b in seq(), limit in tiny_limit()) {
+            let start = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+            let end = a[start..].iter().rev().zip(b[start..].iter().rev()).take_while(|(x, y)| x == y).count();
+            let (n, m) = (a.len() - start - end, b.len() - start - end);
+            prop_assume!(n > 0 && m > 0 && (n + 1) * (m + 1) > limit);
+            let e = edits_within(&a, &b, limit);
+            let middle = &e[start..e.len() - end];
+            prop_assert_eq!(middle.len(), n + m);
+            prop_assert!(middle[..n].iter().all(|x| matches!(x, Edit::Del(_))) && middle[n..].iter().all(|x| matches!(x, Edit::Ins(_))));
+        }
+
+        // The LCS length holds only below the limit: above it the middle part is removed and
+        // inserted whole, so fewer elements are common than the longest common subsequence.
+        // spec: HIST-016
+        #[test]
+        fn hist_016_with_a_limit_the_script_has_at_most_as_many_common_elements_as_the_longest_common_subsequence(a in seq(), b in seq(), limit in tiny_limit()) {
+            let same = edits_within(&a, &b, limit).iter().filter(|e| matches!(e, Edit::Same(..))).count();
+            prop_assert!(same <= naive_lcs(&a, &b));
         }
 
         // spec: HIST-009
