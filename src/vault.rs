@@ -2,6 +2,7 @@
 
 use crate::fsutil;
 use crate::markdown::{self, LinkSpan, Task};
+use crate::media::outside::{self, Library, Outside};
 use crate::vault_path::VaultPath;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -200,6 +201,9 @@ pub struct Vault {
     /// Notes the last rename or move could not update: (path after the change, reason). Reset by
     /// every rename and move; the notes that were updated are the call's result (VAULT-016).
     pub failed_rewrites: Vec<(PathBuf, String)>,
+    /// The library folders of this device (`@Videos/…` links, MEDIA-014): not part of the vault but
+    /// of the global settings, which the app hands over each frame ([`Vault::set_libraries`]).
+    libraries: Vec<Library>,
 }
 
 /// From this many notes on, a vault is parsed on several threads.
@@ -629,6 +633,29 @@ impl Vault {
         best.into_iter().next()
     }
 
+    /// The library folders of this device, as the global settings have them (MEDIA-014). Nothing in
+    /// the index depends on them: whether a link is an outside link follows from its text alone, and
+    /// where it points is looked up when it is shown ([`Vault::resolve_media`]).
+    pub fn set_libraries(&mut self, libraries: &[Library]) {
+        if self.libraries != libraries {
+            self.libraries = libraries.to_vec();
+        }
+    }
+
+    /// Where a link of a note shows a media file, to be displayed or opened (MEDIA-014, MEDIA-015).
+    /// A file of the vault wins (`resolve`), so a link that worked keeps working; otherwise a library
+    /// link or a file link to a media file is looked up outside the vault. Never use the result to
+    /// write: an outside path is for the players, the picture loader and `opener` only (VAULT-018).
+    pub fn resolve_media(&self, target: &str, from: Option<&Path>) -> Shown {
+        if let Some(rel) = self.resolve(target, from) {
+            return Shown::Vault(rel);
+        }
+        match outside::spot(target) {
+            Some(spot) => Shown::Outside(outside::resolve(&spot, &self.libraries)),
+            None => Shown::Nothing,
+        }
+    }
+
     /// For a link by name that several files share: how many, and the one it opens (LINK-008).
     pub fn ambiguity(&self, target: &str, from: Option<&Path>) -> Option<(usize, PathBuf)> {
         let t = target.trim();
@@ -646,7 +673,8 @@ impl Vault {
     /// (LINK-012). Empty for links that resolve or are not paths.
     pub fn fix_candidates(&self, target: &str, from: Option<&Path>) -> Vec<PathBuf> {
         let t = target.trim();
-        if !t.contains('/') || self.resolve(t, from).is_some() {
+        // an outside link is no vault path (MEDIA-016)
+        if !t.contains('/') || self.resolve(t, from).is_some() || outside::spot(t).is_some() {
             return vec![];
         }
         let name = t.rsplit('/').next().unwrap_or(t);
@@ -672,8 +700,10 @@ impl Vault {
         None
     }
 
+    /// Whether a link is not red: it reaches a file of the vault, or it is an outside link
+    /// (MEDIA-016), which never makes a note even when its file is not there.
     pub fn exists(&self, target: &str, from: Option<&Path>) -> bool {
-        self.resolve(target, from).is_some()
+        self.resolve(target, from).is_some() || outside::spot(target).is_some()
     }
 
     /// Notes and drawings linking to `rel`: (source, [(line number, line text)]). For a drawing
@@ -744,20 +774,22 @@ impl Vault {
         out
     }
 
-    /// Outgoing links of a note or drawing: (display text, target, resolved path).
+    /// Outgoing links of a note or drawing: (display text, target, resolved path). Links to media
+    /// outside the vault are not here, they are [`Vault::outgoing_outside`] (MEDIA-016).
     pub fn outgoing(&self, rel: &Path) -> Vec<(String, String, Option<PathBuf>)> {
+        self.outgoing_links(rel).into_iter().filter(|(l, r)| r.is_some() || !l.is_outside()).map(|(l, r)| (l.display(), l.target.clone(), r)).collect()
+    }
+
+    /// The links of a note or drawing to media outside the vault (MEDIA-016): (display text, target).
+    pub fn outgoing_outside(&self, rel: &Path) -> Vec<(String, String)> {
+        self.outgoing_links(rel).into_iter().filter(|(l, r)| r.is_none() && l.is_outside()).map(|(l, _)| (l.display(), l.target.clone())).collect()
+    }
+
+    /// The links of a note or drawing, each target once, with what it resolves to.
+    fn outgoing_links(&self, rel: &Path) -> Vec<(&LinkSpan, Option<PathBuf>)> {
         let Some(n) = self.notes.get(rel).or_else(|| self.drawings.get(rel)) else { return vec![] };
         let mut seen = HashSet::new();
-        let mut out = Vec::new();
-        for (l, r) in n.links.iter().zip(n.resolved.iter()) {
-            if l.target.is_empty() {
-                continue;
-            }
-            if seen.insert(l.target.to_lowercase()) {
-                out.push((l.display(), l.target.clone(), r.clone()));
-            }
-        }
-        out
+        n.links.iter().zip(n.resolved.iter()).filter(|(l, _)| !l.target.is_empty() && seen.insert(l.target.to_lowercase())).map(|(l, r)| (l, r.clone())).collect()
     }
 
     /// Every task in every note, sorted by note path.
@@ -1207,7 +1239,8 @@ impl Vault {
                         None => continue,
                     },
                     None => {
-                        if !include_missing || l.target.is_empty() {
+                        // an outside link is no missing note (MEDIA-016)
+                        if !include_missing || l.target.is_empty() || l.is_outside() {
                             continue;
                         }
                         let key = format!("missing:{}", l.target.to_lowercase());
@@ -1225,6 +1258,37 @@ impl Vault {
         let mut e: Vec<_> = edges.into_iter().collect();
         e.sort();
         (nodes, e)
+    }
+}
+
+/// Where a link shows a file (`Vault::resolve_media`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Shown {
+    /// A file of the vault, by its path in it.
+    Vault(PathBuf),
+    /// A library link or a file link: found, missing, or a library not set up here.
+    Outside(Outside),
+    /// Neither: a note that does not exist, or a link of no media kind.
+    Nothing,
+}
+
+impl Shown {
+    /// The file to show as `(path for the kind of file, absolute path)`: for a file of the vault its
+    /// path in it and where it is; for an outside file its absolute path twice. None for the rest.
+    pub fn file(&self, vault: &Vault) -> Option<(PathBuf, PathBuf)> {
+        match self {
+            Shown::Vault(rel) => Some((rel.clone(), vault.abs(rel))),
+            Shown::Outside(Outside::Found { abs, .. }) => Some((abs.clone(), abs.clone())),
+            _ => None,
+        }
+    }
+
+    /// What to say in place of a media file that is outside and cannot be shown.
+    pub fn notice(&self) -> Option<String> {
+        match self {
+            Shown::Outside(o) => o.notice(),
+            _ => None,
+        }
     }
 }
 
@@ -1486,6 +1550,113 @@ mod tests {
         let (nodes, edges) = v.graph(true);
         assert!(nodes.iter().any(|n| n.rel.is_none() && n.label == "Reading list"));
         assert!(edges.len() >= 5);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// A vault with a note linking outside media, a library folder next to it and a loose file.
+    fn outside_fixture(tag: &str) -> (Vault, PathBuf, PathBuf) {
+        let d = temp_vault(tag);
+        fs::create_dir_all(d.join("vault")).unwrap();
+        fs::create_dir_all(d.join("Videos/2024")).unwrap();
+        fs::write(d.join("Videos/2024/a.mp4"), b"x").unwrap();
+        fs::write(d.join("loose.png"), b"x").unwrap();
+        let uri = crate::media::testdata::file_address(&d.join("loose.png"));
+        let note = format!("# Links\n\n![[@Videos/2024/a.mp4]]\n\n[[@Videos/gone.mp3]] and ![x](<{uri}>) and [[@Music/a.mp3]] and [[Real note]]\n");
+        fs::write(d.join("vault/Links.md"), note).unwrap();
+        fs::write(d.join("vault/Real note.md"), "x").unwrap();
+        let mut v = Vault::open(&d.join("vault")).unwrap();
+        v.set_libraries(&[Library { name: "Videos".into(), path: d.join("Videos") }]);
+        (v, d.clone(), d.join("loose.png"))
+    }
+
+    // spec: MEDIA-014, MEDIA-015
+    #[test]
+    fn a_link_shows_a_file_of_the_vault_first_then_the_library_then_a_file_address() {
+        let (mut v, d, loose) = outside_fixture("media-resolve");
+        let from = Path::new("Links.md");
+        assert_eq!(v.resolve_media("Real note", Some(from)), Shown::Vault(PathBuf::from("Real note.md")));
+        assert_eq!(v.resolve_media("@Videos/2024/a.mp4", Some(from)), Shown::Outside(Outside::Found { abs: d.join("Videos/2024/a.mp4"), kind: crate::media::Kind::Video }));
+        let uri = crate::media::testdata::file_address(&loose);
+        assert_eq!(v.resolve_media(&uri, Some(from)), Shown::Outside(Outside::Found { abs: loose.clone(), kind: crate::media::Kind::Image }));
+        assert_eq!(v.resolve_media("@Music/a.mp3", Some(from)), Shown::Outside(Outside::NoLibrary("Music".into())));
+        assert!(matches!(v.resolve_media("@Videos/../x.mp4", Some(from)), Shown::Outside(Outside::LeavesLibrary { .. })));
+        assert_eq!(v.resolve_media("No such note", Some(from)), Shown::Nothing);
+        assert_eq!(v.resolve_media("@Videos/notes.txt", Some(from)), Shown::Nothing, "a file of another kind is not shown from outside");
+        // a file of the vault at that path wins: existing links keep working
+        fs::create_dir_all(v.root.join("@Videos/2024")).unwrap();
+        fs::write(v.root.join("@Videos/2024/a.mp4"), b"mine").unwrap();
+        v.rescan();
+        assert_eq!(v.resolve_media("@Videos/2024/a.mp4", Some(from)), Shown::Vault(PathBuf::from("@Videos/2024/a.mp4")));
+        // the library of another device: set again, the same link finds the file there
+        v.set_libraries(&[Library { name: "VIDEOS".into(), path: d.join("Videos") }]);
+        assert!(matches!(v.resolve_media("@videos/2024/b.mp4", Some(from)), Shown::Outside(Outside::Missing { .. })));
+        v.set_libraries(&[]);
+        assert_eq!(v.resolve_media("@Videos/2024/b.mp4", Some(from)), Shown::Outside(Outside::NoLibrary("Videos".into())));
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: MEDIA-014
+    #[test]
+    fn what_is_shown_is_a_path_and_where_it_is_and_the_words_for_what_is_wrong() {
+        let (v, d, _) = outside_fixture("media-shown");
+        let from = Some(Path::new("Links.md"));
+        let found = v.resolve_media("@Videos/2024/a.mp4", from);
+        assert_eq!(found.file(&v), Some((d.join("Videos/2024/a.mp4"), d.join("Videos/2024/a.mp4"))));
+        assert_eq!(found.notice(), None);
+        let real = v.resolve_media("Real note", from);
+        assert_eq!(real.file(&v), Some((PathBuf::from("Real note.md"), v.abs(Path::new("Real note.md")))));
+        assert_eq!(real.notice(), None);
+        let gone = v.resolve_media("@Videos/gone.mp3", from);
+        assert_eq!((gone.file(&v), gone.notice()), (None, Some(format!("Not found: {}", d.join("Videos/gone.mp3").display()))));
+        assert_eq!(v.resolve_media("@Music/a.mp3", from).notice().as_deref(), Some("Library “Music” is not set up on this device"));
+        assert_eq!(v.resolve_media("nothing", from).notice(), None);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: MEDIA-018, LINK-004
+    #[test]
+    fn an_outside_link_is_not_red_and_never_a_missing_note() {
+        let (v, d, _) = outside_fixture("media-index");
+        let from = Some(Path::new("Links.md"));
+        for t in ["@Videos/2024/a.mp4", "@Videos/gone.mp3", "@Music/a.mp3"] {
+            assert!(v.exists(t, from), "{t} is not red, found or not");
+        }
+        assert!(!v.exists("No such note", from) && !v.exists("@Videos/notes.txt", from), "other links are red as before");
+        let uri = crate::media::testdata::file_address(&d.join("loose.png"));
+        assert!(v.exists(&uri, from) && v.exists("file:///nowhere/at/all.mp4", from));
+        // outgoing links: the note's links are the note, the outside ones are listed apart
+        let out = v.outgoing(Path::new("Links.md"));
+        assert_eq!(out.iter().map(|o| o.1.as_str()).collect::<Vec<_>>(), ["Real note"], "no outside link among the notes, found or missing: {out:?}");
+        let outside: Vec<String> = v.outgoing_outside(Path::new("Links.md")).into_iter().map(|o| o.1).collect();
+        assert_eq!(outside.len(), 4, "{outside:?}");
+        assert!(outside.contains(&"@Videos/2024/a.mp4".to_string()) && outside.contains(&"@Videos/gone.mp3".to_string()) && outside.contains(&"@Music/a.mp3".to_string()) && outside.contains(&uri));
+        // the graph has no node for them, however it is asked
+        let (nodes, edges) = v.graph(true);
+        let names: Vec<&str> = nodes.iter().map(|n| n.label.as_str()).collect();
+        assert!(!names.iter().any(|n| n.contains("mp4") || n.contains("mp3") || n.contains("file:") || n.contains("png")), "{names:?}");
+        assert_eq!(edges.len(), 1, "only the link to the real note");
+        // backlinks: nothing in the vault is linked by them
+        assert!(v.backlinks(Path::new("Real note.md")).iter().all(|b| b.0 == Path::new("Links.md")));
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: MEDIA-018, LINK-012
+    #[test]
+    fn an_outside_link_is_never_offered_for_the_automatic_fix_of_path_links() {
+        let (mut v, d, _) = outside_fixture("media-fix");
+        // a file of the same name elsewhere in the vault would be a candidate for a red path link
+        fs::write(v.root.join("a.mp4"), b"x").unwrap();
+        fs::write(v.root.join("Plan.md"), "x").unwrap();
+        fs::create_dir_all(v.root.join("Projects")).unwrap();
+        fs::write(v.root.join("Projects/Plan.md"), "x").unwrap();
+        fs::write(v.root.join("Fix.md"), "![[@Videos/2024/b.mp4]] [[Archive/Plan]]\n![[@Elsewhere/a.mp4]]").unwrap();
+        v.rescan();
+        assert_eq!(v.fix_candidates("@Elsewhere/a.mp4", Some(Path::new("Fix.md"))), Vec::<PathBuf>::new());
+        assert!(v.link_hint("@Elsewhere/a.mp4", Some(Path::new("Fix.md"))).is_none());
+        assert_eq!(v.fix_candidates("Archive/Plan", Some(Path::new("Fix.md"))).len(), 2, "a red path link still has its candidates");
+        let fixed = v.auto_fix_links(Path::new("Fix.md")).unwrap();
+        assert_eq!(fixed, 0, "two candidates for the one, none for the outside links");
+        assert_eq!(fs::read_to_string(v.root.join("Fix.md")).unwrap(), "![[@Videos/2024/b.mp4]] [[Archive/Plan]]\n![[@Elsewhere/a.mp4]]");
         let _ = fs::remove_dir_all(&d);
     }
 

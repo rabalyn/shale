@@ -161,16 +161,16 @@ impl<'a> Look<'a> {
         if !self.embeds {
             return None;
         }
-        let rel = self.vault.resolve(&l.target, Some(self.rel));
-        let is_picture = crate::media::is_image(rel.as_deref().unwrap_or(Path::new(&l.target)));
+        let file = self.vault.resolve_media(&l.target, Some(self.rel)).file(self.vault);
+        let is_picture = crate::media::is_image(file.as_ref().map(|(p, _)| p.as_path()).unwrap_or(Path::new(&l.target)));
         if !is_picture {
             return None;
         }
         let mut files = self.files.borrow_mut();
-        let Some(rel) = rel else { return Some(files.missing(&format!("missing: {}", l.target))) };
+        let Some((rel, abs)) = file else { return Some(files.missing(&format!("missing: {}", l.target))) };
         let name = match files.named(&rel) {
             Some(n) => n,
-            None => match picture_file(&self.vault.abs(&rel)) {
+            None => match picture_file(&abs) {
                 Some((ext, bytes)) => files.keep(&rel, "picture", ext, bytes),
                 None => return Some(files.missing(&format!("not readable: {}", l.target))),
             },

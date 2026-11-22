@@ -11,6 +11,7 @@ use crate::calendar::dav;
 use crate::editor::EditorAction;
 use crate::lists;
 use crate::markdown;
+use crate::media::outside::Outside;
 use crate::reader;
 use crate::theme;
 use crate::vault::{FileKind, Vault};
@@ -397,6 +398,8 @@ pub enum Content {
     Web {
         url: String,
     },
+    /// a library link or a file link (MEDIA-016): a picture, or what the file is; or why it cannot be shown
+    Outside(Outside),
     /// a link that has nothing to preview, in words
     Plain(String),
 }
@@ -409,7 +412,11 @@ pub fn content_for(target: &Target, vault: &Vault, note_text: &dyn Fn(&Path) -> 
         Target::Web { url } => return Content::Web { url: fetchable(url) },
         Target::Link { target, heading, from } => (target, heading, from),
     };
-    let Some(rel) = vault.resolve(link, Some(from)) else { return Content::Missing(link.clone()) };
+    let rel = match vault.resolve_media(link, Some(from)) {
+        crate::vault::Shown::Vault(rel) => rel,
+        crate::vault::Shown::Outside(outside) => return Content::Outside(outside),
+        crate::vault::Shown::Nothing => return Content::Missing(link.clone()),
+    };
     match vault.file(&rel).map(|f| f.kind) {
         Some(FileKind::Note) => {
             let text = note_text(&rel).unwrap_or_default();
@@ -648,6 +655,20 @@ impl LinkPreview {
                     ui.label(egui::RichText::new(rel.to_string_lossy()).strong().color(theme::palette().text));
                     ui.label(egui::RichText::new(format!("{kind}. Enter opens it")).color(theme::palette().muted));
                 }
+                Content::Outside(outside) => match outside {
+                    Outside::Found { abs, kind } => match (*kind == crate::media::Kind::Image).then_some(abs).and_then(|abs| crate::media::image_widget(ui.ctx(), abs, room.x, room.y - 16.0)) {
+                        Some(img) => {
+                            ui.add(img);
+                        }
+                        None => {
+                            ui.label(egui::RichText::new(abs.to_string_lossy()).strong().color(theme::palette().text));
+                            ui.label(egui::RichText::new(format!("{}, outside the vault. Enter opens it", kind.label())).color(theme::palette().muted));
+                        }
+                    },
+                    other => {
+                        ui.label(egui::RichText::new(other.notice().unwrap_or_default()).strong().color(theme::palette().link_missing));
+                    }
+                },
                 Content::Plain(m) => {
                     ui.label(egui::RichText::new(m.as_str()).color(theme::palette().text));
                 }

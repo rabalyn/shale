@@ -4,7 +4,8 @@
 use std::ops::Range;
 
 /// A link found in a note: `[[Target]]`, `[[Target|Alias]]`, `[[Target#Heading]]`,
-/// `![[Embed]]` or a markdown link `[text](Target.md)` that points inside the vault.
+/// `![[Embed]]` or a markdown link `[text](Target.md)` that points inside the vault, or a `file://`
+/// address of a media file outside it (MEDIA-015).
 #[derive(Clone, Debug, PartialEq)]
 pub struct LinkSpan {
     /// Byte range of the whole link including brackets (and the `!` of an embed).
@@ -35,6 +36,13 @@ impl LinkSpan {
 }
 
 impl LinkSpan {
+    /// A library link or a file link to a media file outside the vault (MEDIA-014, MEDIA-015). Such
+    /// a link is no note, so it is not red and never creates one; whether the vault has a file of
+    /// that path is `Vault::resolve`'s business.
+    pub fn is_outside(&self) -> bool {
+        crate::media::outside::spot(&self.target).is_some()
+    }
+
     /// The width an embed asks for (`![[pic.png|300]]`, `|300x200` too: the width counts), if its
     /// last `|` part is a number (EDIT-052).
     pub fn embed_width(&self) -> Option<f32> {
@@ -219,11 +227,14 @@ pub fn find_links(text: &str) -> Vec<LinkSpan> {
                             let t_end = t_start + paren_rel;
                             let raw = line[t_start..t_end].trim();
                             let raw = raw.trim_start_matches('<').trim_end_matches('>');
-                            if !raw.is_empty() && !is_external(raw) {
+                            // a `file://` address of a media file is a link too (MEDIA-015); its target stays as
+                            // written, the address is decoded once where it is read
+                            let file_link = crate::media::outside::is_file_link(raw);
+                            if !raw.is_empty() && (!is_external(raw) || file_link) {
                                 let embed = i > 0 && b[i - 1] == b'!';
                                 let start = if embed { i - 1 } else { i };
-                                let decoded = percent_decode(raw);
-                                let (target, heading) = match decoded.find('#') {
+                                let decoded = if file_link { raw.to_string() } else { percent_decode(raw) };
+                                let (target, heading) = match decoded.find('#').filter(|_| !file_link) {
                                     Some(p) => (decoded[..p].to_string(), Some(decoded[p + 1..].to_string())),
                                     None => (decoded.clone(), None),
                                 };
@@ -1335,6 +1346,27 @@ a
         assert_eq!(l[0].target, "Sketch.excalidraw");
         assert!(l[1].markdown_style);
         assert_eq!(l[1].target, "My Note");
+    }
+
+    // spec: MEDIA-014, MEDIA-015, LINK-001
+    #[test]
+    fn library_links_and_file_links_to_media_are_links() {
+        let t = "![[@Videos/2024/a.mp4|480]] [[@Music/Album/b.flac]]\n![](<file:///home/ada/My Videos/a.mp4>) ![pic](file:///home/ada/My%20Pics/a%20b.png) [song](<file:///home/ada/Track #3.mp3>)";
+        let l = find_links(t);
+        assert_eq!(l.len(), 5, "{l:?}");
+        assert_eq!((l[0].target.as_str(), l[0].embed, l[0].embed_width()), ("@Videos/2024/a.mp4", true, Some(480.0)));
+        assert_eq!((l[1].target.as_str(), l[1].embed), ("@Music/Album/b.flac", false));
+        assert_eq!((l[2].target.as_str(), l[2].embed, l[2].markdown_style), ("file:///home/ada/My Videos/a.mp4", true, true), "the angle brackets are not part of it");
+        assert_eq!(&t[l[2].range.clone()], "![](<file:///home/ada/My Videos/a.mp4>)");
+        assert_eq!((l[3].target.as_str(), l[3].alias.as_deref()), ("file:///home/ada/My%20Pics/a%20b.png", Some("pic")), "the address is kept as written, it is decoded once where it is read");
+        assert_eq!((l[4].target.as_str(), l[4].heading.as_deref()), ("file:///home/ada/Track #3.mp3", None), "a # is part of a file name, not a heading");
+        assert!(l.iter().all(|l| l.is_outside()));
+        // not links: another kind of file, another scheme, an address with a host, inside code
+        let not = "[a](file:///home/ada/notes.docx) [b](https://x.org/a.mp4) [c](file://host/a.mp4) `![](file:///a.mp4)` [[@Videos]] [[@Videos/notes.docx]]";
+        let found: Vec<_> = find_links(not).into_iter().map(|l| l.target).collect();
+        assert_eq!(found, ["@Videos", "@Videos/notes.docx"], "only the two wiki links (notes, red as before); none is an outside link");
+        assert!(find_links("[[@Videos]]")[0].target == "@Videos" && !find_links("[[@Videos]]")[0].is_outside());
+        assert!(!find_links("[[@Videos/notes.docx]]")[0].is_outside());
     }
 
     // spec: LINK-001

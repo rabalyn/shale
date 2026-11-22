@@ -10,6 +10,7 @@ use eframe::egui::{self, Event, Key, Modifiers, PointerButton, Pos2, Rect};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+mod outside;
 mod video;
 
 struct Fx {

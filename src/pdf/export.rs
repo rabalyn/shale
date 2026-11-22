@@ -1064,9 +1064,9 @@ impl<'a> Writer<'a> {
             // an embed on its own line
             let line_links = markdown::find_links(line);
             if line_links.len() == 1 && line_links[0].embed && trimmed.len() == line_links[0].range.len() {
-                let target = vault.resolve(&line_links[0].target, Some(rel));
-                if let (Some(t), true) = (target, opts.embeds) {
-                    let abs = vault.abs(&t);
+                // a picture, PDF or sound of a library or a file outside the vault is printed too (MEDIA-016)
+                let target = vault.resolve_media(&line_links[0].target, Some(rel)).file(vault);
+                if let (Some((t, abs)), true) = (target, opts.embeds) {
                     let kind = vault.file(&t).map(|f| f.kind).unwrap_or(FileKind::Other);
                     // the link under the thumbnail (PDF-004); the size the editor gives it (PDF-005)
                     let caption = crate::caption::text(&line_links[0]);
@@ -2252,6 +2252,60 @@ pub(crate) mod tests {
 
     fn near(got: f32, want: f32, what: &str) {
         assert!((got - want).abs() <= want * 0.02 + 0.6, "{what}: {got} should be {want}");
+    }
+
+    /// The media vault with a library folder `Media` beside it (a picture, a PDF and a sound in it) set up for it.
+    fn outside_vault() -> (Vault, std::path::PathBuf, std::path::PathBuf) {
+        let (mut v, d) = media_vault();
+        let lib = d.with_file_name(format!("{}-library", d.file_name().unwrap().to_string_lossy()));
+        let _ = std::fs::remove_dir_all(&lib);
+        std::fs::create_dir_all(lib.join("My Pics")).unwrap();
+        image::RgbaImage::from_pixel(400, 200, image::Rgba([10, 120, 10, 255])).save(lib.join("My Pics/wide.png")).unwrap();
+        std::fs::write(lib.join("doc.pdf"), crate::pdf::view::sample_pdf()).unwrap();
+        std::fs::copy(crate::media::testdata::fixture("tone.wav"), lib.join("tone.wav")).unwrap();
+        v.set_libraries(&[crate::media::outside::Library { name: "Media".into(), path: lib.clone() }]);
+        (v, d, lib)
+    }
+
+    // spec: MEDIA-016, PDF-004, PDF-005
+    #[test]
+    fn a_picture_a_pdf_and_a_sound_outside_the_vault_are_printed_like_those_inside() {
+        let (v, d, lib) = outside_vault();
+        let (cw, col) = (text_width(), crate::embed_size::DEFAULT_COLUMN);
+        // the width a link asks for, or the picture's own (400 points of the 720 of the editor's column)
+        let address = crate::media::testdata::file_address(&lib.join("My Pics/wide.png"));
+        let cases = [("![[@Media/My Pics/wide.png|360]]".to_string(), cw * 0.5), (format!("![](<{}>)", address.replace("%20", " ")), cw * 400.0 / col), (format!("![]({address})"), cw * 400.0 / col)];
+        for (link, width) in cases {
+            let got = sized(&v, &link);
+            assert_eq!(got.len(), 1, "{link}: the picture is in the PDF");
+            near(got[0].0, width, &link);
+            let (_, text) = export_text(&v, &format!("{link}\n"));
+            assert!(text.contains(&hex(&crate::caption::text(&crate::markdown::find_links(&link)[0]))), "{link}: its caption is its link");
+        }
+        // the pages of a PDF, and the card of a sound
+        assert!(!sized(&v, "![[@Media/doc.pdf]]").is_empty(), "the pages of the PDF");
+        assert_eq!(sized(&v, &format!("![]({})", crate::media::testdata::file_address(&lib.join("doc.pdf")))).len(), sized(&v, "![[@Media/doc.pdf]]").len());
+        let card = export_text(&v, "![[@Media/tone.wav]]\n").1;
+        assert!(card.contains(&hex("tone.wav")), "the card of the sound has its name");
+        let _ = std::fs::remove_dir_all(&lib);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: MEDIA-016
+    #[test]
+    fn an_outside_embed_that_cannot_be_shown_stays_its_link_text_in_the_pdf() {
+        let (v, d, lib) = outside_vault();
+        for link in ["![[@Media/gone.png]]", "![[@Nowhere/a.png]]", "![[@Media/../x.png]]", "![](<file:///no/such/a.png>)"] {
+            let (bytes, text) = export_text(&v, &format!("{link}\n"));
+            assert!(image_sizes(&bytes).is_empty(), "{link}: no picture");
+            assert!(text.contains(&hex(&crate::caption::text(&crate::markdown::find_links(link)[0]))), "{link}: the link is printed as text");
+        }
+        // inside a line a picture is drawn too, and a missing one stays text
+        let line = |t: &str| image_sizes(&export_text(&v, t).0).len();
+        assert_eq!(line("an icon ![[@Media/My Pics/wide.png]] here\n"), 1);
+        assert_eq!(line("an icon ![[@Media/My Pics/gone.png]] here\n"), 0);
+        let _ = std::fs::remove_dir_all(&lib);
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     // spec: PDF-005

@@ -385,6 +385,10 @@ pub struct Config {
     pub media_volume: f32,
     /// How opaque the round play button over the artwork is, 0.0–1.0 (MEDIA-004).
     pub media_play_button_opacity: f32,
+    /// The library folders of this computer (MEDIA-014): a name that links use (`![[@Videos/a.mp4]]`)
+    /// and the folder on this device it stands for. Global, not in a vault, because the folder
+    /// differs from one device to another.
+    pub media_libraries: Vec<crate::media::outside::Library>,
     /// Calendars shown in the calendar panel (local .ics files and CalDAV calendars).
     pub calendars: Vec<crate::calendar::store::CalendarSource>,
     /// Calendar weeks start on Monday (otherwise Sunday).
@@ -512,6 +516,7 @@ impl Default for Config {
             table_cell_edit: true,
             media_volume: 0.8,
             media_play_button_opacity: 0.6,
+            media_libraries: vec![],
             calendars: vec![],
             week_starts_monday: true,
             input_log: false,
@@ -1014,6 +1019,22 @@ mod tests {
         let c: Config = serde_json::from_str(r#"{"media_volume": 0.25, "media_play_button_opacity": 1.0}"#).unwrap();
         let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
         assert_eq!((back.media_volume, back.media_play_button_opacity), (0.25, 1.0));
+    }
+
+    // spec: CFG-069, CFG-001
+    #[test]
+    fn the_media_libraries_are_empty_by_default_load_from_old_files_and_round_trip() {
+        use crate::media::outside::Library;
+        let (c, _) = crate::vault_state::parse::<Config>(br#"{"toolbar_size": 120}"#).unwrap();
+        assert!(c.media_libraries.is_empty(), "an old file: no library");
+        assert_eq!(c.version, 2, "a new field with a default needs no migration (CFG-001)");
+        let libs = vec![Library { name: "Videos".into(), path: "/media/Videos".into() }, Library { name: "Pics".into(), path: "/home/ada/My Pictures".into() }];
+        let text = text::to_toml(&Config { media_libraries: libs.clone(), ..Config::default() });
+        assert!(text.contains("[[media_libraries]]") && text.contains("name = \"Videos\"") && text.contains("path = \"/media/Videos\""), "{text}");
+        assert_eq!(Config::parse_text(&text).unwrap().0.media_libraries, libs);
+        // typed by hand, a library without a folder is kept as it is
+        let (hand, _) = Config::parse_text("[[media_libraries]]\nname = \"Music\"\n").unwrap();
+        assert_eq!(hand.media_libraries, vec![Library { name: "Music".into(), path: Default::default() }]);
     }
 
     // spec: MEDIA-007, CFG-001

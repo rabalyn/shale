@@ -27,3 +27,14 @@ pub const FORMATS: [Format; 8] = [
 pub fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/testdata/media").join(name)
 }
+
+/// The `file://` address of a file, as a file manager or Obsidian writes it (spaces as `%20`, the
+/// Windows drive after three slashes).
+pub fn file_address(path: &std::path::Path) -> String {
+    let p = path.to_string_lossy().replace('\\', "/").replace(' ', "%20");
+    if p.starts_with('/') {
+        format!("file://{p}")
+    } else {
+        format!("file:///{p}")
+    }
+}

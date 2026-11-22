@@ -11,6 +11,7 @@ pub mod embed;
 pub mod engine;
 pub mod ffmpeg;
 pub mod output;
+pub mod outside;
 pub mod player;
 #[cfg(test)]
 pub mod testdata;
@@ -31,7 +32,7 @@ const AUDIO_EXTS: [&str; 8] = ["mp3", "ogg", "oga", "opus", "m4a", "aac", "wav",
 const VIDEO_EXTS: [&str; 7] = ["mp4", "m4v", "webm", "mkv", "mov", "avi", "ogv"];
 
 /// What a media file is (imports and pastes bring these in as files, IMP-031, EDIT-019).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Image,
     Pdf,
@@ -117,6 +118,11 @@ pub fn percent_decode(s: &str) -> String {
 
 /// The path of a `file://` address (`file://localhost/…` too, and `file:///C:/…` on Windows), `%XX` decoded; None for any other address.
 pub fn file_uri_path(uri: &str) -> Option<PathBuf> {
+    file_uri_path_for(uri, cfg!(windows))
+}
+
+/// [`file_uri_path`] for Windows (`windows`) or for any other system, so that both forms can be tested everywhere.
+pub fn file_uri_path_for(uri: &str, windows: bool) -> Option<PathBuf> {
     let rest = uri.trim().strip_prefix("file://")?;
     let rest = rest.strip_prefix("localhost").unwrap_or(rest);
     if !rest.starts_with('/') {
@@ -125,7 +131,7 @@ pub fn file_uri_path(uri: &str) -> Option<PathBuf> {
     let path = percent_decode(rest);
     // Windows writes `file:///C:/Users/x`: the slash before the drive letter is not part of the path
     let drive = path.as_bytes().get(1..3).is_some_and(|d| d[0].is_ascii_alphabetic() && d[1] == b':');
-    Some(PathBuf::from(if cfg!(windows) && drive { &path[1..] } else { &path }))
+    Some(PathBuf::from(if windows && drive { &path[1..] } else { &path }))
 }
 
 /// The media files of pasted text: every non-empty line is a `file://` address or an absolute

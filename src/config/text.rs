@@ -92,6 +92,9 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
     ("table_cell_edit", "true: a click on the grid of a table edits that cell in place."),
     ("media_volume", "The volume of the media players, 0.0 to 1.0."),
     ("media_play_button_opacity", "How opaque the round play button over a player's artwork is, 0.0 to 1.0."),
+    ("media_libraries", "The library folders of this computer: media outside the vault that notes link as ![[@Name/folder/file.mp4]]. The same name on another computer can be another folder."),
+    ("media_libraries.name", "The name notes use in the link, after the @ (letters and digits; capitals do not matter)."),
+    ("media_libraries.path", "The folder on this computer that the name stands for."),
     ("calendars", "The calendars of the calendar panel: files on this computer and CalDAV calendars."),
     ("calendars.id", "A name that identifies the calendar; do not reuse it."),
     ("calendars.name", "What the calendar is called in the window."),
@@ -401,6 +404,7 @@ pub fn decode(bytes: &[u8]) -> Result<Map<String, Value>, String> {
 mod tests {
     use super::*;
     use crate::config::{CacheRetention, MailAccount, RightViewCfg, SidebarCfg};
+    use crate::media::outside::Library;
     use crate::social::{Account, Network, SocialAccountEntry};
 
     /// A config in which every collection holds something and every setting that can be left out is set.
@@ -433,6 +437,7 @@ mod tests {
             social_accounts: vec![SocialAccountEntry { account: Account::new(Network::Bluesky, "https://bsky.social", "ada.bsky.social", "Ada"), secret: "tok".into() }],
             social_last: Some(("a".into(), "home".into())),
             media_volume: 0.8,
+            media_libraries: vec![Library { name: "Videos".into(), path: "/media/ada/Videos".into() }, Library { name: "Pictures".into(), path: "/home/ada/Pictures".into() }],
             ..Config::default()
         };
         c.keybindings.insert("some.action".into(), vec!["Ctrl+K".into()]);

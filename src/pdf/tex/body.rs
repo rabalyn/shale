@@ -238,10 +238,9 @@ impl<'a> Body<'a> {
             return format!("{}\n\n", inline(&self.look, &format!("[[{}]]", link.target)));
         }
         let vault = self.look.vault;
-        let Some(rel) = vault.resolve(&link.target, Some(self.look.rel)) else {
+        let Some((rel, abs)) = vault.resolve_media(&link.target, Some(self.look.rel)).file(vault) else {
             return self.placeholder(&format!("missing: {}", link.target));
         };
-        let abs = vault.abs(&rel);
         let column = self.opts.column();
         let kind = vault.file(&rel).map(|f| f.kind).unwrap_or(FileKind::Other);
         let frame = |file: &str, extra: &str, share: f32| format!("\\includegraphics[{extra}width={:.3}\\linewidth,height=0.8\\textheight,keepaspectratio]{{{file}}}", share.clamp(0.02, 1.0));

@@ -65,6 +65,9 @@ link (`z_media/photo.png`), or the words you give it after a `|`: `![[photo.png|
 
 **Resizing.** Pictures and videos can be resized by dragging; see [[Editor]].
 
+**Outside the vault.** A picture, PDF, sound or video may stay where it is and be linked with a
+library link `![[@Pictures/a.png]]` or a file link; see [[Sounds and videos]].
+
 # Moving and renaming
 
 ![[tree-drag.png]]

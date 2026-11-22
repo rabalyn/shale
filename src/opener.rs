@@ -102,6 +102,12 @@ pub fn open_vault_file(path: &Path, vault_root: &Path) -> Result<(), String> {
     launch(check_vault_file(path, vault_root)?.as_ref())
 }
 
+/// Open a media file outside the vault with its default program (MEDIA-017): a picture, PDF, sound
+/// or video that a library link or a file link names. Nothing else is opened from there.
+pub fn open_outside_media(path: &Path) -> Result<(), String> {
+    launch(check_outside_media(path)?.as_ref())
+}
+
 /// Open the PDF that was just exported (it may be outside the vault, where the user chose).
 pub fn open_exported_pdf(path: &Path) -> Result<(), String> {
     launch(check_exported_pdf(path)?.as_ref())
@@ -281,6 +287,19 @@ pub fn check_vault_file(path: &Path, vault_root: &Path) -> Result<PathBuf, Strin
     let root = std::fs::canonicalize(vault_root).map_err(|e| format!("Not opened: {e}"))?;
     if !real.starts_with(&root) {
         return Err("Not opened: the file is outside the vault".into());
+    }
+    refuse_program(path)?;
+    refuse_program(&real)?;
+    Ok(real)
+}
+
+/// The file to open if it is a media file (picture, PDF, sound or video by its name, and not a
+/// program), a regular file, after resolving links: the files of outside links are opened with no
+/// vault around them, so the kind of file is the check (MEDIA-017).
+pub fn check_outside_media(path: &Path) -> Result<PathBuf, String> {
+    let real = real_file(path)?;
+    if crate::media::media_kind(path).is_none() || crate::media::media_kind(&real).is_none() {
+        return Err("Not opened: only pictures, PDFs, sounds and videos are opened from outside the vault".into());
     }
     refuse_program(path)?;
     refuse_program(&real)?;
@@ -750,6 +769,40 @@ mod tests {
         assert!(check_exported_pdf(&d.join("a.txt")).is_err());
         assert!(check_exported_pdf(&d.join("b.sh")).is_err());
         assert!(check_exported_pdf(&d.join("missing.pdf")).is_err());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: SEC-006, MEDIA-017
+    #[test]
+    fn a_file_outside_the_vault_is_opened_only_when_it_is_media() {
+        let d = tmp("outside-media");
+        for name in ["a.mp4", "A.PDF", "b.png", "c.flac", "notes.txt", "d.docx", "run.sh", "e.desktop", "f.exe"] {
+            fs::write(d.join(name), "x").unwrap();
+        }
+        for ok in ["a.mp4", "A.PDF", "b.png", "c.flac"] {
+            assert!(check_outside_media(&d.join(ok)).is_ok(), "{ok}");
+        }
+        for bad in ["notes.txt", "d.docx", "run.sh", "e.desktop", "f.exe", "missing.mp4"] {
+            assert!(check_outside_media(&d.join(bad)).is_err(), "{bad}");
+        }
+        assert!(check_outside_media(&d).is_err(), "a folder");
+        #[cfg(unix)]
+        {
+            // a media name that is a link to something else, and an executable one
+            std::os::unix::fs::symlink(d.join("run.sh"), d.join("link.mp4")).unwrap();
+            assert!(check_outside_media(&d.join("link.mp4")).is_err(), "the link is judged by what it points to");
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(d.join("a.mp4"), fs::Permissions::from_mode(0o755)).unwrap();
+            assert!(check_outside_media(&d.join("a.mp4")).is_ok(), "a document type may carry the executable bit");
+        }
+        let opened = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let sink = opened.clone();
+        let _guard = install_test_browser(Box::new(move |t| sink.lock().unwrap().push(t.to_string())));
+        assert!(open_outside_media(&d.join("a.mp4")).is_ok());
+        assert!(open_outside_media(&d.join("run.sh")).is_err());
+        let opened = opened.lock().unwrap();
+        assert_eq!(opened.len(), 1, "only the media file was handed over: {opened:?}");
+        assert!(opened[0].ends_with("a.mp4"));
         let _ = fs::remove_dir_all(&d);
     }
 

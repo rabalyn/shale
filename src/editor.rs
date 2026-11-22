@@ -596,6 +596,8 @@ enum Art {
     Audio(std::path::PathBuf),
     /// a picture that is still a Git LFS pointer: the "Download" strip in its place (SYNC-020)
     Download(std::path::PathBuf),
+    /// an outside file that cannot be shown: what is wrong, in a strip in its place (MEDIA-016)
+    Notice(String),
 }
 
 /// What the editor asks the app to do.
@@ -1636,12 +1638,19 @@ impl NoteEditor {
                 if inside || raw_line || fold.view.is_hidden(line) {
                     continue;
                 }
-                let Some(p) = vault.resolve(&l.target, Some(rel)) else { continue };
-                let abs = vault.abs(&p);
+                let shown = vault.resolve_media(&l.target, Some(rel));
+                let outside = matches!(shown, crate::vault::Shown::Outside(_));
+                let Some((p, abs)) = shown.file(vault) else {
+                    if let Some(text) = shown.notice() {
+                        let size = crate::embed_size::not_downloaded(max_w);
+                        images.push((l.range.clone(), size.y + 6.0 + caption_h, Art::Notice(text), size));
+                    }
+                    continue;
+                };
                 // the width the link asks for, or the one a drag is giving it right now
                 let asked = self.embeds.dragging(l.range.start).or(l.embed_width());
                 if crate::media::is_image(&p) {
-                    if self.media.notice(&abs).is_some() {
+                    if self.media.notice(&abs).is_some() && !outside {
                         let size = crate::embed_size::not_downloaded(max_w);
                         images.push((l.range.clone(), size.y + 6.0 + caption_h, Art::Download(abs.clone()), size));
                         continue;
@@ -1856,6 +1865,9 @@ impl NoteEditor {
                     Art::Download(abs) => {
                         ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| crate::media::widget::show_not_downloaded(ui, &self.media, abs));
                     }
+                    Art::Notice(text) => {
+                        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| crate::media::widget::show_notice(ui, text));
+                    }
                     Art::Pdf(tex, total) => {
                         painter.image(tex.id(), rect, uv, Color32::WHITE);
                         painter.rect_stroke(rect, 0.0, Stroke::new(1.0, theme::palette().border), egui::StrokeKind::Outside);
@@ -2063,7 +2075,7 @@ impl NoteEditor {
                     let tip = if *exists { format!("Open “{}”", l.target) } else { format!("Create note “{}”", l.target) };
                     let hint = if ctrl_to_follow { "Ctrl+click to follow" } else { "Ctrl+click to edit the link text" };
                     let colour = if *exists { theme::palette().link } else { theme::palette().link_missing };
-                    let image = vault.resolve(&l.target, Some(rel)).filter(|p| crate::media::is_image(p)).map(|p| vault.abs(&p));
+                    let image = vault.resolve_media(&l.target, Some(rel)).file(vault).filter(|(p, _)| crate::media::is_image(p)).map(|(_, abs)| abs);
                     // several files share the name, or a red path has several candidates (LINK-008, LINK-012)
                     let note = vault.link_hint(&l.target, Some(rel));
                     resp.clone().on_hover_ui_at_pointer(|ui| {

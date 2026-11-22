@@ -288,6 +288,12 @@ pub fn show_not_downloaded(ui: &mut Ui, media: &MediaPlayer, abs: &Path) -> Opti
     Some(r)
 }
 
+/// What stands in place of an outside file that cannot be shown (MEDIA-016): where it should be, or
+/// that its library is not set up here. Cut to the width it has; the whole text is in the tooltip.
+pub fn show_notice(ui: &mut Ui, text: &str) -> Response {
+    ui.add(egui::Label::new(egui::RichText::new(text).color(theme::palette().link_missing)).truncate()).on_hover_text(text)
+}
+
 fn paint_art(painter: &Painter, art: Rect, v: &View) {
     painter.rect_filled(art, CornerRadius::same(6), if v.cover.is_some() { Color32::from_rgb(20, 20, 20) } else { theme::palette().bg_hover });
     match &v.cover {

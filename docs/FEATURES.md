@@ -148,6 +148,18 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   file in your system's video player, and Settings → Appearance says that ffmpeg is missing and
   where to get it.
 
+- **Media outside the vault** (ADR-0030). A picture, PDF, sound or video can stay where it is. A
+  **library link** `![[@Videos/2024/a.mp4]]` names a file in the library folder `Videos`, which each
+  computer maps to a local folder in its own settings (`media_libraries` in the settings file); a vault
+  file at that path wins, and the rest of the path may not leave the folder. A **file link**
+  `![](<file:///home/ada/Videos/a.mp4>)` (also `%20`, and `file:///C:/…`) is Obsidian's form. Both show
+  like media of the vault, in the editor, the preview, the reading view, the link preview and the PDF
+  export. A missing file, or a library that is not set up here, says so in place of the embed. A click
+  opens the file with your system's program and never makes a note; such links are not red, not in the
+  graph and not offered by "Fix link". Only these four kinds of file are opened this way, and nothing
+  outside the vault is ever written. Outside files are not synced. The setting that asks whether to copy
+  or link, the library folders in Settings, and "Copy into the vault" follow (#500, #501).
+
 ![Reading view](userguide/z_media/screenshots/reading.png)
 
 - Ctrl+E switches between editing and the reading view.

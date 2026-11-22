@@ -385,6 +385,7 @@ impl ShaleApp {
             }
             RightPanel::Outgoing => {
                 let out = v.outgoing(&rel);
+                let outside = v.outgoing_outside(&rel);
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                     let (ok, missing): (Vec<_>, Vec<_>) = out.into_iter().partition(|o| o.2.is_some());
                     section_header(ui, &format!("Links  {}", ok.len()));
@@ -393,6 +394,20 @@ impl ShaleApp {
                             let resp = ui.add(egui::Label::new(egui::RichText::new(display).color(theme::palette().link)).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand);
                             if resp.clicked() {
                                 self.actions.push(Action::Open { rel: r, new_tab: false });
+                            }
+                        }
+                    }
+                    if !outside.is_empty() {
+                        // media outside the vault: no notes, nothing to create (MEDIA-016)
+                        ui.add_space(10.0);
+                        section_header(ui, &format!("Outside the vault  {}", outside.len()));
+                        for (display, target) in outside {
+                            let resp = ui
+                                .add(egui::Label::new(egui::RichText::new(display).color(theme::palette().link)).sense(Sense::click()))
+                                .on_hover_text("Click to open it with your system's program")
+                                .on_hover_cursor(egui::CursorIcon::PointingHand);
+                            if resp.clicked() {
+                                self.actions.push(Action::OpenLink { target, heading: None, from: Some(rel.clone()), new_tab: false });
                             }
                         }
                     }
@@ -444,7 +459,7 @@ impl ShaleApp {
                             let links: Vec<_> = markdown::find_links(&title)
                                 .into_iter()
                                 .map(|l| {
-                                    let ok = v.resolve(&l.target, Some(&rel)).is_some();
+                                    let ok = v.exists(&l.target, Some(&rel));
                                     (l, ok)
                                 })
                                 .collect();

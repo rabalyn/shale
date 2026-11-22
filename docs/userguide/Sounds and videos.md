@@ -56,6 +56,31 @@ Without them the video shows a tile with a play mark, and a click opens the file
 system's video player. Settings → Appearance says where ffmpeg was found, or that it
 is missing and where to get it.
 
+# Files outside the vault
+
+You do not have to copy big media files into the vault. A note can link a picture, PDF, sound or
+video where it is. There are two forms, and both show like a file of the vault, with the same
+players, in the editor, the preview, the [[Reading view]] and the [[PDF]] export:
+
+- **A library link**, written `![[@Videos/2024/a.mp4]]` (or `[[@Videos/doc.pdf]]` as a plain
+  link). `Videos` is a *library folder*: every computer says in its own settings (`media_libraries`
+  in the settings file, see [[Settings reference]]) which folder it stands for, so the same note
+  works on each of your computers although the folders differ. A file of the vault at that path wins,
+  and the rest of the path must stay inside the library folder (no `..`).
+- **A file link**, written `![](<file:///home/ada/Videos/a.mp4>)`, also with `%20` for a space and
+  as `file:///C:/Users/ada/a.mp4` on Windows. It is the form Obsidian writes, and it names one file on
+  this computer only.
+
+If the file is not there the note says "Not found:" with its path; if the library is not set up on
+this computer it says "Library “Videos” is not set up on this device". Nothing is created. A click
+on such a link opens the file in your system's program, and nothing else than pictures, PDFs,
+sounds and videos is ever opened this way. These links are not red, and they are not in the graph.
+
+Files outside the vault are not part of it: they are not synced with [[Git sync]] and not in
+the [[File history]], and a backup of the vault does not hold them. The setting that chooses between
+copying and linking when you import or paste a file, and the Settings page for library folders,
+come with the next versions.
+
 # Media from other computers
 
 When a vault is synced with [[Git sync]] and its media are stored with Git LFS, a sound or

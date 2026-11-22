@@ -426,6 +426,34 @@ fn a_picture_a_drawing_and_a_pdf_are_files_in_the_work_folder_sized_like_the_edi
     assert!(narrow.contains("width=0.500\\linewidth"), "{narrow}");
 }
 
+// spec: MEDIA-016, TEX-015, TEX-031
+#[test]
+fn a_picture_and_a_pdf_outside_the_vault_are_files_in_the_work_folder_and_a_missing_one_is_a_warning() {
+    let assets = rich_assets();
+    let (mut v, dir) = temp_vault("outside", &[("Plan.md", b"x")]);
+    let lib = dir.with_file_name(format!("{}-library", dir.file_name().unwrap().to_string_lossy()));
+    std::fs::create_dir_all(lib.join("My Pics")).unwrap();
+    std::fs::write(lib.join("My Pics/pic.png"), &assets[0].1).unwrap();
+    std::fs::write(lib.join("doc.pdf"), &assets[2].1).unwrap();
+    v.set_libraries(&[crate::media::outside::Library { name: "Media".into(), path: lib.clone() }]);
+    let address = crate::media::testdata::file_address(&lib.join("My Pics/pic.png"));
+    let note = format!("## S\n![[@Media/My Pics/pic.png|200]]\n![[@Media/doc.pdf]]\n![x]({address})\nan icon ![[@Media/My Pics/pic.png]] here\n![[@Media/gone.png]]\n![[@Nowhere/a.png]]\nin a line ![[@Media/gone.png]]\n");
+    let set = tuda_set(SetSettings { accent: "9c".into(), ..SetSettings::default() });
+    let opts = ExportOptions::for_note();
+    let out = write(&Request { vault: &v, rel: Path::new("Plan.md"), text: &note, opts: &opts, set: &set, kind: kind(&set, "pub"), fields: &fields(&[("author", "A")]) }).unwrap();
+    let b = body_of(&out.tex);
+    assert!(b.contains("\\includegraphics[width=0.278\\linewidth,height=0.8\\textheight,keepaspectratio]{picture-1.png}"), "200 points of the editor's 720: {b}");
+    assert!(b.contains("\\textit{@Media/My Pics/pic.png}") && b.contains("\\includegraphics[page=1,"), "{b}");
+    assert_eq!(b.matches("picture-1.png}").count(), 3, "one file for the picture however it is linked: {b}");
+    assert!(b.contains("\\raisebox{-0.2\\baselineskip}{\\includegraphics[height=0.9\\baselineskip"), "the picture in the line: {b}");
+    let names: Vec<&str> = out.files.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, ["picture-1.png", "document-2.pdf"]);
+    assert_eq!(out.warnings, ["missing: @Media/gone.png", "missing: @Nowhere/a.png", "missing: @Media/gone.png"], "a missing file or library is told, not a failure");
+    assert!(b.contains("\\textit{[missing: @Nowhere/a.png]}"), "{b}");
+    let _ = std::fs::remove_dir_all(lib);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 // spec: TEX-015
 #[test]
 fn an_embed_that_cannot_be_used_is_a_line_of_text_and_a_warning_not_a_failure() {
