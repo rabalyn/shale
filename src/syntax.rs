@@ -4,6 +4,7 @@
 //! few `Kind`s that `theme` colours).
 //! The result for a block is cached, so a long note is not highlighted again on every frame.
 
+use crate::jobs;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -226,6 +227,39 @@ fn lookup(word: &str, code: &str) -> (Arc<Spans>, bool) {
     (spans, false)
 }
 
+/// The languages whose grammars are compiled in the background at start (EDIT-118), each with a
+/// short sample that walks through the grammar's main contexts (strings, comments, numbers,
+/// functions, types, templates): a grammar compiles its regexes when a context is first used.
+const PREWARM: &[(&str, &str)] = &[
+    ("ts", "import { a } from \"x\";\ninterface A<T> { n: number; s?: string }\n/* c */ // d\nexport class B<T> extends C implements A<T> {\n  private x: Map<string, number> = new Map();\n  async f(a: A, b = 1.5): Promise<void> { const t = `v ${a.n}`; if (a) { return await g(t, /re/g); } }\n}\nenum E { A = 1 }\ntype U = 'a' | 'b';\nconst fn = (x: number) => x * 2;\n"),
+    ("tsx", "import React from \"react\";\nconst C = ({ a }: { a: number }) => <div id=\"a\" onClick={() => f(a)}>{a} text</div>;\n// c\nexport default C;\n"),
+    ("js", "const a = 1; // c\n/* d */ function f(x, y = 2) { return `t ${x}` + \"s\" + 'q' + /re/g.test(y); }\nclass A extends B { static x = 3; get y() { return this.x; } }\nlet o = { k: [1, 2.5, 0xff], f() {} }; const g = async () => await f();\n"),
+    ("rs", "use std::fmt;\n/// doc\n// c\n#[derive(Debug)]\npub struct A<'a> { n: &'a str, m: u32 }\nimpl<'a> A<'a> { pub fn f(&self, x: i64) -> Option<String> { let s = format!(\"{}\", x); match x { 0 => None, _ => Some(s) } } }\nfn main() { let v: Vec<u8> = vec![1, 2]; println!(\"{v:?}\"); let c = 'c'; let r = r#\"raw\"#; }\n"),
+    ("py", "import os\n# c\n@dec\nclass A(B):\n    \"\"\"doc\"\"\"\n    def f(self, x: int = 1) -> str:\n        s = f\"v {x}\" + 'q'\n        return [i for i in range(3) if i]\nasync def g(): await h(1.5, None, True)\n"),
+    ("sh", "#!/bin/sh\n# c\nset -eu\nf() { echo \"$1\" 'q' $(date) ${x:-1}; }\nif [ -f a ]; then f b; fi\nfor i in 1 2; do cat <<EOF\nhi\nEOF\ndone | grep x > /dev/null\n"),
+    ("json", "{ \"a\": [1, 2.5, true, null], \"b\": { \"c\": \"d\" } }\n"),
+    ("toml", "# c\n[package]\nname = \"x\"\nversion = 3\non = true\nd = 1979-05-27\n[[bin]]\nk = ['a', \"\"\"b\"\"\"]\n"),
+    ("yaml", "# c\na: 1\nb:\n  - \"x\"\n  - 'y'\n  - true\nc: |\n  text\n"),
+    ("cpp", "#include <vector>\n// c\n/* d */ template <typename T> class A : public B { public: int f(const T& x) const { return x + 1.5f; } };\nint main() { std::vector<int> v{1, 2}; auto s = \"s\"; char c = 'c'; return 0; }\n"),
+    ("go", "package main\n// c\nimport \"fmt\"\ntype A struct { n int }\nfunc (a A) f(x int) string { return fmt.Sprintf(\"%d\", x) + `raw` }\nfunc main() { go f(); for i := 0; i < 2; i++ {} }\n"),
+    ("html", "<!doctype html>\n<!-- c -->\n<div class=\"a\" id='b'><p>text &amp; more</p><script>let a = 1;</script><style>p { color: red; }</style></div>\n"),
+    ("css", "/* c */\n.a > b:hover, #c { color: #fff; margin: 1px 2em; background: url(x.png); }\n@media (min-width: 1px) { p { top: 0 } }\n"),
+    ("md", "# h\n\n*a* **b** `c` [l](u)\n\n- x\n\n```rs\nfn f() {}\n```\n"),
+];
+
+/// Compile the grammars of [`PREWARM`] and load the syntax set, here and now (EDIT-118). It does
+/// not touch the cache of highlighted blocks. Returns how many grammars were warmed.
+pub fn prewarm() -> usize {
+    PREWARM.iter().filter_map(|(word, sample)| syntax_for(word).map(|s| run_syntect(s, sample))).count()
+}
+
+/// [`prewarm`] on a thread of its own, started once at start-up (EDIT-118): the first block of a
+/// language then does not wait for its grammar to compile. A block that comes before the
+/// thread is done is highlighted as before, so no frame ever shows wrong colours.
+pub fn prewarm_in_background() {
+    jobs::run(prewarm, |_| {});
+}
+
 /// The coloured parts of a block of code in the language `word` (a fence's language word, any
 /// alias). A language that is not known, or none, gives no spans: the block stays plain.
 pub fn highlight(word: &str, code: &str) -> Arc<Spans> {
@@ -399,6 +433,31 @@ mod tests {
         assert!(highlight_inline("plain words").is_empty());
         assert!(highlight_inline("it's é").is_empty(), "a lone quote is no string");
         assert!(highlight_inline("x1 = a2").is_empty(), "digits inside a name are not a number");
+    }
+
+    // spec: EDIT-118
+    #[test]
+    fn prewarm_warms_every_listed_grammar_without_touching_the_cache() {
+        assert_eq!(prewarm(), PREWARM.len(), "every listed word has a grammar");
+        for (word, sample) in PREWARM {
+            assert!(!run_syntect(syntax_for(word).unwrap(), sample).is_empty(), "{word}: the sample has coloured parts");
+        }
+        let code = "let prewarm_not_cached_1618 = 'x';\n";
+        prewarm();
+        assert!(!lookup("js", code).1, "warming leaves the cache of blocks alone");
+    }
+
+    // spec: EDIT-118
+    #[test]
+    fn highlighting_while_the_background_warm_up_runs_gives_the_same_spans() {
+        let code = "const racing_1414: number = 1; // c\n";
+        let before = run_syntect(syntax_for("ts").unwrap(), code);
+        let (tx, rx) = std::sync::mpsc::channel();
+        jobs::run(prewarm, move |r| tx.send(r).unwrap());
+        let during = run_syntect(syntax_for("ts").unwrap(), code);
+        assert_eq!(during, before, "the result does not depend on who compiled the grammar");
+        assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(60)).unwrap(), Ok(PREWARM.len()));
+        prewarm_in_background();
     }
 
     // spec: EDIT-080
