@@ -54,8 +54,23 @@ stores `docs/perf/results/vX.Y.Z.json` and `docs/perf/results-worst/vX.Y.Z.json`
 with the highest earlier release that has one (`docs/perf/compare/vX.Y.Z.{md,json}`,
 `vX.Y.Z-worst.{md,json}`), regenerates `index.html`, and puts all of it into the release commit.
 A regression stops the release (`--allow-perf-regression` lets it pass, `--skip-bench` leaves the
-step out). The step takes about ten minutes. A false alarm from a busy computer: run the release
-again on a quiet one before using the flag.
+step out). The step takes about ten minutes. **A flagged time regression is confirmed first**
+(ADR-0031, BUILD-034): the stored comparison is one run of each side against a result of another
+day, which at v0.7.0 flagged nine regressions that were all noise (#493). So the release measures
+the flagged scenarios again, alone, against the previous release, X and Y interleaved, 5 runs
+(`BENCH_RECHECK_RUNS`), and stops only if the regression shows again there. Allocations and peak
+bytes are exact and stop the release without a re-run. The re-run is kept in
+`docs/perf/compare/vX.Y.Z-recheck.{md,json}` (`-worst-recheck` for the worst profile) whatever it
+found, and its numbers are commented on the release issue.
+
+**Where performance is measured.** The only gate is the owner's workstation (the release step
+above). GitHub runs the `full` profile on Linux, macOS and Windows after the release page is up
+(job `bench` of `build.yml`, `scripts/bench-github.sh`): the result is kept as the release asset
+`shale-bench-<version>-<system>.json`, compared with the previous release's asset of the *same
+system*, and the odd findings are in that job's summary. That is statistics, read by a person: a
+shared runner is noisy and its hardware changes, so it never fails or delays a release. Forgejo
+measures nothing (its runner is a shared aarch64 machine). To see how a system developed, download
+the assets of the releases and `shale --bench-compare` two of them.
 
 ## The scenarios
 
@@ -260,10 +275,15 @@ What an agent does, and in this order. Everything is a command; nothing needs a 
 1. **A release does it for you.** `scripts/make-release.sh` runs `scripts/bench-release.sh` in the
    release worktree: `full` twice (`BENCH_RUNS`, merged) and `worst` once (`BENCH_WORST_RUNS`),
    compared with the last release's stored result into `docs/perf/compare/vX.Y.Z.{md,json}` and
-   `vX.Y.Z-worst.{md,json}` (the same `compare.json` as below). On a regression it ends with
-   "performance regression" and the lines `<id> <metric> <x> -> <y> (<delta> %, confidence …)`.
-   Go on at 4. `--allow-perf-regression` lets the release pass: only with the reason in the
-   release issue (step 6), `--skip-bench` leaves the step out and says so.
+   `vX.Y.Z-worst.{md,json}` (the same `compare.json` as below). **Time regressions are run again by
+   the step itself** (4 below, `--runs 5`, interleaved, against the previous release, the numbers in
+   `vX.Y.Z[-worst]-recheck.{md,json}` and on the release issue): a "regression" that the re-run does
+   not show is noise and the release goes on, saying so. When something is confirmed (or is an
+   allocation or peak regression) it ends with "performance regression" and the lines `<id> <metric>
+   <x> -> <y> (<delta> %, confidence …)`. Go on at 5. `--allow-perf-regression` lets the release
+   pass: only with the reason in the release issue (step 6), `--skip-bench` leaves the step out and
+   says so. After the release, GitHub's job `bench` adds the statistics of the three systems
+   (job summary, release asset); they are for reading, not a gate.
 2. **A fix or a branch** (is it faster, did it break something): `scripts/bench-compare.sh <before>
    <after> --profile quick` (about 15 minutes with the three runs; `full` for what `quick` lacks,
    `worst` for the worst case; `--max-load 12` on a shared computer).
@@ -279,7 +299,8 @@ What an agent does, and in this order. Everything is a command; nothing needs a 
      look at them again (4) before a release.
    - `changed` scenarios have no verdict by design; `skipped` ones lacked a tool (pandoc, ffmpeg,
      lualatex, git-lfs) on one side: not a failure.
-4. **Run the flagged scenarios again, alone**, quiet if you can:
+4. **Run the flagged scenarios again, alone** (a release does this for its flagged time
+   regressions), quiet if you can:
    `scripts/bench-compare.sh <X> <Y> --profile full --runs 5 --filter =id1,=id2 --max-load 8`
    (the profile of the flagged scenario: `worst.*` is `worst`). A regression that stays is real.
    A `noisy` one that vanishes was noise.

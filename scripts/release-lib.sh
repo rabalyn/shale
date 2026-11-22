@@ -240,7 +240,7 @@ has_entries() {
 # tag_and_push <kind: check|release> <version> <issue|""> <dry-run: yes|no>
 # The whole run of FORGE-013 / FORGE-014 once the version is known.
 tag_and_push() {
-  local kind=$1 v=$2 issue=$3 dry=$4 tag="v$2" common wt branch base bump_commit merge msg
+  local kind=$1 v=$2 issue=$3 dry=$4 tag="v$2" common wt branch base bump_commit merge msg note bench_rc
   is_semver "$v" || die "$v is not a semver version (x.y.z or x.y.z-rc.n)"
   if [ "$kind" = check ]; then
     is_pre "$v" || die "a check tag is a pre-release (x.y.z-rc.n); a release is scripts/make-release.sh"
@@ -297,8 +297,22 @@ tag_and_push() {
     merge_changelog "$wt" "$v" "${RELEASE_DATE:-$(date +%F)}"
     # the performance of the release: stored, compared with the last release, and in the release commit (BUILD-034)
     if [ "${BENCH_SKIP:-no}" != yes ]; then
-      bash "$LIB_DIR/bench-release.sh" "$wt" "$v" ${BENCH_ALLOW:+--allow-perf-regression} \
-        || die "the performance step failed (see above); nothing was landed or tagged"
+      # a flagged time regression is measured again by the step (#408); its numbers go into the release issue
+      # whatever they say, also when the step stops the release
+      note="$common/release/bench-recheck.md"
+      rm -f "$note"
+      bench_rc=0
+      bash "$LIB_DIR/bench-release.sh" "$wt" "$v" --note "$note" ${BENCH_ALLOW:+--allow-perf-regression} || bench_rc=$?
+      if [ -s "$note" ]; then
+        { printf '### Performance check of %s: flagged scenarios measured again\n\n' "$v"; cat "$note"; } > "$note.body"
+        "$GH" issue comment "$issue" -R "$GH_REPO" --body-file "$note.body" >/dev/null \
+          || echo "note: gh could not comment the performance numbers on #$issue"
+      fi
+      case $bench_rc in
+        0) ;;
+        1) die "performance regression (see above); nothing was landed or tagged" ;;
+        *) die "the performance step failed (see above); nothing was landed or tagged" ;;
+      esac
     else
       echo "note: --skip-bench: the performance of $v is not measured"
     fi

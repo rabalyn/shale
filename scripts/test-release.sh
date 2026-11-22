@@ -25,6 +25,12 @@ mkdir "$TMP/bin"
 cat > "$TMP/bin/gh" <<'GH'
 #!/bin/sh
 echo "$*" >> "$GH_LOG"
+# a comment from a file (the performance numbers of a release): keep what it said
+prev=""
+for a in "$@"; do
+  [ "$prev" = --body-file ] && cat "$a" >> "$GH_LOG.body"
+  prev=$a
+done
 case "$1 $2" in
   "issue list")
     # a test hook, run once: what happens while the release runs (#348)
@@ -57,13 +63,26 @@ case "$1" in
     while [ $# -gt 0 ]; do [ "$1" = --out ] && dir=$2; shift; done
     mkdir -p "$dir"
     echo "# compare" > "$dir/compare.md"
-    echo '{"regressions":[]}' > "$dir/compare.json"
+    # FAKE_COMPARE_JSON: a file with the compare.json to write (the regressions it names)
+    if [ -n "${FAKE_COMPARE_JSON:-}" ]; then cp "$FAKE_COMPARE_JSON" "$dir/compare.json"; else echo '{"regressions":[]}' > "$dir/compare.json"; fi
     exit "${FAKE_COMPARE_EXIT:-0}" ;;
   --bench-report) echo "<html></html>" > "$3" ;;
 esac
 FAKE
 chmod +x "$TMP/bin/fake-shale"
-export BENCH_BIN="$TMP/bin/fake-shale" BENCH_LOG="$TMP/bench.log"
+# scripts/bench-compare.sh, which a release uses to measure flagged scenarios again (BUILD-034): it records
+# its arguments and writes FAKE_RECHECK_JSON as the compare.json (no regression without it)
+cat > "$TMP/bin/fake-bench-compare" <<'FAKE'
+#!/bin/sh
+echo "bench-compare $*" >> "$BENCH_LOG"
+while [ $# -gt 0 ]; do [ "$1" = --out ] && dir=$2; shift; done
+mkdir -p "$dir"
+echo "# recheck" > "$dir/compare.md"
+cp "$FAKE_RECHECK_JSON" "$dir/compare.json"
+exit "${FAKE_RECHECK_EXIT:-0}"
+FAKE
+chmod +x "$TMP/bin/fake-bench-compare"
+export BENCH_BIN="$TMP/bin/fake-shale" BENCH_COMPARE="$TMP/bin/fake-bench-compare" BENCH_LOG="$TMP/bench.log"
 export RELEASE_GH="$TMP/bin/gh" GH_LOG="$TMP/gh.log" RELEASE_DATE=2026-11-17 LAND_CHECK_CMD=true
 
 git init -q --bare "$TMP/remote.git"
@@ -320,6 +339,50 @@ git checkout -q main
 bash scripts/land.sh bigcl2 >/dev/null 2>&1 || echo "setup: landing bigcl2 failed"
 OUT=$(bash scripts/make-release.sh --dry-run patch 2>&1)
 check "a big changelog with an [Unreleased] entry does not stop a release dry run (#466)" '! printf "%s" "$OUT" | grep -Fq "needs an update first" && printf "%s" "$OUT" | grep -Fq "v0.4."'
+
+# spec: BUILD-034 (#408): a flagged time regression is measured again, interleaved, before it stops a release;
+# allocations and peak bytes are exact and stand as they are
+FIRST=$(git rev-parse origin/main)
+cat > "$TMP/time-reg.json" <<J
+{"verdict":"regression","x":{"commit":"$FIRST"},"regressions":[
+ {"id":"ui.frame.x","metric":"time","x":1000000,"y":2000000,"delta_pct":100.0,"confidence":"low"},
+ {"id":"vault.open.large","metric":"time","x":5000000,"y":6000000,"delta_pct":20.0,"confidence":"low"}]}
+J
+cat > "$TMP/alloc-reg.json" <<J
+{"verdict":"regression","x":{"commit":"$FIRST"},"regressions":[{"id":"ui.frame.x","metric":"allocs","x":1000,"y":2000,"delta_pct":100.0,"confidence":"high"}]}
+J
+cat > "$TMP/recheck-noise.json" <<'J'
+{"verdict":"ok","x":{"describe":"v0.4.5","commit":"aaaaaaaaaaaa","load":1.5},"y":{"repeats":5,"load":1.8},"regressions":[],
+ "rows":[{"id":"ui.frame.x","x_median_ns":1000000,"y_median_ns":1010000,"time_delta_pct":1.0,"time_verdict":"ok"},
+         {"id":"vault.open.large","x_median_ns":5000000,"y_median_ns":5100000,"time_delta_pct":2.0,"time_verdict":"ok"}]}
+J
+cat > "$TMP/recheck-real.json" <<'J'
+{"verdict":"regression","x":{"describe":"v0.4.5","commit":"aaaaaaaaaaaa","load":1.5},"y":{"repeats":5,"load":1.8},
+ "regressions":[{"id":"ui.frame.x","metric":"time","x":1000000,"y":1900000,"delta_pct":90.0,"confidence":"high"}],
+ "rows":[{"id":"ui.frame.x","x_median_ns":1000000,"y_median_ns":1900000,"time_delta_pct":90.0,"time_verdict":"REGRESSION"},
+         {"id":"vault.open.large","x_median_ns":5000000,"y_median_ns":5100000,"time_delta_pct":2.0,"time_verdict":"ok"}]}
+J
+land perf4 docs/changelog-pending/I33.md $'### Fixed\n\n- Thirty-three (#33).'
+: > "$BENCH_LOG"; rm -f "$GH_LOG.body"
+FAKE_COMPARE_JSON="$TMP/time-reg.json" FAKE_COMPARE_EXIT=1 FAKE_RECHECK_JSON="$TMP/recheck-real.json" FAKE_RECHECK_EXIT=1 expect "a time regression that shows again in the re-run stops the release" 1 "performance regression" make-release.sh patch
+check "only the confirmed regression is listed, with the numbers of the re-run" 'printf "%s" "$OUT" | grep -Fq "ui.frame.x time 1000000 -> 1900000" && ! printf "%s" "$OUT" | grep -Fq "vault.open.large time" && ! printf "%s" "$OUT" | grep -Fq "2000000"'
+check "the flagged scenarios alone were measured again against the previous release, interleaved, 5 runs" 'grep -Fq "bench-compare $FIRST " "$BENCH_LOG" && grep -Fq -- "--profile full --runs 5 --filter =ui.frame.x,=vault.open.large --out" "$BENCH_LOG" && grep -Fq -- "--profile worst --runs 5 --filter =ui.frame.x,=vault.open.large" "$BENCH_LOG"'
+check "the numbers went into the release issue although the release stopped" 'grep -Fq "issue comment 77 -R rabalyn/shale --body-file" "$GH_LOG" && grep -Fq "| \`ui.frame.x\` | +100 % | 1 | 1.9 | 90 % | REGRESSION |" "$GH_LOG.body" && grep -Fq "**Confirmed**: ui.frame.x" "$GH_LOG.body" && grep -Fq "| \`vault.open.large\` | +20 % | 5 | 5.1 | 2 % | ok |" "$GH_LOG.body"'
+check "nothing was landed or tagged" '! remote_tag v0.4.6 && ! git rev-parse -q --verify refs/heads/release/v0.4.6 >/dev/null'
+: > "$BENCH_LOG"
+FAKE_COMPARE_JSON="$TMP/time-reg.json" FAKE_COMPARE_EXIT=1 FAKE_RECHECK_JSON="$TMP/recheck-real.json" FAKE_RECHECK_EXIT=1 expect "--allow-perf-regression lets a confirmed time regression pass" 0 "allowed by --allow-perf-regression" make-release.sh --allow-perf-regression patch
+check "the re-run is kept in docs/perf/compare, and the first comparison stays" 'remote_tag v0.4.6 && git show origin/main:docs/perf/compare/v0.4.6-recheck.json | grep -Fq REGRESSION && git show origin/main:docs/perf/compare/v0.4.6-recheck.md | grep -Fq recheck && git show origin/main:docs/perf/compare/v0.4.6-worst-recheck.json | grep -Fq REGRESSION && git show origin/main:docs/perf/compare/v0.4.6.json | grep -Fq "\"delta_pct\":100.0"'
+land perf5 docs/changelog-pending/I34.md $'### Fixed\n\n- Thirty-four (#34).'
+: > "$BENCH_LOG"; rm -f "$GH_LOG.body"
+FAKE_COMPARE_JSON="$TMP/time-reg.json" FAKE_COMPARE_EXIT=1 FAKE_RECHECK_JSON="$TMP/recheck-noise.json" BENCH_MAX_LOAD=6 expect "a time regression that does not show again is noise and the release goes on" 0 "not confirmed by the re-run" make-release.sh patch
+check "the release is made, the re-run was kept and said so in the issue; --max-load was passed on" 'remote_tag v0.4.7 && git show origin/main:docs/perf/compare/v0.4.7-recheck.json | grep -Fq "\"verdict\":\"ok\"" && grep -Fq "**Not confirmed**" "$GH_LOG.body" && grep -Fq -- "--max-load 6" "$BENCH_LOG"'
+land perf6 docs/changelog-pending/I35.md $'### Fixed\n\n- Thirty-five (#35).'
+: > "$BENCH_LOG"
+FAKE_COMPARE_JSON="$TMP/alloc-reg.json" FAKE_COMPARE_EXIT=1 FAKE_RECHECK_JSON="$TMP/recheck-noise.json" expect "an allocation regression is exact: it stops the release without a re-run" 1 "ui.frame.x allocs 1000 -> 2000" make-release.sh patch
+check "nothing was measured again" '! grep -q "^bench-compare " "$BENCH_LOG"'
+: > "$BENCH_LOG"
+echo '{"schema":2,"verdict":"error","exit_code":2,"error":"the build failed"}' > "$TMP/recheck-error.json"
+FAKE_COMPARE_JSON="$TMP/time-reg.json" FAKE_COMPARE_EXIT=1 FAKE_RECHECK_JSON="$TMP/recheck-error.json" FAKE_RECHECK_EXIT=2 expect "a re-run that fails stops the release as a failed step" 1 "the performance step failed" make-release.sh patch
 
 [ "$FAILED" = 0 ] && echo "all $N checks passed"
 exit "$FAILED"
