@@ -45,11 +45,16 @@ jobs:
           else
             git init -q .
             git remote add origin "${{ github.server_url }}/${{ github.repository }}.git"
-            auth=()
-            if [ -n "$TOKEN" ]; then
-              auth=(-c "http.extraHeader=Authorization: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)")
-            fi
-            git "${auth[@]}" fetch -q --depth=1 origin "${{ github.sha }}"
+            # the token goes in git's environment, never on its command line (argv shows in the process list)
+            git_auth() {
+              if [ -n "$TOKEN" ]; then
+                GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraHeader \
+                  GIT_CONFIG_VALUE_0="Authorization: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)" git "$@"
+              else
+                git "$@"
+              fi
+            }
+            git_auth fetch -q --depth=1 origin "${{ github.sha }}"
             git checkout -q FETCH_HEAD
           fi
 

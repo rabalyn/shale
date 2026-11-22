@@ -127,3 +127,29 @@ fn dev_010_coverage_runs_for_every_tag_push() {
     assert!(cond.contains("github.event_name != 'schedule'") && cond.contains("github.event_name != 'workflow_dispatch'"), "tag pushes only, not weekly, not by hand: {cond}");
     assert!(!cond.contains("contains(github.ref_name"), "check and release tags alike: {cond}");
 }
+
+// spec: FORGE-023 (#149): git's arguments show in the process list, so the tokens of the Forgejo jobs
+// (the job token of every checkout, the GitHub token of `mirror`) go in git's environment configuration
+#[test]
+fn forge_023_no_workflow_puts_a_token_on_gits_command_line() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(".forgejo/workflows");
+    let mut headers = 0;
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        let text = std::fs::read_to_string(&path).unwrap();
+        for l in text.lines().map(str::trim).filter(|l| !l.starts_with('#')) {
+            let name = path.file_name().unwrap().to_string_lossy();
+            assert!(!l.contains("-c \"http") && !l.contains("-c http") && !l.contains("-c 'http") && !l.contains("--config"), "{name}: a git option with an http setting: {l}");
+            if l.contains("extraHeader") {
+                headers += 1;
+                assert!(l.contains("GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http."), "{name}: the header is not set through git's environment: {l}");
+            }
+            if l.contains("GIT_CONFIG_VALUE_0=") {
+                assert!(l.ends_with("git \"$@\"") && !l.contains("echo"), "{name}: the value is set for one git command only: {l}");
+            }
+        }
+        assert!(!text.contains("set -x") && !text.contains("set -o xtrace"), "{path:?} traces commands, which would print a token");
+    }
+    // five checkouts and the fetch of the tags in ci.yml, the mirror's two functions, security.yml
+    assert!(headers >= 8, "fewer header settings than expected: {headers}");
+}

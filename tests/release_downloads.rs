@@ -273,7 +273,7 @@ fn build_039_a_release_tag_reaches_github_before_main_and_is_not_tested_twice() 
     }
     let mirror = job(&read(".forgejo/workflows/ci.yml"), "mirror");
     let tag = mirror.find("          if [ \"$release\" = yes ]; then\n            push_tag").expect("the tag is pushed for a release");
-    let main = mirror.find("git \"${gh[@]}\" push github \"$SHA:refs/heads/main\"").expect("main is pushed");
+    let main = mirror.find("git_gh push github \"$SHA:refs/heads/main\"").expect("main is pushed");
     assert!(tag < main, "the release tag must reach GitHub before main, or the gate finds no tag");
 }
 
