@@ -5,7 +5,9 @@ A real NFS server (the kernel's nfsd, in the privileged container `docker.io/eri
 NET-012, [`docs/storage-on-shares.md`](../../docs/storage-on-shares.md), #470) run in the mount.
 
 **Everything here needs root**: nfsd lives in the kernel (the module `nfsd` must be loaded) and a mount needs `sudo`. It cannot run rootless
-and cannot run in CI without a privileged runner (rabalyn/shale#477). **This stack has never been started**: the script was written and
+and cannot run in CI without a privileged runner (rabalyn/shale#477). **There is no rootless stand-in** (rabalyn/shale#477): rclone has no NFS client, a FUSE NFS client (libnfs's `fuse-nfs`) is not packaged for most distributions
+and would still need this kernel nfsd, which needs root; so `nfs_env_storage_checks` stays ignored, kernel mount only, run by hand (the steps: [`docs/storage-on-shares.md`](../../docs/storage-on-shares.md),
+"Kernel mounts, to run by hand"). **This stack has never been started**: the script was written and
 syntax-checked on a machine where no `sudo` was used for it. Expect to fix details of the image's options on the first run.
 
 ```sh
