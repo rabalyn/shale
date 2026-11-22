@@ -221,6 +221,9 @@ fn footnote_pairs(line: &str, off: usize, fmts: &mut [Fmt], defined: &std::colle
     }
 }
 
+/// The selection of the text box and `last_selection` from before a press on a task box.
+type BoxHold = (Option<CCursorRange>, Option<(usize, usize)>);
+
 /// Build the coloured layout for the editor (without inline pictures).
 #[cfg(test)]
 pub fn highlight(text: &str, links: &[(LinkSpan, bool)], base: f32) -> LayoutJob {
@@ -706,7 +709,7 @@ pub struct NoteEditor {
     /// the painted task boxes of the last frame (rect, byte of the check), for the press that ticks one (EDIT-007)
     task_boxes: Vec<(Rect, usize)>,
     /// a press on a painted task box is on: the selection the text box had before it, put back each frame (EDIT-007)
-    box_hold: Option<(Option<CCursorRange>, Option<(usize, usize)>)>,
+    box_hold: Option<BoxHold>,
     /// a button of a table grid was clicked: the table (by its number in the note) and the change
     /// to make at the start of the next frame (EDIT-025, EDIT-030)
     table_edit: Option<(usize, crate::table::Change)>,
