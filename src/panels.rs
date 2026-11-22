@@ -293,6 +293,10 @@ impl ShaleApp {
                     self.actions.push(Action::Export(rel.clone()));
                     ui.close();
                 }
+                if kind == FileKind::Note && ui.button("Export to Word…").clicked() {
+                    self.actions.push(Action::ExportDocx(rel.clone()));
+                    ui.close();
+                }
                 if ui.button("Rename…").clicked() {
                     self.actions.push(Action::Rename(rel.clone()));
                     ui.close();
@@ -761,6 +765,7 @@ impl ShaleApp {
             }
             Modal::TexSetup
             | Modal::Export(_)
+            | Modal::ExportDocx(_)
             | Modal::Calendars(_)
             | Modal::Event(_)
             | Modal::Import(_)
@@ -1091,6 +1096,9 @@ impl ShaleApp {
             if close_asked {
                 keep = false;
             }
+        }
+        if let Modal::ExportDocx(d) = &mut modal {
+            keep &= self.docx_export_modal(&ctx, d);
         }
         if keep && self.modal.is_none() {
             self.modal = Some(modal);

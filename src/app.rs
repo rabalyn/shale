@@ -148,6 +148,7 @@ pub enum RightPanel {
 
 #[cfg(test)]
 mod calendar_action_tests;
+mod docx_export;
 mod drops;
 #[cfg(all(test, target_os = "linux"))]
 mod drops_tests;
@@ -217,6 +218,8 @@ pub enum Modal {
     /// the "Turn on sync" wizard (SYNC-047); its state is `ShaleApp::sync.setup.wizard`
     SyncWizard,
     Export(Box<crate::pdf::export_dialog::ExportDialog>),
+    /// the "Export to Word" dialog of a note (DOCX-001)
+    ExportDocx(Box<crate::docx_export::dialog::DocxDialog>),
     /// the guided setup of the LaTeX export (TEX-017); its state is `ShaleApp::tex.setup`
     TexSetup,
     Calendars(Box<crate::calendar::dialog::CalendarDialog>),
@@ -245,6 +248,8 @@ pub enum Action {
     FocusEditor,
     /// open the "Export to PDF" dialog for a note or drawing
     Export(PathBuf),
+    /// open the "Export to Word" dialog for a note (DOCX-001)
+    ExportDocx(PathBuf),
     /// open the "Export to PDF" dialog for a folder as one PDF, a book; the empty path is the vault (BOOK-010)
     ExportFolder(PathBuf),
     Open {
@@ -2165,14 +2170,19 @@ impl ShaleApp {
 
     /// Save the PDF bytes at the dialog's path (made, with its folder, when it is not there yet).
     fn save_pdf(&mut self, path: &str, bytes: &[u8]) -> Result<PathBuf, String> {
+        self.save_file(path, bytes, "PDF")
+    }
+
+    /// Save the bytes of an export (`what`: "PDF") at `path`, made with its folder when it is not there yet; the vault is scanned again.
+    fn save_file(&mut self, path: &str, bytes: &[u8], what: &str) -> Result<PathBuf, String> {
         let out = PathBuf::from(crate::layout::shellexpand(path));
         if out.as_os_str().is_empty() {
-            return Err("Choose where to save the PDF".into());
+            return Err(format!("Choose where to save the {what}"));
         }
         if let Some(dir) = out.parent() {
             std::fs::create_dir_all(dir).map_err(|e| format!("Could not create the folder: {e}"))?;
         }
-        crate::fsutil::write_atomic(&out, bytes).map_err(|e| format!("Could not save the PDF: {e}"))?;
+        crate::fsutil::write_atomic(&out, bytes).map_err(|e| format!("Could not save the {what}: {e}"))?;
         if let Some(v) = self.vault.as_mut() {
             v.rescan();
         }
@@ -2427,6 +2437,7 @@ impl ShaleApp {
                 Action::NewFolder(parent) => self.modal = Some(Modal::NewFolder { parent, name: String::new() }),
                 Action::OpenVault(p) => self.open_vault(&p),
                 Action::Export(rel) => self.open_export_dialog(&rel),
+                Action::ExportDocx(rel) => self.open_docx_export_dialog(&rel),
                 Action::ExportFolder(dir) => self.open_export_folder_dialog(&dir),
                 Action::Rescan => self.rescan(),
                 Action::Toast(m) => self.toast(m),

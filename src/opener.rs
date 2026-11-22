@@ -107,6 +107,11 @@ pub fn open_exported_pdf(path: &Path) -> Result<(), String> {
     launch(check_exported_pdf(path)?.as_ref())
 }
 
+/// Open the Word file that was just exported (it may be outside the vault, where the user chose).
+pub fn open_exported_docx(path: &Path) -> Result<(), String> {
+    launch(check_exported_docx(path)?.as_ref())
+}
+
 /// Open a folder of rescued notes (see `recovery`) in the file manager. Only folders inside the
 /// recovery folder are opened.
 pub fn open_recovery_folder(path: &Path, recovery_root: &Path) -> Result<(), String> {
@@ -287,6 +292,16 @@ pub fn check_exported_pdf(path: &Path) -> Result<PathBuf, String> {
     let real = real_file(path)?;
     if extension(&real) != "pdf" {
         return Err("Not opened: not a PDF".into());
+    }
+    refuse_program(&real)?;
+    Ok(real)
+}
+
+/// The file to open if it is a Word file that exists and not a program.
+fn check_exported_docx(path: &Path) -> Result<PathBuf, String> {
+    let real = real_file(path)?;
+    if extension(&real) != "docx" {
+        return Err("Not opened: not a Word file".into());
     }
     refuse_program(&real)?;
     Ok(real)
@@ -708,6 +723,20 @@ mod tests {
             assert_eq!(check_vault_file(&p, &root).is_ok(), ok, "{name}");
         }
         let _ = fs::remove_dir_all(&root);
+    }
+
+    // spec: DOCX-002
+    #[test]
+    fn an_exported_word_file_is_a_docx() {
+        let d = tmp("export-docx");
+        fs::write(d.join("a.docx"), "x").unwrap();
+        fs::write(d.join("a.pdf"), "x").unwrap();
+        fs::write(d.join("b.sh"), "x").unwrap();
+        assert!(check_exported_docx(&d.join("a.docx")).is_ok());
+        assert!(check_exported_docx(&d.join("a.pdf")).is_err());
+        assert!(check_exported_docx(&d.join("b.sh")).is_err());
+        assert!(check_exported_docx(&d.join("missing.docx")).is_err());
+        let _ = fs::remove_dir_all(&d);
     }
 
     // spec: SEC-006

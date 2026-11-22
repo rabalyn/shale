@@ -1,4 +1,4 @@
--- Shale's Word export filter (DOCX-004 to DOCX-010): turns the Markdown of a note, as pandoc's commonmark reader
+-- Shale's Word export filter (DOCX-004 to DOCX-006): turns the Markdown of a note, as pandoc's commonmark reader
 -- sees it, back into the Word formatting the docx import (IMP-037 to IMP-046) made Markdown of.
 -- Shale prepares the text first (DOCX-003): the front matter is gone and every embed names its file by its
 -- vault path. What the docx writer cannot say itself is left as marks that Shale finishes after pandoc
@@ -7,6 +7,9 @@
 
 -- the width of the editor's text column an embed's size is a share of (PDF-005, embed_size::DEFAULT_COLUMN)
 local COLUMN = 720
+-- the width of the Word page's text in inches, which Shale gives with `-M shale-text-width=<inches>`: pandoc's docx
+-- writer takes no share of the page, so a size is a width in inches (without it, a share of the page)
+local text_width
 local PICTURES = {png = true, jpg = true, jpeg = true, gif = true, bmp = true, tif = true, tiff = true, svg = true, emf = true, wmf = true}
 
 local function lower(s) return s:lower() end
@@ -26,8 +29,12 @@ local function embed(link)
   local width = label:match('^(%d+)$') or label:match('^(%d+)x%d+$')
   local alt = {}
   if width then
-    local share = math.min(100, math.floor(tonumber(width) * 100 / COLUMN + 0.5))
-    attr.attributes.width = tostring(share) .. '%'
+    local share = math.min(1, tonumber(width) / COLUMN)
+    if text_width then
+      attr.attributes.width = string.format('%.4fin', share * text_width)
+    else
+      attr.attributes.width = string.format('%d%%', math.floor(share * 100 + 0.5))
+    end
   elseif label ~= target then
     alt = {pandoc.Str(label)}
   end
@@ -250,7 +257,9 @@ local function blocks(list)
       out:insert(pandoc.RawBlock('openxml', BREAK)); i = i + 1
     elseif lone_image(b) and caption(list[i + 1]) then
       local img = b.content[1]
-      out:insert(pandoc.Figure({pandoc.Plain({img})}, {long = {pandoc.Plain(caption(list[i + 1]))}}))
+      local words = caption(list[i + 1])
+      img.caption = words -- the caption is the picture's alternative text too
+      out:insert(pandoc.Figure({pandoc.Plain({img})}, {long = {pandoc.Plain(words)}}))
       i = i + 2
     else
       if align then b = mark_align(b, align) end
@@ -263,6 +272,8 @@ end
 -- the title block the import writes (IMP-042, IMP-046): a centred `#` heading at the very top, with an
 -- italic line below it, becomes Word's Title and Subtitle
 local function title(doc)
+  local w = doc.meta['shale-text-width']
+  text_width = w and tonumber(pandoc.utils.stringify(w)) or nil
   local b = doc.blocks
   if not (b[1] and align_open(b[1]) == 'center' and b[2] and b[2].t == 'Header' and b[2].level == 1) then return nil end
   local sub = caption(b[3])

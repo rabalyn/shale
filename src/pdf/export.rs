@@ -341,30 +341,30 @@ const PAPER_INK: Rgba = Rgba(30, 30, 30, 255);
 const PAPER_CODE_BG: Rgba = Rgba(245, 245, 245, 255);
 
 /// Six sizes in pt for the heading levels 1 to 6, separated by spaces or commas (each 4 to 72).
-fn parse_heading_sizes(v: &str) -> Option<[f32; 6]> {
+pub(crate) fn parse_heading_sizes(v: &str) -> Option<[f32; 6]> {
     let parts: Vec<f32> = v.split(|c: char| c.is_whitespace() || c == ',').filter(|p| !p.is_empty()).map(number).collect::<Option<_>>()?;
     let sizes: [f32; 6] = parts.try_into().ok()?;
     sizes.iter().all(|n| (4.0..=72.0).contains(n)).then_some(sizes)
 }
 
 /// The `print-*` properties of a note's front matter (key in lower case, its values joined by spaces).
-fn print_properties(text: &str) -> HashMap<String, String> {
+pub(crate) fn print_properties(text: &str) -> HashMap<String, String> {
     markdown::front_matter_values(text).into_iter().filter(|(k, _)| k.starts_with("print-")).map(|(k, v)| (k, v.join(" ").trim().to_string())).collect()
 }
 
-enum NotePaper {
+pub(crate) enum NotePaper {
     Standard(Paper),
     Custom([f32; 2]),
 }
 
 /// A number, with a unit (`pt`, `mm`) after it.
-fn number(v: &str) -> Option<f32> {
+pub(crate) fn number(v: &str) -> Option<f32> {
     let v = v.trim();
     let v = v.strip_suffix("pt").or_else(|| v.strip_suffix("mm")).unwrap_or(v);
     v.trim().parse::<f32>().ok().filter(|n| n.is_finite())
 }
 
-fn parse_bool(v: &str) -> Option<bool> {
+pub(crate) fn parse_bool(v: &str) -> Option<bool> {
     match v.to_lowercase().as_str() {
         "true" | "yes" => Some(true),
         "false" | "no" => Some(false),
@@ -373,7 +373,7 @@ fn parse_bool(v: &str) -> Option<bool> {
 }
 
 /// `A4`, `Letter`… or `<W>x<H>mm` (50 to 2000 mm a side).
-fn parse_paper(v: &str) -> Option<NotePaper> {
+pub(crate) fn parse_paper(v: &str) -> Option<NotePaper> {
     match v.to_lowercase().as_str() {
         "a3" => return Some(NotePaper::Standard(Paper::A3)),
         "a4" => return Some(NotePaper::Standard(Paper::A4)),
@@ -389,14 +389,14 @@ fn parse_paper(v: &str) -> Option<NotePaper> {
 }
 
 /// Four numbers in mm: top, right, bottom, left (0 to 100 each).
-fn parse_margins(v: &str) -> Option<[f32; 4]> {
+pub(crate) fn parse_margins(v: &str) -> Option<[f32; 4]> {
     let parts: Vec<f32> = v.split(|c: char| c.is_whitespace() || c == ',').filter(|p| !p.is_empty()).map(number).collect::<Option<_>>()?;
     let m: [f32; 4] = parts.try_into().ok()?;
     m.iter().all(|n| (0.0..=100.0).contains(n)).then_some(m)
 }
 
 /// `#RRGGBB` or `#RGB`.
-fn parse_hex_colour(v: &str) -> Option<Rgba> {
+pub(crate) fn parse_hex_colour(v: &str) -> Option<Rgba> {
     let h = v.strip_prefix('#')?;
     if !h.is_ascii() || !h.chars().all(|c| c.is_ascii_hexdigit()) {
         return None;
