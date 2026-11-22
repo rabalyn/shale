@@ -153,3 +153,16 @@ fn forge_023_no_workflow_puts_a_token_on_gits_command_line() {
     // five checkouts and the fetch of the tags in ci.yml, the mirror's two functions, security.yml
     assert!(headers >= 8, "fewer header settings than expected: {headers}");
 }
+
+// spec: BUILD-040 (#342): a podman-compose that cannot be installed is retried and then fails the step
+#[test]
+fn build_040_a_failed_podman_compose_install_is_retried_and_fails_the_step() {
+    let env_tests = ci_job("env-tests");
+    let step = env_tests.split("      - name: ").find(|s| s.starts_with("Container engine (Podman)")).expect("the Podman step");
+    assert!(!step.contains("|| echo \"Could not install podman-compose"), "the failed install is only a note");
+    assert!(step.contains("for attempt in 1 2 3; do") && step.contains("pip install -q --break-system-packages podman-compose==1.2.0"), "the install is tried three times");
+    assert!(step.contains("sleep "), "a pause between the tries");
+    let error = step.find("::error::podman-compose 1.2.0 could not be installed").expect("a clear reason");
+    assert!(step[error..].contains("exit 1"), "the step fails after the reason");
+    assert!(step.contains("command -v podman"), "where Podman is not there the job still skips (DEV-011)");
+}
