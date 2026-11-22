@@ -463,6 +463,22 @@ fn format_chunk(text: &str, input: &Input, defined: &HashSet<String>, fonts: &Ed
             f.syn = false
         });
     }
+    // the tasks of the lines the preview draws: the marker is hidden, with room for the painted box (EDIT-016)
+    if let Some(rl) = raw_lines.as_ref() {
+        let in_code = markdown::fenced_code_lines(text);
+        for (li, (off, line)) in markdown::lines_with_offsets(text).into_iter().enumerate() {
+            if rl.contains(&li) || in_code.get(li).copied().unwrap_or(false) {
+                continue;
+            }
+            if let Some(m) = crate::task_box::marker_range(line) {
+                set(&mut fmts, off + m.start..off + m.end, |f| {
+                    f.task = true;
+                    f.hidden = true;
+                    f.rendered = true
+                });
+            }
+        }
+    }
     // the code blocks the preview draws as boxes (EDIT-080): the lines have no background of their own;
     // the fences are hidden, the closing one with its row, unless the cursor is in the block
     if let Some(rl) = raw_lines.as_ref() {
@@ -546,6 +562,14 @@ fn format_chunk(text: &str, input: &Input, defined: &HashSet<String>, fonts: &Ed
                             sections.push(egui::text::LayoutSection { leading_space: 0.0, byte_range: egui::text::ByteIndex(start)..egui::text::ByteIndex(at), format: crate::math::paint::hidden_format(f, m.em) });
                             start = at;
                             (f.layout.width, crate::math::paint::hidden_format(f, m.em))
+                        }
+                        _ if c.task => {
+                            // the first character is a section of its own: the room is before the rest, as a section that begins a row loses it
+                            let at = start + text[start..].chars().next().map_or(0, char::len_utf8);
+                            let format = to_format(c, fonts);
+                            sections.push(egui::text::LayoutSection { leading_space: 0.0, byte_range: egui::text::ByteIndex(start)..egui::text::ByteIndex(at), format: format.clone() });
+                            start = at;
+                            (crate::task_box::room(fonts.rendered.size), format)
                         }
                         _ if c.math_rest => (0.0, TextFormat { font_id: FontId::proportional(crate::math::paint::HIDDEN_SIZE), color: Color32::TRANSPARENT, line_height: Some(1.0), ..Default::default() }),
                         _ => (0.0, to_format(c, fonts)),

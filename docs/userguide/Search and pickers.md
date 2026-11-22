@@ -45,7 +45,7 @@ browse the sidebar results, and in the picker; the hint shows the keys, and they
 A found line of a note is shown **rendered**, the way the editor draws a line that the cursor is not
 on: bold, italic, strikethrough, highlight and inline code styled, links and wiki links by the text
 they show (`[[Note|alias]]` is "alias"), `#tags` in the tag colour, a heading in the heading style
-without its `#`, a task as `[ ]` or `[x]` and a list item with a bullet. The **found text is
+without its `#`, a task with a checkbox (ticked when it is done) and a list item with a bullet. The **found text is
 marked** with a background, in the rendered and in the raw line alike; when a match covers markup that
 is not drawn, the visible part of it is marked. Mail and post hits stay plain text and mark the words
 of your query in their subject or text.

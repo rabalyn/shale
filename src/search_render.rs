@@ -10,7 +10,7 @@ use crate::markdown;
 use crate::picker::Hit;
 use crate::theme;
 use eframe::egui::text::{ByteIndex, LayoutJob, LayoutSection};
-use eframe::egui::{Color32, FontId, TextFormat};
+use eframe::egui::{Color32, FontId, Galley, Pos2, TextFormat, Ui};
 use std::cell::RefCell;
 use std::ops::Range;
 use std::sync::Arc;
@@ -52,25 +52,40 @@ impl Hit {
     }
 }
 
+/// Paint the box of the task a hit shows (the box of EDIT-016, NAV-056) in the gap its `job` has for
+/// it. `pos` says where the top left of the text is, given the job laid out in one row.
+pub fn paint_task_boxes(ui: &Ui, job: &LayoutJob, pos: impl FnOnce(&Galley) -> Pos2) {
+    if crate::task_box::gaps(job).is_empty() {
+        return;
+    }
+    let mut job = job.clone();
+    job.wrap.max_width = f32::INFINITY;
+    let galley = ui.fonts_mut(|f| f.layout_job(job));
+    let index = crate::galley_index::GalleyIndex::new(&galley);
+    crate::task_box::paint_in_galley(ui.painter(), (&galley, &index), pos(&galley));
+}
+
 /// A piece of the text of a line: the bytes of the line it is drawn from, what is drawn and how.
 struct Piece {
     source: Range<usize>,
     text: String,
     /// the text is the bytes of the line (not a glyph that stands for them): it can be cut
     cuttable: bool,
+    /// the room before it (the painted box of a task, EDIT-016)
+    room: f32,
     format: TextFormat,
 }
 
 /// `text` as it is written, the marks with a background (NAV-056).
 pub fn raw_job(text: &str, marks: &[Range<usize>], size: f32, colour: Color32) -> LayoutJob {
     let format = TextFormat { font_id: FontId::proportional(size), color: colour, ..Default::default() };
-    let piece = Piece { source: 0..text.len(), text: text.to_string(), cuttable: true, format };
+    let piece = Piece { source: 0..text.len(), text: text.to_string(), cuttable: true, room: 0.0, format };
     job_of(vec![piece], marks)
 }
 
 /// A line of a note as the editor draws it away from its cursor (NAV-056): bold, italic, strike,
 /// highlight, inline code, links and wiki links by their shown text, tags in their colour, a
-/// heading styled without its `#`, a task as `[ ]` / `[x]` (without its list marker) and a list item with a bullet. Markup the
+/// heading styled without its `#`, a task with its marker hidden and a gap for the painted box (see [`crate::task_box`]) and a list item with a bullet. Markup the
 /// editor hides is not in the text. A line with a typeset formula is raw: the formula is painted
 /// over its hidden TeX by the editor, which a hit does not do.
 pub fn rendered_job(line: &str, marks: &[Range<usize>], size: f32) -> LayoutJob {
@@ -80,15 +95,20 @@ pub fn rendered_job(line: &str, marks: &[Range<usize>], size: f32) -> LayoutJob 
     if job.sections.iter().any(|s| crate::math::paint::is_hidden_formula(&s.format)) {
         return raw_job(line, marks, size, theme::palette().text);
     }
-    // the markers that are drawn another way: where they are written and what is drawn
-    let marker = markdown::parse_task_line(line).map(|(check, done, _, indent)| (indent..check + 2, if done { "[x]" } else { "[ ]" })).or_else(|| {
-        let indent = line.len() - line.trim_start().len();
-        ["- ", "* ", "+ "].iter().any(|m| line[indent..].starts_with(m)).then_some((indent..indent + 1, "\u{2022}"))
-    });
+    // the bullet of a list item is drawn another way: where it is written and what is drawn (a task's
+    // marker is a gap in the text, with the box painted in it: see `task_box`)
+    let indent = line.len() - line.trim_start().len();
+    let bullet = markdown::parse_task_line(line).is_none() && ["- ", "* ", "+ "].iter().any(|m| line[indent..].starts_with(m));
+    let marker = bullet.then_some((indent..indent + 1, "\u{2022}"));
     let mut pieces = Vec::new();
     let mut glyph_done = false;
     for (s, source) in job.sections.iter().zip(sources) {
         let text = &job.text[s.byte_range.start.0..s.byte_range.end.0];
+        if s.leading_space > 0.0 {
+            // the marker of a task: hidden, after the room for its box
+            pieces.push(Piece { source, text: text.into(), cuttable: false, room: s.leading_space, format: s.format.clone() });
+            continue;
+        }
         // a section is cut where the marker starts and ends, so that the glyph replaces the marker only
         let mut cuts = vec![source.start];
         cuts.extend(marker.iter().flat_map(|(m, _)| [m.start, m.end]).filter(|c| *c > source.start && *c < source.end));
@@ -102,7 +122,7 @@ pub fn rendered_job(line: &str, marks: &[Range<usize>], size: f32) -> LayoutJob 
                 Some((_, glyph)) if inside => (if std::mem::replace(&mut glyph_done, true) { "" } else { glyph }, false),
                 _ => (piece, true),
             };
-            pieces.push(Piece { source: a..b, text: text.to_string(), cuttable, format: s.format.clone() });
+            pieces.push(Piece { source: a..b, text: text.to_string(), cuttable, room: 0.0, format: s.format.clone() });
         }
     }
     job_of(pieces, marks)
@@ -115,6 +135,7 @@ fn job_of(pieces: Vec<Piece>, marks: &[Range<usize>]) -> LayoutJob {
     let colour = theme::palette().selection_bg;
     for piece in pieces {
         let mut at = piece.source.start;
+        let mut room = piece.room;
         let mut text = piece.text.as_str();
         // the cuts, in the order of the line: where a mark starts or ends inside the piece
         let mut cuts: Vec<usize> = marks.iter().flat_map(|m| [m.start, m.end]).filter(|c| *c > piece.source.start && *c < piece.source.end).collect();
@@ -131,7 +152,7 @@ fn job_of(pieces: Vec<Piece>, marks: &[Range<usize>]) -> LayoutJob {
             if marked(from, to) {
                 format.background = colour;
             }
-            job.sections.push(LayoutSection { leading_space: 0.0, byte_range: ByteIndex(start)..ByteIndex(job.text.len()), format });
+            job.sections.push(LayoutSection { leading_space: std::mem::take(&mut room), byte_range: ByteIndex(start)..ByteIndex(job.text.len()), format });
         };
         if piece.cuttable {
             for cut in cuts.into_iter().chain(std::iter::once(piece.source.end)) {
@@ -252,15 +273,46 @@ mod tests {
     #[test]
     fn tasks_are_boxes_list_items_bullets_and_headings_lose_their_hashes() {
         let open = rendered_job("- [ ] buy milk", &[], 12.5);
-        assert_eq!(open.text, "[ ] buy milk");
+        assert_eq!(open.text, "- [ ] buy milk", "the marker stays in the text, hidden, with a gap for the box");
         let done = rendered_job("- [x] done **it**", &[], 12.5);
-        assert_eq!(done.text, "[x] done it");
+        assert_eq!(done.text, "- [x] done it");
         assert_eq!(rendered_job("* an item", &[], 12.5).text, "\u{2022} an item");
         assert_eq!(rendered_job("1. first", &[], 12.5).text, "1. first", "a numbered item keeps its number");
         let head = rendered_job("## A heading", &[], 12.5);
         assert_eq!(head.text, "A heading");
         assert_eq!(format_at(&head, "A heading").color, theme::palette().heading);
         assert!(format_at(&head, "A heading").font_id.size > 12.5, "a heading is bigger");
+    }
+
+    // spec: NAV-056
+    #[test]
+    fn a_task_has_a_gap_for_its_box_and_the_view_paints_the_box_in_it() {
+        use eframe::egui;
+        let gaps = |line: &str| crate::task_box::gaps(&rendered_job(line, &[], 12.5)).into_iter().map(|g| g.done).collect::<Vec<_>>();
+        assert_eq!(gaps("- [ ] buy milk"), [false]);
+        assert_eq!(gaps("  * [x] done"), [true]);
+        assert_eq!(gaps("1. [X] numbered"), [true]);
+        assert!(gaps("- plain item").is_empty() && gaps("a [ ] in a sentence").is_empty());
+        assert!(crate::task_box::gaps(&raw_job("- [ ] raw", &[], 12.5, Color32::PLACEHOLDER)).is_empty(), "a raw hit stays raw");
+        assert_eq!(rendered_job("1. [ ] first", &[], 12.5).text, "1. [ ] first", "a numbered task keeps its number");
+        // painted in a view
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx);
+        let job = rendered_job("- [x] buy milk", &[], 12.5);
+        crate::task_box::take_painted();
+        let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, egui::Vec2::new(400.0, 200.0))), ..Default::default() };
+        let mut text_x = 0.0;
+        let mut done = ctx.run_ui(raw, |ui| {
+            let at = Pos2::new(10.0, 10.0);
+            paint_task_boxes(ui, &job, |_| at);
+            let galley = ui.fonts_mut(|f| f.layout_job(job.clone()));
+            text_x = at.x + galley.pos_from_cursor(eframe::egui::text::CCursor::new(3)).min.x;
+        });
+        done.textures_delta.clear();
+        let painted = crate::task_box::take_painted();
+        assert_eq!(painted.len(), 1);
+        assert!(painted[0].1, "ticked");
+        assert!(painted[0].0.min.x >= 10.0 && painted[0].0.max.x < text_x, "the box is in the gap before the text: {:?} {text_x}", painted[0].0);
     }
 
     // spec: NAV-056
@@ -294,7 +346,7 @@ mod tests {
         assert_eq!(marked(&rendered_job(line, &one(at..at + 7), 12.5)), "al");
         // a match that includes a task marker marks the box
         let line = "- [ ] milk";
-        assert_eq!(marked(&rendered_job(line, &one(0..8), 12.5)), "[ ] mi");
+        assert_eq!(marked(&rendered_job(line, &one(0..8), 12.5)), "- [ ] mi");
         assert_eq!(marked(&rendered_job(line, &one(6..10), 12.5)), "milk");
     }
 

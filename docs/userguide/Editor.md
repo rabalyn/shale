@@ -216,6 +216,10 @@ shows the raw markdown; with "Raw lines around the cursor" that many lines befor
 too (or all the lines of a selection). The note stays editable: links still open with a click
 and task boxes still tick.
 
+A task (`- [ ] text` or `- [x] text`, also numbered and indented) away from the cursor is drawn with a
+real checkbox instead of its `- [ ]`, ticked for a done task; click the box to tick or untick it
+(the cursor stays where it was; the line with the cursor shows the `[ ]` as written).
+
 A table (`| a | b |` rows with a `|---|---|` line below the header) away from the cursor is drawn as
 a real grid: borders, a bold header row, columns aligned as `:---`, `:---:` or `---:` say, code,
 bold and links inside the cells, and long text wrapping inside its own column.

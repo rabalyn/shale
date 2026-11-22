@@ -138,7 +138,7 @@ mail in the mail view, the post in a Feeds tab.
 
 # How the hits look
 
-A found line of a note is shown **rendered** (bold, links by their shown text, a task as `[ ]`, a
+A found line of a note is shown **rendered** (bold, links by their shown text, a task with a checkbox, a
 heading without its `#`) or as **raw markdown**, and the **found text is marked** with a
 background in both. Mail and post hits are plain text, and the words of your query are marked in
 the subject or the start of the text; a mail found only by a word in its text may show no mark. At most 120 characters of a line are shown.
