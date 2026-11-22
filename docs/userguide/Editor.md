@@ -218,7 +218,7 @@ and task boxes still tick.
 
 A task (`- [ ] text` or `- [x] text`, also numbered and indented) away from the cursor is drawn with a
 real checkbox instead of its `- [ ]`, ticked for a done task; click the box to tick or untick it
-(the line with the cursor shows the `[ ]` as written).
+(the cursor stays where it was; the line with the cursor shows the `[ ]` as written).
 
 A table (`| a | b |` rows with a `|---|---|` line below the header) away from the cursor is drawn as
 a real grid: borders, a bold header row, columns aligned as `:---`, `:---:` or `---:` say, code,

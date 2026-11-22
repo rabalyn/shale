@@ -703,6 +703,10 @@ pub struct NoteEditor {
     /// The selection a toolbar command left and the frames it is still put into the text box for: the
     /// text box drops it in the frame it loses the keyboard, and the keyboard comes back a frame later
     keep_selection: Option<((usize, usize), u8)>,
+    /// the painted task boxes of the last frame (rect, byte of the check), for the press that ticks one (EDIT-007)
+    task_boxes: Vec<(Rect, usize)>,
+    /// a press on a painted task box is on: the selection the text box had before it, put back each frame (EDIT-007)
+    box_hold: Option<(Option<CCursorRange>, Option<(usize, usize)>)>,
     /// a button of a table grid was clicked: the table (by its number in the note) and the change
     /// to make at the start of the next frame (EDIT-025, EDIT-030)
     table_edit: Option<(usize, crate::table::Change)>,
@@ -767,6 +771,8 @@ impl NoteEditor {
             format_request: None,
             last_selection: None,
             keep_selection: None,
+            task_boxes: Vec::new(),
+            box_hold: None,
         }
     }
 
@@ -1741,6 +1747,11 @@ impl NoteEditor {
             .event_filter(egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: true })
             .layouter(&mut layouter);
         // egui's pipe is not drawn: the one cursor is painted below, in the chosen shape (EDIT-039)
+        // a press on a painted task box ticks the task and leaves the cursor and selection where they were (EDIT-007)
+        if ui.input(|i| i.pointer.primary_pressed()) && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| crate::task_box::check_under(&self.task_boxes, p).is_some()) {
+            let before = egui::text_edit::TextEditState::load(ui.ctx(), self.id).and_then(|st| st.cursor.char_range());
+            self.box_hold = Some((before, self.last_selection));
+        }
         let pipe = std::mem::replace(&mut ui.visuals_mut().text_cursor.stroke, Stroke::NONE);
         let output = if gutter > 0.0 {
             ui.horizontal_top(|ui| {
@@ -1758,6 +1769,16 @@ impl NoteEditor {
             changed = true;
         }
 
+        // the text box moved the cursor to the press: put the selection back
+        let held = self.box_hold.take().filter(|_| ui.input(|i| i.pointer.primary_down() || i.pointer.primary_released()));
+        if let Some((range, last)) = held {
+            let mut state = egui::text_edit::TextEditState::load(ui.ctx(), self.id).unwrap_or_default();
+            state.cursor.set_char_range(range);
+            state.store(ui.ctx(), self.id);
+            self.last_selection = last;
+            self.box_hold = ui.input(|i| i.pointer.primary_down()).then_some((range, last));
+        }
+        let holding = self.box_hold.is_some() || held.is_some();
         self.last_layout = Some((output.galley.clone(), output.galley_pos));
         let shown_folds = fold.at(&output.galley.job.text);
         let hidden_bytes = shown_folds.view.byte_ranges(&output.galley.job.text);
@@ -1773,9 +1794,10 @@ impl NoteEditor {
         paint_math(ui, &formula_marks.borrow(), &output.galley, output.galley_pos, resp);
         paint_page_breaks(ui, &output.galley, output.galley_pos, resp.rect.right(), preview.as_ref());
         let task_boxes = crate::task_box::paint_in_galley(&ui.painter().with_clip_rect(ui.clip_rect()), (&output.galley, &index), output.galley_pos);
-        if let Some(r) = output.cursor_range.filter(|_| resp.has_focus() && self.keep_selection.is_none()) {
+        if let Some(r) = output.cursor_range.filter(|_| resp.has_focus() && self.keep_selection.is_none() && !holding) {
             self.last_selection = Some((r.primary.index.0, r.secondary.index.0));
         }
+        self.task_boxes = task_boxes.clone();
         // paint the inline pictures over their (invisible) link text
         if !images.is_empty() {
             let painter = ui.painter().with_clip_rect(ui.clip_rect());
@@ -2746,6 +2768,13 @@ mod tests {
         let (changed, _) = h.frame(&mut ed, &mut text, &v, rel, click_events(p, false));
         assert!(changed);
         assert_eq!(text, "first\n- [x] buy milk\n2. [x] done");
+        // the cursor stays in the first line and the ticked task is still a box
+        let range = || egui::text_edit::TextEditState::load(&h.ctx, ed.id).and_then(|st| st.cursor.char_range()).map(|r| (r.primary.index.0, r.secondary.index.0));
+        assert_eq!(range(), Some((0, 0)), "the cursor did not move to the clicked line");
+        crate::task_box::take_painted();
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert_eq!(crate::task_box::take_painted().iter().map(|b| b.1).collect::<Vec<_>>(), [true, true], "the line is not raw");
+        assert_eq!(ed.selection_chars(&h.ctx), Some((0, 0)));
         // a ticked box unticks (the first line is raw while it has the cursor: back to the top first)
         let boxes = preview_boxes(&mut ed, &mut h, &mut text, &v, 0);
         let p = boxes[1].0.center();
