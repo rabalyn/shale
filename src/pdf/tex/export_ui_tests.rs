@@ -478,6 +478,19 @@ mod fake {
         assert!(t.dir.join("exports/Plan.pdf").is_file());
     }
 
+    // spec: TEX-016
+    #[test]
+    fn the_readme_of_a_saved_tex_gives_the_command_of_the_system() {
+        use crate::pdf::tex::dialog::readme_text;
+        let unix = readme_text("/v/templates/tex/tuda/tex", false);
+        assert!(unix.contains("  TEXINPUTS=\"/v/templates/tex/tuda/tex//:\" lualatex main.tex\n"), "{unix}");
+        assert!(!unix.contains("PowerShell") && !unix.contains("set \"") && !unix.contains(';'), "{unix}");
+        let win = readme_text("C:\\v\\templates\\tex\\tuda\\tex", true);
+        assert!(win.contains("  set \"TEXINPUTS=C:\\v\\templates\\tex\\tuda\\tex//;\"\n  lualatex main.tex\n"), "cmd: {win}");
+        assert!(win.contains("  $env:TEXINPUTS=\"C:\\v\\templates\\tex\\tuda\\tex//;\"\n  lualatex main.tex\n"), "PowerShell: {win}");
+        assert!(!win.contains("TEXINPUTS=\"C:\\v\\templates\\tex\\tuda\\tex//:") && !win.contains("\n  TEXINPUTS="), "no `VAR=… command` on Windows: {win}");
+    }
+
     // spec: TEX-016, TEX-004
     #[test]
     fn a_failed_export_shows_the_readable_errors_and_save_the_tex_writes_the_files_for_debugging() {
@@ -503,7 +516,8 @@ mod fake {
         assert!(main.contains("\\begin{document}") && main.contains("\\author{Ada}"), "{main}");
         assert!(folder.join("drawing-1.pdf").is_file(), "the files of the document are with it");
         let readme = std::fs::read_to_string(folder.join("README.txt")).unwrap();
-        assert!(readme.contains("TEXINPUTS=") && readme.contains("templates/tex/tuda/tex//"), "{readme}");
+        let set_tex = Path::new("templates").join("tex").join("tuda").join("tex");
+        assert!(readme.contains("TEXINPUTS=") && readme.contains(&format!("{}//", set_tex.display())), "{readme}");
         assert!(t.app.toasts.iter().any(|(m, _)| m.starts_with("Saved main.tex and its files in") && m.contains("Plan-tex")), "{:?}", t.app.toasts);
         // trying again clears the error; the dialog can be closed with Cancel
         std::fs::remove_file(f.state().join("exit")).unwrap();

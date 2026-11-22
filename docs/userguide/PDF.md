@@ -502,6 +502,7 @@ always exported with the built-in engine.
 - When it fails, the dialog stays open and shows what went wrong in words: the file and line of the
   error (`main.tex:21: Undefined control sequence.`), a package that is missing, and the end of the log.
   **Save the .tex** writes `main.tex`, its pictures and a `README.txt` with the command to compile it
+  (for your system: the one-line form on Linux and macOS, the cmd and PowerShell forms on Windows)
   into a folder next to the PDF (`<name>-tex`), so you can look at it and run it with your own TeX.
 - The fields **author** and **department** start with what you gave in the guided setup (`settings.toml`
   of the set) when the note has none.
