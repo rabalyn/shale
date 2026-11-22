@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 fn vault_check_large(fx: &mut Fixtures) -> Body {
     let g = fx.vault(Size::Large);
     Box::new(move || {
-        black_box(crate::vault_check::check(&g.root).expect("the vault is read"));
+        black_box(crate::vault_check::check(&g.root, &crate::busy::Cancel::default()).expect("the vault is read"));
     })
 }
 
@@ -27,7 +27,7 @@ fn vault_check_problems(fx: &mut Fixtures) -> Body {
     }
     std::fs::write(dir.join("con.md"), "x").expect("a reserved name");
     Box::new(move || {
-        black_box(crate::vault_check::check(&dir).expect("the folder is read"));
+        black_box(crate::vault_check::check(&dir, &crate::busy::Cancel::default()).expect("the folder is read"));
     })
 }
 

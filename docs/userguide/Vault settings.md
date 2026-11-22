@@ -30,7 +30,7 @@ the name it got. Files that are in the vault already are never renamed by this.
 
 If the vault is shared with a Windows or macOS computer (for example through [[Git sync]]), find the
 names that would break there: **Settings → Vault → Check names for Windows and macOS…**. The check runs
-in the background and lists each file or folder with the reason and the name it would get:
+in the background (a spinner says so, **Cancel** stops it, see [[Background work]]) and lists each file or folder with the reason and the name it would get:
 
 - characters Windows forbids, a trailing dot or space, a device name;
 - a name longer than 200 bytes, or a path longer than 240 characters (counted from the vault folder);

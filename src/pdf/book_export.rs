@@ -2,6 +2,7 @@
 //! of `book` one after the other in the layout of a single note's export (`export::Writer`), with
 //! numbered headings, running headers, links between the chapters and nested bookmarks.
 
+use crate::busy::Cancel;
 use crate::markdown;
 use crate::pdf::book::{self, Item, Plan};
 use crate::pdf::export::{book_scale, finish_from, fit_text, wrap_pieces, Entry, ExportOptions, Piece, Writer};
@@ -9,7 +10,7 @@ use crate::pdf::write::{text_width, Bookmark, Dest, FontKind, Rgba, TextStyle};
 use crate::vault::Vault;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 const BLACK: Rgba = Rgba(0, 0, 0, 255);
 const GREY: Rgba = Rgba(120, 120, 120, 255);
@@ -20,7 +21,14 @@ const NUMBER: Rgba = Rgba(130, 130, 130, 255);
 pub struct Progress {
     pub total: AtomicUsize,
     pub done: AtomicUsize,
-    pub cancel: AtomicBool,
+    pub cancel: Cancel,
+}
+
+impl Progress {
+    /// Progress that stops when `cancel` (the token of the export's busy task) is set.
+    pub fn with_cancel(cancel: Cancel) -> Self {
+        Progress { cancel, ..Default::default() }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -252,7 +260,7 @@ pub fn export_book(vault: &Vault, dir: &Path, opts: &ExportOptions, progress: Op
     let mut places: Vec<HashMap<usize, Dest>> = Vec::new();
     for (i, s) in secs.iter().enumerate() {
         if let Some(p) = progress {
-            if p.cancel.load(Ordering::SeqCst) {
+            if p.cancel.is_cancelled() {
                 return Err("The export was cancelled".into());
             }
             p.done.store(i, Ordering::SeqCst);

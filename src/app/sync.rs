@@ -2,6 +2,7 @@
 //! (ADR-0008, ADR-0015; SYNC-002, SYNC-013…SYNC-017).
 
 use super::{muted, ShaleApp};
+use crate::busy::{self, Key};
 use crate::drawing::DrawingDoc;
 use crate::gitsync::{self, lfs, Git, Report, TreeGuard, TreeLock};
 use crate::theme;
@@ -13,11 +14,12 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
-/// What a sync job sends back: its report, or why it failed (the outer error: the job itself died).
-type SyncResult = Result<Result<Report, String>, String>;
+/// The git sync as a task (JOB-003): it cannot be stopped, because a sync that ends between its
+/// commit and its merge or push would leave the repository half way (JOB-011).
+pub(crate) const GIT_SYNC: Key = Key::new("git-sync");
 
-/// What a Git LFS setup job sends back: the number of files it converted, or why it failed.
-type LfsResult = Result<Result<usize, String>, String>;
+/// "Store media with Git LFS" as a task; like the sync, it is not stopped half way.
+pub(crate) const LFS_SETUP: Key = Key::new("git-lfs-setup");
 
 /// What an LFS download job sends back (the outer error: the job itself died).
 type PullResult = Result<Result<(), String>, String>;
@@ -37,7 +39,7 @@ pub struct SyncState {
     /// The managed git and the choice of git (SYNC-023…SYNC-029).
     pub managed: crate::gitsync::install_ui::ManagedState,
     /// A running sync: its vault and where its result arrives.
-    job: Option<(PathBuf, Receiver<SyncResult>)>,
+    job: Option<(PathBuf, busy::Job<Result<Report, String>>)>,
     /// Held by the job while it changes files in the vault, and by the window while it writes
     /// notes (SYNC-013).
     pub tree: TreeLock,
@@ -50,7 +52,7 @@ pub struct SyncState {
     /// Is git-lfs installed, does this vault store media with it (SYNC-016).
     pub lfs: lfs::Status,
     /// A running "Store media with Git LFS": its vault and where its result arrives (SYNC-017).
-    lfs_job: Option<(PathBuf, Receiver<LfsResult>)>,
+    lfs_job: Option<(PathBuf, busy::Job<Result<usize, String>>)>,
     /// The running LFS download (SYNC-020); one at a time, the others wait in `pulls`.
     pull: Option<PullJob>,
     /// Files asked for while a download runs (absolute paths); None: the whole vault.
@@ -126,7 +128,9 @@ impl ShaleApp {
         let Some(root) = self.vault.as_ref().map(|v| v.root.clone()) else { return };
         self.flush_all();
         let (git, tree, opts, ctx, job_root) = (self.sync.git.clone(), self.sync.tree.clone(), self.sync_options(), self.ctx.clone(), root.clone());
-        let rx = crate::jobs::spawn(
+        let job = self.busy.spawn(
+            LFS_SETUP,
+            "Setting up Git LFS…",
             move || lfs::setup(&git, &job_root, &opts, &tree),
             move || {
                 if let Some(c) = ctx {
@@ -134,7 +138,7 @@ impl ShaleApp {
                 }
             },
         );
-        self.sync.lfs_job = Some((root, rx));
+        self.sync.lfs_job = job.map(|j| (root, j));
     }
 
     /// Collect a finished LFS setup: say what happened and sync, which uploads the files.
@@ -293,7 +297,9 @@ impl ShaleApp {
         let tree = self.sync.tree.clone();
         let ctx = self.ctx.clone();
         let job_root = root.clone();
-        let rx = crate::jobs::spawn(
+        let job = self.busy.spawn(
+            GIT_SYNC,
+            "Syncing with git…",
             move || gitsync::sync(&git, &job_root, &opts, &tree),
             move || {
                 if let Some(c) = ctx {
@@ -301,8 +307,8 @@ impl ShaleApp {
                 }
             },
         );
-        self.sync.job = Some((root, rx));
-        true
+        self.sync.job = job.map(|j| (root, j));
+        self.sync.job.is_some()
     }
 
     /// Bring buffers in line with what the sync changed (SYNC-013) and tell the user (SYNC-014).
@@ -547,21 +553,19 @@ impl ShaleApp {
         });
         self.sync.rects.extend(rects.inner);
         let now = ui.horizontal(|ui| {
-            let b = ui.add_enabled(!self.sync.running(), egui::Button::new("Sync now"));
+            let b = busy::ui::button(ui, &self.busy, &[&GIT_SYNC, &LFS_SETUP], egui::Button::new("Sync now"));
             self.sync.rects.push(("sync-now", b.rect));
             if b.clicked() {
                 self.start_sync();
             }
-            let status = if self.sync.running() {
-                muted("Syncing…")
-            } else {
-                match &self.sync.last {
+            if !busy::ui::status(ui, &self.busy, &GIT_SYNC) {
+                let status = match &self.sync.last {
                     Some((t, Ok(s))) => muted(format!("Last sync {t}: {s}")),
                     Some((t, Err(e))) => egui::RichText::new(format!("Last sync {t} failed: {e}")).color(theme::palette().link_missing),
                     None => muted("Not synced yet in this session"),
-                }
-            };
-            ui.label(status.size(12.0));
+                };
+                ui.label(status.size(12.0));
+            }
         });
         crate::settings::anchor::mark(ui, "sync.now", now.response.rect);
         changed
@@ -578,13 +582,14 @@ impl ShaleApp {
             return;
         }
         ui.horizontal(|ui| {
-            let busy = self.sync.running() || self.sync.lfs_job.is_some();
-            let b = ui.add_enabled(!busy, egui::Button::new("Store media with Git LFS"));
+            let b = busy::ui::button(ui, &self.busy, &[&GIT_SYNC, &LFS_SETUP], egui::Button::new("Store media with Git LFS"));
             self.sync.rects.push(("lfs-setup", b.rect));
             if b.clicked() {
                 self.start_lfs_setup();
             }
-            crate::theme::hint(ui, if self.sync.lfs_job.is_some() { "Setting up…".to_string() } else { format!("Audio and video go to the LFS store of the remote instead of the history ({version}).") });
+            if !busy::ui::status(ui, &self.busy, &LFS_SETUP) {
+                crate::theme::hint(ui, format!("Audio and video go to the LFS store of the remote instead of the history ({version})."));
+            }
         });
     }
 }
@@ -810,6 +815,51 @@ mod tests {
         wait(&mut app);
         let o = std::process::Command::new("git").arg("-C").arg(&remote).args(["log", "-1", "--format=%s", "main"]).envs(git.env.iter().cloned()).output().unwrap();
         assert!(String::from_utf8_lossy(&o.stdout).starts_with("[n] Sync from "), "{}", String::from_utf8_lossy(&o.stdout));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: JOB-011
+    #[test]
+    fn job_011_a_running_sync_is_a_task_the_button_waits_for_that_cannot_stop_and_that_ends_with_the_sync() {
+        let root = std::env::temp_dir().join(format!("shale-app-sync-task-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mut git = hermetic();
+        let remote = root.join("remote.git");
+        std::fs::create_dir_all(&remote).unwrap();
+        assert!(std::process::Command::new("git").args(["init", "--quiet", "--bare"]).arg(&remote).envs(git.env.iter().cloned()).status().unwrap().success());
+        let v = root.join("vault");
+        std::fs::create_dir_all(&v).unwrap();
+        gitsync::connect(&git, &v, remote.to_str().unwrap()).unwrap();
+        // the commit of the sync waits in a hook until the test opens the gate, so the sync runs as long as the test wants
+        let hooks = root.join("hooks");
+        std::fs::create_dir_all(&hooks).unwrap();
+        let hook = hooks.join("pre-commit");
+        std::fs::write(&hook, "#!/bin/sh\nwhile [ ! -e .git/shale-test-gate ]; do sleep 0.05; done\n").unwrap();
+        #[cfg(unix)]
+        std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        git.env.retain(|(k, _)| k != "GIT_CONFIG_COUNT");
+        git.env.extend([("GIT_CONFIG_COUNT", "2"), ("GIT_CONFIG_KEY_1", "core.hooksPath"), ("GIT_CONFIG_VALUE_1", hooks.to_str().unwrap())].map(|(k, v)| (OsString::from(k), OsString::from(v))));
+        crate::fsutil::write_atomic(&v.join("Note.md"), b"hi\n").unwrap();
+
+        let mut app = app_on(&v);
+        app.sync.git = git;
+        let mut h = H { ctx: egui::Context::default(), t: 0.0 };
+        h.frame(&mut app, vec![]);
+        assert!(app.busy.list().is_empty());
+        h.click(&mut app, "sync-now");
+        let task = app.busy.info(&GIT_SYNC).expect("the running sync is listed");
+        assert_eq!((task.label.as_str(), task.cancellable), ("Syncing with git…", false), "a sync is not stopped half way");
+        assert!(app.sync.running());
+        // no second sync from the button, from a key or from the timer
+        assert!(!app.start_sync_with(app.sync.git.clone()));
+        h.click(&mut app, "sync-now");
+        assert_eq!(app.busy.list().len(), 1);
+        std::fs::write(v.join(".git/shale-test-gate"), "").unwrap();
+        wait(&mut app);
+        assert!(app.busy.list().is_empty(), "the task ends with the sync");
+        assert!(matches!(&app.sync.last, Some((_, Ok(_)))), "{:?}", app.sync.last);
+        let o = std::process::Command::new("git").arg("-C").arg(&remote).args(["show", "main:Note.md"]).envs(app.sync.git.env.iter().cloned()).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&o.stdout), "hi\n", "the sync did its work");
         let _ = std::fs::remove_dir_all(&root);
     }
 

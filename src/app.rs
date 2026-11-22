@@ -427,6 +427,8 @@ pub struct ShaleApp {
     pub(crate) outside_copy: Option<outside_copy::OutsideCopy>,
     /// outside files a click is opening, in background jobs (MEDIA-017, MEDIA-024)
     pub(crate) outside_opens: Vec<outside_open::Opening>,
+    /// what runs in the background: the registry behind the busy states and the corner indicator (JOB-003)
+    pub busy: crate::busy::Busy,
     /// the check of the vault's names for other systems (VAULT-028)
     pub vault_check: crate::vault_check::VaultCheck,
     /// the LaTeX page of the settings: the TeX found, the managed TeX Live and its jobs (TEX-001)
@@ -683,6 +685,7 @@ impl ShaleApp {
             usage: crate::data_usage::DataUsage::new(places),
             outside_copy: None,
             outside_opens: Vec::new(),
+            busy: Default::default(),
             vault_check: Default::default(),
             tex: crate::pdf::tex::settings_ui::TexState::new(persist, &tag),
             update: if persist { crate::update::UpdateState::for_running_program() } else { Default::default() },
@@ -701,6 +704,10 @@ impl ShaleApp {
             app.open_vault(&p);
             if app.shot.path.is_some() && p.join("Welcome.md").is_file() {
                 app.open(Path::new("Welcome.md"), false);
+            }
+            // screenshots: two made-up tasks in the busy indicator (JOB-014)
+            if app.shot.path.is_some() && std::env::var_os("SHALE_DEMO_BUSY").is_some() {
+                app.busy.start_demo();
             }
             // screenshots: a made-up history of the notes (HIST-018)
             if let (true, Some(dir)) = (app.shot.path.is_some(), std::env::var_os("SHALE_DEMO_HISTORY")) {
@@ -2111,7 +2118,7 @@ impl ShaleApp {
         let name = dir.file_name().or_else(|| v.root.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Vault".to_string());
         let opts = crate::pdf::export::ExportOptions { numbered_headings: self.cfg.numbered_headings, ..crate::pdf::export::ExportOptions::for_note() };
         let path = v.root.join("exports").join(format!("{name}.pdf"));
-        let book = crate::pdf::book_dialog::BookExport::new(v, dir);
+        let book = crate::pdf::book_dialog::BookExport::new(v, dir, &self.busy);
         let plan = book.plan.as_ref().ok();
         let title = plan.map(|p| p.title.clone()).unwrap_or_else(|| name.clone());
         let text = plan.and_then(|p| p.note.as_deref()).map(|n| self.note_text(n)).unwrap_or_default();
@@ -2129,7 +2136,9 @@ impl ShaleApp {
         let root = self.vault.as_ref().ok_or("No vault is open")?.root.clone();
         let book = d.book.as_mut().ok_or("This is not the export of a folder")?;
         let ctx = ctx.clone();
-        book.start(root, d.opts.clone(), move || ctx.request_repaint());
+        if !book.start(root, d.opts.clone(), move || ctx.request_repaint()) {
+            return Err("Another PDF export is still running".into());
+        }
         self.remember_export_engine(false, d);
         Ok(())
     }

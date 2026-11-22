@@ -53,6 +53,7 @@ fn dev_008_the_app_owns_its_sub_states_as_fields() {
         ("graphs", "Graphs"),
         ("shot", "ScreenshotRun"),
         ("recovery", "RecoveryState"),
+        ("busy", "Busy"),
         ("side", "SideState"),
     ] {
         let declared = body
