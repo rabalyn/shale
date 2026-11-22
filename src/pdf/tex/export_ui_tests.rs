@@ -177,6 +177,42 @@ fn a_folder_has_the_engine_choice_and_only_the_kinds_that_can_hold_a_book() {
     }
 }
 
+// spec: BOOK-013, TEX-033
+#[test]
+fn a_folder_note_that_names_a_kind_a_book_cannot_use_says_so_and_what_is_used_instead() {
+    let mut t = T::new("dlg-folder-beamer", usable());
+    put_set(&t);
+    let top = |t: &mut T, template: &str| {
+        let path = t.dir.join("Book/index.md");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, format!("---\nlatex-template: {template}\n---\nIntro\n")).unwrap();
+        std::fs::write(t.dir.join("Book/One.md"), "# One\n").unwrap();
+        t.app.vault.as_mut().unwrap().rescan();
+        t.app.modal = None;
+        t.app.open_export_folder_dialog(Path::new("Book"));
+        t.hl.frames(&mut t.app, 3);
+    };
+    top(&mut t, "tuda/beamer");
+    let d = dialog(&t);
+    assert_eq!(d.engine, ExportEngine::Latex, "the note's own template picks the engine");
+    let tex = d.tex.as_ref().unwrap();
+    assert_eq!(tex.kind, "pub", "a kind a book cannot use is not taken");
+    let warning = tex.template_warning.clone().expect("a warning");
+    let using = format!("“{}” of “{}”", tex.current_kind().unwrap().name, tex.current_set().unwrap().meta.name);
+    let beamer = tex.current_set().unwrap().kinds.iter().find(|(id, _)| id == "beamer").unwrap().1.name.clone();
+    assert_eq!(warning, format!("The note's latex-template asks for “{beamer}”, which takes a single note, not a folder: using {using} instead."));
+    assert!(has(&t, "template-warning") && t.shows("takes a single note, not a folder"), "it is shown: {:?}", t.painted());
+    // picking a kind by hand takes it away
+    click(&mut t, "kind");
+    click(&mut t, "kind:report");
+    assert!(dialog(&t).tex.as_ref().unwrap().template_warning.is_none() && !has(&t, "template-warning"));
+    // a kind a book can use needs no warning
+    top(&mut t, "tuda/thesis");
+    let tex = dialog(&t).tex.as_ref().unwrap();
+    assert_eq!(tex.kind, "thesis");
+    assert!(tex.template_warning.is_none() && !has(&t, "template-warning"));
+}
+
 // spec: BOOK-013, TEX-017
 #[test]
 fn set_up_from_a_folder_goes_back_to_the_folders_dialog_on_the_latex_engine() {

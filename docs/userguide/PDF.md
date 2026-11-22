@@ -510,7 +510,8 @@ always exported with the built-in engine.
   template with the property `latex-template: tuda/thesis` (the folder of the set, a slash, the
   kind's file name); the dialog then opens on LaTeX with that kind. When the vault has no set or kind
   of that name (or the value has no `/kind`), a red line at the top says what was not found and what the
-  dialog uses instead; choosing a set or kind yourself takes it away.
+  dialog uses instead; choosing a set or kind yourself takes it away. The same line appears in the dialog of a folder when the top
+  note names a kind a book cannot use (slides, letters and posters take a single note).
 
 ## How the note becomes the document
 
