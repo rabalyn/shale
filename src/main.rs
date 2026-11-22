@@ -28,6 +28,7 @@ mod caption;
 mod code_box;
 mod colour_tags;
 mod config;
+mod conflict;
 #[cfg(windows)]
 mod console;
 mod cursor_style;

@@ -1176,6 +1176,11 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   notes, and pauses if git is in the middle of something you started (a merge, a rebase).
 - Edits you type while a sync runs are never overwritten: if the sync brought a new version of
   that note, your text is saved as a conflict copy next to it.
+- Conflict copies are recognised (NET-015): Shale's own `Note (conflict …).md` and the copies of Syncthing, Dropbox,
+  Nextcloud, ownCloud and Seafile. A copy has a "conflict" badge in the file tree and a banner above the note with
+  Compare (changes, or the Markdown side by side), "Keep this one" (its text goes into the original; the old text is kept in the trash) and "Keep the
+  other"; the copy goes to the trash. The original shows the same banner and a badge. While the original exists, the copy is left out of search, links, the graph,
+  tasks and tags. OneDrive, iCloud and Google Drive copies (`Note 2.md`) cannot be told from a note by name.
 - Passwords are git's business (credential helper or SSH key); Shale never asks for one.
 - Every commit ends with the lines `Shale-Reason:` (`sync`, `merge`, or why a version was kept, see File history) and
   `Shale-Device:` (the name of the computer), after the optional suffix. The sync pushes the version commits of File

@@ -917,6 +917,13 @@ impl ShaleApp {
                 self.actions.push(Action::ShiftHeadings(rel.clone()));
             }
         }
+        // a conflict copy of a cloud client or of Shale, or a note that has one (NET-015)
+        if let Some(notice) = self.vault.as_ref().and_then(|v| crate::app::conflict::notice(v, &rel)) {
+            ui.add_space(4.0);
+            if let Some(a) = crate::app::conflict::banner(ui, &notice) {
+                self.actions.push(a);
+            }
+        }
         let mut area = egui::ScrollArea::vertical().id_salt(("note-scroll", self.tabbar.tabs[active].id)).auto_shrink([false, false]);
         // a restored tab is scrolled where it was left, when it is first shown (NAV-038)
         if let Some(y) = self.tabbar.tabs[active].place.restore_scroll.take() {

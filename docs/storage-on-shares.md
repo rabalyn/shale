@@ -16,7 +16,7 @@ documentation or the kernel's documentation describes it, **not** observed here.
 | Change detection | Fine on all systems: a full rescan every 3 s, no file watcher, stamps compare mtime, size, inode, ctime. **Defect**: the rescan runs on the UI thread and freezes on a slow share ([#473](https://github.com/rabalyn/shale/issues/473)). |
 | Watching | No watcher exists, so nothing is missed on NFS/SMB; no polling to add (already 3 s). |
 | Locks | Shale takes no lock in the vault. The tree lock is in-process; the instance lock is in the local data folder. Two Shales on two machines are protected only by DATA-003. |
-| Cloud conflict files | They are ordinary notes to Shale (ran: Syncthing). Not recognised, not shown: [#475](https://github.com/rabalyn/shale/issues/475). |
+| Cloud conflict files | Recognised by name (Syncthing, Dropbox, Nextcloud, ownCloud, Seafile, Shale's own), marked in the file tree and in the note, with compare and keep (NET-015, #475). OneDrive, iCloud and Google Drive copies cannot be told from a note by name. |
 | `.shale/` from two devices | Fixed for a vault found synced (NET-016, #476): `state.json` and `undo/` live in the data folder, conflict copies are swept. (Before: `state.sync-conflict-…json` stayed for ever and devices overwrote each other's tabs.) |
 | Case and Unicode names | Case: fine (DATA-013, VAULT-026..028). NFC and NFD spellings are one name for links (NET-014, [#474](https://github.com/rabalyn/shale/issues/474)); Syncthing even renames the local file. |
 | A repository in a synced folder | Unsafe, confirmed by how git works and by the clients' behaviour; local-only history must live outside the vault (owner decision #467). |
@@ -118,22 +118,24 @@ plus conflict copies, which is what we want. Documented limitation (NET-004).
 
 *Ran* (Syncthing): two devices change a note at the same time; after the sync both devices hold `N.md` and
 `N.sync-conflict-20261121-142440-7JJWLPP.md`, with both versions. The extension stays last, so Shale lists the
-conflict file as a note (it is searchable, linkable and shows in the graph) and loses nothing. Nothing tells the
-user ([#475](https://github.com/rabalyn/shale/issues/475)). Patterns of the other clients are *documented*:
+conflict file as a note and loses nothing. Shale recognises the name (NET-015, [#475](https://github.com/rabalyn/shale/issues/475)):
+the copy gets a badge in the file tree and a banner with Compare, Keep this one and Keep the other, and is left out of
+search, links, the graph, tasks and tags while its original exists. Patterns of the other clients are *documented*
+(the last column says whether Shale recognises them):
 
-| Client | Conflict file name |
-|---|---|
-| Syncthing | `Name.sync-conflict-YYYYMMDD-HHMMSS-DEVICEID.ext` (ran) |
-| Dropbox | `Name (<User's> conflicted copy YYYY-MM-DD).ext`, a counter `Name (<User's> conflicted copy YYYY-MM-DD) (1).ext` |
-| Nextcloud / ownCloud | `Name (conflicted copy YYYY-MM-DD HHMMSS).ext` (Nextcloud); `Name_conflict-YYYYMMDD-HHMMSS.ext` (ownCloud) |
-| OneDrive | `Name-<COMPUTERNAME>.ext` (personal), `Name-<COMPUTERNAME>-<n>.ext`; SharePoint may keep both with a numeric suffix |
-| iCloud Drive | `Name 2.ext` |
-| Shale's own (SYNC-008, DATA-003) | `Name (conflict YYYY-MM-DD HHMM).ext` |
-| Google Drive for desktop | `Name (1).ext` |
-| Seafile | `Name (SFConflict <user> YYYY-MM-DD-HH-MM-SS).ext` |
+| Client | Conflict file name | Recognised |
+|---|---|---|
+| Syncthing | `Name.sync-conflict-YYYYMMDD-HHMMSS-DEVICEID.ext` (ran) | yes |
+| Dropbox | `Name (<User's> conflicted copy YYYY-MM-DD).ext`, a counter `Name (<User's> conflicted copy YYYY-MM-DD) (1).ext` | yes |
+| Nextcloud / ownCloud | `Name (conflicted copy YYYY-MM-DD HHMMSS).ext` (Nextcloud); `Name_conflict-YYYYMMDD-HHMMSS.ext` (ownCloud) | yes |
+| OneDrive | `Name-<COMPUTERNAME>.ext` (personal), `Name-<COMPUTERNAME>-<n>.ext`; SharePoint may keep both with a numeric suffix | no |
+| iCloud Drive | `Name 2.ext` | no |
+| Shale's own (SYNC-008, DATA-003) | `Name (conflict YYYY-MM-DD HHMM).ext` | yes |
+| Google Drive for desktop | `Name (1).ext` | no |
+| Seafile | `Name (SFConflict <user> YYYY-MM-DD-HH-MM-SS).ext` | yes |
 
 OneDrive, iCloud and Google Drive names cannot be told from a note called `Plan 2` by the name alone, so the
-detection (#475) can only be certain for the patterns that carry a keyword.
+detection (NET-015) is only done for the patterns that carry a keyword; the strict form of each is in the spec row.
 
 ## 6. `.shale/` state and undo files written by two devices
 
@@ -223,8 +225,8 @@ warns when a vault with `.git` is in such a folder, and moves the repository out
   `.tmp.driveupload` and `.tmp.drivedownload` (Google Drive), `.icloud` placeholder suffix (`.Name.ext.icloud`).
 
 **Conflict-file name patterns** (to flag and to ignore in the history snapshots): see the table in section 5.
-Match case-insensitively on `conflicted copy`, `.sync-conflict-`, `_conflict-`, `SFConflict`, `(conflict `;
-`Name-<COMPUTER>` (OneDrive) and `Name 2` (iCloud) are too ambiguous to match by name.
+Shale matches them strictly (`conflict.rs`, NET-015); `Name-<COMPUTER>` (OneDrive), `Name 2` (iCloud) and
+`Name (1)` (Google Drive) are too ambiguous to match by name.
 
 **Temp and housekeeping names a snapshot (#471) and the scan must ignore**: `.shale-tmp-*` (Shale), `.syncthing.*.tmp`
 and `.stfolder`/`.stversions`/`.stignore` (Syncthing), `.~lock.*#`, `~$*`, `*.tmp`, `*.part` (Office and Nextcloud),
