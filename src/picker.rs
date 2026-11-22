@@ -7,7 +7,8 @@ use crate::app::Action;
 use crate::dialog::Dialog;
 use crate::keys::{Action as KeyAction, Keymap};
 use crate::markdown;
-use crate::search_all::{self, Ctx, Query, Refreshed, Results};
+use crate::search_all::{self, Ctx, Found, Query, Refreshed, Results};
+use crate::search_sources::{self, Bar, Filter, SearchConfig, Selection};
 use crate::theme;
 use crate::vault::rel_to_string;
 use eframe::egui::{self, Context, FontId, RichText, Ui};
@@ -55,7 +56,8 @@ impl Source {
         matches!(self, Source::Everything)
     }
 
-    /// The hits for what is typed, best first.
+    /// The hits for what is typed, best first; the search of everything lists every source (a
+    /// picker asks [`Source::found`], with the sources it is set to).
     pub fn hits(self, ctx: &Ctx, query: &str) -> Vec<Hit> {
         match self {
             Source::FileNames => {
@@ -76,6 +78,15 @@ impl Source {
             Source::Everything => search_all::all_hits(ctx, &Query::picker(query)),
         }
     }
+
+    /// What is found for `query`: for the search of everything every source, counted, for the file
+    /// names their hits.
+    fn found(self, ctx: &Ctx, query: &Query) -> Found {
+        match self {
+            Source::FileNames => Found { hits: self.hits(ctx, query.text), counts: None },
+            Source::Everything => search_all::search(ctx, query),
+        }
+    }
 }
 
 /// The state of an open picker.
@@ -85,20 +96,25 @@ pub struct Picker {
     pub sel: usize,
     /// the list made for the query; made again when the typing has settled (NAV-024)
     results: Results,
+    /// the solo of the count buttons (NAV-052); the default selection is in the settings
+    pub filter: Filter,
 }
 
 impl Picker {
     pub fn new(source: Source) -> Picker {
-        Picker { source, query: String::new(), sel: 0, results: Results::default() }
+        Picker { source, query: String::new(), sel: 0, results: Results::default(), filter: Filter::default() }
     }
 
     /// Make the list for the query when it is not the one the list is for and either the source
     /// is not debounced, or the last list was made long enough ago, or `now` is asked for.
     /// True while the list is for an older query.
-    fn refresh(&mut self, ctx: &Ctx, now: bool) -> bool {
-        let (source, query) = (self.source, &self.query);
-        let done = self.results.refresh(query, ctx.stamp(), source.debounced(), now, || source.hits(ctx, query));
-        if done == Refreshed::Made {
+    fn refresh(&mut self, ctx: &Ctx, now: bool, cfg: &SearchConfig) -> bool {
+        let source = self.source;
+        // the text, with the letters of the prefixes and the sources to list
+        let query = Query::picker(&self.query).with_sources(cfg.prefixes(), self.filter.shown(cfg.selection()));
+        let listed = if source == Source::Everything { query.listed() } else { Selection::ALL };
+        let done = self.results.refresh(query.text, ctx.stamp(), source.debounced(), now, listed, || source.found(ctx, &query));
+        if matches!(done, Refreshed::Made | Refreshed::Relisted) {
             self.sel = 0;
         }
         done == Refreshed::Waits
@@ -149,40 +165,94 @@ impl ListKeys {
     }
 }
 
+/// The keys of the search of everything that choose the sources (NAV-055): the actions
+/// `list.next_source` and `list.prev_source` of the scope `Scope::ListWindow`, by default Tab and
+/// Shift+Tab.
+pub struct SourceKeys {
+    pub next: bool,
+    pub prev: bool,
+}
+
+impl SourceKeys {
+    pub fn take(ui: &mut Ui, keymap: &Keymap) -> SourceKeys {
+        // (Shift+Tab first: a key of the same letter without Shift would take it too)
+        ui.input_mut(|i| {
+            let prev = keymap.take(i, KeyAction::ListSourcePrev);
+            SourceKeys { prev, next: !prev && keymap.take(i, KeyAction::ListSourceNext) }
+        })
+    }
+
+    /// The hint of the two keys as they are bound now: "Tab next source · Shift+Tab previous source".
+    pub fn hint(keymap: &Keymap) -> String {
+        [(KeyAction::ListSourceNext, "next source"), (KeyAction::ListSourcePrev, "previous source")].into_iter().filter_map(|(a, what)| keymap.hint(a).map(|k| format!("{k} {what}"))).collect::<Vec<_>>().join(" · ")
+    }
+}
+
 /// What the user did in this frame.
 pub struct Outcome {
     /// The hit that was picked (Enter or a click): the window closes.
     pub pick: Option<Hit>,
     pub close: bool,
+    /// The default selection of the sources was changed (Shift+click): save the settings.
+    pub save: bool,
 }
 
 /// What the header of the window passes to its list: the keys it took this frame.
 struct Frame<'a> {
     p: &'a mut Picker,
     keys: ListKeys,
+    save: bool,
 }
 
-/// Draw the window: the field and the key hint are its header (NAV-049, they stay in view), the
-/// list scrolls below them.
-pub fn show(ctx: &Context, p: &mut Picker, data: &Ctx, keymap: &Keymap) -> Outcome {
-    let mut out = Outcome { pick: None, close: false };
-    let mut frame = Frame { p, keys: ListKeys { down: false, up: false, enter: false, esc: false } };
+/// Draw the window: the field, the key hint and the source buttons are its header (NAV-049, they
+/// stay in view), the list scrolls below them. The list is made in the header, so that the
+/// counts of its buttons are those of the list below.
+pub fn show(ctx: &Context, p: &mut Picker, data: &Ctx, keymap: &Keymap, cfg: &mut SearchConfig) -> Outcome {
+    let mut out = Outcome { pick: None, close: false, save: false };
+    let mut frame = Frame { p, keys: ListKeys { down: false, up: false, enter: false, esc: false }, save: false };
     let title = frame.p.source.title();
     let resp = Dialog::new("picker", title).width(520.0).show_with_header(
         ctx,
         &mut frame,
         |ui, f| {
-            let r = ui.add(egui::TextEdit::singleline(&mut f.p.query).hint_text(f.p.source.hint()).desired_width(f32::INFINITY).font(FontId::proportional(16.0)));
+            let everything = f.p.source == Source::Everything;
+            // (Tab is no focus change here: the field keeps it for the keys of the sources)
+            let r = ui.add(egui::TextEdit::singleline(&mut f.p.query).hint_text(f.p.source.hint()).desired_width(f32::INFINITY).font(FontId::proportional(16.0)).lock_focus(true));
             r.request_focus();
             f.keys = ListKeys::take(ui, keymap);
-            theme::prose(ui, RichText::new(ListKeys::hint(keymap)).color(theme::palette().muted).size(11.5));
+            let source_keys = if everything { SourceKeys::take(ui, keymap) } else { SourceKeys { next: false, prev: false } };
+            let prefixed = cfg.prefixes().parse(&f.p.query).prefix.is_some();
+            let available = Bar::available(data.mail.is_some());
+            if !prefixed && (source_keys.next || source_keys.prev) {
+                f.p.filter.step(source_keys.next, &available);
+            }
+            // Enter means the list of what is typed, not of what was typed before
+            if f.p.refresh(data, f.keys.enter, cfg) {
+                ui.ctx().request_repaint_after(search_all::DEBOUNCE);
+            }
+            let mut hint = ListKeys::hint(keymap);
+            if everything {
+                let more = SourceKeys::hint(keymap);
+                if !more.is_empty() {
+                    hint = format!("{hint} · {more}");
+                }
+            }
+            theme::prose(ui, RichText::new(hint).color(theme::palette().muted).size(11.5));
+            if everything {
+                let listed = Query::picker(&f.p.query).with_sources(cfg.prefixes(), f.p.filter.shown(cfg.selection())).listed();
+                let bar = Bar { counts: f.p.results.counts(), limit: search_all::GROUP_LIMIT, mail_open: data.mail.is_some(), listed, prefixed };
+                let before = f.p.filter;
+                if search_sources::bar(ui, &bar, &mut f.p.filter, cfg) {
+                    f.save = true;
+                }
+                if f.save || f.p.filter != before {
+                    // the list of the new sources, in this frame
+                    f.p.refresh(data, false, cfg);
+                }
+            }
         },
         |ui, f| {
             let (p, keys) = (&mut *f.p, &f.keys);
-            // Enter means the list of what is typed, not of what was typed before
-            if p.refresh(data, keys.enter) {
-                ui.ctx().request_repaint_after(search_all::DEBOUNCE);
-            }
             keys.select(&mut p.sel, p.results.hits().len());
             let mut pick = (keys.enter && !p.results.hits().is_empty()).then_some(p.sel);
             let headers = search_all::group_headers(p.results.hits(), search_all::GROUP_LIMIT);
@@ -211,6 +281,7 @@ pub fn show(ctx: &Context, p: &mut Picker, data: &Ctx, keymap: &Keymap) -> Outco
         },
     );
     out.close |= resp.should_close();
+    out.save = frame.save;
     out
 }
 
@@ -255,28 +326,29 @@ mod tests {
         let v = Vault::open(&dir).unwrap();
         let posts = PostIndex::in_memory();
         let ctx = Ctx { vault: &v, mail: None, posts: &posts };
+        let cfg = SearchConfig::default();
         let mut p = Picker::new(Source::Everything);
-        assert!(!p.refresh(&ctx, false), "nothing typed, nothing waits");
+        assert!(!p.refresh(&ctx, false, &cfg), "nothing typed, nothing waits");
         std::thread::sleep(search_all::DEBOUNCE + std::time::Duration::from_millis(20));
         p.query = "b".into();
-        assert!(!p.refresh(&ctx, false), "a key after a pause is answered at once");
+        assert!(!p.refresh(&ctx, false, &cfg), "a key after a pause is answered at once");
         assert_eq!(p.listed().len(), 2);
         p.query = "ba".into();
-        assert!(p.refresh(&ctx, false), "the next key right after it waits");
+        assert!(p.refresh(&ctx, false, &cfg), "the next key right after it waits");
         assert_eq!(p.listed().len(), 2, "the old list stays meanwhile");
-        assert!(!p.refresh(&ctx, true), "Enter makes the list of what is typed");
+        assert!(!p.refresh(&ctx, true, &cfg), "Enter makes the list of what is typed");
         assert_eq!(p.listed().len(), 1);
         p.query = "ban".into();
-        assert!(p.refresh(&ctx, false));
+        assert!(p.refresh(&ctx, false, &cfg));
         std::thread::sleep(search_all::DEBOUNCE + std::time::Duration::from_millis(20));
-        assert!(!p.refresh(&ctx, false), "later the list is made");
+        assert!(!p.refresh(&ctx, false, &cfg), "later the list is made");
         assert_eq!(p.listed()[0].title, "banana");
         // file names are never held back
         let mut f = Picker::new(Source::FileNames);
         f.query = "a".into();
-        f.refresh(&ctx, false);
+        f.refresh(&ctx, false, &cfg);
         f.query = "".into();
-        assert!(!f.refresh(&ctx, false));
+        assert!(!f.refresh(&ctx, false, &cfg));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

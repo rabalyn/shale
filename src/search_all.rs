@@ -14,6 +14,7 @@
 use crate::app::Action;
 use crate::markdown;
 use crate::picker::Hit;
+use crate::search_sources::{Counts, Kind, Prefixes, Selection};
 use crate::social::post_index::PostIndex;
 use crate::vault::Vault;
 use rusqlite::Connection;
@@ -31,26 +32,42 @@ pub const SIDEBAR_NOTE_LINES: usize = 20;
 /// A list is made at most this often while typing (NAV-024).
 pub const DEBOUNCE: Duration = Duration::from_millis(150);
 
-/// What to look for and how much of it to list: the text and the size of the answer, which is
-/// all that tells the views apart. (A filter by source, #478, is another field here.)
+/// What to look for and how much of it to list: the text, the size of the answer (which is all
+/// that tells the views apart) and the sources to list. Every source is searched and counted
+/// (NAV-052); `shown` and a prefix in the text (NAV-050) only choose which are listed.
 #[derive(Clone, Copy, Debug)]
 pub struct Query<'a> {
+    /// what was typed, with its prefix
     pub text: &'a str,
     /// at most this many lines of one note
     pub note_lines: usize,
     /// at most this many hits in one group
     pub limit: usize,
+    /// the letters of the prefixes
+    pub prefixes: Prefixes,
+    /// the sources listed when the text has no prefix: the default selection, or a solo
+    pub shown: Selection,
 }
 
 impl<'a> Query<'a> {
     /// What the picker asks: three lines per note, 20 hits per group.
     pub fn picker(text: &'a str) -> Query<'a> {
-        Query { text, note_lines: PICKER_NOTE_LINES, limit: GROUP_LIMIT }
+        Query { text, note_lines: PICKER_NOTE_LINES, limit: GROUP_LIMIT, prefixes: Prefixes::default(), shown: Selection::ALL }
     }
 
     /// What the sidebar asks: 20 lines per note, up to 200 hits per group.
     pub fn sidebar(text: &'a str) -> Query<'a> {
-        Query { text, note_lines: SIDEBAR_NOTE_LINES, limit: SIDEBAR_GROUP_LIMIT }
+        Query { text, note_lines: SIDEBAR_NOTE_LINES, limit: SIDEBAR_GROUP_LIMIT, prefixes: Prefixes::default(), shown: Selection::ALL }
+    }
+
+    /// The same with the letters of the prefixes and the sources to list.
+    pub fn with_sources(self, prefixes: Prefixes, shown: Selection) -> Query<'a> {
+        Query { prefixes, shown, ..self }
+    }
+
+    /// The sources this query lists: those of its prefix, else `shown` (NAV-050).
+    pub fn listed(&self) -> Selection {
+        self.prefixes.parse(self.text).prefix.unwrap_or(self.shown)
     }
 }
 
@@ -185,18 +202,46 @@ pub fn post_hits(index: &PostIndex, query: &Query) -> Vec<Hit> {
         .collect()
 }
 
-/// Notes, then mail, then posts.
-pub fn all_hits(ctx: &Ctx, query: &Query) -> Vec<Hit> {
-    if query.text.trim().is_empty() {
-        return vec![];
+/// What a search found: the hits of every source, in the order of the sources, and how many each
+/// source found. No counts: nothing was searched for.
+#[derive(Default)]
+pub struct Found {
+    pub hits: Vec<Hit>,
+    pub counts: Option<Counts>,
+}
+
+/// Search every source for the text of the query, without its prefix: notes, then mail (while the
+/// mail store is open), then posts. Which of them are listed is [`Query::listed`]'s to say.
+pub fn search(ctx: &Ctx, query: &Query) -> Found {
+    let text = query.prefixes.parse(query.text).text;
+    if text.trim().is_empty() {
+        return Found::default();
     }
+    let query = &Query { text, ..*query };
     let _flow = tracing::info_span!("flow.vault_search", peer = "search_view").entered();
-    let mut out = tracing::info_span!("flow.vault_search.search_notes", peer = "vault").in_scope(|| note_hits(ctx.vault, query));
+    let mut hits = tracing::info_span!("flow.vault_search.search_notes", peer = "vault").in_scope(|| note_hits(ctx.vault, query));
+    let mut counts = Counts::default();
+    counts.0[0] = hits.len();
     if let Some(db) = ctx.mail {
-        out.extend(tracing::info_span!("flow.vault_search.search_mail", peer = "mail_index").in_scope(|| mail_hits(db, query)));
+        let mail = tracing::info_span!("flow.vault_search.search_mail", peer = "mail_index").in_scope(|| mail_hits(db, query));
+        counts.0[1] = mail.len();
+        hits.extend(mail);
     }
-    out.extend(tracing::info_span!("flow.vault_search.search_posts", peer = "post_index").in_scope(|| post_hits(ctx.posts, query)));
-    out
+    let posts = tracing::info_span!("flow.vault_search.search_posts", peer = "post_index").in_scope(|| post_hits(ctx.posts, query));
+    counts.0[2] = posts.len();
+    hits.extend(posts);
+    Found { hits, counts: Some(counts) }
+}
+
+/// The hits of the sources the query lists: notes, then mail, then posts.
+pub fn all_hits(ctx: &Ctx, query: &Query) -> Vec<Hit> {
+    let listed = query.listed();
+    search(ctx, query).hits.into_iter().filter(|h| is_listed(h, listed)).collect()
+}
+
+/// Does `listed` have the source of the hit? A hit of a list without sources always counts.
+fn is_listed(h: &Hit, listed: Selection) -> bool {
+    Kind::of_group(h.group).is_none_or(|k| listed.contains(k))
 }
 
 /// The heading of each group of a list with its count: "Notes  3", "Mail  20+" when the group is
@@ -243,16 +288,23 @@ pub enum Refreshed {
     Unchanged,
     /// a new list was made
     Made,
+    /// the sources to list changed (a button, a key): the same hits, other ones listed
+    Relisted,
     /// the list is for an older query or state and a new one is not due yet: ask for a repaint
+    /// (the sources may have changed as well, and the old hits are listed as they say)
     Waits,
 }
 
 /// The list one view shows: made for a query and a state of the data, kept while neither
 /// changes, and made again at most every [`DEBOUNCE`] while typing (NAV-024). Both views of the
-/// search hold one.
+/// search hold one. It keeps the hits of the sources that are not listed, so that a button or a
+/// key lists them without a new search (NAV-052).
 #[derive(Default)]
 pub struct Results {
     hits: Vec<Hit>,
+    unlisted: Vec<Hit>,
+    counts: Option<Counts>,
+    listed: Option<Selection>,
     made_for: Option<(String, (u64, u64))>,
     made_at: Option<Instant>,
 }
@@ -260,23 +312,41 @@ pub struct Results {
 impl Results {
     /// Make the list with `make` when it is not the one for `text` and `stamp` (the state of the
     /// data, [`Ctx::stamp`]) and either `debounced` is off, or the last list was made long enough
-    /// ago, or `now` asks for it.
-    pub fn refresh(&mut self, text: &str, stamp: (u64, u64), debounced: bool, now: bool, make: impl FnOnce() -> Vec<Hit>) -> Refreshed {
-        if self.made_for.as_ref().is_some_and(|(t, s)| t == text && *s == stamp) {
-            return Refreshed::Unchanged;
-        }
-        if now || !debounced || self.made_at.is_none_or(|t| t.elapsed() >= DEBOUNCE) {
-            self.hits = make();
+    /// ago, or `now` asks for it. Only the hits of the sources in `listed` are listed.
+    pub fn refresh(&mut self, text: &str, stamp: (u64, u64), debounced: bool, now: bool, listed: Selection, make: impl FnOnce() -> Found) -> Refreshed {
+        let current = self.made_for.as_ref().is_some_and(|(t, s)| t == text && *s == stamp);
+        if !current && (now || !debounced || self.made_at.is_none_or(|t| t.elapsed() >= DEBOUNCE)) {
+            let found = make();
+            self.counts = found.counts;
+            (self.hits, self.unlisted) = found.hits.into_iter().partition(|h| is_listed(h, listed));
+            self.listed = Some(listed);
             self.made_for = Some((text.to_string(), stamp));
             self.made_at = Some(Instant::now());
-            Refreshed::Made
-        } else {
-            Refreshed::Waits
+            return Refreshed::Made;
+        }
+        // (while a new list waits for the typing to settle, the old one is listed as asked)
+        let relisted = self.listed.is_some_and(|l| l != listed);
+        if relisted {
+            let mut all = std::mem::take(&mut self.hits);
+            all.append(&mut self.unlisted);
+            all.sort_by_key(|h| Kind::of_group(h.group).map_or(0, |k| k as usize));
+            (self.hits, self.unlisted) = all.into_iter().partition(|h| is_listed(h, listed));
+            self.listed = Some(listed);
+        }
+        match (current, relisted) {
+            (false, _) => Refreshed::Waits,
+            (true, true) => Refreshed::Relisted,
+            (true, false) => Refreshed::Unchanged,
         }
     }
 
     pub fn hits(&self) -> &[Hit] {
         &self.hits
+    }
+
+    /// How many hits each source found, for the text of the list; none while nothing is typed.
+    pub fn counts(&self) -> Option<&Counts> {
+        self.counts.as_ref()
     }
 
     /// Has a list been made at all (an empty one is "nothing found")?
@@ -397,6 +467,69 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    // spec: NAV-050, NAV-052
+    #[test]
+    fn a_prefix_and_the_buttons_choose_the_listed_sources_and_every_source_is_counted() {
+        let (v, dir) = fixture();
+        let db = mail_db_with(&[("Banana order".into(), 10), ("Banana again".into(), 20)]);
+        let mut posts = PostIndex::in_memory();
+        let mut p = post("p1", "ada", crate::calendar::time::now() - 3600, None);
+        p.text_markdown = "banana republic".into();
+        posts.add("acct", "home", &[p]);
+        let ctx = Ctx { vault: &v, mail: Some(&db), posts: &posts };
+        let sel = |kinds: &[Kind]| kinds.iter().fold(None, |acc: Option<Selection>, k| Some(acc.map_or(Selection::only(*k), |a| a.toggled(*k).unwrap_or(a)))).unwrap();
+        let groups = |text: &str, shown: Selection| {
+            let q = Query::picker(text).with_sources(Prefixes::default(), shown);
+            let mut g: Vec<&str> = all_hits(&ctx, &q).iter().map(|h| h.group).collect();
+            g.dedup();
+            g
+        };
+        assert_eq!(groups("banana", Selection::ALL), [NOTES, MAIL, POSTS]);
+        assert_eq!(groups("banana", Selection::only(Kind::Mail)), [MAIL], "a solo lists one source");
+        assert_eq!(groups("banana", sel(&[Kind::Notes, Kind::Posts])), [NOTES, POSTS], "the default selection lists its sources");
+        // a prefix wins over the buttons, and the prefix is not searched for
+        assert_eq!(groups("s:banana", Selection::only(Kind::Mail)), [POSTS]);
+        assert_eq!(groups("f: banana", Selection::ALL), [NOTES]);
+        assert_eq!(groups("fm:banana", Selection::only(Kind::Posts)), [NOTES, MAIL]);
+        assert_eq!(groups("m:", Selection::ALL), Vec::<&str>::new(), "a prefix alone: nothing to look for");
+        assert_eq!(groups("from:ann banana", Selection::only(Kind::Posts)), [] as [&str; 0], "a field prefix is text: no post of ann here");
+        // every source is counted, whatever is listed
+        let q = Query::picker("s:banana");
+        let found = search(&ctx, &q);
+        let counts = found.counts.unwrap();
+        assert_eq!((counts.get(Kind::Notes), counts.get(Kind::Mail), counts.get(Kind::Posts)), (3 + 1, 2, 1), "notes: three lines of Fruit and the name; mail 2; posts 1");
+        assert_eq!(all_hits(&ctx, &q).len(), 1, "but only posts are listed");
+        let none = search(&ctx, &Query::picker("zzzz")).counts.unwrap();
+        assert_eq!((none.get(Kind::Notes), none.get(Kind::Mail), none.get(Kind::Posts)), (0, 0, 0), "a source with no hit is counted: 0");
+        assert!(search(&ctx, &Query::picker("  ")).counts.is_none(), "nothing typed: no counts");
+        // no mail store: no mail count, and a mail prefix lists nothing
+        let ctx2 = Ctx { vault: &v, mail: None, posts: &posts };
+        assert_eq!(search(&ctx2, &Query::picker("banana")).counts.unwrap().get(Kind::Mail), 0);
+        assert!(all_hits(&ctx2, &Query::picker("m:banana")).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: NAV-052
+    #[test]
+    fn another_selection_lists_the_kept_hits_without_a_new_search() {
+        let mut r = Results::default();
+        let hits = || Found { hits: vec![hit(NOTES, "a"), hit(NOTES, "b"), hit(MAIL, ""), hit(POSTS, "")], counts: Some(Counts([2, 1, 1])) };
+        let groups = |r: &Results| r.hits().iter().map(|h| h.group).collect::<Vec<_>>();
+        assert_eq!(r.refresh("x", (1, 1), false, false, Selection::only(Kind::Mail), hits), Refreshed::Made);
+        assert_eq!(groups(&r), [MAIL]);
+        assert_eq!(r.counts(), Some(&Counts([2, 1, 1])), "the others are counted");
+        assert_eq!(r.refresh("x", (1, 1), false, false, Selection::ALL, || panic!("no new search")), Refreshed::Relisted);
+        assert_eq!(groups(&r), [NOTES, NOTES, MAIL, POSTS], "back in the order of the sources");
+        let two = Selection::only(Kind::Posts).toggled(Kind::Notes).unwrap();
+        assert_eq!(r.refresh("x", (1, 1), false, false, two, || panic!("no new search")), Refreshed::Relisted);
+        assert_eq!(groups(&r), [NOTES, NOTES, POSTS]);
+        assert_eq!(r.refresh("x", (1, 1), false, false, two, || panic!("no new search")), Refreshed::Unchanged);
+        // a list without sources is always listed
+        let mut names = Results::default();
+        names.refresh("", (1, 1), false, false, Selection::only(Kind::Posts), || Found { hits: vec![hit("", "")], counts: None });
+        assert_eq!(names.hits().len(), 1);
+    }
+
     // spec: DEV-031
     #[test]
     fn dataflow_vault_search() {
@@ -417,6 +550,10 @@ mod tests {
     fn hit(group: &'static str, rel: &str) -> Hit {
         let action = if group == NOTES { Action::GotoMatch { rel: rel.into(), line: 0, col: 0 } } else { Action::FocusEditor };
         Hit { group, title: String::new(), detail: String::new(), action }
+    }
+
+    fn found(hits: Vec<Hit>) -> Found {
+        Found { hits, counts: None }
     }
 
     // spec: NAV-022
@@ -465,18 +602,19 @@ mod tests {
     #[test]
     fn a_list_is_made_again_for_another_query_or_state_and_not_more_often_than_the_debounce() {
         let mut r = Results::default();
-        let make = || vec![hit(NOTES, "a")];
-        assert_eq!(r.refresh("", (1, 1), false, false, make), Refreshed::Made);
+        let make = || found(vec![hit(NOTES, "a")]);
+        let all = Selection::ALL;
+        assert_eq!(r.refresh("", (1, 1), false, false, all, make), Refreshed::Made);
         assert!(r.is_made());
-        assert_eq!(r.refresh("", (1, 1), false, false, || panic!("the same query and state")), Refreshed::Unchanged);
-        assert_eq!(r.refresh("a", (1, 1), true, false, make), Refreshed::Waits, "right after the last list");
+        assert_eq!(r.refresh("", (1, 1), false, false, all, || panic!("the same query and state")), Refreshed::Unchanged);
+        assert_eq!(r.refresh("a", (1, 1), true, false, all, make), Refreshed::Waits, "right after the last list");
         assert!(r.hits().len() == 1);
-        assert_eq!(r.refresh("a", (1, 1), true, true, Vec::new), Refreshed::Made, "Enter asks for the list now");
+        assert_eq!(r.refresh("a", (1, 1), true, true, all, Found::default), Refreshed::Made, "Enter asks for the list now");
         assert!(r.hits().is_empty());
-        assert_eq!(r.refresh("a", (1, 2), true, false, make), Refreshed::Waits, "another state of the data waits like another query");
+        assert_eq!(r.refresh("a", (1, 2), true, false, all, make), Refreshed::Waits, "another state of the data waits like another query");
         std::thread::sleep(DEBOUNCE + Duration::from_millis(20));
-        assert_eq!(r.refresh("a", (1, 2), true, false, make), Refreshed::Made);
-        assert_eq!(r.refresh("b", (1, 2), false, false, make), Refreshed::Made, "not debounced: at once");
+        assert_eq!(r.refresh("a", (1, 2), true, false, all, make), Refreshed::Made);
+        assert_eq!(r.refresh("b", (1, 2), false, false, all, make), Refreshed::Made, "not debounced: at once");
         assert_eq!(r.take(0).group, NOTES);
     }
 }

@@ -6,6 +6,7 @@
 use crate::app::{muted, Action, ShaleApp};
 use crate::keys::{Action as KeyAction, Scope};
 use crate::search_all::{self, Ctx, Query, Refreshed, Results};
+use crate::search_sources::{self, Bar};
 use crate::theme;
 use eframe::egui::{self, CornerRadius, Key, Modifiers, Sense, Ui};
 use std::path::Path;
@@ -22,6 +23,8 @@ pub struct SearchBox {
     pub(crate) scroll: bool,
     /// focus the search box (and select its text) in the next frame
     pub focus: bool,
+    /// the solo of the count buttons (NAV-052); the default selection is in the settings
+    pub filter: search_sources::Filter,
 }
 
 impl SearchBox {
@@ -68,8 +71,19 @@ impl ShaleApp {
         // ↓ in the box goes into the result list (checked before the box sees the key)
         let box_focused = ui.ctx().memory(|m| m.has_focus(id));
         let down_from_box = box_focused && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowDown));
-        let r = ui.add(egui::TextEdit::singleline(&mut self.search.query).id(id).hint_text("Search notes, mail and posts…").desired_width(f32::INFINITY));
-        if r.changed() || r.has_focus() {
+        // Tab / Shift+Tab choose the source (NAV-055), in the box and while the list is browsed. They are
+        // taken before the box is drawn: egui moves the focus on Tab, and the box must not get it.
+        // (A selection means the last frame ended with no widget focused, so what has the focus now
+        // got it from this Tab: it is taken away again below.)
+        let browsing = self.search.sel.is_some();
+        let step = if box_focused || browsing { ui.input_mut(|i| (self.keymap.take(i, KeyAction::HitSourcePrev), self.keymap.take(i, KeyAction::HitSourceNext))) } else { (false, false) };
+        let tabbed = step.0 || step.1;
+        let r = ui.add(egui::TextEdit::singleline(&mut self.search.query).id(id).hint_text("Search notes, mail and posts…").desired_width(f32::INFINITY).lock_focus(true));
+        if tabbed && !box_focused {
+            if let Some(grabbed) = ui.ctx().memory(|m| m.focused()) {
+                ui.ctx().memory_mut(|m| m.surrender_focus(grabbed));
+            }
+        } else if r.changed() || r.has_focus() {
             self.search.sel = None;
         }
         let enter_from_box = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
@@ -82,11 +96,33 @@ impl ShaleApp {
         // the same engine as the picker; Enter in the box makes the list of what is typed now, and
         // an emptied box empties the list at once
         let typed = !self.search.query.trim().is_empty();
+        let prefixes = self.cfg.search.prefixes();
+        let prefixed = prefixes.parse(&self.search.query).prefix.is_some();
+        let available = Bar::available(data.mail.is_some());
+        if !prefixed && tabbed {
+            self.search.filter.step(step.1, &available);
+        }
         let query = &self.search.query;
-        if self.search.results.refresh(query, data.stamp(), typed, enter_from_box, || search_all::all_hits(&data, &Query::sidebar(query))) == Refreshed::Waits {
+        let sidebar = |filter: search_sources::Filter| Query::sidebar(query).with_sources(prefixes, filter.shown(self.cfg.search.selection()));
+        let ask = sidebar(self.search.filter);
+        let refreshed = self.search.results.refresh(query, data.stamp(), typed, enter_from_box, ask.listed(), || search_all::search(&data, &ask));
+        if matches!(refreshed, Refreshed::Waits | Refreshed::Relisted) {
             ui.ctx().request_repaint_after(search_all::DEBOUNCE);
         }
+        let relisted = refreshed == Refreshed::Relisted;
+        let before = self.search.filter;
+        let bar = Bar { counts: self.search.results.counts(), limit: search_all::SIDEBAR_GROUP_LIMIT, mail_open: data.mail.is_some(), listed: ask.listed(), prefixed };
+        let save = search_sources::bar(ui, &bar, &mut self.search.filter, &mut self.cfg.search);
+        if save || self.search.filter != before {
+            // the list of the new sources, in the next frame
+            ui.ctx().request_repaint();
+        }
         let hits = self.search.results.hits();
+        if relisted && self.search.sel.is_some() {
+            // browsing: the first hit of the other list
+            self.search.sel = Some(0);
+            self.search.scroll = true;
+        }
         let entering = (down_from_box || enter_from_box) && !hits.is_empty();
         if entering {
             self.search.sel = Some(0);
@@ -121,16 +157,18 @@ impl ShaleApp {
             }
         }
         if typed {
+            let source_keys = [(KeyAction::HitSourceNext, "next"), (KeyAction::HitSourcePrev, "previous")].into_iter().filter_map(|(a, what)| self.keymap.hint(a).map(|k| format!("{k} {what} source"))).collect::<Vec<_>>().join(", ");
+            let source_keys = if source_keys.is_empty() { String::new() } else { format!(", {source_keys}") };
             let hint = if self.search.sel.is_some() {
-                "j/k hit to hit, Ctrl+J/K next/previous file or group, Enter opens, Esc back"
+                format!("j/k hit to hit, Ctrl+J/K next/previous file or group{source_keys}, Enter opens, Esc back")
             } else if hits.is_empty() {
                 if self.search.results.is_made() {
-                    "Nothing found"
+                    "Nothing found".to_string()
                 } else {
-                    ""
+                    String::new()
                 }
             } else {
-                "↓ to browse"
+                "↓ to browse".to_string()
             };
             if !hint.is_empty() {
                 ui.label(muted(hint).size(12.0));
@@ -205,6 +243,10 @@ impl ShaleApp {
                 ui.add_space(if h.group == search_all::NOTES { 2.0 } else { 4.0 });
             }
         });
+        if save {
+            // Shift+click on a button changed the default selection
+            self.save_config();
+        }
     }
 }
 

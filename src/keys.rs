@@ -220,7 +220,7 @@ actions! {
     FocusSidebar => "global.focus_sidebar", "Keyboard one place to the left (pane, then left sidebar)", Global, ["Ctrl+H"];
     FocusEditor => "global.focus_editor", "Keyboard one place to the right (sidebar, then panes)", Global, ["Ctrl+L"];
     ShowFiles => "global.show_files", "File list with the keyboard in it", Global, ["Ctrl+Shift+B"];
-    Search => "global.search", "Search all notes", Global, ["Ctrl+Shift+F"];
+    Search => "global.search", "Search notes, mail and posts", Global, ["Ctrl+Shift+F"];
     MailView => "global.mail_view", "Mail view", Global, ["Ctrl+Shift+M"];
     QuickSwitcher => "global.quick_switcher", "Quick switcher", Global, ["Ctrl+O"];
     NewNote => "global.new_note", "New note", Global, ["Ctrl+N"];
@@ -299,11 +299,17 @@ actions! {
     HitPrev => "search.prev_hit", "Previous hit", SearchResults, ["K", "Up"];
     HitNextFile => "search.next_file", "First hit of the next file or group", SearchResults, ["Ctrl+J"];
     HitPrevFile => "search.prev_file", "First hit of the previous file or group", SearchResults, ["Ctrl+K"];
+    // (Shift+Tab before Tab: egui lets a bare key match with Shift held)
+    HitSourcePrev => "search.prev_source", "Previous source only (notes, mail, posts), then the default sources", SearchResults, ["Shift+Tab"];
+    HitSourceNext => "search.next_source", "Next source only (notes, mail, posts), then the default sources", SearchResults, ["Tab"];
     // List windows (NAV-049): the keys of the pickers, the quick switcher and the font list
     ListNext => "list.next", "Next line of a list window", ListWindow, ["Down", "Ctrl+J"];
     ListPrev => "list.prev", "Previous line of a list window", ListWindow, ["Up", "Ctrl+K"];
     ListOpen => "list.open", "Open the selected line of a list window", ListWindow, ["Enter"];
     ListClose => "list.close", "Close a list window", ListWindow, ["Escape"];
+    // the search of everything (NAV-055)
+    ListSourcePrev => "list.prev_source", "Previous source only in the search of everything, then the default sources", ListWindow, ["Shift+Tab"];
+    ListSourceNext => "list.next_source", "Next source only in the search of everything (notes, mail, posts), then the default sources", ListWindow, ["Tab"];
     // Mail view: the Shift keys come before the bare key of the same letter (egui lets a bare key match with Shift held)
     MailReplyAll => "mail.reply_all", "Reply all", MailView, ["Shift+R"];
     MailForward => "mail.forward", "Forward", MailView, ["Shift+F"];
@@ -739,7 +745,7 @@ mod tests {
             assert_eq!(mac.display(d.action), on_mac, "{}", d.id);
         }
         assert_eq!(DEFS.iter().filter(|d| d.scope == Scope::NoteView).count(), 26 + 5);
-        assert_eq!(DEFS.len(), 29 + 36 + 6 + 12 + 4 + 26 + 5);
+        assert_eq!(DEFS.len(), 29 + 36 + 6 + 12 + 6 + 26 + 5 + 2);
     }
 
     // spec: KEY-014
@@ -868,7 +874,7 @@ mod tests {
                 assert_eq!(k.check(a, &b(key)), Ok(()));
             }
         }
-        assert_eq!(linux.check(Action::NoteFold, &b("Ctrl+Shift+F")), Err("Ctrl+Shift+F is already used by “Search all notes”".to_string()));
+        assert_eq!(linux.check(Action::NoteFold, &b("Ctrl+Shift+F")), Err("Ctrl+Shift+F is already used by “Search notes, mail and posts”".to_string()));
     }
 
     // spec: KEY-035, KEY-036
