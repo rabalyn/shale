@@ -10,6 +10,8 @@ its section from this file.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-22
+
 ### Added
 
 - Git for sync can be installed with one button. Settings → Sync shows which git and git-lfs it found and which is used, offers **Download and install git** with the download size, the size on disk and the folder `<data folder>/shale/git` (nothing is downloaded before you press it), checks every file against a pinned SHA-256, builds the folder aside and renames it when it runs, and has Cancel, **Remove…**, a choice between the git of your computer and Shale's own (`git.choice`) and an opt-in check for newer versions that can also install them (`git.updates`, off by default). Windows gets MinGit and git-lfs, macOS opens Apple's installer for git and downloads git-lfs, Linux shows your distribution's install command and downloads git-lfs (#468).
@@ -31,12 +33,15 @@ its section from this file.
 - The lines of notes that the search finds (Ctrl+Shift+F and `Space f g`) are now shown rendered like the editor draws them: bold, italic, links and wiki links by their shown text, tags, task boxes (`[ ]` / `[x]`), bullets and headings without their markup, with the found text marked (also for wildcards). Mail and post hits mark the words of your query. New setting **Settings → Search → Hits of notes** (`search.hit_display`): follow the editor (default: rendered while the Markdown preview is on or the open note is in the reading view, raw otherwise), raw, or rendered (#483).
 - The user guide shows the search windows (`Space f g`, the sidebar search) and Settings → Search in pictures, and the pictures of the Settings tabs and of the keybindings show the new Search tab and key names (#481, #478, #483).
 - In the search over everything (Ctrl+Shift+F and `Space f g`) every word of a mail or post query now matches the start of a word: `meet` finds "meeting", `from:ann` finds the sender "Anna". A "quoted phrase" stays exact, and the found words are marked in the hit. The mail view's own search is unchanged (#491).
+- A task in the editor's Markdown preview and in a rendered search hit is now drawn with a real checkbox (ticked for a done task) instead of `- [ ]` / `[x]` as text. Clicking the box in the preview still ticks the task (#489).
+- A list item in the editor's Markdown preview and in a rendered search hit is now drawn with a painted dot (filled on the first level, hollow on the next, alternating) instead of its `-`, `*` or `+`. Numbered items keep their numbers, tasks keep their box, and the line with the cursor stays raw (#492).
 
 ### Fixed
 
 - For developers: the test suite now passes when run as root (as in the CI containers) and under parallel load in release builds. Flaky UI waits in the sync, managed-git and file-history tests were replaced by waiting for the background jobs to finish, two history tests no longer share a vault folder, and the move-out failure test no longer relies on an unreadable file (#469, #468, #471).
 - For developers: the storage check NET-001 now tests the file lock from a second process with Shale's own test binary instead of `flock(1)`, which macOS does not have, so the test suite passes on macOS again (#470).
 - For developers: the askpass helper's integration test, which fakes the Linux keyring (`secret-tool`), now runs only on Linux; on macOS and Windows the helper is covered by its unit tests, so the test suite passes on macOS again (#469).
+- For developers: the mail test that checks a Bcc copy no longer fails now and then. It looked for "bcc" anywhere in Shale's own message headers, so it matched random hex in a message ID or boundary. It now looks for a `Bcc:` header line (#488).
 
 ## [0.6.10] - 2026-11-21
 
@@ -1851,7 +1856,8 @@ First public version (published before releases were tagged).
 - Ctrl+Shift+F always focuses the search box and selects the previous search.
 - File names with `#` work in links.
 
-[Unreleased]: https://github.com/rabalyn/shale/compare/v0.6.10...HEAD
+[Unreleased]: https://github.com/rabalyn/shale/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/rabalyn/shale/compare/v0.6.10...v0.7.0
 [0.6.10]: https://github.com/rabalyn/shale/compare/v0.6.9...v0.6.10
 [0.6.9]: https://github.com/rabalyn/shale/compare/v0.6.8...v0.6.9
 [0.6.8]: https://github.com/rabalyn/shale/compare/v0.6.7...v0.6.8
