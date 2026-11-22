@@ -392,7 +392,25 @@ jobs:
             || echo "Could not install Podman here."
           # bookworm's podman-compose (1.0.3) does not know `network_mode: "service:…"`, which the mail
           # stack uses: a pinned newer one from PyPI
-          python3 -m pip install -q --break-system-packages podman-compose==1.2.0 || echo "Could not install podman-compose here."
+          # where Podman could not be installed the next steps skip; where it is there, the stack needs
+          # podman-compose, so a PyPI that does not answer is retried and then fails the step with its reason
+          if command -v podman >/dev/null 2>&1; then
+            installed=no
+            for attempt in 1 2 3; do
+              if python3 -m pip install -q --break-system-packages podman-compose==1.2.0; then
+                installed=yes
+                break
+              fi
+              echo "Installing podman-compose failed (attempt $attempt of 3)."
+              if [ "$attempt" -lt 3 ]; then
+                sleep $((attempt * 10))
+              fi
+            done
+            if [ "$installed" != yes ]; then
+              echo "::error::podman-compose 1.2.0 could not be installed from PyPI after 3 attempts; the mail stack needs it (network_mode service:...), so the env-tests cannot run"
+              exit 1
+            fi
+          fi
           # podman's default `overlay` storage does not work on top of the job container's own overlayfs
           # ("'overlay' is not supported over overlayfs"): vfs is slower but works; set before podman's first run.
           # graphroot is on the runner volume above (ADR-0022), so keep the driver: a different one cannot read it
