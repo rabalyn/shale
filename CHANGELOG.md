@@ -10,6 +10,22 @@ its section from this file.
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-11-22
+
+### Added
+
+- Work that runs longer than a moment now shows what it does and cannot be started twice. A small indicator in the top right of the editor pane (in the row of the tabs) lists what runs in the background (a spinner and the text, or "2 tasks running"; point at it or click it for the list with how long each runs and **Cancel** where the work can stop). The git sync ("Syncing with git…"), the Git LFS setup, the check of file names in Settings → Vault (new: **Cancel** stops it) and the PDF export of a folder are the first on it; the buttons that would start them again are off while they run. The other long actions follow (#397).
+
+### Changed
+
+- The headless window tests share one wait for the background jobs after `ShaleApp::build` (DEV-041): `Headless::settle` frames until the tag learner, the rescan, the vault check and the other jobs are done, with a deadline and a message that names what still runs. The tests of the settings file, of dragging in the file list, of the sync wizard and of the file history use it, so a file such as `.shale/tag-words.json` no longer appears in the middle of a test on a loaded machine (#272). `media_022` waits for the new vault check job with the same wait instead of reading the answer of the first check as the answer of the second (#514).
+- Test scripts that stand in for external programs (pretend gpg, pandoc, ffprobe, `secret-tool`, git hooks) are written by one helper (`test_exec::write_script`, DEV-040) that starts each script once before the test does, until it is no longer "Text file busy", so a test that forks at the same moment no longer fails the next test with `ExecutableFileBusy`; the wait of `media_022` for the vault check ends by the clock instead of after 300 frames (#514).
+
+### Fixed
+
+- On Windows, no console window flashes up any more when Shale starts `git`, `git-lfs`, `ffmpeg`, `ffprobe`, `gpg`, `curl`, `pandoc` or the TeX tools: every program is started with the creation flag `CREATE_NO_WINDOW`, set in one place (`program::command`), and a test checks that no other code starts a program (#205). Not yet seen on a Windows desktop.
+- For developers: the release-script tests in Forgejo's build job get `jq` before they run, and stop with a clear message when it is missing (#522); `--allow-perf-regression` now also lets a release pass when the re-run confirms a regression (#520).
+
 ## [0.7.1] - 2026-11-22
 
 ### Added
@@ -1904,7 +1920,8 @@ First public version (published before releases were tagged).
 - Ctrl+Shift+F always focuses the search box and selects the previous search.
 - File names with `#` work in links.
 
-[Unreleased]: https://github.com/rabalyn/shale/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/rabalyn/shale/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/rabalyn/shale/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/rabalyn/shale/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/rabalyn/shale/compare/v0.6.10...v0.7.0
 [0.6.10]: https://github.com/rabalyn/shale/compare/v0.6.9...v0.6.10

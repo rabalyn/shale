@@ -1,0 +1,69 @@
+{
+  "schema": 2,
+  "verdict": "ok",
+  "exit_code": 0,
+  "x": {
+    "commit": "cbc3fb053ee7b522b2b431ffd8775b6865a280d3",
+    "describe": "v0.7.0-rc.4-8-gcbc3fb0",
+    "date": "2026-11-22T15:57:42Z",
+    "load": 10.89,
+    "cores": 28,
+    "repeats": 5
+  },
+  "y": {
+    "commit": "46743a10996d8aea29d81e8099bfbdfa5c1a72ae",
+    "describe": "v0.7.1-13-g46743a1",
+    "date": "2026-11-22T15:57:50Z",
+    "load": 9.6,
+    "cores": 28,
+    "repeats": 5
+  },
+  "busy": false,
+  "threshold_time_pct": 10.0,
+  "threshold_bytes_pct": 15.0,
+  "threshold_allocs_pct": 10.0,
+  "rows": [
+    {
+      "id": "worst.frame.idle",
+      "status": "both",
+      "x_median_ns": 2713169,
+      "y_median_ns": 2486595,
+      "time_delta_pct": -8.350898893507924,
+      "time_verdict": "noisy",
+      "x_range_ns": [
+        2713169,
+        2824822
+      ],
+      "y_range_ns": [
+        2486595,
+        2916282
+      ],
+      "x_allocs": 10010,
+      "y_allocs": 10010,
+      "allocs_delta_pct": 0.0,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 19368344,
+      "y_peak_bytes": 19368344,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    }
+  ],
+  "regressions": [],
+  "improvements": [],
+  "tradeoffs": [],
+  "noisy": [],
+  "changed": [],
+  "skipped": [],
+  "summary": {
+    "compared": 1,
+    "faster": 0,
+    "slower": 0,
+    "regressions": 0,
+    "noisy": 1,
+    "changed": 0,
+    "added": 0,
+    "removed": 0
+  }
+}
