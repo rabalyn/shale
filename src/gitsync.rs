@@ -671,9 +671,7 @@ pub fn hide_lfs(git: &mut Git) {
         let dir = std::env::temp_dir().join(format!("shale-no-git-lfs-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let stub = dir.join("git-lfs");
-        std::fs::write(&stub, "#!/bin/sh\nexit 1\n").unwrap();
-        #[cfg(unix)]
-        std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        crate::test_exec::write_script(&stub, "#!/bin/sh\nexit 1\n");
         let rest = std::env::var_os("PATH").unwrap_or_default();
         std::env::join_paths(std::iter::once(dir).chain(std::env::split_paths(&rest))).unwrap()
     });

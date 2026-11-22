@@ -263,10 +263,8 @@ mod fake {
     use super::*;
 
     pub fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
         let p = dir.join(name);
-        crate::fsutil::write_atomic(&p, format!("#!/bin/sh\n{body}\n").as_bytes()).unwrap();
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::test_exec::write_script(&p, &format!("#!/bin/sh\n{body}\n"));
         p
     }
 

@@ -137,6 +137,10 @@ mod table;
 mod table_grid;
 mod table_select;
 mod task_box;
+#[cfg(all(test, unix))]
+mod test_exec;
+#[cfg(all(test, unix))]
+mod test_exec_tests;
 mod theme;
 mod themes;
 #[cfg(test)]

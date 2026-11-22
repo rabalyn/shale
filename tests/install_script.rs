@@ -8,6 +8,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+#[path = "../src/test_exec.rs"]
+mod test_exec;
+
 const ROOT: &str = env!("CARGO_MANIFEST_DIR");
 const SIZES: [u32; 8] = [16, 32, 48, 64, 128, 256, 512, 1024];
 
@@ -213,10 +216,8 @@ fn build_025_missing_libraries_are_named_with_a_hint() {
     let tools = e.tools();
     let _ = fs::remove_file(tools.join("ldd"));
     // and a cache tool that fails: ignored
-    fs::write(tools.join("gtk-update-icon-cache"), "#!/bin/sh\nexit 1\n").unwrap();
-    fs::set_permissions(tools.join("gtk-update-icon-cache"), fs::Permissions::from_mode(0o755)).unwrap();
-    fs::write(tools.join("ldd"), "#!/bin/sh\necho '\tlibasound.so.2 => not found'\necho '\tlibc.so.6 => /lib/libc.so.6 (0x1)'\n").unwrap();
-    fs::set_permissions(tools.join("ldd"), fs::Permissions::from_mode(0o755)).unwrap();
+    test_exec::write_script(&tools.join("gtk-update-icon-cache"), "#!/bin/sh\nexit 1\n");
+    test_exec::write_script(&tools.join("ldd"), "#!/bin/sh\necho '\tlibasound.so.2 => not found'\necho '\tlibc.so.6 => /lib/libc.so.6 (0x1)'\n");
     let out = Command::new("sh").arg(e.pkg().join("install.sh")).env("HOME", e.home()).env("XDG_DATA_HOME", e.data()).env("PATH", &tools).output().unwrap();
     assert!(out.status.success(), "a missing library is a warning");
     let err = String::from_utf8_lossy(&out.stderr);

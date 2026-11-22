@@ -191,7 +191,6 @@ fn the_log_of_a_failed_compile_is_kept_under_a_unique_name_and_a_missing_log_or_
 #[cfg(unix)]
 pub(crate) mod fake {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
     use std::time::{Duration, Instant};
 
     /// A folder with a fake `lualatex` and `biber`, and the state they keep in `state/`.
@@ -199,21 +198,9 @@ pub(crate) mod fake {
         pub dir: PathBuf,
     }
 
-    /// An executable script `name` in `dir`. Another test thread that forks while the file is open for
-    /// writing leaves a copy of the open file in its child for a moment, and starting the script then
-    /// fails with "Text file busy": the script is started once here (it answers `--shale-warm-up` at
-    /// once) until that is over, so the test that uses it later never meets it.
+    /// An executable script `name` in `dir` that can be started at once (`test_exec::write_script`).
     pub fn script(dir: &Path, name: &str, body: &str) {
-        std::fs::create_dir_all(dir).unwrap();
-        let path = dir.join(name);
-        std::fs::write(&path, format!("#!/bin/sh\n[ \"$1\" = --shale-warm-up ] && exit 0\n{body}\n")).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        for _ in 0..500 {
-            match std::process::Command::new(&path).arg("--shale-warm-up").output() {
-                Err(e) if e.raw_os_error() == Some(26) => std::thread::sleep(std::time::Duration::from_millis(10)),
-                _ => break,
-            }
-        }
+        crate::test_exec::write_script(&dir.join(name), &format!("#!/bin/sh\n{body}\n"));
     }
 
     impl Fake {

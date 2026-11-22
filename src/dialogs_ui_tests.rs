@@ -1086,11 +1086,7 @@ fn docx_002_export_runs_as_a_job_saves_the_file_where_asked_scans_the_vault_and_
 fn docx_002_a_pandoc_that_fails_leaves_the_dialog_open_with_its_first_error_line_and_writes_nothing() {
     let mut p = P::with_files("docx-fail", &[("Ideas.md", "# Ideas\n")]);
     let fake = p.dir.join("fake-pandoc");
-    std::fs::write(&fake, "#!/bin/sh\necho 'pandoc: it cannot do that' >&2\nexit 2\n").unwrap();
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
+    crate::test_exec::write_script(&fake, "#!/bin/sh\necho 'pandoc: it cannot do that' >&2\nexit 2\n");
     p.app.cfg.pandoc_path = fake.to_string_lossy().into_owned();
     p.app.open_docx_export_dialog(Path::new("Ideas.md"));
     assert!(p.shows(Show::Modals, &format!("pandoc: {}", fake.display())), "the line says where pandoc was found");

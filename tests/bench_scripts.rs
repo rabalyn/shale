@@ -8,6 +8,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[path = "../src/test_exec.rs"]
+mod test_exec;
+
 fn script(name: &str, args: &[&str]) -> (i32, String) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let out = Command::new("bash").arg(root.join("scripts").join(name)).args(args).current_dir(root).env_remove("GIT_DIR").env_remove("GIT_WORK_TREE").output().expect("bash runs");
@@ -132,12 +135,11 @@ fn build_035_land_sh_checks_the_benchmark_feature() {
 /// `gh release list` names the tags in `releases`, and `gh release download <tag>` has an asset only for the tags named
 /// in `assets` (a line `tag system`).
 fn bench_fakes(name: &str) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
     let dir = std::env::temp_dir().join(format!("shale-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let bin = dir.join("fake-shale");
-    std::fs::write(
+    test_exec::write_script(
         &bin,
         r##"#!/bin/sh
 echo "$*" >> "$(dirname "$0")/calls.log"
@@ -151,10 +153,9 @@ case "$1" in
     exit "$(cat "$(dirname "$0")/compare-exit")" ;;
 esac
 "##,
-    )
-    .unwrap();
+    );
     let gh = dir.join("fake-gh");
-    std::fs::write(
+    test_exec::write_script(
         &gh,
         r##"#!/bin/sh
 d=$(dirname "$0")
@@ -170,11 +171,10 @@ case "$1 $2" in
     echo '{"schema":2,"describe":"'"$tag"'"}' > "$o/shale-bench-${tag#v}-${sys}" ;;
 esac
 "##,
-    )
-    .unwrap();
+    );
     // scripts/bench.sh: writes an svg for each `=id` of --filter into --flame-dir, none when `no-perf` exists
     let flames = dir.join("fake-flames");
-    std::fs::write(
+    test_exec::write_script(
         &flames,
         r##"#!/bin/sh
 d=$(dirname "$0")
@@ -184,11 +184,7 @@ while [ $# -gt 0 ]; do [ "$1" = --filter ] && f=$2; [ "$1" = --flame-dir ] && o=
 mkdir -p "$o"
 for id in $(echo "$f" | tr ',' ' '); do echo "<svg/>" > "$o/${id#=}.svg"; done
 "##,
-    )
-    .unwrap();
-    for f in [&bin, &gh, &flames] {
-        std::fs::set_permissions(f, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
+    );
     dir
 }
 

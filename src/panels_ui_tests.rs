@@ -632,15 +632,17 @@ fn edit_044_the_vim_tab_follows_editor_indented_and_holds_the_vim_settings() {
 }
 
 /// The labels of Settings until one starts with `text` (a background job answers after a moment).
+/// The wait ends by the clock, not by a count of frames: on a loaded machine a frame takes long.
 fn labels_until(p: &mut P, text: &str) -> Vec<String> {
-    for _ in 0..300 {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
         let shown = shown_labels(p);
         if shown.iter().any(|s| s.starts_with(text)) {
             return shown;
         }
+        assert!(std::time::Instant::now() < deadline, "no label starting with {text:?} after 60 s in {shown:?}");
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    panic!("no label starting with {text:?} in {:?}", shown_labels(p));
 }
 
 // spec: IMP-036

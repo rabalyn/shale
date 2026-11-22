@@ -4,9 +4,11 @@
 #![cfg(unix)]
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+
+#[path = "../src/test_exec.rs"]
+mod test_exec;
 
 const ROOT: &str = env!("CARGO_MANIFEST_DIR");
 const SUM_A: &str = "74abed4af9864825232e87943894d05b79da4d89e883b59e8d56fd0454cd8cb3";
@@ -153,8 +155,7 @@ impl Env {
     }
     fn fake(&self, name: &str, body: &str) {
         let p = self.base.join("tools").join(name);
-        fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
-        fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+        test_exec::write_script(&p, &format!("#!/bin/sh\n{body}\n"));
     }
     /// A `gh` that logs its arguments and writes the checksum file for `-p` into the `-D` folder
     /// when `sum` is given, and fails (no such release) otherwise.

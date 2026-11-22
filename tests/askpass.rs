@@ -13,6 +13,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+#[path = "../src/test_exec.rs"]
+mod test_exec;
+
 struct Setup {
     root: PathBuf,
     path: std::ffi::OsString,
@@ -24,7 +27,8 @@ impl Setup {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("bin")).unwrap();
         std::fs::create_dir_all(root.join("secrets")).unwrap();
-        std::fs::copy(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/askpass/secret-tool"), root.join("bin/secret-tool")).unwrap();
+        let fake = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/askpass/secret-tool")).unwrap();
+        test_exec::write_script(&root.join("bin/secret-tool"), &fake);
         let rest = std::env::var_os("PATH").unwrap_or_default();
         let path = std::env::join_paths(std::iter::once(root.join("bin")).chain(std::env::split_paths(&rest))).unwrap();
         Setup { root, path }
