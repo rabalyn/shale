@@ -372,8 +372,8 @@ impl MailView {
         let r = ui.add(
             egui::TextEdit::singleline(&mut self.query)
                 .id(id)
-                .hint_text(format!("Search mail  (from:  to:  subject:  \"phrase\"){}", self.kbd.hints.get(&KeyAction::MailSearch).map(|k| format!("  ·  {k}")).unwrap_or_default()))
-                .desired_width(300.0),
+                .hint_text(format!("Search (from: to: cc: subject: body: \"phrase\" x*){}", self.kbd.hints.get(&KeyAction::MailSearch).map(|k| format!("  ·  {k}")).unwrap_or_default()))
+                .desired_width(340.0),
         );
         rec(rects, "mail:search", &r);
         if r.changed() {

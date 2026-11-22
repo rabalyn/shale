@@ -2,8 +2,8 @@
 //! (list a folder, search). The index is a cache of the `.eml` files and the server state:
 //! `mail/store.rs` can rebuild it from the files at any time.
 //!
-//! Search text from the user never reaches the FTS5 query language raw: [`fts_query`] turns it
-//! into quoted phrases, so `"`, `*`, `NEAR`, `-` or `:` in what someone types is only text.
+//! Search text from the user never reaches the FTS5 query language raw: [`fts_query_wild`] turns
+//! it into quoted phrases, so `"`, `NEAR`, `-` or `:` in what someone types is only text.
 
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use std::collections::{HashMap, HashSet};
@@ -762,19 +762,11 @@ pub fn list(c: &Connection, folder: i64, limit: usize, offset: usize) -> Result<
     Ok(rows)
 }
 
-/// Search (see [`fts_query`] for what is understood), newest first. `folder` limits it to one folder.
+/// Search (see [`fts_query_wild`] for what is understood: words are word starts, `*` and `?` are
+/// wildcards, NAV-023), newest first. `folder` limits it to one folder. The mail view and the
+/// search over everything (NAV-022) both ask this.
 pub fn search(c: &Connection, query: &str, folder: Option<i64>, limit: usize, offset: usize) -> Result<Vec<MessageSummary>> {
-    let Some(q) = fts_query(query) else { return Ok(vec![]) };
-    search_fts(c, &q, folder, limit, offset)
-}
-
-/// [`search`] with wildcards (NAV-023): see [`fts_query_wild`]. Over all folders.
-pub fn search_wild(c: &Connection, query: &str, limit: usize) -> Result<Vec<MessageSummary>> {
     let Some(q) = fts_query_wild(query, &FIELDS) else { return Ok(vec![]) };
-    search_fts(c, &q, None, limit, 0)
-}
-
-fn search_fts(c: &Connection, q: &str, folder: Option<i64>, limit: usize, offset: usize) -> Result<Vec<MessageSummary>> {
     let mut st = c.prepare(&format!(
         "SELECT {MSG_COLS} FROM mail_fts JOIN messages m ON m.id = mail_fts.rowid JOIN folders f ON f.id = m.folder AND {VISIBLE}
          WHERE mail_fts MATCH ?1 AND (?2 IS NULL OR m.folder = ?2) ORDER BY m.date DESC, m.uid DESC LIMIT ?3 OFFSET ?4"
@@ -859,32 +851,19 @@ const MAX_TERMS: usize = 24;
 const MAX_QUERY_CHARS: usize = 512;
 
 /// Turn what a person typed into an FTS5 query that cannot be anything but text: plain words
-/// and "quoted phrases" become quoted phrases (all must match), and `from:`, `to:`, `cc:`,
-/// `subject:` and `body:` in front of a word or phrase limit it to that field. Everything else, including
-/// `*`, `-`, `NEAR`, `AND`, `OR`, `NOT`, `:` and brackets, is plain text for the tokenizer.
-/// None if there is nothing to search for.
-pub fn fts_query(input: &str) -> Option<String> {
-    fts_query_in(input, &FIELDS)
-}
-
-/// [`fts_query`] for another table: `fields` pairs each prefix a person may type with the FTS5
-/// column it limits a term to (the social post index uses it, SOC-032).
-pub fn fts_query_in(input: &str, fields: &[(&str, &str)]) -> Option<String> {
-    build_fts_query(input, fields, false)
-}
-
-/// [`fts_query_in`] for the unified search (NAV-023): every plain word (not a "phrase") is a
-/// prefix term, also after a field prefix (`meet` and `from:ann` become `"meet"*` and
-/// `from : "ann"*`), and `*` and `?` in it are wildcards as far as FTS5 can do them: the word is
-/// cut before the first wildcard and what is left of it is the prefix (`mee*`, `mee?ing` and
-/// `meeting*` all become prefix queries). FTS5 cannot match the end of a word or one letter, so
-/// `?` and an inner `*` give more than the pattern says, and a word that starts with a wildcard
-/// is left out. A "quoted phrase" stays exact.
+/// and "quoted phrases" become quoted phrases (all must match), and a field prefix in front of a
+/// word or phrase limits it to that field; `fields` pairs each prefix a person may type with the
+/// FTS5 column (the mail's [`FIELDS`], MAIL-012, or the post index's, SOC-031). `-`, `NEAR`,
+/// `AND`, `OR`, `NOT`, `:` and brackets are plain text for the tokenizer. None if there is
+/// nothing to search for.
+///
+/// Every plain word (not a "phrase") is a prefix term, also after a field prefix (`meet` and
+/// `from:ann` become `"meet"*` and `from : "ann"*`), and `*` and `?` in it are wildcards as far
+/// as FTS5 can do them (NAV-023): the word is cut before the first wildcard and what is left of
+/// it is the prefix (`mee*`, `mee?ing` and `meeting*` all become prefix queries). FTS5 cannot
+/// match the end of a word or one letter, so `?` and an inner `*` give more than the pattern
+/// says, and a word that starts with a wildcard is left out. A "quoted phrase" stays exact.
 pub fn fts_query_wild(input: &str, fields: &[(&str, &str)]) -> Option<String> {
-    build_fts_query(input, fields, true)
-}
-
-fn build_fts_query(input: &str, fields: &[(&str, &str)], wild: bool) -> Option<String> {
     let chars: Vec<char> = input.chars().take(MAX_QUERY_CHARS).collect();
     let mut terms: Vec<String> = Vec::new();
     let mut i = 0;
@@ -912,12 +891,10 @@ fn build_fts_query(input: &str, fields: &[(&str, &str)], wild: bool) -> Option<S
                 }
                 None => text = word,
             }
-            if wild {
-                if let Some(at) = text.find(['*', '?']) {
-                    text.truncate(at);
-                }
-                prefix = true;
+            if let Some(at) = text.find(['*', '?']) {
+                text.truncate(at);
             }
+            prefix = true;
         }
         if i < chars.len() && chars[i] == '"' && text.is_empty() {
             i += 1;
@@ -1153,11 +1130,12 @@ mod tests {
     // spec: MAIL-011
     #[test]
     fn the_query_builder_quotes_everything() {
-        assert_eq!(fts_query("hello world").unwrap(), "\"hello\" \"world\"");
-        assert_eq!(fts_query("\"a b\" c").unwrap(), "\"a b\" \"c\"");
+        let fts_query = |s: &str| fts_query_wild(s, &FIELDS);
+        assert_eq!(fts_query("hello world").unwrap(), "\"hello\"* \"world\"*");
+        assert_eq!(fts_query("\"a b\" c").unwrap(), "\"a b\" \"c\"*");
         assert_eq!(fts_query("from:\"Anna M\"").unwrap(), "from_addr : \"Anna M\"");
-        assert_eq!(fts_query("x\"y\"").unwrap(), "\"x\" \"y\"");
-        assert_eq!(fts_query("NEAR/2"), Some("\"NEAR/2\"".into()));
+        assert_eq!(fts_query("x\"y\"").unwrap(), "\"x\"* \"y\"");
+        assert_eq!(fts_query("NEAR/2"), Some("\"NEAR/2\"*".into()));
         assert_eq!(fts_query("   "), None);
         assert_eq!(fts_query("\" * - \""), None);
         let long = "word ".repeat(1000);
@@ -1277,13 +1255,12 @@ mod tests {
         assert_eq!(q("subject:inv*").as_deref(), Some("subject : \"inv\"*"), "a field prefix still works");
         assert_eq!(q("*ing"), None, "a word that starts with a wildcard is left out");
         assert_eq!(q("\"mee*\"").as_deref(), Some("\"mee*\""), "a phrase has no wildcards");
-        assert_eq!(fts_query("mee*").as_deref(), Some("\"mee*\""), "the plain mail search is as it was");
         let mut c = db();
         let f = inbox(&c);
         add(&mut c, f.id, 1, fields("Team meetings", "a@x.de", "agenda", 1));
         add(&mut c, f.id, 2, fields("Lunch", "a@x.de", "meet me", 2));
         add(&mut c, f.id, 3, fields("Other", "a@x.de", "nothing", 3));
-        let subjects = |s: &str| search_wild(&c, s, 10).unwrap().into_iter().map(|m| m.subject).collect::<Vec<_>>();
+        let subjects = |s: &str| search(&c, s, None, 10, 0).unwrap().into_iter().map(|m| m.subject).collect::<Vec<_>>();
         assert_eq!(subjects("mee*"), ["Lunch", "Team meetings"], "newest first");
         assert_eq!(subjects("meeti?g"), ["Team meetings"]);
         assert_eq!(subjects("meet"), ["Lunch", "Team meetings"], "a word is a prefix");
@@ -1291,7 +1268,9 @@ mod tests {
         assert_eq!(subjects("from:a@x subject:lun"), ["Lunch"], "a field word is a prefix");
         assert!(subjects("*ing").is_empty(), "a word that starts with a wildcard is dropped");
         assert!(subjects("*").is_empty());
-        assert_eq!(search_wild(&c, "mee*", 1).unwrap().len(), 1, "the limit holds");
+        assert_eq!(search(&c, "mee*", None, 1, 0).unwrap().len(), 1, "the limit holds");
+        assert_eq!(search(&c, "mee*", Some(f.id), 10, 0).unwrap().len(), 2, "the mail view's search of one folder (MAIL-060) takes them too");
+        assert!(search(&c, "mee*", Some(f.id + 1), 10, 0).unwrap().is_empty());
     }
 
     #[test]

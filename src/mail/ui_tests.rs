@@ -861,6 +861,7 @@ fn search_waits_for_a_pause_runs_in_a_job_and_the_keys_work_without_the_mouse() 
     w.sync_and_wait();
     w.until("the Inbox is open", |a| a.mail.total == 3);
     w.frame(vec![]);
+    assert!(w.shows("(from: to: cc: subject: body: \"phrase\" x*)"), "the hint names every field, the phrase and a wildcard (#490)");
     // `/` goes into the search field and the slash is not typed
     w.press(Key::Slash, Modifiers::NONE);
     assert!(w.ctx.memory(|m| m.has_focus(egui::Id::unique("mail-search"))), "/ focuses the search field");
@@ -878,6 +879,14 @@ fn search_waits_for_a_pause_runs_in_a_job_and_the_keys_work_without_the_mouse() 
     w.frame(vec![Event::Key { key: Key::A, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::COMMAND }]);
     w.type_text("from:dora \"projector later\"");
     w.until("the phrase search arrives", |a| a.mail.results.as_ref().is_some_and(|r| r.len() == 1));
+    assert_eq!(w.app.mail.results.as_ref().unwrap()[0].subject, "Lunch plans");
+    // a word is a word start and `*` / `?` are wildcards, as in the search over everything (NAV-023, #490)
+    w.frame(vec![Event::Key { key: Key::A, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::COMMAND }]);
+    w.type_text("invo");
+    w.until("the word-start search arrives", |a| a.mail.results.as_ref().is_some_and(|r| r.len() == 2));
+    w.frame(vec![Event::Key { key: Key::A, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::COMMAND }]);
+    w.type_text("from:do proj?ctor");
+    w.until("the wildcard search arrives", |a| a.mail.results.as_ref().is_some_and(|r| r.len() == 1));
     assert_eq!(w.app.mail.results.as_ref().unwrap()[0].subject, "Lunch plans");
     // this folder only
     w.click("mail:scope-folder");
