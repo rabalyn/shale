@@ -1231,6 +1231,74 @@ mod tests {
         assert_eq!(w.app.notes[Path::new("A.md")].text, "# A\n");
     }
 
+    /// A note with a hit that has markup in it: a task, bold, a wiki link with an alias and a tag.
+    fn with_rich_note(w: &mut W) {
+        w.app.vault.as_mut().unwrap().create_file(Path::new("Rich.md"), "- [ ] **zebra** with [[Some note|the alias]] and #idea\n").unwrap();
+        w.app.vault.as_mut().unwrap().rescan();
+    }
+
+    const RAW_HIT: &str = "- [ ] **zebra** with [[Some note|the alias]] and #idea";
+    const RENDERED_HIT: &str = "[ ] zebra with the alias and #idea";
+
+    // spec: NAV-056, NAV-057, NAV-058
+    #[test]
+    fn nav_056_the_picker_shows_a_note_hit_rendered_or_raw_as_the_editor_does_or_the_setting_says() {
+        let mut w = vim_note("hit-display-picker");
+        with_rich_note(&mut w);
+        w.app.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::Everything)));
+        settle(&mut w);
+        search_for(&mut w, "zebra");
+        assert_eq!(picker_rows(&w), [("Notes", RAW_HIT.to_string())], "the hit keeps the line as written (the click opens it)");
+        // the editor shows the markdown (no preview, edit view): raw
+        assert!(!w.app.search_rendered());
+        assert!(shows(&w, RAW_HIT), "{:?}", w.texts);
+        // the Markdown preview is on: rendered
+        w.app.cfg.live_preview = true;
+        settle(&mut w);
+        assert!(shows(&w, RENDERED_HIT), "{:?}", w.texts);
+        assert!(!shows(&w, RAW_HIT));
+        // the setting says raw / rendered whatever the editor does
+        w.app.cfg.search.hit_display = "raw".into();
+        settle(&mut w);
+        assert!(shows(&w, RAW_HIT), "{:?}", w.texts);
+        w.app.cfg.live_preview = false;
+        w.app.cfg.search.hit_display = "rendered".into();
+        settle(&mut w);
+        assert!(shows(&w, RENDERED_HIT), "{:?}", w.texts);
+        // follow the editor again: the reading view of the active note counts as rendered
+        w.app.cfg.search.hit_display = "follow".into();
+        settle(&mut w);
+        assert!(shows(&w, RAW_HIT));
+        w.app.tabbar.tabs[0].reading = true;
+        settle(&mut w);
+        assert!(w.app.search_rendered());
+        assert!(shows(&w, RENDERED_HIT), "{:?}", w.texts);
+        // a view that is not a note is not a reading view
+        w.app.tabbar.tabs[0].reading = false;
+        w.app.show_view(View::Calendar, false);
+        w.app.tabbar.tabs[w.app.tabbar.active].reading = true;
+        assert!(!w.app.search_rendered());
+    }
+
+    // spec: NAV-056, NAV-057, NAV-058
+    #[test]
+    fn nav_056_the_sidebar_shows_a_note_hit_rendered_or_raw_as_the_editor_does() {
+        let mut w = W::new("hit-display-sidebar");
+        with_rich_note(&mut w);
+        w.app.side.left = crate::app::LeftPanel::Search;
+        w.app.search.query = "zebra".into();
+        w.app.search.focus = true;
+        settle(&mut w);
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        settle(&mut w);
+        assert_eq!(sidebar_rows(&w), [("Notes", RAW_HIT.to_string())]);
+        assert!(shows(&w, RAW_HIT), "raw while the editor shows the markdown: {:?}", w.texts);
+        w.app.cfg.live_preview = true;
+        settle(&mut w);
+        assert!(shows(&w, RENDERED_HIT), "rendered while the preview is on: {:?}", w.texts);
+        assert!(!shows(&w, RAW_HIT));
+    }
+
     /// The groups and titles the sidebar search lists.
     fn sidebar_rows(w: &W) -> Vec<(&'static str, String)> {
         w.app.search.listed().iter().map(|h| (h.group, h.title.clone())).collect()

@@ -196,11 +196,64 @@ pub struct SearchConfig {
     /// The default selection: the sources a query without prefix looks in and lists, as words
     /// (`notes`, `mail`, `posts`); empty or unknown reads as all.
     pub sources: Vec<String>,
+    /// How a hit of a note is shown, as a word (`follow`, `raw`, `rendered`); an unknown word
+    /// reads as `follow` (NAV-058, CFG-068).
+    pub hit_display: String,
 }
 
 impl Default for SearchConfig {
     fn default() -> Self {
-        SearchConfig { prefix_notes: "f".into(), prefix_mail: "m".into(), prefix_posts: "s".into(), sources: Selection::ALL.ids() }
+        SearchConfig { prefix_notes: "f".into(), prefix_mail: "m".into(), prefix_posts: "s".into(), sources: Selection::ALL.ids(), hit_display: HitDisplay::Follow.id().into() }
+    }
+}
+
+/// How the lines of notes that the search found are shown (NAV-058).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum HitDisplay {
+    /// like the editor shows notes now ([`HitDisplay::rendered`])
+    #[default]
+    Follow,
+    /// the markdown as it is written
+    Raw,
+    /// drawn as the editor draws a line away from its cursor
+    Rendered,
+}
+
+impl HitDisplay {
+    pub const ALL: [HitDisplay; 3] = [HitDisplay::Follow, HitDisplay::Raw, HitDisplay::Rendered];
+
+    /// The word the settings file uses.
+    pub fn id(self) -> &'static str {
+        match self {
+            HitDisplay::Follow => "follow",
+            HitDisplay::Raw => "raw",
+            HitDisplay::Rendered => "rendered",
+        }
+    }
+
+    /// The name in Settings → Search.
+    pub fn label(self) -> &'static str {
+        match self {
+            HitDisplay::Follow => "Follow the editor",
+            HitDisplay::Raw => "Raw markdown",
+            HitDisplay::Rendered => "Rendered",
+        }
+    }
+
+    /// The setting for a word of the settings file (case ignored); an unknown one is the default.
+    pub fn from_id(id: &str) -> HitDisplay {
+        HitDisplay::ALL.into_iter().find(|d| d.id().eq_ignore_ascii_case(id.trim())).unwrap_or_default()
+    }
+
+    /// Is a line drawn rendered? `raw` and `rendered` say so; `follow` is the editor's: rendered
+    /// when the Markdown preview is on (`live_preview`, EDIT-016) or the note in view is in the
+    /// reading view (`reading`, Ctrl+E), raw otherwise (NAV-058).
+    pub fn rendered(self, live_preview: bool, reading: bool) -> bool {
+        match self {
+            HitDisplay::Follow => live_preview || reading,
+            HitDisplay::Raw => false,
+            HitDisplay::Rendered => true,
+        }
     }
 }
 
@@ -216,6 +269,10 @@ impl SearchConfig {
 
     pub fn set_selection(&mut self, sel: Selection) {
         self.sources = sel.ids();
+    }
+
+    pub fn display(&self) -> HitDisplay {
+        HitDisplay::from_id(&self.hit_display)
     }
 }
 

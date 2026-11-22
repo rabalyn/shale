@@ -405,8 +405,16 @@ fn paint_page_breaks(ui: &Ui, galley: &Galley, pos: Pos2, right: f32, raw_lines:
 /// code, strike, highlight, `<mark>` colours, links by their shown text) with the markup left out
 /// of the text altogether, not just hidden.
 pub fn outline_job(title: &str, links: &[(LinkSpan, bool)], base: f32) -> LayoutJob {
+    inline_job(title, links, base).0
+}
+
+/// [`outline_job`] and, for each of its sections, the bytes of `title` it was made from (the markup the
+/// preview hides is left out of both). One line drawn as the preview draws a line away from the
+/// cursor: the outline and the hits of the search show their text this way (NAV-056).
+pub fn inline_job(title: &str, links: &[(LinkSpan, bool)], base: f32) -> (LayoutJob, Vec<Range<usize>>) {
     let job = highlight_preview(title, links, &EditorFonts::uniform(base), &[], Some(1..1));
     let mut out = LayoutJob::default();
+    let mut sources = Vec::new();
     for s in &job.sections {
         let hidden = s.format.color == Color32::TRANSPARENT && s.format.font_id.size <= 1.0;
         // a formula keeps its hidden TeX and the room for it, to be painted over (EDIT-048)
@@ -416,8 +424,9 @@ pub fn outline_job(title: &str, links: &[(LinkSpan, bool)], base: f32) -> Layout
         let start = out.text.len();
         out.text.push_str(&job.text[s.byte_range.start.0..s.byte_range.end.0]);
         out.sections.push(egui::text::LayoutSection { leading_space: s.leading_space, byte_range: egui::text::ByteIndex(start)..egui::text::ByteIndex(out.text.len()), format: s.format.clone() });
+        sources.push(s.byte_range.start.0..s.byte_range.end.0);
     }
-    out
+    (out, sources)
 }
 
 /// Where a cursor end at char `at` is after the link at chars `link` was rewritten to `new_len`

@@ -8,10 +8,12 @@ use crate::dialog::Dialog;
 use crate::keys::{Action as KeyAction, Keymap};
 use crate::markdown;
 use crate::search_all::{self, Ctx, Found, Query, Refreshed, Results};
+use crate::search_render::Look;
 use crate::search_sources::{self, Bar, Filter, SearchConfig, Selection};
 use crate::theme;
 use crate::vault::rel_to_string;
-use eframe::egui::{self, Context, FontId, RichText, Ui};
+use eframe::egui::{self, Color32, Context, FontId, RichText, Ui};
+use std::sync::Arc;
 
 /// How many hits are listed at most.
 const MAX_HITS: usize = 14;
@@ -24,6 +26,21 @@ pub struct Hit {
     pub title: String,
     pub detail: String,
     pub action: Action,
+    /// the found text: byte ranges of `title`, drawn marked (NAV-057)
+    pub marks: Vec<std::ops::Range<usize>>,
+    /// the title as a job, made when the hit is first drawn (NAV-056)
+    pub(crate) jobs: crate::search_render::Jobs,
+}
+
+impl Hit {
+    pub fn new(group: &'static str, title: String, detail: String, action: Action) -> Hit {
+        Hit { group, title, detail, action, marks: Vec::new(), jobs: Default::default() }
+    }
+
+    /// The same hit with the found text marked.
+    pub fn marked(self, marks: Vec<std::ops::Range<usize>>) -> Hit {
+        Hit { marks, ..self }
+    }
 }
 
 /// Where the hits come from.
@@ -69,7 +86,7 @@ impl Source {
                         let name = f.display_name();
                         let score = markdown::fuzzy_score(query.trim(), &name)?;
                         let detail = f.rel.parent().map(rel_to_string).unwrap_or_default();
-                        Some((score, Hit { group: "", title: name, detail, action: Action::Open { rel: f.rel.clone(), new_tab: false } }))
+                        Some((score, Hit::new("", name, detail, Action::Open { rel: f.rel.clone(), new_tab: false })))
                     })
                     .collect();
                 found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.title.cmp(&b.1.title)));
@@ -206,8 +223,9 @@ struct Frame<'a> {
 
 /// Draw the window: the field, the key hint and the source buttons are its header (NAV-049, they
 /// stay in view), the list scrolls below them. The list is made in the header, so that the
-/// counts of its buttons are those of the list below.
-pub fn show(ctx: &Context, p: &mut Picker, data: &Ctx, keymap: &Keymap, cfg: &mut SearchConfig) -> Outcome {
+/// counts of its buttons are those of the list below. `rendered`: the lines of notes are drawn
+/// rendered, not raw (NAV-056, NAV-058).
+pub fn show(ctx: &Context, p: &mut Picker, data: &Ctx, keymap: &Keymap, cfg: &mut SearchConfig, rendered: bool) -> Outcome {
     let mut out = Outcome { pick: None, close: false, save: false };
     let mut frame = Frame { p, keys: ListKeys { down: false, up: false, enter: false, esc: false }, save: false };
     let title = frame.p.source.title();
@@ -264,8 +282,13 @@ pub fn show(ctx: &Context, p: &mut Picker, data: &Ctx, keymap: &Keymap, cfg: &mu
                         ui.label(RichText::new(text).color(theme::palette().muted).size(12.0));
                     }
                 }
-                let label = if h.detail.is_empty() { h.title.clone() } else { format!("{}    {}", h.title, h.detail) };
-                let resp = ui.selectable_label(i == p.sel, label);
+                // the title as a job (made once per hit, NAV-056), then the detail
+                let size = ui.style().text_styles[&egui::TextStyle::Body].size;
+                let mut job = Arc::unwrap_or_clone(h.job(Look { rendered, size, raw_colour: Color32::PLACEHOLDER }));
+                if !h.detail.is_empty() {
+                    job.append(&format!("    {}", h.detail), 0.0, egui::TextFormat { font_id: FontId::proportional(size), color: theme::palette().muted, ..Default::default() });
+                }
+                let resp = ui.selectable_label(i == p.sel, job);
                 if i == p.sel && (keys.down || keys.up) {
                     resp.scroll_to_me(None);
                 }

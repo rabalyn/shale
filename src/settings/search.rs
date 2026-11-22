@@ -1,8 +1,9 @@
-//! The Search tab (CFG-067): the sources a search looks in by default and the letters of the
-//! prefixes that name one source in the query (`f:`, `m:`, `s:`, NAV-050…NAV-054).
+//! The Search tab (CFG-067, CFG-068): the sources a search looks in by default, how the hits of notes
+//! are drawn and the letters of the prefixes that name one source in the query (`f:`, `m:`, `s:`,
+//! NAV-050…NAV-054).
 
 use crate::app::ShaleApp;
-use crate::search_sources::{check_prefixes, Kind};
+use crate::search_sources::{check_prefixes, HitDisplay, Kind};
 use eframe::egui::{self, Id, Ui};
 
 impl ShaleApp {
@@ -21,6 +22,15 @@ impl ShaleApp {
                     self.cfg.search.set_selection(sel);
                     changed = true;
                 }
+            }
+        }
+        crate::theme::section(ui, "Hits of notes");
+        crate::theme::hint(ui, "How the lines of notes that a search found are drawn: rendered like the editor draws a line (bold, links by their text, tags, task boxes), as the markdown is written, or like the editor shows notes now (rendered when the Markdown preview is on or the note in view is in the reading view). The found text is marked in all of them.");
+        let shown = self.cfg.search.display();
+        for display in HitDisplay::ALL {
+            if ui.radio(shown == display, display.label()).clicked() && shown != display {
+                self.cfg.search.hit_display = display.id().into();
+                changed = true;
             }
         }
         crate::theme::section(ui, "Prefixes");
