@@ -9,7 +9,9 @@
 //!
 //! Only media kinds ([`super::media_kind`]) are outside links, and only to show: the paths found
 //! here go to the players, the picture loader and `opener`, never to code that writes files
-//! (VAULT-018). Everything in this file but [`resolve`] is pure.
+//! (VAULT-018). Everything in this file is pure but [`resolve`], which asks the disk and is for jobs
+//! (exports, copy-in, the vault check), and [`look`], which frames use: the disk is asked on a
+//! worker and the answer is kept (MEDIA-024).
 
 use super::{file_uri_path, media_kind, Kind};
 use serde::{Deserialize, Serialize};
@@ -91,6 +93,7 @@ pub enum Outside {
     Found { abs: PathBuf, kind: Kind },
     /// The path is clear but nothing is there (a moved disk, a deleted file).
     Missing { abs: PathBuf },
+
     /// A library link whose library this device has not set up.
     NoLibrary(String),
     /// A library link whose path leaves the library folder (`..`, a drive, an absolute path).
@@ -123,22 +126,62 @@ fn inside(library: &Path, rest: &str) -> Option<PathBuf> {
     Some(abs)
 }
 
-/// Look an outside link up on this device. Library names match in any case; a library with an
-/// empty folder is not set up.
-pub fn resolve(spot: &Spot, libraries: &[Library]) -> Outside {
+/// What a link names on this device before the disk is asked: the file and its kind, or what is
+/// wrong already (a library that is not set up, a path that leaves it, a file of no media kind).
+/// Library names match in any case; a library with an empty folder is not set up.
+fn target(spot: &Spot, libraries: &[Library]) -> Result<(PathBuf, Kind), Outside> {
     let abs = match spot {
         Spot::File(path) => path.clone(),
         Spot::Library { name, rest } => {
-            let Some(lib) = libraries.iter().find(|l| l.name.eq_ignore_ascii_case(name) && !l.path.as_os_str().is_empty()) else { return Outside::NoLibrary(name.clone()) };
-            match inside(&lib.path, rest) {
-                Some(abs) => abs,
-                None => return Outside::LeavesLibrary { name: name.clone() },
-            }
+            let Some(lib) = libraries.iter().find(|l| l.name.eq_ignore_ascii_case(name) && !l.path.as_os_str().is_empty()) else { return Err(Outside::NoLibrary(name.clone())) };
+            inside(&lib.path, rest).ok_or_else(|| Outside::LeavesLibrary { name: name.clone() })?
         }
     };
     match media_kind(&abs) {
-        Some(kind) if abs.is_file() => Outside::Found { abs, kind },
-        _ => Outside::Missing { abs },
+        Some(kind) => Ok((abs, kind)),
+        None => Err(Outside::Missing { abs }),
+    }
+}
+
+/// Look an outside link up on this device, asking the disk now: for jobs and tests. A frame must
+/// not call this (a slow drive would freeze the window): it calls [`look`].
+pub fn resolve(spot: &Spot, libraries: &[Library]) -> Outside {
+    match target(spot, libraries) {
+        Ok((abs, kind)) if abs.is_file() => Outside::Found { abs, kind },
+        Ok((abs, _)) => Outside::Missing { abs },
+        Err(outside) => outside,
+    }
+}
+
+/// What a frame knows about an outside link (MEDIA-024).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Seen {
+    /// The path is clear and a worker is looking whether the file is there: the frame shows a quiet
+    /// "loading" state of a stable size and the answer comes in a moment.
+    Checking {
+        abs: PathBuf,
+        kind: Kind,
+    },
+    Is(Outside),
+}
+
+/// Look an outside link up for a frame (MEDIA-024): the answer of the last check of the file, which
+/// a worker makes and repeats every few seconds, or `Checking` while the first one is on its way.
+/// Never waits for the disk.
+pub fn look(ctx: &eframe::egui::Context, spot: &Spot, libraries: &[Library]) -> Seen {
+    match target(spot, libraries) {
+        Ok((abs, kind)) => looked(ctx, abs, kind),
+        Err(outside) => Seen::Is(outside),
+    }
+}
+
+/// The answer of [`look`] for a file whose path and kind are known already (the link preview asks
+/// again in later frames for a file that was `Checking`).
+pub fn looked(ctx: &eframe::egui::Context, abs: PathBuf, kind: Kind) -> Seen {
+    match super::look::Looks::of(ctx).facts(ctx, &abs) {
+        super::look::Look::Checking => Seen::Checking { abs, kind },
+        super::look::Look::Known(Some(f)) if f.is_file => Seen::Is(Outside::Found { abs, kind }),
+        super::look::Look::Known(_) => Seen::Is(Outside::Missing { abs }),
     }
 }
 

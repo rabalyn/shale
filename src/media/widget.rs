@@ -150,7 +150,7 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
         }
     }
     if download_link.is_some_and(|l| l.clicked()) {
-        media.download(abs);
+        media.download(&ctx, abs);
         ctx.request_repaint();
     }
 
@@ -265,7 +265,7 @@ fn paint_download_link(ui: &Ui, painter: &Painter, at: Pos2, right: f32, id: Id)
 /// A picture that is still an LFS pointer: "Not downloaded (12 MB) — Download", or the spinner
 /// while it comes (SYNC-020). None when the file is real, so the caller shows it as it does.
 pub fn show_not_downloaded(ui: &mut Ui, media: &MediaPlayer, abs: &Path) -> Option<Response> {
-    let n = media.notice(abs)?;
+    let n = media.notice(ui.ctx(), abs)?;
     let name = abs.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let failed = n.error.is_some();
     let mut clicked = false;
@@ -280,12 +280,18 @@ pub fn show_not_downloaded(ui: &mut Ui, media: &MediaPlayer, abs: &Path) -> Opti
         })
         .response;
     if clicked {
-        media.download(abs);
+        media.download(ui.ctx(), abs);
     }
     if n.running {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
     }
     Some(r)
+}
+
+/// What stands in place of an embed while its file is looked up or its picture decoded on a worker
+/// (MEDIA-024): quiet, one line, cut to the width it has. The file's name is the text.
+pub fn show_loading(ui: &mut Ui, name: &str) -> Response {
+    ui.add(egui::Label::new(egui::RichText::new(format!("Loading {name}…")).color(theme::palette().muted)).truncate())
 }
 
 /// What stands in place of an outside file that cannot be shown (MEDIA-016): where it should be, or

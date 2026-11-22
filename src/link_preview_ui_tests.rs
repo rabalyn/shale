@@ -47,6 +47,17 @@ impl W {
         self.hl.frames(&mut self.app, 4);
     }
 
+    /// Frames until the files the window looks up in the background (MEDIA-024) are answered and drawn.
+    fn looked(&mut self) {
+        let looks = crate::media::look::Looks::of(self.hl.ctx());
+        let mut idle = 0;
+        while idle < 3 {
+            self.hl.frames(&mut self.app, 1);
+            idle = if looks.busy() { 0 } else { idle + 1 };
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
     fn ed(&self) -> &NoteEditor {
         &self.app.tabbar.tabs[self.app.tabbar.active].editor
     }
@@ -73,6 +84,7 @@ impl W {
 
     fn shift_k(&mut self) {
         self.key(Key::K, Modifiers::SHIFT, "K");
+        self.looked();
     }
 
     /// Put the text box's cursor (as a click would) on the first character of `word`, in the way of a click.
@@ -455,4 +467,33 @@ fn edit_037_a_corner_and_an_edge_resize_the_preview_and_the_size_is_kept() {
     w.shift_k();
     assert_eq!(w.open().unwrap().size, egui::vec2(650.0, 520.0), "a new preview uses the setting");
     assert_eq!((w.ed().vim.cursor, w.text()), (cursor, text));
+}
+
+// spec: MEDIA-024, MEDIA-016
+#[test]
+fn media_024_the_preview_of_an_outside_link_says_loading_while_the_drive_does_not_answer_and_then_shows_the_picture() {
+    use crate::media::outside::{Library, Outside};
+    let lib = std::env::temp_dir().join(format!("shale-outside-held-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&lib);
+    std::fs::create_dir_all(&lib).unwrap();
+    image::RgbaImage::from_pixel(40, 30, image::Rgba([200, 30, 30, 255])).save(lib.join("a.png")).unwrap();
+    let mut w = W::new("outside-held", "[[@Media/a.png]]\n");
+    w.app.cfg.media_libraries = vec![Library { name: "Media".into(), path: lib.clone() }];
+    w.settle();
+    let gate = std::sync::Arc::new(crate::media::look::tests::Gate::default());
+    let g = gate.clone();
+    crate::media::look::Looks::of(w.hl.ctx()).use_stat(move |p| {
+        g.pass();
+        crate::media::look::Facts::of(p)
+    });
+    w.cursor_at("a.png");
+    w.key(Key::K, Modifiers::SHIFT, "K");
+    w.hl.frames(&mut w.app, 4);
+    assert!(matches!(w.open().map(|o| &o.content), Some(Content::Checking { abs, .. }) if *abs == lib.join("a.png")), "the preview is open, the file is being looked at");
+    assert!(w.painted("Loading a.png…"), "a quiet loading state");
+    gate.open();
+    w.looked();
+    assert!(matches!(w.open().map(|o| &o.content), Some(Content::Outside(Outside::Found { abs, .. })) if *abs == lib.join("a.png")));
+    assert!(!w.painted("Loading a.png…"));
+    let _ = std::fs::remove_dir_all(&lib);
 }

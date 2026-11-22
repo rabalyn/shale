@@ -175,7 +175,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   MEDIA-021). **Settings → Vault → Check names for Windows and macOS…** also lists the vault's outside
   links by note (a file that is not found, a library not set up on this computer or whose folder is not
   there, file links that work on this computer only; MEDIA-022), and **Data usage** counts the outside
-  files the vault links and their size (USE-026), both in background jobs. The Import tab of Settings is
+  files the vault links and their size (USE-026), both in background jobs. The window never waits for
+  the disk of a shown picture or media file: whether a file is there, its date and its decoding are looked
+  up in the background and asked again every few seconds, and an embed says "Loading …" until the answer
+  is there, so a NAS or USB disk that does not answer freezes nothing (MEDIA-024). The Import tab of Settings is
   shown under "Importing e-mails, events and files".
 
 ![Reading view](userguide/z_media/screenshots/reading.png)

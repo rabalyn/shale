@@ -4,15 +4,12 @@
 //! be. The players and pictures ask this state about a file: if it is a pointer, they say "Not
 //! downloaded (12 MB)" with a Download link instead of failing to decode it. A request made here
 //! is taken by the app, which runs `git lfs pull` in a background job (`app/sync.rs`) and reports
-//! back; a play button that asked for it starts the sound when the file has arrived.
+//! back; a play button that asked for it starts the sound when the file has arrived. Whether a file
+//! is a pointer comes from the look-up of the file (`look::Facts::pointer`, made on a worker,
+//! MEDIA-024): nothing here touches the file system.
 
-use crate::gitsync::lfs;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
-
-/// How many files' answers are kept.
-const KEPT: usize = 256;
 
 /// What the person sees about a file that is not downloaded.
 #[derive(Clone, Debug, PartialEq)]
@@ -61,42 +58,24 @@ struct Job {
 /// The pointer files the views have met, and their downloads.
 #[derive(Default)]
 pub struct Downloads {
-    /// The size a pointer announces (None: the file is real), per file version.
-    seen: HashMap<(PathBuf, Option<SystemTime>), Option<u64>>,
     jobs: HashMap<PathBuf, Job>,
     /// Asked for, not yet taken by the app.
     requests: Vec<PathBuf>,
 }
 
 impl Downloads {
-    /// The size of the real file when `abs` holds a pointer; None for a real file or none at all.
-    fn pointer_size(&mut self, abs: &Path) -> Option<u64> {
-        let meta = std::fs::metadata(abs).ok()?;
-        if !meta.is_file() || meta.len() > 1024 {
-            return None; // a pointer is a few lines; nothing to read for a real media file
-        }
-        let key = (abs.to_path_buf(), meta.modified().ok());
-        if let Some(known) = self.seen.get(&key) {
-            return *known;
-        }
-        if self.seen.len() >= KEPT {
-            self.seen.clear();
-        }
-        let size = crate::fsutil::read(abs).ok().and_then(|b| lfs::parse_pointer(&b)).map(|p| p.size);
-        self.seen.insert(key, size);
-        size
-    }
-
-    /// What to say about `abs`: None when it is a real file.
-    pub fn notice(&mut self, abs: &Path) -> Option<Notice> {
-        let size = self.pointer_size(abs)?;
+    /// What to say about `abs`: None when it is a real file. `pointer` is the size of the real file
+    /// when `abs` holds a pointer (`look::Facts::pointer`).
+    pub fn notice(&self, abs: &Path, pointer: Option<u64>) -> Option<Notice> {
+        let size = pointer?;
         let job = self.jobs.get(abs);
         Some(Notice { size, running: job.is_some_and(|j| j.running), error: job.and_then(|j| j.error.clone()) })
     }
 
     /// Ask for the file: the app starts the download. `play_for`: the note whose play button asked.
-    pub fn request(&mut self, abs: &Path, play_for: Option<&Path>) {
-        if self.pointer_size(abs).is_none() {
+    /// `pointer` as for `notice`: a real file is never requested.
+    pub fn request(&mut self, abs: &Path, play_for: Option<&Path>, pointer: Option<u64>) {
+        if pointer.is_none() {
             return;
         }
         let job = self.jobs.entry(abs.to_path_buf()).or_default();
@@ -117,7 +96,6 @@ impl Downloads {
 
     /// A download ended. Returns the note whose play button asked, when the file is here now.
     pub fn finish(&mut self, abs: &Path, result: Result<(), String>) -> Option<PathBuf> {
-        self.seen.retain(|(p, _), _| p != abs);
         let job = self.jobs.get_mut(abs)?;
         job.running = false;
         match result {
@@ -138,7 +116,12 @@ impl Downloads {
 mod tests {
     use super::*;
 
-    fn pointer(size: u64) -> String {
+    /// What the look-up of the file says about it (made here on the spot: a worker does it in the app).
+    fn pointer(path: &Path) -> Option<u64> {
+        crate::media::look::Facts::of(path).and_then(|f| f.pointer)
+    }
+
+    fn pointer_text(size: u64) -> String {
         format!("version https://git-lfs.github.com/spec/v1\noid sha256:{}\nsize {size}\n", "a".repeat(64))
     }
 
@@ -157,16 +140,16 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("shale-media-pointer-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let (song, real, gone) = (dir.join("Song.mp3"), dir.join("Real.mp3"), dir.join("Gone.mp3"));
-        std::fs::write(&song, pointer(12_345_678)).unwrap();
+        std::fs::write(&song, pointer_text(12_345_678)).unwrap();
         std::fs::write(&real, vec![7u8; 4000]).unwrap();
-        let mut d = Downloads::default();
-        let n = d.notice(&song).expect("a pointer");
+        let d = Downloads::default();
+        let n = d.notice(&song, pointer(&song)).expect("a pointer");
         assert_eq!((n.size, n.running, n.line()), (12_345_678, false, "Not downloaded (12 MB)".to_string()));
-        assert_eq!(d.notice(&real), None);
-        assert_eq!(d.notice(&gone), None);
+        assert_eq!(d.notice(&real, pointer(&real)), None);
+        assert_eq!(d.notice(&gone, pointer(&gone)), None);
         // a small file that is no pointer is none either
         std::fs::write(&real, "ID3 and a few bytes").unwrap();
-        assert_eq!(Downloads::default().notice(&real), None);
+        assert_eq!(Downloads::default().notice(&real, pointer(&real)), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -176,26 +159,26 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("shale-media-request-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let song = dir.join("Song.mp3");
-        std::fs::write(&song, pointer(10)).unwrap();
+        std::fs::write(&song, pointer_text(10)).unwrap();
         let mut d = Downloads::default();
-        d.request(&song, Some(Path::new("Note.md")));
-        d.request(&song, None);
+        d.request(&song, Some(Path::new("Note.md")), pointer(&song));
+        d.request(&song, None, pointer(&song));
         assert_eq!(d.take_requests(), vec![song.clone()], "asked twice, one download");
         assert!(d.take_requests().is_empty());
-        assert!(d.notice(&song).unwrap().running);
+        assert!(d.notice(&song, pointer(&song)).unwrap().running);
         // it failed: the words are shown, nothing plays, and "Download" asks again
         assert_eq!(d.finish(&song, Err("no network".into())), None);
-        let n = d.notice(&song).unwrap();
+        let n = d.notice(&song, pointer(&song)).unwrap();
         assert!(!n.running && n.line().contains("no network"), "{n:?}");
-        d.request(&song, Some(Path::new("Note.md")));
+        d.request(&song, Some(Path::new("Note.md")), pointer(&song));
         assert_eq!(d.take_requests().len(), 1);
-        assert!(d.notice(&song).unwrap().error.is_none());
+        assert!(d.notice(&song, pointer(&song)).unwrap().error.is_none());
         // the file arrived
         std::fs::write(&song, vec![1u8; 2000]).unwrap();
         assert_eq!(d.finish(&song, Ok(())), Some(PathBuf::from("Note.md")));
-        assert_eq!(d.notice(&song), None);
+        assert_eq!(d.notice(&song, pointer(&song)), None);
         // a real file is never requested
-        d.request(&song, None);
+        d.request(&song, None, pointer(&song));
         assert!(d.take_requests().is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }

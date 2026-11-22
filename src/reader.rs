@@ -683,16 +683,23 @@ pub(crate) fn embed_is_in_a_line(text: &str, range: &Range<usize>) -> bool {
 }
 
 /// The picture embeds of `text` that stand inside a line and can be shown there, by their target:
-/// a picture of the vault (EDIT-114, PDF-030). `load` is given its file and says its size in pixels
-/// and its texture; one it cannot read is left out and stays its link text. A picture outside the
-/// vault counts (MEDIA-016).
-pub(crate) fn pictures_in_lines(text: &str, links: &[(LinkSpan, bool)], vault: &Vault, rel: &Path, mut load: impl FnMut(&Path) -> Option<(Vec2, Option<egui::TextureId>)>) -> HashMap<String, InlinePicture> {
+/// a picture of the vault (EDIT-114, PDF-030). `resolve` finds the file of a link (a frame looks it
+/// up in the background, MEDIA-024; an export asks the disk). `load` is given its file and says its
+/// size in pixels and its texture; one it cannot read (or cannot yet) is left out and stays its link
+/// text. A picture outside the vault counts (MEDIA-016).
+pub(crate) fn pictures_in_lines(
+    text: &str,
+    links: &[(LinkSpan, bool)],
+    vault: &Vault,
+    resolve: impl Fn(&str) -> crate::vault::Shown,
+    mut load: impl FnMut(&Path) -> Option<(Vec2, Option<egui::TextureId>)>,
+) -> HashMap<String, InlinePicture> {
     let mut out = HashMap::new();
     for (l, _) in links.iter().filter(|(l, ok)| l.embed && *ok) {
         if out.contains_key(&l.target) || !embed_is_in_a_line(text, &l.range) {
             continue;
         }
-        let Some(path) = vault.resolve_media(&l.target, Some(rel)).file(vault).filter(|(f, _)| crate::media::is_image(f)).map(|(_, abs)| abs) else { continue };
+        let Some(path) = resolve(&l.target).file(vault).filter(|(f, _)| crate::media::is_image(f)).map(|(_, abs)| abs) else { continue };
         if let Some((size, texture)) = load(&path) {
             out.insert(l.target.clone(), InlinePicture { path, size, texture });
         }
@@ -767,7 +774,7 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
             (l, ok)
         })
         .collect();
-    let pictures = pictures_in_lines(text, &all_links, vault, rel, |abs| crate::media::texture(ui.ctx(), abs).map(|t| (t.size_vec2(), Some(t.id()))));
+    let pictures = pictures_in_lines(text, &all_links, vault, |t| vault.look_media(ui.ctx(), t, Some(rel)), |abs| crate::media::texture(ui.ctx(), abs).map(|t| (t.size_vec2(), Some(t.id()))));
     let _pictures = InlinePictures::set(pictures, ui.available_width());
     let fenced = markdown::fenced_code_lines(text);
     let lines = markdown::lines_with_offsets(text);
@@ -908,7 +915,7 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
             if line_links.len() == 1 && line_links[0].0.embed && trimmed.len() == line_links[0].0.range.len() {
                 let (l, ok) = &line_links[0];
                 if *ok {
-                    let shown = vault.resolve_media(&l.target, Some(rel));
+                    let shown = vault.look_media(ui.ctx(), &l.target, Some(rel));
                     let outside = matches!(shown, crate::vault::Shown::Outside(_));
                     if let Some((target, abs)) = shown.file(vault) {
                         if crate::media::is_media(&target) {
@@ -927,6 +934,12 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
                     // a library that is not set up, a file that is not there (MEDIA-016)
                     if let Some(text) = shown.notice() {
                         embed_notice(ui, &text);
+                        i += 1;
+                        break 'line;
+                    }
+                    // the first look at the file is on its way (MEDIA-024)
+                    if let Some(abs) = shown.checking() {
+                        embed_loading(ui, abs);
                         i += 1;
                         break 'line;
                     }
@@ -1170,6 +1183,16 @@ fn embed_notice(ui: &mut Ui, text: &str) {
     ui.add_space(6.0);
 }
 
+/// The quiet strip of an embed whose file is looked up or whose picture is decoded on a worker (MEDIA-024);
+/// as high as the strip of an outside file that is not found, so the page hardly moves.
+fn embed_loading(ui: &mut Ui, abs: &Path) {
+    egui::Frame::new().fill(theme::palette().bg_secondary).stroke(Stroke::new(1.0, theme::palette().border)).corner_radius(CornerRadius::same(8)).inner_margin(8).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        crate::media::widget::show_loading(ui, &abs.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+    });
+    ui.add_space(6.0);
+}
+
 /// `width` is what the link asks for (`![[pic.png|300]]`, EDIT-052); `text` is the text size and
 /// whether drawings get a dark canvas.
 /// `file` is the file's path (in the vault, or the absolute path of an outside file), where it is, and for an
@@ -1257,18 +1280,21 @@ fn embed(ui: &mut Ui, vault: &Vault, (target, abs, outside): (&Path, &Path, Opti
                     ui.add_space(6.0);
                     return;
                 }
-                let shown = match width {
-                    Some(asked) => crate::media::image_widget(ui.ctx(), abs, asked.min(w), f32::INFINITY),
-                    None => crate::media::image_widget(ui.ctx(), abs, w, 520.0),
-                };
-                match shown {
-                    Some(img) => {
+                match crate::media::picture(ui.ctx(), abs) {
+                    crate::media::look::Pic::Ready(tex) => {
+                        let img = match width {
+                            Some(asked) => crate::media::fitted(&tex, asked.min(w), f32::INFINITY),
+                            None => crate::media::fitted(&tex, w, 520.0),
+                        };
                         let resp = ui.add(img.corner_radius(CornerRadius::same(4)).sense(Sense::click()));
                         if resp.on_hover_text("Open with your image viewer").clicked() {
                             *out = Some(open());
                         }
                     }
-                    None => {
+                    crate::media::look::Pic::Loading => {
+                        crate::media::widget::show_loading(ui, &name);
+                    }
+                    crate::media::look::Pic::Broken => {
                         ui.label(egui::RichText::new("This picture can't be shown (unsupported or damaged file).").color(theme::palette().muted));
                     }
                 }

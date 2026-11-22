@@ -29,7 +29,7 @@ impl Frame {
 
 /// The reading view of `text` in a 700 x 500 window of a vault with `icon.png` (40 x 30),
 /// `wide.png` (3000 x 30), a damaged `broken.png`, a drawing and a PDF; the events are for the
-/// frames after the first three.
+/// frames after the first ones, which wait for the pictures.
 fn read(text: &str, frames: Vec<Vec<Event>>) -> Frame {
     static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let d = std::env::temp_dir().join(format!("shale-inline-picture-{}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
@@ -43,10 +43,11 @@ fn read(text: &str, frames: Vec<Vec<Event>>) -> Frame {
     let v = Vault::open(&d).unwrap();
     let (mut scenes, media) = (SceneCache::default(), crate::media::MediaPlayer::default());
     let ctx = egui::Context::default();
+    let ctx2 = ctx.clone();
     crate::theme::apply(&ctx);
     let mut time = 0.0;
     let mut last = Frame { texts: vec![], pictures: vec![], blocks: vec![] };
-    for events in std::iter::repeat_with(Vec::new).take(3).chain(frames).chain(std::iter::repeat_with(Vec::new).take(10)) {
+    let mut run = |events: Vec<Event>| {
         time += 0.05;
         let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::Vec2::new(700.0, 500.0))), time: Some(time), events, ..Default::default() };
         let mut out = ctx.run_ui(raw, |ui| {
@@ -66,7 +67,18 @@ fn read(text: &str, frames: Vec<Vec<Event>>) -> Frame {
             }
         }
         out.shapes.iter().for_each(|c| walk(&c.shape, &mut frame));
-        last = frame;
+        frame
+    };
+    // the pictures are looked up and decoded on workers (MEDIA-024): the first frames wait for them
+    let looks = crate::media::look::Looks::of(&ctx2);
+    let mut idle = 0;
+    while idle < 3 {
+        last = run(Vec::new());
+        idle = if looks.busy() { 0 } else { idle + 1 };
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    for events in frames.into_iter().chain(std::iter::repeat_with(Vec::new).take(10)) {
+        last = run(events);
     }
     let _ = std::fs::remove_dir_all(&d);
     last

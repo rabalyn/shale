@@ -223,13 +223,14 @@ fn a_video_that_is_an_lfs_pointer_is_downloaded_first_even_without_ffmpeg() {
     let clip = fx.dir.join("clip.mp4");
     super::write_pointer(&clip, 2_000_000);
     fx.app.vault.as_mut().unwrap().rescan();
+    fx.disk_changed();
     fx.reading(true);
     fx.hl.frames(&mut fx.app, 3);
     // the pointer is not probed: it says "not downloaded", not "ffmpeg is not installed"
-    assert_eq!(fx.app.media.notice(&clip).map(|n| n.line()), Some("Not downloaded (2 MB)".to_string()));
+    assert_eq!(fx.app.media.notice(fx.hl.ctx(), &clip).map(|n| n.line()), Some("Not downloaded (2 MB)".to_string()));
     assert!(!texts(&fx).iter().any(|t| t.contains("ffmpeg is not installed")), "{:?}", texts(&fx));
     // Play asks for the download; the system player does not get the pointer file
-    let ctx = egui::Context::default();
+    let ctx = fx.hl.ctx().clone();
     fx.app.media.toggle(&ctx, &clip, Path::new("Watch.md"));
     assert_eq!(fx.app.media.take_download_requests(), vec![clip.clone()]);
     assert!(opened.lock().unwrap().is_empty(), "{:?}", opened.lock().unwrap());

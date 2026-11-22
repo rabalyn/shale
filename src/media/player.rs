@@ -7,6 +7,7 @@
 use super::download::{Downloads, Notice};
 use super::engine::Shared;
 use super::ffmpeg::{self, Info, Tools};
+use super::look::{Look, Looks};
 use super::output::Output;
 use super::video::{self, FrameSlot, Looked};
 use eframe::egui;
@@ -62,8 +63,14 @@ enum LookSlot {
     Ready { duration: Option<f64>, error: Option<String>, cover: Option<egui::TextureHandle>, info: Option<Info>, external: bool },
 }
 
+/// The look at a file, and the version of the file (its modification time) it was made of.
+struct LookAt {
+    mtime: Option<SystemTime>,
+    slot: LookSlot,
+}
+
 struct State {
-    looks: HashMap<(PathBuf, Option<SystemTime>), LookSlot>,
+    looks: HashMap<PathBuf, LookAt>,
     current: Option<Playback>,
     /// files that are still LFS pointers, and their downloads (SYNC-020)
     downloads: Downloads,
@@ -127,10 +134,6 @@ pub struct View {
     pub download: Option<Notice>,
     /// a click on the bar that waits for the length, as a share of the bar (MEDIA-005)
     pub waiting_share: Option<f64>,
-}
-
-fn key(abs: &Path) -> (PathBuf, Option<SystemTime>) {
-    (abs.to_path_buf(), std::fs::metadata(abs).and_then(|m| m.modified()).ok())
 }
 
 impl MediaPlayer {
@@ -205,9 +208,14 @@ impl MediaPlayer {
     /// Play or pause `abs`; another file that plays is stopped first (MEDIA-007).
     pub fn toggle(&self, ctx: &egui::Context, abs: &Path, owner: &Path) {
         let mut s = self.lock();
-        if s.downloads.notice(abs).is_some() {
+        let Look::Known(facts) = Looks::of(ctx).facts(ctx, abs) else {
+            // the file is still being looked at (the card says so): the click comes too early
+            return;
+        };
+        let pointer = facts.and_then(|f| f.pointer);
+        if s.downloads.notice(abs, pointer).is_some() {
             // not downloaded: fetch first, the sound starts when it is here (SYNC-020)
-            s.downloads.request(abs, Some(owner));
+            s.downloads.request(abs, Some(owner), pointer);
             ctx.request_repaint();
             return;
         }
@@ -248,31 +256,20 @@ impl MediaPlayer {
     /// the first player of a new note when asked to, asks for a repaint while something moves.
     pub fn view(&self, ctx: &egui::Context, abs: &Path) -> View {
         let mut s = self.lock();
-        if let Some(n) = s.downloads.notice(abs) {
+        // what the disk says about the file is looked up on a worker; until it is there the card is
+        // a quiet "busy" one of its usual size (MEDIA-024)
+        let Look::Known(facts) = Looks::of(ctx).facts(ctx, abs) else {
+            return s.bare_view(abs, true, None, None);
+        };
+        if let Some(n) = s.downloads.notice(abs, facts.as_ref().and_then(|f| f.pointer)) {
             // an LFS pointer has nothing to decode: say so, with the Download link (SYNC-020)
             if n.running {
                 ctx.request_repaint_after(Duration::from_millis(100));
             }
-            return View {
-                file_name: abs.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
-                cover: None,
-                duration: None,
-                position: 0.0,
-                playing: false,
-                busy: n.running,
-                message: Some(n.line()),
-                unplayable: false,
-                external: false,
-                volume: s.volume,
-                muted: s.muted,
-                opacity: s.opacity,
-                video_size: None,
-                download: Some(n),
-                waiting_share: None,
-            };
+            return s.bare_view(abs, n.running, Some(n.line()), Some(n));
         }
-        let slot_key = key(abs);
-        if !s.looks.contains_key(&slot_key) {
+        let mtime = facts.and_then(|f| f.mtime);
+        if s.looks.get(abs).is_none_or(|l| l.mtime != mtime) {
             if s.looks.len() >= LOOKS_KEPT {
                 s.looks.clear();
             }
@@ -284,18 +281,18 @@ impl MediaPlayer {
                 *out.lock().unwrap_or_else(|e| e.into_inner()) = Some(look);
                 ctx2.request_repaint();
             });
-            s.looks.insert(slot_key.clone(), LookSlot::Loading(cell));
+            s.looks.insert(abs.to_path_buf(), LookAt { mtime, slot: LookSlot::Loading(cell) });
         }
-        if let Some(LookSlot::Loading(cell)) = s.looks.get(&slot_key) {
+        if let Some(LookSlot::Loading(cell)) = s.looks.get(abs).map(|l| &l.slot) {
             let done = cell.lock().unwrap_or_else(|e| e.into_inner()).take();
             if let Some(look) = done {
                 let (external, info) = (look.missing, look.info);
                 let look = look.look;
                 let cover = look.cover.map(|img| ctx.load_texture(abs.to_string_lossy(), img, egui::TextureOptions::LINEAR));
-                s.looks.insert(slot_key.clone(), LookSlot::Ready { duration: look.duration, error: look.error, cover, info, external });
+                s.looks.insert(abs.to_path_buf(), LookAt { mtime, slot: LookSlot::Ready { duration: look.duration, error: look.error, cover, info, external } });
             }
         }
-        let (duration, look_error, cover, loading, external) = match s.looks.get(&slot_key) {
+        let (duration, look_error, cover, loading, external) = match s.looks.get(abs).map(|l| &l.slot) {
             Some(LookSlot::Ready { duration, error, cover, external, .. }) => (*duration, error.clone(), cover.clone(), false, *external),
             _ => (None, None, None, true, false),
         };
@@ -313,7 +310,7 @@ impl MediaPlayer {
             volume: s.volume,
             muted: s.muted,
             opacity: s.opacity,
-            video_size: match s.looks.get(&slot_key) {
+            video_size: match s.looks.get(abs).map(|l| &l.slot) {
                 Some(LookSlot::Ready { info: Some(i), .. }) => Some((i.width, i.height)),
                 _ => None,
             },
@@ -380,13 +377,16 @@ impl MediaPlayer {
     }
 
     /// What to say about a file that may be an LFS pointer; None for a real file (SYNC-020).
-    pub fn notice(&self, abs: &Path) -> Option<Notice> {
-        self.lock().downloads.notice(abs)
+    /// What the look-up of the file says (MEDIA-024): None for a real file and while the first look is on its way.
+    pub fn notice(&self, ctx: &egui::Context, abs: &Path) -> Option<Notice> {
+        let Look::Known(facts) = Looks::of(ctx).facts(ctx, abs) else { return None };
+        self.lock().downloads.notice(abs, facts.and_then(|f| f.pointer))
     }
 
     /// Ask for the real file of an LFS pointer (the Download link, SYNC-020).
-    pub fn download(&self, abs: &Path) {
-        self.lock().downloads.request(abs, None);
+    pub fn download(&self, ctx: &egui::Context, abs: &Path) {
+        let Look::Known(facts) = Looks::of(ctx).facts(ctx, abs) else { return };
+        self.lock().downloads.request(abs, None, facts.and_then(|f| f.pointer));
     }
 
     /// The files asked for since the last call; the app downloads them.
@@ -397,6 +397,8 @@ impl MediaPlayer {
     /// A download ended; when a play button asked for it, the sound starts now.
     pub fn download_done(&self, ctx: &egui::Context, abs: &Path, result: Result<(), String>) {
         let mut s = self.lock();
+        // the file is not what it was: the next frame looks at it again
+        Looks::of(ctx).forget(abs);
         if let Some(owner) = s.downloads.finish(abs, result) {
             s.begin(ctx, abs, &owner).want_play = true;
             s.apply_state();
@@ -413,7 +415,7 @@ impl MediaPlayer {
     /// Tests: the size of the first-frame (or cover) picture that was read for `abs`.
     #[cfg(test)]
     pub fn thumbnail_size(&self, abs: &Path) -> Option<[usize; 2]> {
-        match self.lock().looks.get(&key(abs)) {
+        match self.lock().looks.get(abs).map(|l| &l.slot) {
             Some(LookSlot::Ready { cover: Some(t), .. }) => Some(t.size()),
             _ => None,
         }
@@ -466,9 +468,31 @@ impl MediaPlayer {
 }
 
 impl State {
+    /// The card of a file that has nothing to decode (yet): its name, perhaps a line of words and
+    /// the download state of a pointer (SYNC-020), and a busy mark while its look-up is on its way (MEDIA-024).
+    fn bare_view(&self, abs: &Path, busy: bool, message: Option<String>, download: Option<Notice>) -> View {
+        View {
+            file_name: abs.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+            cover: None,
+            duration: None,
+            position: 0.0,
+            playing: false,
+            busy,
+            message,
+            unplayable: false,
+            external: false,
+            volume: self.volume,
+            muted: self.muted,
+            opacity: self.opacity,
+            video_size: None,
+            download,
+            waiting_share: None,
+        }
+    }
+
     /// A video that cannot be played here because ffmpeg is missing (MEDIA-010).
     fn is_external(&self, abs: &Path) -> bool {
-        matches!(self.looks.get(&key(abs)), Some(LookSlot::Ready { external: true, .. }))
+        matches!(self.looks.get(abs).map(|l| &l.slot), Some(LookSlot::Ready { external: true, .. }))
     }
 
     fn gain(&self) -> f32 {
@@ -507,7 +531,7 @@ impl State {
             let open = self.open_output.unwrap_or(open);
             let frames = Arc::new(FrameSlot::default());
             let video = super::is_video(abs).then(|| {
-                let info = match self.looks.get(&key(abs)) {
+                let info = match self.looks.get(abs).map(|l| &l.slot) {
                     Some(LookSlot::Ready { info, .. }) => info.clone(),
                     _ => None,
                 };

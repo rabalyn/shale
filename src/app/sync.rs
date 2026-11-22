@@ -1027,11 +1027,15 @@ mod tests {
         assert!(lfs::parse_pointer(&std::fs::read(&abs).unwrap()).is_some(), "synced as a pointer");
         // the player asks; the app downloads and tells the player
         let ctx = egui::Context::default();
+        let looks = crate::media::look::Looks::of(&ctx);
+        assert!(looks.wait_for(&ctx, &abs).is_some_and(|f| f.pointer.is_some()), "the look-up sees the pointer");
         app.media.toggle(&ctx, &abs, Path::new("Note.md"));
         app.media.use_silent_output();
         wait_pulls(&mut app);
         assert_eq!(std::fs::read(&abs).unwrap(), song);
-        assert_eq!(app.media.notice(&abs), None);
+        looks.forget(&abs);
+        assert!(looks.wait_for(&ctx, &abs).is_some_and(|f| f.pointer.is_none()), "the look-up sees the real file");
+        assert_eq!(app.media.notice(&ctx, &abs), None);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

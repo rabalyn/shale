@@ -2,8 +2,8 @@
 
 - **Status**: Accepted (owner decision, 2026-11-22)
 - **Date**: 2026-11-22
-- **Specs**: MEDIA-014…MEDIA-023, CFG-069 ([`docs/spec/features.md`](../spec/features.md), [`docs/spec/vault-and-files.md`](../spec/vault-and-files.md)); SEC-006, VAULT-018, LINK-004, LINK-010…LINK-012 are touched
-- **Issues**: #499 (this record, the specs, resolving and showing), #500 (the setting, the library folders in Settings, every import entry point), #501 (Copy into the vault, the vault check, data usage, the sync note)
+- **Specs**: MEDIA-014…MEDIA-024, CFG-069 ([`docs/spec/features.md`](../spec/features.md), [`docs/spec/vault-and-files.md`](../spec/vault-and-files.md)); SEC-006, VAULT-018, LINK-004, LINK-010…LINK-012 are touched
+- **Issues**: #499 (this record, the specs, resolving and showing), #500 (the setting, the library folders in Settings, every import entry point), #501 (Copy into the vault, the vault check, data usage, the sync note), #504 (no file system access on the window's thread)
 - **Builds on**: [ADR-0015](0015-media-playback-and-storage.md) (players, media in `z_media/`), [ADR-0004](0004-link-resolution-and-paths.md) (link resolution, paths), [ADR-0005](0005-where-state-lives.md) (what is synced and what is device-local)
 - **Amends**: the rule that a vault is self-contained: its media are in the vault (EDIT-003, IMP-031)
 
@@ -52,6 +52,12 @@ is a red link (LINK-010).
    outside the vault is **Ask** by default, with **Copy into the vault** and **Link where they are** as
    the other values (MEDIA-019, #500). Shale never links a file by itself because it lies under a
    library folder: every entry point follows the setting.
+8. **The window never waits for these files** (#504, MEDIA-024). The drive of an outside collection
+   may be a NAS, a share or a USB disk, where one `stat` hangs for seconds. A frame therefore never asks
+   the disk: whether a file is there, its date and whether it is an LFS pointer are looked up on a
+   worker and kept per path (asked again after 5 seconds, the old answer shown meanwhile, one check in
+   flight per path), pictures are decoded on workers, and the embed shows "Loading …" until the answer is
+   there. `Vault::resolve_media` keeps asking the disk for jobs; frames use `Vault::look_media`.
 
 ## Consequences
 
