@@ -693,6 +693,8 @@ impl ShaleApp {
             guide: if persist { crate::userguide::Places::system() } else { crate::userguide::Places::none() },
             handover: None,
         };
+        // the mail view's check of the index is a task of the window's registry (JOB-015)
+        app.mail.busy = app.busy.clone();
         if persist {
             app.refresh_git();
         }

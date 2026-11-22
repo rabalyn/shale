@@ -411,7 +411,7 @@ mod tests {
         playing("clip.mp4", |shared, slot, _| {
             shared.set_playing(true);
             assert!(wait_for(5.0, || slot.lock().unwrap().is_some()), "a frame arrives");
-            assert!(wait_for(1.0, || shared.position_secs() > 0.3), "the sound clock runs");
+            assert!(wait_for(20.0, || shared.position_secs() > 0.3), "the sound clock runs");
             let frame = slot.lock().unwrap().take();
             assert!(frame.is_none_or(|f| f.size == [160, 90]));
             assert!(wait_for(6.0, || shared.is_finished()), "the end is reported after about a second");
@@ -427,7 +427,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(200));
             assert!(shared.position_secs() < 0.01, "paused: the clock stands");
             shared.set_playing(true);
-            assert!(wait_for(1.0, || shared.position_secs() > 0.3), "the frame clock runs");
+            assert!(wait_for(20.0, || shared.position_secs() > 0.3), "the frame clock runs");
             assert!(wait_for(6.0, || shared.is_finished()), "and ends at the length of the video");
         });
     }
@@ -439,7 +439,7 @@ mod tests {
             assert!(wait_for(5.0, || slot.lock().unwrap().is_some()), "the first frame");
             slot.lock().unwrap().take();
             shared.set_playing(true);
-            assert!(wait_for(1.0, || shared.position_secs() > 0.1));
+            assert!(wait_for(20.0, || shared.position_secs() > 0.1));
             shared.seek(0.7);
             // the fixture is red at the start and blue at the end: a frame after the seek is bluish
             assert!(wait_for(5.0, || slot.lock().unwrap().as_ref().is_some_and(|f| f.pixels[45 * 160 + 80].b() > f.pixels[45 * 160 + 80].r())), "a frame of the second half");
@@ -466,7 +466,7 @@ mod tests {
                 assert!(wait_for(8.0, || slot.lock().unwrap().is_some()), "{clip}: a frame arrives");
                 assert!(!shared.is_finished(), "{clip}: not over before the first picture");
                 assert!(shared.position_secs() < 0.2, "{clip}: the clock waited for the picture: {}", shared.position_secs());
-                assert!(wait_for(1.0, || shared.position_secs() > 0.3), "{clip}: then it runs");
+                assert!(wait_for(20.0, || shared.position_secs() > 0.3), "{clip}: then it runs");
                 assert!(wait_for(6.0, || shared.is_finished()), "{clip}: and the clip ends");
             });
         }

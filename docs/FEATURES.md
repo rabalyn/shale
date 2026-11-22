@@ -1252,7 +1252,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 ## Busy states: spinner, what is happening, Cancel
 
-Whatever runs longer than a moment says what it does, cannot be started twice and shows in one place (JOB-003 to JOB-014, #397).
+Whatever runs longer than a moment says what it does, cannot be started twice and shows in one place (JOB-003 to JOB-015, #397, #385).
 
 - **A spinner and what happens.** A running action shows a spinner and a short phrase that names it
   ("Syncing with git…", "Checking file names and links…", "Exporting “Handbook” to PDF…"). Where the work can stop, **Cancel**
@@ -1265,7 +1265,7 @@ Whatever runs longer than a moment says what it does, cannot be started twice an
   where the work can stop. It disappears when nothing runs.
   ![The indicator with two tasks listed](userguide/z_media/screenshots/busy-indicator.png)
 - **Moved so far:** the git sync and the Git LFS setup, the check of the vault's names (Cancel stops it) and the PDF export of a
-  folder (Cancel stops it). The other long actions follow; the list of all of them, with what each shows today, is
+  folder (Cancel stops it), and the check of the mail index (JOB-015: it starts with the window when a mail account is set up, so the mail view finds the index ready, and the view shows "Checking the mail index…" with a spinner when it is opened earlier). The other long actions follow; the list of all of them, with what each shows today, is
   [docs/spec/busy-states.md](spec/busy-states.md).
 
 ## Keyboard

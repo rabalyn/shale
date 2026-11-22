@@ -262,6 +262,39 @@ fn job_008_work_started_before_its_view_exists_is_shown_by_the_view_through_the_
     assert_eq!(view(&busy), None, "the view finds the index ready");
 }
 
+// spec: JOB-015
+#[test]
+fn job_015_the_mail_view_shows_the_check_of_the_index_with_a_spinner_while_its_task_runs() {
+    use crate::mail::ui::{StoreState, MAIL_INDEX as CHECK};
+    let (mut app, mut h, dir) = window("mail-index");
+    app.show_view(crate::app::View::Mail, false);
+    app.mail.store = StoreState::Opening;
+    let task = app.busy.begin(CHECK, "Checking the mail index…").expect("the registry of the window is the mail view's");
+    h.frames(&mut app, 3);
+    assert!(painted_at(&h, "Checking the mail index…").is_some(), "the view says what runs");
+    assert!(painted_at(&h, "Opening the local mail copy…").is_none());
+    drop(task);
+    h.frames(&mut app, 3);
+    assert!(painted_at(&h, "Checking the mail index…").is_none());
+    assert!(painted_at(&h, "Opening the local mail copy…").is_some(), "no task: the plain line");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// spec: JOB-015
+#[test]
+fn job_015_the_store_opens_at_start_when_there_is_an_account_though_the_mail_view_is_not_open() {
+    let dir = std::env::temp_dir().join(format!("shale-busy-mail-start-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    crate::vault::write_sample_vault(&dir).unwrap();
+    let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
+    app.cfg.mail_accounts = vec![crate::config::MailAccount { id: "a".into(), ..Default::default() }];
+    assert!(!app.tabbar.tabs.iter().any(|t| t.view == crate::app::View::Mail));
+    let mut h = Headless::new();
+    h.frames(&mut app, 1);
+    assert!(!matches!(app.mail.store, crate::mail::ui::StoreState::Closed), "the first frame starts the open");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 fn window(tag: &str) -> (ShaleApp, Headless, std::path::PathBuf) {
     let dir = std::env::temp_dir().join(format!("shale-busy-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

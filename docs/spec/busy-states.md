@@ -75,7 +75,7 @@ would leave a mess (JOB-006).
 
 | Action | Runs today | Stop | Shows today | Registry |
 |---|---|---|---|---|
-| Opening the mail store (`MailStore::open`, MAIL-050; first run: the integrity check and a possible index rebuild) | thread, started when the mail view first opens | no | "Opening the local mail copy…" in the view | planned (#385, next): started at app start as a task "Checking the mail index…" (JOB-008); the view shows its text |
+| Opening the mail store (`MailStore::open`, MAIL-050; the integrity check, MAIL-006, and a possible index rebuild) | thread, started with the first frame of the window when an account is set up (else when the mail view first opens) | no | a spinner and "Checking the mail index…" in the view ("Opening the local mail copy…" in the instant between) | **IS NOW** (JOB-015) |
 | Rebuilding the mail index (USE-012) | the store's writer thread | no | "Rebuilding the mail index from the message files…" | planned: a task |
 | Mail sync (IMAP, MAIL) | thread per account (`imap_sync::start`) | yes (flag) | progress in the view, "Cancel sync" | planned: a task per account |
 | Mail: loading a listing, reading and downloading a message, search, send, sign-in (OAuth), key and GnuPG work | threads of the mail UI (`mail/ui.rs`, `send.rs`, `oauth.rs`) | sign-in: flag and timeout; the others: no | per-view lines ("Loading the list from the server…", "Reading the message…", "Searching…") | not tasks (they belong to their view); send and sign-in planned |
