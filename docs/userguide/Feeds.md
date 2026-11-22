@@ -32,7 +32,7 @@ social` shows made-up posts.
 # Search the posts you loaded
 
 Every post a feed brings in is kept in a local search index. The sidebar search (Ctrl+Shift+F)
-lists matching posts under the notes ([[Search and pickers]]); `from:ada`, `text:`, `in:`,
+lists matching posts under the notes and mail, and the keyboard reaches them ([[Search and pickers]]); `from:ada`, `text:`, `in:`,
 `link:` and `date:2026-11` limit a word to one part. Settings → Feeds → Post search index
 shows how many posts are indexed, **Rebuild**s or **Clear…**s it.
 

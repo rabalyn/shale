@@ -393,7 +393,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   under the keys says which action they would clash with.
 - Ctrl+PageUp / Ctrl+PageDown (macOS: Cmd+Opt+← / Cmd+Opt+→) switch to the previous / next tab, also from the file list and from
   mail, calendar and Feeds; after the last tab comes the first.
-- In the search results j / k go from hit to hit and Ctrl+J / Ctrl+K from file to file.
+- In the search results j / k go from hit to hit and Ctrl+J / Ctrl+K from file to file (in the mail and posts groups from group to group).
 - **Markdown preview** (Settings → Editor, or the eye icon in the top right of the editor;
   off by default): every line is drawn rendered, with headings at their size, bold, italic,
   strike and code without their markers, links as just their text, and only the line the cursor
@@ -892,7 +892,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 - **Search the posts you loaded**: every post a feed brings in is kept in a search index
   (`~/.local/share/shale/social-posts.db`, the same for every vault: text, author, date, links
   and the thread around it). The sidebar search (Ctrl+Shift+F) lists the posts that match under
-  the notes; click one to open a new Feeds tab scrolled to it, also when the feed no longer has
+  the notes and mail (as `Space f g` does); click one to open a new Feeds tab scrolled to it, also when the feed no longer has
   it. `from:ada`, `text:`, `in:` (quote, link card, the post answered, who boosted), `link:` and
   `date:2026-11` limit a word to one part. At most 10 000 posts per account and one year are
   kept; removing an account removes its posts. Posts you save to the vault (the thread and the
@@ -1170,7 +1170,7 @@ Text editing keys and vim keys are fixed.
 | F6 / Shift+F6 | Focus the next / previous pane |
 | Ctrl+Shift+W | Close the pane with all its tabs (macOS: Cmd+Shift+W) |
 | Ctrl+Shift+B | File list with the keyboard in it: j / k (or ↓ / ↑) next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
-| ↓ or Enter in the search box | Browse the results: j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
+| ↓ or Enter in the search box | Browse the results (notes, mail and posts): j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K first hit of the next / previous file or group, Enter opens the hit, Esc back to the box |
 | Ctrl+Shift+M | Mail view (its keys are listed below) |
 | Alt+← / Alt+→ | Back / forward (macOS: Cmd+[ / Cmd+], because Option+← / → move by word in text) |
 | Alt+B, Alt+I, Alt+S, Alt+H, Alt+C, Alt+Y, Alt+F, Alt+Shift+Y, Alt+Shift+F, Alt+E, Alt+U, Alt+O, Alt+T, Alt+Q, Alt+K, Alt+R, Alt+J, Alt+A, Alt+L, Alt+W, Alt+M, Alt+X | The buttons of the formatting toolbar of a note, each doing what a click on it does (the keyboard stays in the text and nothing is typed): Bold, Italic, Strikethrough, Highlight, Inline code, Highlight colour and Font colour (apply the current colour: the main part of the split button; Alt+Shift+Y and Alt+Shift+F open the palette, the ▾ part, where the digits 1 to 8 pick a swatch and 0 picks none, shown as ⇧Y and ⇧F while Alt is held), Heading level (opens its menu), Bullet list, Numbered list, Task, Quote, Code block, Horizontal rule, Table, Link to a note, Web link, Embed, Clear formatting. A key whose button is not there (reading view) or is greyed out (in a table cell) does nothing |

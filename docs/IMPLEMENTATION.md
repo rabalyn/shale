@@ -14,7 +14,7 @@ are `src/<feature>/<child>.rs`, with their tests next to them. The feature folde
 are folders of the same kind. `ShaleApp` (`src/app.rs`, 34 fields) owns its sub-states, each defined
 beside its feature: `drag: DragState` (`app/drops.rs`), `cal: CalendarUi` (`calendar/ui.rs`),
 `tag_learner: TagLearner` (`import/tagwords.rs`), `script: ScriptRun` (`script.rs`),
-`tabbar: TabBar` (`app/tabs.rs`), `search: SearchBox` and `tree: FileTree` (`panels.rs`),
+`tabbar: TabBar` (`app/tabs.rs`), `search: SearchBox` (`search_panel.rs`) and `tree: FileTree` (`panels.rs`),
 `graphs: Graphs` (`graph.rs`), `shot: ScreenshotRun` (`app/screenshot.rs`) and
 `recovery: RecoveryState` (`recovery.rs`). The shown left panel is `side.left` (`SideState`,
 `sidebar_ui.rs`). The frame counter `frames` stays a loose field: screenshots and scripted input
@@ -31,7 +31,8 @@ both pace by it.
 | `src/app/screenshot.rs` | `ScreenshotRun`: where the picture of a `--screenshot` run goes, and whether it was asked for and saved. |
 | `src/app/sync.rs`, `src/app/usage.rs`, `src/app/social.rs` | Git sync in the window (when it runs, open buffers, settings), the Data usage dialog and the daily cleanup, the feed view and its accounts dialog. |
 | `src/layout.rs` | Window layout: ribbon, tab bar, view header, note view (inline title plus editor or reading view), status bar, toasts, painted icons, start screen. |
-| `src/panels.rs` | Left sidebar (file tree, search, tags), right sidebar (backlinks and unlinked mentions, outgoing links, outline, local graph), the vault-wide task list and the dialogs (quick switcher, rename, new folder, trash, settings). |
+| `src/search_panel.rs` | The sidebar search (Ctrl+Shift+F): the second view of the one search engine of `src/search_all.rs` (notes, mail and posts; the picker `Space f g` is the first view), with the keyboard browsing of its hits. |
+| `src/panels.rs` | Left sidebar (file tree, tags), right sidebar (backlinks and unlinked mentions, outgoing links, outline, local graph), the vault-wide task list and the dialogs (quick switcher, rename, new folder, trash, settings). |
 | `src/editor.rs` | Markdown editor: live colouring, blue and red links, clicking links and checkboxes. Includes headless UI tests that simulate mouse clicks and typing. |
 | `src/link_assist.rs` | The `[[` note suggestions, `[[p ` people list and `[!` file picker for any text box (notes and drawing texts): takes the popup keys before the text box, draws the popups, and has a safety net for keys that reach the text box anyway. |
 | `src/reader.rs` | Reading view: rendered markdown with clickable links, checkboxes, embedded drawings and notes. |

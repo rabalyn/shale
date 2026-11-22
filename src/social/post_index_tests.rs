@@ -36,7 +36,7 @@ fn a_post_is_found_by_text_author_link_date_and_thread_context() {
     // as a feed brings them: newest first, so the reply comes before the post it answers
     ix.add("acct", "home", &[warned, boosted, quoting, reply, parent]);
     assert_eq!(ix.count(None), 5);
-    let find = |q: &str| ix.search(q, 10).iter().map(|h| h.post.id.clone()).collect::<Vec<_>>();
+    let find = |q: &str| ix.search_wild(q, 10).iter().map(|h| h.post.id.clone()).collect::<Vec<_>>();
     assert_eq!(find("text:\"outlive apps\""), ["p1"], "the text");
     assert_eq!(find("outlive apps"), ["p2", "p1"], "without a prefix the answer to the post is found too (context)");
     assert_eq!(find("from:lovelace"), ["p1"], "the author's name");
@@ -57,12 +57,12 @@ fn a_post_is_found_by_text_author_link_date_and_thread_context() {
     assert_eq!(find("weather"), ["p5"], "the content warning");
     assert_eq!(find("text:weather"), ["p5"]);
     assert!(find("from:weather").is_empty(), "a prefix limits the term to its part");
-    let hit = &ix.search("from:lovelace", 5)[0];
+    let hit = &ix.search_wild("from:lovelace", 5)[0];
     assert_eq!((hit.account.as_str(), hit.feed.as_str(), hit.author_handle.as_str(), hit.author_name.as_str()), ("acct", "home", "ada@m.test", "Ada Lovelace"));
     assert_eq!(hit.snippet, "Plain text files outlive apps");
     assert_eq!(hit.url, "https://m.test/@ada/p1");
     assert_eq!(hit.key, crate::social::state::post_key(&hit.post));
-    assert_eq!(ix.search("see this", 5)[0].reply_to.as_deref(), Some("p1"));
+    assert_eq!(ix.search_wild("see this", 5)[0].reply_to.as_deref(), Some("p1"));
 }
 
 // spec: SOC-031
@@ -70,13 +70,13 @@ fn a_post_is_found_by_text_author_link_date_and_thread_context() {
 fn search_ignores_case_and_accents_is_newest_first_and_cannot_be_broken_by_what_is_typed() {
     let mut ix = PostIndex::in_memory();
     ix.add("a", "home", &[with_text("3", "x", ago(1), "Grüße von Müller"), with_text("2", "x", ago(2), "MÜLLER and the Büro"), with_text("1", "x", ago(3), "other")]);
-    assert_eq!(ids(&ix.search("muller", 10)), ["3", "2"], "newest first");
-    assert!(ix.search("BURO grusse", 10).is_empty(), "all words must match");
-    assert_eq!(ids(&ix.search("buro muller", 10)), ["2"]);
-    assert_eq!(ix.search("muller", 1).len(), 1, "the limit");
-    assert_eq!(ids(&ix.search("\"the buro\"", 10)), ["2"], "a phrase");
+    assert_eq!(ids(&ix.search_wild("muller", 10)), ["3", "2"], "newest first");
+    assert!(ix.search_wild("BURO grusse", 10).is_empty(), "all words must match");
+    assert_eq!(ids(&ix.search_wild("buro muller", 10)), ["2"]);
+    assert_eq!(ix.search_wild("muller", 1).len(), 1, "the limit");
+    assert_eq!(ids(&ix.search_wild("\"the buro\"", 10)), ["2"], "a phrase");
     for hostile in ["\"", "*", "a AND", "NEAR(a b)", "-x", "text:", ":::", "(", "from:\"", "OR NOT", "'; DROP TABLE posts; --", "", "   "] {
-        assert!(ix.search(hostile, 10).len() <= 3, "{hostile:?} is only text");
+        assert!(ix.search_wild(hostile, 10).len() <= 3, "{hostile:?} is only text");
     }
     assert_eq!(ix.count(None), 3, "nothing was damaged");
 }
@@ -90,8 +90,8 @@ fn a_post_loaded_again_is_one_entry_with_the_newest_data_and_a_boost_is_its_own(
     p.text_markdown = "edited words".into();
     ix.add("a", "list:1", &[p.clone()]);
     assert_eq!(ix.count(None), 1);
-    assert!(ix.search("first", 5).is_empty(), "the old text is gone");
-    let hits = ix.search("edited", 5);
+    assert!(ix.search_wild("first", 5).is_empty(), "the old text is gone");
+    let hits = ix.search_wild("edited", 5);
     assert_eq!((hits.len(), hits[0].feed.as_str()), (1, "list:1"), "the feed seen last");
     let boosted = Post { reposted_by: Some(Author { id: "b".into(), handle: "b@m.test".into(), ..Default::default() }), ..p };
     ix.add("a", "home", &[boosted]);
@@ -108,22 +108,22 @@ fn the_index_keeps_the_newest_posts_of_each_account_and_nothing_older_than_the_d
     ix.add("a", "home", &(1..=5).map(|i| with_text(&format!("a{i}"), "x", ago(10 - i), "word")).collect::<Vec<_>>());
     ix.add("b", "home", &[with_text("b1", "x", ago(50), "word")]);
     assert_eq!((ix.count(Some("a")), ix.count(Some("b"))), (3, 1), "a cap per account");
-    assert_eq!(ids(&ix.search("word", 10)), ["a5", "a4", "a3", "b1"]);
-    assert!(ix.search("link:a1", 10).is_empty(), "the oldest went, with their search entries");
+    assert_eq!(ids(&ix.search_wild("word", 10)), ["a5", "a4", "a3", "b1"]);
+    assert!(ix.search_wild("link:a1", 10).is_empty(), "the oldest went, with their search entries");
     ix.keep_posts = Some(KEEP_POSTS);
     ix.keep_days = Some(30);
     ix.add("a", "home", &[with_text("old", "x", ago(31), "ancient"), with_text("new", "x", ago(29), "recent")]);
-    assert!(ix.search("ancient", 5).is_empty(), "a post older than the days is not taken");
-    assert_eq!(ids(&ix.search("recent", 5)), ["new"]);
-    assert_eq!(ids(&ix.search("word", 10)), ["a5", "a4", "a3"], "the post of 50 days ago went with the next addition, in the other account too");
+    assert!(ix.search_wild("ancient", 5).is_empty(), "a post older than the days is not taken");
+    assert_eq!(ids(&ix.search_wild("recent", 5)), ["new"]);
+    assert_eq!(ids(&ix.search_wild("word", 10)), ["a5", "a4", "a3"], "the post of 50 days ago went with the next addition, in the other account too");
     // shrinking the days drops what is now too old at the next addition
     ix.keep_days = Some(20);
     ix.add("a", "home", &[with_text("x", "x", ago(1), "fresh")]);
-    assert!(ix.search("recent", 5).is_empty());
+    assert!(ix.search_wild("recent", 5).is_empty());
     assert_eq!(ix.count(None), 4);
     // a post without a date counts as loaded now
     ix.add("a", "home", &[with_text("u", "x", 0, "timeless")]);
-    assert_eq!(ids(&ix.search("timeless", 5)), ["u"]);
+    assert_eq!(ids(&ix.search_wild("timeless", 5)), ["u"]);
 }
 
 // spec: SOC-033
@@ -134,11 +134,11 @@ fn removing_an_account_removes_its_posts_from_the_index_and_the_search() {
     ix.add("b", "home", &[with_text("1", "x", ago(1), "shared words")]);
     ix.remove_account("a");
     assert_eq!((ix.count(Some("a")), ix.count(Some("b"))), (0, 1));
-    let hits = ix.search("shared", 10);
+    let hits = ix.search_wild("shared", 10);
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].account, "b");
     ix.remove_account("b");
-    assert!(ix.search("shared", 10).is_empty() && ix.count(None) == 0);
+    assert!(ix.search_wild("shared", 10).is_empty() && ix.count(None) == 0);
 }
 
 // spec: SOC-034
@@ -151,13 +151,13 @@ fn the_index_file_keeps_posts_between_runs_and_a_broken_file_is_made_again() {
     ix.add("a", "home", &[with_text("1", "x", ago(1), "remember me")]);
     drop(ix);
     let ix = PostIndex::open(&path).unwrap();
-    assert_eq!(ids(&ix.search("remember", 5)), ["1"]);
+    assert_eq!(ids(&ix.search_wild("remember", 5)), ["1"]);
     drop(ix);
     std::fs::write(&path, b"this is not a database, not even close, but long enough to be looked at").unwrap();
     let mut ix = PostIndex::open(&path).expect("a file that is no database is replaced");
     assert_eq!(ix.count(None), 0);
     ix.add("a", "home", &[with_text("2", "x", ago(1), "after the crash")]);
-    assert_eq!(ix.search("crash", 5).len(), 1);
+    assert_eq!(ix.search_wild("crash", 5).len(), 1);
     drop(ix);
     // a folder where the file should be: nothing can be done, the feeds go on without search
     assert!(PostIndex::open(&dir).is_none());
@@ -182,13 +182,13 @@ fn the_data_usage_dialog_counts_empties_and_prunes_the_index_file_next_to_the_op
     assert!(s.bytes > 0);
     let pruned = prune_file(&path, Some(365), Some(1), crate::calendar::time::now()).unwrap();
     assert_eq!(pruned.entries, 2, "the post of 400 days, then the oldest over one per account");
-    assert_eq!(ids(&ix.search("new", 5)), ["3"], "the window's own connection sees the change");
+    assert_eq!(ids(&ix.search_wild("new", 5)), ["3"], "the window's own connection sees the change");
     assert_eq!(ix.count(None), 2);
     assert_eq!(prune_file(&path, None, None, crate::calendar::time::now()).unwrap().entries, 0, "no limits remove nothing");
     assert_eq!(clear_file(&path).unwrap().entries, 2);
-    assert!(ix.search("other", 5).is_empty() && ix.count(None) == 0, "empty for every account");
+    assert!(ix.search_wild("other", 5).is_empty() && ix.count(None) == 0, "empty for every account");
     ix.add("a", "home", &[with_text("5", "x", ago(1), "after the clear")]);
-    assert_eq!(ix.search("clear", 5).len(), 1, "the feeds go on filling it");
+    assert_eq!(ix.search_wild("clear", 5).len(), 1, "the feeds go on filling it");
     drop(ix);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -214,21 +214,21 @@ fn a_parent_that_arrives_later_gives_its_replies_their_context() {
     let mut reply = with_text("r1", "bob", ago(2), "me too");
     reply.reply_to = Some("p1".into());
     ix.add("acct", "home", &[reply]);
-    assert!(ix.search("in:lighthouse", 10).is_empty(), "the parent is not known yet: no context");
+    assert!(ix.search_wild("in:lighthouse", 10).is_empty(), "the parent is not known yet: no context");
     // a feed brings the parent (and the same id of another account) later
     let mut parent = with_text("p1", "ada", ago(3), "A lighthouse keeper writes");
     parent.author.display_name = "Ada Lovelace".into();
     ix.add("other", "home", &[with_text("p1", "zed", ago(3), "lighthouse of the other account")]);
-    assert!(ix.search("in:lighthouse", 10).is_empty(), "another account's post is no parent");
+    assert!(ix.search_wild("in:lighthouse", 10).is_empty(), "another account's post is no parent");
     ix.add("acct", "home", &[parent.clone()]);
-    assert_eq!(ids(&ix.search("in:lighthouse", 10)), ["r1"], "the text of the parent");
-    assert_eq!(ids(&ix.search("in:lovelace", 10)), ["r1"], "the author of the parent");
-    assert_eq!(ids(&ix.search("from:bob", 10)), ["r1"], "the reply is still one entry");
+    assert_eq!(ids(&ix.search_wild("in:lighthouse", 10)), ["r1"], "the text of the parent");
+    assert_eq!(ids(&ix.search_wild("in:lovelace", 10)), ["r1"], "the author of the parent");
+    assert_eq!(ids(&ix.search_wild("from:bob", 10)), ["r1"], "the reply is still one entry");
     assert_eq!(ix.count(None), 3);
     // the parent changes (an edit): the context follows
     ix.add("acct", "home", &[Post { text_markdown: "A beacon keeper writes".into(), ..parent }]);
-    assert!(ix.search("in:lighthouse", 10).is_empty());
-    assert_eq!(ids(&ix.search("in:beacon", 10)), ["r1"]);
+    assert!(ix.search_wild("in:lighthouse", 10).is_empty());
+    assert_eq!(ids(&ix.search_wild("in:beacon", 10)), ["r1"]);
 }
 
 // spec: SOC-040
@@ -241,8 +241,8 @@ fn clearing_empties_the_index_and_it_fills_again() {
     assert!(!ix.contains("b", &key));
     ix.clear();
     assert_eq!(ix.count(None), 0);
-    assert!(ix.search("alpha", 10).is_empty());
+    assert!(ix.search_wild("alpha", 10).is_empty());
     assert!(!ix.contains("a", &key));
     ix.add("a", "home", &[with_text("3", "x", ago(1), "gamma")]);
-    assert_eq!(ids(&ix.search("gamma", 10)), ["3"]);
+    assert_eq!(ids(&ix.search_wild("gamma", 10)), ["3"]);
 }

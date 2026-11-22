@@ -101,6 +101,7 @@ mod recorder;
 mod recovery;
 mod script;
 mod search_all;
+mod search_panel;
 mod secret;
 mod secrets;
 mod settings;

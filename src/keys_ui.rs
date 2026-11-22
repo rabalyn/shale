@@ -1231,6 +1231,84 @@ mod tests {
         assert_eq!(w.app.notes[Path::new("A.md")].text, "# A\n");
     }
 
+    /// The groups and titles the sidebar search lists.
+    fn sidebar_rows(w: &W) -> Vec<(&'static str, String)> {
+        w.app.search.listed().iter().map(|h| (h.group, h.title.clone())).collect()
+    }
+
+    /// Put the keyboard into the sidebar search's list: show the panel, type, wait for the list, ↓.
+    fn browse_sidebar(w: &mut W, text: &str) {
+        w.app.side.left = crate::app::LeftPanel::Search;
+        w.app.search.query.clear();
+        w.app.search.focus = true;
+        settle(w);
+        w.frame(vec![Event::Text(text.to_string())]);
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        settle(w);
+        w.press(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(w.app.search.sel, Some(0), "↓ goes into the list");
+    }
+
+    // spec: NAV-007, NAV-008, NAV-025, NAV-023, SOC-036
+    #[test]
+    fn the_sidebar_search_lists_notes_mail_and_posts_and_the_keyboard_opens_each() {
+        let mut w = W::new("sidebar-all");
+        with_mail(&mut w);
+        with_post(&mut w);
+        browse_sidebar(&mut w, "ban*");
+        let rows = sidebar_rows(&w);
+        let groups: Vec<&str> = rows.iter().map(|r| r.0).collect();
+        let (mail, post) = (groups.iter().position(|g| *g == "Mail").expect("the mail group"), groups.iter().position(|g| *g == "Posts").expect("the posts group"));
+        assert_eq!(groups[0], "Notes");
+        assert_eq!((&rows[mail].1[..], &rows[post].1[..]), ("Banana invoice", "banana republic"), "{rows:?}");
+        assert!(post == mail + 1 && groups.len() == post + 1, "notes, then mail, then posts: {groups:?}");
+        // Ctrl+J / Ctrl+K go from group to group: the first hit of the next / previous
+        w.press(Key::J, CTRL);
+        assert_eq!(w.app.search.sel, Some(mail));
+        w.press(Key::J, CTRL);
+        assert_eq!(w.app.search.sel, Some(post));
+        w.press(Key::J, CTRL);
+        assert_eq!(w.app.search.sel, Some(post), "no group after the last");
+        w.press(Key::K, CTRL);
+        assert_eq!(w.app.search.sel, Some(mail));
+        w.press(Key::K, Modifiers::NONE);
+        assert_eq!(w.app.search.sel, Some(mail - 1), "k goes to the hit before, across the groups");
+        w.press(Key::J, Modifiers::NONE);
+        // Enter on the mail hit opens it in the mail view
+        w.press(Key::Enter, Modifiers::NONE);
+        settle(&mut w);
+        assert_eq!(views(&w), ["mail"]);
+        assert_eq!(w.app.mail.open.as_ref().map(|o| o.msg.subject.as_str()), Some("Banana invoice"));
+        assert_eq!(w.app.search.sel, None, "the hit was opened");
+        // Enter on the post hit opens its feed in a new tab
+        browse_sidebar(&mut w, "ban*");
+        w.press(Key::J, CTRL);
+        w.press(Key::J, CTRL);
+        let tabs = w.app.tabbar.tabs.len();
+        w.press(Key::Enter, Modifiers::NONE);
+        settle(&mut w);
+        assert_eq!(w.app.tabbar.tabs.len(), tabs + 1);
+        let feed = crate::social::FeedRef { account: crate::social::demo::account().account.id, feed: "home".into() };
+        assert_eq!(w.app.tabbar.tabs[w.app.tabbar.active].view, View::Social(Some(feed)));
+        // Enter on a note line puts the cursor on the found text
+        browse_sidebar(&mut w, "ban*");
+        let (crate::app::Action::GotoMatch { rel, .. } | crate::app::Action::Open { rel, .. }) = &w.app.search.listed()[0].action else { panic!("the first hit is a note") };
+        let rel = rel.clone();
+        w.press(Key::Enter, Modifiers::NONE);
+        settle(&mut w);
+        assert_eq!(w.app.current_path(), Some(rel), "the note of the first hit is open");
+    }
+
+    // spec: NAV-022
+    #[test]
+    fn the_sidebar_search_has_no_mail_group_while_the_mail_store_is_closed() {
+        let mut w = W::new("sidebar-nomail");
+        with_post(&mut w);
+        browse_sidebar(&mut w, "banana");
+        let groups: Vec<&str> = sidebar_rows(&w).iter().map(|r| r.0).collect();
+        assert!(!groups.contains(&"Mail") && groups.contains(&"Posts"), "{groups:?}");
+    }
+
     // spec: KEY-008, NAV-022
     #[test]
     fn the_search_all_keys_can_be_changed() {
