@@ -21,6 +21,10 @@ its section from this file.
 - Sync commits and version commits now end with the lines `Shale-Reason:` and `Shale-Device:` (#471).
 - A file history panel and a comparison view that is not a git tool. The history of the open note is a slim column in the empty right margin of the note when the window is wide enough (one note, **Readable line length** on), else a **History** panel of the right sidebar (a clock icon, next to the outline and the calendar); the **×** of the column hides it and `history.show_panel` remembers that. The list is grouped by day (Today, Yesterday, dates) with relative times, where each version came from in plain words (edited here, synced from your laptop, restored version of 17 Nov 09:00, merged after a conflict, renamed from …), and a small bar of +/− ticks whose hover says "12 lines added, 3 removed". A click opens **Changes since 11:05**: the note with inserted words highlighted and underlined, deleted words struck through, a mark (+, −, ~) in the gutter of every changed block and the unchanged parts folded ("… 34 unchanged paragraphs"), a time slider and a "to" list to compare any two versions, **Next change** and **Previous change**, **Restore this version**, **Copy text** and **Read-only**. A switch shows the Markdown side by side with line numbers and word highlights, and **Copy as patch**. Drawings show before and after thumbnails. The ⋯ menu entry is now **History of this note** (#472).
 
+### Fixed
+
+- For developers: the test suite now passes when run as root (as in the CI containers) and under parallel load in release builds. Flaky UI waits in the sync, managed-git and file-history tests were replaced by waiting for the background jobs to finish, two history tests no longer share a vault folder, and the move-out failure test no longer relies on an unreadable file (#469, #468, #471).
+
 ## [0.6.10] - 2026-11-21
 
 ### Added
