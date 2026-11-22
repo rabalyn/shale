@@ -6,7 +6,6 @@
 use super::package::Package;
 use crate::pdf::tex::compile::WorkDir;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Once;
 
 /// The commit of devoidfury/docx-validator whose schemas are used; the script has the same one.
@@ -47,7 +46,7 @@ pub fn check_with(bytes: &[u8], cache: &Path) -> Outcome {
         Ok(p) => p,
         Err(e) => return Outcome::Invalid(format!("not a Word file: {e}")),
     };
-    if Command::new("xmllint").arg("--version").output().is_err() {
+    if crate::program::command("xmllint").arg("--version").output().is_err() {
         return Outcome::Skipped("xmllint is not installed here".into());
     }
     let Some(xsd) = schema_in(cache) else {
@@ -72,7 +71,7 @@ pub fn check_with(bytes: &[u8], cache: &Path) -> Outcome {
             return Outcome::Skipped(format!("cannot write to the temporary folder: {e}"));
         }
         // formatted, so that an error names a line of a readable file
-        let pretty = match Command::new("xmllint").arg("--format").arg(&raw).output() {
+        let pretty = match crate::program::command("xmllint").arg("--format").arg(&raw).output() {
             Ok(o) if o.status.success() => o.stdout,
             Ok(o) => {
                 errors.push(format!("{name}: not well-formed XML: {}", first_lines(&String::from_utf8_lossy(&o.stderr), 3)));
@@ -84,7 +83,7 @@ pub fn check_with(bytes: &[u8], cache: &Path) -> Outcome {
         if let Err(e) = work.write(&format!("p{i}.pretty.xml"), &pretty) {
             return Outcome::Skipped(format!("cannot write to the temporary folder: {e}"));
         }
-        match Command::new("xmllint").args(["--noout", "--nonet", "--schema"]).arg(&xsd).arg(&formatted).output() {
+        match crate::program::command("xmllint").args(["--noout", "--nonet", "--schema"]).arg(&xsd).arg(&formatted).output() {
             Ok(o) if o.status.success() => {}
             Ok(o) => {
                 let said = String::from_utf8_lossy(&o.stderr).replace("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}", "w:");

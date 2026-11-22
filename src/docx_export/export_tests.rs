@@ -8,6 +8,7 @@ use super::*;
 use crate::import::docx_look;
 use crate::import::{docx, Options};
 use std::collections::HashMap;
+use std::process::Command;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 

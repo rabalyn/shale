@@ -340,7 +340,7 @@ fn no_keyring_text() -> &'static str {
 mod backend {
     use crate::secret::Secret;
     use std::io::{Read, Write};
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
     use std::time::{Duration, Instant};
     use zeroize::Zeroizing;
 
@@ -354,7 +354,7 @@ mod backend {
     /// Run secret-tool with `input` on stdin. Gives up after a while (an unlock prompt left open).
     /// What it prints comes back in a buffer that is zeroed when dropped (it never reallocates).
     fn run(args: &[&str], input: Option<&str>) -> Option<(bool, Zeroizing<Vec<u8>>)> {
-        let mut child = Command::new("secret-tool").args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+        let mut child = crate::program::command("secret-tool").args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
         {
             let mut stdin = child.stdin.take()?;
             if let Some(i) = input {
@@ -394,7 +394,7 @@ mod backend {
         static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         *AVAILABLE.get_or_init(|| {
             // a search that finds nothing still succeeds, but only with a running Secret Service
-            Command::new("secret-tool").args(["search", "application", "shale-caldav-probe"]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false)
+            crate::program::command("secret-tool").args(["search", "application", "shale-caldav-probe"]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false)
         })
     }
 

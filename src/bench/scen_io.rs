@@ -10,7 +10,6 @@ use crate::gitsync::{self, Git, Options, TreeLock};
 use crate::vault::Vault;
 use std::hint::black_box;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::AtomicBool;
 
 // ---- import ----------------------------------------------------------------------------------
@@ -149,7 +148,7 @@ fn git_available() -> Result<(), String> {
 fn bare_remote(dir: &Path) -> PathBuf {
     let p = dir.join("remote.git");
     std::fs::create_dir_all(&p).expect("a folder for the remote");
-    let ok = Command::new("git").args(["init", "--quiet", "--bare"]).arg(&p).envs([("GIT_CONFIG_GLOBAL", "/dev/null"), ("GIT_CONFIG_NOSYSTEM", "1")]).status().is_ok_and(|s| s.success());
+    let ok = crate::program::command("git").args(["init", "--quiet", "--bare"]).arg(&p).envs([("GIT_CONFIG_GLOBAL", "/dev/null"), ("GIT_CONFIG_NOSYSTEM", "1")]).status().is_ok_and(|s| s.success());
     assert!(ok, "git init --bare failed");
     p
 }

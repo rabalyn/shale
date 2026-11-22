@@ -47,7 +47,7 @@ impl Out {
 impl Git {
     /// `git -C <dir> args…` with stdin closed, no prompts and no inherited repository variables.
     fn command(&self, dir: &Path, args: &[&OsStr]) -> Command {
-        let mut c = Command::new(&self.program);
+        let mut c = crate::program::command(&self.program);
         c.arg("-C").arg(dir);
         // hidden git-lfs (tests): `git lfs …` becomes an unknown git command, which fails everywhere
         #[cfg(test)]
@@ -91,7 +91,7 @@ impl Git {
 
     /// The installed git's version line, or None without git (SYNC-003).
     pub fn version(&self) -> Option<String> {
-        let mut c = Command::new(&self.program);
+        let mut c = crate::program::command(&self.program);
         c.arg("--version");
         let o = self.finish_command(c).output().ok()?;
         o.status.success().then(|| String::from_utf8_lossy(&o.stdout).trim().to_string())

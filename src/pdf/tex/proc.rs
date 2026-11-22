@@ -66,12 +66,6 @@ fn run_with(mut cmd: Command, stdout: Stdio, timeout: Duration, cancel: Option<&
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW: no console window flashes up for a command line tool
-        cmd.creation_flags(0x0800_0000);
-    }
     let mut child = crate::program::spawn(&mut cmd)?;
     let (tx, rx) = mpsc::channel::<String>();
     let readers: Vec<_> = [child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>), child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>)]
@@ -173,8 +167,7 @@ fn kill_tree(child: &mut std::process::Child) {
     }
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
-        let _ = Command::new("taskkill").args(["/PID", &child.id().to_string(), "/T", "/F"]).creation_flags(0x0800_0000).stdout(Stdio::null()).stderr(Stdio::null()).status();
+        let _ = crate::program::command("taskkill").args(["/PID", &child.id().to_string(), "/T", "/F"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
     }
     let _ = child.kill();
 }

@@ -10,14 +10,13 @@ use super::archive;
 use super::install::{download, Handle, Stage, MIRROR_TRIES};
 use super::proc::{self, Ending};
 use std::path::Path;
-use std::process::Command;
 use std::time::Duration;
 
 /// Where `url` leads: the address it redirects to, or `None` for an address that answers itself.
 /// An error when the address cannot be reached at all (no mirror can help then).
 fn redirect_target(handle: &Handle, url: &str) -> Result<Option<String>, String> {
     let protos = if url.starts_with("http://") { "=http,https" } else { "=https" };
-    let mut c = Command::new("curl");
+    let mut c = crate::program::command("curl");
     c.args(["-q", "-sS", "--proto", protos, "--proto-redir", protos, "--connect-timeout", "20", "--max-time", "60", "-o"]).arg(null_device()).args(["-w", "%{http_code} %{redirect_url}\n"]).arg(url);
     let run = proc::run(c, Duration::from_secs(120), Some(&handle.cancel), |_| {}).map_err(|e| format!("could not run curl ({e}) — is curl installed?"))?;
     match run.ending {

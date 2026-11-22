@@ -12,7 +12,7 @@ use crate::config::CryptoStandard;
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -215,7 +215,7 @@ impl Gnupg {
 
     /// `(program, the error for "not installed", the fixed options before `args`)`.
     fn exec(&self, (program, missing, fixed): (&str, GpgError, &[&str]), args: &[&str], input: &[u8], limit: Duration, cancel: &AtomicBool) -> Result<Run, GpgError> {
-        let mut cmd = Command::new(program);
+        let mut cmd = crate::program::command(program);
         cmd.args(fixed);
         cmd.args(args);
         if let Some(h) = &self.home {
@@ -280,7 +280,7 @@ impl Gnupg {
 
     /// Is the program there? Its version line, or why not.
     pub fn version(&self, s: CryptoStandard) -> Result<String, GpgError> {
-        let mut cmd = Command::new(self.program(s));
+        let mut cmd = crate::program::command(self.program(s));
         if let Some(h) = &self.home {
             cmd.env("GNUPGHOME", home_text(h));
         }
@@ -842,6 +842,7 @@ pub(crate) mod testkit {
     //! `trustlist.txt` as trusted roots: `gpgsm` cannot issue certificates. A CA, its certificates and its CRL (for revoked ones) come from `openssl` ([`TestCa`]), so no PKCS#12 file is ever imported.
 
     use super::*;
+    use std::process::Command;
     use std::sync::atomic::AtomicUsize;
 
     static COUNT: AtomicUsize = AtomicUsize::new(0);

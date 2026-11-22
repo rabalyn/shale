@@ -24,7 +24,6 @@ use crate::vault::{rel_to_string, Vault};
 pub use look::PrintLook;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
@@ -203,7 +202,7 @@ pub fn export(job: &Job, cancel: &AtomicBool) -> Result<Vec<u8>, String> {
     };
     write("reference.docx", &template)?;
     let out = work.path().join("out.docx");
-    let mut cmd = Command::new(&job.pandoc);
+    let mut cmd = crate::program::command(&job.pandoc);
     let width = reference::text_width(&template, &job.look);
     cmd.args(args(&work.path().join("note.md"), &work.path().join("filter.lua"), &job.root, &work.path().join("reference.docx"), width, &out, job.toc)).current_dir(work.path());
     let run = proc::run(cmd, job.timeout, Some(cancel), |_| {}).map_err(|e| format!("pandoc could not be started: {e}"))?;

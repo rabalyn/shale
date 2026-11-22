@@ -22,7 +22,7 @@
 use crate::calendar::ics::{self, Event};
 use roxmltree::{Document, Node};
 use std::io::Write;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use zeroize::{Zeroize, Zeroizing};
 
 #[derive(Clone, PartialEq)]
@@ -292,7 +292,7 @@ fn request_bytes_opts(method: &str, url: &str, headers: &[&str], body: &str, acc
     // a local http server may redirect to http; the final address is checked below
     let protos = if origin.scheme == "http" { "=http,https" } else { "=https" };
     let max_time = if max_bytes > 10_000_000 { "300" } else { "30" };
-    let mut curl = Command::new("curl");
+    let mut curl = crate::program::command("curl");
     // -q must come first: don't read ~/.curlrc (it could turn off certificate checks or trace the password to a file)
     curl.args(["-q", "-sS", "-i"]).args(if follow { &["-L", "--max-redirs", "5"][..] } else { &[][..] }).args(["--proto", protos, "--proto-redir", protos]).args([
         "--connect-timeout",
@@ -831,6 +831,7 @@ pub(crate) mod tests {
     }
     use std::io::{BufRead, BufReader, Read};
     use std::net::TcpListener;
+    use std::process::Command;
 
     fn has_curl() -> bool {
         Command::new("curl").arg("--version").output().is_ok()

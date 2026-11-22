@@ -4,7 +4,7 @@
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::thread::JoinHandle;
 
 /// The frame rate of every clip: one app frame is 1/30 s of clip time.
@@ -25,7 +25,7 @@ pub fn missing_message(program: &str) -> String {
 
 /// Whether `program` can be started; `Err` is the message in words (BUILD-018).
 pub fn probe(program: &str) -> Result<(), String> {
-    match Command::new(program).arg("-version").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status() {
+    match crate::program::command(program).arg("-version").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status() {
         Ok(s) if s.success() => Ok(()),
         Ok(s) => Err(format!("{program} -version ended with {s}; --record needs a working ffmpeg")),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(missing_message(program)),
@@ -104,7 +104,7 @@ impl Recorder {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
         }
-        let mut child = Command::new(program).args(ffmpeg_args(size, &part_path(path))).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| {
+        let mut child = crate::program::command(program).args(ffmpeg_args(size, &part_path(path))).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 missing_message(program)
             } else {

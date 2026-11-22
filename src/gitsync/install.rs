@@ -141,7 +141,7 @@ pub(super) fn unpack(part: &Part, bytes: &[u8], partial: &Path, index: usize) ->
 fn check_program(part: &Part, partial: &Path, handle: &Handle) -> Result<(), String> {
     let r = &part.recipe;
     let program = partial.join(&r.program);
-    let mut c = Command::new(&program);
+    let mut c = crate::program::command(&program);
     c.arg(if r.kind == Kind::Git { "--version" } else { "version" }).current_dir(partial);
     if let Some(first) = r.path.first() {
         c.env("PATH", crate::pdf::tex::engine::path_with(&partial.join(first)));
@@ -314,7 +314,7 @@ pub fn remove(data: &Path) -> Result<(), String> {
 /// The command that starts Apple's installer of the command line tools (SYNC-029); the dialog is
 /// Apple's, Shale does not wait for it.
 pub fn xcode_select_command() -> Command {
-    let mut c = Command::new("xcode-select");
+    let mut c = crate::program::command("xcode-select");
     c.arg("--install");
     c
 }

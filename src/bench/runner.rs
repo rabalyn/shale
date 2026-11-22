@@ -204,7 +204,7 @@ pub fn iso_date(secs: i64) -> String {
 }
 
 fn git(args: &[&str]) -> Option<String> {
-    let out = std::process::Command::new("git").args(args).output().ok().filter(|o| o.status.success())?;
+    let out = crate::program::command("git").args(args).output().ok().filter(|o| o.status.success())?;
     Some(String::from_utf8_lossy(&out.stdout).trim().to_string()).filter(|s| !s.is_empty())
 }
 
