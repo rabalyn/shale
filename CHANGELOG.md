@@ -10,6 +10,49 @@ its section from this file.
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-11-22
+
+### Added
+
+- The Import dialog leaves out the noise of an e-mail's signature: the signature files of a signed mail (`smime.p7s`, `signature.asc`) and the pictures of signature blocks (logos, social icons, `image001.png`, pictures that are only used after the `-- ` line) start unticked and say why, and you can still tick them. The box **Skip signatures** (also in Settings → Import, on by default) turns this off; a real picture or file attached to the mail stays ticked (IMP-059, IMP-060, IMP-061, CFG-074, #440).
+- Conflict copies of Syncthing, Dropbox, Nextcloud, ownCloud and Seafile (`Note.sync-conflict-….md`, `Note (… conflicted copy …).md`, `Note_conflict-….md`, `Note (SFConflict …).md`) and Shale's own `Note (conflict …).md` are recognised. They carry a "conflict" badge in the file list, and the note shows a banner "Another device changed this note at the same time" with Compare (the changes, or the Markdown side by side), "Keep this one" (its text goes into the original) and "Keep the other"; the copy goes to the trash, and the text it replaces goes there too, never deleted for good. The original note shows the same banner and a badge. While the original exists, the copy is left out of search, links, the graph, backlinks, tasks and tags. Copies of OneDrive, iCloud and Google Drive (`Note 2.md`) cannot be told from a real note by name and stay ordinary notes (NET-015, #475).
+- For developers: the SMB storage checks run without root against the Samba test server through an rclone FUSE mount (not the kernel CIFS client); the kernel SMB and NFS mounts stay a manual run (#477).
+- For developers: property tests (`proptest`) for the history diff (HIST-009…HIST-016): the edit script turns `a` into `b` and keeps as many elements as the longest common subsequence, the comparison, the side-by-side source and the word spans hold every line or word of both texts once and in order, folding hides only unchanged rows, change starts are the first rows of the runs, and the patch applied to the old text gives the new text (#532, #534).
+
+### Changed
+
+- `.avi` and `.ogv` videos now have the video player like the other video types (needs ffmpeg, as before), and one list of media extensions serves the import, the player and the Git LFS patterns: Shale's `.gitattributes` block now also sends avi and ogv files to LFS (MEDIA-001, MEDIA-009, SYNC-017, #206).
+- File history: a history kept on this computer (no git server) is thinned once a day: every version of the last day, one per hour for a month, one per day before that; restored and deleted notes stay. A vault's own git repository is never rewritten (#479).
+- Connecting a server to a vault whose history was kept on this computer now moves those versions into the vault's repository, so they go to the server with the first sync and stay in the history panel (#485).
+- For developers: `scripts/land.sh` refuses a change to a property test of a spec rule unless the rule's row in `docs/spec/` changes too or a commit says `rule-unchanged: <ID> <why>` (DEV-043, #533).
+- For developers: the spec says what gates a release on macOS and Windows: GitHub's main-check skips a release commit, so the release build's own macOS and Windows tests are the gate (#546).
+- For developers: the `lead` skill starts implementing subagents in Claude with `isolation: "worktree"` instead of a hand-made worktree, which the desktop app refused for new files; the hand-made worktree stays for opencode (FORGE-022, #550).
+
+### Fixed
+
+- In a vault that Shale finds in a cloud-synced or network folder (Syncthing, Dropbox, Nextcloud, OneDrive, a share), the open tabs (`.shale/state.json`) and the undo histories (`.shale/undo/`) are kept outside the vault, in Shale's data folder under the vault's ID, so two computers no longer overwrite each other's tabs or leave `state.sync-conflict-….json` files behind. What an older version left in the vault is moved out on the first open. Shale also removes `.shale-tmp-*` files that a crash left (older than a day) and conflict copies of the state and undo files; notes and the settings are never touched (NET-016, #476).
+- The vault rescan uses about 13 % less memory at its peak again (it copied every path for its worker since NET-013) (#521).
+- The Word import and export stop pandoc when it needs more than 2 GB for a file and say so, instead of letting a broken document use up the computer's memory; the developer corpus run gives up on such a file too (#528).
+- A folder path typed as `/~` (or `..~`) made a folder named `~`, which Shale then refused to read back as typed; it is now refused like `~/x` (#537).
+- For developers: property tests (`proptest`) for rules that hold for all inputs, with a shared fixed-seed setup (DEV-042); the first ones check that typed vault paths never leave the vault (#532, #537).
+- Emptying the first cell of a table row written without outer pipes (`a|b`) made the cell vanish, so the others moved left; emptying the last cell of such a row did the same. The cell is now written with its pipe (#535).
+- A table column grid given no room and columns with no minimum width got a width of "not a number" instead of nothing; it is now zero (#535).
+- For developers: property tests for the table text: a cell set reads back and the others stay, the comment line round-trips, cell ranges lie in the line, column widths keep their bounds, and the table finders never leave the note (#535, DEV-042).
+- A calendar file with a time like `20261112T1é000Z` (a non-ASCII character among the digits of a time) or with a duration of an absurd size (`P99999999999999999W`) made Shale stop; such a time or duration is now ignored (#536).
+- For developers: property tests for the iCalendar reader and writer: what is written is read back, every line is folded to 75 octets, the repeat rules of the event dialog are read back, occurrences lie in their window and no text makes the reader panic (#536).
+- A note with a `$` just before a letter such as `é` or `ü` (as in `$é`) made Shale stop with an error when it looked for math in it; it does not any more (#538).
+- A markdown link whose file name has a `#`, written `a%23b.md`, was read as the name `a` with the heading `b.md`, and renaming such a note wrote links that did not read back; the `%23` now stays part of the name (#538).
+- For developers: property tests (`proptest`) check that the Markdown scanners (links, tasks, tags, footnotes, math, headings, wrappers) never panic and return ranges inside the text, and that replacing a link's target keeps the rest of the text (LINK-018, #538).
+- Redoing the deletion of the last lines of a note could hand vim-lite a cursor position past the end of the text (it was clamped there, so nothing showed); undo and redo now return a position inside the text (#539).
+- For developers: property tests for undo and redo (every checkpoint comes back in reverse, redo gives back the text before the undo, a new change drops the redo steps, the 200-step cap, the history read back from the vault) (#539).
+- In a table, a lone backtick typed into a cell no longer pairs with a backtick in the next cell and merges the two cells; it is written as `\`` (#540).
+- An unclosed `[x](` earlier on a line could take in a later link once that link's target was replaced (a rename); a markdown link's destination now follows CommonMark (balanced parentheses, `<…>` without `<`), and an unclosed opener is plain text (#541).
+- For developers: the tests that compare a folder recorded by a fake program with one Shale built resolve links first, so they pass on macOS, where `/var` is a link to `/private/var` (#542).
+- Windows: links to files outside the vault are written as `file:///C:/…` and paths are shown without the `\\?\` prefix and with one kind of separator; a written link is found again (#544).
+- For developers: the Windows tests for outside-media links, paths shown in messages, the Word schema cache and a git folder remote with spaces now expect Windows paths, so they pass on Windows (#545).
+- For developers: the history diff's property tests now also run with a tiny cell limit, so the fallback for a middle part that is too big to compare (`MAX_CELLS`) is checked for many inputs (#547).
+- For developers: the test of the Word export job (DOCX-002) no longer fails now and then with "Text file busy": a cancelled fake pandoc can still run for a moment, so each fake pandoc in the test has a folder of its own instead of the file being written again (#549).
+
 ## [0.7.3] - 2026-11-22
 
 ### Changed
@@ -1932,7 +1975,8 @@ First public version (published before releases were tagged).
 - Ctrl+Shift+F always focuses the search box and selects the previous search.
 - File names with `#` work in links.
 
-[Unreleased]: https://github.com/rabalyn/shale/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/rabalyn/shale/compare/v0.7.4...HEAD
+[0.7.4]: https://github.com/rabalyn/shale/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/rabalyn/shale/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/rabalyn/shale/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/rabalyn/shale/compare/v0.7.0...v0.7.1

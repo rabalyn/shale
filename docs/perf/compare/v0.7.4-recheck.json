@@ -1,0 +1,365 @@
+{
+  "schema": 2,
+  "verdict": "regression",
+  "exit_code": 1,
+  "x": {
+    "commit": "05f22efb72a42f462e8ff0ca4b92367d1aad0e91",
+    "describe": "v0.7.2-9-g05f22efb",
+    "date": "2026-11-22T23:05:46Z",
+    "load": 7.95,
+    "cores": 28,
+    "repeats": 5
+  },
+  "y": {
+    "commit": "b2865e2db81c151e63af1f81b88b6d841ca876d0",
+    "describe": "v0.7.3-65-gb2865e2d",
+    "date": "2026-11-22T23:05:57Z",
+    "load": 7.36,
+    "cores": 28,
+    "repeats": 5
+  },
+  "busy": false,
+  "threshold_time_pct": 10.0,
+  "threshold_bytes_pct": 15.0,
+  "threshold_allocs_pct": 10.0,
+  "rows": [
+    {
+      "id": "vault.open.large",
+      "status": "both",
+      "x_median_ns": 70726542,
+      "y_median_ns": 75132542,
+      "time_delta_pct": 6.2296273441447205,
+      "time_verdict": "noisy",
+      "x_range_ns": [
+        70726542,
+        75889224
+      ],
+      "y_range_ns": [
+        75132542,
+        76443952
+      ],
+      "x_allocs": 862813,
+      "y_allocs": 867819,
+      "allocs_delta_pct": 0.5801952450878696,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 52915621,
+      "y_peak_bytes": 52915621,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "vault.rescan.large",
+      "status": "both",
+      "x_median_ns": 9670189,
+      "y_median_ns": 9686137,
+      "time_delta_pct": 0.16491921719420374,
+      "time_verdict": "ok",
+      "x_range_ns": [
+        9670189,
+        10132885
+      ],
+      "y_range_ns": [
+        9686137,
+        10200746
+      ],
+      "x_allocs": 105864,
+      "y_allocs": 100860,
+      "allocs_delta_pct": -4.726819315347994,
+      "allocs_verdict": "fewer",
+      "x_peak_bytes": 2112329,
+      "y_peak_bytes": 1834373,
+      "bytes_delta_pct": -13.15874563100729,
+      "bytes_verdict": "smaller",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "index.tasks.large",
+      "status": "both",
+      "x_median_ns": 4169094,
+      "y_median_ns": 4131334,
+      "time_delta_pct": -0.9057123682027798,
+      "time_verdict": "ok",
+      "x_range_ns": [
+        4169094,
+        4621852
+      ],
+      "y_range_ns": [
+        4131334,
+        4749197
+      ],
+      "x_allocs": 93395,
+      "y_allocs": 93395,
+      "allocs_delta_pct": 0.0,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 4145318,
+      "y_peak_bytes": 4145318,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "ui.frame.editor.long",
+      "status": "both",
+      "x_median_ns": 2455327,
+      "y_median_ns": 2414840,
+      "time_delta_pct": -1.6489453339616271,
+      "time_verdict": "ok",
+      "x_range_ns": [
+        2455327,
+        2486369
+      ],
+      "y_range_ns": [
+        2414840,
+        2537266
+      ],
+      "x_allocs": 9936,
+      "y_allocs": 9936,
+      "allocs_delta_pct": 0.0,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 19284544,
+      "y_peak_bytes": 19284544,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "ui.frame.backlinks.large",
+      "status": "both",
+      "x_median_ns": 10989712,
+      "y_median_ns": 11166892,
+      "time_delta_pct": 1.6122351522951648,
+      "time_verdict": "ok",
+      "x_range_ns": [
+        10989712,
+        11328700
+      ],
+      "y_range_ns": [
+        11166892,
+        11439746
+      ],
+      "x_allocs": 52631,
+      "y_allocs": 52631,
+      "allocs_delta_pct": 0.0,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 1245784,
+      "y_peak_bytes": 1245784,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "ui.scroll.editor.long",
+      "status": "both",
+      "x_median_ns": 2537679,
+      "y_median_ns": 2544438,
+      "time_delta_pct": 0.2663457434923802,
+      "time_verdict": "ok",
+      "x_range_ns": [
+        2537679,
+        2659300
+      ],
+      "y_range_ns": [
+        2544438,
+        2599527
+      ],
+      "x_allocs": 10060,
+      "y_allocs": 10060,
+      "allocs_delta_pct": 0.0,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 19295683,
+      "y_peak_bytes": 19295683,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "startup.app.large",
+      "status": "both",
+      "x_median_ns": 131382147,
+      "y_median_ns": 149478716,
+      "time_delta_pct": 13.773993965862044,
+      "time_verdict": "REGRESSION",
+      "x_range_ns": [
+        131382147,
+        143243132
+      ],
+      "y_range_ns": [
+        149478716,
+        152735181
+      ],
+      "x_allocs": 1660246,
+      "y_allocs": 1837027,
+      "allocs_delta_pct": 10.64787989249786,
+      "allocs_verdict": "REGRESSION",
+      "x_peak_bytes": 85491001,
+      "y_peak_bytes": 86690138,
+      "bytes_delta_pct": 1.4026470458569082,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "startup.app.recovery.large",
+      "status": "both",
+      "x_median_ns": 132840378,
+      "y_median_ns": 149168081,
+      "time_delta_pct": 12.29121991808846,
+      "time_verdict": "noisy",
+      "x_range_ns": [
+        132840378,
+        153966343
+      ],
+      "y_range_ns": [
+        149168081,
+        153365162
+      ],
+      "x_allocs": 1681074,
+      "y_allocs": 1833907,
+      "allocs_delta_pct": 9.091390384956284,
+      "allocs_verdict": "more",
+      "x_peak_bytes": 85876016,
+      "y_peak_bytes": 87008630,
+      "bytes_delta_pct": 1.3188944396302689,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "ui.type.vim.long",
+      "status": "both",
+      "x_median_ns": 3128656,
+      "y_median_ns": 3153207,
+      "time_delta_pct": 0.7847139474585892,
+      "time_verdict": "ok",
+      "x_range_ns": [
+        3128656,
+        3230463
+      ],
+      "y_range_ns": [
+        3153207,
+        3223849
+      ],
+      "x_allocs": 10004,
+      "y_allocs": 10004,
+      "allocs_delta_pct": 0.0,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 19331031,
+      "y_peak_bytes": 19331031,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "mail.read.message",
+      "status": "both",
+      "x_median_ns": 669423,
+      "y_median_ns": 735216,
+      "time_delta_pct": 9.828314832325749,
+      "time_verdict": "slower",
+      "x_range_ns": [
+        669423,
+        696712
+      ],
+      "y_range_ns": [
+        735216,
+        811126
+      ],
+      "x_allocs": 12663,
+      "y_allocs": 12703,
+      "allocs_delta_pct": 0.3158809128958383,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 18052,
+      "y_peak_bytes": 18052,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "git.sync.initial.large",
+      "status": "both",
+      "x_median_ns": 706160327,
+      "y_median_ns": 650948641,
+      "time_delta_pct": -7.8185765879198135,
+      "time_verdict": "noisy",
+      "x_range_ns": [
+        706160327,
+        728386427
+      ],
+      "y_range_ns": [
+        650948641,
+        732916878
+      ],
+      "x_allocs": 12128,
+      "y_allocs": 12128,
+      "allocs_delta_pct": 0.0,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 294902,
+      "y_peak_bytes": 294903,
+      "bytes_delta_pct": 0.0003390956995883378,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    }
+  ],
+  "regressions": [
+    {
+      "id": "startup.app.large",
+      "metric": "time",
+      "x": 131382147,
+      "y": 149478716,
+      "delta_pct": 13.773993965862044,
+      "confidence": "high"
+    },
+    {
+      "id": "startup.app.large",
+      "metric": "allocs",
+      "x": 1660246,
+      "y": 1837027,
+      "delta_pct": 10.64787989249786,
+      "confidence": "high"
+    }
+  ],
+  "improvements": [
+    {
+      "id": "vault.rescan.large",
+      "metric": "peak_bytes",
+      "x": 2112329,
+      "y": 1834373,
+      "delta_pct": -13.15874563100729,
+      "confidence": "high"
+    },
+    {
+      "id": "vault.rescan.large",
+      "metric": "allocs",
+      "x": 105864,
+      "y": 100860,
+      "delta_pct": -4.726819315347994,
+      "confidence": "high"
+    }
+  ],
+  "tradeoffs": [],
+  "noisy": [
+    "startup.app.recovery.large"
+  ],
+  "changed": [],
+  "skipped": [],
+  "summary": {
+    "compared": 11,
+    "faster": 1,
+    "slower": 2,
+    "regressions": 1,
+    "noisy": 3,
+    "changed": 0,
+    "added": 0,
+    "removed": 0
+  }
+}
