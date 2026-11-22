@@ -651,7 +651,7 @@ impl ShaleApp {
                     let mut items: Vec<(i32, PathBuf, String)> = v.files.iter().filter_map(|f| markdown::fuzzy_score(query, &rel_to_string(&f.rel)).map(|s| (s, f.rel.clone(), f.display_name()))).collect();
                     items.sort_by(|a, b| b.0.cmp(&a.0).then(a.2.cmp(&b.2)));
                     items.truncate(12);
-                    let create = !query.trim().is_empty() && !items.iter().any(|(_, _, n)| n.eq_ignore_ascii_case(query.trim()));
+                    let create = !query.trim().is_empty() && !items.iter().any(|(_, _, n)| crate::vault::name_key(n) == crate::vault::name_key(query.trim()));
                     let n = items.len() + create as usize;
                     let keys = crate::picker::ListKeys::take(ui, &self.keymap);
                     keys.select(sel, n);

@@ -18,7 +18,7 @@ documentation or the kernel's documentation describes it, **not** observed here.
 | Locks | Shale takes no lock in the vault. The tree lock is in-process; the instance lock is in the local data folder. Two Shales on two machines are protected only by DATA-003. |
 | Cloud conflict files | They are ordinary notes to Shale (ran: Syncthing). Not recognised, not shown: [#475](https://github.com/rabalyn/shale/issues/475). |
 | `.shale/` from two devices | **Collides** (ran): `state.sync-conflict-…json` stays for ever, devices overwrite each other's tabs: [#476](https://github.com/rabalyn/shale/issues/476). |
-| Case and Unicode names | Case: fine (DATA-013, VAULT-026..028). **Defect**: NFC and NFD spellings are different notes for links ([#474](https://github.com/rabalyn/shale/issues/474)); Syncthing even renames the local file. |
+| Case and Unicode names | Case: fine (DATA-013, VAULT-026..028). NFC and NFD spellings are one name for links (NET-014, [#474](https://github.com/rabalyn/shale/issues/474)); Syncthing even renames the local file. |
 | A repository in a synced folder | Unsafe, confirmed by how git works and by the clients' behaviour; local-only history must live outside the vault (owner decision #467). |
 
 ## 1. Atomic save and temp files
@@ -157,8 +157,10 @@ synced folder for such vaults, and sweep conflict files.
 - **Unicode** (*ran*): a note made as NFD (`e` + U+0301) on device A arrived on B as one note with the NFC
   name, and Syncthing's log says it *renamed the file on A to NFC* ("Normalized UTF8 encoding of file name").
   macOS/APFS (*documented*) keeps the bytes it was given but compares normalisation-insensitively; HFS+ and SMB
-  servers on macOS store NFD. Shale compares names with `to_lowercase()` only, so `[[Café]]` (NFC, typed on Linux)
-  does not find a note whose name is NFD. **Defect** ([#474](https://github.com/rabalyn/shale/issues/474)).
+  servers on macOS store NFD. Shale compares names in NFC (then lower case), so `[[Café]]` (NFC, typed on Linux)
+  finds a note whose name is NFD; the file name on disk is never changed (NET-014,
+  [#474](https://github.com/rabalyn/shale/issues/474)). Two files that differ only in normal form (Linux) stay two
+  notes that share a name (the usual ambiguity rules).
 - **Illegal names** (*code*): everything Shale writes is made portable (VAULT-026, VAULT-027), a name from outside
   is checked on demand (VAULT-028). A path over 260 characters on Windows is handled by `\\?\` (DATA-013).
 

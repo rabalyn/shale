@@ -188,7 +188,7 @@ pub struct Vault {
     /// link (see `drawing::link_lines`); `tasks` and `tags` stay empty.
     pub drawings: HashMap<PathBuf, NoteIndex>,
     name_index: HashMap<String, Vec<PathBuf>>,
-    /// Lowercase vault path (`projects/plan.md` and `projects/plan`) -> file.
+    /// Key ([`name_key`]) of a vault path (`projects/plan.md` and `projects/plan`) -> file.
     path_index: HashMap<String, PathBuf>,
     /// Path -> position in `files`, for [`Vault::file`] (PERF-002). Built with the name index, which
     /// is rebuilt whenever the set of files changes; a rescan that only changes times keeps the order.
@@ -247,6 +247,19 @@ pub struct LinkUpdate {
     pub changed: Vec<PathBuf>,
     /// canvases that still link to the old name or place (canvases are never written)
     pub canvases: Vec<PathBuf>,
+}
+
+/// The key a link target, a file name or a vault path is compared by (NET-014): Unicode normal
+/// form NFC, then lower case. A macOS file name is NFD (`e` + combining accent), a name typed or
+/// completed elsewhere is NFC; both make the same key. Only a key is made from the text: the file
+/// on disk and the text of a link keep their form. Every lookup of a name or a path in the index
+/// goes through this.
+pub fn name_key(s: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    if s.is_ascii() {
+        return s.to_ascii_lowercase();
+    }
+    s.nfc().collect::<String>().to_lowercase()
 }
 
 /// The key the file tree and the lists sort paths by: the path in lower case. Sort with
@@ -640,18 +653,22 @@ impl Vault {
         self.path_index.clear();
         self.file_pos = self.files.iter().enumerate().map(|(i, f)| (f.rel.clone(), i)).collect();
         for f in &self.files {
-            self.name_index.entry(f.link_name.to_lowercase()).or_default().push(f.rel.clone());
+            self.name_index.entry(name_key(&f.link_name)).or_default().push(f.rel.clone());
             // also allow the full file name (`Note.md`, `Plan.excalidraw.md`)
-            let full = f.rel.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
-            if full != f.link_name.to_lowercase() {
+            let full = f.rel.file_name().map(|n| name_key(&n.to_string_lossy())).unwrap_or_default();
+            if full != name_key(&f.link_name) {
                 self.name_index.entry(full).or_default().push(f.rel.clone());
             }
-            let path = rel_to_string(&f.rel).to_lowercase();
+            let path = name_key(&rel_to_string(&f.rel));
             if let Some(short) = crate::drawing::excalidraw_md::strip_suffix_ci(&path, ".md") {
                 // an exact file name wins over `X.md` written without its `.md`
                 self.path_index.entry(short.to_string()).or_insert_with(|| f.rel.clone());
             }
-            self.path_index.insert(path, f.rel.clone());
+            // two files whose paths differ only in case or normal form: the first one stays (NET-014)
+            let taken_by_a_full_path = self.path_index.get(&path).is_some_and(|other| name_key(&rel_to_string(other)) == path);
+            if !taken_by_a_full_path {
+                self.path_index.insert(path, f.rel.clone());
+            }
         }
     }
 
@@ -754,14 +771,14 @@ impl Vault {
         }
         let from_dir = from.and_then(|f| f.parent()).unwrap_or(Path::new(""));
         if target.contains('/') {
-            let find = |p: Option<String>| p.and_then(|p| self.path_index.get(&p.to_lowercase()).cloned());
+            let find = |p: Option<String>| p.and_then(|p| self.path_index.get(&name_key(&p)).cloned());
             if is_relative_link(target) {
                 return find(normalize_path(from_dir, target));
             }
             let t = target.trim_start_matches('/');
             return find(normalize_path(Path::new(""), t)).or_else(|| if from.is_some() && !target.starts_with('/') { find(normalize_path(from_dir, t)) } else { None });
         }
-        let cands = self.name_index.get(&target.to_lowercase())?;
+        let cands = self.name_index.get(&name_key(target))?;
         if cands.len() == 1 {
             return Some(cands[0].clone());
         }
@@ -821,7 +838,7 @@ impl Vault {
         if t.is_empty() || t.contains('/') {
             return None;
         }
-        let n = self.name_index.get(&t.to_lowercase())?.len();
+        let n = self.name_index.get(&name_key(t))?.len();
         if n < 2 {
             return None;
         }
@@ -837,7 +854,7 @@ impl Vault {
             return vec![];
         }
         let name = t.rsplit('/').next().unwrap_or(t);
-        let mut c = self.name_index.get(&name.to_lowercase()).cloned().unwrap_or_default();
+        let mut c = self.name_index.get(&name_key(name)).cloned().unwrap_or_default();
         c.sort_by_cached_key(|p| sort_key(p));
         c
     }
@@ -847,7 +864,7 @@ impl Vault {
     pub fn link_hint(&self, target: &str, from: Option<&Path>) -> Option<String> {
         let what = |paths: &[PathBuf]| if paths.iter().all(|p| self.file(p).map(|f| f.kind == FileKind::Note).unwrap_or(false)) { "notes" } else { "files" };
         if let Some((n, opens)) = self.ambiguity(target, from) {
-            let all = self.name_index.get(&target.trim().to_lowercase()).cloned().unwrap_or_default();
+            let all = self.name_index.get(&name_key(target.trim())).cloned().unwrap_or_default();
             let shown = self.file(&opens).map(|f| markdown::strip_md_ext(&rel_to_string(&f.rel)).to_string()).unwrap_or_default();
             return Some(format!("{n} {} are called “{}” – opens {shown}", what(&all), target.trim()));
         }
@@ -891,7 +908,7 @@ impl Vault {
     /// Notes that mention the name of `rel` in plain text without linking it.
     pub fn unlinked_mentions(&self, rel: &Path) -> Vec<(PathBuf, Vec<(usize, String)>)> {
         let Some(f) = self.file(rel) else { return vec![] };
-        let name = f.display_name().to_lowercase();
+        let name = name_key(&f.display_name());
         if name.len() < 3 {
             return vec![];
         }
@@ -907,9 +924,9 @@ impl Vault {
             let link_ranges: Vec<_> = n.links.iter().map(|l| l.range.clone()).collect();
             let mut lines = Vec::new();
             for (li, (off, line)) in markdown::lines_with_offsets(&n.text).into_iter().enumerate() {
-                let lower = line.to_lowercase();
+                let lower = name_key(line);
                 if lower.len() != line.len() {
-                    // non-ASCII case folding changed lengths; fall back to a simple contains check
+                    // non-ASCII case folding or normalisation changed lengths; fall back to a simple contains check
                     if lower.contains(&name) && !n.links.iter().any(|l| l.range.start >= off && l.range.end <= off + line.len()) {
                         lines.push((li, line.trim().to_string()));
                     }
@@ -970,7 +987,7 @@ impl Vault {
     fn outgoing_links(&self, rel: &Path) -> Vec<(&LinkSpan, Option<PathBuf>)> {
         let Some(n) = self.notes.get(rel).or_else(|| self.drawings.get(rel)) else { return vec![] };
         let mut seen = HashSet::new();
-        n.links.iter().zip(n.resolved.iter()).filter(|(l, _)| !l.target.is_empty() && seen.insert(l.target.to_lowercase())).map(|(l, r)| (l, r.clone())).collect()
+        n.links.iter().zip(n.resolved.iter()).filter(|(l, _)| !l.target.is_empty() && seen.insert(name_key(&l.target))).map(|(l, r)| (l, r.clone())).collect()
     }
 
     /// Every task in every note, sorted by note path.
@@ -1424,7 +1441,7 @@ impl Vault {
                         if !include_missing || l.target.is_empty() || l.is_outside() {
                             continue;
                         }
-                        let key = format!("missing:{}", l.target.to_lowercase());
+                        let key = format!("missing:{}", name_key(&l.target));
                         *idx.entry(key.clone()).or_insert_with(|| {
                             nodes.push(GraphNode { key, label: l.target.clone(), rel: None, kind: FileKind::Other });
                             nodes.len() - 1
@@ -2039,6 +2056,131 @@ mod tests {
         assert_eq!(res(&v, "plan", "x/y/Note.md").as_deref(), Some("x/y/Plan.md"), "same folder first");
         assert_eq!(res(&v, "Plan", "Top.md").as_deref(), Some("a/Plan.md"), "then fewest levels, then path");
         assert_eq!(res(&v, "Plan.md", "Top.md").as_deref(), Some("a/Plan.md"), ".md is ignored");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    const NFC: &str = "Caf\u{e9}";
+    const NFD: &str = "Cafe\u{301}";
+
+    // spec: NET-014
+    #[test]
+    fn net_014_a_link_in_one_normal_form_finds_a_file_named_in_the_other() {
+        let (v, d) = vault_with("nfc-find", &[(&format!("{NFD}.md"), ""), (&format!("Ge{}.md", "\u{e4}"), ""), (&format!("Dir/Na{NFC}.md"), ""), (&format!("{NFC}-dir/Plan.md"), ""), ("Top.md", "")]);
+        assert_eq!(res(&v, NFC, "Top.md"), Some(format!("{NFD}.md")), "an NFC link, an NFD file");
+        assert_eq!(res(&v, &NFC.to_uppercase(), "Top.md"), Some(format!("{NFD}.md")), "and the letter case is still ignored");
+        assert_eq!(res(&v, &format!("{NFC}.md"), "Top.md"), Some(format!("{NFD}.md")), "also with its extension");
+        assert_eq!(res(&v, "Gea\u{308}", "Top.md"), Some("Ge\u{e4}.md".into()), "an NFD link, an NFC file");
+        assert_eq!(res(&v, &format!("Dir/Na{NFD}"), "Top.md"), Some(format!("Dir/Na{NFC}.md")), "a path with an NFD name");
+        assert_eq!(res(&v, &format!("{NFD}-dir/Plan"), "Top.md"), Some(format!("{NFC}-dir/Plan.md")), "a path with an NFD folder");
+        assert!(v.exists(NFC, Some(Path::new("Top.md"))));
+        assert!(v.files.iter().any(|f| f.rel == Path::new(&format!("{NFD}.md"))), "the name on disk is what it was");
+        assert_eq!(v.ambiguity(NFC, None), None);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: NET-014
+    #[test]
+    fn net_014_backlinks_and_the_graph_see_a_link_in_the_other_normal_form() {
+        let (v, d) = vault_with("nfc-back", &[(&format!("{NFD}.md"), "x"), ("A.md", &format!("see [[{NFC}]]")), ("B.md", &format!("see [[{NFD}|b]] and [[{NFC}]]"))]);
+        let back = v.backlinks(Path::new(&format!("{NFD}.md")));
+        let from: Vec<_> = back.iter().map(|(p, _)| rel_to_string(p)).collect();
+        assert_eq!(from, ["A.md", "B.md"]);
+        assert_eq!(v.outgoing(Path::new("B.md")).len(), 1, "both spellings are one outgoing link");
+        assert!(v.outgoing(Path::new("A.md"))[0].2.is_some());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: NET-014
+    #[test]
+    fn net_014_a_red_link_in_both_forms_is_one_missing_node_in_the_graph() {
+        let (v, d) = vault_with("nfc-graph", &[("A.md", &format!("[[{NFC}x]] [[{NFD}x]]"))]);
+        let (nodes, _) = v.graph(true);
+        assert_eq!(nodes.iter().filter(|n| n.rel.is_none()).count(), 1);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: NET-014
+    #[test]
+    fn net_014_a_rename_rewrites_links_written_in_the_other_normal_form() {
+        let (mut v, d) = vault_with("nfc-rename", &[(&format!("{NFD}.md"), ""), ("A.md", &format!("[[{NFC}]] and [[{NFD}#H|x]] and [[Other]]")), ("Other.md", "")]);
+        v.rename(Path::new(&format!("{NFD}.md")), Path::new("Kaffee.md"), true).unwrap();
+        assert_eq!(text(&v, "A.md"), "[[Kaffee]] and [[Kaffee#H|x]] and [[Other]]");
+        // and back: the new link text is the file's name as it is on disk
+        v.rename(Path::new("Kaffee.md"), Path::new(&format!("{NFC}.md")), true).unwrap();
+        assert_eq!(text(&v, "A.md"), format!("[[{NFC}]] and [[{NFC}#H|x]] and [[Other]]"));
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: NET-014
+    #[test]
+    fn net_014_a_move_keeps_a_link_in_the_other_form_working() {
+        let (mut v, d) = vault_with("nfc-move", &[(&format!("{NFD}.md"), ""), ("Dir/Other.md", ""), ("A.md", &format!("[[{NFC}]]"))]);
+        v.rename(Path::new(&format!("{NFD}.md")), Path::new(&format!("Dir/{NFD}.md")), true).unwrap();
+        assert_eq!(res(&v, NFC, "A.md"), Some(format!("Dir/{NFD}.md")), "a name link still finds it");
+        assert_eq!(text(&v, "A.md"), format!("[[{NFC}]]"), "and needs no rewrite");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: NET-014
+    #[test]
+    fn net_014_fixing_a_red_path_link_finds_the_file_named_in_the_other_form() {
+        let (mut v, d) = vault_with("nfc-fix", &[(&format!("Sub/{NFD}.md"), ""), ("A.md", &format!("[[Gone/{NFC}]]"))]);
+        assert_eq!(v.fix_candidates(&format!("Gone/{NFC}"), Some(Path::new("A.md"))), [PathBuf::from(format!("Sub/{NFD}.md"))]);
+        assert_eq!(v.auto_fix_links(Path::new("A.md")).unwrap(), 1);
+        assert_eq!(res(&v, &format!("Sub/{NFC}"), "A.md"), Some(format!("Sub/{NFD}.md")));
+        assert!(text(&v, "A.md").starts_with("[[Sub/"));
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: NET-014
+    #[test]
+    fn net_014_two_files_that_differ_only_in_normal_form_are_ambiguous_and_the_first_wins() {
+        let d = temp_vault("nfc-twins");
+        for (n, t) in [(format!("{NFC}.md"), "nfc"), (format!("{NFD}.md"), "nfd")] {
+            fs::write(d.join(n), t).unwrap();
+        }
+        if fs::read_dir(&d).unwrap().count() < 2 {
+            println!("skipped: this file system keeps one file for both normal forms");
+            let _ = fs::remove_dir_all(&d);
+            return;
+        }
+        let v = Vault::open(&d).unwrap();
+        // both are listed, none is hidden; the one that sorts first by its path opens, as for case
+        let (n, opens) = v.ambiguity(NFC, None).expect("two files share the name");
+        assert_eq!(n, 2);
+        assert_eq!(opens, PathBuf::from(format!("{NFD}.md")));
+        assert_eq!(res(&v, NFC, "Top.md"), Some(format!("{NFD}.md")));
+        assert_eq!(res(&v, NFD, "Top.md"), Some(format!("{NFD}.md")), "the same file whatever form the link has");
+        assert_eq!(res(&v, &format!("{NFC}.md"), "Top.md"), Some(format!("{NFD}.md")), "a path link too: the first in the list");
+        assert_eq!(res(&v, &format!("/{NFC}"), "Top.md"), Some(format!("{NFD}.md")));
+        assert!(v.link_hint(NFC, None).is_some_and(|h| h.contains("2 notes are called")));
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: NET-014
+    #[test]
+    fn net_014_the_key_is_normal_form_then_lower_case_and_ascii_is_left_alone() {
+        assert_eq!(name_key(NFD), name_key(NFC));
+        assert_eq!(name_key(&NFC.to_uppercase()), name_key(NFD));
+        assert_eq!(name_key("Plan/NOTE.md"), "plan/note.md");
+        assert_eq!(name_key(""), "");
+        assert_ne!(name_key("Cafe"), name_key(NFC), "an accent is still a difference");
+    }
+
+    // spec: NET-014
+    #[test]
+    fn net_014_the_fuzzy_match_of_link_completion_compares_in_normal_form() {
+        assert!(markdown::fuzzy_score(NFC, NFD).unwrap() >= 1000, "the same name");
+        assert!(markdown::fuzzy_score("caf", NFD).is_some());
+        assert!(markdown::fuzzy_score(&format!("{NFD}x"), NFC).is_none());
+    }
+
+    // spec: NET-014
+    #[test]
+    fn net_014_a_mention_in_the_other_normal_form_is_found() {
+        let (v, d) = vault_with("nfc-mention", &[(&format!("{NFD}.md"), ""), ("A.md", &format!("a {NFC} here")), ("B.md", &format!("link [[{NFC}]] only"))]);
+        let m = v.unlinked_mentions(Path::new(&format!("{NFD}.md")));
+        assert_eq!(m.iter().map(|(p, _)| rel_to_string(p)).collect::<Vec<_>>(), ["A.md"]);
         let _ = fs::remove_dir_all(&d);
     }
 

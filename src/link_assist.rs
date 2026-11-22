@@ -553,7 +553,7 @@ impl LinkAssist {
                 labels.push(name);
             }
             let qt = pq.trim();
-            if !qt.is_empty() && !labels.iter().any(|n| n.eq_ignore_ascii_case(qt)) {
+            if !qt.is_empty() && !labels.iter().any(|n| crate::vault::name_key(n) == crate::vault::name_key(qt)) {
                 list.push((markdown::link_safe_name(qt), false));
                 labels.push(format!("＋ New contact “{}” in {}", markdown::link_safe_name(qt), self.people_dir.trim().trim_matches('/')));
             }
@@ -563,7 +563,7 @@ impl LinkAssist {
             items.dedup_by(|a, b| a.1 == b.1);
             list = items.into_iter().take(8).map(|(_, n)| (n, true)).collect();
             let qt = q.trim();
-            if !qt.is_empty() && !list.iter().any(|(n, _)| n.eq_ignore_ascii_case(qt)) {
+            if !qt.is_empty() && !list.iter().any(|(n, _)| crate::vault::name_key(n) == crate::vault::name_key(qt)) {
                 list.push((qt.to_string(), false));
             }
             labels = list.iter().map(|(n, e)| if *e { n.clone() } else { format!("＋ Create “{n}”") }).collect();
@@ -773,4 +773,25 @@ pub fn link_query(text: &str, cursor_char: usize) -> Option<(usize, String)> {
         return None;
     }
     Some((line_start + open + 2, q.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // spec: NET-014
+    #[test]
+    fn net_014_typing_a_name_in_the_other_normal_form_finds_the_note_and_offers_no_duplicate() {
+        let dir = std::env::temp_dir().join(format!("shale-test-nfc-assist-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("Cafe\u{301}.md"), "").unwrap();
+        let vault = Vault::open(&dir).unwrap();
+        let mut assist = LinkAssist::new(egui::Id::unique("nfc"));
+        assist.fill_suggestions(&vault, "Caf\u{e9}", "");
+        assert_eq!(assist.ac_items, [("Cafe\u{301}".to_string(), true)], "the note is listed under the name on disk, and no “Create” entry for the same name");
+        assist.fill_suggestions(&vault, "Caf\u{e9}s", "");
+        assert_eq!(assist.ac_items, [("Caf\u{e9}s".to_string(), false)], "another name is still offered for creation");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

@@ -1174,8 +1174,8 @@ pub fn fuzzy_score(query: &str, candidate: &str) -> Option<i32> {
     if query.is_empty() {
         return Some(0);
     }
-    let q = query.to_lowercase();
-    let c = candidate.to_lowercase();
+    let q = crate::vault::name_key(query);
+    let c = crate::vault::name_key(candidate);
     if c == q {
         return Some(1000);
     }
