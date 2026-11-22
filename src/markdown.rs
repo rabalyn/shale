@@ -233,10 +233,11 @@ pub fn find_links(text: &str) -> Vec<LinkSpan> {
                             if !raw.is_empty() && (!is_external(raw) || file_link) {
                                 let embed = i > 0 && b[i - 1] == b'!';
                                 let start = if embed { i - 1 } else { i };
-                                let decoded = if file_link { raw.to_string() } else { percent_decode(raw) };
-                                let (target, heading) = match decoded.find('#').filter(|_| !file_link) {
-                                    Some(p) => (decoded[..p].to_string(), Some(decoded[p + 1..].to_string())),
-                                    None => (decoded.clone(), None),
+                                // the `#` that starts the heading is the written one: a `%23` is a `#` of the name (#538)
+                                let (target, heading) = match raw.find('#').filter(|_| !file_link) {
+                                    Some(p) => (percent_decode(&raw[..p]), Some(percent_decode(&raw[p + 1..]))),
+                                    None if file_link => (raw.to_string(), None),
+                                    None => (percent_decode(raw), None),
                                 };
                                 // Use the file name part: folder/Note.md -> keep the path for resolution.
                                 out.push(LinkSpan {
@@ -648,7 +649,7 @@ fn inline_math(line: &str, off: usize, li: usize, out: &mut Vec<MathSpan>) {
                 k += 1 + line[k + 1..].chars().next().map_or(0, char::len_utf8);
             } else if let Some(r) = code.iter().find(|r| r.contains(&k)) {
                 k = r.end;
-            } else if line[k..].starts_with(want) {
+            } else if b[k..].starts_with(want.as_bytes()) {
                 return Some(k);
             } else {
                 k += 1;
@@ -1023,11 +1024,7 @@ pub fn written_target(text: &str, link: &LinkSpan) -> String {
     }
     let (_, core, _) = split_md_target(raw);
     let core = core.trim_start_matches('<').trim_end_matches('>');
-    let decoded = percent_decode(core);
-    match decoded.find('#') {
-        Some(p) => decoded[..p].to_string(),
-        None => decoded,
-    }
+    percent_decode(core.find('#').map_or(core, |p| &core[..p]))
 }
 
 /// Leading space, the target itself and trailing space of a markdown link's `(…)` part.
@@ -1703,6 +1700,29 @@ a
 
     fn tex_of(text: &str) -> Vec<(String, bool, bool)> {
         find_math(text).into_iter().map(|m| (text[m.tex].to_string(), m.display, m.block)).collect()
+    }
+
+    // spec: LINK-001
+    #[test]
+    fn a_percent_encoded_hash_is_part_of_the_name_and_a_written_one_starts_the_heading() {
+        let text = "[t](a%23b.md#h%20x)";
+        let l = &find_links(text)[0];
+        assert_eq!((l.target.as_str(), l.heading.as_deref()), ("a#b", Some("h x")));
+        assert_eq!(written_target(text, l), "a#b.md");
+        // a new target with a `#` is written escaped, and the link reads back with it (#538)
+        let (r, new) = (&l.target_range, format!("{}{}{}", &text[..l.target_range.start], replace_target(text, l, "#"), &text[l.target_range.end..]));
+        assert_eq!((new.as_str(), r.start), ("[t](%23#h%20x)", 4));
+        assert_eq!(find_links(&new)[0].target, "#");
+    }
+
+    // spec: EDIT-046
+    #[test]
+    fn a_dollar_before_a_multibyte_character_is_no_math_and_no_panic() {
+        // the scan for the closing `$` stepped over bytes and sliced inside the `é` (#538)
+        for text in ["$é", "$é$$", "$$é", "$ü ü", "$$📅 x"] {
+            let _ = find_math(text);
+        }
+        assert_eq!(find_math("$é$").len(), 1);
     }
 
     // spec: EDIT-046

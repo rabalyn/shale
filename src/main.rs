@@ -87,6 +87,8 @@ mod link_preview_ui_tests;
 mod lists;
 mod mail;
 mod markdown;
+#[cfg(test)]
+mod markdown_tests;
 mod math;
 #[cfg(test)]
 mod math_ui_tests;
