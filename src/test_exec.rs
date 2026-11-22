@@ -15,14 +15,17 @@
 #![cfg(test)]
 
 use std::path::Path;
+#[cfg(unix)]
 use std::process::{Command, Stdio};
+#[cfg(unix)]
 use std::time::{Duration, Instant};
 
 /// The variable that makes a script written by `write_script` end before its own lines.
 const WARM_UP: &str = "SHALE_TEST_WARM_UP";
 
 /// Write `text`, a script whose first line is `#!/bin/sh` or `#!/bin/bash`, to `path` as an
-/// executable (its folder is made when missing) and return when it can be started.
+/// executable (its folder is made when missing) and return when it can be started. Where there
+/// are no executable bits and no `ETXTBSY` (Windows) the file is only written.
 pub fn write_script(path: &Path, text: &str) {
     let (shebang, rest) = text.split_once('\n').unwrap_or((text, ""));
     assert!(shebang == "#!/bin/sh" || shebang == "#!/bin/bash", "a test script starts with #!/bin/sh or #!/bin/bash, not {shebang:?}");
@@ -30,11 +33,18 @@ pub fn write_script(path: &Path, text: &str) {
         std::fs::create_dir_all(dir).unwrap();
     }
     std::fs::write(path, format!("{shebang}\n[ -z \"${{{WARM_UP}-}}\" ] || exit 0\n{rest}")).unwrap();
-    make_executable(path);
+    #[cfg(unix)]
+    start_once(path);
+}
+
+#[cfg(unix)]
+fn start_once(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         match Command::new(path).env(WARM_UP, "1").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status() {
-            Err(e) if is_busy(&e) && Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
+            Err(e) if e.raw_os_error() == Some(libc::ETXTBSY) && Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
             Err(e) => panic!("{} cannot be started: {e}", path.display()),
             Ok(status) => {
                 assert!(status.success(), "the first start of {} ended with {status}", path.display());
@@ -42,23 +52,4 @@ pub fn write_script(path: &Path, text: &str) {
             }
         }
     }
-}
-
-#[cfg(unix)]
-fn make_executable(path: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
-}
-
-#[cfg(not(unix))]
-fn make_executable(_: &Path) {}
-
-#[cfg(unix)]
-fn is_busy(e: &std::io::Error) -> bool {
-    e.raw_os_error() == Some(libc::ETXTBSY)
-}
-
-#[cfg(not(unix))]
-fn is_busy(_: &std::io::Error) -> bool {
-    false
 }
