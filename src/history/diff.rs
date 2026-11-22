@@ -19,12 +19,17 @@ const MAX_CELLS: usize = 4_000_000;
 
 /// The edit script from `a` to `b`: removed elements come before inserted ones within a changed part.
 pub fn edits<T: Eq>(a: &[T], b: &[T]) -> Vec<Edit> {
+    edits_within(a, b, MAX_CELLS)
+}
+
+/// `edits` with the cell limit passed in, so that the tests reach the fallback with small inputs.
+fn edits_within<T: Eq>(a: &[T], b: &[T], max_cells: usize) -> Vec<Edit> {
     let start = a.iter().zip(b).take_while(|(x, y)| x == y).count();
     let end = a[start..].iter().rev().zip(b[start..].iter().rev()).take_while(|(x, y)| x == y).count();
     let (ma, mb) = (&a[start..a.len() - end], &b[start..b.len() - end]);
     let mut out: Vec<Edit> = (0..start).map(|i| Edit::Same(i, i)).collect();
     let (n, m) = (ma.len(), mb.len());
-    if n == 0 || m == 0 || (n + 1).saturating_mul(m + 1) > MAX_CELLS {
+    if n == 0 || m == 0 || (n + 1).saturating_mul(m + 1) > max_cells {
         out.extend((0..n).map(|i| Edit::Del(start + i)));
         out.extend((0..m).map(|j| Edit::Ins(start + j)));
     } else {
