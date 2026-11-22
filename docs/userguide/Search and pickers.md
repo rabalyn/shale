@@ -10,7 +10,7 @@ Back to [[Start here]].
 (below), shown in the sidebar: it stays open while you work, is narrow, and lists up to 20 lines
 of each note (the picker lists 3). The results are grouped under **Notes**, **Mail** (only while
 your mail is set up and open) and **Posts** (the posts of your feeds that Shale loaded), each
-group with its count (`200+` when there are more). What you can type (wildcards, `"phrases"`,
+group with its count (`200+` when there are more). What you can type (wildcards, every word of mail and posts as a word start, `"phrases"`,
 the fields `from:`, `subject:`, `in:`, `date:` of mail and posts) is in [[Search syntax]].
 
 ![[sidebar-search.png]]

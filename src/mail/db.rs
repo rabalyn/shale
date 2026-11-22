@@ -873,11 +873,13 @@ pub fn fts_query_in(input: &str, fields: &[(&str, &str)]) -> Option<String> {
     build_fts_query(input, fields, false)
 }
 
-/// [`fts_query_in`] where `*` and `?` in a plain word (not in a "phrase") are wildcards as far as
-/// FTS5 can do them (NAV-023): the word is cut before the first wildcard and what is left of it
-/// is a prefix (`mee*`, `mee?ing` and `meeting*` all become prefix queries). FTS5 cannot match
-/// the end of a word or one letter, so `?` and an inner `*` give more than the pattern says,
-/// and a word that starts with a wildcard is left out.
+/// [`fts_query_in`] for the unified search (NAV-023): every plain word (not a "phrase") is a
+/// prefix term, also after a field prefix (`meet` and `from:ann` become `"meet"*` and
+/// `from : "ann"*`), and `*` and `?` in it are wildcards as far as FTS5 can do them: the word is
+/// cut before the first wildcard and what is left of it is the prefix (`mee*`, `mee?ing` and
+/// `meeting*` all become prefix queries). FTS5 cannot match the end of a word or one letter, so
+/// `?` and an inner `*` give more than the pattern says, and a word that starts with a wildcard
+/// is left out. A "quoted phrase" stays exact.
 pub fn fts_query_wild(input: &str, fields: &[(&str, &str)]) -> Option<String> {
     build_fts_query(input, fields, true)
 }
@@ -913,8 +915,8 @@ fn build_fts_query(input: &str, fields: &[(&str, &str)], wild: bool) -> Option<S
             if wild {
                 if let Some(at) = text.find(['*', '?']) {
                     text.truncate(at);
-                    prefix = true;
                 }
+                prefix = true;
             }
         }
         if i < chars.len() && chars[i] == '"' && text.is_empty() {
@@ -924,6 +926,7 @@ fn build_fts_query(input: &str, fields: &[(&str, &str)], wild: bool) -> Option<S
                 i += 1;
             }
             text = chars[start..i].iter().collect();
+            prefix = false; // a phrase stays exact
             i += 1; // the closing quote (or the end)
         }
         if !text.chars().any(|c| c.is_alphanumeric()) {
@@ -1266,7 +1269,11 @@ mod tests {
         let q = |s: &str| fts_query_wild(s, &FIELDS);
         assert_eq!(q("mee*").as_deref(), Some("\"mee\"*"));
         assert_eq!(q("mee?ing").as_deref(), Some("\"mee\"*"), "cut before the first wildcard");
-        assert_eq!(q("a*b*c Plan").as_deref(), Some("\"a\"* \"Plan\""));
+        assert_eq!(q("a*b*c Plan").as_deref(), Some("\"a\"* \"Plan\"*"), "a word without a wildcard is a prefix too");
+        assert_eq!(q("meet").as_deref(), Some("\"meet\"*"));
+        assert_eq!(q("from:ann").as_deref(), Some("from_addr : \"ann\"*"), "also after a field prefix");
+        assert_eq!(q("subject:\"year end\"").as_deref(), Some("subject : \"year end\""), "a phrase after a field stays exact");
+        assert_eq!(q("a AND b").as_deref(), Some("\"a\"* \"AND\"* \"b\"*"), "AND is a word");
         assert_eq!(q("subject:inv*").as_deref(), Some("subject : \"inv\"*"), "a field prefix still works");
         assert_eq!(q("*ing"), None, "a word that starts with a wildcard is left out");
         assert_eq!(q("\"mee*\"").as_deref(), Some("\"mee*\""), "a phrase has no wildcards");
@@ -1279,7 +1286,10 @@ mod tests {
         let subjects = |s: &str| search_wild(&c, s, 10).unwrap().into_iter().map(|m| m.subject).collect::<Vec<_>>();
         assert_eq!(subjects("mee*"), ["Lunch", "Team meetings"], "newest first");
         assert_eq!(subjects("meeti?g"), ["Team meetings"]);
-        assert_eq!(subjects("meet"), ["Lunch"], "without a wildcard whole words only");
+        assert_eq!(subjects("meet"), ["Lunch", "Team meetings"], "a word is a prefix");
+        assert_eq!(subjects("\"meet\""), ["Lunch"], "a phrase is exact");
+        assert_eq!(subjects("from:a@x subject:lun"), ["Lunch"], "a field word is a prefix");
+        assert!(subjects("*ing").is_empty(), "a word that starts with a wildcard is dropped");
         assert!(subjects("*").is_empty());
         assert_eq!(search_wild(&c, "mee*", 1).unwrap().len(), 1, "the limit holds");
     }

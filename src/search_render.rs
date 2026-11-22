@@ -148,21 +148,24 @@ fn job_of(pieces: Vec<Piece>, marks: &[Range<usize>]) -> LayoutJob {
 }
 
 /// The marks of the words of a query in a text of mail or posts (NAV-059): each word of the
-/// query (a field prefix such as `from:` is left out, quotes too) is marked where it is a whole
-/// word of the text, a word with a wildcard where a word of the text starts with it; case is
-/// ignored. This is what the full-text search matches, simplified: no stemming.
+/// query (a field prefix such as `from:` is left out, quotes too) is marked where a word of the
+/// text starts with it, as the search matches it (`meet` marks the start of "meeting"); a word
+/// at a quote (`"bread"`, a word of a "phrase") only where it is a whole word; case is ignored.
+/// This is what the full-text search matches, simplified: no stemming.
 pub fn word_marks(text: &str, query: &str) -> Vec<Range<usize>> {
     let mut marks = Vec::new();
     for raw in query.split_whitespace() {
+        let quoted = raw.starts_with('"') || raw.ends_with('"');
         let word = raw.trim_matches('"');
         let word = match word.split_once(':') {
             Some((field, rest)) if !rest.is_empty() && field.chars().all(char::is_alphabetic) => rest,
             _ => word,
         };
-        let (word, prefix) = match word.find(['*', '?']) {
-            Some(at) => (&word[..at], true),
-            None => (word, false),
+        let word = match word.find(['*', '?']) {
+            Some(at) => &word[..at],
+            None => word,
         };
+        let prefix = !quoted;
         let word = word.trim_matches('"').to_lowercase();
         if word.is_empty() {
             continue;
@@ -300,8 +303,11 @@ mod tests {
     fn the_words_of_a_query_are_marked_in_mail_and_post_text() {
         let text = "Banana bread and a BANANAS plan, no bananas";
         let words = |q: &str| word_marks(text, q).into_iter().map(|r| &text[r]).collect::<Vec<_>>();
-        assert_eq!(words("banana"), ["Banana"], "a word is a whole word, case ignored");
-        assert_eq!(words("banana*"), ["Banana", "BANANA", "banana"], "a wildcard makes a prefix");
+        assert_eq!(words("banana"), ["Banana", "BANANA", "banana"], "a word marks where a word starts with it (only the typed part), case ignored");
+        assert_eq!(words("banana*"), ["Banana", "BANANA", "banana"], "a wildcard cuts the word");
+        assert_eq!(words("anana"), Vec::<&str>::new(), "not inside a word");
+        assert_eq!(words("\"banana\""), ["Banana"], "a quoted word is a whole word");
+        assert_eq!(words("from:ban"), ["Ban", "BAN", "ban"], "a field word is a prefix");
         assert_eq!(words("bread plan"), ["bread", "plan"], "each word of the query");
         assert_eq!(words("from:plan"), ["plan"], "a field prefix is left out");
         assert_eq!(words("\"bread\""), ["bread"], "quotes too");
