@@ -10,7 +10,6 @@ use crate::gitsync::{self, Git, Options, TreeLock};
 use crate::vault::Vault;
 use std::hint::black_box;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::AtomicBool;
 
 // ---- import ----------------------------------------------------------------------------------

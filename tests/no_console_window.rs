@@ -34,13 +34,17 @@ fn open_count(line: &str) -> i32 {
         .sum()
 }
 
-/// The lines of production code with their numbers: those that are not in an item behind
+/// The lines of production code with their numbers: none for a file that is test code as a whole
+/// (`#![cfg(test)]` at its top); else those that are not in an item behind
 /// `#[cfg(test)]` (or `#[cfg(all(test, …))]`: a `mod tests`, a test helper, a field or a
 /// statement) and are not comments. An item that fits one line (balanced brackets) ends there; a
 /// longer one ends at the first line that closes it at the indent of its first line (rustfmt,
 /// DEV-015, writes it so).
 fn production_lines(text: &str) -> Vec<(usize, &str)> {
     let lines: Vec<&str> = text.lines().collect();
+    if lines.iter().any(|l| l.trim() == "#![cfg(test)]") {
+        return Vec::new();
+    }
     let mut out = Vec::new();
     let mut i = 0;
     while i < lines.len() {
@@ -154,6 +158,7 @@ fn last() {
 ";
     let found: Vec<usize> = production_lines(src).into_iter().filter(|(_, l)| l.contains("Command::new(")).map(|(n, _)| n).collect();
     assert_eq!(found, [2, 14, 32], "the lines of production code that start a program");
+    assert!(production_lines("//! helpers\n\n#![cfg(test)]\n\nfn t() { Command::new(\"sh\"); }\n").is_empty(), "a `#![cfg(test)]` file is all test code");
     let files = [
         ("src/a.rs".to_string(), "fn f() { Command::new(\"git\"); }\n#[cfg(test)]\nmod tests {\n    fn t() { Command::new(\"sh\"); }\n}\n".to_string()),
         ("src/a_tests.rs".to_string(), "fn t() { Command::new(\"sh\"); }\n".to_string()),
