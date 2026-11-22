@@ -103,6 +103,7 @@ and `shale-userguide-<version>.pdf`, the same guide as one book to print or read
 
 What differs from Linux:
 
+- **No console window**: `shale.exe` opens only its window. Started from a terminal it still prints there (`-h`, errors), but `cmd.exe` does not wait for it; for the exit code of `--export-pdf` use `start /wait shale.exe …` (PowerShell: `Start-Process -Wait`).
 - **Passwords** and tokens go to the macOS Keychain and the Windows Credential Manager (on Linux to
   the Secret Service through `secret-tool`). If the store cannot be used, or you cancel its unlock
   prompt, Shale says so: they are then kept in the settings file, which only you can read, or for this run only.
