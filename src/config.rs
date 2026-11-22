@@ -905,6 +905,40 @@ mod tests {
         assert_eq!(back.search.selection().kinds().collect::<Vec<_>>(), [Kind::Notes, Kind::Posts]);
     }
 
+    // spec: CFG-068, NAV-058
+    #[test]
+    fn cfg_068_the_hit_display_defaults_to_follow_round_trips_and_loads_from_old_files() {
+        use crate::search_sources::HitDisplay;
+        assert_eq!(Config::default().search.display(), HitDisplay::Follow);
+        let (old, _) = crate::vault_state::parse::<Config>(br#"{"search": {"sources": ["mail"]}}"#).unwrap();
+        assert_eq!(old.search.display(), HitDisplay::Follow, "a file from before has the default");
+        let (old, _) = crate::vault_state::parse::<Config>(br#"{"toolbar_size": 120}"#).unwrap();
+        assert_eq!(old.search.display(), HitDisplay::Follow);
+        for (word, want) in [("raw", HitDisplay::Raw), ("rendered", HitDisplay::Rendered), ("Rendered", HitDisplay::Rendered), ("follow", HitDisplay::Follow), ("nonsense", HitDisplay::Follow)] {
+            let json = format!(r#"{{"search": {{"hit_display": "{word}", "prefix_notes": "n"}}}}"#);
+            let (c, _) = crate::vault_state::parse::<Config>(json.as_bytes()).unwrap();
+            assert_eq!((c.search.display(), c.search.prefix_notes.as_str()), (want, "n"), "{word}: the other settings are kept");
+        }
+        let mut c = Config::default();
+        c.search.hit_display = HitDisplay::Rendered.id().into();
+        let text = text::to_toml(&c);
+        assert!(text.contains("hit_display = \"rendered\""), "{text}");
+        let (back, _) = Config::parse_text(&text).unwrap();
+        assert_eq!(back.search.display(), HitDisplay::Rendered);
+    }
+
+    // spec: NAV-058
+    #[test]
+    fn nav_058_follow_the_editor_is_rendered_with_the_preview_or_the_reading_view_and_raw_otherwise() {
+        use crate::search_sources::HitDisplay::{Follow, Raw, Rendered};
+        // (live_preview, reading view of the active note)
+        for (preview, reading, follow) in [(false, false, false), (true, false, true), (false, true, true), (true, true, true)] {
+            assert_eq!(Follow.rendered(preview, reading), follow, "preview {preview}, reading {reading}");
+            assert!(!Raw.rendered(preview, reading));
+            assert!(Rendered.rendered(preview, reading));
+        }
+    }
+
     // spec: EDIT-037, CFG-001
     #[test]
     fn the_link_preview_size_has_defaults_loads_from_old_files_and_round_trips() {

@@ -18,6 +18,7 @@ use crate::search_sources::{Counts, Kind, Prefixes, Selection};
 use crate::social::post_index::PostIndex;
 use crate::vault::Vault;
 use rusqlite::Connection;
+use std::ops::Range;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -95,14 +96,14 @@ impl Ctx<'_> {
     }
 }
 
-/// Does the pattern match at the start of `text`? The end of the text is not anchored: the match
-/// is over when the pattern is.
-fn matches_at(pat: &[char], text: &[char]) -> bool {
+/// Where the match of the pattern at the start of `text` ends (a count of characters), if it
+/// matches. The end of the text is not anchored: the match is over when the pattern is.
+fn matches_at(pat: &[char], text: &[char]) -> Option<usize> {
     let (mut p, mut t) = (0, 0);
     let mut star: Option<(usize, usize)> = None;
     loop {
         if p == pat.len() {
-            return true;
+            return Some(t);
         }
         if pat[p] == '*' {
             star = Some((p, t));
@@ -117,18 +118,19 @@ fn matches_at(pat: &[char], text: &[char]) -> bool {
                     p = sp + 1;
                     t = st + 1;
                 }
-                _ => return false,
+                _ => return None,
             }
         }
     }
 }
 
-/// The byte offset of the first place in `line` where the wildcard pattern matches, ignoring
-/// case. `pat` is lower case already. A pattern without wildcards is the plain search of the
-/// sidebar (same offsets).
-pub fn wildcard_find(line: &str, pat: &str) -> Option<usize> {
+/// The bytes of `line` of the first match of the wildcard pattern, ignoring case (a match is
+/// the text from where the pattern starts to where it is over, NAV-057). `pat` is lower case
+/// already. A pattern without wildcards is the plain search of the sidebar (same offsets).
+pub fn wildcard_find(line: &str, pat: &str) -> Option<Range<usize>> {
     if !pat.contains(['*', '?']) {
-        return markdown::find_ci(line, pat);
+        let start = markdown::find_ci(line, pat)?;
+        return Some(start..start + crate::search_render::matched_len(&line[start..], pat));
     }
     let pat: Vec<char> = pat.chars().collect();
     // the buffers of one line are kept for the next (a search looks at every line of the vault)
@@ -142,7 +144,7 @@ pub fn wildcard_find(line: &str, pat: &str) -> Option<usize> {
             offsets.push(i);
             text.push(c.to_lowercase().next().unwrap_or(c));
         }
-        (0..text.len()).find(|&i| matches_at(&pat, &text[i..])).map(|i| offsets[i])
+        (0..text.len()).find_map(|i| matches_at(&pat, &text[i..]).map(|n| offsets[i]..offsets.get(i + n).copied().unwrap_or(line.len())))
     })
 }
 
@@ -160,17 +162,23 @@ pub fn note_hits(vault: &Vault, query: &Query) -> Vec<Hit> {
         let before = out.len();
         if let Some(n) = vault.notes.get(&f.rel) {
             for (i, line) in n.text.lines().enumerate() {
-                if let Some(col) = wildcard_find(line, &q) {
-                    let shown: String = line.trim().chars().take(120).collect();
-                    out.push(Hit { group: NOTES, title: shown, detail: format!("{name}  ·  line {}", i + 1), action: Action::GotoMatch { rel: f.rel.clone(), line: i, col } });
+                if let Some(found) = wildcard_find(line, &q) {
+                    let shown: String = line.trim().chars().take(crate::search_render::MAX_SHOWN_CHARS).collect();
+                    // the found text in the shown one: it starts after the white space that is cut off
+                    let lead = line.len() - line.trim_start().len();
+                    let marks = shown_marks(&shown, found.start.saturating_sub(lead)..found.end.saturating_sub(lead));
+                    let (rel, col) = (f.rel.clone(), found.start);
+                    out.push(Hit::new(NOTES, shown, format!("{name}  ·  line {}", i + 1), Action::GotoMatch { rel, line: i, col }).marked(marks));
                     if out.len() >= query.limit || out.len() - before >= query.note_lines {
                         break;
                     }
                 }
             }
         }
-        if out.len() == before && wildcard_find(&name, &q).is_some() {
-            out.push(Hit { group: NOTES, title: name, detail: "name".into(), action: Action::Open { rel: f.rel.clone(), new_tab: false } });
+        if out.len() == before {
+            if let Some(found) = wildcard_find(&name, &q) {
+                out.push(Hit::new(NOTES, name, "name".into(), Action::Open { rel: f.rel.clone(), new_tab: false }).marked(vec![found]));
+            }
         }
         if out.len() >= query.limit {
             break;
@@ -179,13 +187,24 @@ pub fn note_hits(vault: &Vault, query: &Query) -> Vec<Hit> {
     out
 }
 
+/// The found text `range` as the marks of the shown text: cut at its end, none when it is not in it.
+fn shown_marks(shown: &str, range: Range<usize>) -> Vec<Range<usize>> {
+    let end = range.end.min(shown.len());
+    if range.start < end && shown.is_char_boundary(range.start) && shown.is_char_boundary(end) {
+        std::iter::once(range.start..end).collect()
+    } else {
+        vec![]
+    }
+}
+
 pub fn mail_hits(db: &Connection, query: &Query) -> Vec<Hit> {
     crate::mail::db::search_wild(db, query.text, query.limit)
         .unwrap_or_default()
         .into_iter()
         .map(|m| {
             let title = if m.subject.trim().is_empty() { "(no subject)".to_string() } else { m.subject.clone() };
-            Hit { group: MAIL, title, detail: format!("{}  ·  {}", m.from, m.folder), action: Action::OpenMail(Box::new(m)) }
+            let marks = crate::search_render::word_marks(&title, query.text);
+            Hit::new(MAIL, title, format!("{}  ·  {}", m.from, m.folder), Action::OpenMail(Box::new(m))).marked(marks)
         })
         .collect()
 }
@@ -197,7 +216,8 @@ pub fn post_hits(index: &PostIndex, query: &Query) -> Vec<Hit> {
         .into_iter()
         .map(|h| {
             let age = crate::social::feed_ui::age_text(h.created_at, now);
-            Hit { group: POSTS, title: h.snippet.clone(), detail: format!("{}  ·  @{}  ·  {age}", h.author_name, h.author_handle), action: Action::OpenPost(Box::new(h)) }
+            let marks = crate::search_render::word_marks(&h.snippet, query.text);
+            Hit::new(POSTS, h.snippet.clone(), format!("{}  ·  @{}  ·  {age}", h.author_name, h.author_handle), Action::OpenPost(Box::new(h))).marked(marks)
         })
         .collect()
 }
@@ -366,21 +386,48 @@ mod tests {
     use crate::mail::db::{self, IndexFields, NewMessage, Op, STATE_FULL};
     use crate::social::tests::post;
 
-    // spec: NAV-023
+    // spec: NAV-023, NAV-057
     #[test]
     fn wildcards_match_inside_a_line_ignoring_case() {
-        assert_eq!(wildcard_find("I like Banana bread", "ban*a"), Some(7));
-        assert_eq!(wildcard_find("I like Banana bread", "b?nana"), Some(7));
-        assert_eq!(wildcard_find("banana", "ban?na"), Some(0));
-        assert_eq!(wildcard_find("banana", "ban?n?"), Some(0));
+        assert_eq!(wildcard_find("I like Banana bread", "ban*a"), Some(7..11), "a * matches as little as it can");
+        assert_eq!(wildcard_find("I like Banana bread", "b?nana"), Some(7..13));
+        assert_eq!(wildcard_find("banana", "ban?na"), Some(0..6));
+        assert_eq!(wildcard_find("banana", "ban?n?"), Some(0..6));
         assert_eq!(wildcard_find("banana", "ban??a?"), None, "one character too many");
-        assert_eq!(wildcard_find("a long line with end", "long*end"), Some(2));
+        assert_eq!(wildcard_find("a long line with end", "long*end"), Some(2..20));
         assert_eq!(wildcard_find("end before long", "long*end"), None, "the order of the parts counts");
-        assert_eq!(wildcard_find("anything", "any*"), Some(0), "a trailing * is allowed and the end is not anchored");
-        assert_eq!(wildcard_find("Äpfel und Birnen", "äpf*und"), Some(0), "case of non-ASCII letters");
-        assert_eq!(wildcard_find("x Äpfel", "ä?fel"), Some(2), "byte offsets of the line");
-        assert_eq!(wildcard_find("plain text", "text"), Some(6), "no wildcard: the sidebar's search");
+        assert_eq!(wildcard_find("anything", "any*"), Some(0..3), "a trailing * is allowed and the end is not anchored: the match ends where the pattern does");
+        assert_eq!(wildcard_find("Äpfel und Birnen", "äpf*und"), Some(0..10), "case of non-ASCII letters");
+        assert_eq!(wildcard_find("x Äpfel", "ä?fel"), Some(2..8), "byte offsets of the line");
+        assert_eq!(wildcard_find("plain text", "text"), Some(6..10), "no wildcard: the sidebar's search");
+        assert_eq!(wildcard_find("Straße", "straße"), Some(0..7), "the match is as long as the text it matches");
         assert_eq!(wildcard_find("no star", "a*z"), None);
+    }
+
+    // spec: NAV-057
+    #[test]
+    fn a_note_hit_carries_the_found_text_as_marks_of_its_shown_line() {
+        let (v, dir) = fixture();
+        let hits = note_hits(&v, &Query::picker("ban*d"));
+        let h = hits.iter().find(|h| h.title == "I like banana bread").unwrap();
+        assert_eq!(h.marks, vec![7..19], "the wildcard match from where it starts to where it ends");
+        assert!(matches!(h.action, Action::GotoMatch { col: 7, .. }), "the column is still where it starts");
+        // the white space cut off the line moves the marks with it
+        std::fs::write(dir.join("Indent.md"), "      banana here\n").unwrap();
+        let v = Vault::open(&dir).unwrap();
+        let h = note_hits(&v, &Query::picker("banana")).into_iter().find(|h| h.title == "banana here").unwrap();
+        assert_eq!(h.marks, vec![0..6]);
+        assert!(matches!(h.action, Action::GotoMatch { col: 6, .. }));
+        // a name-only hit marks the name
+        let h = note_hits(&v, &Query::picker("ana pl")).into_iter().find(|h| h.title == "banana plans").unwrap();
+        assert_eq!(h.marks, vec![3..9]);
+        // a match beyond the shown part is not marked
+        let long = format!("{} banana", "x".repeat(130));
+        std::fs::write(dir.join("Long.md"), long).unwrap();
+        let v = Vault::open(&dir).unwrap();
+        let h = note_hits(&v, &Query::picker("banana")).into_iter().find(|h| h.title.starts_with("xxx")).unwrap();
+        assert!(h.marks.is_empty() && h.title.chars().count() == 120);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // each call gets its own folder: tests run in parallel and each deletes its folder at the end
@@ -549,7 +596,7 @@ mod tests {
 
     fn hit(group: &'static str, rel: &str) -> Hit {
         let action = if group == NOTES { Action::GotoMatch { rel: rel.into(), line: 0, col: 0 } } else { Action::FocusEditor };
-        Hit { group, title: String::new(), detail: String::new(), action }
+        Hit::new(group, String::new(), String::new(), action)
     }
 
     fn found(hits: Vec<Hit>) -> Found {

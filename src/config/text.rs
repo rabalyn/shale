@@ -181,6 +181,7 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
     ("search.prefix_notes", "The one letter that starts a query for notes only: f gives f:banana. Combined letters work too (fm: is notes and mail). A letter that is another source's, or that would spell a field of the mail and post search (to, in), is not accepted."),
     ("search.prefix_mail", "The one letter that starts a query for mail only: m gives m:banana."),
     ("search.prefix_posts", "The one letter that starts a query for posts only: s gives s:banana."),
+    ("search.hit_display", "How the lines of notes that a search found are drawn: follow (like the editor shows notes now: rendered when live_preview is on or the note in view is in the reading view, raw otherwise), raw (the markdown as written) or rendered (bold, links by their text, tags, task boxes). The found text is marked in all of them. An unknown word means follow."),
     ("search.sources", "The sources a query without a prefix looks in and lists, from notes, mail and posts. The buttons above the results change it with Shift+click. An empty or unknown list means all three."),
     ("updates", "What Shale does about new releases on GitHub. SHALE_UPDATES=off in the environment switches it off whatever is set here."),
     ("updates.mode", "Ask (not chosen yet: the first update found asks), Off (no request, no notice), Notify (say a new version is out), Download (download and check it in the background) or Install (download, check and install it; you restart when you like)."),

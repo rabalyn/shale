@@ -445,6 +445,13 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   count (**Notes 12 · Mail 20+ · Posts 4**, a switched-off source is counted, in grey) lists only that source on a
   click (again: back), or goes in and out of the default selection on Shift+click. Tab / Shift+Tab step through the
   sources. The default selection is saved; the letters are in Settings → Search.
+- **Hits of notes are shown rendered** (#483): a found line is drawn with the editor's own inline rendering (bold, italic,
+  strikethrough, highlight, code, links and wiki links by their shown text, tags in their colour, a task as `[ ]` / `[x]`,
+  a list item with a bullet, a heading without its `#`), in the picker and the sidebar, and the **found text is marked** in
+  raw and rendered lines (also a wildcard match, over its whole length). Mail and post hits stay plain text with the words
+  of the query marked. Settings → Search → "Hits of notes" (`search.hit_display`): follow the editor (default: rendered with
+  the Markdown preview on or the note in view in the reading view, raw otherwise), raw, or rendered. Each hit's rendering
+  is made once and kept, a hit shows at most 120 characters.
 
 ## Drawings
 

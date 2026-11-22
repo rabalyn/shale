@@ -6,6 +6,7 @@
 use crate::app::{muted, Action, ShaleApp};
 use crate::keys::{Action as KeyAction, Scope};
 use crate::search_all::{self, Ctx, Query, Refreshed, Results};
+use crate::search_render::Look;
 use crate::search_sources::{self, Bar};
 use crate::theme;
 use eframe::egui::{self, CornerRadius, Key, Modifiers, Sense, Ui};
@@ -56,6 +57,14 @@ fn mark(ui: &Ui, rect: egui::Rect) {
 }
 
 impl ShaleApp {
+    /// Are the lines of notes that the search found drawn rendered now (NAV-058)? The setting
+    /// `search.hit_display` says; "follow the editor" is rendered when the Markdown preview is on or
+    /// the note in view is in the reading view.
+    pub(crate) fn search_rendered(&self) -> bool {
+        let reading = self.tabbar.tabs.get(self.tabbar.active).is_some_and(|t| t.reading && matches!(t.view, crate::app::View::Note(_)));
+        self.cfg.search.display().rendered(self.cfg.live_preview, reading)
+    }
+
     pub(crate) fn search_panel(&mut self, ui: &mut Ui) {
         ui.label(egui::RichText::new("Search").size(13.0).color(theme::palette().muted));
         let id = egui::Id::unique("search-input");
@@ -174,6 +183,7 @@ impl ShaleApp {
                 ui.label(muted(hint).size(12.0));
             }
         }
+        let rendered = self.search_rendered();
         let selected = self.search.sel;
         if open_sel {
             if let Some(hit) = selected.and_then(|i| hits.get(i)) {
@@ -206,9 +216,10 @@ impl ShaleApp {
                                 self.actions.push(Action::Open { rel: rel.clone(), new_tab: false });
                             }
                         }
-                        let shown: String = h.title.chars().take(120).collect();
+                        // (the title is at most search_render::MAX_SHOWN_CHARS long)
+                        let job = h.job(Look { rendered, size: 12.5, raw_colour: theme::palette().muted });
                         row(ui, |ui| {
-                            ui.add(egui::Label::new(egui::RichText::new(shown).size(12.5).color(theme::palette().muted)).wrap());
+                            ui.add(egui::Label::new(job).wrap());
                         })
                     }
                     Action::Open { rel, .. } if h.group == search_all::NOTES => {
@@ -217,13 +228,13 @@ impl ShaleApp {
                         note_name(ui, v, rel)
                     }
                     Action::OpenMail(_) => row(ui, |ui| {
-                        ui.add(egui::Label::new(egui::RichText::new(&h.title).size(12.5).color(theme::palette().text_strong)).truncate());
+                        ui.add(egui::Label::new(h.job(Look { rendered: false, size: 12.5, raw_colour: theme::palette().text_strong })).truncate());
                         ui.add(egui::Label::new(egui::RichText::new(&h.detail).size(12.0).color(theme::palette().muted)).truncate());
                     }),
                     _ => {
                         let resp = row(ui, |ui| {
                             ui.add(egui::Label::new(egui::RichText::new(&h.detail).size(12.5).color(theme::palette().text_strong)).truncate());
-                            ui.add(egui::Label::new(egui::RichText::new(&h.title).size(12.5).color(theme::palette().muted)).wrap());
+                            ui.add(egui::Label::new(h.job(Look { rendered: false, size: 12.5, raw_colour: theme::palette().muted })).wrap());
                         });
                         // the rows of posts, for the tests that click them
                         self.social.hit_rects.push((posts, resp.rect));

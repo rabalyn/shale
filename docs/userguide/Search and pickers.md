@@ -39,6 +39,22 @@ Posts, then back to the default selection) and **Shift+Tab** the previous one, i
 browse the sidebar results, and in the picker; the hint shows the keys, and they can be changed in
 **Settings → Keybindings** (see [[Keyboard shortcuts]]).
 
+## How a hit of a note looks
+
+A found line of a note is shown **rendered**, the way the editor draws a line that the cursor is not
+on: bold, italic, strikethrough, highlight and inline code styled, links and wiki links by the text
+they show (`[[Note|alias]]` is "alias"), `#tags` in the tag colour, a heading in the heading style
+without its `#`, a task as `[ ]` or `[x]` and a list item with a bullet. The **found text is
+marked** with a background, in the rendered and in the raw line alike; when a match covers markup that
+is not drawn, the visible part of it is marked. Mail and post hits stay plain text and mark the words
+of your query in their subject or text.
+
+**Settings → Search → Hits of notes** chooses the look: **Follow the editor** (the default) draws the
+lines rendered while the Markdown preview is on ([[Editor]]) or the note you are in is in the
+[[Reading view]], and as raw markdown otherwise; **Raw markdown** and **Rendered** always draw one
+of them. Changing it, the preview or the view changes the open results at once. A line with a
+formula is shown raw, and a hit shows at most 120 characters of its line.
+
 ↓ or Enter in the box browse the results: j / k (or ↓ / ↑) go from hit to hit through all
 groups, Ctrl+J / Ctrl+K to the first hit of the next / previous note, and in mail and posts to
 the first hit of the next / previous group. Enter (or a click) opens the hit where it belongs:
