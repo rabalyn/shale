@@ -27,6 +27,9 @@ pub(crate) mod outbox;
 pub(crate) mod send;
 #[cfg(test)]
 mod send_fuzz_tests;
+pub(crate) mod signature;
+#[cfg(test)]
+mod signature_tests;
 pub(crate) mod smtp_client;
 #[cfg(test)]
 mod smtp_fake_tests;
@@ -47,6 +50,21 @@ pub struct Attachment {
     pub data: Vec<u8>,
     /// shown inside the message (pictures in signatures and the like)
     pub inline: bool,
+    /// the `Content-ID` without the angle brackets, as `cid:` links in the HTML name it
+    pub cid: String,
+    /// a part of the signature, or content (IMP-059)
+    pub kind: AttKind,
+}
+
+/// What an attachment is for (IMP-059).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AttKind {
+    #[default]
+    Content,
+    /// the `smime.p7s` or `signature.asc` part of a signed message
+    CryptoSignature,
+    /// a logo, icon or banner of the signature block
+    SignatureImage,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -704,7 +722,8 @@ fn walk(part: &[u8], w: &mut Walk, depth: usize) {
         }
     });
     let inline = disp == "inline" || (disp.is_empty() && header(&h, "content-id").is_some());
-    w.attachments.push(Attachment { name, mime: ctype, data, inline });
+    let cid = header(&h, "content-id").unwrap_or("").trim().trim_start_matches('<').trim_end_matches('>').trim().to_string();
+    w.attachments.push(Attachment { name, mime: ctype, data, inline, cid, kind: AttKind::Content });
 }
 
 /// Read a whole message.
@@ -713,6 +732,7 @@ pub fn parse(raw: &[u8]) -> Mail {
     let get = |n: &str| header(&h, n).map(decode_words).unwrap_or_default();
     let mut w = Walk::default();
     walk(raw, &mut w, 0);
+    signature::classify(&mut w.attachments, w.html.as_deref());
     let text = match (w.plain, w.html) {
         (Some(p), _) if !p.trim().is_empty() => p.replace("\r\n", "\n"),
         (_, Some(h)) => html_to_text(&h),

@@ -921,7 +921,10 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   file whose XML is nested more than 256 levels is refused at import with a message instead of crashing the program.
 
 - Choose the folder (one per project, for example) and tags. Small pictures from signatures are
-  left out by default, and each attachment can be ticked on or off.
+  left out by default, and each attachment can be ticked on or off. The signature files of a signed
+  mail (`smime.p7s`, `signature.asc`) and the pictures of a signature block (logos, social icons,
+  `image001.png`) start unticked and say why; the box **Skip signatures** (Import dialog, start value
+  in Settings → Import) lets them start ticked (IMP-059, IMP-060, IMP-061, CFG-074).
 - Drop onto a folder in the file list to import into that folder, or onto a note to also add
   links to the new notes there.
 - After an import of two or more items a window, **Import summary**, says what was made: the new

@@ -143,7 +143,10 @@ pub fn file_uri_path_for(uri: &str, windows: bool) -> Option<PathBuf> {
     let path = percent_decode(rest);
     // Windows writes `file:///C:/Users/x`: the slash before the drive letter is not part of the path
     let drive = path.as_bytes().get(1..3).is_some_and(|d| d[0].is_ascii_alphabetic() && d[1] == b':');
-    Some(PathBuf::from(if windows && drive { &path[1..] } else { &path }))
+    let path = if windows && drive { &path[1..] } else { &path };
+    // on Windows the path has the separators of Windows only (`C:\Users\x`, `\\host\share`), so it
+    // is shown, compared and joined like any other path of the system
+    Some(PathBuf::from(if windows { path.replace('/', "\\") } else { path.to_string() }))
 }
 
 /// The media files of pasted text: every non-empty line is a `file://` address or an absolute
@@ -579,9 +582,9 @@ mod tests {
         let date = (2026, 11, 22);
         let (links, msg) = paste_text_to_links(&vault, &[], &list, intake::Choice::Copy, date).unwrap();
         assert_eq!((links.as_str(), msg.as_str()), ("![[z_media/2026/11/261122_a.png]]\n![[z_media/2026/11/261122_b b.mp4]]", "Saved 2 files to the media folder"));
-        let abs = src.canonicalize().unwrap();
+        let abs = crate::fsutil::plain_path(src.canonicalize().unwrap());
         let (links, msg) = paste_text_to_links(&vault, &[], &list, intake::Choice::Link, date).unwrap();
-        assert_eq!(links, format!("![](<file://{0}/a.png>)\n![](<file://{0}/b b.mp4>)", abs.display()));
+        assert_eq!(links, format!("![](<{}>)\n![](<{}>)", intake::file_uri(&abs.join("a.png")), intake::file_uri(&abs.join("b b.mp4"))));
         assert_eq!(msg, "Linked 2 files where they are");
         let (_, msg) = paste_text_to_links(&vault, &[], &src.join("a.png").to_string_lossy(), intake::Choice::Link, date).unwrap();
         assert_eq!(msg, "Linked 1 file where it is");

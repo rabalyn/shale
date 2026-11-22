@@ -703,6 +703,18 @@ fn cfg_060_the_import_tab_has_the_header_list_setting() {
     assert!(!p.app.cfg.import_header_list);
 }
 
+// spec: CFG-074
+#[test]
+fn cfg_074_the_import_tab_has_the_skip_signatures_setting() {
+    let mut p = P::new("settings-skip-signatures", &[]);
+    assert!(p.app.cfg.import_skip_signatures, "on by default");
+    p.app.open_settings(SettingsTab::Import);
+    p.click(Show::Modals, "Skip signatures");
+    assert!(!p.app.cfg.import_skip_signatures);
+    p.click(Show::Modals, "Skip signatures");
+    assert!(p.app.cfg.import_skip_signatures);
+}
+
 // spec: CFG-021
 #[test]
 fn set_002_settings_open_on_a_short_page() {

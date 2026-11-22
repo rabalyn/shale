@@ -113,7 +113,9 @@ impl ShaleApp {
         // files from outside the vault start with what the setting says (Ask: Copy, the dialog asks)
         import::preset_how(&mut items, self.cfg.outside_files.preset());
         if let Some(Modal::Import(mut d)) = self.modal.take() {
+            let first_new = d.items.len();
             d.items.extend(items);
+            import::apply_skip_signatures(&mut d.items[first_new..], d.skip_signatures);
             d.notes.extend(notes);
             if let Some((folder, note)) = zone {
                 d.folder = rel_to_string(&folder);
@@ -143,6 +145,8 @@ impl ShaleApp {
         d.people_dir = self.vdata.settings.people_dir.clone();
         d.root = v.root.clone();
         d.header_list = self.cfg.import_header_list;
+        d.skip_signatures = self.cfg.import_skip_signatures;
+        import::apply_skip_signatures(&mut d.items, d.skip_signatures);
         self.suggest_tags(&mut d);
         self.modal = Some(Modal::Import(d));
     }

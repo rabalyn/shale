@@ -118,6 +118,7 @@ pub const ENTRIES: &[Entry] = &[
     e("import.outside_files", Import, "Files from outside the vault", &["outside_files"], "copy link ask picture pdf sound video paste pick"),
     e("import.libraries", Import, "Library folders", &["media_libraries"], "media videos @name folder computer"),
     e("import.header_list", Import, "Header list in the note body", &["import_header_list"], "e-mails events posts properties"),
+    e("import.skip_signatures", Import, "Skip signatures", &["import_skip_signatures"], "e-mails signature smime pgp logo picture attachments"),
     e("import.docx", Import, "Import Word files as notes", &["docx_import"], "docx pandoc attachment"),
     e("import.pandoc", Import, "pandoc program", &["pandoc_path"], "docx word check again"),
     e("data.usage", Data, "Data usage", &[], "disk space caches what Shale keeps"),

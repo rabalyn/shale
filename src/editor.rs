@@ -3166,7 +3166,7 @@ mod tests {
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         assert!(painted(&h, "linked where they are, other files are copied · Alt+Shift+L: copy them instead"), "{:?}", h.texts);
         let (_, a) = h.frame(&mut ed, &mut text, &v, rel, vec![key_event(Key::Enter, Modifiers::NONE)]);
-        assert_eq!(text, format!("see [doc.pdf](<file://{}/doc.pdf>)", out2.canonicalize().unwrap().display()));
+        assert_eq!(text, format!("see [doc.pdf](<{}>)", crate::media::intake::file_uri(&crate::fsutil::plain_path(out2.canonicalize().unwrap()).join("doc.pdf"))));
         assert!(a.is_none() && !d.join(format!("{stamp}doc.pdf")).exists(), "nothing copied");
         // a file under a library folder is a library link, a video is embedded
         let (mut h, mut ed, mut text, v, d3, out3) = picker_on("Lib/song.mp3", "picker-lib");
@@ -5083,7 +5083,7 @@ mod tests {
         v.set_libraries(&[crate::media::outside::Library { name: "Lib".into(), path: out.join("Lib") }]);
         let (y, m, day) = crate::media::local_date();
         let stamp = format!("z_media/{y:04}/{m:02}/{:02}{m:02}{day:02}_", y.rem_euclid(100));
-        let abs = out.canonicalize().unwrap();
+        let abs = crate::fsutil::plain_path(out.canonicalize().unwrap());
         let list = pasted_list(&out);
         let ctx = egui::Context::default();
         let mut t = 0.0;
@@ -5099,7 +5099,7 @@ mod tests {
         start(&ctx, &mut t, &mut ed, &mut text, &v);
         let a = paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::Paste(list.clone())]);
         assert_eq!(pasted_toast(a), "Linked 2 files where they are");
-        assert_eq!(text, format!("![](<file://{}/a b.mp4>)\n![[@Lib/song.mp3]]", abs.display()));
+        assert_eq!(text, format!("![](<{}>)\n![[@Lib/song.mp3]]", crate::media::intake::file_uri(&abs.join("a b.mp4"))));
         assert!(!d.join(format!("{stamp}a b.mp4")).exists(), "nothing was copied");
         // Copy: copies, as before, also the one in the library folder (no automatic linking)
         ed.assist.outside = OutsideFiles::Copy;
