@@ -17,6 +17,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   `![[photo.png|300]]`), a round **100%** button for the natural size and a round fullscreen button.
   Every shown embed has its link as a one-line caption below it (the words of an alias,
   `![[photo.png|Sea at dusk]]`, else the file's link); a click on the caption opens the file.
+  A picture embedded inside a line of text (`an icon ![[icon.png]] here`) is drawn in the line in the reading view and the
+  PDF export, 0.9 of the line high and set a little below its baseline like a letter, as in the LaTeX export; the editor shows it as a picture of its own size.
 
 ![A picture with its resize buttons](userguide/z_media/screenshots/image-resize.png)
 
@@ -157,7 +159,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   embedded pictures, drawings, PDFs, the first frame of a video and the cover of a sound are
   drawn as thumbnails with their link as the caption below, as big in proportion to the text as in
   the editor: a picture made smaller keeps its share of the width, a sound or video is drawn as its
-  player card; highlights and font colours are printed as written, as are footnotes (a reference links to
+  player card; a picture inside a line of text is drawn in the line, as high as the text; highlights and font colours are printed as written, as are footnotes (a reference links to
   its definition), underline, sub and superscript, `<br>` in table cells and math (vector outlines); a **Contents** page after the title lists the
   `#`–`###` headings with their numbers and the pages they start on, each a link, with a checkbox to leave it
   out, and the PDF has bookmarks for its `#`–`######` headings; the title is printed once: when the note's first

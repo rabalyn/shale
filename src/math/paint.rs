@@ -86,7 +86,8 @@ pub fn hidden_format(f: &Formula, em: f32) -> egui::text::TextFormat {
     egui::text::TextFormat { font_id: egui::FontId::proportional(HIDDEN_SIZE), color: Color32::TRANSPARENT, line_height: Some(room_for(f, em).1), ..Default::default() }
 }
 
-/// Whether a text format is that of hidden TeX (see [`hidden_format`]).
+/// Whether a text format is that of hidden TeX (see [`hidden_format`]) or of the hidden link text
+/// of a picture inside a line (EDIT-114): invisible, tiny, with room before it.
 pub fn is_hidden_formula(format: &egui::text::TextFormat) -> bool {
     format.color == Color32::TRANSPARENT && format.font_id.size == HIDDEN_SIZE
 }
@@ -122,15 +123,20 @@ pub fn paint_in_galley(painter: &Painter, galley: &egui::Galley, pos: Pos2, at: 
 
 /// Where the left end of the baseline of `f` is in `galley` (see [`paint_in_galley`]).
 pub fn place_in_galley(galley: &egui::Galley, at: usize, f: &Formula) -> Option<(f32, f32)> {
+    place_in_row(galley, at, |height| (height + f.layout.ascent - f.layout.descent) / 2.0)
+}
+
+/// Where the char `at` of `galley` is: its x and the baseline of the text of its row. A row of
+/// nothing but hidden text has no text to set the baseline: `alone` gives it from the row's height.
+pub fn place_in_row(galley: &egui::Galley, at: usize, alone: impl Fn(f32) -> f32) -> Option<(f32, f32)> {
     let c = galley.pos_from_cursor(egui::text::CCursor::new(at));
     let mut first = 0;
     let row = galley.rows.iter().find(|row| {
         first += row.char_count_including_newline().0;
         at < first
     })?;
-    // the text of the row sets the baseline; a row of nothing but a formula has the formula in its middle
     let main = row.row.glyphs.iter().filter(|g| g.font_height > 2.0).reduce(|a, b| if b.font_height > a.font_height { b } else { a });
-    let baseline = main.map_or((row.row.size.y + f.layout.ascent - f.layout.descent) / 2.0, |g| g.pos.y);
+    let baseline = main.map_or_else(|| alone(row.row.size.y), |g| g.pos.y);
     Some((c.min.x, row.pos.y + baseline))
 }
 

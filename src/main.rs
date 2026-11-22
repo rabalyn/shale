@@ -60,6 +60,8 @@ mod graph;
 mod graph_tree;
 mod history;
 mod import;
+#[cfg(test)]
+mod inline_picture_ui_tests;
 mod instance;
 mod jobs;
 mod key_badges;
