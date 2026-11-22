@@ -1526,7 +1526,14 @@ mod dialog_tests {
         let dir = temp_dir("dialog-job");
         let default = dir.join("default.docx");
         std::fs::write(&default, zip_of(&[("[Content_Types].xml", "<t/>"), ("word/styles.xml", &pandoc_styles())])).unwrap();
-        let slow = fake_pandoc(&dir, &format!("if [ \"$1\" = \"--print-default-data-file\" ]; then cat '{}'; exit 0; fi\nsleep 30", default.display()));
+        // every fake pandoc in a folder of its own: the cancelled one may still run for a moment, and a file that runs cannot be
+        // written again (ETXTBSY, #549)
+        let sub = |name: &str| {
+            let d = dir.join(name);
+            std::fs::create_dir_all(&d).unwrap();
+            d
+        };
+        let slow = fake_pandoc(&sub("slow"), &format!("if [ \"$1\" = \"--print-default-data-file\" ]; then cat '{}'; exit 0; fi\nsleep 30", default.display()));
         let mut d = dialog(Some("/usr/bin/pandoc"), None);
         let mut h = H::new(&mut d);
         assert!(d.poll().is_none() && !d.working());
@@ -1538,7 +1545,7 @@ mod dialog_tests {
         d.cancel();
         assert!(!d.working() && d.poll().is_none());
         // a job that has ended hands its result over once
-        let nothing = fake_pandoc(&dir, "exit 7");
+        let nothing = fake_pandoc(&sub("nothing"), "exit 7");
         d.start(job_with(nothing, &dir, "x\n"), || {});
         let start = std::time::Instant::now();
         let got = loop {
@@ -1551,7 +1558,7 @@ mod dialog_tests {
         assert!(got.unwrap_err().contains("pandoc has no default reference document") && d.poll().is_none() && !d.working());
         // dropping the dialog stops pandoc
         let marker = dir.join("still-running");
-        let waiting = fake_pandoc(&dir, &format!("if [ \"$1\" = \"--print-default-data-file\" ]; then cat '{}'; exit 0; fi\nsleep 3\ntouch '{}'", default.display(), marker.display()));
+        let waiting = fake_pandoc(&sub("waiting"), &format!("if [ \"$1\" = \"--print-default-data-file\" ]; then cat '{}'; exit 0; fi\nsleep 3\ntouch '{}'", default.display(), marker.display()));
         d.start(job_with(waiting, &dir, "x\n"), || {});
         std::thread::sleep(Duration::from_millis(500));
         drop(d);
