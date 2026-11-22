@@ -144,6 +144,36 @@ fn check_conflict_copy(label: &str, root: &Path) {
     assert_eq!(fsutil::read_to_string(w.0.join("N.md")).unwrap(), "theirs\n", "{label}: their version stays");
 }
 
+/// What a second process gets when it takes the lock on `path` through `fsutil::try_lock_file`:
+/// runs this test binary as a child that executes [`net_004_lock_probe_child`] and reads its
+/// answer from stdout. `true`: the lock was GRANTED. Needs no `flock(1)`, so it works on every
+/// platform.
+fn lock_from_another_process(path: &Path) -> bool {
+    let exe = std::env::current_exe().unwrap();
+    let out = Command::new(exe).args(["--exact", "netshare_env_tests::net_004_lock_probe_child", "--ignored", "--nocapture", "--test-threads", "1"]).env(LOCK_PROBE_ENV, path).output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "the lock probe child failed: {text}{}", String::from_utf8_lossy(&out.stderr));
+    if text.contains("lock-probe: granted") {
+        true
+    } else {
+        assert!(text.contains("lock-probe: refused"), "the lock probe child gave no answer: {text}");
+        false
+    }
+}
+
+const LOCK_PROBE_ENV: &str = "SHALE_NET_LOCK_PROBE";
+
+/// Not a test of its own: the child side of [`lock_from_another_process`] (ignored, so a normal run
+/// skips it). It takes the lock named by the environment and prints whether it was granted; without
+/// the variable it fails, so running it by hand does not pass silently.
+#[test]
+#[ignore = "child of check_lock (NET-004); needs SHALE_NET_LOCK_PROBE"]
+fn net_004_lock_probe_child() {
+    let path = std::env::var_os(LOCK_PROBE_ENV).expect("SHALE_NET_LOCK_PROBE names the lock file; this test is run by check_lock");
+    let got = fsutil::try_lock_file(Path::new(&path)).unwrap();
+    println!("lock-probe: {}", if got.is_some() { "granted" } else { "refused" });
+}
+
 /// NET-004: the lock file (DATA-012, SYNC-013, the env lock) and what the file system makes of it.
 /// Reports; asserts only that the lock can be taken at all.
 fn check_lock(label: &str, root: &Path, expect_exclusive: bool) {
@@ -151,22 +181,11 @@ fn check_lock(label: &str, root: &Path, expect_exclusive: bool) {
     let p = w.0.join("x.lock");
     let first = fsutil::try_lock_file(&p).unwrap().expect("the first lock is taken");
     let second = fsutil::try_lock_file(&p).unwrap();
-    let across = Command::new("flock").args(["-n"]).arg(&p).arg("true").status().map(|s| !s.success());
-    observe(
-        label,
-        &format!(
-            "a second flock by the same process is {}; flock(1) from another process is {}",
-            if second.is_none() { "refused" } else { "GRANTED (no exclusion)" },
-            match across {
-                Ok(true) => "refused",
-                Ok(false) => "GRANTED (no exclusion)",
-                Err(_) => "not testable (no flock(1))",
-            }
-        ),
-    );
+    let across = lock_from_another_process(&p);
+    observe(label, &format!("a second flock by the same process is {}; the lock from another process is {}", if second.is_none() { "refused" } else { "GRANTED (no exclusion)" }, if across { "GRANTED (no exclusion)" } else { "refused" }));
     if expect_exclusive {
         assert!(second.is_none(), "{label}: the lock excludes a second open");
-        assert_eq!(across.ok(), Some(true), "{label}: the lock excludes another process");
+        assert!(!across, "{label}: the lock excludes another process");
     }
     drop(first);
 }
