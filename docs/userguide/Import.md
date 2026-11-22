@@ -91,6 +91,37 @@ after the file (spaces become `-`; a number is added when the name is taken): th
 "Keep the original .docx" ticked, the original, which the note names in its properties as `source`. If pandoc
 cannot read the file, nothing is written and a message names the file and pandoc's first error line.
 
+# Export to Word
+
+A note becomes a Word file again with **⋯ → Export to Word…** in the note's menu (also in the context menu of a note in the
+file list), by the same **pandoc** that imports Word files; the setting "Import Word files as notes" does not have to be on.
+The dialog asks where to save (`<vault>/exports/<name>.docx`, so the export shows up in the vault), whether to put a **Table of
+contents** in (on or off as the [[PDF]] dialog has it for the note; Word asks to update its fields when it opens the file, say
+yes to fill the contents in), whether to **Open the file afterwards**, and says where pandoc was found, or that it was not
+(Export then waits). The export runs in the background: closing the dialog, or **Cancel**, stops it, and a file is written only
+when it is whole; if pandoc fails, nothing is written and the dialog shows pandoc's first error line. The note is exported as
+the window has it, typing you have not saved yet included.
+
+A note that was imported from a Word file, with its original kept, has the box **Use the original Word file as the template**
+(ticked): the new file takes the styles, fonts, numbering, headers and footers of the original, so a Word file that goes into
+Shale and comes out again looks like itself. Without it, or for a note you wrote, the look comes from the note's `print-*`
+properties ([[PDF#Print properties of a note]]): the paper and margins of the page, the font, size, line and paragraph
+spacing, justified text, the colour, weight and sizes of the headings and the headings that start a page. A note that says
+nothing gets pandoc's own look.
+
+What comes through: headings, bold, italic, underline, strike-through, sub- and superscript, lists, tasks (as boxes), tables,
+quotes, code, footnotes, math (as Word's equations), web links, highlights (`==text==` and yellow are Word's highlight; other
+background colours and text colours are kept as colours), page breaks, centred, right-aligned and justified paragraphs, and
+the title block the import makes (a centred `#` heading with an italic line, as Word's *Title* and *Subtitle*). A picture is
+as wide in proportion to the text as in the editor, and a picture followed by an italic paragraph has it as its caption and
+as its alternative text. A link to another note is its words, and an embed of a note, a PDF or a sound is its name in
+italics: Word has no place for them.
+
+What the import already lost cannot come back: the cells that were merged in a table (they come back as empty cells),
+the numbers of figures and tables (Word fields), tab stops, the line spacing of single paragraphs, small caps, and the page
+setup of every section but the last. Whatever else is in the file, check it in Word; `scripts/roundtrip-docx.sh <file.docx>`
+shows developers the share of the words that came back.
+
 People and tags are found automatically: [[Tags and people]]. On Wayland Shale reads what
 Thunderbird hands over; when that is only a link to the message, Shale finds the message in
 Thunderbird's local copy (IMAP accounts need "Keep messages for this account on this

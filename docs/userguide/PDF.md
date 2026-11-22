@@ -6,6 +6,7 @@ Notes and drawings export to PDF from the note menu, with no external tools: the
 selectable (fonts are embedded), web links stay clickable and drawings are vector. A dialog
 sets paper size, margins, fonts and more. The default path is `<vault>/exports/<name>.pdf`, so
 the export shows up in the vault.
+The same note can also become a Word file: see [[Import#Export to Word]].
 
 A **Table of contents** (a checkbox in the dialog, on by default) puts a *Contents* page after the title: the
 `#`–`###` headings, indented by level, with their numbers (see [[Notes and links]]), a dotted leader and the page

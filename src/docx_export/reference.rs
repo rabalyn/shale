@@ -21,7 +21,7 @@ const STYLES: &str = "word/styles.xml";
 /// pandoc's default reference document (`pandoc --print-default-data-file reference.docx`), made in `dir`.
 pub fn default_reference(pandoc: &Path, dir: &Path, cancel: Option<&AtomicBool>) -> Result<Vec<u8>, String> {
     let path = dir.join("default-reference.docx");
-    let out = std::fs::File::create(&path).map_err(|e| format!("could not make a file in the temporary folder: {e}"))?;
+    let out = crate::fsutil::open_private_log(&path, false).map_err(|e| format!("could not make a file in the temporary folder: {e}"))?;
     let mut cmd = Command::new(pandoc);
     cmd.args(["--print-default-data-file", "reference.docx"]);
     let run = proc::run_to_file(cmd, out, Duration::from_secs(20), cancel).map_err(|e| format!("pandoc could not be started: {e}"))?;

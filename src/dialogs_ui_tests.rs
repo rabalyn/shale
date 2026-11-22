@@ -991,10 +991,8 @@ fn docx_001_the_menu_of_a_note_in_the_file_tree_opens_the_word_dialog_and_other_
 // spec: DOCX-001
 #[test]
 fn docx_001_the_dialog_takes_the_contents_box_of_the_pdf_dialog_and_the_original_of_the_source_property() {
-    let mut p = P::with_files(
-        "docx-opens",
-        &[("A.md", "---\nprint-toc: false\n---\n# A\n"), ("Imports/Old.docx", "x"), ("B.md", "---\nsource: \"[[Imports/Old.docx]]\"\n---\n# B\n"), ("C.md", "---\nsource: \"[[Imports/Gone.docx]]\"\n---\n# C\n")],
-    );
+    let mut p =
+        P::with_files("docx-opens", &[("A.md", "---\nprint-toc: false\n---\n# A\n"), ("Imports/Old.docx", "x"), ("B.md", "---\nsource: \"[[Imports/Old.docx]]\"\n---\n# B\n"), ("C.md", "---\nsource: \"[[Imports/Gone.docx]]\"\n---\n# C\n")]);
     p.app.open_docx_export_dialog(Path::new("A.md"));
     let Some(Modal::ExportDocx(d)) = &p.app.modal else { panic!() };
     assert!(!d.toc, "print-toc: false, as the PDF dialog has it (PDF-008, PDF-013)");

@@ -14,7 +14,7 @@ mod reference;
 mod xml;
 
 #[cfg(test)]
-mod tests;
+mod export_tests;
 
 use crate::pdf::tex::compile::WorkDir;
 use crate::pdf::tex::proc::{self, Ending};

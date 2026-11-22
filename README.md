@@ -114,7 +114,7 @@ What differs from Linux:
   system's video player and Settings says so; everything else works.
 - **Word files** (`.docx`) are imported as notes by `pandoc` on your computer, once you turn it on in Settings →
   Import (`brew install pandoc` on macOS, `winget install JohnMacFarlane.Pandoc` on Windows, your package
-  manager on Linux). Without it a `.docx` is saved as an attachment and the Import dialog says so.
+  manager on Linux). Without it a `.docx` is saved as an attachment and the Import dialog says so. The same pandoc exports a note as a Word file again (⋯ → Export to Word…), with the original as the template when the note came from Word.
 - **CalDAV** and **git sync** need `curl` and `git` on the path (`curl` comes with macOS and Windows 10 and later).
   For git, Settings → Sync can install one with a button (Windows: MinGit and git-lfs from the official releases into
   Shale's data folder; macOS: Apple's command line tools; Linux: it shows your distribution's install command), after
