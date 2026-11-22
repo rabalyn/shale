@@ -288,7 +288,7 @@ What an agent does, and in this order. Everything is a command; nothing needs a 
    not show is noise and the release goes on, saying so. When something is confirmed (or is an
    allocation or peak regression) it ends with "performance regression" and the lines `<id> <metric>
    <x> -> <y> (<delta> %, confidence …)`. Go on at 5. `--allow-perf-regression` lets the release
-   pass: only with the reason in the release issue (step 6), `--skip-bench` leaves the step out and
+   pass (also when the re-run confirmed it): only with the reason in the release issue (step 6), `--skip-bench` leaves the step out and
    says so. After the release, GitHub's job `bench` adds the statistics of the three systems
    (job summary, release asset); they are for reading, not a gate.
 2. **A fix or a branch** (is it faster, did it break something): `scripts/bench-compare.sh <before>

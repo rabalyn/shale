@@ -6,6 +6,12 @@
 # the stored performance results and refusing.
 #   bash scripts/test-release.sh
 set -u
+# the performance tests filter real JSON with jq (scripts/bench-release.sh): without it they would pass or fail
+# for the wrong reason (#522), so stop here, plainly
+if ! command -v jq >/dev/null 2>&1; then
+  echo "not ok 1 - jq is missing: install jq (apt-get install jq), the performance tests of the release scripts need it"
+  exit 1
+fi
 # a release that runs land.sh and its cargo test must not leak its value in here (#406); the cases set it
 unset SHALE_PREV_PUBLISHED
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
@@ -76,7 +82,10 @@ cat > "$TMP/bin/fake-bench-compare" <<'FAKE'
 #!/bin/sh
 echo "bench-compare $*" >> "$BENCH_LOG"
 while [ $# -gt 0 ]; do [ "$1" = --out ] && dir=$2; shift; done
+# like the real one, which changes into the folder of its own checkout: a relative --out would be lost
+cd "$(dirname "$BENCH_LOG")" || exit 2
 mkdir -p "$dir"
+rm -f "$dir/compare.json"
 echo "# recheck" > "$dir/compare.md"
 cp "$FAKE_RECHECK_JSON" "$dir/compare.json"
 exit "${FAKE_RECHECK_EXIT:-0}"
@@ -383,6 +392,31 @@ check "nothing was measured again" '! grep -q "^bench-compare " "$BENCH_LOG"'
 : > "$BENCH_LOG"
 echo '{"schema":2,"verdict":"error","exit_code":2,"error":"the build failed"}' > "$TMP/recheck-error.json"
 FAKE_COMPARE_JSON="$TMP/time-reg.json" FAKE_COMPARE_EXIT=1 FAKE_RECHECK_JSON="$TMP/recheck-error.json" FAKE_RECHECK_EXIT=2 expect "a re-run that fails stops the release as a failed step" 1 "the performance step failed" make-release.sh patch
+
+# spec: BUILD-034 (#520): bench-release.sh itself. A re-run that confirms a regression (bench-compare.sh exit 1,
+# verdict regression) is a confirmed regression, not a failed re-run; only an error or no compare.json fails (exit 2)
+BWT="$TMP/benchwt"
+git init -q "$BWT" && git -C "$BWT" commit -q --allow-empty -m start
+mkdir -p "$BWT/docs/perf/results" "$BWT/docs/perf/results-worst"
+echo '{}' > "$BWT/docs/perf/results/v0.1.0.json"; echo '{}' > "$BWT/docs/perf/results-worst/v0.1.0.json"
+: > "$BENCH_LOG"
+FAKE_COMPARE_JSON="$TMP/time-reg.json" FAKE_COMPARE_EXIT=1 FAKE_RECHECK_JSON="$TMP/recheck-real.json" FAKE_RECHECK_EXIT=1 expect "bench-release.sh: a re-run that confirms a regression ends in exit 1 without --allow-perf-regression" 1 "performance regression: full(v0.1.0 -> v0.2.0" bench-release.sh "$BWT" 0.2.0 --note "$TMP/note.md"
+check "the re-run was given an absolute --out, and its note section was written" 'grep -Eq -- "--out /.*/docs/perf/compare/.tmp-recheck-full" "$BENCH_LOG" && grep -Fq "**Confirmed**: ui.frame.x" "$TMP/note.md" && [ -f "$BWT/docs/perf/compare/v0.2.0-recheck.json" ]'
+rm -f "$TMP/note.md"
+FAKE_COMPARE_JSON="$TMP/time-reg.json" FAKE_COMPARE_EXIT=1 FAKE_RECHECK_JSON="$TMP/recheck-real.json" FAKE_RECHECK_EXIT=1 expect "bench-release.sh: a re-run that confirms a regression ends in exit 0 with --allow-perf-regression" 0 "allowed by --allow-perf-regression" bench-release.sh "$BWT" 0.2.0 --allow-perf-regression --note "$TMP/note.md"
+check "the note section is still written when the regression is allowed" 'grep -Fq "**Confirmed**: ui.frame.x" "$TMP/note.md"'
+FAKE_COMPARE_JSON="$TMP/time-reg.json" FAKE_COMPARE_EXIT=1 FAKE_RECHECK_JSON="$TMP/recheck-error.json" FAKE_RECHECK_EXIT=2 expect "bench-release.sh: a re-run that errors is exit 2, also with --allow-perf-regression" 2 "the re-run of the flagged full scenarios failed: the build failed" bench-release.sh "$BWT" 0.2.0 --allow-perf-regression
+FAKE_COMPARE_JSON="$TMP/time-reg.json" FAKE_COMPARE_EXIT=1 FAKE_RECHECK_JSON="$TMP/none.json" FAKE_RECHECK_EXIT=1 expect "bench-release.sh: a re-run without a compare.json is exit 2" 2 "the re-run of the flagged full scenarios failed: no compare.json" bench-release.sh "$BWT" 0.2.0
+
+# spec: BUILD-034: without jq a time regression cannot be confirmed: it counts as it is (a PATH without jq)
+NOJQ="$TMP/nojq"; mkdir "$NOJQ"
+for t in bash sh git env sed awk sort seq paste tr head cp rm mkdir mktemp dirname cat date cut uname nproc grep printf sleep expr tail wc; do
+  p=$(command -v "$t") && [ -x "$p" ] && ln -s "$p" "$NOJQ/$t"
+done
+cp "$TMP/bin/fake-shale" "$NOJQ/fake-shale"
+check "the PATH for the next tests has no jq" '! PATH="$NOJQ" command -v jq >/dev/null'
+FAKE_COMPARE_JSON="$TMP/time-reg.json" FAKE_COMPARE_EXIT=1 FAKE_RECHECK_JSON="$TMP/recheck-real.json" PATH="$NOJQ" BENCH_BIN="$NOJQ/fake-shale" expect "bench-release.sh without jq: a time regression counts as it is, and stops the release" 1 "jq is missing, so a time regression cannot be confirmed" bench-release.sh "$BWT" 0.2.0
+FAKE_COMPARE_JSON="$TMP/time-reg.json" FAKE_COMPARE_EXIT=1 FAKE_RECHECK_JSON="$TMP/recheck-real.json" PATH="$NOJQ" BENCH_BIN="$NOJQ/fake-shale" expect "bench-release.sh without jq: --allow-perf-regression lets it pass" 0 "allowed by --allow-perf-regression" bench-release.sh "$BWT" 0.2.0 --allow-perf-regression
 
 [ "$FAILED" = 0 ] && echo "all $N checks passed"
 exit "$FAILED"

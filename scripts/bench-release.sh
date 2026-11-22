@@ -131,18 +131,22 @@ regression_lines() {
 # recheck <profile> <suffix> <prev> <ids>: the flagged scenarios again, alone, against the previous release,
 # interleaved (scripts/bench-compare.sh); the result is docs/perf/compare/v$V$suffix-recheck.{md,json}
 recheck() {
-  local profile=$1 suffix=$2 prev=$3 ids=$4 xc filter out args
+  local profile=$1 suffix=$2 prev=$3 ids=$4 xc filter out args rc
   xc=$(jq -r '.x.commit // empty' "docs/perf/compare/v$V$suffix.json")
   git rev-parse --verify -q "$xc^{commit}" >/dev/null 2>&1 || xc="v$prev"
   filter=$(printf '%s\n' "$ids" | sed 's/^/=/' | paste -sd, -)
-  out="docs/perf/compare/.tmp-recheck-$profile"
+  # absolute: bench-compare.sh changes into the folder of its own checkout, which is not this worktree
+  out="$PWD/docs/perf/compare/.tmp-recheck-$profile"
   args=("$xc" "$(git rev-parse HEAD)" --profile "$profile" --runs "$RECHECK_RUNS" --filter "$filter" --out "$out")
   [ -z "${BENCH_MAX_LOAD:-}" ] || args+=(--max-load "$BENCH_MAX_LOAD")
   echo "== confirming the time regression of $(printf '%s' "$ids" | tr '\n' ' ')against v$prev: $RECHECK_RUNS interleaved runs of each side" >&2
   # the build flags of this script are already in RUSTFLAGS: bench-compare.sh adds them to what it is given, not to them twice
   env RUSTFLAGS="$ORIG_RUSTFLAGS" bash "${BENCH_COMPARE:-$SCRIPT_DIR/bench-compare.sh}" "${args[@]}" >&2
-  if [ ! -f "$out/compare.json" ] || [ "$(jq -r '.verdict // "error"' "$out/compare.json")" = error ]; then
-    echo "bench-release.sh: the re-run of the flagged $profile scenarios failed: $(jq -r '.error // "no compare.json"' "$out/compare.json" 2>/dev/null)" >&2
+  rc=$?
+  # exit 1 is the verdict `regression` (the regression is confirmed, it is no failure: it goes on to the
+  # ALLOW check at the end); only an error (exit 2 or more, verdict error) or no compare.json is a failed re-run
+  if [ "$rc" -gt 1 ] || [ ! -f "$out/compare.json" ] || [ "$(jq -r '.verdict // "error"' "$out/compare.json")" = error ]; then
+    echo "bench-release.sh: the re-run of the flagged $profile scenarios failed: $(jq -r '.error // empty' "$out/compare.json" 2>/dev/null | command grep . || echo "no compare.json, or none that says why (exit code $rc)")" >&2
     exit 2
   fi
   cp "$out/compare.md" "docs/perf/compare/v$V$suffix-recheck.md"
