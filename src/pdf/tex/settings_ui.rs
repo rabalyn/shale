@@ -215,11 +215,13 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &mut TexConfig) -> bool {
         st.check_again(&ctx);
     }
     crate::theme::hint(ui, "Notes can be exported to PDF through LaTeX templates. That needs LuaLaTeX and biber: Shale uses the ones of this computer when they are new enough, or installs its own TeX Live.");
-    ui.horizontal(|ui| {
-        if ui.button("Set up LaTeX export…").on_hover_text("A guided setup: TeX, the templates, the logo and your details, step by step").clicked() {
-            st.setup_requested = true;
-        }
-        crate::theme::hint(ui, "Not firm in TeX? This takes you through it.");
+    crate::settings::anchor::anchor(ui, "tex.setup", |ui| {
+        ui.horizontal(|ui| {
+            if ui.button("Set up LaTeX export…").on_hover_text("A guided setup: TeX, the templates, the logo and your details, step by step").clicked() {
+                st.setup_requested = true;
+            }
+            crate::theme::hint(ui, "Not firm in TeX? This takes you through it.");
+        });
     });
 
     theme::section(ui, "Which TeX is used");
@@ -253,42 +255,50 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &mut TexConfig) -> bool {
         }
     }
 
-    ui.label("TeX to use");
-    for c in TexChoice::ALL {
-        if ui.radio_value(&mut cfg.engine, c, c.label()).changed() {
-            changed = true;
-        }
-    }
-    ui.horizontal(|ui| {
-        if ui.add_enabled(st.detecting.is_none() && st.task.is_none(), egui::Button::new("Check again")).on_hover_text("Look for a TeX again").clicked() {
-            st.check_again(&ctx);
-        }
-        let engine = st.detection.as_ref().and_then(|d| d.selected(cfg.engine).ok()).cloned();
-        let can_test = engine.is_some() && st.task.is_none();
-        if ui.add_enabled(can_test, egui::Button::new("Test")).on_hover_text("Compile a small document with the chosen TeX: fonts, packages and the bibliography").clicked() {
-            if let Some(e) = engine {
-                st.start(&ctx, TaskKind::Test, move |_, _| test_notice(&e));
+    crate::settings::anchor::anchor(ui, "tex.engine", |ui| {
+        ui.label("TeX to use");
+        for c in TexChoice::ALL {
+            if ui.radio_value(&mut cfg.engine, c, c.label()).changed() {
+                changed = true;
             }
         }
     });
+    crate::settings::anchor::anchor(ui, "tex.test", |ui| {
+        ui.horizontal(|ui| {
+            if ui.add_enabled(st.detecting.is_none() && st.task.is_none(), egui::Button::new("Check again")).on_hover_text("Look for a TeX again").clicked() {
+                st.check_again(&ctx);
+            }
+            let engine = st.detection.as_ref().and_then(|d| d.selected(cfg.engine).ok()).cloned();
+            let can_test = engine.is_some() && st.task.is_none();
+            if ui.add_enabled(can_test, egui::Button::new("Test")).on_hover_text("Compile a small document with the chosen TeX: fonts, packages and the bibliography").clicked() {
+                if let Some(e) = engine {
+                    st.start(&ctx, TaskKind::Test, move |_, _| test_notice(&e));
+                }
+            }
+        });
+    });
 
     theme::section(ui, "Shale's own TeX Live");
-    managed_section(ui, st, cfg, &ctx);
+    crate::settings::anchor::anchor(ui, "tex.managed", |ui| managed_section(ui, st, cfg, &ctx));
 
-    super::sets_ui::show(ui, st, cfg);
+    // (the heading of the sets is inside; a scope has no gap above its first line)
+    theme::section_break(ui);
+    crate::settings::anchor::anchor(ui, "tex.sets", |ui| super::sets_ui::show(ui, st, cfg));
 
-    egui::CollapsingHeader::new("Download address").id_salt("tex-repository").show(ui, |ui| {
-        crate::theme::hint(ui, "The TeX Live repository the install and the update download from.");
-        if ui.add(egui::TextEdit::singleline(&mut cfg.repository).desired_width(360.0)).changed() {
-            changed = true;
-        }
-        if let Err(e) = install::check_repository(&cfg.repository) {
-            crate::theme::problem(ui, e);
-        }
-        if ui.button("Use the default").clicked() && cfg.repository != engine::DEFAULT_REPOSITORY {
-            cfg.repository = engine::DEFAULT_REPOSITORY.to_string();
-            changed = true;
-        }
+    crate::settings::anchor::anchor(ui, "tex.repository", |ui| {
+        egui::CollapsingHeader::new("Download address").id_salt("tex-repository").show(ui, |ui| {
+            crate::theme::hint(ui, "The TeX Live repository the install and the update download from.");
+            if ui.add(egui::TextEdit::singleline(&mut cfg.repository).desired_width(360.0)).changed() {
+                changed = true;
+            }
+            if let Err(e) = install::check_repository(&cfg.repository) {
+                crate::theme::problem(ui, e);
+            }
+            if ui.button("Use the default").clicked() && cfg.repository != engine::DEFAULT_REPOSITORY {
+                cfg.repository = engine::DEFAULT_REPOSITORY.to_string();
+                changed = true;
+            }
+        });
     });
 
     if let Some(n) = &st.notice {

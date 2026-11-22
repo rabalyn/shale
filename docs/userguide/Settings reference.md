@@ -14,6 +14,22 @@ A value of the wrong shape in the file loads as its default; fields Shale does n
 The "Where" column says which window changes a value. The global file is meant to be edited
 too: it is plain text with a description above every setting.
 
+# Finding a setting
+
+![[settings-find.png]]
+
+The field at the top of the Settings window (**Ctrl+F**, or **/** while no text field has the keyboard)
+searches every setting of every tab and the actions of the Keybindings tab. Type a few words: a
+setting is found by its name, by its description (the text above it in the settings file) or by the
+name of its tab, a key action by its name or by its keys (`ctrl+h`, `F6`). Each result shows its
+tab at the right. **↓** and **↑** (also Ctrl+J and Ctrl+K) choose, **Enter** or a click goes there:
+the tab is shown, the page scrolls to the setting and a box pulses around it for two seconds. Where
+animations are off, the box stands still for the same time. **Esc** closes the list, a second Esc
+closes the window. A setting that is not shown at the moment (the font of one area while one font is
+used for all) pulses the control that makes it appear instead.
+
+On the Keybindings tab the field of the tab filters the list, see [[Keyboard shortcuts]].
+
 # The settings file
 
 **Settings → Open settings file** opens `config.toml` in a tab of its own. It is not a note: it

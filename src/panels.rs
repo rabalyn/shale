@@ -875,20 +875,22 @@ impl ShaleApp {
                     keep = false;
                 }
             }
-            Modal::Settings { vault_path, tab, keys } => {
-                let mut done = false;
+            Modal::Settings { vault_path, tab, keys, find } => {
                 let mut asks = crate::settings::Asks::default();
-                let mut body = |ui: &mut egui::Ui| asks = self.settings_body(ui, vault_path, tab, keys);
-                let resp = crate::dialog::Dialog::new("settings", "Settings").width(740.0).show_with_footer(
+                // the header (the search, CFG-072) and the page both work on the window's state
+                let mut st = (&mut *self, vault_path, tab, keys, find, &mut asks, false);
+                let resp = crate::dialog::Dialog::new("settings", "Settings").width(740.0).show_with_header_and_footer(
                     &ctx,
-                    &mut done,
-                    |ui, _| body(ui),
-                    |ui, done| {
+                    &mut st,
+                    |ui, (app, _, tab, keys, find, asks, _)| app.settings_header(ui, tab, keys, find, asks),
+                    |ui, (app, vault_path, tab, keys, _, asks, _)| app.settings_body(ui, vault_path, tab, keys, asks),
+                    |ui, st| {
                         if ui.button("Done").clicked() {
-                            *done = true;
+                            st.6 = true;
                         }
                     },
                 );
+                let done = st.6;
                 if done || asks.close {
                     keep = false;
                 }

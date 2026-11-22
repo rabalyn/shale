@@ -2,6 +2,7 @@
 //! a background job (`pandoc --version` is a program run), once when the page is first shown and
 //! again on **Check again**.
 
+use super::anchor::anchor;
 use crate::app::{muted, ShaleApp};
 use crate::import::docx;
 use crate::theme;
@@ -74,11 +75,22 @@ impl ShaleApp {
         let mut changed = false;
         crate::theme::section(ui, "Files from outside the vault");
         crate::theme::hint(ui, "For a picture, PDF, sound or video that is not in the vault when you pick it with [!, paste it or import it. Other files are always copied.");
-        for value in OutsideFiles::ALL {
-            changed |= ui.radio_value(&mut self.cfg.outside_files, value, value.label()).on_hover_text(value.tip()).changed();
-        }
+        changed |= anchor(ui, "import.outside_files", |ui| {
+            let mut changed = false;
+            for value in OutsideFiles::ALL {
+                changed |= ui.radio_value(&mut self.cfg.outside_files, value, value.label()).on_hover_text(value.tip()).changed();
+            }
+            changed
+        });
         crate::theme::section(ui, "Library folders");
         crate::theme::hint(ui, "A library folder gives a folder of this computer a name. A link like ![[@Videos/2024/a.mp4]] means that file on every computer where Videos is set up, so a big collection can stay out of the vault. Each computer has its own list, here.");
+        changed |= anchor(ui, "import.libraries", |ui| self.library_folders_ui(ui));
+        changed
+    }
+
+    /// The list of the library folders with a row to add one (CFG-069).
+    fn library_folders_ui(&mut self, ui: &mut Ui) -> bool {
+        let mut changed = false;
         let names: Vec<String> = self.cfg.media_libraries.iter().map(|l| l.name.clone()).collect();
         let mut remove = None;
         for (i, lib) in self.cfg.media_libraries.iter_mut().enumerate() {
@@ -135,19 +147,21 @@ impl ShaleApp {
     pub(super) fn import_tab(&mut self, ui: &mut Ui) -> bool {
         let mut changed = self.outside_files_ui(ui);
         crate::theme::section(ui, "E-mails, events and posts");
-        changed |= ui
-            .checkbox(&mut self.cfg.import_header_list, "Header list in the note body")
-            .on_hover_text("An imported e-mail or event always has its From, To, Date, When, Where … in the note's properties. Ticked: they are also written as a list below the title, for programs that do not show properties. The Import dialog starts with this choice")
-            .changed();
+        changed |= anchor(ui, "import.header_list", |ui| {
+            ui.checkbox(&mut self.cfg.import_header_list, "Header list in the note body")
+                .on_hover_text("An imported e-mail or event always has its From, To, Date, When, Where … in the note's properties. Ticked: they are also written as a list below the title, for programs that do not show properties. The Import dialog starts with this choice")
+                .changed()
+        });
         self.word.poll();
         if self.word.result.is_none() && !self.word.running() {
             self.word.start(self.cfg.pandoc_path.clone());
         }
         crate::theme::section(ui, "Word files (.docx)");
-        changed |= ui
-            .checkbox(&mut self.cfg.docx_import, "Import Word files as notes (needs pandoc)")
-            .on_hover_text("A .docx file dropped on the window or added in the Import dialog becomes a note; pictures are saved next to it. Off: it is saved as an attachment")
-            .changed();
+        changed |= anchor(ui, "import.docx", |ui| {
+            ui.checkbox(&mut self.cfg.docx_import, "Import Word files as notes (needs pandoc)")
+                .on_hover_text("A .docx file dropped on the window or added in the Import dialog becomes a note; pictures are saved next to it. Off: it is saved as an attachment")
+                .changed()
+        });
         match (&self.word.result, self.word.running()) {
             (_, true) => {
                 ui.label(muted("Looking for pandoc…"));
@@ -169,15 +183,17 @@ impl ShaleApp {
             }
             crate::theme::hint(ui, "or see https://pandoc.org/installing.html");
         }
-        ui.horizontal(|ui| {
-            ui.label("pandoc program");
-            let r = ui.add(egui::TextEdit::singleline(&mut self.cfg.pandoc_path).hint_text("empty: search PATH and the usual places").desired_width(320.0));
-            if r.changed() {
-                changed = true;
-            }
-            if r.lost_focus() && r.changed() {
-                self.word.start(self.cfg.pandoc_path.clone());
-            }
+        anchor(ui, "import.pandoc", |ui| {
+            ui.horizontal(|ui| {
+                ui.label("pandoc program");
+                let r = ui.add(egui::TextEdit::singleline(&mut self.cfg.pandoc_path).hint_text("empty: search PATH and the usual places").desired_width(320.0));
+                if r.changed() {
+                    changed = true;
+                }
+                if r.lost_focus() && r.changed() {
+                    self.word.start(self.cfg.pandoc_path.clone());
+                }
+            });
         });
         if ui.add_enabled(!self.word.running(), egui::Button::new("Check again")).on_hover_text("Look for pandoc again, for example after installing it").clicked() {
             self.word.start(self.cfg.pandoc_path.clone());

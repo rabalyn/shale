@@ -61,6 +61,7 @@ impl ShaleApp {
         ui.add_space(8.0);
         ui.label(egui::RichText::new("File history").color(theme::palette().muted));
         let r = ui.checkbox(&mut self.cfg.history.enabled, "Keep earlier versions of my notes, so that I can go back");
+        crate::settings::anchor::mark(ui, "history.enabled", r.rect);
         self.sync.rects.push(("history-enabled", r.rect));
         changed |= r.changed();
         match self.history_off_reason() {
@@ -75,7 +76,7 @@ impl ShaleApp {
                 theme::hint(ui, format!("Versions are kept {place}. Nothing is written into the vault except a small file .shale/history-id."));
             }
         }
-        ui.horizontal_wrapped(|ui| {
+        let timing = ui.horizontal_wrapped(|ui| {
             ui.label("At most one version of a note every");
             let r = ui.add(egui::DragValue::new(&mut self.cfg.history.coalesce_minutes).range(1..=1440));
             self.sync.rects.push(("history-minutes", r.rect));
@@ -86,8 +87,10 @@ impl ShaleApp {
             changed |= r.changed();
             ui.label("seconds.");
         });
+        crate::settings::anchor::mark(ui, "history.timing", timing.response.rect);
         if self.vault.is_some() {
             let b = ui.add_enabled(self.cfg.history.enabled, egui::Button::new("Restore a deleted note…"));
+            crate::settings::anchor::mark(ui, "history.deleted", b.rect);
             self.sync.rects.push(("history-deleted", b.rect));
             if b.clicked() {
                 asks.history_deleted = true;

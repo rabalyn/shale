@@ -102,6 +102,12 @@ impl Dialog {
         self.show_inner(ctx, state, Some(header), content, None::<fn(&mut Ui, &mut S)>)
     }
 
+    /// Both: a header that stays in view above the content and a footer below it. The three
+    /// closures are over the same `state`; the header runs first, then the content, then the footer.
+    pub fn show_with_header_and_footer<S>(self, ctx: &Context, state: &mut S, header: impl FnOnce(&mut Ui, &mut S), content: impl FnOnce(&mut Ui, &mut S), footer: impl FnOnce(&mut Ui, &mut S)) -> DialogResponse {
+        self.show_inner(ctx, state, Some(header), content, Some(footer))
+    }
+
     /// Like [`Dialog::show`], with a footer (the buttons) below the content. Only the content
     /// scrolls; the footer stays in view, also in a window shorter than the content. The content
     /// and the footer are closures over the same `state` (they could not both borrow what the

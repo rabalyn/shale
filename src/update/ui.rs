@@ -93,15 +93,17 @@ pub fn settings_page(ui: &mut Ui, state: &mut UpdateState, cfg: &mut UpdateConfi
     let mut changed = false;
     theme::hint(ui, "Shale can look for a new release on GitHub (github.com/rabalyn/shale), check its download against the release's SHA-256 file, and install it. A checksum shows the file arrived whole; it does not prove who made it.");
     theme::section(ui, "When an update is found");
-    for m in [UpdateMode::Ask, UpdateMode::Off, UpdateMode::Notify, UpdateMode::Download, UpdateMode::Install] {
-        if ui.radio_value(&mut cfg.mode, m, m.label()).changed() {
-            changed = true;
-            if m == UpdateMode::Off {
-                state.hidden = true;
+    crate::settings::anchor::anchor(ui, "updates.mode", |ui| {
+        for m in [UpdateMode::Ask, UpdateMode::Off, UpdateMode::Notify, UpdateMode::Download, UpdateMode::Install] {
+            if ui.radio_value(&mut cfg.mode, m, m.label()).changed() {
+                changed = true;
+                if m == UpdateMode::Off {
+                    state.hidden = true;
+                }
             }
+            theme::hint(ui, m.about());
         }
-        theme::hint(ui, m.about());
-    }
+    });
     if state.env_off {
         theme::problem(ui, format!("{ENV}=off is set in the environment: updates are off, whatever is chosen here."));
     }
@@ -116,13 +118,15 @@ pub fn settings_page(ui: &mut Ui, state: &mut UpdateState, cfg: &mut UpdateConfi
     theme::hint(ui, how);
     theme::section(ui, "Check");
     let off = state.mode(cfg) == UpdateMode::Off;
-    ui.horizontal(|ui| {
-        if ui.add_enabled(!off && !state.check_pending(), egui::Button::new("Check for updates now")).on_disabled_hover_text("Updates are off: Shale makes no request").clicked() {
-            state.check_now();
-        }
-        if state.check_pending() {
-            ui.spinner();
-        }
+    crate::settings::anchor::anchor(ui, "updates.check", |ui| {
+        ui.horizontal(|ui| {
+            if ui.add_enabled(!off && !state.check_pending(), egui::Button::new("Check for updates now")).on_disabled_hover_text("Updates are off: Shale makes no request").clicked() {
+                state.check_now();
+            }
+            if state.check_pending() {
+                ui.spinner();
+            }
+        });
     });
     if let Some(t) = result_text(state, cfg).filter(|_| !off) {
         match state.result {

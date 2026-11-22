@@ -908,7 +908,9 @@ fn vault_028_settings_vault_checks_names_in_the_background_and_renames_one_or_al
     assert!(shown.iter().any(|l| *l == format!("→ {a2}.md")) && shown.iter().any(|l| *l == format!("→ {c2}.md")), "{shown:?}");
     assert!(!shown.iter().any(|l| l.contains('ε') || l.contains("Fine.md")), "the trash and good names are not listed");
     // one at a time
-    let first = p.find(Show::Modals, None, "Rename");
+    // the topmost one: the order of the widgets in the accessibility tree follows their ids, not the page
+    let seen = p.look(Show::Modals);
+    let first = seen.iter().filter(|(r, l, _)| *r == egui::accesskit::Role::Button && l == "Rename").map(|x| x.2).min_by(|a, b| a.top().total_cmp(&b.top())).expect("a Rename button");
     p.click_rect(Show::Modals, first, PointerButton::Primary);
     let shown = labels_until(&mut p, "1 name would not work on Windows or macOS");
     assert!(p.dir.join(format!("{a2}.md")).exists() && !p.dir.join(&a_md).exists());
@@ -997,6 +999,10 @@ fn media_023_settings_sync_says_how_many_media_files_are_linked_from_outside_and
 fn text_boxes(p: &mut P) -> Vec<Rect> {
     let mut boxes: Vec<Rect> = p.look(Show::Modals).into_iter().filter(|(r, _, _)| matches!(r, Role::TextInput | Role::MultilineTextInput)).map(|(_, _, rect)| rect).collect();
     boxes.sort_by(|a, b| (a.min.y.round(), a.min.x).partial_cmp(&(b.min.y.round(), b.min.x)).unwrap());
+    // the search over all settings is the first box of the Settings window: the numbers are those of the page
+    if matches!(p.app.modal, Some(Modal::Settings { .. })) && !boxes.is_empty() {
+        boxes.remove(0);
+    }
     boxes
 }
 

@@ -2,6 +2,8 @@
 //! its binding(s), a way to record a new binding, add one, clear, reset one, reset all.
 
 use crate::keys::{Action, Binding, Chord, Keymap, Scope, DEFS};
+use crate::settings::anchor;
+use crate::settings::registry::{action_anchor, action_matches, bound_keys, terms};
 use crate::theme;
 use eframe::egui::{self, Event, Key, Modifiers, Rect, RichText, Ui};
 
@@ -16,6 +18,11 @@ pub struct KeyDialog {
     /// A recorded binding that clashes with other actions, waiting for the answer to “Overwrite it?”
     /// (KEY-018).
     pub confirm: Option<Confirm>,
+    /// What the filter field above the list says (KEY-006, CFG-072): the actions whose label or
+    /// keys fit stay in the list.
+    pub filter: String,
+    /// The filter field takes the keyboard in the next frame.
+    focus_filter: bool,
     /// Where the controls were drawn (`key:<id>`, `add:<id>`, `clear:<id>`, `reset:<id>`,
     /// `reset-all`), for tests.
     pub rects: Vec<(String, Rect)>,
@@ -40,6 +47,19 @@ fn names(actions: &[Action]) -> String {
 }
 
 impl KeyDialog {
+    /// A binding is being recorded or asked about: the keys belong to that, not to a field.
+    pub fn capturing(&self) -> bool {
+        self.recording.is_some() || self.confirm.is_some()
+    }
+
+    /// Make sure the row of `a` is in the list: a filter that hides it is cleared (a result of the
+    /// search of the whole dialog goes to the action, CFG-072).
+    pub fn reveal(&mut self, a: Action, keymap: &Keymap) {
+        if !action_matches(a.def().label, &bound_keys(keymap, a), &terms(&self.filter)) {
+            self.filter.clear();
+        }
+    }
+
     fn start(&mut self, a: Action, adding: bool) {
         self.confirm = None;
         self.recording = Some((a, vec![]));
@@ -187,7 +207,25 @@ pub fn show(ui: &mut Ui, d: &mut KeyDialog, keys: &mut Keymap) -> bool {
     if let Some(e) = &d.error {
         ui.label(RichText::new(e.as_str()).color(theme::palette().link_missing));
     }
-    let r = ui.button("Reset all");
+    let capturing = d.capturing();
+    if !capturing && crate::settings::find::take_search_keys(ui) {
+        d.focus_filter = true;
+    }
+    let filter_id = egui::Id::unique("keys-filter-field");
+    // Esc in the field with text in it clears the text; the dialog stays
+    if ui.ctx().memory(|m| m.has_focus(filter_id)) && !d.filter.is_empty() && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+        d.filter.clear();
+    }
+    let r = ui
+        .horizontal(|ui| {
+            let field = ui.add_enabled(!capturing, egui::TextEdit::singleline(&mut d.filter).id(filter_id).hint_text("Filter by name or key, such as ctrl+h or F6  (Ctrl+F)").desired_width(260.0));
+            crate::settings::find::keep_focus_on_esc(ui.ctx(), filter_id);
+            if std::mem::take(&mut d.focus_filter) {
+                field.request_focus();
+            }
+            ui.button("Reset all").on_hover_text("Puts every action back to its keys, also those the filter does not show")
+        })
+        .inner;
     d.rects.push(("reset-all".into(), r.rect));
     if r.clicked() {
         keys.reset_all();
@@ -199,15 +237,21 @@ pub fn show(ui: &mut Ui, d: &mut KeyDialog, keys: &mut Keymap) -> bool {
     let mut clear = None;
     let mut reset = None;
     // one grid for all groups, so that the columns line up from group to group
+    // the actions that fit the filter, by scope; a group with none is not shown (KEY-006)
+    let wanted = terms(&d.filter);
+    let shown: Vec<_> = DEFS.iter().filter(|def| action_matches(def.label, &bound_keys(keys, def.action), &wanted)).collect();
+    if shown.is_empty() {
+        crate::theme::prose(ui, muted("No action matches"));
+    }
     egui::Grid::new("keys-grid").num_columns(3).spacing([14.0, 4.0]).show(ui, |ui| {
-        for scope in Scope::ALL {
+        for scope in Scope::ALL.into_iter().filter(|s| shown.iter().any(|d| d.scope == *s)) {
             ui.allocate_space(egui::vec2(0.0, 8.0));
             ui.end_row();
             ui.label(RichText::new(scope.label()).strong());
             ui.end_row();
-            for def in DEFS.iter().filter(|d| d.scope == scope) {
+            for def in shown.iter().filter(|d| d.scope == scope) {
                 // long names wrap: the page sits next to the tab list of the settings
-                ui.scope(|ui| {
+                let name = ui.scope(|ui| {
                     ui.set_max_width(180.0);
                     ui.add(egui::Label::new(def.label).wrap());
                 });
@@ -221,7 +265,7 @@ pub fn show(ui: &mut Ui, d: &mut KeyDialog, keys: &mut Keymap) -> bool {
                         ui.label(if keys.is_default(def.action) { RichText::new(text) } else { RichText::new(format!("{text}  (changed)")).color(theme::palette().accent) });
                     }
                 }
-                ui.horizontal(|ui| {
+                let buttons = ui.horizontal(|ui| {
                     let change = ui.button("Change");
                     d.rects.push((format!("key:{}", def.id), change.rect));
                     if change.clicked() {
@@ -243,6 +287,7 @@ pub fn show(ui: &mut Ui, d: &mut KeyDialog, keys: &mut Keymap) -> bool {
                         reset = Some(def.action);
                     }
                 });
+                anchor::mark(ui, &action_anchor(def), name.response.rect.union(buttons.response.rect));
                 ui.end_row();
             }
         }

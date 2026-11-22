@@ -213,6 +213,8 @@ pub enum Modal {
         tab: SettingsTab,
         /// State of the Keybindings tab (KEY-006).
         keys: Box<crate::keys_ui::KeyDialog>,
+        /// The search over all settings at the top (CFG-072).
+        find: Box<crate::settings::Find>,
     },
     /// the Data usage dialog (USE-001)
     DataUsage,
@@ -2613,7 +2615,7 @@ impl ShaleApp {
     /// Open the Settings dialog on this tab.
     pub fn open_settings(&mut self, tab: SettingsTab) {
         let vault_path = self.cfg.vault.as_ref().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
-        self.modal = Some(Modal::Settings { vault_path, tab, keys: Box::default() });
+        self.modal = Some(Modal::Settings { vault_path, tab, keys: Box::default(), find: Box::default() });
     }
 
     fn screenshot_tick(&mut self, ui: &Ui) {

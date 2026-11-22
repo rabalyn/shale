@@ -6,6 +6,14 @@ Back to [[Start here]]. Editing keys are in [[Editor]], the settings window is i
 
 ![[keybindings.png]]
 
+To find an action, press **Ctrl+F** (or **/**) on the Keybindings tab and type part of its name or of
+its keys, such as `reading`, `ctrl+h` or `F6`; the list keeps the actions that fit, hides the
+groups with none, and says "No action matches" when nothing does. **Esc** clears the field. Change, Add, Clear and Reset
+work on the rows shown, **Reset all** puts every action back, also those the filter hides. The
+search at the top of Settings finds an action too and pulses its row, see [[Settings reference]].
+
+![[keybindings-filter.png]]
+
 Ctrl is Cmd on macOS. No default key is one that the system reserves (the app menu's Cmd+H, AltGr on Windows, the workspace keys of the Linux desktops), so macOS has other keys for six actions, named in the rows below; a key you set yourself is never refused for that reason. The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings** (Change replaces the keys of an action, Add gives it one more, Clear leaves it without a key)
 (everywhere, file list, search results, mail view, note view, vim normal mode; a key that another action uses asks whether to overwrite it: Yes takes it from that action, No changes nothing).
 Text editing keys and vim keys are fixed.

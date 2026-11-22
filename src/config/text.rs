@@ -207,6 +207,13 @@ pub fn description(path: &[String]) -> Option<&'static str> {
     find(&format!("{}.*", parent.join(".")))
 }
 
+/// The keys that have a description, for the test that the Settings dialog knows every setting
+/// (`settings/registry.rs`).
+#[cfg(test)]
+pub fn described_keys() -> Vec<&'static str> {
+    DESCRIPTIONS.iter().map(|(k, _)| *k).filter(|k| !k.ends_with('*')).collect()
+}
+
 /// Where the description of a setting stands in the table: the order of the file.
 fn rank(path: &[String]) -> usize {
     let at = |p: &str| DESCRIPTIONS.iter().position(|(k, _)| *k == p);

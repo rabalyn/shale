@@ -3,19 +3,27 @@
 //! Every page is a function of `ShaleApp` in its own file; this file holds the frame, the tab
 //! list and what a page can ask the dialog to do.
 
+pub(crate) mod anchor;
 mod appearance;
 mod data;
 mod editor;
+pub(crate) mod find;
 mod font_picker;
 pub(crate) mod fonts;
 mod help;
 pub(crate) mod import;
 mod latex;
 mod mail_social;
+pub(crate) mod registry;
 mod search;
 mod sync_calendar;
 mod vault;
 mod vim;
+
+#[cfg(test)]
+mod find_tests;
+
+pub use find::Find;
 
 use crate::app::ShaleApp;
 use crate::keys_ui::KeyDialog;
@@ -168,12 +176,11 @@ pub fn last_tab(ctx: &Context) -> SettingsTab {
 }
 
 impl ShaleApp {
-    /// The content of the dialog: header row, tab list and the page of the chosen tab.
-    pub fn settings_body(&mut self, ui: &mut Ui, vault_path: &mut String, tab: &mut SettingsTab, keys: &mut KeyDialog) -> Asks {
-        let mut asks = Asks::default();
+    /// The content of the dialog: the tab list and the page of the chosen tab. What the page asks
+    /// of the dialog is added to `asks`.
+    pub fn settings_body(&mut self, ui: &mut Ui, vault_path: &mut String, tab: &mut SettingsTab, keys: &mut KeyDialog, asks: &mut Asks) {
         ui.ctx().data_mut(|d| d.insert_temp(last_tab_id(), *tab));
-        self.settings_header(ui, *tab, &mut asks);
-        ui.separator();
+        anchor::begin(ui.ctx());
         let dialog_width = ui.available_width();
         let auto = auto_tab_width(ui);
         let drag_id = Id::unique("settings-tab-width-drag");
@@ -226,21 +233,21 @@ impl ShaleApp {
                     self.keymap.recording = false;
                 }
                 let changed = match *tab {
-                    SettingsTab::Vault => self.vault_tab(ui, vault_path, &mut asks),
+                    SettingsTab::Vault => self.vault_tab(ui, vault_path, asks),
                     SettingsTab::Editor => self.editor_tab(ui, tab),
                     SettingsTab::Vim => self.vim_tab(ui, tab),
                     SettingsTab::Appearance => self.appearance_tab(ui),
                     SettingsTab::Fonts => self.fonts_tab(ui),
-                    SettingsTab::Sync => self.sync_tab(ui, &mut asks),
-                    SettingsTab::Calendar => self.calendar_tab(ui, &mut asks),
-                    SettingsTab::Mail => self.mail_tab(ui, &mut asks),
-                    SettingsTab::Social => self.social_tab(ui, &mut asks),
+                    SettingsTab::Sync => self.sync_tab(ui, asks),
+                    SettingsTab::Calendar => self.calendar_tab(ui, asks),
+                    SettingsTab::Mail => self.mail_tab(ui, asks),
+                    SettingsTab::Social => self.social_tab(ui, asks),
                     SettingsTab::Search => self.search_tab(ui),
                     SettingsTab::Import => self.import_tab(ui),
-                    SettingsTab::Data => self.data_tab(ui, &mut asks),
-                    SettingsTab::Latex => self.latex_tab(ui, &mut asks),
+                    SettingsTab::Data => self.data_tab(ui, asks),
+                    SettingsTab::Latex => self.latex_tab(ui, asks),
                     SettingsTab::Updates => self.updates_tab(ui),
-                    SettingsTab::Help => self.help_tab(ui, &mut asks),
+                    SettingsTab::Help => self.help_tab(ui, asks),
                     SettingsTab::Keybindings => {
                         let edited = egui::ScrollArea::horizontal().auto_shrink([false, true]).show(ui, |ui| crate::keys_ui::show(ui, keys, &mut self.keymap)).inner;
                         if edited {
@@ -254,12 +261,18 @@ impl ShaleApp {
                 }
             });
         });
-        asks
+        anchor::end(ui.ctx());
     }
 
-    /// The row above the tabs: what the page is for, and room on the right for buttons of the
-    /// whole dialog (add them in a `right_to_left` layout here).
-    fn settings_header(&mut self, ui: &mut Ui, tab: SettingsTab, asks: &mut Asks) {
+    /// What stays above the tabs and the page when the page scrolls: the search over all settings
+    /// (CFG-072), and a row with what the page is for and room on the right for buttons of the
+    /// whole dialog (add them in a `right_to_left` layout here). A search result that is picked
+    /// changes `tab`.
+    pub fn settings_header(&mut self, ui: &mut Ui, tab: &mut SettingsTab, keys: &mut KeyDialog, find: &mut Find, asks: &mut Asks) {
+        // while a key is recorded or asked about, the keys belong to that (KEY-006)
+        let locked = keys.capturing() || self.keymap.recording;
+        find.show(ui, &self.keymap, tab, keys, locked);
+        let tab = *tab;
         ui.horizontal(|ui| {
             crate::theme::hint(ui, tab.about());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -269,6 +282,7 @@ impl ShaleApp {
                 }
             });
         });
+        ui.separator();
     }
 }
 
