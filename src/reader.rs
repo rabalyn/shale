@@ -30,6 +30,8 @@ pub enum ReaderAction {
     OpenUrl(String),
     /// A date of a property card: show this day (a day number, `calendar::time`) in the calendar (EDIT-108).
     OpenDay(i64),
+    /// "Copy into the vault" on an outside embed: the link target whose file is to be copied (MEDIA-021)
+    CopyOutside(String),
 }
 
 /// What the reading view shows besides the text: the numbers of the headings by line (LINK-014)
@@ -912,6 +914,9 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
                         if crate::media::is_media(&target) {
                             // a sound is a player of its own, without the frame (MEDIA-001)
                             crate::media::widget::show(ui, caches.media, &abs, rel, l.embed_width());
+                            if outside {
+                                outside_row(ui, &l.target, &mut out);
+                            }
                             ui.add_space(6.0);
                         } else {
                             embed(ui, vault, (&target, &abs, outside.then_some(l.target.as_str())), l.embed_width(), caches, (base, dark_canvas), &mut out);
@@ -1143,6 +1148,19 @@ fn list_marker(line: &str) -> Option<(String, usize)> {
     None
 }
 
+/// The line under the player of an outside file: it says the file is not synced (MEDIA-023) and
+/// has "Copy into the vault" (MEDIA-021).
+fn outside_row(ui: &mut Ui, target: &str, out: &mut Option<ReaderAction>) {
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(crate::media::outside::NOT_SYNCED).color(theme::palette().muted).small());
+        if ui.small_button(crate::media::outside::COPY_LABEL).on_hover_text(COPY_HINT).clicked() {
+            *out = Some(ReaderAction::CopyOutside(target.to_string()));
+        }
+    });
+}
+
+const COPY_HINT: &str = "Copy the file into the vault, in the media folder, and link the copy. Files outside the vault are not synced.";
+
 /// The strip that stands in place of an outside file that cannot be shown (MEDIA-016).
 fn embed_notice(ui: &mut Ui, text: &str) {
     egui::Frame::new().fill(theme::palette().bg_secondary).stroke(Stroke::new(1.0, theme::palette().border)).corner_radius(CornerRadius::same(8)).inner_margin(8).show(ui, |ui| {
@@ -1169,10 +1187,18 @@ fn embed(ui: &mut Ui, vault: &Vault, (target, abs, outside): (&Path, &Path, Opti
     frame.show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(&name).color(theme::palette().muted).small());
+            let label = ui.label(egui::RichText::new(&name).color(theme::palette().muted).small());
+            if outside.is_some() {
+                label.on_hover_text(crate::media::outside::NOT_SYNCED);
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.small_button("Open").clicked() {
                     *out = Some(open());
+                }
+                if let Some(link) = outside {
+                    if ui.small_button(crate::media::outside::COPY_LABEL).on_hover_text(COPY_HINT).clicked() {
+                        *out = Some(ReaderAction::CopyOutside(link.to_string()));
+                    }
                 }
             });
         });

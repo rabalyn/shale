@@ -1,5 +1,5 @@
 #!/bin/bash
-# Benchmarks two commits and compares them (BUILD-030, BUILD-036, raba/shale#343). For an agent or a release.
+# Benchmarks two commits and compares them (BUILD-030, BUILD-034, BUILD-036, raba/shale#343). For an agent or a release.
 #
 #   scripts/bench-compare.sh <commit-X> <commit-Y> [--profile quick|full|worst] [--runs N]
 #                            [--filter IDS] [--changed IDS] [--threshold PCT] [--bytes-threshold PCT]

@@ -520,7 +520,7 @@ mod tests {
         assert_eq!(parse(&["--help", "--size", "bad"]), Parsed::Help);
     }
 
-    // spec: DEV-013
+    // spec: DEV-013, BUILD-019, NAV-030
     #[test]
     fn a_bad_size_is_an_error_for_exit_code_2() {
         for bad_args in [&["--size", "100x100"][..], &["--size", "1279x720"], &["--size", "1280x719"], &["--size", "1360"], &["--size", "axb"], &["--size"]] {
@@ -573,6 +573,7 @@ mod tests {
         assert!(bad(&["--record", "c.webm", "--keys", "nonsense:x"]).starts_with("--keys: "));
     }
 
+    // spec: DEV-013
     #[test]
     fn bad_keys_are_an_error_for_exit_code_2() {
         match parse(&["--screenshot", "o.png", "--keys", "nonsense:thing"]) {

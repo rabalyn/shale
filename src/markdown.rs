@@ -1454,7 +1454,7 @@ a
         assert_eq!(h, vec![(0, 1, "A".into()), (2, 2, "B".into())]);
     }
 
-    // spec: EDIT-001
+    // spec: EDIT-001, PERF-004
     // spec: NAV-009
     #[test]
     fn find_ignores_case_also_for_other_letters() {

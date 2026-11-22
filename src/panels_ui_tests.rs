@@ -188,7 +188,7 @@ pub(super) fn opened(a: &[Action]) -> Vec<String> {
         .collect()
 }
 
-// spec: VAULT-023
+// spec: VAULT-023, NAV-005
 #[test]
 fn panel_quick_switcher_finds_opens_creates_and_closes() {
     let mut p = P::new("quick", &[]);
@@ -913,6 +913,72 @@ fn vault_028_settings_vault_checks_names_in_the_background_and_renames_one_or_al
     labels_until(&mut p, "All names work on Windows and macOS.");
     assert!(p.dir.join(format!("{c2}.md")).exists() && !p.dir.join(&c_md).exists());
     assert_eq!(std::fs::read_to_string(p.dir.join("Linker.md")).unwrap(), format!("[[{a2}]] [[{c2}]]\n"));
+}
+
+// spec: MEDIA-022, VAULT-028
+#[test]
+fn media_022_the_vault_check_lists_outside_links_by_note_in_the_same_background_job() {
+    let outside = std::env::temp_dir().join(format!("shale-panels-outside-check-media-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&outside);
+    std::fs::create_dir_all(outside.join("Media")).unwrap();
+    std::fs::write(outside.join("Media/a.png"), b"p").unwrap();
+    std::fs::write(outside.join("loose.png"), b"p").unwrap();
+    let loose = crate::media::testdata::file_address(&outside.join("loose.png"));
+    let note = format!("![[@Media/a.png]] ![[@Media/gone.png]] ![[@Nowhere/x.mp3]] ![](<{}>)\n", loose.replace("%20", " "));
+    let mut p = P::with_files("outside-check", &[("Links.md", note.as_str()), ("Plain.md", "no media\n")]);
+    p.app.cfg.media_libraries = vec![crate::media::outside::Library { name: "Media".into(), path: outside.join("Media") }];
+    p.app.vault.as_mut().unwrap().set_libraries(&p.app.cfg.media_libraries);
+    p.app.open_settings(SettingsTab::Vault);
+    let shown = shown_labels(&mut p);
+    assert!(!shown.iter().any(|l| l.contains("outside the vault")), "nothing is listed before the check: {shown:?}");
+    p.app.start_vault_check();
+    assert!(p.app.vault_check.running(), "the files are looked up by the job, not by the frame");
+    let shown = labels_until(&mut p, "4 links to media outside the vault");
+    assert!(shown.iter().any(|l| l.contains("the files are not synced") && l.contains("3 need a look:")), "{shown:?}");
+    assert!(shown.iter().any(|l| l == "Links.md"), "by note: {shown:?}");
+    assert!(!shown.iter().any(|l| l == "Plain.md"), "a note without outside links is not listed");
+    assert!(shown.iter().any(|l| l == "@Media/gone.png") && shown.iter().any(|l| l.starts_with("not found: ") && l.ends_with("gone.png")), "{shown:?}");
+    assert!(shown.iter().any(|l| l == "@Nowhere/x.mp3") && shown.iter().any(|l| l == "library “Nowhere” is not set up on this device"), "{shown:?}");
+    assert!(shown.iter().any(|l| l.contains("a file link") && l.contains("this computer only")), "{shown:?}");
+    assert!(shown.iter().any(|l| l.starts_with("Library “Nowhere” is not set up on this device (Settings → Import): 1 link")), "{shown:?}");
+    assert!(!shown.iter().any(|l| l == "@Media/a.png"), "the library link that works is not listed");
+    // the names part is there as before
+    assert!(shown.iter().any(|l| l == "All names work on Windows and macOS."), "{shown:?}");
+    // a vault without outside links says so
+    let mut q = P::with_files("outside-check-none", &[("Plain.md", "no media [[Plain]]\n")]);
+    q.app.open_settings(SettingsTab::Vault);
+    q.click(Show::Modals, "Check names for Windows and macOS…");
+    labels_until(&mut q, "No note links a picture, PDF, sound or video from outside the vault.");
+    // a library whose folder is set but not there
+    p.app.cfg.media_libraries = vec![crate::media::outside::Library { name: "Media".into(), path: outside.join("unplugged") }];
+    p.app.vault.as_mut().unwrap().set_libraries(&p.app.cfg.media_libraries);
+    p.click(Show::Modals, "Check names for Windows and macOS…");
+    let shown = labels_until(&mut p, "4 links to media outside the vault");
+    assert!(shown.iter().any(|l| l.starts_with("Library “Media” has its folder ") && l.contains("unplugged") && l.contains("but it is not there: 2 links")), "{shown:?}");
+    let _ = std::fs::remove_dir_all(&outside);
+}
+
+// spec: MEDIA-023
+#[test]
+fn media_023_settings_sync_says_how_many_media_files_are_linked_from_outside_and_not_synced() {
+    let mut p = P::with_files("outside-sync-note", &[("Trip.md", "![[@Videos/a.mp4]] ![[@Videos/a.mp4|200]] [[@Videos/b.pdf]]\n"), ("Other.md", "![](<file:///elsewhere/pic.png>) [[Trip]]\n")]);
+    p.app.open_settings(SettingsTab::Sync);
+    let shown = shown_labels(&mut p);
+    let note = shown.iter().find(|l| l.contains("linked from outside the vault")).unwrap_or_else(|| panic!("{shown:?}"));
+    assert!(note.starts_with("3 media files are linked from outside the vault and are not synced"), "each file once, however often it is linked: {note}");
+    assert!(note.contains("file history"), "{note}");
+    assert!(shown.iter().any(|l| l.contains("Settings → Import")), "the way to set the library up: {shown:?}");
+    // one file: the singular
+    let mut q = P::with_files("outside-sync-note-one", &[("Trip.md", "![[@Videos/a.mp4]]\n")]);
+    q.app.open_settings(SettingsTab::Sync);
+    assert!(shown_labels(&mut q).iter().any(|l| l.starts_with("1 media file is linked from outside the vault and is not synced")));
+    // no links: no note; and the count follows the notes
+    let mut r = P::with_files("outside-sync-note-none", &[("Plain.md", "no media\n")]);
+    r.app.open_settings(SettingsTab::Sync);
+    assert!(!shown_labels(&mut r).iter().any(|l| l.contains("linked from outside the vault")));
+    std::fs::write(r.dir.join("Plain.md"), "![[@Videos/c.mp4]]\n").unwrap();
+    r.app.vault.as_mut().unwrap().rescan();
+    assert!(labels_until(&mut r, "1 media file is linked from outside the vault").len() > 1);
 }
 
 /// The text boxes on screen, top to bottom and left to right.

@@ -65,7 +65,8 @@ this guide are embedded exactly like this. Switch it off in Settings → Appeara
 
 **Captions.** Every embed that is shown has its link as a small caption below it: the file's
 link (`z_media/photo.png`), or the words you give it after a `|`: `![[photo.png|Sea at dusk]]`
-(and `![[photo.png|Sea at dusk|300]]` with a width). Click the caption to open the file. The
+(and `![[photo.png|Sea at dusk|300]]` with a width). Click the caption to open the file. A file outside the vault has **Copy into the vault** at the
+right end of its caption ([[Sounds and videos]]). The
 [[PDF]] export draws the same thumbnails with the same captions.
 
 **Resizing.** Pictures and videos can be resized by dragging; see [[Editor]].

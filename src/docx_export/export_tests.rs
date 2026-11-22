@@ -832,7 +832,7 @@ fn docx_with_ppr(ppr: &str) -> Vec<u8> {
     docx_of(&body(&format!("<w:p><w:pPr>{ppr}</w:pPr></w:p>")), &styles_xml(""), &[], &[])
 }
 
-// spec: DOCX-010
+// spec: DOCX-010, DEV-036
 #[test]
 fn the_schemas_are_looked_for_in_the_cache_folder_of_the_developer_tools() {
     let dir = |xdg, home| schema_check::cache_dir(xdg, home).map(|p| p.display().to_string());
@@ -844,14 +844,14 @@ fn the_schemas_are_looked_for_in_the_cache_folder_of_the_developer_tools() {
     assert_eq!(dir(None, None), None);
 }
 
-// spec: DOCX-010
+// spec: DOCX-010, DEV-036
 #[test]
 fn the_commit_of_the_schemas_is_the_one_the_script_fetches() {
     let script = std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/validate-docx.sh")).unwrap();
     assert!(script.lines().any(|l| l == format!("COMMIT={}", schema_check::COMMIT)), "COMMIT in scripts/validate-docx.sh and schema_check::COMMIT differ");
 }
 
-// spec: DOCX-010
+// spec: DOCX-010, DEV-036
 #[test]
 fn a_check_without_the_schemas_is_skipped_and_what_is_no_word_file_is_invalid() {
     let empty = temp_dir("no-schemas");
@@ -867,7 +867,7 @@ fn a_check_without_the_schemas_is_skipped_and_what_is_no_word_file_is_invalid() 
     let _ = std::fs::remove_dir_all(&empty);
 }
 
-// spec: DOCX-010
+// spec: DOCX-010, DEV-036
 #[test]
 fn a_file_with_elements_in_the_wrong_order_does_not_validate_and_the_errors_name_the_part() {
     let good = schema_check::check(&docx_with_ppr("<w:keepNext/><w:spacing w:after=\"0\"/><w:jc w:val=\"left\"/>"));
@@ -1559,7 +1559,7 @@ mod dialog_tests {
 // Word file `SHALE_ROUNDTRIP_DOCX` into a new vault with the real pandoc, exports the note, writes the Word file to
 // `SHALE_ROUNDTRIP_OUT` (the note's text beside it, `.md`) and prints the share of the words that came back. A step that fails prints `import error:` or
 // `export error:` with the message and fails the test (scripts/docx-corpus.sh reads these lines).
-// spec: DOCX-010
+// spec: DOCX-010, DEV-037
 #[test]
 #[ignore = "run by scripts/roundtrip-docx.sh and scripts/docx-corpus.sh"]
 fn dev_004_roundtrip_imports_and_exports_a_word_file_and_prints_the_share_of_words_that_came_back() {

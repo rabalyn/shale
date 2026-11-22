@@ -684,7 +684,7 @@ mod tests {
         }
     }
 
-    // spec: BUILD-030
+    // spec: BUILD-030, BUILD-031
     #[test]
     fn exit_codes_files_and_the_summary_line() {
         let d = std::env::temp_dir().join(format!("shale-bench-cmp-{}", std::process::id()));

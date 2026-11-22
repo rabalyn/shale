@@ -718,6 +718,13 @@ impl ShaleApp {
                             self.actions.push(Action::ExportDocx(p2.clone()));
                             ui.close();
                         }
+                        // the files that the note links from outside the vault (MEDIA-021)
+                        let outside = self.vault.as_ref().zip(self.notes.get(&p2)).map_or(0, |(v, d)| v.outside_targets(&d.text, &p2).len());
+                        let copy = ui.add_enabled(outside > 0 && self.outside_copy.is_none(), egui::Button::new("Copy outside media into the vault"));
+                        if copy.on_hover_text("Copies the pictures, PDFs, sounds and videos that this note links from outside the vault into the media folder and links the copies").clicked() {
+                            self.actions.push(Action::CopyOutside { rel: p2.clone(), target: None });
+                            ui.close();
+                        }
                         if ui.button("Insert new drawing here").clicked() {
                             let folder = p2.parent().map(|x| x.to_path_buf()).unwrap_or_default();
                             self.actions.push(Action::NewDrawing { folder, embed_into: Some(p2.clone()) });

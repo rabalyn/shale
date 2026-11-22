@@ -957,6 +957,7 @@ pub(crate) mod testkit {
         }
     }
 
+    // spec: BUILD-018
     /// Are `gpg`, `gpgsm` and `gpgconf` here? Tests that need them skip themselves with a note when they are not (the
     /// Linux CI image has them; macOS and Windows usually do not, BUILD-018).
     pub fn have_gnupg() -> bool {
@@ -1284,7 +1285,7 @@ mod tests {
         assert_eq!((system.gpg.as_str(), system.gpgsm.as_str(), system.home), ("gpg", "gpgsm", None));
     }
 
-    // spec: MAIL-170
+    // spec: MAIL-170, BUILD-018
     #[test]
     fn a_missing_program_is_reported_in_words() {
         let g = Gnupg { gpg: "/nonexistent/gpg-for-shale-tests".into(), gpgsm: "/nonexistent/gpgsm-for-shale-tests".into(), gpgconf: "/nonexistent/gpgconf-for-shale-tests".into(), home: None };

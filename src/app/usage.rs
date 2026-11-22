@@ -23,18 +23,24 @@ impl ShaleApp {
 
     /// Open the dialog and count again (USE-001, USE-005).
     pub fn open_data_usage(&mut self) {
+        self.usage_count();
+        self.modal = Some(Modal::DataUsage);
+    }
+
+    /// Count again in the background, for the vault that is open now: its outside links come from
+    /// its index, the files are looked up by the job (USE-005, USE-026).
+    fn usage_count(&mut self) {
         self.usage.places.vault = self.vault.as_ref().map(|v| v.root.clone());
+        self.usage.places.linked = self.vault.as_ref().map(|v| v.outside_links()).unwrap_or_default();
         let wake = self.usage_wake();
         self.usage.refresh(wake);
-        self.modal = Some(Modal::DataUsage);
     }
 
     /// What a button of the dialog asked for; true when the dialog closes.
     pub fn usage_ask(&mut self, a: Ask) -> bool {
         match a {
             Ask::Refresh => {
-                let wake = self.usage_wake();
-                self.usage.refresh(wake);
+                self.usage_count();
                 false
             }
             Ask::Clear(id) => {

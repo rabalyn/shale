@@ -436,7 +436,7 @@ mod tests {
         app.search.listed().iter().map(|h| (h.group, h.title.clone())).collect()
     }
 
-    // spec: NAV-023, NAV-024
+    // spec: NAV-023, NAV-024, PERF-004
     #[test]
     fn the_sidebar_search_takes_wildcards_waits_for_the_typing_and_follows_the_vault() {
         let (mut app, d) = browse_app("engine");

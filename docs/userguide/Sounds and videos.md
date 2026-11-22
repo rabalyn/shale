@@ -77,7 +77,35 @@ on such a link opens the file in your system's program, and nothing else than pi
 sounds and videos is ever opened this way. These links are not red, and they are not in the graph.
 
 Files outside the vault are not part of it: they are not synced with [[Git sync]] and not in
-the [[File history]], and a backup of the vault does not hold them.
+the [[File history]], and a backup of the vault does not hold them. Shale says so where it matters:
+the caption of such a picture or player has the tooltip "Outside the vault: not synced", the reading
+view prints it under the player, and Settings → Sync tells how many files the vault links from outside.
+
+## Copy into the vault later
+
+A link to a file outside the vault can become an ordinary file of the vault at any time:
+
+- **One file**: below an outside picture, PDF, sound or video in the editor (and the markdown preview)
+  the caption has **Copy into the vault** at its right end; in the [[Reading view]] it is a button
+  beside **Open** on a picture or PDF and a line under a player. It is shown only when the file is
+  there. A press on it does only that: the cursor stays where it was.
+- **The whole note**: ⋯ → **Copy outside media into the vault** copies every outside file the note
+  links, whose file is there.
+
+The files are copied to `z_media/<year>/<month>/` like any other file you add (a file that is linked
+twice, or in both forms, is copied once), and the links in the note then point at the copies: an
+embed keeps its width (`![[…|300]]`), its words and its form. In the editor this is one step for
+Ctrl+Z, which brings the outside links back (the copies stay in `z_media`). The copying runs in the
+background; the message tells how many files went into the vault and names those that were left
+because their file is not there or could not be copied. The original files are never changed.
+
+## Checking what the vault links
+
+**Settings → Vault → Check names for Windows and macOS…** also lists the links to media outside the
+vault ([[Vault settings]]): the libraries that are not set up on this computer or whose folder is
+not there, and for each note the links whose file is not found, whose library is missing, and the file
+links (`file://`), which work on this computer only. **Data usage…** ([[Data usage and caches]])
+shows how many outside files the vault links and how big they are, and how many are missing.
 
 ## Linking instead of copying
 

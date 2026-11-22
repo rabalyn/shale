@@ -43,6 +43,7 @@ Shale keeps earlier versions of your notes and drawings, so that you can go back
   (`+12 −3`). Hold the pointer on a version for the exact time and "12 lines added, 3 removed". A file that is not text just says
   "changed".
 - Without history (switched off, or no git) the panel says why and has a button to Settings → Sync.
+- The history holds notes and drawings only. Media files that a note links from outside the vault ([[Sounds and videos]]) are never part of it.
 
 ![[file-history.webm]]
 

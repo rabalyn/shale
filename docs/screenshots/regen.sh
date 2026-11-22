@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Regenerates the screenshots of the user guide (docs/userguide/z_media/screenshots/) from the recipes
-# in recipes.conf (DEV-007). The recipes and their fixtures live here, the pictures in the guide vault.
+# in recipes.conf (DEV-007, BUILD-007). The recipes and their fixtures live here, the pictures in the guide vault.
 #
 #   docs/screenshots/regen.sh              all pictures
 #   docs/screenshots/regen.sh mail-view    only these (by recipe name)

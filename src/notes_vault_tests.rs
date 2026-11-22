@@ -1,4 +1,4 @@
-//! The test suite run against a real vault: `notes/` next to `Cargo.toml` (kept out of git), or
+//! The test suite run against a real vault (BUILD-008): `notes/` next to `Cargo.toml` (kept out of git), or
 //! the folder in `SHALE_TEST_VAULT`. Without one these tests pass with a note, so CI is not
 //! affected. Put any notes, drawings and files there that Shale must handle.
 //!

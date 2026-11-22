@@ -7,6 +7,7 @@ use eframe::egui::Ui;
 impl ShaleApp {
     pub(super) fn sync_tab(&mut self, ui: &mut Ui, asks: &mut Asks) -> bool {
         let sync = self.sync_settings_ui(ui);
+        self.outside_media_note(ui);
         self.history_settings_ui(ui, asks) | sync
     }
 

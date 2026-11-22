@@ -44,7 +44,7 @@ fn export_pdf_says_why_it_failed_and_exits_with_1() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// spec: BOOK-011
+// spec: BOOK-011, BUILD-023
 #[cfg(unix)]
 #[test]
 fn userguide_pdf_script_writes_the_guide_as_a_pdf() {

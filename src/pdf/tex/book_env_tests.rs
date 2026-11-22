@@ -93,7 +93,7 @@ fn tex_env_a_folder_compiles_as_a_thesis_with_parts_and_chapters() {
     check("thesis");
 }
 
-// spec: BOOK-017, BOOK-014, BOOK-015, BOOK-016
+// spec: BOOK-017, BOOK-014, BOOK-015, BOOK-016, DEV-028
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_a_folder_compiles_as_a_report_with_sections() {

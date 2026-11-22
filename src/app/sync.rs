@@ -65,6 +65,9 @@ pub struct SyncState {
     pub url: String,
     /// `origin` of the open vault.
     pub remote: Option<String>,
+    /// How many media files the open vault links from outside it, counted from the index once for
+    /// each state of it, with that state (its number and generation): the note in the settings (MEDIA-023).
+    outside_media: Option<((u64, u64), usize)>,
     /// Where the settings controls were drawn (for UI tests).
     pub(crate) rects: Vec<(&'static str, egui::Rect)>,
 }
@@ -398,6 +401,39 @@ impl ShaleApp {
         for f in failures {
             self.toast(f);
         }
+    }
+
+    /// How many media files the notes of the open vault link from outside the vault (each link
+    /// target once): they are not synced and not in the file history (MEDIA-023). Counted from
+    /// the index, no file system access.
+    pub(crate) fn outside_media_count(&mut self) -> usize {
+        let Some(v) = self.vault.as_ref() else { return 0 };
+        let key = (v.uid, v.generation);
+        match self.sync.outside_media {
+            Some((k, n)) if k == key => n,
+            _ => {
+                let n = v.outside_links().links.iter().map(|(_, t)| t.as_str()).collect::<std::collections::HashSet<_>>().len();
+                self.sync.outside_media = Some((key, n));
+                n
+            }
+        }
+    }
+
+    /// The note in Settings → Sync for a vault with links to media outside it (MEDIA-023).
+    pub(crate) fn outside_media_note(&mut self, ui: &mut Ui) {
+        let n = self.outside_media_count();
+        if n == 0 {
+            return;
+        }
+        ui.add_space(8.0);
+        crate::theme::hint(
+            ui,
+            format!(
+                "{n} media {} linked from outside the vault and {} not synced or kept in the file history. A library link finds its file on another device when that device has the library folder set up (Settings → Import).",
+                if n == 1 { "file is" } else { "files are" },
+                if n == 1 { "is" } else { "are" }
+            ),
+        );
     }
 
     /// The "Git sync" part of the settings. Returns whether a setting changed.

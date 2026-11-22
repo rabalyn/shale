@@ -42,4 +42,11 @@ in the background and lists each file or folder with the reason and the name it 
 ` 2`, ` 3` and so on (a long name is shortened to make room for the number). `.git`, `.shale` and
 the trash are not looked at.
 
+The same check lists the vault's **links to media outside the vault** ([[Sounds and videos]]) in a
+second part, "Media outside the vault": how many there are, the libraries that this computer has not
+set up (or whose folder is not there), and by note the links that need a look: a file that is not
+found, a library that is missing or a path that leaves the library folder, and file links
+(`file://…`), which only work on this computer. Library links whose file is there are not listed.
+The files are looked up in the background, so a slow or unplugged disk does not stop the window.
+
 #userguide #settings
