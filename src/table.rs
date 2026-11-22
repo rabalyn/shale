@@ -394,8 +394,14 @@ pub fn set_cell(src: &str, row: usize, col: usize, text: &str) -> Option<String>
     let text = escape_cell(text);
     lines[at] = match raw.cells.get(col) {
         Some(cell) => {
+            // an empty cell with no pipe on its open side would not be read as a cell: blanks
+            // before the first cell's text are not a cell, and nor are blanks after the last pipe
+            let open = col == 0 && !line.trim_start().starts_with('|');
+            let close = cell.end == raw.end && !raw.trailing;
+            let blank = text.is_empty();
+            let (before, after) = (if open && blank { "|" } else { "" }, if close && blank { "|" } else { "" });
             let mut l = line.clone();
-            l.replace_range(cell.clone(), &format!(" {text} "));
+            l.replace_range(cell.clone(), &format!("{before} {text} {after}"));
             l
         }
         None if col == 0 => format!("{}| {text} |{}", &line[..line.len() - line.trim_start().len()], if line.ends_with('\r') { "\r" } else { "" }),
@@ -481,7 +487,9 @@ pub fn column_widths(natural: &[f32], min: &[f32], avail: f32) -> Vec<f32> {
     let floor: Vec<f32> = natural.iter().zip(min).map(|(n, m)| m.min(*n)).collect();
     let floor_sum: f32 = floor.iter().sum();
     if floor_sum >= avail {
-        return floor.iter().map(|f| f * avail.max(0.0) / floor_sum).collect();
+        // no room (or no minimum at all): nothing is left to scale
+        let scale = if floor_sum > 0.0 { avail.max(0.0) / floor_sum } else { 0.0 };
+        return floor.iter().map(|f| f * scale).collect();
     }
     let extra: Vec<f32> = natural.iter().zip(&floor).map(|(n, f)| n - f).collect();
     let share = (avail - floor_sum) / extra.iter().sum::<f32>();
@@ -713,6 +721,14 @@ mod tests {
 
     fn cells(line: &str) -> Vec<String> {
         split_cells(line)
+    }
+
+    // spec: EDIT-024
+    #[test]
+    fn column_widths_with_no_room_and_no_minimum_are_zero_not_nan() {
+        // found by a property test (#535): 0 / 0
+        assert_eq!(column_widths(&[0.0], &[0.0], -24.0), [0.0]);
+        assert_eq!(column_widths(&[50.0, 20.0], &[0.0, 0.0], 0.0), [0.0, 0.0]);
     }
 
     // spec: EDIT-024
@@ -1005,7 +1021,11 @@ mod tests {
         assert_eq!(set_cell(src, 2, 1, "4").unwrap(), "| A |  B |\n|:--|--:|\n|1|2|\n| 3 | 4 |\n", "a short row is filled up");
         assert_eq!(set_cell(src, 3, 0, "x"), None, "no such row");
         assert_eq!(set_cell(src, 0, 2, "x"), None, "no such column");
-        assert_eq!(set_cell("A | B\r\n--|--\r\n1 | 2\r\n", 1, 1, ""), Some("A | B\r\n--|--\r\n1 |  \r\n".to_string()), "no outer pipes, Windows line ends");
+        assert_eq!(set_cell("A | B\r\n--|--\r\n1 | 2\r\n", 1, 1, ""), Some("A | B\r\n--|--\r\n1 |  |\r\n".to_string()), "no outer pipes, Windows line ends, an empty last cell keeps a closing pipe");
+        // the empty first cell of a row without outer pipes keeps an opening pipe (found by a property test, #535)
+        let emptied = set_cell("日|a\n|---|", 0, 0, "").unwrap();
+        assert_eq!(emptied, "|  |a\n|---|");
+        assert_eq!(split_cells(emptied.lines().next().unwrap()), ["", "a"]);
         let back = find_tables(&set_cell(src, 1, 0, "a|b `c|d`").unwrap())[0].table.rows[0][0].clone();
         assert_eq!(back, "a|b `c|d`", "what was typed is what the cell shows");
     }

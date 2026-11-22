@@ -88,6 +88,8 @@ mod link_preview_ui_tests;
 mod lists;
 mod mail;
 mod markdown;
+#[cfg(test)]
+mod markdown_tests;
 mod math;
 #[cfg(test)]
 mod math_ui_tests;
@@ -111,6 +113,8 @@ mod properties;
 mod properties_ui;
 #[cfg(test)]
 mod properties_ui_tests;
+#[cfg(test)]
+mod property_test_support;
 mod reader;
 mod recorder;
 mod recovery;
@@ -138,6 +142,8 @@ mod tab_order_tests;
 mod table;
 mod table_grid;
 mod table_select;
+#[cfg(test)]
+mod table_tests;
 mod task_box;
 #[cfg(test)]
 mod test_exec;
@@ -148,6 +154,8 @@ mod themes;
 #[cfg(test)]
 mod ui_test_support;
 mod undo;
+#[cfg(test)]
+mod undo_tests;
 mod update;
 mod userguide;
 #[cfg(test)]
@@ -158,6 +166,8 @@ mod vault;
 mod vault_cache;
 mod vault_check;
 mod vault_path;
+#[cfg(test)]
+mod vault_path_tests;
 mod vault_state;
 mod vim;
 mod virtual_list;

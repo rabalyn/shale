@@ -31,6 +31,12 @@ fn forge_011_test_land_script_passes() {
     run("scripts/test-land.sh");
 }
 
+// spec: DEV-043
+#[test]
+fn dev_043_test_check_property_rules_script_passes() {
+    run(".forgejo/scripts/test-check-property-rules.sh");
+}
+
 // spec: FORGE-016
 #[test]
 fn forge_016_test_dev_metrics_script_passes() {

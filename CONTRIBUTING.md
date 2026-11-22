@@ -31,6 +31,11 @@ report a security problem there, see Security below.
 - **Every code path gets a sensible test** (DEV-003). Mail and CalDAV are tested against real
   servers in podman test stacks (DEV-005). If a good test is hard to write, propose developer
   tooling in an issue first (DEV-004).
+  When a rule holds for all inputs (a round trip, a bound, "never leaves the vault"), write it
+  once as a property test (`proptest`, set up by `src/property_test_support.rs`, DEV-042) instead
+  of adding more examples; keep example tests for specific cases. A change to a property of a spec
+  rule changes the rule's row in `docs/spec/` too, or a commit message says
+  `rule-unchanged: <ID> <why>` (a rename, a faster generator); `scripts/land.sh` checks it (DEV-043).
 - **Docs in the same change** (DEV-006, DEV-018). Check the README, `docs/FEATURES.md`, the specs,
   the user guide in `docs/userguide` and the screenshots, and update what the change made stale.
   Add an entry to `docs/changelog-pending/` (not to `CHANGELOG.md`).

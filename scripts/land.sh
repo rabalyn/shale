@@ -7,7 +7,8 @@
 #   scripts/land.sh [--release] [--no-env-tests] <branch>…
 #
 # A branch is a local branch if one has the name, else `origin/<branch>`, else any commit.
-# The checks: every new commit names an issue (FORGE-008), `cargo fmt --check`, clippy with
+# The checks: every new commit names an issue (FORGE-008), a changed or removed property test changes
+# its spec row too or a commit says `rule-unchanged: ID why` (DEV-043), `cargo fmt --check`, clippy with
 # `-D warnings` for Linux (also with `--features bench`), and for macOS and Windows (`scripts/cross-check.sh`), the Word schemas of the docx tests fetched into their cache (`scripts/validate-docx.sh --fetch`, DEV-036), `cargo nextest run --locked --no-fail-fast` (#451; cargo-nextest is required, a landing without it stops at the start; `--test-threads` from RUST_TEST_THREADS or the cargo config's [env], because nextest does not read it itself; also `cargo test --features bench bench::` when the change touches the harness or the build, `scripts/bench-tests-wanted.sh` (BUILD-035, #449), or with --release, and also `cargo test --release` with --release), and the real-server
 # suites of tests/caldav-env, tests/mail-env and tests/forgejo-env and the LuaLaTeX suite of tests/tex-env, each only when the
 # change touches its code or environment (`.forgejo/scripts/env-tests.sh suites`, #447); --no-env-tests skips them and
@@ -197,6 +198,7 @@ checks() {
     return 0
   fi
   step "commits name an issue (FORGE-008)" sh .forgejo/scripts/check-commit-issues.sh "$base" HEAD || return 1
+  step "property tests change with their rule (DEV-043)" sh .forgejo/scripts/check-property-rules.sh "$base" HEAD || return 1
   step "cargo fmt --check" cargo fmt --check || return 1
   step "cargo clippy" cargo clippy -q --all-targets --locked -- -D warnings || return 1
   # the benchmark harness is a cargo feature that no shipped build has: it must not rot (BUILD-035)

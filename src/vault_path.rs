@@ -51,12 +51,10 @@ impl VaultPath {
 
     /// Check a folder path the user typed (`Projects/ Neubau B /`). `/` and `\` both separate
     /// folders; spaces around parts and empty or `.` parts are dropped; each part is cleaned
-    /// like a note name. A leading `/` is read as the vault root; `~` and `..` are refused.
+    /// like a note name. A leading `/` is read as the vault root; `..` and a first part starting
+    /// with `~` are refused.
     pub fn parse(typed: &str) -> Result<VaultPath, PathError> {
         let typed = typed.trim();
-        if typed.starts_with('~') {
-            return Err(PathError::Absolute);
-        }
         let mut out = PathBuf::new();
         for part in typed.split(['/', '\\']) {
             let part = part.trim();
@@ -74,6 +72,11 @@ impl VaultPath {
             if clean.is_empty() {
                 // `...` and the like: nothing left of the name
                 return Err(PathError::GoesUp);
+            }
+            if clean.starts_with('~') && out.as_os_str().is_empty() {
+                // `~/x`, also after a leading `/` or `./` (and `..~`, which is cleaned to `~`): a
+                // home folder, not a folder of the vault
+                return Err(PathError::Absolute);
             }
             out.push(clean);
         }
@@ -129,7 +132,7 @@ mod tests {
         assert_eq!(VaultPath::parse("/Projekte/ Neubau B /").unwrap().as_path(), Path::new("Projekte/Neubau B"));
         assert_eq!(VaultPath::parse("a\\b/./c").unwrap().as_path(), Path::new("a/b/c"));
         assert_eq!(VaultPath::parse("").unwrap(), VaultPath::default());
-        for bad in ["..", "../x", "a/../../x", "~/x", "C:\\x", "a/.../b"] {
+        for bad in ["..", "../x", "a/../../x", "~/x", "/~", "./~x", "..~", "C:\\x", "a/.../b"] {
             assert!(VaultPath::parse(bad).is_err(), "{bad} must be refused");
         }
         assert!(VaultPath::new(Path::new("/tmp/x")).is_err());

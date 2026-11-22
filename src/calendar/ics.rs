@@ -219,7 +219,7 @@ fn parse_dt(value: &str, params: &[(String, String)]) -> Option<(i64, bool)> {
         return Some((days * 86_400, true));
     }
     let tpart = v.get(9..15)?;
-    let secs = num(&tpart[0..2])? * 3600 + num(&tpart[2..4])? * 60 + num(&tpart[4..6])?;
+    let secs = num(tpart.get(0..2)?)? * 3600 + num(tpart.get(2..4)?)? * 60 + num(tpart.get(4..6)?)?;
     if v.ends_with('Z') {
         return Some((days * 86_400 + secs, false));
     }
@@ -243,7 +243,7 @@ fn parse_duration(v: &str) -> Option<i64> {
             _ => {
                 let n: i64 = num.parse().ok()?;
                 num.clear();
-                total += n * match (c, in_time) {
+                let unit = match (c, in_time) {
                     ('W', _) => 604_800,
                     ('D', _) => 86_400,
                     ('H', true) => 3600,
@@ -251,6 +251,8 @@ fn parse_duration(v: &str) -> Option<i64> {
                     ('S', true) => 1,
                     _ => return None,
                 };
+                // a number too big for a duration is no duration (not an overflow)
+                total = total.checked_add(n.checked_mul(unit)?)?;
             }
         }
     }

@@ -532,7 +532,7 @@ impl Vault {
 
     /// The path of `rel` on disk, for something that changes files: an error unless `rel` stays
     /// inside the vault (no `..`, not absolute), as a last guard behind VAULT-018.
-    fn abs_checked(&self, rel: &Path) -> io::Result<PathBuf> {
+    pub(crate) fn abs_checked(&self, rel: &Path) -> io::Result<PathBuf> {
         let checked = VaultPath::new(rel).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, format!("“{}”: {e}", rel.display())))?;
         if checked.as_path().as_os_str().is_empty() {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "that is the vault itself"));

@@ -7,6 +7,8 @@ pub(crate) mod dialog;
 #[cfg(test)]
 mod env_tests;
 pub(crate) mod ics;
+#[cfg(test)]
+mod ics_tests;
 pub(crate) mod store;
 #[cfg(test)]
 mod store_failure_tests;

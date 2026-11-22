@@ -132,26 +132,27 @@ impl History {
         self.known = Some(text.to_string());
     }
 
-    /// Undo the last step in `text`; returns the char index for the cursor, `None` when there is
-    /// nothing to undo.
+    /// Undo the last step in `text`; returns the char index for the cursor (never past the end of
+    /// the text), `None` when there is nothing to undo.
     pub fn undo(&mut self, text: &mut String) -> Option<usize> {
         self.checkpoint(text);
         let back = self.undo.pop_back()?.reversed();
         back.apply(text);
         self.known = Some(text.clone());
-        let at = back.landing(false);
+        let at = back.landing(false).min(text.chars().count());
         self.redo.push(back.reversed());
         self.touch();
         Some(at)
     }
 
-    /// Redo the last undone step in `text`; returns the char index for the cursor.
+    /// Redo the last undone step in `text`; returns the char index for the cursor (never past the
+    /// end of the text).
     pub fn redo(&mut self, text: &mut String) -> Option<usize> {
         self.checkpoint(text);
         let again = self.redo.pop()?;
         again.apply(text);
         self.known = Some(text.clone());
-        let at = again.landing(true);
+        let at = again.landing(true).min(text.chars().count());
         self.undo.push_back(again);
         self.touch();
         Some(at)
@@ -401,13 +402,23 @@ mod tests {
     fn the_cursor_lands_on_a_restored_last_line() {
         let (mut h, mut t) = after(&["a\nb", "a"]);
         assert_eq!(h.undo(&mut t), Some(2), "on the b, not on the line break before it");
-        assert_eq!(h.redo(&mut t), Some(2));
+        assert_eq!(h.redo(&mut t), Some(1), "the end of the text, not past it (#539)");
         assert_eq!(t, "a");
         // a middle line deleted again: the cursor is on the line that came up
         let (mut h, mut t) = after(&["a\nb\nc", "a\nc"]);
         h.undo(&mut t);
         assert_eq!(h.redo(&mut t), Some(2));
         assert_eq!(t, "a\nc");
+    }
+
+    // spec: EDIT-021
+    #[test]
+    fn the_cursor_never_lands_past_the_end_of_the_text() {
+        // found by a property (#539): a redone deletion of "\nü" left nothing to skip the break for
+        let (mut h, mut t) = after(&["", "\n\u{fc}", ""]);
+        h.undo(&mut t);
+        assert_eq!(h.redo(&mut t), Some(0));
+        assert_eq!(t, "");
     }
 
     // spec: EDIT-021
