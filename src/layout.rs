@@ -902,6 +902,13 @@ impl ShaleApp {
                 ui.add_space(2.0);
             }
         }
+        // the bar for headings that skip levels, in both views (EDIT-115)
+        if let Some(doc) = self.notes.get_mut(&rel).filter(|d| d.unreadable.is_none()) {
+            ui.add_space(2.0);
+            if doc.heading_bar.show(ui, &doc.text) {
+                self.actions.push(Action::ShiftHeadings(rel.clone()));
+            }
+        }
         let mut area = egui::ScrollArea::vertical().id_salt(("note-scroll", self.tabbar.tabs[active].id)).auto_shrink([false, false]);
         // a restored tab is scrolled where it was left, when it is first shown (NAV-038)
         if let Some(y) = self.tabbar.tabs[active].place.restore_scroll.take() {

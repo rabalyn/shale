@@ -578,6 +578,13 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   through the usual rename, so links are rewritten, and a name that is taken gets ` 2`, ` 3`. `.git`, `.shale` and `.trash` are skipped.
 - **Lift headings on paste** (EDIT-038): pasting text whose headings are all `##` or deeper opens "The pasted text has no # heading. Lift its headings?" with **Lift** and **Paste as it
   is** (Esc pastes as it is); text without headings or with a `#` is pasted at once.
+- **Heading levels bar** (EDIT-115 to EDIT-117, rabalyn/shale#457): a note whose headings skip levels (`##` first, or a `#`
+  followed by a `###`) gets a thin bar above the text, in the editor and the reading view: "Headings: no level 1 heading",
+  "Headings: level 2 is skipped" (up to the deepest level found; code, math blocks and front matter hold no headings). When
+  the highest heading is deeper than `#`, **Move all up by X** moves every heading up by the same X in one undo step (`u` in
+  Vim-style editing too); a gap that is left stays named. The **×** hides the bar for that note until Shale quits.
+
+![The heading levels bar](userguide/z_media/screenshots/editor-heading-bar.png)
 - **Heading links scroll** (LINK-015): `[[Note#Heading]]`, `[[#Heading]]` and `[text](Note.md#Heading)` open the note with the heading at the top of the view, in the mode the tab is
   in: the cursor on the heading line in the editor, the reading view scrolled to it in the reading view. The heading is found ignoring case, spaces and inline markup
   (`## **Plan** v2` matches `#Plan v2`); a missing one opens the note at its top and says so. The outline's entries do the same.
