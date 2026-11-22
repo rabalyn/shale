@@ -146,7 +146,11 @@ pub struct Fixtures {
 impl Fixtures {
     pub fn new(scale: Scale) -> Fixtures {
         static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let base = std::env::temp_dir().join(format!("shale-bench-{}-{}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+        Fixtures::in_folder(scale, std::env::temp_dir().join(format!("shale-bench-{}-{}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))))
+    }
+
+    /// Fixtures made below `base` (which may have a space in its path, like a temporary folder can).
+    pub(super) fn in_folder(scale: Scale, base: PathBuf) -> Fixtures {
         let _ = std::fs::remove_dir_all(&base);
         Fixtures { base, scale, small: None, large: None, cache: Default::default(), counter: 0, world: None, skipped: vec![] }
     }

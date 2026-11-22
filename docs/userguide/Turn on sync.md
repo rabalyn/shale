@@ -38,7 +38,7 @@ keeps the notes safe, and the warning says what to do if the repository breaks (
 
 1. **The server.** Press GitHub, GitLab or Codeberg, or enter a host name (`git.example.org`), the address of a repository or an
    SSH address (`git@host:owner/repo.git`). For a server Shale does not know, say whether it is Forgejo or Gitea, GitHub or GitLab, or
-   any git server. A folder on this computer or a network share (an absolute path) also works and needs no sign-in.
+   any git server. A folder on this computer or a network share (an absolute path, spaces in its name are fine) also works and needs no sign-in.
 
    ![[wizard-server.png]]
 

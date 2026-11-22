@@ -1077,7 +1077,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   ![Signing in with a token or an SSH key](userguide/z_media/screenshots/wizard-sign-in.png)
 
 - **The address field.** Settings → Sync keeps the old way under **Advanced**: enter the URL of a git repository
-  (`https://…`, `ssh://…`, `git@host:notes.git` or a folder path) and press Connect (an address with a password in it, and plain `http://` or `git://` except on this computer, are refused: use the wizard's token or an SSH key), or run
+  (`https://…`, `ssh://…`, `git@host:notes.git` or a folder path, which may have spaces in its name, like `…/Dropbox/My notes.git` or `C:\Users\Ada\OneDrive - Company\notes.git`) and press Connect (an address with a password in it, and plain `http://` or `git://` except on this computer, are refused: use the wizard's token or an SSH key), or run
   `git init` in the vault folder yourself. Shale then syncs on its own: when the vault opens,
   every few minutes (default 5, changeable) and on "Sync now".
 - **A repository inside a synced folder.** A vault with a `.git` folder inside a folder another app syncs or on a network share

@@ -270,6 +270,29 @@ fn sync_058_the_server_path_with_a_file_remote_sets_origin_says_what_will_happen
     assert!(t.app.toasts.iter().any(|(m, _)| m.contains("Sync is on")));
 }
 
+// spec: SYNC-004, SYNC-050
+#[test]
+fn sync_050_a_file_remote_in_a_folder_with_a_space_is_accepted() {
+    let mut t = T::new("file-remote-space");
+    let folder = t.root.join("My notes");
+    std::fs::create_dir_all(&folder).unwrap();
+    let remote = folder.join("notes.git");
+    std::fs::create_dir_all(&remote).unwrap();
+    assert!(std::process::Command::new("git").args(["init", "--quiet", "--bare"]).arg(&remote).envs(hermetic().env.iter().cloned()).status().unwrap().success());
+    t.open_wizard();
+    t.click("Sync with a server");
+    t.click("Next");
+    type_address(&mut t, remote.to_str().unwrap());
+    t.click("Next");
+    t.settle();
+    assert!(!t.shows("can't contain spaces"), "{:?}", t.painted());
+    assert_eq!(gitsync::remote_url(&t.app.sync.git, &t.vault).as_deref(), remote.to_str());
+    assert_eq!(t.wizard().step, Step::Test);
+    // the same for an address: a space is still refused, and a folder on Windows is read as a folder
+    assert!(super::is_local_remote(r"C:\Users\Ada\OneDrive - Company\notes.git"));
+    assert!(!super::is_local_remote("https://host/my notes.git"));
+}
+
 // spec: SYNC-057
 #[test]
 fn sync_057_a_server_with_notes_and_a_vault_with_notes_are_said_to_merge() {

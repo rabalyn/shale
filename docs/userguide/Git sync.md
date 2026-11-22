@@ -6,7 +6,7 @@ Keep a vault on several computers with git. Back to [[Start here]]. The easy way
 
 - Needs `git` (see "Installing git" below if you have none). In Settings → Sync press **Turn on sync…** ([[Turn on sync]]),
   or open **Advanced**, enter the URL of a git repository (`https://…`, `ssh://…`, `git@host:notes.git` or a folder path)
-  and press **Connect**, or run `git init` in the vault folder yourself. An address with a password in it, and plain `http://`
+  and press **Connect** (a folder path may have spaces, like `…/Dropbox/My notes.git`; an address may not), or run `git init` in the vault folder yourself. An address with a password in it, and plain `http://`
   or `git://` (except on this computer), are refused: use the wizard's token, a credential helper or an SSH key.
   A token made through the wizard is kept in your system's keyring and given to git by Shale; it is never in a file.
 - Shale then syncs on its own: when the vault opens, every few minutes (default 5; the setting
