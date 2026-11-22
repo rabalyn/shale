@@ -158,6 +158,7 @@ mod history;
 mod history_ui;
 mod link_preview;
 mod mail;
+mod outside_copy;
 pub mod panes;
 mod screenshot;
 mod social;
@@ -265,6 +266,12 @@ pub enum Action {
         heading: Option<String>,
         from: Option<PathBuf>,
         new_tab: bool,
+    },
+    /// "Copy into the vault": copy the files that the outside links of the note `rel` name (only the
+    /// link with this target, or all of them) and point the links at the copies (MEDIA-021)
+    CopyOutside {
+        rel: PathBuf,
+        target: Option<String>,
     },
     /// "Fix link": point the red links `target` in `note` at `to` (LINK-012)
     FixLink {
@@ -406,6 +413,8 @@ pub struct ShaleApp {
     pub media: crate::media::MediaPlayer,
     /// the Data usage dialog's numbers, the cache jobs and the daily cleanup (USE)
     pub usage: crate::data_usage::DataUsage,
+    /// the files of a note's outside links being copied into the vault (MEDIA-021)
+    pub(crate) outside_copy: Option<outside_copy::OutsideCopy>,
     /// the check of the vault's names for other systems (VAULT-028)
     pub vault_check: crate::vault_check::VaultCheck,
     /// the LaTeX page of the settings: the TeX found, the managed TeX Live and its jobs (TEX-001)
@@ -583,6 +592,7 @@ impl ShaleApp {
                 history: crate::gitsync::history::default_root(),
                 cleanup_file: crate::data_usage::cleanup::default_path(),
                 vault: None,
+                linked: Default::default(),
             }
         } else {
             let mut places = crate::data_usage::Places {
@@ -659,6 +669,7 @@ impl ShaleApp {
             recovery: crate::recovery::RecoveryState { root: recovery_root, notice: vec![] },
             link_preview: Default::default(),
             usage: crate::data_usage::DataUsage::new(places),
+            outside_copy: None,
             vault_check: Default::default(),
             tex: crate::pdf::tex::settings_ui::TexState::new(persist, &tag),
             update: if persist { crate::update::UpdateState::for_running_program() } else { Default::default() },
@@ -2434,6 +2445,7 @@ impl ShaleApp {
                 Action::FocusEditor => self.focus_editor(),
                 Action::Open { rel, new_tab } => self.open(&rel, new_tab),
                 Action::OpenLink { target, heading, from, new_tab } => self.open_link(&target, heading, from, new_tab),
+                Action::CopyOutside { rel, target } => self.copy_outside(&rel, target),
                 Action::FixLink { note, target, to } => self.fix_link(&note, &target, &to),
                 Action::NewNote { folder } => self.new_untitled(&folder),
                 Action::NewDrawing { folder, embed_into } => self.new_drawing(&folder, embed_into),
@@ -2961,6 +2973,7 @@ impl ShaleApp {
         }
         let ctx = ui.ctx().clone();
         self.media_tick(&ctx);
+        self.outside_copy_tick();
         self.tex.poll(&ctx);
         self.git_tick(&ctx);
         self.update_tick(&ctx);
@@ -3071,6 +3084,7 @@ pub fn handle_editor_action(app_actions: &mut Vec<Action>, a: EditorAction, from
         EditorAction::CreatePerson(name) => app_actions.push(Action::CreatePerson(name)),
         EditorAction::AskLiftHeadings(text) => app_actions.push(Action::AskLiftHeadings(text)),
         EditorAction::AskOutsideFiles(text) => app_actions.push(Action::AskOutsideFiles(text)),
+        EditorAction::CopyOutside(target) => app_actions.push(Action::CopyOutside { rel: from.to_path_buf(), target: Some(target) }),
     }
 }
 
@@ -3081,6 +3095,7 @@ pub fn handle_reader_action(app_actions: &mut Vec<Action>, a: ReaderAction, from
         ReaderAction::OpenFile(rel) => app_actions.push(Action::Open { rel, new_tab: false }),
         ReaderAction::OpenUrl(url) => app_actions.push(Action::OpenUrl(url)),
         ReaderAction::OpenDay(day) => app_actions.push(Action::OpenCalendarDay(day)),
+        ReaderAction::CopyOutside(target) => app_actions.push(Action::CopyOutside { rel: from.to_path_buf(), target: Some(target) }),
     }
 }
 

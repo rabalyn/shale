@@ -186,3 +186,20 @@ fn a_click_on_a_largest_file_opens_it_and_one_on_a_largest_folder_shows_it() {
     assert_eq!(f.asks, [Ask::ShowFolder(PathBuf::from("Projects/Deep"))]);
     let _ = fs::remove_dir_all(&d);
 }
+
+// spec: USE-026
+#[test]
+fn saved_lists_the_outside_media_in_the_section_outside_the_vault_with_the_missing_apart() {
+    let (mut u, d) = usage("dlg-linked");
+    let line = Line { label: scan::LINKED_LABEL.into(), path: None, files: 2, bytes: 3_500, problem: Some("2 not found or not set up on this device".into()) };
+    u.saved = Some(Ok(Saved { linked: Some(line), ..Saved::default() }));
+    let mut f = Frames::new();
+    f.frame(&mut u, vec![]);
+    assert!(f.shows("Outside the vault") && f.shows("Outside media linked by this vault"), "{:?}", f.text);
+    assert!(f.shows("2 files") && f.shows("3.4 KB") && f.shows("2 not found or not set up on this device"), "{:?}", f.text);
+    // none linked: no line
+    u.saved = Some(Ok(Saved::default()));
+    f.frame(&mut u, vec![]);
+    assert!(!f.shows("Outside media linked"));
+    let _ = fs::remove_dir_all(&d);
+}

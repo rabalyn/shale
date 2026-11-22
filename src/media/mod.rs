@@ -4,6 +4,7 @@
 //! `[!/…`  starts at the vault root, `[!~/…` at the home folder, `[!…` (anything else) at the
 //! vault root as well.
 
+pub mod copy_in;
 pub mod cover;
 pub mod decode;
 pub mod download;
@@ -11,6 +12,7 @@ pub mod embed;
 pub mod engine;
 pub mod ffmpeg;
 pub mod intake;
+pub mod linked;
 pub mod output;
 pub mod outside;
 pub mod player;

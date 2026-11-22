@@ -420,3 +420,30 @@ fn saved_lists_the_file_history_of_a_vault_without_git_and_not_of_one_with_git()
     assert!(line(&p).is_none());
     let _ = fs::remove_dir_all(&d);
 }
+
+// spec: USE-026, MEDIA-022
+#[test]
+fn saved_counts_the_outside_media_the_vault_links_each_file_once_and_the_missing_apart() {
+    let (mut p, d) = places_with_caches("linked-line");
+    assert_eq!(scan::saved(&p).linked, None, "no outside links, no line");
+    let videos = d.join("Videos");
+    write(&videos.join("2024/a.mp4"), &[0; 3_000]);
+    write(&videos.join("b.png"), &[0; 500]);
+    let by_address = crate::media::testdata::file_address(&videos.join("2024/a.mp4"));
+    p.linked = crate::media::linked::Links {
+        links: [("A.md", "@Videos/2024/a.mp4"), ("B.md", "@Videos/2024/a.mp4"), ("B.md", by_address.as_str()), ("B.md", "@Videos/b.png"), ("B.md", "@Videos/gone.mp3"), ("B.md", "@Nowhere/x.png")]
+            .iter()
+            .map(|(n, t)| (PathBuf::from(n), t.to_string()))
+            .collect(),
+        libraries: vec![crate::media::outside::Library { name: "Videos".into(), path: videos }],
+    };
+    let line = scan::saved(&p).linked.expect("a line");
+    assert_eq!(line.label, scan::LINKED_LABEL);
+    assert_eq!((line.files, line.bytes), (2, 3_500), "a.mp4 once however it is linked, and b.png");
+    assert_eq!(line.problem.as_deref(), Some("2 not found or not set up on this device"));
+    assert!(scan::saved(&p).vault.iter().all(|l| l.bytes < 3_000), "the outside files are not counted as the vault's");
+    // all of them there: no problem line
+    p.linked.links.retain(|(_, t)| !t.contains("gone") && !t.contains("Nowhere"));
+    assert_eq!(scan::saved(&p).linked.unwrap().problem, None);
+    let _ = fs::remove_dir_all(&d);
+}

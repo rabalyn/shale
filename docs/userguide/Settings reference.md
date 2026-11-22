@@ -302,7 +302,8 @@ The file history ([[File history]]) is set in the settings file of this computer
 The git remote itself is git's (`git remote`), set with **Connect** in the same section.
 
 Settings → Vault also has **Check names for Windows and macOS…** (no setting, a tool): it lists the files
-and folders whose names would break on Windows or macOS and renames them on request ([[Vault settings]]).
+and folders whose names would break on Windows or macOS and renames them on request, and in the same run lists
+the links to media outside the vault ([[Vault settings]]).
 
 # Vault session state (`<vault>/.shale/state.json`)
 

@@ -240,6 +240,26 @@ fn a_new_local_history_starts_with_the_vault_as_it_is() {
     assert_eq!(g.files_in_head(&r), ["A.md"]);
 }
 
+// spec: MEDIA-023, SYNC-034
+#[test]
+fn the_file_history_never_takes_a_file_that_a_note_links_from_outside_the_vault() {
+    let h = setup("hist-outside-media");
+    let outside = h.env.folder("Videos");
+    write(&outside, "clip.mp4", "outside video");
+    write(&outside, "pic.png", "outside picture");
+    write(&h.vault, "Trip.md", "![[@Videos/clip.mp4]] ![](<file:///elsewhere/pic.png>)\n");
+    let repo = h.repo();
+    committed(h.snap(&repo, Reason::Save, &["Trip.md"]));
+    // asked for by a path out of the vault, or an absolute one, nothing is committed
+    let absolute = outside.join("clip.mp4").to_string_lossy().into_owned();
+    for p in ["../Videos/clip.mp4", "../Videos/pic.png", absolute.as_str()] {
+        assert_eq!(h.snap(&repo, Reason::Save, &[p]), Outcome::Unchanged, "{p}");
+    }
+    assert_eq!(h.files_in_head(&repo), ["Trip.md"]);
+    assert_eq!(h.messages(&repo).len(), 1, "one version, of the note");
+    assert!(!outside.join(".git").exists() && fs::read_dir(&outside).unwrap().count() == 2, "nothing is written next to the outside files");
+}
+
 // spec: SYNC-034
 #[test]
 fn a_snapshot_commits_only_its_paths_and_leaves_other_staged_changes_alone() {

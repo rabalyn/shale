@@ -6,6 +6,9 @@
 //! [`check`] is a pure scan of a folder; the Settings → Vault page runs it in a background job
 //! ([`VaultCheck`] holds its state) and renames through `ShaleApp::rename_path`.
 
+mod outside;
+pub use outside::{check_outside, FolderState, OutsideCheck};
+
 use crate::app::ShaleApp;
 use crate::fsutil::{portable_name, portable_problems, TYPED_NAME_MAX};
 use crate::vault::rel_to_string;
@@ -154,14 +157,19 @@ pub fn free_name(name: &str, is_dir: bool, taken: impl Fn(&str) -> bool) -> Stri
 /// The state of the check on the Settings → Vault page.
 #[derive(Default)]
 pub struct VaultCheck {
-    job: Option<Receiver<Result<io::Result<Vec<Finding>>, String>>>,
+    job: Option<Receiver<Result<Checked, String>>>,
     /// the last result, `None` until the check ran
     pub result: Option<Result<Vec<Finding>, String>>,
+    /// the outside links of the vault and what is the matter with them (MEDIA-022), from the same run
+    pub outside: Option<OutsideCheck>,
     /// "Rename all" waits for a yes
     pub confirm_all: bool,
     /// what the last rename did, for the page
     pub report: Option<String>,
 }
+
+/// What the background job of the check brings: the names and the outside links.
+type Checked = (io::Result<Vec<Finding>>, OutsideCheck);
 
 impl VaultCheck {
     pub fn running(&self) -> bool {
@@ -172,9 +180,13 @@ impl VaultCheck {
     pub fn poll(&mut self) -> bool {
         let Some(rx) = &self.job else { return false };
         match rx.try_recv() {
-            Ok(r) => self.result = Some(r.and_then(|r| r.map_err(|e| format!("The vault could not be read: {e}")))),
+            Ok(Ok((names, outside))) => {
+                self.result = Some(names.map_err(|e| format!("The vault could not be read: {e}")));
+                self.outside = Some(outside);
+            }
+            Ok(Err(e)) => (self.result, self.outside) = (Some(Err(e)), None),
             Err(TryRecvError::Empty) => return true,
-            Err(TryRecvError::Disconnected) => self.result = Some(Err("The check stopped unexpectedly".into())),
+            Err(TryRecvError::Disconnected) => (self.result, self.outside) = (Some(Err("The check stopped unexpectedly".into())), None),
         }
         self.job = None;
         false
@@ -184,13 +196,13 @@ impl VaultCheck {
 impl ShaleApp {
     /// Run the check in the background (VAULT-028).
     pub(crate) fn start_vault_check(&mut self) {
-        let Some(root) = self.vault.as_ref().map(|v| v.root.clone()) else { return };
         self.flush_all();
+        let Some((root, links)) = self.vault.as_ref().map(|v| (v.root.clone(), v.outside_links())) else { return };
         let ctx = self.ctx.clone();
         self.vault_check.confirm_all = false;
         self.vault_check.report = None;
         self.vault_check.job = Some(crate::jobs::spawn(
-            move || check(&root),
+            move || (check(&root), check_outside(&links)),
             move || {
                 if let Some(c) = ctx {
                     c.request_repaint();

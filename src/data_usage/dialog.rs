@@ -94,10 +94,10 @@ fn default_of(get: fn(&mut CacheRetention) -> &mut Option<u32>) -> u32 {
     get(&mut d).unwrap_or(1)
 }
 
-fn size_row(ui: &mut Ui, l: &scan::Line) {
+fn size_row(ui: &mut Ui, l: &scan::Line) -> egui::Response {
     let name = ui.label(&l.label);
     if let Some(p) = &l.path {
-        name.on_hover_text(p.display().to_string());
+        name.clone().on_hover_text(p.display().to_string());
     }
     ui.label(muted(format!("{} file{}", l.files, if l.files == 1 { "" } else { "s" })));
     ui.label(human_bytes(l.bytes));
@@ -107,6 +107,7 @@ fn size_row(ui: &mut Ui, l: &scan::Line) {
         ui.label(RichText::new(p).color(theme::palette().link_missing).size(12.0));
         ui.end_row();
     }
+    name
 }
 
 fn saved_ui(ui: &mut Ui, u: &DataUsage, out: &mut Vec<Ask>) {
@@ -156,6 +157,9 @@ fn saved_ui(ui: &mut Ui, u: &DataUsage, out: &mut Vec<Ask>) {
     }
     theme::section(ui, "Outside the vault");
     egui::Grid::new("usage-outside").num_columns(3).striped(true).show(ui, |ui| {
+        if let Some(l) = &saved.linked {
+            size_row(ui, l).on_hover_text("Pictures, PDFs, sounds and videos that notes of this vault link where they are (each file counted once). They are not in the vault, so they are not synced or kept in the file history.");
+        }
         for l in &saved.outside {
             size_row(ui, l);
         }

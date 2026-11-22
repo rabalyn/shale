@@ -15,6 +15,12 @@ use super::{file_uri_path, media_kind, Kind};
 use serde::{Deserialize, Serialize};
 use std::path::{Component, Path, PathBuf};
 
+/// What the caption or name of an outside file says on hover (MEDIA-023).
+pub const NOT_SYNCED: &str = "Outside the vault: not synced";
+
+/// The action that copies an outside file into the vault and links the copy (MEDIA-021).
+pub const COPY_LABEL: &str = "Copy into the vault";
+
 /// A library folder of this device: the name links use (`@Videos/…`) and the local folder.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]

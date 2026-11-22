@@ -1,5 +1,7 @@
 //! What the window does with the asks of the Data usage dialog and with a finished clear or
-//! prune (USE-005, USE-010, USE-015, USE-017, USE-020, USE-023).
+//! prune (USE-005, USE-010, USE-015, USE-017, USE-020, USE-023, USE-026).
+
+#![cfg(test)]
 
 use super::*;
 use crate::app::tests::test_app;
@@ -109,4 +111,42 @@ fn a_finished_job_says_so_always_for_a_clear_and_a_failure_and_for_a_prune_only_
     app.usage_finished(Finished { id: CacheId::DebugLog, kind: Kind::Clear, result: Err("busy".into()) });
     assert_eq!(said(&app), ["Input debug log: could not clear: busy"]);
     let _ = std::fs::remove_dir_all(&d);
+}
+
+// spec: USE-026, MEDIA-022
+#[test]
+fn the_dialog_counts_the_outside_media_of_the_open_vault_and_again_after_a_refresh() {
+    let (mut app, d) = test_app("usage-linked");
+    app.ctx = Some(egui::Context::default());
+    let videos = d.join("Videos-outside");
+    std::fs::create_dir_all(&videos).unwrap();
+    std::fs::write(videos.join("a.mp4"), vec![0u8; 2_000]).unwrap();
+    app.cfg.media_libraries = vec![crate::media::outside::Library { name: "Videos".into(), path: videos.clone() }];
+    app.vault.as_mut().unwrap().set_libraries(&app.cfg.media_libraries);
+    std::fs::write(d.join("Clips.md"), "![[@Videos/a.mp4]]\n\n[[@Videos/gone.mp4]]\n").unwrap();
+    app.vault.as_mut().unwrap().rescan();
+    let wait = |app: &mut ShaleApp| {
+        let start = Instant::now();
+        while app.usage.saved.is_none() {
+            app.usage_tick();
+            assert!(start.elapsed() < Duration::from_secs(40), "the count did not end");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    };
+    app.open_data_usage();
+    assert_eq!(app.usage.places.linked.links.len(), 2, "the window hands the links of its index to the job");
+    wait(&mut app);
+    let line = app.usage.saved.clone().unwrap().unwrap().linked.expect("a line for the outside media");
+    assert_eq!((line.files, line.bytes, line.problem.as_deref()), (1, 2_000, Some("1 not found or not set up on this device")));
+    // the file comes back, the note links a second one: Refresh counts what the vault links now
+    std::fs::write(videos.join("gone.mp4"), vec![0u8; 100]).unwrap();
+    std::fs::write(videos.join("b.mp3"), vec![0u8; 10]).unwrap();
+    std::fs::write(d.join("More.md"), "[[@Videos/b.mp3]]\n").unwrap();
+    app.vault.as_mut().unwrap().rescan();
+    app.usage_ask(Ask::Refresh);
+    wait(&mut app);
+    let line = app.usage.saved.clone().unwrap().unwrap().linked.unwrap();
+    assert_eq!((line.files, line.bytes, line.problem), (3, 2_110, None));
+    let _ = std::fs::remove_dir_all(&d);
+    let _ = std::fs::remove_dir_all(&videos);
 }

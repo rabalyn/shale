@@ -116,6 +116,8 @@ pub struct Places {
     pub cleanup_file: PathBuf,
     /// the open vault
     pub vault: Option<PathBuf>,
+    /// the outside links of the open vault, for the count of the media they name (USE-026)
+    pub linked: crate::media::linked::Links,
 }
 
 impl Places {
@@ -132,6 +134,7 @@ impl Places {
             history: root.join("history"),
             cleanup_file: root.join("cache-cleanup.json"),
             vault: None,
+            linked: Default::default(),
         }
     }
 

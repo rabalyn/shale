@@ -791,6 +791,28 @@ impl Vault {
         self.outgoing_links(rel).into_iter().filter(|(l, r)| r.is_none() && l.is_outside()).map(|(l, _)| (l.display(), l.target.clone())).collect()
     }
 
+    /// The links of the note `rel`, whose text is `text`, to media outside the vault (MEDIA-021): each
+    /// target once, as written, in the order of the text. A link that a file of the vault answers
+    /// to is not one (MEDIA-014).
+    pub fn outside_targets(&self, text: &str, rel: &Path) -> Vec<String> {
+        let mut seen = HashSet::new();
+        markdown::find_links(text).into_iter().filter(|l| l.is_outside() && self.resolve(&l.target, Some(rel)).is_none() && seen.insert(l.target.clone())).map(|l| l.target).collect()
+    }
+
+    /// Every outside link of the vault, from the index (no file system access): for the background
+    /// jobs that look the files up (MEDIA-022). A link that a file of the vault answers to is not one.
+    pub fn outside_links(&self) -> crate::media::linked::Links {
+        let mut paths: Vec<&PathBuf> = self.notes.keys().chain(self.drawings.keys()).collect();
+        paths.sort_by_cached_key(|p| sort_key(p));
+        let mut links = Vec::new();
+        for rel in paths {
+            let Some(n) = self.notes.get(rel).or_else(|| self.drawings.get(rel)) else { continue };
+            let mut seen = HashSet::new();
+            links.extend(n.links.iter().zip(&n.resolved).filter(|(l, r)| r.is_none() && l.is_outside() && seen.insert(l.target.as_str())).map(|(l, _)| (rel.clone(), l.target.clone())));
+        }
+        crate::media::linked::Links { links, libraries: self.libraries.clone() }
+    }
+
     /// The links of a note or drawing, each target once, with what it resolves to.
     fn outgoing_links(&self, rel: &Path) -> Vec<(&LinkSpan, Option<PathBuf>)> {
         let Some(n) = self.notes.get(rel).or_else(|| self.drawings.get(rel)) else { return vec![] };

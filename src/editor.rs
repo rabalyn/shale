@@ -621,6 +621,9 @@ pub enum EditorAction {
     /// the pasted text names pictures, PDFs, sounds or videos outside the vault and the setting is
     /// Ask (MEDIA-019): nothing is written yet; the answer comes back with [`NoteEditor::pending_files`]
     AskOutsideFiles(String),
+    /// "Copy into the vault" on the caption of an outside embed: copy the file of this link target
+    /// and point the note's links at the copy (MEDIA-021)
+    CopyOutside(String),
 }
 
 #[derive(Default)]
@@ -661,6 +664,9 @@ pub struct NoteEditor {
     /// Pasted file names to bring into the note in the next frame, with what to do with them: the
     /// answer to [`EditorAction::AskOutsideFiles`] (MEDIA-019).
     pub pending_files: Option<(String, crate::media::intake::Choice)>,
+    /// Copies of outside media that arrived in the vault: the note (by path) and the links (by
+    /// target) to point at them in the next frame of that note (MEDIA-021).
+    pub pending_relink: Option<(std::path::PathBuf, Vec<(String, std::path::PathBuf)>)>,
     /// Frames left to ask again when the request was not granted (a dialog that has just closed
     /// still blocks the keyboard for the window behind it for a frame).
     focus_retry: u8,
@@ -751,6 +757,7 @@ impl NoteEditor {
             request_focus: false,
             pending_paste: None,
             pending_files: None,
+            pending_relink: None,
             focus_retry: 0,
             last_layout: None,
             inline_images: false,
@@ -1272,23 +1279,47 @@ impl NoteEditor {
 
     /// The caption of an embed shown inside the editor (EDIT-053), one line of muted text below
     /// `art` (the picture's rectangle), shortened to the room it has. A click on it opens the
-    /// link's target.
-    fn paint_caption(ui: &mut Ui, link: &LinkSpan, art: Rect, (base_size, max_w): (f32, f32), id: egui::Id) -> Option<EditorAction> {
+    /// link's target. `outside` is None for a file of the vault, else whether the outside file is
+    /// there: the caption says on hover that it is not synced (MEDIA-023), and of a file that is
+    /// there it has "Copy into the vault" at its right end (MEDIA-021).
+    fn paint_caption(ui: &mut Ui, link: &LinkSpan, art: Rect, (base_size, max_w): (f32, f32), id: egui::Id, outside: Option<bool>) -> Option<EditorAction> {
         let size = crate::caption::size(base_size);
         let font = egui::FontId::proportional(size);
-        let room = art.width().max(160.0).min(max_w);
-        let shown = crate::caption::fit(&crate::caption::text(link), room, |t| ui.painter().layout_no_wrap(t.to_string(), font.clone(), Color32::WHITE).size().x);
+        let width = |t: &str, ui: &Ui| ui.painter().layout_no_wrap(t.to_string(), font.clone(), Color32::WHITE).size().x;
+        // the action has its room at the right end of the line: a narrow picture's line is as wide as the caption and the action need
+        let copy = (outside == Some(true)).then(|| ui.painter().layout_no_wrap(crate::media::outside::COPY_LABEL.to_string(), font.clone(), theme::palette().muted));
+        let reserved = copy.as_ref().map_or(0.0, |g| g.size().x + 10.0);
+        let room = art.width().max(160.0 + reserved).min(max_w);
+        let shown = crate::caption::fit(&crate::caption::text(link), (room - reserved).max(40.0), |t| width(t, ui));
         let galley = ui.painter().layout_no_wrap(shown, font, theme::palette().muted);
         let rect = Rect::from_min_size(Pos2::new(art.min.x, art.max.y + crate::caption::GAP), galley.size());
         // click and drag, as the player's controls: the text box under it would take a plain click
-        let resp = ui.interact(rect, id, egui::Sense::click_and_drag());
+        let mut resp = ui.interact(rect, id, egui::Sense::click_and_drag());
+        if outside.is_some() {
+            resp = resp.on_hover_text(crate::media::outside::NOT_SYNCED);
+        }
         let hovered = resp.hovered();
         if hovered {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
         let colour = if hovered { theme::palette().link } else { theme::palette().muted };
         ui.painter().with_clip_rect(ui.clip_rect()).galley(rect.min, galley, colour);
-        resp.clicked().then(|| EditorAction::OpenLink { target: link.target.clone(), heading: link.heading.clone(), new_tab: false })
+        let mut action = resp.clicked().then(|| EditorAction::OpenLink { target: link.target.clone(), heading: link.heading.clone(), new_tab: false });
+        if let Some(g) = copy {
+            let rect = Rect::from_min_size(Pos2::new(art.min.x + room - g.size().x, art.max.y + crate::caption::GAP), g.size());
+            let button = ui.interact(rect, id.with("copy-into-vault"), egui::Sense::click_and_drag());
+            button.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::media::outside::COPY_LABEL));
+            let button = button.on_hover_text("Copy the file into the vault, in the media folder, and link the copy. Files outside the vault are not synced.");
+            if button.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            let colour = if button.hovered() { theme::palette().link } else { theme::palette().muted };
+            ui.painter().with_clip_rect(ui.clip_rect()).galley(rect.min, g, colour);
+            if button.clicked() {
+                action = Some(EditorAction::CopyOutside(link.target.clone()));
+            }
+        }
+        action
     }
 
     /// What following a link does: the one place a click and `gt` (EDIT-023) share.
@@ -1298,6 +1329,24 @@ impl NoteEditor {
             (None, Some((l, _))) => Some(EditorAction::OpenLink { target: l.target.clone(), heading: l.heading.clone(), new_tab }),
             (None, None) => None,
         }
+    }
+
+    /// The copies of outside media are in the vault: point the note's links at them (MEDIA-021).
+    /// One step of its own for Ctrl+Z, and the cursor and the selection move with the text as they
+    /// do when a link is resized (EDIT-052). True when a link changed.
+    fn apply_relink(&mut self, ui: &Ui, text: &mut String, hist: &mut crate::undo::History, done: &[(String, std::path::PathBuf)]) -> bool {
+        let Some(r) = crate::media::copy_in::relink(text, done) else { return false };
+        hist.checkpoint(text);
+        let before = std::mem::replace(text, r.text);
+        let at = |c: CCursor| CCursor::new(r.changes.iter().rev().fold(c.index.0, |at, (range, len)| after_relink(at, range, *len)));
+        let cursor = TextEditState::load(ui.ctx(), self.id).and_then(|st| st.cursor.char_range()).map_or(CCursorRange::one(CCursor::new(before.chars().count())), |c| CCursorRange::two(at(c.primary), at(c.secondary)));
+        if let Some((a, b)) = self.last_selection.as_mut() {
+            (*a, *b) = (at(CCursor::new(*a)).index.0, at(CCursor::new(*b)).index.0);
+        }
+        hist.checkpoint(text);
+        self.record_edit(ui.ctx(), &before, text, cursor);
+        self.last_cursor = None;
+        true
     }
 
     /// Change the table with this number in the note (EDIT-025, EDIT-030, EDIT-031). With `step`
@@ -1492,6 +1541,9 @@ impl NoteEditor {
         for (n, change, step) in std::mem::take(&mut self.grid.pending) {
             changed |= self.apply_table_edit(ui, text, undo.of(rel), n, &change, step);
         }
+        if let Some((_, done)) = self.pending_relink.take().filter(|(for_rel, _)| for_rel == rel) {
+            changed |= self.apply_relink(ui, text, undo.of(rel), &done);
+        }
         if let Some((before, give_back)) = self.grid.ended.take() {
             self.end_cell_edit(ui, text, undo.of(rel), before, give_back);
         }
@@ -1623,6 +1675,9 @@ impl NoteEditor {
         // Inline embeds: pictures, drawings and PDFs are shown in place of their link unless the
         // cursor is inside the link.
         let mut images: Vec<(Range<usize>, f32, Art, Vec2)> = Vec::new();
+        // the embeds of files outside the vault, and whether the file is there (their captions say
+        // "not synced" and offer "Copy into the vault", MEDIA-021, MEDIA-023)
+        let mut outside_embeds: Vec<(Range<usize>, bool)> = Vec::new();
         // the caption under each shown embed (EDIT-053) is part of its row
         let caption_h = crate::caption::height(base_size);
         // line numbers (EDIT-018): a gutter wide enough for the last number, left of the text
@@ -1674,6 +1729,9 @@ impl NoteEditor {
                 }
                 let shown = vault.resolve_media(&l.target, Some(rel));
                 let outside = matches!(shown, crate::vault::Shown::Outside(_));
+                if let crate::vault::Shown::Outside(o) = &shown {
+                    outside_embeds.push((l.range.clone(), matches!(o, crate::media::outside::Outside::Found { .. })));
+                }
                 let Some((p, abs)) = shown.file(vault) else {
                     if let Some(text) = shown.notice() {
                         let size = crate::embed_size::not_downloaded(max_w);
@@ -1914,7 +1972,8 @@ impl NoteEditor {
                 }
                 // the link as the caption below the picture; a click on it follows the link (EDIT-053)
                 if let Some(link) = markdown::find_links(&now_text[r.clone()]).into_iter().next() {
-                    if let Some(a) = Self::paint_caption(ui, &link, rect, (base_size, max_w), id.with("caption")) {
+                    let found = outside_embeds.iter().find(|(range, _)| *range == images[idx].0).map(|(_, found)| *found);
+                    if let Some(a) = Self::paint_caption(ui, &link, rect, (base_size, max_w), id.with("caption"), found) {
                         action = Some(a);
                     }
                 }
@@ -2321,6 +2380,7 @@ pub fn char_under(galley: &Galley, galley_pos: Pos2, p: Pos2) -> Option<usize> {
 mod tests {
     use super::*;
     use egui::{Event, PointerButton, RawInput};
+    use std::path::PathBuf;
 
     struct Harness {
         ctx: egui::Context,
@@ -5427,6 +5487,98 @@ mod tests {
         ed.live_preview = false;
         let h = rows(&mut ed, &mut text);
         assert!(h.iter().all(|x| *x < 22.0), "{h:?}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A vault of the sample notes, a library `Media` next to it with `a.png` (or not), for the outside embeds.
+    fn vault_with_library(tag: &str, picture: bool) -> (Vault, std::path::PathBuf) {
+        let (mut v, d) = vault_for_tests(tag);
+        let lib = d.parent().unwrap().join(format!("shale-ed-{tag}-library-{}", std::process::id()));
+        std::fs::create_dir_all(&lib).unwrap();
+        if picture {
+            image::RgbaImage::from_pixel(200, 120, image::Rgba([200, 30, 30, 255])).save(lib.join("a.png")).unwrap();
+        }
+        v.set_libraries(&[crate::media::outside::Library { name: "Media".into(), path: lib }]);
+        (v, d)
+    }
+
+    // spec: MEDIA-021, EDIT-112, MEDIA-023
+    #[test]
+    fn the_caption_of_an_outside_picture_that_is_there_offers_to_copy_it_and_a_click_leaves_the_cursor_alone() {
+        let (v, d) = vault_with_library("copy-button", true);
+        let rel = Path::new("Welcome.md");
+        let mut text = String::from("intro\n![[@Media/a.png|300]]\nafter\n![[a.png]]\n![[@Media/gone.png]]");
+        let before = text.clone();
+        let mut ed = NoteEditor::new(egui::Id::unique("copy-button"));
+        ed.inline_images = true;
+        ed.pending_cursor = Some(text.find("after").unwrap() + 2);
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+        for _ in 0..4 {
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        }
+        let labels = h.rects.iter().filter(|(t, _)| t == crate::media::outside::COPY_LABEL).count();
+        assert_eq!(labels, 1, "the picture that is there has the action; the one that is not and the one of the vault have none: {:?}", h.rects.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>());
+        let (_, button) = h.rects.iter().find(|(t, _)| t == crate::media::outside::COPY_LABEL).unwrap();
+        let caption = h.rects.iter().find(|(t, _)| t.starts_with("@Media/a.png")).map(|(_, r)| *r).expect("the caption");
+        assert!(button.left() > caption.right() - 1.0 && (button.center().y - caption.center().y).abs() < 2.0, "right of the caption on its line");
+        let cursor = cursor_of(&h, &ed);
+        let at = button.center();
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::PointerMoved(at)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![press(at, true)]);
+        let (changed, action) = h.frame(&mut ed, &mut text, &v, rel, vec![press(at, false)]);
+        assert!(matches!(action, Some(EditorAction::CopyOutside(ref t)) if t == "@Media/a.png"), "{}", action.is_some());
+        assert!(!changed && text == before, "the editor only asks: the copy and the link change come with the window");
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert_eq!(cursor_of(&h, &ed), cursor, "the click on the button did not move the cursor");
+        // a click on the caption's words still opens the file
+        let words = h.rects.iter().find(|(t, _)| t.starts_with("@Media/a.png")).map(|(_, r)| r.center()).unwrap();
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::PointerMoved(words)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![press(words, true)]);
+        let (_, action) = h.frame(&mut ed, &mut text, &v, rel, vec![press(words, false)]);
+        assert!(matches!(action, Some(EditorAction::OpenLink { ref target, .. }) if target == "@Media/a.png"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: MEDIA-021
+    #[test]
+    fn a_copy_that_arrived_points_the_links_at_it_and_the_cursor_moves_with_the_text() {
+        let (v, d) = vault_with_library("relink", true);
+        let rel = Path::new("Welcome.md");
+        let original = "intro\n![[@Media/a.png|300]]\nafter\n[[@Media/a.png]]\n![[z_media/b.png]]";
+        let done = vec![("@Media/a.png".to_string(), PathBuf::from("z_media/2026/11/261122_a.png"))];
+        // (cursor before, selection end, where each is after): before the first link, between the links, behind both
+        for (from, to) in [(2usize, 2usize), (original.find("after").unwrap() + 2, original.find("after").unwrap() + 2), (original.len(), original.len() - 4)] {
+            let mut text = original.to_string();
+            let mut ed = NoteEditor::new(egui::Id::unique("relink"));
+            ed.pending_cursor = Some(from);
+            let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+            for _ in 0..3 {
+                h.frame(&mut ed, &mut text, &v, rel, vec![]);
+            }
+            let mut st = TextEditState::load(&h.ctx, ed.id).unwrap_or_default();
+            st.cursor.set_char_range(Some(CCursorRange::two(CCursor::new(from), CCursor::new(to))));
+            st.store(&h.ctx, ed.id);
+            ed.pending_cursor = None;
+            ed.pending_relink = Some((rel.to_path_buf(), done.clone()));
+            let (changed, _) = h.frame(&mut ed, &mut text, &v, rel, vec![]);
+            assert!(changed);
+            assert_eq!(text, "intro\n![[z_media/2026/11/261122_a.png|300]]\nafter\n[[z_media/2026/11/261122_a.png]]\n![[z_media/b.png]]");
+            assert!(ed.pending_relink.is_none());
+            let (a, b) = cursor_of(&h, &ed);
+            // each end still stands in the same place of the text: the characters around it are the same
+            for (new, old) in [(a, from), (b, to)] {
+                let (n, o): (String, String) = (text.chars().skip(new).take(3).collect(), original.chars().skip(old).take(3).collect());
+                assert_eq!(n, o, "the end that was at {old} is at {new}");
+            }
+        }
+        // a copy for another note, or one without a matching link, changes nothing
+        let mut text = original.to_string();
+        let mut ed = NoteEditor::new(egui::Id::unique("relink2"));
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+        ed.pending_relink = Some((PathBuf::from("Other.md"), done.clone()));
+        assert!(!h.frame(&mut ed, &mut text, &v, rel, vec![]).0 && text == original && ed.pending_relink.is_none());
+        ed.pending_relink = Some((rel.to_path_buf(), vec![("@Media/zzz.png".into(), PathBuf::from("z_media/z.png"))]));
+        assert!(!h.frame(&mut ed, &mut text, &v, rel, vec![]).0 && text == original);
         let _ = std::fs::remove_dir_all(&d);
     }
 }
