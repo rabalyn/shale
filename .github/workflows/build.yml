@@ -204,7 +204,14 @@ jobs:
           mv dist/Shale.app dist/dmg/
           ln -s /Applications dist/dmg/Applications
           ASSET="shale-${LABEL}-macos-arm64.dmg"
-          hdiutil create -volname "Shale $VERSION" -srcfolder dist/dmg -ov -format UDZO "release/$ASSET"
+          # hdiutil's own guess of the volume size came out too small ("No space left on device", #502),
+          # so the size is explicit: the folder's size in MB + 25 % + 20 MB of filesystem overhead,
+          # at least 64 MB, rounded up. -size with -srcfolder works for UDZO and keeps one command.
+          DMG_USED_MB="$(du -sm dist/dmg | cut -f1)"
+          DMG_SIZE_MB=$(( (DMG_USED_MB * 125 + 99) / 100 + 20 ))
+          if [ "$DMG_SIZE_MB" -lt 64 ]; then DMG_SIZE_MB=64; fi
+          echo "dmg volume: ${DMG_USED_MB} MB of content, ${DMG_SIZE_MB} MB volume"
+          hdiutil create -volname "Shale $VERSION" -srcfolder dist/dmg -size "${DMG_SIZE_MB}m" -ov -format UDZO "release/$ASSET"
           hdiutil verify "release/$ASSET"
           MOUNT="$(mktemp -d)"
           hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT" "release/$ASSET"

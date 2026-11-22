@@ -59,7 +59,13 @@ fn build_024_macos_packs_an_ad_hoc_signed_app_in_a_dmg_after_the_tests_and_check
     assert!(j.find("hdiutil create").unwrap() > j.find("codesign --verify").unwrap());
     assert!(!j.contains("notarytool") && !j.contains("Developer ID"), "no notarisation");
     assert!(j.contains("ln -s /Applications dist/dmg/Applications"), "the Applications link");
-    assert!(j.contains("hdiutil create -volname \"Shale $VERSION\" -srcfolder dist/dmg -ov -format UDZO \"release/$ASSET\""));
+    // the volume size is explicit (#502): hdiutil's own guess came out too small
+    assert!(j.contains("du -sm dist/dmg"), "the size comes from du of the dmg folder");
+    assert!(j.contains("DMG_SIZE_MB=$(( (DMG_USED_MB * 125 + 99) / 100 + 20 ))"), "content + 25 % + 20 MB, rounded up");
+    assert!(j.contains("-lt 64 ]; then DMG_SIZE_MB=64"), "a floor of 64 MB");
+    assert!(j.contains("echo \"dmg volume:"), "the size is logged");
+    assert!(j.contains("hdiutil create -volname \"Shale $VERSION\" -srcfolder dist/dmg -size \"${DMG_SIZE_MB}m\" -ov -format UDZO \"release/$ASSET\""));
+    assert!(j.find("DMG_SIZE_MB=$((").unwrap() < j.find("hdiutil create").unwrap(), "the size is computed before the image is made");
     assert!(j.contains("hdiutil verify \"release/$ASSET\""), "the dmg is verified");
     assert!(j.contains("hdiutil attach -readonly") && j.contains("Shale.app/Contents/MacOS/shale") && j.contains("hdiutil detach"), "the dmg is attached and looked into");
     assert!(j.contains("shasum -a 256 -c \"$ASSET.sha256\""), "the checksum is not checked");
