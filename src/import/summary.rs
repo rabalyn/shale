@@ -177,7 +177,7 @@ mod tests {
         assert_eq!(line_of(""), "");
     }
 
-    // spec: IMP-056
+    // spec: IMP-056, MEDIA-019
     #[test]
     fn the_title_counts_notes_and_files() {
         let s = |n: usize, f: usize, l: usize| ImportSummary {

@@ -3045,7 +3045,7 @@ mod tests {
         h.texts.iter().any(|t| t.contains(part))
     }
 
-    // spec: MEDIA-019, MEDIA-020, EDIT-003
+    // spec: MEDIA-019, MEDIA-020, EDIT-003, EDIT-002
     #[test]
     fn the_file_picker_copies_or_links_a_file_from_outside_as_the_setting_says() {
         use crate::media::intake::OutsideFiles;
@@ -3083,7 +3083,7 @@ mod tests {
         }
     }
 
-    // spec: MEDIA-019
+    // spec: MEDIA-019, EDIT-002
     #[test]
     fn alt_shift_l_in_the_file_picker_changes_copy_and_link_for_this_pick_only() {
         use crate::media::intake::{Choice, OutsideFiles};
@@ -3119,7 +3119,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
-    // spec: MEDIA-019
+    // spec: MEDIA-019, EDIT-002
     #[test]
     fn with_ask_the_file_picker_asks_before_it_writes_and_c_l_esc_and_the_buttons_answer() {
         let rel = Path::new("Welcome.md");

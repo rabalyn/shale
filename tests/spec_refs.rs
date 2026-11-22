@@ -490,8 +490,8 @@ fn dev_039_every_test_a_spec_row_names_is_about_that_row() {
     let allow_text = fs::read_to_string(root.join(ALLOWLIST)).unwrap();
     let allowed = allowlist_entries(&allow_text);
     let new: Vec<&String> = found.iter().filter(|f| !allowed.contains(&f.as_str())).collect();
-    let how = "put `// spec: ID` above the test (or the ID in its name); the list in tests/spec_refs_allowlist.txt only shrinks";
-    assert!(new.is_empty(), "tests that spec rows name and that do not carry the row's ID ({}); {how}:\n{}", new.len(), new.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n"));
+    let how = "A spec row names a test that is not about that row. Fix it in the test, not in the list: add a comment line `// spec: <ID>` right above the test (above its `#[test]`; several IDs: `// spec: ID1, ID2`), or give the test a name that starts with or contains the ID (`build_019_…`). Where the line says a file or a script, mention the ID in its header comment. If the test really belongs to another rule, name a better test in the row's Test column instead. Do not add to tests/spec_refs_allowlist.txt: it only shrinks (DEV-039)";
+    assert!(new.is_empty(), "tests that spec rows name and that do not carry the row's ID ({}), as `ID: reference`.\n{how}.\n{}", new.len(), new.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n"));
     let fixed: Vec<&&str> = allowed.iter().filter(|a| !found.iter().any(|f| f == **a)).collect();
     assert!(fixed.is_empty(), "entries of tests/spec_refs_allowlist.txt that are no exception any more (remove them and lower ALLOWLIST_LEN):\n{}", fixed.iter().map(|s| s.to_string()).collect::<Vec<_>>().join("\n"));
     assert_eq!(allowed.len(), ALLOWLIST_LEN, "ALLOWLIST_LEN says how long the list is: lower it with the list, never raise it");
