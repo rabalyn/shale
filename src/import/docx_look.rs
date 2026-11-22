@@ -14,7 +14,7 @@ use roxmltree::{Document, Node};
 use std::path::{Path, PathBuf};
 
 /// The namespace of `w:` (WordprocessingML).
-const W: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+pub(crate) const W: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 
 /// Marks the start of a tag (`c:RRGGBB` or `h:RRGGBB`, then [`TAG_END`]).
 const OPEN: char = '\u{E000}';
@@ -112,16 +112,16 @@ fn paper(w: f64, h: f64) -> String {
     }
 }
 
-fn is_w(n: Node, name: &str) -> bool {
+pub(crate) fn is_w(n: Node, name: &str) -> bool {
     n.is_element() && n.tag_name().name() == name && n.tag_name().namespace() == Some(W)
 }
 
 /// The first child of `n` named `name` in `w:`.
-fn child<'a, 'i>(n: Node<'a, 'i>, name: &str) -> Option<Node<'a, 'i>> {
+pub(crate) fn child<'a, 'i>(n: Node<'a, 'i>, name: &str) -> Option<Node<'a, 'i>> {
     n.children().find(|c| is_w(*c, name))
 }
 
-fn val<'a>(n: Node<'a, '_>, attr: &str) -> Option<&'a str> {
+pub(crate) fn val<'a>(n: Node<'a, '_>, attr: &str) -> Option<&'a str> {
     n.attribute((W, attr))
 }
 
@@ -430,10 +430,10 @@ fn highlight_hex(name: &str) -> Option<&'static str> {
 }
 
 /// A change to the text of `document.xml`: the bytes `start..end` become `with`.
-struct Edit {
-    start: usize,
-    end: usize,
-    with: String,
+pub(crate) struct Edit {
+    pub start: usize,
+    pub end: usize,
+    pub with: String,
 }
 
 /// The colours of a file: its styles and its theme (either may be missing).
@@ -580,11 +580,12 @@ pub fn tag_runs(document: &str, styles: Option<&str>, theme: Option<&str>) -> Op
 }
 
 /// `document` with the edits made, `None` when there are none.
-fn apply(document: &str, mut edits: Vec<Edit>) -> Option<String> {
+pub(crate) fn apply(document: &str, mut edits: Vec<Edit>) -> Option<String> {
     if edits.is_empty() {
         return None;
     }
-    edits.sort_by_key(|e| std::cmp::Reverse(e.start));
+    // from the end, so the places of the others stay; of two at one place the longer first (an insertion after a removal)
+    edits.sort_by_key(|e| std::cmp::Reverse((e.start, e.end)));
     let mut out = document.to_string();
     for e in edits {
         out.replace_range(e.start..e.end, &e.with);
@@ -908,17 +909,6 @@ pub fn colours_to_html(text: &str) -> String {
 
 // ---------------------------------------------------------------- the zip of the tagged copy
 
-fn crc32(data: &[u8]) -> u32 {
-    let mut crc = !0u32;
-    for &b in data {
-        crc ^= b as u32;
-        for _ in 0..8 {
-            crc = if crc & 1 != 0 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
-        }
-    }
-    !crc
-}
-
 /// The files below `dir` as (name with `/`, path), `[Content_Types].xml` first, the rest sorted.
 fn files_of(dir: &Path) -> Result<Vec<(String, PathBuf)>, String> {
     fn walk(dir: &Path, prefix: &str, out: &mut Vec<(String, PathBuf)>) -> Result<(), String> {
@@ -942,7 +932,13 @@ fn files_of(dir: &Path) -> Result<Vec<(String, PathBuf)>, String> {
 /// Write the files below `dir` as a zip at `to`, stored without compression (the file is read
 /// once by pandoc and then removed).
 pub fn write_zip(dir: &Path, to: &Path) -> Result<(), String> {
-    let files = files_of(dir)?;
+    let files = files_of(dir)?.into_iter().map(|(name, path)| Ok((name, crate::fsutil::read(&path).map_err(|e| e.to_string())?))).collect::<Result<Vec<_>, String>>()?;
+    crate::fsutil::write_atomic(to, &zip_bytes(&files, false)?).map_err(|e| e.to_string())
+}
+
+/// The zip of `files` (name, content), in this order. `deflate`: each file is compressed when that
+/// makes it smaller; else all are stored. The same bytes for the same files.
+pub fn zip_bytes(files: &[(String, Vec<u8>)], deflate: bool) -> Result<Vec<u8>, String> {
     if files.len() > u16::MAX as usize {
         return Err("too many files".into());
     }
@@ -950,11 +946,16 @@ pub fn write_zip(dir: &Path, to: &Path) -> Result<(), String> {
     let mut central: Vec<u8> = Vec::new();
     // 1980-01-01 00:00: the same bytes for the same files
     let (time, date) = (0u16, 0x0021u16);
-    for (name, path) in &files {
-        let data = crate::fsutil::read(path).map_err(|e| e.to_string())?;
+    for (name, data) in files {
         let size = u32::try_from(data.len()).map_err(|_| "a file is too big".to_string())?;
         let at = u32::try_from(out.len()).map_err(|_| "the archive is too big".to_string())?;
-        let crc = crc32(&data);
+        let crc = archive::crc32(data);
+        let packed = deflate.then(|| miniz_oxide::deflate::compress_to_vec(data, 6)).filter(|p| p.len() < data.len());
+        let (method, body) = match &packed {
+            Some(p) => (8u16, p.as_slice()),
+            None => (0, data.as_slice()),
+        };
+        let csize = u32::try_from(body.len()).map_err(|_| "a file is too big".to_string())?;
         let n = name.as_bytes();
         // flags 0x0800: the names are UTF-8
         let head = |sig: u32, central: bool| {
@@ -962,10 +963,10 @@ pub fn write_zip(dir: &Path, to: &Path) -> Result<(), String> {
             if central {
                 h.extend(20u16.to_le_bytes());
             }
-            for v in [20u16, 0x0800, 0, time, date] {
+            for v in [20u16, 0x0800, method, time, date] {
                 h.extend(v.to_le_bytes());
             }
-            for v in [crc, size, size] {
+            for v in [crc, csize, size] {
                 h.extend(v.to_le_bytes());
             }
             h.extend((n.len() as u16).to_le_bytes());
@@ -974,7 +975,7 @@ pub fn write_zip(dir: &Path, to: &Path) -> Result<(), String> {
         };
         out.extend(head(0x0403_4b50, false));
         out.extend(n);
-        out.extend(&data);
+        out.extend(body);
         central.extend(head(0x0201_4b50, true));
         // comment length, disk, internal and external attributes, offset of the local header
         for v in [0u16, 0, 0] {
@@ -993,7 +994,7 @@ pub fn write_zip(dir: &Path, to: &Path) -> Result<(), String> {
     out.extend((central.len() as u32).to_le_bytes());
     out.extend(start.to_le_bytes());
     out.extend(0u16.to_le_bytes());
-    crate::fsutil::write_atomic(to, &out).map_err(|e| e.to_string())
+    Ok(out)
 }
 
 /// What one Word file gives: its look, and the path of a tagged copy when there was a colour to tag.

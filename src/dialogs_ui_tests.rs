@@ -947,3 +947,165 @@ fn book_010_a_folder_without_notes_says_so_and_cannot_be_exported() {
     p.click(Show::Modals, "Cancel");
     assert!(p.app.modal.is_none());
 }
+
+// spec: DOCX-001
+#[test]
+fn docx_001_the_menu_of_a_note_in_the_file_tree_opens_the_word_dialog_and_other_files_have_no_entry() {
+    let mut p = P::with_files("docx-menu", &[("Ideas.md", "# Ideas\n\nA plain note.\n"), ("Sketch.excalidraw.md", "x"), ("Pic.png", "x"), ("Box/inside.md", "x\n")]);
+    p.app.tree.expanded.clear();
+    let r = p.row("Ideas");
+    p.click_rect(Show::Files, r, PointerButton::Secondary);
+    p.actions();
+    assert!(p.shows(Show::Files, "Export to PDF…") && p.shows(Show::Files, "Export to Word…"));
+    p.click(Show::Files, "Export to Word…");
+    let a = p.actions();
+    assert!(matches!(a.as_slice(), [Action::ExportDocx(r)] if r == Path::new("Ideas.md")), "{} actions", a.len());
+    p.app.actions = a;
+    p.app.process_actions();
+    let Some(Modal::ExportDocx(d)) = &p.app.modal else { panic!("the Word dialog opens") };
+    assert_eq!((Path::new(&d.path), d.rel.as_path(), d.toc, d.original.is_none()), (p.dir.join("exports/Ideas.docx").as_path(), Path::new("Ideas.md"), true, true), "<vault>/exports/<note name>.docx");
+    assert!(p.shows(Show::Modals, "Export “Ideas” to Word") && p.shows(Show::Modals, "Table of contents") && p.shows(Show::Modals, "Open the file afterwards") && !p.shows(Show::Modals, "Use the original Word file as the template"));
+    // a drawing has the PDF entry, a picture, a folder and the vault have none for Word
+    p.app.modal = None;
+    for (row, pdf) in [("Sketch", true), ("Pic.png", false)] {
+        let r = p.row(row);
+        p.click_rect(Show::Files, r, PointerButton::Secondary);
+        p.actions();
+        assert_eq!(p.shows(Show::Files, "Export to PDF…"), pdf, "{row}");
+        assert!(!p.shows(Show::Files, "Export to Word…"), "{row}");
+        p.frame(Show::Files, vec![Event::Key { key: Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }]);
+        p.look(Show::Files);
+    }
+    let r = p.row("Box");
+    p.click_rect(Show::Files, r, PointerButton::Secondary);
+    p.actions();
+    assert!(p.shows(Show::Files, "Export to PDF…") && !p.shows(Show::Files, "Export to Word…"), "a folder is a book of PDFs only");
+    // the dialog is only for notes: a drawing, a picture and a note that is not there open none
+    p.app.modal = None;
+    for rel in ["Sketch.excalidraw.md", "Pic.png", "Missing.md"] {
+        p.app.open_docx_export_dialog(Path::new(rel));
+        assert!(p.app.modal.is_none(), "{rel}");
+    }
+}
+
+// spec: DOCX-001
+#[test]
+fn docx_001_the_dialog_takes_the_contents_box_of_the_pdf_dialog_and_the_original_of_the_source_property() {
+    let mut p =
+        P::with_files("docx-opens", &[("A.md", "---\nprint-toc: false\n---\n# A\n"), ("Imports/Old.docx", "x"), ("B.md", "---\nsource: \"[[Imports/Old.docx]]\"\n---\n# B\n"), ("C.md", "---\nsource: \"[[Imports/Gone.docx]]\"\n---\n# C\n")]);
+    p.app.open_docx_export_dialog(Path::new("A.md"));
+    let Some(Modal::ExportDocx(d)) = &p.app.modal else { panic!() };
+    assert!(!d.toc, "print-toc: false, as the PDF dialog has it (PDF-008, PDF-013)");
+    p.app.open_docx_export_dialog(Path::new("B.md"));
+    {
+        let Some(Modal::ExportDocx(d)) = &p.app.modal else { panic!() };
+        assert!(d.toc && d.use_original && d.original.as_deref() == Some(Path::new("Imports/Old.docx")));
+    }
+    assert!(p.shows(Show::Modals, "Use the original Word file as the template"));
+    p.app.open_docx_export_dialog(Path::new("C.md"));
+    let Some(Modal::ExportDocx(d)) = &p.app.modal else { panic!() };
+    assert!(d.original.is_none() && !d.use_original, "the original is gone: no box");
+    assert!(!p.shows(Show::Modals, "Use the original Word file as the template"));
+}
+
+// spec: DOCX-001
+#[test]
+fn docx_001_without_pandoc_the_dialog_says_so_and_export_does_nothing() {
+    let mut p = P::with_files("docx-nopandoc", &[("Ideas.md", "# Ideas\n")]);
+    p.app.cfg.pandoc_path = p.dir.join("no-such-pandoc").to_string_lossy().into_owned();
+    p.app.open_docx_export_dialog(Path::new("Ideas.md"));
+    assert!(p.shows(Show::Modals, "pandoc was not found (Settings → Import)"));
+    p.click(Show::Modals, "Export");
+    assert!(matches!(&p.app.modal, Some(Modal::ExportDocx(d)) if !d.working() && d.error.is_none()), "no job, no error");
+    assert!(!p.dir.join("exports").exists());
+    // the Word import's setting is not needed: it is off by default
+    assert!(!p.app.cfg.docx_import);
+    p.click(Show::Modals, "Cancel");
+    assert!(p.app.modal.is_none());
+}
+
+// spec: DOCX-002
+#[test]
+fn docx_002_export_runs_as_a_job_saves_the_file_where_asked_scans_the_vault_and_closes() {
+    if crate::import::docx::locate("").is_none() {
+        eprintln!("skipping: pandoc is not installed here");
+        return;
+    }
+    let mut p = P::with_files("docx-run", &[("Report.md", "---\nprint-paper: Letter\n---\n# Report\n\nHello **world** from the saved note.\n"), ("Other.md", "x\n")]);
+    p.app.open(Path::new("Report.md"), false);
+    // typing that is not saved yet is exported too
+    p.app.notes.get_mut(Path::new("Report.md")).unwrap().text.push_str("\nAnd unsaved typing.\n");
+    p.app.open_docx_export_dialog(Path::new("Report.md"));
+    p.look(Show::Modals);
+    let target = p.dir.join("exports/Report.docx");
+    assert!(matches!(&p.app.modal, Some(Modal::ExportDocx(d)) if Path::new(&d.path) == target));
+    p.click(Show::Modals, "Export");
+    until(&mut p, Show::Modals, "the file is exported and the dialog closes", |p| p.app.modal.is_none());
+    let bytes = std::fs::read(&target).unwrap();
+    let files = crate::pdf::tex::archive::read_zip_files(&bytes).unwrap();
+    let doc = String::from_utf8(files.into_iter().find(|(n, _)| n == "word/document.xml").unwrap().1).unwrap();
+    assert!(doc.contains("Hello") && doc.contains("unsaved typing") && doc.contains("<w:pgSz w:w=\"12240\" w:h=\"15840\"/>"), "{doc}");
+    assert!(p.app.toasts.iter().any(|(t, _)| t.starts_with("Exported to") && t.contains("Report.docx")), "{:?}", p.app.toasts);
+    assert!(p.app.vault.as_ref().unwrap().exists("exports/Report.docx", None), "the vault is scanned again: the file shows up");
+    // the box Open the file afterwards opens it with the system's program
+    let opener = crate::opener::FakeXdgOpen::install();
+    p.app.open_docx_export_dialog(Path::new("Report.md"));
+    p.look(Show::Modals);
+    if let Some(Modal::ExportDocx(d)) = &mut p.app.modal {
+        d.path = p.dir.join("exports/Again.docx").to_string_lossy().into_owned();
+    }
+    p.click(Show::Modals, "Open the file afterwards");
+    p.click(Show::Modals, "Export");
+    until(&mut p, Show::Modals, "the second export is done", |p| p.app.modal.is_none());
+    let calls = opener.calls(1);
+    assert!(calls[0].last().is_some_and(|f| f.ends_with("Again.docx")), "{calls:?}");
+    // a place that cannot be written: the dialog stays with the reason, nothing is written
+    std::fs::write(p.dir.join("in-the-way"), "a file").unwrap();
+    p.app.open_docx_export_dialog(Path::new("Other.md"));
+    p.look(Show::Modals);
+    if let Some(Modal::ExportDocx(d)) = &mut p.app.modal {
+        d.path = p.dir.join("in-the-way/out.docx").to_string_lossy().into_owned();
+    }
+    p.click(Show::Modals, "Export");
+    until(&mut p, Show::Modals, "the failure is shown", |p| matches!(&p.app.modal, Some(Modal::ExportDocx(d)) if d.error.is_some()));
+    let Some(Modal::ExportDocx(d)) = &p.app.modal else { panic!("the dialog closed") };
+    assert!(d.error.as_deref().unwrap().contains("Could not create the folder") && !d.working(), "{:?}", d.error);
+    // no place at all
+    if let Some(Modal::ExportDocx(d)) = &mut p.app.modal {
+        d.path = "  ".into();
+    }
+    p.click(Show::Modals, "Export");
+    assert!(p.shows(Show::Modals, "Choose where to save the Word file"));
+    p.click(Show::Modals, "Cancel");
+    assert!(p.app.modal.is_none() && !p.dir.join("in-the-way/out.docx").exists());
+}
+
+// spec: DOCX-002
+#[cfg(unix)]
+#[test]
+fn docx_002_a_pandoc_that_fails_leaves_the_dialog_open_with_its_first_error_line_and_writes_nothing() {
+    let mut p = P::with_files("docx-fail", &[("Ideas.md", "# Ideas\n")]);
+    let fake = p.dir.join("fake-pandoc");
+    std::fs::write(&fake, "#!/bin/sh\necho 'pandoc: it cannot do that' >&2\nexit 2\n").unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    p.app.cfg.pandoc_path = fake.to_string_lossy().into_owned();
+    p.app.open_docx_export_dialog(Path::new("Ideas.md"));
+    assert!(p.shows(Show::Modals, &format!("pandoc: {}", fake.display())), "the line says where pandoc was found");
+    p.click(Show::Modals, "Export");
+    until(&mut p, Show::Modals, "the failure is shown", |p| matches!(&p.app.modal, Some(Modal::ExportDocx(d)) if d.error.is_some()));
+    let Some(Modal::ExportDocx(d)) = &p.app.modal else { panic!() };
+    assert_eq!(d.error.as_deref(), Some("pandoc has no default reference document: pandoc: it cannot do that"));
+    assert!(!d.working() && !p.dir.join("exports").exists(), "nothing is written, not even the folder");
+    assert!(p.shows(Show::Modals, "pandoc has no default reference document"));
+    // Cancel while it works stops it, a second Cancel closes the dialog
+    std::fs::write(&fake, "#!/bin/sh\nsleep 30\n").unwrap();
+    p.click(Show::Modals, "Export");
+    assert!(matches!(&p.app.modal, Some(Modal::ExportDocx(d)) if d.working()));
+    p.click(Show::Modals, "Cancel");
+    assert!(matches!(&p.app.modal, Some(Modal::ExportDocx(d)) if !d.working()), "the first Cancel stops the export");
+    p.click(Show::Modals, "Cancel");
+    assert!(p.app.modal.is_none());
+}

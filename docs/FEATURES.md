@@ -853,6 +853,19 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   without pandoc, a `.docx` is an attachment as before; the dialog says when pandoc is missing.
 
   ![The Import tab of Settings](userguide/z_media/screenshots/settings-import.png)
+- **Export to Word** (DOCX-001 to DOCX-010, rabalyn/shale#487): a note's ⋯ menu and its context menu in the file list have **Export to Word…**,
+  the reverse of the Word import, by the same `pandoc` (the Word import setting need not be on). The dialog saves to `<vault>/exports/<name>.docx`
+  and has the boxes **Use the original Word file as the template** (for a note imported with its original kept, its `source:` property),
+  **Table of contents** and **Open the file afterwards**; the export is a background job that Cancel stops, and nothing is written when it
+  fails. Shale cleans the note's text (front matter off, embeds by their vault path), pandoc reads it with commonmark and a Lua filter of
+  Shale's (highlights, text and background colours, underline, sub- and superscript, strike-through, line breaks, links to notes as their words,
+  pictures as wide as in the editor with their captions as alternative text, page breaks, alignment wrappers, the import's title block as Word's
+  Title and Subtitle), with a reference document that is a copy of the original (pandoc's own styles merged into its styles) or pandoc's default
+  with the note's `print-*` properties laid into its styles (font, size, spacing, justified, heading colour, weight and sizes, headings that
+  start a page), and Shale finishes the file (alignment, colour styles, the page and margins of the note in the last section, unused pictures
+  out, compressed). Docx → note → docx keeps what the import kept: the words of the fixtures come back (all of them, 95 % of `text.docx`);
+  merged cells, figure and table numbers, tab stops, line spacing of single paragraphs, small caps and all but the last section's page are lost
+  at import. `scripts/roundtrip-docx.sh <file.docx>` prints the share of the words of any Word file that comes back.
 
 - Choose the folder (one per project, for example) and tags. Small pictures from signatures are
   left out by default, and each attachment can be ticked on or off.

@@ -78,7 +78,7 @@ a name without it and the message says so ([[Vault settings]]).
 
 ![[more-menu.png]]
 
-Export to PDF ([[PDF]]), insert a new drawing, rename, or move to the trash. The trash keeps
+Export to PDF ([[PDF]]), export to Word ([[Import#Export to Word]]), insert a new drawing, rename, or move to the trash. The trash keeps
 the original folder (`.trash/<date>/<path>`), and "Restore last deleted" in the file list's
 context menu brings the last item back.
 

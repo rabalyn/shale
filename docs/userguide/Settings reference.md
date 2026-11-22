@@ -200,10 +200,10 @@ cannot use are shown with the reason in Settings → Search, and read as `f`, `m
 |---|---|---|
 | `docx_import` | off | Settings → Import, "Import Word files as notes (needs pandoc)"; global config |
 | `import_header_list` | off | Settings → Import, "Header list in the note body" (e-mails, events and saved posts); the start value of the box of the same name in the Import dialog |
-| `pandoc_path` | empty (search `PATH`, then `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, and on Windows `%LOCALAPPDATA%\Pandoc` and `%ProgramFiles%\Pandoc`) | Settings → Import, "pandoc program" |
+| `pandoc_path` | empty (search `PATH`, then `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, and on Windows `%LOCALAPPDATA%\Pandoc` and `%ProgramFiles%\Pandoc`) | Settings → Import, "pandoc program" (the Word export looks for pandoc the same way) |
 
 To set it up: install pandoc (Linux `sudo pacman -S pandoc-cli` or `sudo apt install pandoc`, macOS `brew install pandoc`,
-Windows `winget install JohnMacFarlane.Pandoc`), tick the box and press Check again.
+Windows `winget install JohnMacFarlane.Pandoc`), tick the box and press Check again. The export of a note to Word (the note's ⋯ menu) needs pandoc too, but not the box.
 
 ## LaTeX ([[PDF]])
 

@@ -31,6 +31,7 @@ mod dataflow;
 #[cfg(test)]
 mod dataflow_tests;
 mod dialog;
+mod docx_export;
 mod download;
 mod drawing;
 mod editor;

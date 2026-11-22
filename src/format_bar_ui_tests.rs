@@ -946,6 +946,20 @@ fn the_keys_of_the_menu_buttons_open_their_popups_and_new_tab_and_the_menu_key_w
     assert_eq!(fx.app.tabbar.tabs.len(), tabs + 1, "Alt+N: a new tab");
 }
 
+// spec: DOCX-001
+#[test]
+fn the_menu_of_a_note_has_export_to_word_below_export_to_pdf_and_it_opens_the_dialog() {
+    let mut fx = Fx::new("docx-menu", "one two three\n");
+    fx.alt_key(Key::D, "d");
+    let (pdf, word) = (fx.hl.find_label(&mut fx.app, "Export to PDF…"), fx.hl.find_label(&mut fx.app, "Export to Word…"));
+    assert!(word.min.y > pdf.min.y, "below Export to PDF…");
+    fx.click("Export to Word…");
+    fx.app.process_actions();
+    let Some(crate::app::Modal::ExportDocx(d)) = &fx.app.modal else { panic!("the Word dialog opens for the open note") };
+    assert_eq!(d.rel, Path::new(NOTE));
+    assert_eq!(fx.text(), "one two three\n", "nothing was typed");
+}
+
 // spec: KEY-015
 #[test]
 fn alt_1_does_what_a_click_on_the_first_ribbon_item_does_and_alt_comma_toggles_the_sidebar() {

@@ -49,8 +49,18 @@ impl Run {
 /// Start `cmd` and wait for it. `on_line` sees every output line (split at `\n` and `\r`, so a
 /// progress bar that rewrites its line is seen too) as it arrives. Fails only when the program
 /// cannot be started.
-pub fn run(mut cmd: Command, timeout: Duration, cancel: Option<&AtomicBool>, mut on_line: impl FnMut(&str)) -> io::Result<Run> {
-    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+pub fn run(cmd: Command, timeout: Duration, cancel: Option<&AtomicBool>, on_line: impl FnMut(&str)) -> io::Result<Run> {
+    run_with(cmd, Stdio::piped(), timeout, cancel, on_line)
+}
+
+/// [`run`] with the standard output of the program written to `out` (a program that makes a
+/// binary file on its standard output): the tail holds its error lines only.
+pub fn run_to_file(cmd: Command, out: std::fs::File, timeout: Duration, cancel: Option<&AtomicBool>) -> io::Result<Run> {
+    run_with(cmd, Stdio::from(out), timeout, cancel, |_| {})
+}
+
+fn run_with(mut cmd: Command, stdout: Stdio, timeout: Duration, cancel: Option<&AtomicBool>, mut on_line: impl FnMut(&str)) -> io::Result<Run> {
+    cmd.stdin(Stdio::null()).stdout(stdout).stderr(Stdio::piped());
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -194,6 +204,22 @@ mod tests {
         let run = run(Command::new(&script), Duration::from_secs(20), None, |_| {}).unwrap();
         closer.join().unwrap();
         assert!(run.success() && run.tail == ["started"], "{run:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: DOCX-002
+    #[cfg(unix)]
+    #[test]
+    fn the_standard_output_of_a_program_can_go_to_a_file() {
+        let dir = std::env::temp_dir().join(format!("shale-proc-file-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "printf 'a\\000b'; echo oops >&2"]);
+        let file = std::fs::File::create(dir.join("out.bin")).unwrap();
+        let run = run_to_file(cmd, file, Duration::from_secs(20), None).unwrap();
+        assert!(run.success() && run.tail == ["oops"], "{run:?}");
+        assert_eq!(std::fs::read(dir.join("out.bin")).unwrap(), b"a\0b");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

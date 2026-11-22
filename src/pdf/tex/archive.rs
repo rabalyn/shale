@@ -65,7 +65,7 @@ pub(super) fn safe_path(raw: &str) -> Result<PathBuf, String> {
 }
 
 /// CRC-32 (the checksum of zip and gzip).
-pub(super) fn crc32(data: &[u8]) -> u32 {
+pub fn crc32(data: &[u8]) -> u32 {
     let mut crc = !0u32;
     for &b in data {
         crc ^= b as u32;
@@ -277,6 +277,12 @@ fn read_tar(b: &[u8], lim: Limits) -> Result<Vec<Entry>, String> {
 }
 
 // ---------------------------------------------------------------- writing
+
+/// The files of a zip in the order of its central directory, as (name, content), read in memory
+/// with the checks of [`extract`] (a Word file or a template that is changed and packed again).
+pub fn read_zip_files(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, String> {
+    Ok(read_zip(bytes, Limits::TEMPLATES)?.into_iter().filter_map(|e| Some((e.path.to_string_lossy().replace('\\', "/"), e.data?))).collect())
+}
 
 /// Unpack `bytes` (a zip or a gzipped tar, told apart by their first bytes) into `dest`, a folder
 /// that exists and is empty. Nothing is written when any entry is refused.

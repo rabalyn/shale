@@ -38,7 +38,7 @@ Your other data:
 - [[Calendar]]: local and CalDAV calendars.
 - [[Mail]]: IMAP, writing, signing and encrypting.
 - [[Feeds]]: Mastodon and Bluesky.
-- [[Import]]: mails, events and files become notes.
+- [[Import]]: mails, events and files become notes, and notes become Word files.
 - [[PDF]]: export notes, read PDFs.
 
 Keeping it safe and tidy:

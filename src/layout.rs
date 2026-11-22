@@ -714,6 +714,10 @@ impl ShaleApp {
                             self.actions.push(Action::Export(p2.clone()));
                             ui.close();
                         }
+                        if ui.button("Export to Word…").clicked() {
+                            self.actions.push(Action::ExportDocx(p2.clone()));
+                            ui.close();
+                        }
                         if ui.button("Insert new drawing here").clicked() {
                             let folder = p2.parent().map(|x| x.to_path_buf()).unwrap_or_default();
                             self.actions.push(Action::NewDrawing { folder, embed_into: Some(p2.clone()) });

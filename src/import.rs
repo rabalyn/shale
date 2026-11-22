@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 mod dataflow_tests;
 pub mod dialog;
 pub mod docx;
-mod docx_look;
+pub(crate) mod docx_look;
 #[cfg(test)]
 mod docx_look_tests;
 #[cfg(test)]
