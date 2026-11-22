@@ -356,7 +356,7 @@ fn editor_layout_long(fx: &mut Fixtures) -> Body {
 fn search_sidebar_large(fx: &mut Fixtures) -> Body {
     let v = open(&fx.vault(Size::Large));
     Box::new(move || {
-        black_box(v.search("garden"));
+        black_box(crate::search_all::note_hits(&v, &crate::search_all::Query::sidebar("garden")));
     })
 }
 
@@ -364,7 +364,7 @@ fn search_sidebar_large(fx: &mut Fixtures) -> Body {
 fn search_all(fx: &mut Fixtures, query: &'static str) -> Body {
     let v = open(&fx.vault(Size::Large));
     Box::new(move || {
-        black_box(crate::search_all::note_hits(&v, query));
+        black_box(crate::search_all::note_hits(&v, &crate::search_all::Query::picker(query)));
     })
 }
 

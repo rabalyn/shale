@@ -10,7 +10,7 @@
 //! connection of its own ([`clear_file`], [`prune_file`]).
 
 use super::{feed_ui::segments, Post};
-use crate::mail::db::{fts_query_in, fts_query_wild};
+use crate::mail::db::fts_query_wild;
 use rusqlite::{params, Connection};
 use std::path::Path;
 
@@ -369,14 +369,9 @@ impl PostIndex {
 
     /// The posts that match, newest first, at most `limit`. All words must match (in any column);
     /// `from:`, `text:`, `in:` (quote, link card, the post answered, who boosted), `link:` and
-    /// `date:` limit a term to one part; "quotes" make a phrase. Nothing found, nothing to search
-    /// for, or a broken index: an empty list.
-    pub fn search(&self, query: &str, limit: usize) -> Vec<PostHit> {
-        let Some(q) = fts_query_in(query, &FIELDS) else { return vec![] };
-        self.search_fts(&q, limit)
-    }
-
-    /// [`PostIndex::search`] with the wildcards of `fts_query_wild` (NAV-023).
+    /// `date:` limit a term to one part; "quotes" make a phrase; `*` and `?` make a word a prefix
+    /// (NAV-023, `fts_query_wild`). Nothing found, nothing to search for, or a broken index: an
+    /// empty list.
     pub fn search_wild(&self, query: &str, limit: usize) -> Vec<PostHit> {
         let Some(q) = fts_query_wild(query, &FIELDS) else { return vec![] };
         self.search_fts(&q, limit)

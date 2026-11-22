@@ -7,11 +7,10 @@ use crate::app::Action;
 use crate::dialog::Dialog;
 use crate::keys::{Action as KeyAction, Keymap};
 use crate::markdown;
-use crate::search_all::{self, Ctx};
+use crate::search_all::{self, Ctx, Query, Refreshed, Results};
 use crate::theme;
 use crate::vault::rel_to_string;
 use eframe::egui::{self, Context, FontId, RichText, Ui};
-use std::time::{Duration, Instant};
 
 /// How many hits are listed at most.
 const MAX_HITS: usize = 14;
@@ -74,7 +73,7 @@ impl Source {
                 found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.title.cmp(&b.1.title)));
                 found.into_iter().take(MAX_HITS).map(|(_, h)| h).collect()
             }
-            Source::Everything => search_all::all_hits(ctx, query),
+            Source::Everything => search_all::all_hits(ctx, &Query::picker(query)),
         }
     }
 }
@@ -84,55 +83,32 @@ pub struct Picker {
     pub source: Source,
     pub query: String,
     pub sel: usize,
-    /// the list made for `made_for`; made again when the typing has settled
-    hits: Vec<Hit>,
-    made_for: Option<String>,
-    made_at: Option<Instant>,
+    /// the list made for the query; made again when the typing has settled (NAV-024)
+    results: Results,
 }
-
-/// A list is made at most this often while typing (NAV-024).
-const DEBOUNCE: Duration = Duration::from_millis(150);
 
 impl Picker {
     pub fn new(source: Source) -> Picker {
-        Picker { source, query: String::new(), sel: 0, hits: Vec::new(), made_for: None, made_at: None }
+        Picker { source, query: String::new(), sel: 0, results: Results::default() }
     }
 
     /// Make the list for the query when it is not the one the list is for and either the source
     /// is not debounced, or the last list was made long enough ago, or `now` is asked for.
     /// True while the list is for an older query.
     fn refresh(&mut self, ctx: &Ctx, now: bool) -> bool {
-        if self.made_for.as_deref() == Some(self.query.as_str()) {
-            return false;
-        }
-        let due = now || !self.source.debounced() || self.made_at.is_none_or(|t| t.elapsed() >= DEBOUNCE);
-        if due {
-            self.hits = self.source.hits(ctx, &self.query);
-            self.made_for = Some(self.query.clone());
-            self.made_at = Some(Instant::now());
+        let (source, query) = (self.source, &self.query);
+        let done = self.results.refresh(query, ctx.stamp(), source.debounced(), now, || source.hits(ctx, query));
+        if done == Refreshed::Made {
             self.sel = 0;
         }
-        !due
+        done == Refreshed::Waits
     }
 
     /// The hits now listed (tests).
     #[cfg(test)]
     pub fn listed(&self) -> &[Hit] {
-        &self.hits
+        self.results.hits()
     }
-}
-
-/// The heading of each group of the list with its count: "Notes  3", "Mail  20+" when the group
-/// is cut at its limit (NAV-022). A list without groups has none.
-fn group_headers(hits: &[Hit]) -> Vec<(&'static str, String)> {
-    let mut out: Vec<(&'static str, usize)> = Vec::new();
-    for h in hits.iter().filter(|h| !h.group.is_empty()) {
-        match out.iter_mut().find(|(g, _)| *g == h.group) {
-            Some((_, n)) => *n += 1,
-            None => out.push((h.group, 1)),
-        }
-    }
-    out.into_iter().map(|(g, n)| (g, format!("{g}  {n}{}", if n >= search_all::GROUP_LIMIT { "+" } else { "" }))).collect()
 }
 
 /// The keys every list window of the app reads (NAV-049): the actions of the scope
@@ -205,13 +181,13 @@ pub fn show(ctx: &Context, p: &mut Picker, data: &Ctx, keymap: &Keymap) -> Outco
             let (p, keys) = (&mut *f.p, &f.keys);
             // Enter means the list of what is typed, not of what was typed before
             if p.refresh(data, keys.enter) {
-                ui.ctx().request_repaint_after(DEBOUNCE);
+                ui.ctx().request_repaint_after(search_all::DEBOUNCE);
             }
-            keys.select(&mut p.sel, p.hits.len());
-            let mut pick = (keys.enter && !p.hits.is_empty()).then_some(p.sel);
-            let headers = group_headers(&p.hits);
+            keys.select(&mut p.sel, p.results.hits().len());
+            let mut pick = (keys.enter && !p.results.hits().is_empty()).then_some(p.sel);
+            let headers = search_all::group_headers(p.results.hits(), search_all::GROUP_LIMIT);
             let mut last = "";
-            for (i, h) in p.hits.iter().enumerate() {
+            for (i, h) in p.results.hits().iter().enumerate() {
                 if h.group != last {
                     last = h.group;
                     if let Some((_, text)) = headers.iter().find(|(g, _)| *g == last) {
@@ -227,10 +203,10 @@ pub fn show(ctx: &Context, p: &mut Picker, data: &Ctx, keymap: &Keymap) -> Outco
                     pick = Some(i);
                 }
             }
-            if p.hits.is_empty() && p.made_for.is_some() {
+            if p.results.hits().is_empty() && p.results.is_made() {
                 ui.label(RichText::new("Nothing found").color(theme::palette().muted).size(12.5));
             }
-            out.pick = pick.map(|i| p.hits.swap_remove(i));
+            out.pick = pick.map(|i| p.results.take(i));
             out.close = keys.esc;
         },
     );
@@ -281,7 +257,7 @@ mod tests {
         let ctx = Ctx { vault: &v, mail: None, posts: &posts };
         let mut p = Picker::new(Source::Everything);
         assert!(!p.refresh(&ctx, false), "nothing typed, nothing waits");
-        std::thread::sleep(DEBOUNCE + Duration::from_millis(20));
+        std::thread::sleep(search_all::DEBOUNCE + std::time::Duration::from_millis(20));
         p.query = "b".into();
         assert!(!p.refresh(&ctx, false), "a key after a pause is answered at once");
         assert_eq!(p.listed().len(), 2);
@@ -292,7 +268,7 @@ mod tests {
         assert_eq!(p.listed().len(), 1);
         p.query = "ban".into();
         assert!(p.refresh(&ctx, false));
-        std::thread::sleep(DEBOUNCE + Duration::from_millis(20));
+        std::thread::sleep(search_all::DEBOUNCE + std::time::Duration::from_millis(20));
         assert!(!p.refresh(&ctx, false), "later the list is made");
         assert_eq!(p.listed()[0].title, "banana");
         // file names are never held back
@@ -302,16 +278,5 @@ mod tests {
         f.query = "".into();
         assert!(!f.refresh(&ctx, false));
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    // spec: NAV-022
-    #[test]
-    fn groups_have_a_heading_with_their_count() {
-        let hit = |group| Hit { group, title: String::new(), detail: String::new(), action: Action::FocusEditor };
-        let hits = [hit("Notes"), hit("Notes"), hit("Posts")];
-        assert_eq!(group_headers(&hits), [("Notes", "Notes  2".to_string()), ("Posts", "Posts  1".to_string())]);
-        let full: Vec<Hit> = (0..search_all::GROUP_LIMIT).map(|_| hit("Mail")).collect();
-        assert_eq!(group_headers(&full)[0].1, "Mail  20+", "a group at its limit may have more");
-        assert!(group_headers(&[hit("")]).is_empty(), "no groups, no headings");
     }
 }

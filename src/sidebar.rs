@@ -132,7 +132,7 @@ impl Item {
     pub fn tip(self) -> &'static str {
         match self {
             Item::Files => "Files",
-            Item::Search => "Search all notes (Ctrl+Shift+F)",
+            Item::Search => "Search notes, mail and posts (Ctrl+Shift+F)",
             Item::Tags => "Tags",
             Item::Switcher => "Quick switcher (Ctrl+O)",
             Item::Graph => "Graph of all notes",

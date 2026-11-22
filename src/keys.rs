@@ -297,8 +297,8 @@ actions! {
     TreeToggleFolder => "files.toggle_folder", "Open or close the folder", FileList, ["Space"];
     HitNext => "search.next_hit", "Next hit", SearchResults, ["J", "Down"];
     HitPrev => "search.prev_hit", "Previous hit", SearchResults, ["K", "Up"];
-    HitNextFile => "search.next_file", "First hit of the next file", SearchResults, ["Ctrl+J"];
-    HitPrevFile => "search.prev_file", "First hit of the previous file", SearchResults, ["Ctrl+K"];
+    HitNextFile => "search.next_file", "First hit of the next file or group", SearchResults, ["Ctrl+J"];
+    HitPrevFile => "search.prev_file", "First hit of the previous file or group", SearchResults, ["Ctrl+K"];
     // List windows (NAV-049): the keys of the pickers, the quick switcher and the font list
     ListNext => "list.next", "Next line of a list window", ListWindow, ["Down", "Ctrl+J"];
     ListPrev => "list.prev", "Previous line of a list window", ListWindow, ["Up", "Ctrl+K"];
@@ -948,9 +948,9 @@ mod tests {
         // within a scope; the same key in unrelated scopes is fine
         assert_eq!(k.check(Action::TreePrevFile, &b("J")), Err("j is already used by “Next file”".to_string()));
         assert_eq!(k.check(Action::HitNext, &b("J")), Ok(()), "own old key");
-        assert_eq!(k.check(Action::HitPrev, &b("Ctrl+J")), Err("Ctrl+J is already used by “First hit of the next file”".to_string()));
+        assert_eq!(k.check(Action::HitPrev, &b("Ctrl+J")), Err("Ctrl+J is already used by “First hit of the next file or group”".to_string()));
         k.set(Action::TreeNextFolder, b("Ctrl+Alt+J")).unwrap();
-        assert_eq!(k.check(Action::HitPrev, &b("Ctrl+J")), Err("Ctrl+J is already used by “First hit of the next file”".to_string()));
+        assert_eq!(k.check(Action::HitPrev, &b("Ctrl+J")), Err("Ctrl+J is already used by “First hit of the next file or group”".to_string()));
         assert_eq!(k.check(Action::HitNextFile, &b("Ctrl+Alt+J")), Ok(()), "File list and Search results do not see each other");
         // a sequence clashes with its own start
         k.set(Action::TreeToggleFolder, b("Space f f")).unwrap();

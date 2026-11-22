@@ -290,14 +290,14 @@ fn posts_that_pages_and_checks_bring_in_are_searchable() {
     *w.script.first_page.lock().unwrap() = Some(Page { posts: recent("first", 3), ..Default::default() });
     w.app.social.reload(&w.ctx, &entry, &feed);
     wait_for(&mut w, |w| w.app.social.index.count(None) == 3);
-    assert_eq!(w.app.social.index.search("first1", 5)[0].feed, "home");
+    assert_eq!(w.app.social.index.search_wild("first1", 5)[0].feed, "home");
     // a check: the posts that wait are searchable before they are shown
     let newer = recent("newer", 2);
     w.script.newer.lock().unwrap().push(("home".into(), Fresh { posts: newer.clone(), ..Default::default() }));
     assert!(w.app.social.check(&w.ctx, &entry, &feed));
     wait_for(&mut w, |w| w.app.social.index.count(None) == 5);
     assert_eq!(w.app.social.waiting_count(&entry.account.id, "home"), 2);
-    assert_eq!(w.app.social.index.search("newer0", 5).len(), 1);
+    assert_eq!(w.app.social.index.search_wild("newer0", 5).len(), 1);
     // a post that waits and is found again is not a second entry; the page of a gap is indexed too
     w.app.social.index.add(&entry.account.id, "home", &newer);
     assert_eq!(w.app.social.index.count(None), 5);
@@ -309,12 +309,12 @@ fn removing_the_account_in_the_dialog_drops_its_posts_from_the_search_but_adding
     let mut w = W::new("remove-index");
     let entry = demo::account();
     w.app.social.index.add(&entry.account.id, "home", &recent("gone", 2));
-    assert_eq!(w.app.social.index.search("gone1", 5).len(), 1);
+    assert_eq!(w.app.social.index.search_wild("gone1", 5).len(), 1);
     // the same account signed in again (a new secret): its posts stay
     assert!(!w.app.social_dialog_action(crate::social::accounts_ui::DialogAction::Added(entry.clone())));
     assert_eq!(w.app.social.index.count(None), 2);
     w.app.social_dialog_action(crate::social::accounts_ui::DialogAction::Remove(entry.account.id.clone()));
-    assert!(w.app.social.index.search("gone1", 5).is_empty());
+    assert!(w.app.social.index.search_wild("gone1", 5).is_empty());
     assert_eq!(w.app.social.index.count(None), 0);
 }
 
@@ -330,6 +330,8 @@ fn a_post_found_in_the_sidebar_search_opens_in_its_feed_scrolled_to_the_post() {
     w.app.side.left = crate::app::LeftPanel::Search;
     let search = |w: &mut W, q: &str| {
         w.app.search.query = q.into();
+        // the sidebar search waits for the typing to settle (NAV-024)
+        std::thread::sleep(crate::search_all::DEBOUNCE + std::time::Duration::from_millis(30));
         w.frames(3);
     };
     // 1: a post the feed holds (in the middle of its list)
@@ -395,7 +397,7 @@ fn a_post_found_in_the_sidebar_search_opens_in_its_feed_scrolled_to_the_post() {
     let View::Social(Some(shown)) = shown else { panic!() };
     assert!(w.app.social.timelines[&(acct.clone(), shown.feed)].posts.iter().any(|p| p.id == "elsewhere"));
     // 6: the account is gone: nothing opens, the user is told
-    let hit = w.app.social.index.search("zebra", 1).remove(0);
+    let hit = w.app.social.index.search_wild("zebra", 1).remove(0);
     let tabs = w.app.tabbar.tabs.len();
     w.app.open_post_hit(&crate::social::post_index::PostHit { account: "mastodon:nobody".into(), ..hit });
     assert_eq!(w.app.tabbar.tabs.len(), tabs);
@@ -811,10 +813,10 @@ fn saving_a_thread_puts_its_posts_and_replies_into_the_index() {
     w.wait_for("the save did not finish", |w| w.app.social.index.count(None) > 0);
     // the three posts of the thread and the three replies of other people
     assert_eq!(w.app.social.index.count(Some(&acct)), 6);
-    let hits = w.app.social.index.search("grep", 10);
+    let hits = w.app.social.index.search_wild("grep", 10);
     assert_eq!((hits.len(), hits[0].post.id.as_str(), hits[0].feed.as_str()), (1, "demo-reply-3", "home"), "a reply of another person");
     // a reply has the text of the thread post it answers as context
-    let ids = |q: &str| w.app.social.index.search(q, 10).iter().map(|h| h.post.id.clone()).collect::<Vec<_>>();
+    let ids = |q: &str| w.app.social.index.search_wild(q, 10).iter().map(|h| h.post.id.clone()).collect::<Vec<_>>();
     assert_eq!(ids("in:\"folder I mean\""), ["demo-reply-3"]);
     assert_eq!(ids("in:\"Formats with one reader\""), ["demo-reply-1", "demo-thread-3"], "the two replies to the second post");
     assert_eq!(ids("folder").len(), 2, "the third post of the thread, and the reply that has it as context");
@@ -829,7 +831,7 @@ fn a_hit_whose_post_is_gone_is_fetched_from_the_network_and_an_error_is_shown() 
     gone.text_markdown = "an unusual walrus".into();
     // a hit of the search, then the index is cleared (Settings) before the click: the index is empty and the feed has no such post
     w.app.social.index.add(&acct, "list:1", std::slice::from_ref(&gone));
-    let hit = w.app.social.index.search("walrus", 5).remove(0);
+    let hit = w.app.social.index.search_wild("walrus", 5).remove(0);
     w.app.social.index.clear();
     *w.script.posts.lock().unwrap() = vec![Post { text_markdown: "an unusual walrus, from the server".into(), ..gone.clone() }];
     w.app.open_post_hit(&hit);
@@ -879,7 +881,7 @@ fn the_settings_clear_and_rebuild_the_post_index() {
     }
     w.click("index-rebuild");
     assert_eq!(w.app.social.index.count(None), 81);
-    assert!(w.app.social.index.search("old1", 5).is_empty(), "what no feed holds is gone");
+    assert!(w.app.social.index.search_wild("old1", 5).is_empty(), "what no feed holds is gone");
     assert!(w.app.toasts.iter().any(|t| t.0.contains("rebuilt: 81")));
     // Clear asks first
     w.click("index-clear");

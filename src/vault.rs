@@ -309,9 +309,6 @@ pub fn move_to_trash(root: &Path, rel: &Path) -> io::Result<PathBuf> {
     Err(io::Error::other("there are too many files with that name in today's trash"))
 }
 
-/// A note with search hits: (note, [(line, byte offset of the match in the line, line text)]).
-pub type SearchHit = (PathBuf, Vec<(usize, usize, String)>);
-
 /// For one note, during a rename or move: its path after the change, its text, and each link
 /// that resolved with the file it must point to after the change.
 type RewritePlan = (PathBuf, String, Vec<(LinkSpan, PathBuf)>);
@@ -786,34 +783,6 @@ impl Vault {
         let mut v: Vec<_> = m.into_iter().collect();
         v.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
         v
-    }
-
-    /// Full-text search, ignoring case: (note, [(line, byte offset of the match in that line,
-    /// the line's text)]), at most 20 lines per note.
-    pub fn search(&self, query: &str) -> Vec<SearchHit> {
-        let q = query.trim().to_lowercase();
-        if q.is_empty() {
-            return vec![];
-        }
-        let mut out = Vec::new();
-        for f in &self.files {
-            let name_hit = f.display_name().to_lowercase().contains(&q);
-            let mut lines = Vec::new();
-            if let Some(n) = self.notes.get(&f.rel) {
-                for (i, line) in n.text.lines().enumerate() {
-                    if let Some(col) = markdown::find_ci(line, &q) {
-                        lines.push((i, col, line.trim().to_string()));
-                        if lines.len() >= 20 {
-                            break;
-                        }
-                    }
-                }
-            }
-            if name_hit || !lines.is_empty() {
-                out.push((f.rel.clone(), lines));
-            }
-        }
-        out
     }
 
     /// Pick a path for a new note called `name` (may contain folders) inside `folder`.

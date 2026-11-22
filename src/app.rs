@@ -7,8 +7,9 @@ use crate::fsutil;
 use crate::graph::{GraphClick, Graphs};
 use crate::keys::{Action as KeyAction, Scope};
 use crate::markdown;
-use crate::panels::{FileTree, SearchBox};
+use crate::panels::FileTree;
 use crate::reader::{ReaderAction, SceneCache};
+use crate::search_panel::SearchBox;
 use crate::theme;
 use crate::vault::{self, rel_to_string, FileKind, Saved, Vault};
 use crate::vault_path::VaultPath;
@@ -238,6 +239,7 @@ pub enum Modal {
     },
 }
 
+#[derive(Clone)]
 pub enum Action {
     /// put the keyboard into the editor of the open note (after opening it)
     FocusEditor,

@@ -4,7 +4,7 @@
 //! `generation` (which every change of the index bumps), the vault itself or the note is another,
 //! never for the next frame of the same state.
 
-use crate::vault::{SearchHit, Vault};
+use crate::vault::Vault;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -25,7 +25,6 @@ pub struct VaultCache {
     backlinks: Option<(State, PathBuf, Arc<Mentions>)>,
     unlinked: Option<(State, PathBuf, Arc<Mentions>)>,
     tasks: Option<(State, Arc<Tasks>, usize)>,
-    search: Option<(State, String, Arc<Vec<SearchHit>>)>,
 }
 
 impl VaultCache {
@@ -49,19 +48,6 @@ impl VaultCache {
                 let m = Arc::new(v.unlinked_mentions(rel));
                 self.unlinked = Some((state(v), rel.to_path_buf(), m.clone()));
                 m
-            }
-        }
-    }
-
-    /// The sidebar search for `query` ([`Vault::search`]): read through the vault again only for
-    /// another query or another state of the vault, not for the next frame of the same.
-    pub fn search(&mut self, v: &Vault, query: &str) -> Arc<Vec<SearchHit>> {
-        match &self.search {
-            Some((s, q, hits)) if *s == state(v) && q == query => hits.clone(),
-            _ => {
-                let hits = Arc::new(v.search(query));
-                self.search = Some((state(v), query.to_string(), hits.clone()));
-                hits
             }
         }
     }
@@ -132,22 +118,10 @@ mod tests {
         assert_eq!(c.backlinks(&v, a).len(), 0);
         v.trash(Path::new("C.md")).unwrap();
         assert_eq!((c.backlinks(&v, Path::new("Z.md")).len(), c.open_tasks(&v)), (0, 2));
-        // the search follows the query and the vault
-        let found = |c: &mut VaultCache, v: &Vault, q: &str| c.search(v, q).iter().map(|(p, _)| p.to_string_lossy().into_owned()).collect::<Vec<_>>();
-        assert!(found(&mut c, &v, "mention").is_empty());
-        let s1 = c.search(&v, "three");
-        assert!(Arc::ptr_eq(&s1, &c.search(&v, "three")), "the next frame gets the same result");
-        assert_eq!(found(&mut c, &v, "three"), ["B.md"]);
-        assert!(!Arc::ptr_eq(&s1, &c.search(&v, "THREE")), "another query");
-        v.set_note_text(Path::new("B.md"), "# B\nthree and four\n");
-        assert_eq!(c.search(&v, "four").len(), 1);
-        assert_eq!(c.search(&v, "three").len(), 1);
-        v.set_note_text(Path::new("B.md"), "# B\nnothing\n");
-        assert_eq!(c.search(&v, "three").len(), 0, "an edit is seen");
         // another vault with the same generation is not the same state
         let (v2, dir2) = vault("other", &[("Alpha.md", "# Alpha\n- [ ] x\n- [ ] y\n- [ ] z\n")]);
         let mut c2 = VaultCache::default();
-        assert_eq!(c2.open_tasks(&v), 1);
+        assert_eq!(c2.open_tasks(&v), 2);
         v.generation = v2.generation;
         assert_eq!(c2.open_tasks(&v2), 3, "the same generation of another vault");
         let _ = std::fs::remove_dir_all(&dir);
