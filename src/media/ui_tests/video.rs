@@ -73,7 +73,7 @@ fn playing_a_video_shows_its_frames_pauses_and_seeks_with_the_bar() {
         let mut fx = Fx::new("v-play", &format!("![[{clip}]]\n"), &[clip]);
         fx.reading(true);
         let abs = fx.dir.join(clip);
-        // the length must be known, or the bar ignores a click
+        // the length is known, so the click on the bar below jumps at once
         fx.until("the look is done", |a| a.media.thumbnail_size(&abs).is_some());
         // the clock starts with the first picture, however slow ffmpeg is (#259)
         fx.click_label("Play");
@@ -93,6 +93,37 @@ fn playing_a_video_shows_its_frames_pauses_and_seeks_with_the_bar() {
         fx.until("the seek is done", |a| !a.media.seek_pending() && a.media.position().is_some_and(|p| p > 0.75));
         fx.label("Play");
     }
+}
+
+/// Holds ffprobe back until the test lets it go, so the length of a video is not known yet.
+static LENGTH_HELD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+fn held_ffmpeg() -> Option<crate::media::ffmpeg::Tools> {
+    while LENGTH_HELD.load(std::sync::atomic::Ordering::Relaxed) {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    crate::media::ffmpeg::locate()
+}
+
+// spec: MEDIA-005
+#[test]
+fn a_click_on_the_bar_before_the_length_is_known_waits_for_it_and_then_jumps() {
+    if !have_ffmpeg() {
+        return;
+    }
+    let mut fx = Fx::new_with("v-early-seek", VIDEO_NOTE, &["clip.mp4"], |a| a.media.use_ffmpeg(held_ffmpeg));
+    fx.reading(true);
+    let bar = fx.label("Position");
+    assert!(texts(&fx).iter().any(|t| t == "–:––"), "the length is not known yet: {:?}", texts(&fx));
+    fx.hl.click(&mut fx.app, Pos2::new(bar.left() + bar.width() * 0.8, bar.center().y), PointerButton::Primary);
+    fx.hl.frames(&mut fx.app, 3);
+    let waiting = fx.app.media.waiting_share().expect("the click is remembered (#258)");
+    assert!((0.75..0.85).contains(&waiting), "{waiting}");
+    assert!(fx.app.media.position().is_none_or(|p| p == 0.0), "nothing is sought while the length is unknown");
+    LENGTH_HELD.store(false, std::sync::atomic::Ordering::Relaxed);
+    fx.until("the length arrives and the click jumps", |a| a.media.waiting_share().is_none() && !a.media.seek_pending() && a.media.position().is_some_and(|p| p > 0.6));
+    assert!(texts(&fx).iter().any(|t| t == "0:01"), "the length shows: {:?}", texts(&fx));
+    fx.label("Play");
 }
 
 // spec: MEDIA-013
