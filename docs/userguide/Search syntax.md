@@ -13,10 +13,10 @@ and each one reads it by its own rules:
 | | Notes | Mail | Posts |
 |---|---|---|---|
 | What is searched | every line of every note, and the note's name | subject, sender, recipients, text, attachment names | text, author, links, date and the context of the post |
-| The text is | **one piece of text**, found inside a line | **words**: all of them, in any order | **words**: all of them, in any order |
+| The text is | **one piece of text**, found inside a line | **words**: all of them, in any order, each one **matches the start of a word** (`meet` finds "meeting") | the same |
 | Case | ignored | ignored, also accents (`muller` finds `Müller`) | ignored, also accents |
-| `*` and `?` | wildcards (any run of characters, one character) | only make the word a **prefix** | only make the word a **prefix** |
-| `"phrase"` | the quotes are part of the text | words next to each other, in this order | words next to each other, in this order |
+| `*` and `?` | wildcards (any run of characters, one character) | only cut the word: every word is a **word start** anyway | only cut the word: every word is a **word start** anyway |
+| `"phrase"` | the quotes are part of the text | words next to each other, in this order, **exactly** (no word starts) | the same |
 | `from:` and the other fields | plain text, no field | limit a word to one field | limit a word to one field |
 | Order of the list | the order of the files of the vault | newest first | newest first |
 
@@ -38,27 +38,28 @@ are ignored.
 | `"to do"` | lines that contain the quotes as well |
 | `AND`, `OR`, `NOT`, `-word` | plain text, like any other word: `cats OR dogs` looks for that sentence |
 
-The found text is marked in the hit. For a wildcard the mark runs from where the pattern starts
+The found text is marked in the hit. In mail and posts a word marks where a word of the text starts with it. For a wildcard the mark runs from where the pattern starts
 to where it ends (`*` matches as little as it can: `ban*a` marks "Bana" in "Banana"). A match
 cannot continue into the next line, and you cannot search for a literal `*` or `?`.
 
 # Mail
 
 Mail is searched over **all folders**, with a full-text index. Every word you type must be in the
-mail, anywhere in it, in any order. Words are whole words, not parts of words: `meet` does not
-find "meeting" unless you type `meet*`.
+mail, anywhere in it, in any order. Every word matches the **start of a word**:
+`meet` finds meet, meets and "meeting", but not "comet" (not the middle of a word). A "phrase" stays exact.
 
 | You type | It finds |
 |---|---|
 | `invoice` | mails with the word "invoice" in any field |
 | `invoice march` | mails that have both words, in any order, also far apart |
 | `"annual report"` | mails with these two words next to each other, in this order |
-| `meet*` | words that start with "meet": meeting, meetings, meet |
+| `meet` | words that start with "meet": meeting, meetings, meet (the same as `meet*`) |
+| `"meet"` | only the word "meet": a phrase is exact |
 | `mee?ing` | the same as `mee*`: the word is cut at the first wildcard and what is left is a prefix, so `?` finds more than it says |
 | `*ing` | nothing from this word: a word that starts with a wildcard is dropped (the rest of the query still counts) |
 | `invoice AND march` | needs the words "invoice", "and" and "march". `AND`, `OR`, `NOT` are plain words, and `NEAR` is too |
 | `invoice -spam` | needs "invoice" and "spam": the `-` is dropped, it does not exclude |
-| `from:anna` | the sender contains "anna" |
+| `from:anna` | a word of the sender starts with "anna" |
 | `from:"Anna M"` | the sender contains the phrase "Anna M" |
 | `to:team subject:budget` | recipient "team" and "budget" in the subject |
 | `cc:finance` | someone in Cc |
@@ -72,7 +73,7 @@ Attachment names are searched too, but there is no field for them.
 # Posts
 
 The posts of your feeds that Shale loaded ([[Feeds]]) are searched like mail: all words, in any
-order, case and accents ignored, wildcards only as prefixes, `"phrases"`, and `AND`, `OR`, `NOT`
+order, case and accents ignored, every word a word start (`meet` finds "meeting"), wildcards only cut the word, `"phrases"`, and `AND`, `OR`, `NOT`
 and `-` as plain text. The search always looks at all your accounts.
 
 | You type | It finds |
@@ -129,7 +130,7 @@ refused. Tab and Shift+Tab can be changed in **Settings → Keybindings** ("List
 | Search picker | **Space f g** (vim-style editing on, [[Editor]]) | the same search in a window; 3 lines per note, 20 hits per group | the same |
 | File picker | **Space f f** | **file names** only: the letters you type must be in the name in this order | letters in order, no wildcards, no fields; never creates a note |
 | Quick switcher | **Ctrl+O** | note names, like the file picker | letters in order; creates the note when nothing matches |
-| The search of the mail view | **/** in the mail view, or the field above the list | mail only, **all folders** or **this folder** (**t** switches) | words, `"phrases"` and the five fields as above. **No wildcards**: `meet*` is the word "meet" |
+| The search of the mail view | **/** in the mail view, or the field above the list | mail only, **all folders** or **this folder** (**t** switches) | words, `"phrases"` and the five fields as above. **No wildcards and no word starts**: `meet*` is the word "meet" |
 
 Mail is part of the sidebar and the picker only while your mail is set up and open. In every
 list of hits, Enter or a click opens the hit where it belongs: the note at the found text, the

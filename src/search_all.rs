@@ -7,7 +7,8 @@
 //!
 //! Wildcards (NAV-023): in notes the whole query is one pattern matched inside a line
 //! (`*` any run of characters, `?` one character, case ignored); in mail and posts each word is
-//! one term of the FTS5 query and a wildcard makes the word a prefix (`db::fts_query_wild`).
+//! one term of the FTS5 query and every plain word is a prefix, a "phrase" is exact
+//! (`db::fts_query_wild`).
 //! Everything is bounded (NAV-024): at most [`Query::limit`] hits per group, and a note search
 //! stops scanning when its group is full.
 
@@ -492,9 +493,9 @@ mod tests {
         sorted.dedup();
         assert_eq!(sorted, [NOTES, MAIL, POSTS], "notes, then mail, then posts");
         let mail: Vec<&Hit> = hits.iter().filter(|h| h.group == MAIL).collect();
-        assert_eq!(mail.len(), 1, "without a wildcard whole words only");
-        assert_eq!(mail[0].title, "Banana order");
-        assert!(matches!(&mail[0].action, Action::OpenMail(m) if m.subject == "Banana order"));
+        assert_eq!(mail.len(), 2, "a word is a prefix: banana finds bananas");
+        assert_eq!(mail[0].title, "Bananas again", "newest first");
+        assert!(matches!(&mail[0].action, Action::OpenMail(m) if m.subject == "Bananas again"));
         let posts_hit = hits.iter().find(|h| h.group == POSTS).unwrap();
         assert_eq!(posts_hit.title, "banana republic");
         assert!(posts_hit.detail.contains("@ada@m.test"), "{}", posts_hit.detail);
@@ -502,6 +503,7 @@ mod tests {
         // a prefix finds the plural in mail, newest first
         let subjects = |q: &str| all_hits(&ctx, &Query::picker(q)).into_iter().filter(|h| h.group == MAIL).map(|h| h.title).collect::<Vec<_>>();
         assert_eq!(subjects("banana*"), ["Bananas again", "Banana order"]);
+        assert_eq!(subjects("\"banana\""), ["Banana order"], "a phrase stays exact");
         // no mail store open: no mail group, no error
         let ctx = Ctx { vault: &v, mail: None, posts: &posts };
         assert!(all_hits(&ctx, &Query::picker("banana")).iter().all(|h| h.group != MAIL));
