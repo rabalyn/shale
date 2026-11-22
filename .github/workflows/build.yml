@@ -428,7 +428,9 @@ jobs:
   # compares it with the previous release's asset of the same system; what is odd goes into the job
   # summary. Statistics only, never a gate (the gate is the owner's workstation, BUILD-034): the job
   # is not needed by anything, may fail without failing the workflow (`continue-on-error` here and on
-  # every step) and so cannot hold up or stop the release. It writes only that one asset.
+  # every step) and so cannot hold up or stop the release. It writes only assets of the release: the
+  # result of each system and, from Linux, the flamegraphs of the flagged and the slowest scenarios
+  # as shale-flamegraphs-<version>.tar.gz (#400; docs/perf/index.html links to it).
   bench:
     needs: release
     if: startsWith(github.ref, 'refs/tags/v')
@@ -471,13 +473,28 @@ jobs:
           shared-key: release-${{ runner.os }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      # #400: the flamegraphs of the release are made here, on Linux, and attached to the release (they
+      # are not kept in git): perf (the one of the generic kernel tools, the runner's own kernel has
+      # none), user-space sampling with a software clock, and inferno for the graphs
+      - name: perf and inferno (Linux)
+        id: perf
+        if: matrix.system == 'linux-x86_64'
+        continue-on-error: true
+        run: |
+          sudo apt-get install -y linux-tools-common linux-tools-generic
+          sudo ln -sf "$(ls /usr/lib/linux-tools/*/perf | tail -n 1)" /usr/local/bin/perf
+          sudo sysctl -w kernel.perf_event_paranoid=1
+          perf --version
+          cargo install inferno --locked --version 0.12.8
+
       - name: Benchmark and compare with the previous release
         id: bench
         continue-on-error: true
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: scripts/bench-github.sh "$GITHUB_REF_NAME" "${{ matrix.system }}" --out bench-out
+          FLAMES: ${{ matrix.system == 'linux-x86_64' && steps.perf.outcome == 'success' && '--flamegraphs' || '' }}
+        run: scripts/bench-github.sh "$GITHUB_REF_NAME" "${{ matrix.system }}" $FLAMES --out bench-out
 
       - name: Keep the result as an asset of the release
         if: steps.bench.outputs.result != ''
@@ -487,6 +504,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RESULT: ${{ steps.bench.outputs.result }}
         run: gh release upload "$GITHUB_REF_NAME" "$RESULT" --clobber
+
+      - name: Attach the flamegraphs to the release (Linux)
+        if: steps.bench.outputs.flamegraphs != ''
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FLAMEGRAPHS: ${{ steps.bench.outputs.flamegraphs }}
+        run: gh release upload "$GITHUB_REF_NAME" "$FLAMEGRAPHS" --clobber
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: steps.bench.outputs.result != ''

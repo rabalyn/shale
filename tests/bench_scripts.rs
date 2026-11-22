@@ -142,7 +142,7 @@ fn bench_fakes(name: &str) -> PathBuf {
         r##"#!/bin/sh
 echo "$*" >> "$(dirname "$0")/calls.log"
 case "$1" in
-  --bench) printf '{"schema":2,"describe":"%s","run":"%s"}\n' "$SHALE_BENCH_DESCRIBE" "$4" > "$2" ;;
+  --bench) printf '{"schema":2,"describe":"%s","run":"%s","scenarios":[{"id":"a.fast","median_ns":10},{"id":"b.slow","median_ns":900},{"id":"c.slower","median_ns":9000},{"id":"ui.frame.x","median_ns":500}]}\n' "$SHALE_BENCH_DESCRIBE" "$4" > "$2" ;;
   --bench-compare)
     while [ $# -gt 0 ]; do [ "$1" = --out ] && o=$2; shift; done
     mkdir -p "$o"
@@ -172,7 +172,21 @@ esac
 "##,
     )
     .unwrap();
-    for f in [&bin, &gh] {
+    // scripts/bench.sh: writes an svg for each `=id` of --filter into --flame-dir, none when `no-perf` exists
+    let flames = dir.join("fake-flames");
+    std::fs::write(
+        &flames,
+        r##"#!/bin/sh
+d=$(dirname "$0")
+echo "flames $*" >> "$d/calls.log"
+[ ! -e "$d/no-perf" ] || exit 0
+while [ $# -gt 0 ]; do [ "$1" = --filter ] && f=$2; [ "$1" = --flame-dir ] && o=$2; shift; done
+mkdir -p "$o"
+for id in $(echo "$f" | tr ',' ' '); do echo "<svg/>" > "$o/${id#=}.svg"; done
+"##,
+    )
+    .unwrap();
+    for f in [&bin, &gh, &flames] {
         std::fs::set_permissions(f, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
     dir
@@ -190,6 +204,8 @@ fn github_run(dir: &Path, args: &[&str]) -> (i32, String, String) {
         .current_dir(root)
         .env("BENCH_BIN", dir.join("fake-shale"))
         .env("BENCH_GH", dir.join("fake-gh"))
+        .env("BENCH_FLAMES", dir.join("fake-flames"))
+        .env("FLAME_MAX", "3")
         .env("GITHUB_STEP_SUMMARY", &summary)
         .env("GITHUB_OUTPUT", dir.join("output"))
         .env("GITHUB_SHA", "0123456789abcdef")
@@ -294,4 +310,46 @@ fn build_034_bench_release_sh_confirms_time_regressions_and_names_its_note_file(
     }
     let (code, text) = script("bench-release.sh", &["/tmp", "1.2.3", "--note"]);
     assert_eq!((code, text.contains("--note needs a file")), (2, true), "{text}");
+}
+
+// spec: BUILD-041
+#[test]
+fn build_041_the_linux_job_packs_flamegraphs_of_the_flagged_then_the_slowest_scenarios() {
+    let dir = bench_fakes("bench-github-flames");
+    std::fs::write(
+        dir.join("compare-json"),
+        r#"{"verdict":"regression","x":{"describe":"v0.7.0"},"y":{},"summary":{},
+ "regressions":[{"id":"ui.frame.x","metric":"time","x":1,"y":2,"delta_pct":100.0,"confidence":"high"}],"noisy":["a.fast"],"improvements":[]}"#,
+    )
+    .unwrap();
+    std::fs::write(dir.join("compare-exit"), "1").unwrap();
+    std::fs::write(dir.join("releases"), "v0.7.0\n").unwrap();
+    std::fs::write(dir.join("assets"), "v0.7.0 linux-x86_64\n").unwrap();
+    let (code, summary, text) = github_run(&dir, &["v0.7.1", "linux-x86_64", "--flamegraphs"]);
+    assert_eq!(code, 0, "{text}");
+    // at most FLAME_MAX (3): the regressed, the noisy, then the slowest of the rest
+    let calls = std::fs::read_to_string(dir.join("calls.log")).unwrap();
+    assert!(calls.contains("--flamegraph-only") && calls.contains("--no-build") && calls.contains("--profile full"), "{calls}");
+    assert!(calls.contains("--filter =ui.frame.x,=a.fast,=c.slower --flame-dir"), "{calls}");
+    let tarball = dir.join("out/shale-flamegraphs-0.7.1.tar.gz");
+    let listing = Command::new("tar").arg("-tzf").arg(&tarball).output().expect("tar runs");
+    let listing = String::from_utf8_lossy(&listing.stdout).to_string();
+    for id in ["ui.frame.x", "a.fast", "c.slower"] {
+        assert!(listing.contains(&format!("flamegraphs/{id}.svg")), "{id}: {listing}");
+    }
+    assert!(!listing.contains("b.slow"), "{listing}");
+    assert!(summary.contains("3 flamegraphs") && summary.contains("shale-flamegraphs-0.7.1.tar.gz"), "{summary}");
+    assert!(std::fs::read_to_string(dir.join("output")).unwrap().contains("flamegraphs="), "the workflow learns the file");
+
+    // without --flamegraphs nothing is made; without perf there is no file, and no failure
+    let _ = std::fs::remove_file(dir.join("calls.log"));
+    let (code, _, text) = github_run(&dir, &["v0.7.1", "macos-arm64"]);
+    assert_eq!(code, 0, "{text}");
+    assert!(!std::fs::read_to_string(dir.join("calls.log")).unwrap().contains("flames "), "no flamegraphs without the option");
+    let _ = std::fs::remove_file(&tarball);
+    std::fs::write(dir.join("no-perf"), "").unwrap();
+    let (code, summary, text) = github_run(&dir, &["v0.7.1", "linux-x86_64", "--flamegraphs"]);
+    assert_eq!(code, 0, "{text}");
+    assert!(!tarball.exists() && summary.contains("No flamegraphs were made"), "{summary}");
+    let _ = std::fs::remove_dir_all(&dir);
 }

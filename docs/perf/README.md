@@ -72,6 +72,13 @@ shared runner is noisy and its hardware changes, so it never fails or delays a r
 measures nothing (its runner is a shared aarch64 machine). To see how a system developed, download
 the assets of the releases and `shale --bench-compare` two of them.
 
+**Flamegraphs are not in git** (#400). The Linux job of a release also renders the flamegraphs of the
+scenarios its comparison flagged and of the slowest ones (at most 8) and attaches them to the release
+as `shale-flamegraphs-<version>.tar.gz` (a folder `flamegraphs/` of `<scenario id>.svg`); the page
+`docs/perf/index.html` links to the attachment of its latest release. They are made on GitHub because
+the release page does not exist yet when `make-release.sh` ends. For a regression, make your own on
+the workstation (step 5 below); `docs/perf/flamegraphs/` is git-ignored.
+
 ## The scenarios
 
 IDs are stable; the first word is the module or feature. `L` = the large vault (5000 notes), the
