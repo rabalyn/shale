@@ -31,9 +31,9 @@ fn sources(scene: &Scene, vault: &Vault, rel: &Path) -> Vec<(String, Source)> {
         if out.iter().any(|(k, _)| k == id) {
             continue;
         }
-        let file = scene.embedded.iter().find(|(k, _)| k == id).and_then(|(_, target)| vault.resolve(target, Some(rel))).filter(|p| crate::media::is_image(p));
-        if let Some(p) = file {
-            out.push((id.to_string(), Source::File(vault.abs(&p))));
+        let file = scene.embedded.iter().find(|(k, _)| k == id).and_then(|(_, target)| vault.resolve_media(target, Some(rel)).file(vault)).filter(|(p, _)| crate::media::is_image(p));
+        if let Some((_, abs)) = file {
+            out.push((id.to_string(), Source::File(abs)));
         } else if let Some(url) = scene.files.get(id).and_then(|f| f.get("dataURL")).and_then(|v| v.as_str()) {
             out.push((id.to_string(), Source::Data(url.to_string())));
         }
@@ -211,6 +211,31 @@ mod tests {
         // a plugin drawing reads its `## Embedded Files`
         let file = crate::drawing::excalidraw_md::new_file(&scene).replace("\n%%\n## Drawing", "\n## Embedded Files\nf1: [[dot.png]]\n\n%%\n## Drawing");
         assert_eq!(crate::drawing::excalidraw_md::read(&file).unwrap().embedded, vec![("f1".to_string(), "dot.png".to_string())]);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: DRAW-018, MEDIA-016
+    #[test]
+    fn a_picture_of_a_drawing_can_be_outside_the_vault() {
+        let d = std::env::temp_dir().join(format!("shale-pictures-outside-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("vault")).unwrap();
+        std::fs::create_dir_all(d.join("Pics")).unwrap();
+        std::fs::write(d.join("Pics/dot.png"), tiny_png()).unwrap();
+        std::fs::write(d.join("Pics/note.txt"), b"x").unwrap();
+        let mut v = Vault::open(&d.join("vault")).unwrap();
+        v.set_libraries(&[crate::media::outside::Library { name: "Pics".into(), path: d.join("Pics") }]);
+        let mut scene = Scene::parse(
+            r#"{"type":"excalidraw","version":2,"elements":[
+                {"id":"a","type":"image","x":0,"y":0,"width":20,"height":10,"fileId":"f1"},
+                {"id":"b","type":"image","x":30,"y":0,"width":20,"height":10,"fileId":"f2"},
+                {"id":"c","type":"image","x":60,"y":0,"width":20,"height":10,"fileId":"f3"}]}"#,
+        )
+        .unwrap();
+        scene.embedded = vec![("f1".into(), "@Pics/dot.png".into()), ("f2".into(), crate::media::testdata::file_address(&d.join("Pics/dot.png"))), ("f3".into(), "@Pics/note.txt".into())];
+        let imgs = images(&scene, &v, Path::new("Sketch.excalidraw"));
+        assert_eq!(imgs.len(), 2, "the library link and the file address; the text file is no picture");
+        assert_eq!(imgs["f1"].get_pixel(0, 0).0, [255, 0, 0, 255]);
         let _ = std::fs::remove_dir_all(&d);
     }
 }

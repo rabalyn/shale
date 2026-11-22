@@ -682,15 +682,15 @@ pub(crate) fn embed_is_in_a_line(text: &str, range: &Range<usize>) -> bool {
 
 /// The picture embeds of `text` that stand inside a line and can be shown there, by their target:
 /// a picture of the vault (EDIT-114, PDF-030). `load` is given its file and says its size in pixels
-/// and its texture; one it cannot read is left out and stays its link text.
+/// and its texture; one it cannot read is left out and stays its link text. A picture outside the
+/// vault counts (MEDIA-016).
 pub(crate) fn pictures_in_lines(text: &str, links: &[(LinkSpan, bool)], vault: &Vault, rel: &Path, mut load: impl FnMut(&Path) -> Option<(Vec2, Option<egui::TextureId>)>) -> HashMap<String, InlinePicture> {
     let mut out = HashMap::new();
     for (l, _) in links.iter().filter(|(l, ok)| l.embed && *ok) {
         if out.contains_key(&l.target) || !embed_is_in_a_line(text, &l.range) {
             continue;
         }
-        let Some(file) = vault.resolve(&l.target, Some(rel)).filter(|f| crate::media::is_image(f)) else { continue };
-        let path = vault.abs(&file);
+        let Some(path) = vault.resolve_media(&l.target, Some(rel)).file(vault).filter(|(f, _)| crate::media::is_image(f)).map(|(_, abs)| abs) else { continue };
         if let Some((size, texture)) = load(&path) {
             out.insert(l.target.clone(), InlinePicture { path, size, texture });
         }
@@ -906,14 +906,22 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
             if line_links.len() == 1 && line_links[0].0.embed && trimmed.len() == line_links[0].0.range.len() {
                 let (l, ok) = &line_links[0];
                 if *ok {
-                    if let Some(target) = vault.resolve(&l.target, Some(rel)) {
+                    let shown = vault.resolve_media(&l.target, Some(rel));
+                    let outside = matches!(shown, crate::vault::Shown::Outside(_));
+                    if let Some((target, abs)) = shown.file(vault) {
                         if crate::media::is_media(&target) {
                             // a sound is a player of its own, without the frame (MEDIA-001)
-                            crate::media::widget::show(ui, caches.media, &vault.abs(&target), rel, l.embed_width());
+                            crate::media::widget::show(ui, caches.media, &abs, rel, l.embed_width());
                             ui.add_space(6.0);
                         } else {
-                            embed(ui, vault, &target, l.embed_width(), caches, (base, dark_canvas), &mut out);
+                            embed(ui, vault, (&target, &abs, outside.then_some(l.target.as_str())), l.embed_width(), caches, (base, dark_canvas), &mut out);
                         }
+                        i += 1;
+                        break 'line;
+                    }
+                    // a library that is not set up, a file that is not there (MEDIA-016)
+                    if let Some(text) = shown.notice() {
+                        embed_notice(ui, &text);
                         i += 1;
                         break 'line;
                     }
@@ -1135,12 +1143,28 @@ fn list_marker(line: &str) -> Option<(String, usize)> {
     None
 }
 
+/// The strip that stands in place of an outside file that cannot be shown (MEDIA-016).
+fn embed_notice(ui: &mut Ui, text: &str) {
+    egui::Frame::new().fill(theme::palette().bg_secondary).stroke(Stroke::new(1.0, theme::palette().border)).corner_radius(CornerRadius::same(8)).inner_margin(8).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        crate::media::widget::show_notice(ui, text);
+    });
+    ui.add_space(6.0);
+}
+
 /// `width` is what the link asks for (`![[pic.png|300]]`, EDIT-052); `text` is the text size and
 /// whether drawings get a dark canvas.
-fn embed(ui: &mut Ui, vault: &Vault, target: &Path, width: Option<f32>, caches: &mut Caches, text: (f32, bool), out: &mut Option<ReaderAction>) {
+/// `file` is the file's path (in the vault, or the absolute path of an outside file), where it is, and for an
+/// outside file the link's target.
+fn embed(ui: &mut Ui, vault: &Vault, (target, abs, outside): (&Path, &Path, Option<&str>), width: Option<f32>, caches: &mut Caches, text: (f32, bool), out: &mut Option<ReaderAction>) {
     let (base, dark) = text;
+    // a click opens the file: a file of the vault in its program or tab, an outside one through its link (MEDIA-017)
+    let open = || match outside {
+        Some(link) => ReaderAction::OpenLink { target: link.to_string(), heading: None, new_tab: false },
+        None => ReaderAction::OpenFile(target.to_path_buf()),
+    };
     let kind = vault.file(target).map(|f| f.kind).unwrap_or(FileKind::Other);
-    let name = vault.file(target).map(|f| f.display_name()).unwrap_or_default();
+    let name = vault.file(target).map(|f| f.display_name()).unwrap_or_else(|| abs.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
     let frame = egui::Frame::new().fill(theme::palette().bg_secondary).stroke(Stroke::new(1.0, theme::palette().border)).corner_radius(CornerRadius::same(8)).inner_margin(8);
     frame.show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -1148,7 +1172,7 @@ fn embed(ui: &mut Ui, vault: &Vault, target: &Path, width: Option<f32>, caches: 
             ui.label(egui::RichText::new(&name).color(theme::palette().muted).small());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.small_button("Open").clicked() {
-                    *out = Some(ReaderAction::OpenFile(target.to_path_buf()));
+                    *out = Some(open());
                 }
             });
         });
@@ -1163,7 +1187,7 @@ fn embed(ui: &mut Ui, vault: &Vault, target: &Path, width: Option<f32>, caches: 
                     drawing::paint_thumbnail(ui.painter(), scene, rect.shrink(6.0), dark, &pics);
                 }
                 if resp.on_hover_text("Open drawing").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                    *out = Some(ReaderAction::OpenFile(target.to_path_buf()));
+                    *out = Some(open());
                 }
             }
             FileKind::Note => {
@@ -1173,14 +1197,14 @@ fn embed(ui: &mut Ui, vault: &Vault, target: &Path, width: Option<f32>, caches: 
             }
             FileKind::Other if crate::pdf::view::is_pdf(target) => {
                 let w = ui.available_width();
-                match crate::pdf::view::pdf_pages(ui.ctx(), &vault.abs(target), 50) {
+                match crate::pdf::view::pdf_pages(ui.ctx(), abs, 50) {
                     crate::pdf::view::PdfState::Ready { pages, total } => {
                         for (i, tex) in pages.iter().enumerate() {
                             let [tw, th] = tex.size_vec2().into();
                             let k = (w / tw).min(1.0);
                             let resp = ui.add(egui::Image::from_texture(egui::load::SizedTexture::new(tex.id(), egui::vec2(tw * k, th * k))).sense(Sense::click()));
                             if resp.on_hover_text(format!("Page {} of {total} · click to open in your PDF viewer", i + 1)).clicked() {
-                                *out = Some(ReaderAction::OpenFile(target.to_path_buf()));
+                                *out = Some(open());
                             }
                             ui.add_space(4.0);
                         }
@@ -1203,19 +1227,19 @@ fn embed(ui: &mut Ui, vault: &Vault, target: &Path, width: Option<f32>, caches: 
             FileKind::Other if crate::media::is_image(target) => {
                 let w = ui.available_width();
                 // still a Git LFS pointer: "Not downloaded (12 MB) — Download" (SYNC-020)
-                if crate::media::widget::show_not_downloaded(ui, caches.media, &vault.abs(target)).is_some() {
+                if crate::media::widget::show_not_downloaded(ui, caches.media, abs).is_some() {
                     ui.add_space(6.0);
                     return;
                 }
                 let shown = match width {
-                    Some(asked) => crate::media::image_widget(ui.ctx(), &vault.abs(target), asked.min(w), f32::INFINITY),
-                    None => crate::media::image_widget(ui.ctx(), &vault.abs(target), w, 520.0),
+                    Some(asked) => crate::media::image_widget(ui.ctx(), abs, asked.min(w), f32::INFINITY),
+                    None => crate::media::image_widget(ui.ctx(), abs, w, 520.0),
                 };
                 match shown {
                     Some(img) => {
                         let resp = ui.add(img.corner_radius(CornerRadius::same(4)).sense(Sense::click()));
                         if resp.on_hover_text("Open with your image viewer").clicked() {
-                            *out = Some(ReaderAction::OpenFile(target.to_path_buf()));
+                            *out = Some(open());
                         }
                     }
                     None => {

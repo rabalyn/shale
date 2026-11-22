@@ -765,9 +765,13 @@ impl ShaleApp {
             }
         }
         self.media.configure(self.cfg.media_volume, self.cfg.media_play_button_opacity);
+        // the library folders of this device (MEDIA-014)
+        if let Some(v) = self.vault.as_mut() {
+            v.set_libraries(&self.cfg.media_libraries);
+        }
         // videos that cannot play here (no ffmpeg) go to the system's player (MEDIA-010)
         for abs in self.media.take_open_requests() {
-            let opened = self.vault.as_ref().map(|v| crate::opener::open_vault_file(&abs, &v.root));
+            let opened = self.vault.as_ref().map(|v| if abs.starts_with(&v.root) { crate::opener::open_vault_file(&abs, &v.root) } else { crate::opener::open_outside_media(&abs) });
             if let Some(Err(e)) = opened {
                 self.toast(e);
             }
@@ -1180,6 +1184,18 @@ impl ShaleApp {
                         self.toast(format!("No heading “{}” in {name}", h.trim()));
                     }
                 }
+            }
+            return;
+        }
+        // a library link or a file link to a media file is opened by the system's program, and is never a note (MEDIA-017)
+        let shown = v.resolve_media(target, from.as_deref());
+        if let crate::vault::Shown::Outside(outside) = shown {
+            let opened = match &outside {
+                crate::media::outside::Outside::Found { abs, .. } => crate::opener::open_outside_media(abs),
+                other => Err(other.notice().unwrap_or_default()),
+            };
+            if let Err(e) = opened {
+                self.toast(e);
             }
             return;
         }

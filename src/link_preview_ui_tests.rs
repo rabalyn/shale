@@ -179,6 +179,38 @@ fn edit_034_a_missing_note_and_a_picture_have_their_own_preview() {
     assert!(w.open().is_none());
 }
 
+// spec: MEDIA-016, EDIT-034
+#[test]
+fn media_016_the_preview_of_an_outside_link_shows_the_picture_or_says_what_is_wrong() {
+    use crate::media::outside::{Library, Outside};
+    let lib = std::env::temp_dir().join(format!("shale-outside-library-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&lib);
+    std::fs::create_dir_all(&lib).unwrap();
+    image::RgbaImage::from_pixel(40, 30, image::Rgba([200, 30, 30, 255])).save(lib.join("a.png")).unwrap();
+    std::fs::write(lib.join("tone.wav"), b"x").unwrap();
+    let mut w = W::new("outside", "[[@Media/a.png]] [[@Media/tone.wav]] [[@Media/gone.png]] [[@Nowhere/b.mp3]]\n");
+    w.app.cfg.media_libraries = vec![Library { name: "Media".into(), path: lib.clone() }];
+    w.settle();
+    w.cursor_at("a.png");
+    w.shift_k();
+    assert!(matches!(w.open().map(|o| &o.content), Some(Content::Outside(Outside::Found { abs, .. })) if *abs == lib.join("a.png")));
+    w.plain(Key::Escape, "");
+    w.cursor_at("tone.wav");
+    w.shift_k();
+    assert!(matches!(w.open().map(|o| &o.content), Some(Content::Outside(Outside::Found { .. }))));
+    assert!(w.painted("Audio, outside the vault. Enter opens it"), "a sound has no picture: it says what it is");
+    w.plain(Key::Escape, "");
+    w.cursor_at("gone.png");
+    w.shift_k();
+    assert!(matches!(w.open().map(|o| &o.content), Some(Content::Outside(Outside::Missing { .. }))));
+    assert!(w.painted(&format!("Not found: {}", lib.join("gone.png").display())));
+    w.plain(Key::Escape, "");
+    w.cursor_at("b.mp3");
+    w.shift_k();
+    assert!(w.painted("Library “Nowhere” is not set up on this device"));
+    let _ = std::fs::remove_dir_all(&lib);
+}
+
 // spec: EDIT-035
 #[test]
 fn edit_035_k_again_focuses_the_preview_j_scrolls_esc_gives_the_cursor_back_enter_opens() {
