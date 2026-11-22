@@ -415,6 +415,31 @@ fn walk_names(root: &Path) -> Vec<String> {
     out
 }
 
+// spec: IMP-062
+#[cfg(unix)]
+#[test]
+fn a_run_that_needs_more_than_the_memory_limit_has_the_limit_says_so_in_words_and_leaves_nothing() {
+    let dir = temp_dir("fake-heap");
+    let mut v = temp_vault("fake-heap-vault");
+    let seen = dir.join("seen");
+    // records the runtime options it gets, writes a picture and half a note, then dies like a GHC program whose heap is full
+    let body = format!(
+        "echo \"$GHCRTS\" >> '{}'; mkdir -p media; echo x > media/a.png; while [ $# -gt 0 ]; do case \"$1\" in -o) echo half > \"$2\"; shift;; esac; shift; done; echo 'pandoc: Heap exhausted;' >&2; echo 'pandoc: Current maximum heap size is 2147483648 bytes (2048 MB).' >&2; exit 251",
+        seen.display()
+    );
+    let pandoc = fake::script(&dir, "pandoc", &body);
+    let it = docx::docx_item(fake::word_file(&dir, "Huge.docx"), Some(pandoc));
+    let done = import(&mut v, &[it], &options(true));
+    assert!(done.notes.is_empty() && done.files.is_empty());
+    assert_eq!(done.errors, vec!["pandoc needed more than 2 GB of memory for “Huge.docx” and was stopped"]);
+    let recorded = std::fs::read_to_string(&seen).unwrap();
+    assert_eq!(recorded.lines().count(), 1, "one start: the original is not tried after the copy would only fill the memory again");
+    assert!(recorded.trim().ends_with("-M2g"), "the limit is given to the import's pandoc: {recorded}");
+    let all = walk_names(&v.root);
+    assert!(all.is_empty(), "no note, no folder of the import, no temp folder: {all:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // spec: IMP-035
 #[cfg(unix)]
 #[test]

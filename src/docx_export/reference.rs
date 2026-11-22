@@ -20,14 +20,19 @@ const STYLES: &str = "word/styles.xml";
 /// pandoc's default reference document (`pandoc --print-default-data-file reference.docx`), made in `dir`.
 pub fn default_reference(pandoc: &Path, dir: &Path, cancel: Option<&AtomicBool>) -> Result<Vec<u8>, String> {
     let path = dir.join("default-reference.docx");
-    let out = crate::fsutil::open_private_log(&path, false).map_err(|e| format!("could not make a file in the temporary folder: {e}"))?;
-    let mut cmd = crate::program::command(pandoc);
-    cmd.args(["--print-default-data-file", "reference.docx"]);
-    let run = proc::run_to_file(cmd, out, Duration::from_secs(20), cancel).map_err(|e| format!("pandoc could not be started: {e}"))?;
+    let setup = |cmd: &mut std::process::Command| {
+        cmd.args(["--print-default-data-file", "reference.docx"]);
+    };
+    let go = |cmd| {
+        let out = crate::fsutil::open_private_log(&path, false)?;
+        proc::run_to_file(cmd, out, Duration::from_secs(20), cancel)
+    };
+    let run = crate::pandoc_limit::run(pandoc, setup, go).map_err(|e| format!("pandoc could not be started: {e}"))?;
     match run.ending {
         Ending::Exited(Some(0)) => crate::fsutil::read(&path).map_err(|e| e.to_string()),
         Ending::Cancelled => Err("stopped".into()),
         Ending::TimedOut => Err("pandoc did not give its default reference document in time".into()),
+        Ending::Exited(_) if crate::pandoc_limit::overflowed(&run) => Err(crate::pandoc_limit::overflow_message(None)),
         Ending::Exited(_) => Err(format!("pandoc has no default reference document: {}", run.tail.iter().find(|l| !l.trim().is_empty()).map_or("it stopped without a message", |l| l.trim()))),
     }
 }

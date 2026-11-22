@@ -79,7 +79,8 @@ ticked.
    found and its version. If it is somewhere unusual, type the path in "pandoc program"; **Check again**
    looks once more after an install.
 3. Drop a `.docx` on the window. Import runs pandoc in the background (a file that takes longer than
-   two minutes is stopped).
+   two minutes is stopped, and so is one for which pandoc needs more than 2 GB of memory; the message says so and
+   nothing is written).
 
 The note is made in the folder of the dialog. It keeps headings, bold, italic, underline, strike-through,
 sub- and superscript, links, lists, tables (tables with merged cells become plain tables, a cell with
@@ -115,7 +116,8 @@ The dialog asks where to save (`<vault>/exports/<name>.docx`, so the export show
 contents** in (on or off as the [[PDF]] dialog has it for the note; Word asks to update its fields when it opens the file, say
 yes to fill the contents in), whether to **Open the file afterwards**, and says where pandoc was found, or that it was not
 (Export then waits). The export runs in the background: closing the dialog, or **Cancel**, stops it, and a file is written only
-when it is whole; if pandoc fails, nothing is written and the dialog shows pandoc's first error line. The note is exported as
+when it is whole; if pandoc fails, nothing is written and the dialog shows pandoc's first error line (the same when it
+takes more than two minutes or needs more than 2 GB of memory, which is where it is stopped). The note is exported as
 the window has it, typing you have not saved yet included.
 
 A note that was imported from a Word file, with its original kept, has the box **Use the original Word file as the template**

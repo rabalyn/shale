@@ -184,6 +184,7 @@ fn ended(run: &proc::Run, timeout: Duration) -> Result<(), String> {
         Ending::Exited(Some(0)) => Ok(()),
         Ending::TimedOut => Err(format!("pandoc needed more than {} seconds and was stopped", timeout.as_secs_f64())),
         Ending::Cancelled => Err("stopped".into()),
+        Ending::Exited(_) if crate::pandoc_limit::overflowed(run) => Err(crate::pandoc_limit::overflow_message(None)),
         Ending::Exited(_) => Err(format!("pandoc could not make the Word file: {}", run.tail.iter().find(|l| !l.trim().is_empty()).map_or("it stopped without a message", |l| l.trim()))),
     }
 }
@@ -202,10 +203,11 @@ pub fn export(job: &Job, cancel: &AtomicBool) -> Result<Vec<u8>, String> {
     };
     write("reference.docx", &template)?;
     let out = work.path().join("out.docx");
-    let mut cmd = crate::program::command(&job.pandoc);
     let width = reference::text_width(&template, &job.look);
-    cmd.args(args(&work.path().join("note.md"), &work.path().join("filter.lua"), &job.root, &work.path().join("reference.docx"), width, &out, job.toc)).current_dir(work.path());
-    let run = proc::run(cmd, job.timeout, Some(cancel), |_| {}).map_err(|e| format!("pandoc could not be started: {e}"))?;
+    let setup = |cmd: &mut std::process::Command| {
+        cmd.args(args(&work.path().join("note.md"), &work.path().join("filter.lua"), &job.root, &work.path().join("reference.docx"), width, &out, job.toc)).current_dir(work.path());
+    };
+    let run = crate::pandoc_limit::run(&job.pandoc, setup, |cmd| proc::run(cmd, job.timeout, Some(cancel), |_| {})).map_err(|e| format!("pandoc could not be started: {e}"))?;
     ended(&run, job.timeout)?;
     let made = crate::fsutil::read(&out).map_err(|e| format!("pandoc made no file: {e}"))?;
     finish::finish(&made, &job.look)
