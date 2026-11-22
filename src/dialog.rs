@@ -91,7 +91,15 @@ impl Dialog {
     }
 
     pub fn show(self, ctx: &Context, content: impl FnOnce(&mut Ui)) -> DialogResponse {
-        self.show_inner(ctx, &mut (), |ui, _| content(ui), None::<fn(&mut Ui, &mut ())>)
+        self.show_inner(ctx, &mut (), None::<fn(&mut Ui, &mut ())>, |ui, _| content(ui), None::<fn(&mut Ui, &mut ())>)
+    }
+
+    /// Like [`Dialog::show`], with a header above the content (a search field and its key hint,
+    /// NAV-049). Only the content scrolls; the header stays in view, also in a window shorter than
+    /// the content. The header and the content are closures over the same `state`; the header runs
+    /// first, in the same frame.
+    pub fn show_with_header<S>(self, ctx: &Context, state: &mut S, header: impl FnOnce(&mut Ui, &mut S), content: impl FnOnce(&mut Ui, &mut S)) -> DialogResponse {
+        self.show_inner(ctx, state, Some(header), content, None::<fn(&mut Ui, &mut S)>)
     }
 
     /// Like [`Dialog::show`], with a footer (the buttons) below the content. Only the content
@@ -99,10 +107,10 @@ impl Dialog {
     /// and the footer are closures over the same `state` (they could not both borrow what the
     /// dialog edits); the footer runs right after the content, in the same frame.
     pub fn show_with_footer<S>(self, ctx: &Context, state: &mut S, content: impl FnOnce(&mut Ui, &mut S), footer: impl FnOnce(&mut Ui, &mut S)) -> DialogResponse {
-        self.show_inner(ctx, state, content, Some(footer))
+        self.show_inner(ctx, state, None::<fn(&mut Ui, &mut S)>, content, Some(footer))
     }
 
-    fn show_inner<S>(self, ctx: &Context, state: &mut S, content: impl FnOnce(&mut Ui, &mut S), footer: Option<impl FnOnce(&mut Ui, &mut S)>) -> DialogResponse {
+    fn show_inner<S>(self, ctx: &Context, state: &mut S, header: Option<impl FnOnce(&mut Ui, &mut S)>, content: impl FnOnce(&mut Ui, &mut S), footer: Option<impl FnOnce(&mut Ui, &mut S)>) -> DialogResponse {
         let Self { id, title, width, modal } = self;
         let has_footer = footer.is_some();
         let screen = ctx.content_rect();
@@ -163,9 +171,14 @@ impl Dialog {
             // While measuring, the scroll area may be as tall as the screen allows and shrinks to
             // the content (an inner scroll area takes what it is given), so the window takes the
             // content's height; otherwise it fills the window and scrolls.
+            let top = ui.cursor().min.y;
+            if let Some(header) = header {
+                header(ui, state);
+            }
+            let header_room = ui.cursor().min.y - top;
             let reserve = if footer.is_some() { footer_room } else { 0.0 };
             let (room, shrink) = if measuring {
-                (Rect::from_min_size(ui.cursor().min, Vec2::new(ui.available_width(), (max.y - TITLE_ROOM - reserve).max(MIN_SIZE.y))), [false, true])
+                (Rect::from_min_size(ui.cursor().min, Vec2::new(ui.available_width(), (max.y - TITLE_ROOM - header_room - reserve).max(MIN_SIZE.y))), [false, true])
             } else {
                 let mut room = ui.available_rect_before_wrap();
                 room.max.y = (room.max.y - reserve).max(room.min.y);

@@ -761,7 +761,7 @@ impl ShaleApp {
             Modal::Picker(p) => {
                 if let Some(v) = &self.vault {
                     let data = crate::search_all::Ctx { vault: v, mail: self.mail.index(), posts: &self.social.index };
-                    let out = crate::picker::show(&ctx, p, &data);
+                    let out = crate::picker::show(&ctx, p, &data, &self.keymap);
                     keep = out.pick.is_none() && !out.close;
                     if let Some(hit) = out.pick {
                         // a note opens in this tab and the keyboard goes into it; a mail or a post has its own view
@@ -783,7 +783,7 @@ impl ShaleApp {
                     items.truncate(12);
                     let create = !query.trim().is_empty() && !items.iter().any(|(_, _, n)| n.eq_ignore_ascii_case(query.trim()));
                     let n = items.len() + create as usize;
-                    let keys = crate::picker::ListKeys::take(ui);
+                    let keys = crate::picker::ListKeys::take(ui, &self.keymap);
                     keys.select(sel, n);
                     let mut pick: Option<usize> = if keys.enter && n > 0 { Some(*sel) } else { None };
                     for (i, (_, rel, name)) in items.iter().enumerate() {
@@ -796,7 +796,7 @@ impl ShaleApp {
                     if create && ui.selectable_label(*sel == items.len(), egui::RichText::new(format!("＋ Create “{}”", query.trim())).color(theme::palette().link_missing)).clicked() {
                         pick = Some(items.len());
                     }
-                    crate::theme::prose(ui, muted("↑↓ to move · Enter to open · Esc to close").size(11.5));
+                    crate::theme::prose(ui, muted(crate::picker::ListKeys::hint(&self.keymap)).size(11.5));
                     if let Some(p) = pick {
                         if p < items.len() {
                             self.actions.push(Action::Open { rel: items[p].1.clone(), new_tab: false });

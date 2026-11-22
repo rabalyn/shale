@@ -4,6 +4,7 @@
 use super::font_picker;
 use crate::app::ShaleApp;
 use crate::fonts::{Area, AreaFont, FontChoice, FontState, Preview, MAX_SIZE, MIN_SIZE};
+use crate::keys::Keymap;
 use crate::theme;
 use eframe::egui::{self, text::LayoutJob, FontId, TextFormat, Ui};
 
@@ -33,11 +34,11 @@ impl ShaleApp {
         let fonts = &mut self.fonts;
         egui::Grid::new("fonts-grid").num_columns(4).spacing([12.0, 6.0]).show(ui, |ui| {
             if self.cfg.fonts.same_everywhere {
-                changed |= font_row(ui, "Font and size", &mut self.cfg.fonts.all, &families, searching, fonts);
+                changed |= font_row(ui, "Font and size", &mut self.cfg.fonts.all, &families, searching, fonts, &self.keymap);
                 ui.end_row();
             } else {
                 for area in Area::ALL {
-                    changed |= font_row(ui, area.label(), self.cfg.fonts.slot_mut(area), &families, searching, fonts);
+                    changed |= font_row(ui, area.label(), self.cfg.fonts.slot_mut(area), &families, searching, fonts, &self.keymap);
                     ui.end_row();
                 }
             }
@@ -51,10 +52,10 @@ impl ShaleApp {
 
 /// One row: the font, the size, a hint when the font is not installed, and the sample text in
 /// the chosen font, or in the highlighted one while the list is open (CFG-040).
-fn font_row(ui: &mut Ui, label: &str, choice: &mut FontChoice, families: &[String], searching: bool, fonts: &mut FontState) -> bool {
+fn font_row(ui: &mut Ui, label: &str, choice: &mut FontChoice, families: &[String], searching: bool, fonts: &mut FontState, keymap: &Keymap) -> bool {
     let mut changed = false;
     ui.label(label);
-    let picker = font_picker::show(ui, label, &mut choice.family, families, searching);
+    let picker = font_picker::show(ui, label, &mut choice.family, families, searching, keymap);
     changed |= picker.picked;
     ui.horizontal(|ui| {
         changed |= ui.add(egui::DragValue::new(&mut choice.size).range(MIN_SIZE..=MAX_SIZE).speed(0.1).suffix(" pt").max_decimals(1)).on_hover_text("Text size in points").changed();

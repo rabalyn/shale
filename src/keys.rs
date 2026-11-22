@@ -15,6 +15,9 @@ pub enum Scope {
     Global,
     FileList,
     SearchResults,
+    /// The list windows with a search field (NAV-049): the pickers (NAV-020, NAV-022), the quick switcher (NAV-021) and the font list.
+    /// The field has the keyboard, so a key here is an arrow, Enter, Esc or a chord with Ctrl or Alt.
+    ListWindow,
     MailView,
     /// The buttons of a note (KEY-014): active while the focused pane shows a note, in the editor and in the reading view.
     NoteView,
@@ -24,13 +27,14 @@ pub enum Scope {
 
 impl Scope {
     /// The scopes in the order the keybindings list shows them.
-    pub const ALL: [Scope; 6] = [Scope::Global, Scope::FileList, Scope::SearchResults, Scope::MailView, Scope::NoteView, Scope::EditorNormal];
+    pub const ALL: [Scope; 7] = [Scope::Global, Scope::FileList, Scope::SearchResults, Scope::ListWindow, Scope::MailView, Scope::NoteView, Scope::EditorNormal];
 
     pub fn label(self) -> &'static str {
         match self {
             Scope::Global => "Everywhere",
             Scope::FileList => "File list (Ctrl+Shift+B)",
             Scope::SearchResults => "Search results",
+            Scope::ListWindow => "List windows (pickers, quick switcher)",
             Scope::MailView => "Mail view",
             Scope::NoteView => "Note view",
             Scope::EditorNormal => "Vim-style editing, normal mode",
@@ -43,6 +47,7 @@ impl Scope {
             Scope::Global => &[],
             Scope::FileList => &[Key::Enter, Key::Escape],
             Scope::SearchResults => &[Key::Enter, Key::Escape, Key::Slash],
+            Scope::ListWindow => &[],
             Scope::MailView => &[Key::Enter, Key::Escape],
             Scope::NoteView => &[],
             // every key vim-lite uses in normal mode (EDIT-011…014), with or without Shift; but see
@@ -134,6 +139,7 @@ impl Chord {
             Key::ArrowRight => "→".to_string(),
             Key::ArrowUp => "↑".to_string(),
             Key::ArrowDown => "↓".to_string(),
+            Key::Escape => "Esc".to_string(),
             k if k.symbol_or_name().chars().count() == 1 && !self.ctrl && !self.alt && !self.shift => k.symbol_or_name().to_lowercase(),
             k => k.symbol_or_name().to_string(),
         };
@@ -293,6 +299,11 @@ actions! {
     HitPrev => "search.prev_hit", "Previous hit", SearchResults, ["K", "Up"];
     HitNextFile => "search.next_file", "First hit of the next file", SearchResults, ["Ctrl+J"];
     HitPrevFile => "search.prev_file", "First hit of the previous file", SearchResults, ["Ctrl+K"];
+    // List windows (NAV-049): the keys of the pickers, the quick switcher and the font list
+    ListNext => "list.next", "Next line of a list window", ListWindow, ["Down", "Ctrl+J"];
+    ListPrev => "list.prev", "Previous line of a list window", ListWindow, ["Up", "Ctrl+K"];
+    ListOpen => "list.open", "Open the selected line of a list window", ListWindow, ["Enter"];
+    ListClose => "list.close", "Close a list window", ListWindow, ["Escape"];
     // Mail view: the Shift keys come before the bare key of the same letter (egui lets a bare key match with Shift held)
     MailReplyAll => "mail.reply_all", "Reply all", MailView, ["Shift+R"];
     MailForward => "mail.forward", "Forward", MailView, ["Shift+F"];
@@ -504,6 +515,12 @@ impl Keymap {
         (!self.bindings(a).is_empty()).then(|| self.display(a))
     }
 
+    /// Take the key press of `a` out of the frame's input: true when one of its bindings (single
+    /// chords, as a list window has, NAV-049) was pressed. Nothing while a key is being recorded.
+    pub fn take(&self, input: &mut InputState, a: Action) -> bool {
+        !self.recording && self.bindings(a).iter().any(|b| b.0.len() == 1 && consume_exact(input, b.0[0]))
+    }
+
     /// Can `a` take `b`? The error is the message for the user (KEY-004, KEY-005).
     pub fn check(&self, a: Action, b: &Binding) -> Result<(), String> {
         self.check_rules(a, b)?;
@@ -521,6 +538,16 @@ impl Keymap {
         let function_key = first.key.name().strip_prefix('F').is_some_and(|n| n.parse::<u8>().is_ok());
         if matches!(scope, Scope::Global | Scope::NoteView) && !first.ctrl && !first.alt && !function_key {
             return Err(format!("{} needs Ctrl or Alt: a shortcut that works everywhere must not get in the way of typing", b.display()));
+        }
+        // a list window has a text field with the keyboard: one chord, and a key that is no typing
+        if scope == Scope::ListWindow {
+            if b.0.len() > 1 {
+                return Err(format!("{} is a sequence; a list window takes one key", b.display()));
+            }
+            let no_typing = matches!(first.key, Key::ArrowUp | Key::ArrowDown | Key::PageUp | Key::PageDown | Key::Enter | Key::Escape | Key::Tab) || function_key;
+            if !first.ctrl && !first.alt && !no_typing {
+                return Err(format!("{} needs Ctrl or Alt: the search field of the window has the keyboard", b.display()));
+            }
         }
         if b.0.len() == 1 && matches!(scope, Scope::Global | Scope::NoteView) && RESERVED_TEXT.iter().any(|(shift, key)| first.ctrl && !first.alt && first.shift == *shift && first.key == *key) {
             return Err(format!("{} is reserved for text editing", b.display()));
@@ -712,7 +739,7 @@ mod tests {
             assert_eq!(mac.display(d.action), on_mac, "{}", d.id);
         }
         assert_eq!(DEFS.iter().filter(|d| d.scope == Scope::NoteView).count(), 26 + 5);
-        assert_eq!(DEFS.len(), 29 + 36 + 6 + 12 + 26 + 5);
+        assert_eq!(DEFS.len(), 29 + 36 + 6 + 12 + 4 + 26 + 5);
     }
 
     // spec: KEY-014
@@ -858,7 +885,14 @@ mod tests {
     // spec: KEY-017
     #[test]
     fn no_two_actions_of_scopes_that_are_active_together_clash_on_any_system() {
-        let sets: [&[Scope]; 5] = [&[Scope::Global, Scope::FileList], &[Scope::Global, Scope::SearchResults], &[Scope::Global, Scope::MailView], &[Scope::Global, Scope::NoteView], &[Scope::Global, Scope::NoteView, Scope::EditorNormal]];
+        let sets: [&[Scope]; 6] = [
+            &[Scope::Global, Scope::FileList],
+            &[Scope::Global, Scope::SearchResults],
+            &[Scope::Global, Scope::ListWindow],
+            &[Scope::Global, Scope::MailView],
+            &[Scope::Global, Scope::NoteView],
+            &[Scope::Global, Scope::NoteView, Scope::EditorNormal],
+        ];
         for (system, mac) in [("linux", false), ("windows", false), ("macos", true)] {
             let k = Keymap::for_os(mac);
             for set in sets {

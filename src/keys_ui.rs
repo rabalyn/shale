@@ -1020,6 +1020,73 @@ mod tests {
         assert_eq!(w.app.notes[Path::new("A.md")].text, "# A\n");
     }
 
+    /// Open the file picker over a vault of 40 files in a window of 900 x 420 points, so the list is taller than the window.
+    fn long_picker(tag: &str) -> W {
+        let mut w = vim_note(tag);
+        for i in 0..40 {
+            std::fs::write(w.dir.join(format!("Note {i:02}.md")), "x\n").unwrap();
+        }
+        w.app.vault.as_mut().unwrap().rescan();
+        w.size = Vec2::new(900.0, 420.0);
+        w.app.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::FileNames)));
+        settle(&mut w);
+        w
+    }
+
+    /// Where the hint of the picker is painted, and where the first and the last of the listed lines are.
+    fn hint_and_rows(w: &W) -> (Pos2, Pos2) {
+        let hint = w.text_pos.iter().find(|(t, _)| t.contains(" next · ")).unwrap_or_else(|| panic!("no hint painted: {:?}", w.texts)).1;
+        let first = w.text_pos.iter().find(|(t, p)| t.starts_with("Note 0") && p.x > 150.0).expect("a listed line (the file list at the left has the same names)").1;
+        (hint, first)
+    }
+
+    // spec: NAV-049, NAV-021
+    #[test]
+    fn nav_049_the_picker_hint_stays_in_view_above_a_list_that_is_longer_than_the_window() {
+        let mut w = long_picker("picker-hint");
+        assert_eq!(picker(&w).listed().len(), 14, "the list is cut at 14 lines, and still longer than the window");
+        let screen = Rect::from_min_size(Pos2::ZERO, w.size);
+        let (hint, first) = hint_and_rows(&w);
+        assert!(screen.contains(hint), "the hint is inside the window: {hint:?}");
+        assert!(hint.y < first.y, "the hint {hint:?} is above the list {first:?}");
+        let field = w.text_pos.iter().find(|(t, _)| t.contains("File name")).expect("the field").1;
+        assert!(field.y < hint.y, "the field {field:?} is above the hint {hint:?}");
+        // moving to the last line scrolls the list, the hint and the field stay where they are
+        w.press(Key::ArrowUp, Modifiers::NONE);
+        settle(&mut w);
+        assert_eq!(picker(&w).sel, 13);
+        let (hint2, first2) = hint_and_rows(&w);
+        assert_eq!(hint2, hint, "the hint does not move when the list scrolls");
+        assert!(first2.y < first.y, "the list scrolled inside the window: {first:?} then {first2:?}");
+        // the same window for the other source (NAV-021)
+        w.app.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::Everything)));
+        settle(&mut w);
+        let hint3 = w.text_pos.iter().find(|(t, _)| t.contains(" next · ")).expect("the hint of the search").1;
+        assert!(screen.contains(hint3));
+    }
+
+    // spec: NAV-049, KEY-001
+    #[test]
+    fn nav_049_the_picker_hint_shows_the_keys_as_they_are_bound_now_and_the_rebound_keys_work() {
+        let mut w = long_picker("picker-hint-keys");
+        let hint = |w: &W| w.texts.iter().find(|t| t.contains(" next · ")).cloned().expect("the hint");
+        assert_eq!(hint(&w), "↓ / Ctrl+J next · ↑ / Ctrl+K previous · Enter open · Esc close");
+        let key = |t: &str| crate::keys::Binding::parse(t).unwrap();
+        w.app.keymap.set(crate::keys::Action::ListNext, key("Ctrl+Alt+N")).unwrap();
+        w.app.keymap.clear(crate::keys::Action::ListClose);
+        settle(&mut w);
+        assert_eq!(hint(&w), "Ctrl+Alt+N next · ↑ / Ctrl+K previous · Enter open");
+        w.press(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(picker(&w).sel, 0, "the old key no longer moves");
+        w.press(Key::N, CTRL_ALT);
+        assert_eq!(picker(&w).sel, 1, "the new key moves");
+        // a key of the field is refused, and the window is closed with the key of the new binding
+        assert!(w.app.keymap.check(crate::keys::Action::ListNext, &key("J")).is_err(), "a bare letter is typing");
+        w.app.keymap.set(crate::keys::Action::ListClose, key("Ctrl+Q")).unwrap();
+        w.press(Key::Q, CTRL);
+        assert!(w.app.modal.is_none());
+    }
+
     /// A mail index with two mails ("Banana invoice" and "Lunch") that the app has open.
     fn with_mail(w: &mut W) {
         let root = w.dir.join("mail-store");
