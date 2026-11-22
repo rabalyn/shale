@@ -45,9 +45,14 @@ pub fn locate(chosen: &str) -> Option<PathBuf> {
 
 /// The first line of `pandoc --version` ("pandoc 3.14"), or why it could not be had.
 pub fn version(pandoc: &Path) -> Result<String, String> {
-    let mut cmd = crate::program::command(pandoc);
-    cmd.arg("--version");
-    let run = proc::run(cmd, Duration::from_secs(20), None, |_| {}).map_err(|e| format!("could not start {}: {e}", pandoc.display()))?;
+    let run = crate::pandoc_limit::run(
+        pandoc,
+        |cmd| {
+            cmd.arg("--version");
+        },
+        |cmd| proc::run(cmd, Duration::from_secs(20), None, |_| {}),
+    )
+    .map_err(|e| format!("could not start {}: {e}", pandoc.display()))?;
     match run.tail.iter().find(|l| !l.trim().is_empty()) {
         Some(line) if run.success() => Ok(line.trim().to_string()),
         Some(line) => Err(line.trim().to_string()),
@@ -229,9 +234,15 @@ pub fn prepare(c: &Convert, reserved: &mut HashSet<String>) -> Result<Prepared, 
     }
     let mut last = None;
     for input in &inputs {
-        let mut cmd = crate::program::command(c.pandoc);
-        cmd.args(args(input, &filter, &rel_to_string(&folder), &out)).current_dir(&files);
-        let run = tracing::info_span!("flow.import_docx.pandoc", peer = "pandoc").in_scope(|| proc::run(cmd, c.timeout, Some(c.cancel), |_| {})).map_err(|e| format!("pandoc could not be started: {e}"))?;
+        let setup = |cmd: &mut std::process::Command| {
+            cmd.args(args(input, &filter, &rel_to_string(&folder), &out)).current_dir(&files);
+        };
+        let go = |cmd| proc::run(cmd, c.timeout, Some(c.cancel), |_| {});
+        let run = tracing::info_span!("flow.import_docx.pandoc", peer = "pandoc").in_scope(|| crate::pandoc_limit::run(c.pandoc, setup, go)).map_err(|e| format!("pandoc could not be started: {e}"))?;
+        // the memory limit (IMP-062): the same answer for the tagged copy and the original, which would only fill the memory again
+        if crate::pandoc_limit::overflowed(&run) {
+            return Err(crate::pandoc_limit::overflow_message(Some(&file)));
+        }
         match run.ending {
             Ending::Exited(Some(0)) => {
                 last = None;

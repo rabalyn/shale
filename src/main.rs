@@ -101,6 +101,9 @@ mod notes_vault_tests;
 mod opener;
 #[cfg(test)]
 mod page_break_ui_tests;
+mod pandoc_limit;
+#[cfg(test)]
+mod pandoc_limit_tests;
 mod panels;
 #[cfg(test)]
 mod panes_ui_tests;

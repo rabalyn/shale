@@ -16,6 +16,12 @@
 #     installed, else LibreOffice (`soffice --headless --convert-to pdf`, then pdfinfo), else no pages.
 # and prints a table: name, words back, pages before -> after, schema result of the export (the failing parts, and
 # those of the original), the import or export error. The exports stay in DIR (default ${TMPDIR:-/tmp}/shale-corpus).
+# No pandoc is started by this script itself: the round trip runs it through Shale's import and export, which give it
+# a memory limit (2 GB, `GHCRTS=-M2g`, IMP-062, DOCX-012) and a time limit (120 s each, IMP-035, DOCX-002), and the whole
+# round trip of a file has `timeout` ($SHALE_CORPUS_TIMEOUT seconds, default 600). A file for which pandoc was stopped
+# (by one of the three) is reported as "pandoc gave up (memory or time)" and counts as an error; the run goes on.
+# SHALE_ROUNDTRIP_BIN set: that binary is used and nothing is built (what the script's test does with a stand-in);
+# SHALE_CORPUS_NO_FETCH=1 leaves out the fetch of the schemas of scripts/validate-docx.sh.
 # The exit status is the number of files with an error or a failing schema check of the export that the original
 # does not have (at most 125).
 set -euo pipefail
@@ -94,8 +100,11 @@ failing_parts() {
 }
 
 # the build, once
-echo "building the test binary…" >&2
-bin=$(cd "$root" && cargo test --locked --no-run --message-format=json 2> /dev/null \
+GAVE_UP="pandoc gave up (memory or time)"
+limit=${SHALE_CORPUS_TIMEOUT:-600}
+bin=${SHALE_ROUNDTRIP_BIN:-}
+[ -n "$bin" ] || echo "building the test binary…" >&2
+[ -n "$bin" ] || bin=$(cd "$root" && cargo test --locked --no-run --message-format=json 2> /dev/null \
     | python3 -c '
 import json, sys
 exe = None
@@ -109,7 +118,7 @@ for line in sys.stdin:
 print(exe or "")
 ')
 [ -n "$bin" ] && [ -x "$bin" ] || { echo "docx-corpus.sh: the test binary could not be built" >&2; exit 1; }
-"$root/scripts/validate-docx.sh" --fetch
+[ "${SHALE_CORPUS_NO_FETCH:-}" = 1 ] || "$root/scripts/validate-docx.sh" --fetch
 
 report=$keep/summary.tsv
 printf 'name\twords back\tpages\tschema\terror\n' > "$report"
@@ -134,11 +143,16 @@ while IFS=$'\t' read -r name url hash _; do
     rm -f "$out"
     log=$work/run.log
     words=-
-    if SHALE_ROUNDTRIP_BIN=$bin timeout 600 "$root/scripts/roundtrip-docx.sh" "$input" "$out" > "$log" 2>&1; then
+    status=0
+    SHALE_ROUNDTRIP_BIN=$bin timeout -k 10 "$limit" "$root/scripts/roundtrip-docx.sh" "$input" "$out" > "$log" 2>&1 || status=$?
+    if [ $status -eq 0 ]; then
         words=$(sed -n -e 's/^words that came back: [0-9]* of [0-9]* (\([0-9.]*\) %).*/\1%/p' -e 's/^words that came back: 0 of 0 (no words).*/no words/p' "$log")
     else
         error=$(grep -m1 -E '^(import|export) error:' "$log" || true)
-        if [ -z "$error" ]; then
+        # the time limit of the whole round trip, or the memory or time limit of a pandoc run (Shale's messages "needed more than")
+        if [ $status -eq 124 ] || [ $status -eq 137 ] || printf '%s\n' "$error" | grep -q 'pandoc needed more than'; then
+            error="$GAVE_UP"
+        elif [ -z "$error" ]; then
             message=$(grep -m1 -A1 'panicked at' "$log" | tail -n 1 | cut -c1-100 || true)
             [ -n "$message" ] || message=$(tail -n 1 "$log" | cut -c1-100 || true)
             error="crash: $message"

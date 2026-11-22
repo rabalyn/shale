@@ -1386,6 +1386,37 @@ fn pandoc_runs_in_a_folder_of_its_own_with_the_arguments_and_a_failure_writes_no
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// spec: DOCX-012, IMP-062
+#[cfg(unix)]
+#[test]
+fn a_pandoc_that_needs_more_than_the_memory_limit_has_the_limit_and_the_export_says_so_and_leaves_nothing() {
+    let dir = temp_dir("heap");
+    let record = dir.join("record");
+    std::fs::create_dir_all(&record).unwrap();
+    let default = dir.join("default.docx");
+    std::fs::write(&default, zip_of(&[("[Content_Types].xml", "<t/>"), ("word/styles.xml", &pandoc_styles())])).unwrap();
+    // both starts (the default reference document and the conversion) record the runtime options; the conversion writes
+    // half a file and dies like a GHC program whose heap is full
+    let body = format!(
+        "echo \"$GHCRTS\" >> '{r}/ghcrts'\nif [ \"$1\" = \"--print-default-data-file\" ]; then cat '{}'; exit 0; fi\npwd -P > '{r}/cwd'\n\
+         while [ $# -gt 0 ]; do case \"$1\" in -o) echo half > \"$2\";; esac; shift; done\n\
+         echo 'pandoc: Heap exhausted;' >&2; echo 'pandoc: Current maximum heap size is 2147483648 bytes (2048 MB).' >&2; exit 251",
+        default.display(),
+        r = record.display()
+    );
+    let pandoc = fake_pandoc(&dir, &body);
+    let e = export(&job_with(pandoc, &dir, "x\n"), &AtomicBool::new(false)).unwrap_err();
+    assert_eq!(e, "pandoc needed more than 2 GB of memory and was stopped");
+    let starts: Vec<String> = std::fs::read_to_string(record.join("ghcrts")).unwrap().lines().map(String::from).collect();
+    assert!(starts.len() == 2 && starts.iter().all(|s| s.ends_with("-M2g")), "the limit on every start: {starts:?}");
+    let cwd = PathBuf::from(std::fs::read_to_string(record.join("cwd")).unwrap().trim());
+    assert!(!cwd.exists(), "the temporary folder with the half file is removed: {}", cwd.display());
+    // the default reference document too
+    let heavy_default = fake_pandoc(&dir, "echo 'pandoc: Heap exhausted;' >&2; exit 251");
+    assert_eq!(export(&job_with(heavy_default, &dir, "x\n"), &AtomicBool::new(false)).unwrap_err(), "pandoc needed more than 2 GB of memory and was stopped");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // spec: DOCX-002
 #[cfg(unix)]
 #[test]
