@@ -12,6 +12,7 @@
 //! view enqueues, starts a job per account, shows the optimistic state and the waiting marker, and
 //! tells the person when the server refused something.
 
+use crate::busy::{Busy, Key};
 use crate::config::{Config, MailAccount};
 use crate::mail::compose::{self, Kind};
 use crate::mail::compose_ui::{Ask, Compose, ComposeOut, Field, LocalOut, LocalView, VaultInfo};
@@ -47,6 +48,9 @@ pub const DEBOUNCE: Duration = Duration::from_millis(300);
 pub const TEXT_CAP: usize = 200_000;
 /// While a sync runs the counts and the list are read again at most this often.
 const REFRESH_EVERY: Duration = Duration::from_millis(800);
+
+/// The check of the mail index when the store opens (MAIL-006, JOB-015): started at app start, shown by the mail view through this key.
+pub const MAIL_INDEX: Key = Key::new("mail-index");
 
 /// What the store is doing.
 pub enum StoreState {
@@ -335,6 +339,8 @@ pub struct MailView {
     tx: Sender<Event>,
     rx: Receiver<Event>,
     ctx: Option<egui::Context>,
+    /// The registry of running work (JOB-003): the app hands over its own, so the check of the index is listed in the indicator (JOB-015).
+    pub busy: Busy,
     reader: Option<Reader>,
     // data read from the index when something changed
     pub folders: Vec<FolderRow>,
@@ -490,6 +496,7 @@ impl MailView {
             tx,
             rx,
             ctx: None,
+            busy: Busy::default(),
             reader: None,
             folders: vec![],
             counts: HashMap::new(),
@@ -669,9 +676,17 @@ impl MailView {
         if !matches!(self.store, StoreState::Closed) {
             return;
         }
+        // the task ends with the job, before its result is taken in (JOB-003), so the view never finds it stale
+        let Some(task) = self.busy.begin(MAIL_INDEX, "Checking the mail index…") else { return };
         self.store = StoreState::Opening;
         let root = self.root.clone();
-        self.spawn(move || MailStore::open(&root).map(Arc::new).map_err(|e| e.0), |r| Event::Store(flatten(r)));
+        self.spawn(
+            move || {
+                let _task = task;
+                MailStore::open(&root).map(Arc::new).map_err(|e| e.0)
+            },
+            |r| Event::Store(flatten(r)),
+        );
     }
 
     // ------------------------------------------------------------ polling
@@ -3014,6 +3029,48 @@ mod tests {
         assert!(c.error.as_ref().is_some_and(|e| e.contains("not in the trash any more")), "{:?}", c.error);
         assert_eq!(c.att_alerts.len(), 1, "the alert stays");
         assert!(c.draft.attachments[0].data.is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // spec: JOB-015
+    #[test]
+    fn job_015_the_store_opens_as_a_task_that_is_gone_before_the_store_is_ready_and_never_twice() {
+        let root = temp("open-task");
+        let mut v = MailView::new(root.clone());
+        let cfg = Config::default();
+        // an action with this key runs already: the store does not start to open
+        let held = v.busy.begin(MAIL_INDEX, "Checking the mail index…").unwrap();
+        v.open_store();
+        assert!(matches!(v.store, StoreState::Closed));
+        drop(held);
+        v.open_store();
+        assert!(matches!(v.store, StoreState::Opening));
+        let start = Instant::now();
+        while v.ready_store().is_none() {
+            v.tick(&cfg, false);
+            assert!(start.elapsed() < Duration::from_secs(30), "the store opens");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(v.busy.info(&MAIL_INDEX).is_none(), "the view that sees the store ready finds no task");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // spec: JOB-015
+    #[test]
+    fn job_015_a_store_that_cannot_be_opened_ends_its_task_too() {
+        let root = temp("open-task-fails");
+        // the store's folder is a file: the open fails
+        let file = root.join("a-file");
+        std::fs::write(&file, b"x").unwrap();
+        let mut v = MailView::new(file);
+        v.open_store();
+        let start = Instant::now();
+        while !matches!(v.store, StoreState::Failed(_)) {
+            v.tick(&Config::default(), false);
+            assert!(start.elapsed() < Duration::from_secs(30), "the open fails");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(v.busy.info(&MAIL_INDEX).is_none());
         let _ = std::fs::remove_dir_all(root);
     }
 }

@@ -119,7 +119,9 @@ impl MailView {
             }
             StoreState::Closed | StoreState::Opening => {
                 ui.scope_builder(UiBuilder::new().max_rect(body.shrink(20.0)), |ui| {
-                    ui.label(muted("Opening the local mail copy…"));
+                    if !crate::busy::ui::status(ui, &self.busy, &MAIL_INDEX) {
+                        ui.label(muted("Opening the local mail copy…"));
+                    }
                 });
             }
             StoreState::Rebuilding(_) => {
