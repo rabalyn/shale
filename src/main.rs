@@ -145,6 +145,9 @@ mod vault_path;
 mod vault_state;
 mod vim;
 mod virtual_list;
+mod xml_limits;
+#[cfg(test)]
+mod xml_limits_tests;
 
 use eframe::egui;
 use std::path::PathBuf;

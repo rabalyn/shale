@@ -287,6 +287,35 @@ fn convert<'a>(pandoc: &'a Path, docx: &'a Path, root: &'a Path, keep: bool, tim
     Convert { pandoc, docx, root, date: (2026, 11, 17), keep_original: keep, timeout, cancel }
 }
 
+// spec: IMP-047, DEV-038
+#[cfg(unix)]
+#[test]
+fn a_file_nested_too_deeply_is_refused_before_pandoc_runs_and_leaves_nothing_in_the_vault() {
+    let dir = temp_dir("deep");
+    let root = temp_dir("deep-vault");
+    let ran = dir.join("pandoc-ran");
+    let pandoc = fake::script(&dir, "pandoc", &format!("touch '{}'", ran.display()));
+    let document = format!("<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>{}</w:body></w:document>", "<w:sdt>".repeat(3000));
+    let files: Vec<(String, Vec<u8>)> = vec![("[Content_Types].xml".into(), b"<Types/>".to_vec()), ("word/document.xml".into(), document.into_bytes())];
+    let docx = dir.join("Deep.docx");
+    crate::fsutil::create_new(&docx, &docx_look::zip_bytes(&files, false).unwrap()).unwrap();
+    let cancel = AtomicBool::new(false);
+    let e = docx::prepare(&convert(&pandoc, &docx, &root, true, docx::TIMEOUT, &cancel), &mut HashSet::new()).unwrap_err();
+    assert_eq!(e, "“Deep.docx” cannot be imported: word/document.xml: the XML is nested too deeply (more than 256 levels)");
+    assert!(!ran.exists(), "pandoc is not started for it");
+    assert_eq!(std::fs::read_dir(&root).unwrap().flat_map(|d| walk(&d.unwrap().path())).filter(|p| p.is_file()).count(), 0, "no file in the vault");
+}
+
+fn walk(p: &Path) -> Vec<PathBuf> {
+    let mut all = vec![p.to_path_buf()];
+    if p.is_dir() {
+        for e in std::fs::read_dir(p).unwrap() {
+            all.extend(walk(&e.unwrap().path()));
+        }
+    }
+    all
+}
+
 // spec: IMP-035, IMP-038
 #[cfg(unix)]
 #[test]

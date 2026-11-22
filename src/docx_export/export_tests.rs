@@ -3,6 +3,7 @@
 //! on small parts and need none.
 
 use super::package::Package;
+use super::schema_check::{self, Outcome};
 use super::*;
 use crate::import::docx_look;
 use crate::import::{docx, Options};
@@ -20,6 +21,14 @@ fn temp_dir(tag: &str) -> PathBuf {
 
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/testdata/docx").join(name)
+}
+
+/// The export of the real pandoc, checked against the WordprocessingML schema (DOCX-010): the test fails when Word's own
+/// format would not accept the file (the check is skipped with a printed note without xmllint or the schemas).
+fn export_valid(job: &Job) -> Vec<u8> {
+    let bytes = export(job, &AtomicBool::new(false)).unwrap();
+    schema_check::assert_valid(&bytes, "the export");
+    bytes
 }
 
 /// The pandoc of this computer, or None with a printed note: the tests that need it skip (BUILD-018).
@@ -68,21 +77,33 @@ struct Trip {
     bytes: Vec<u8>,
 }
 
-/// Import `file` into a new vault with the real pandoc (the original kept), export the note; None without pandoc.
-fn round_trip(tag: &str, file: &Path) -> Option<Trip> {
+/// Import `file` into a new vault with the real pandoc (the original kept), export the note; None without pandoc, an
+/// error naming the step ("import: …", "export: …") when one fails.
+fn try_round_trip(tag: &str, file: &Path) -> Option<Result<Trip, String>> {
     let pandoc = real_pandoc()?;
     let mut vault = temp_vault(tag);
     let item = docx::docx_item(file.to_path_buf(), Some(pandoc.clone()));
     let options = Options { folder: PathBuf::from("In"), tags: vec![], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false };
-    let note = docx::import_item(&mut vault, &item, &options).unwrap();
+    let note = match docx::import_item(&mut vault, &item, &options) {
+        Ok(note) => note,
+        Err(e) => return Some(Err(format!("import: {e}"))),
+    };
     vault.rescan();
     let text = std::fs::read_to_string(vault.abs(&note)).unwrap();
     let original = original_of(&vault, &note, &text);
     let job = Job::new(pandoc, &vault, &note, &text, original.as_deref(), false);
-    let bytes = export(&job, &AtomicBool::new(false)).unwrap();
+    let bytes = match export(&job, &AtomicBool::new(false)) {
+        Ok(bytes) => bytes,
+        Err(e) => return Some(Err(format!("export: {e}"))),
+    };
     let exported = vault.root.join("out.docx");
     std::fs::write(&exported, &bytes).unwrap();
-    Some(Trip { text, exported, bytes })
+    Some(Ok(Trip { text, exported, bytes }))
+}
+
+/// The same for a file that has to go through: None without pandoc.
+fn round_trip(tag: &str, file: &Path) -> Option<Trip> {
+    try_round_trip(tag, file).map(|trip| trip.unwrap())
 }
 
 fn part(bytes: &[u8], name: &str) -> String {
@@ -785,6 +806,105 @@ fn a_file_that_cannot_be_finished_is_an_error() {
     assert!(e(&zip_of(&broken_part)).contains("word/header1.xml cannot be read"));
 }
 
+// ---------------------------------------------------------------- DOCX-011: nesting too deep
+
+// spec: DOCX-011, DEV-038
+#[test]
+fn a_part_nested_too_deeply_is_an_error_of_the_finish_and_of_the_merge_of_styles_and_never_an_abort() {
+    let deep = |n: usize, open: &str, close: &str| format!("<w:document xmlns:w=\"{W}\" xmlns:r=\"{R}\"><w:body>{}{}</w:body></w:document>", open.repeat(n), close.repeat(n));
+    let document = deep(5000, "<w:sdt>", "</w:sdt>");
+    let styles = format!("<w:styles xmlns:w=\"{W}\">{}{}</w:styles>", "<w:style>".repeat(5000), "</w:style>".repeat(5000));
+    let finish = |document: &str, styles: &str, rels: &[(&str, &str)]| finish::finish(&docx_of(document, styles, rels, &[]), &PrintLook::default()).unwrap_err();
+    let ok_styles = styles_xml("");
+    for e in [finish(&document, &ok_styles, &[]), finish(&body("<w:p/>"), &styles, &[]), finish(&body("<w:p/>"), &ok_styles, &[("word/_rels/document.xml.rels", &"<a>".repeat(5000))])] {
+        assert!(e.starts_with("pandoc's file cannot be finished: ") && e.contains("the XML is nested too deeply (more than 256 levels)"), "{e}");
+    }
+    let e = reference::merge_styles(&styles, &ok_styles).unwrap_err();
+    assert_eq!(e, "its styles cannot be read: the XML is nested too deeply (more than 256 levels)");
+    let e = reference::merge_styles(&ok_styles, &styles).unwrap_err();
+    assert_eq!(e, "pandoc's default styles cannot be read: the XML is nested too deeply (more than 256 levels)");
+}
+
+// ---------------------------------------------------------------- DOCX-010: the schema check
+
+/// A Word file of a document with the paragraph properties `ppr` and an empty list of styles.
+fn docx_with_ppr(ppr: &str) -> Vec<u8> {
+    docx_of(&body(&format!("<w:p><w:pPr>{ppr}</w:pPr></w:p>")), &styles_xml(""), &[], &[])
+}
+
+// spec: DOCX-010
+#[test]
+fn the_schemas_are_looked_for_in_the_cache_folder_of_the_developer_tools() {
+    let dir = |xdg, home| schema_check::cache_dir(xdg, home).map(|p| p.display().to_string());
+    let tail = format!("shale-dev/docx-schemas/{}", schema_check::COMMIT);
+    assert_eq!(dir(Some("/x"), Some("/h")), Some(format!("/x/{tail}")), "XDG_CACHE_HOME first");
+    assert_eq!(dir(Some(""), Some("/h")), Some(format!("/h/.cache/{tail}")), "an empty one is not set");
+    assert_eq!(dir(None, Some("/h")), Some(format!("/h/.cache/{tail}")));
+    assert_eq!(dir(None, Some("")), None);
+    assert_eq!(dir(None, None), None);
+}
+
+// spec: DOCX-010
+#[test]
+fn the_commit_of_the_schemas_is_the_one_the_script_fetches() {
+    let script = std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/validate-docx.sh")).unwrap();
+    assert!(script.lines().any(|l| l == format!("COMMIT={}", schema_check::COMMIT)), "COMMIT in scripts/validate-docx.sh and schema_check::COMMIT differ");
+}
+
+// spec: DOCX-010
+#[test]
+fn a_check_without_the_schemas_is_skipped_and_what_is_no_word_file_is_invalid() {
+    let empty = temp_dir("no-schemas");
+    match schema_check::check_with(&docx_with_ppr(""), &empty) {
+        Outcome::Skipped(why) => assert!(why.contains("xmllint is not installed") || why.contains("are not in"), "{why}"),
+        other => panic!("{other:?}"),
+    }
+    // the cache is only used when the script marked it as verified
+    std::fs::create_dir_all(empty.join("schemas/microsoft")).unwrap();
+    std::fs::write(empty.join("schemas/microsoft/wml-2010.xsd"), "<xsd/>").unwrap();
+    assert!(matches!(schema_check::check_with(&docx_with_ppr(""), &empty), Outcome::Skipped(_)));
+    assert!(matches!(schema_check::check_with(b"not a zip", &empty), Outcome::Invalid(why) if why.starts_with("not a Word file")));
+    let _ = std::fs::remove_dir_all(&empty);
+}
+
+// spec: DOCX-010
+#[test]
+fn a_file_with_elements_in_the_wrong_order_does_not_validate_and_the_errors_name_the_part() {
+    let good = schema_check::check(&docx_with_ppr("<w:keepNext/><w:spacing w:after=\"0\"/><w:jc w:val=\"left\"/>"));
+    if let Outcome::Skipped(why) = &good {
+        eprintln!("skipping: {why}");
+        return;
+    }
+    assert_eq!(good, Outcome::Valid);
+    // the order of the schema is pageBreakBefore, spacing, jc: this is the failure of the old styled.docx
+    let Outcome::Invalid(errors) = schema_check::check(&docx_with_ppr("<w:spacing w:after=\"0\"/><w:pageBreakBefore/>")) else { panic!("it validates") };
+    assert!(errors.starts_with("word/document.xml:") && errors.contains("w:pageBreakBefore") && errors.contains("not expected"), "{errors}");
+    assert!(!errors.contains("http://schemas"), "the namespace is shortened: {errors}");
+    // a part that is no XML
+    let broken = docx_of(&body("<w:p/>"), "<w:styles", &[], &[]);
+    let Outcome::Invalid(errors) = schema_check::check(&broken) else { panic!("it validates") };
+    assert!(errors.starts_with("word/styles.xml: not well-formed XML"), "{errors}");
+}
+
+// The Word files of the import's tests are valid WordprocessingML (IMP-039), except what LibreOffice wrote.
+// spec: DOCX-010, IMP-039
+#[test]
+fn every_fixture_of_the_import_validates() {
+    // toc.docx is made by LibreOffice, whose styles.xml and numbering.xml carry `mc:Ignorable` on the root, which the
+    // schema does not declare for them (markup compatibility says every reader has to accept it); out of our hands.
+    let by_libreoffice = ["toc.docx"];
+    let mut seen = 0;
+    for entry in std::fs::read_dir(fixture("")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|e| e != "docx") || by_libreoffice.contains(&path.file_name().unwrap().to_str().unwrap()) {
+            continue;
+        }
+        seen += 1;
+        schema_check::assert_valid(&std::fs::read(&path).unwrap(), &path.display().to_string());
+    }
+    assert!(seen >= 5, "the fixtures: {seen}");
+}
+
 // ---------------------------------------------------------------- DOCX-010: the round trip with the real pandoc
 
 /// The share of the words of the fixture `name` that come back through import and export, and the trip.
@@ -792,6 +912,7 @@ fn fixture_trip(name: &str) -> Option<(f64, Trip)> {
     let pandoc = real_pandoc()?;
     let file = fixture(&format!("{name}.docx"));
     let trip = round_trip(name, &file)?;
+    schema_check::assert_valid(&trip.bytes, &format!("the export of {name}"));
     Some((share(&words_of(&pandoc, &file), &words_of(&pandoc, &trip.exported)), trip))
 }
 
@@ -870,7 +991,7 @@ fn the_original_of_a_word_file_is_the_template_with_its_styles_and_the_styles_pa
     let original = original_of(&vault, Path::new("Note.md"), &text);
     assert_eq!(original, Some(PathBuf::from("Report.docx")));
     let job = Job::new(pandoc.clone(), &vault, Path::new("Note.md"), &text, original.as_deref(), false);
-    let bytes = export(&job, &AtomicBool::new(false)).unwrap();
+    let bytes = export_valid(&job);
     let styles = part(&bytes, "word/styles.xml");
     let ids = style_ids(&styles);
     for kept in ["Standard", "berschrift1", "MeinStil"] {
@@ -921,7 +1042,7 @@ fn word(md: &str, toc: bool) -> Option<Made> {
     put_picture(&dir, "a.png");
     put_picture(&dir, "B.PNG");
     let job = Job { pandoc, root: dir.clone(), text: md.to_string(), look: PrintLook::default(), original: None, toc, timeout: TIMEOUT };
-    let bytes = export(&job, &AtomicBool::new(false)).unwrap();
+    let bytes = export_valid(&job);
     let _ = std::fs::remove_dir_all(&dir);
     Some(Made { document: part(&bytes, "word/document.xml"), styles: part(&bytes, "word/styles.xml"), numbering: part(&bytes, "word/numbering.xml") })
 }
@@ -1133,7 +1254,7 @@ fn a_note_without_an_original_gets_a_reference_from_its_print_properties_and_the
     std::fs::write(dir.join("Plain.md"), &text).unwrap();
     let vault = Vault::open(&dir).unwrap();
     let job = Job::new(pandoc.clone(), &vault, Path::new("Plain.md"), &text, None, false);
-    let bytes = export(&job, &AtomicBool::new(false)).unwrap();
+    let bytes = export_valid(&job);
     let (document, styles) = (part(&bytes, "word/document.xml"), part(&bytes, "word/styles.xml"));
     assert!(document.contains("<w:pgSz w:w=\"12240\" w:h=\"15840\"/>") && document.contains("w:top=\"1134\" w:right=\"1417\" w:bottom=\"1134\" w:left=\"1701\""), "the page of the note");
     assert_eq!(attr(&styles, "rPrDefault", "rPr", "rFonts", "ascii").as_deref(), Some("Times New Roman"));
@@ -1148,7 +1269,7 @@ fn a_note_without_an_original_gets_a_reference_from_its_print_properties_and_the
     assert_eq!(got, want);
     // a note that says nothing: pandoc's default look and nothing of the page
     let bare = Job::new(pandoc.clone(), &vault, Path::new("Plain.md"), "# Head\n\nText\n", None, false);
-    let bytes = export(&bare, &AtomicBool::new(false)).unwrap();
+    let bytes = export_valid(&bare);
     assert!(!part(&bytes, "word/document.xml").contains("<w:pgSz"), "pandoc's section as it is");
     let styles = part(&bytes, "word/styles.xml");
     assert_eq!(attr(&styles, "rPrDefault", "rPr", "rFonts", "asciiTheme").as_deref(), Some("minorHAnsi"), "the theme font of pandoc's default");
@@ -1436,19 +1557,35 @@ mod dialog_tests {
 
 // A developer tool, not a test of a rule (DEV-004): `scripts/roundtrip-docx.sh` runs this ignored test, which imports the
 // Word file `SHALE_ROUNDTRIP_DOCX` into a new vault with the real pandoc, exports the note, writes the Word file to
-// `SHALE_ROUNDTRIP_OUT` and prints the share of the words that came back.
+// `SHALE_ROUNDTRIP_OUT` (the note's text beside it, `.md`) and prints the share of the words that came back. A step that fails prints `import error:` or
+// `export error:` with the message and fails the test (scripts/docx-corpus.sh reads these lines).
 // spec: DOCX-010
 #[test]
-#[ignore = "run by scripts/roundtrip-docx.sh"]
+#[ignore = "run by scripts/roundtrip-docx.sh and scripts/docx-corpus.sh"]
 fn dev_004_roundtrip_imports_and_exports_a_word_file_and_prints_the_share_of_words_that_came_back() {
     let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from).unwrap_or_else(|| panic!("{name} is not set"));
     let (input, out) = (var("SHALE_ROUNDTRIP_DOCX"), var("SHALE_ROUNDTRIP_OUT"));
     let pandoc = docx::locate("").expect("pandoc is not installed");
-    let trip = round_trip("roundtrip", &input).expect("pandoc is not installed");
+    let trip = match try_round_trip("roundtrip", &input).expect("pandoc is not installed") {
+        Ok(trip) => trip,
+        Err(e) => {
+            let (step, message) = e.split_once(": ").unwrap_or(("", &e));
+            let message = message.lines().next().unwrap_or_default();
+            println!("{step} error: {message}");
+            panic!("{step} error: {message}");
+        }
+    };
     std::fs::write(&out, &trip.bytes).unwrap();
+    let note = out.with_extension("md");
+    std::fs::write(&note, &trip.text).unwrap();
     let (before, after) = (words_of(&pandoc, &input), words_of(&pandoc, &out));
     let common = (share(&before, &after) * before.len() as f64).round() as usize;
-    println!("words that came back: {common} of {} ({:.1} %); the export has {}", before.len(), share(&before, &after) * 100.0, after.len());
+    if before.is_empty() {
+        println!("words that came back: 0 of 0 (no words); the export has {}", after.len());
+    } else {
+        println!("words that came back: {common} of {} ({:.1} %); the export has {}", before.len(), share(&before, &after) * 100.0, after.len());
+    }
     println!("original: {}", input.display());
+    println!("note: {}", note.display());
     println!("exported: {}", out.display());
 }

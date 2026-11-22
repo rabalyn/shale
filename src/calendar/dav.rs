@@ -415,9 +415,9 @@ const CALDAV: &str = "urn:ietf:params:xml:ns:caldav";
 const CS: &str = "http://calendarserver.org/ns/";
 const APPLE: &str = "http://apple.com/ns/ical/";
 
-/// Parse a server answer. Document type declarations (and so entity tricks) are refused.
+/// Parse a server answer. Document type declarations (and so entity tricks) and a nesting beyond the limit of DEV-038 are refused.
 fn parse(xml: &str) -> Result<Document<'_>, String> {
-    Document::parse(xml).map_err(|e| format!("the server's answer could not be read ({e})"))
+    crate::xml_limits::parse(xml).map_err(|e| format!("the server's answer could not be read ({e})"))
 }
 
 fn is_el(n: &Node, ns: &str, name: &str) -> bool {
@@ -902,6 +902,14 @@ pub(crate) mod tests {
         assert!(parse(r#"<!DOCTYPE x [<!ENTITY a "b">]><x>&a;</x>"#).is_err());
         let other_ns = r#"<d:multistatus xmlns:d="DAV:" xmlns:o="urn:other"><d:response><d:href>/o/</d:href><d:propstat><d:prop><d:resourcetype><o:calendar/></d:resourcetype></d:prop></d:propstat></d:response></d:multistatus>"#;
         assert!(calendars_in(&responses(&parse(other_ns).unwrap()), "https://h.example/").0.is_empty());
+    }
+
+    // spec: DEV-038
+    #[test]
+    fn a_server_answer_nested_too_deeply_is_an_error() {
+        let deep = format!("<d:multistatus xmlns:d=\"DAV:\">{}{}</d:multistatus>", "<d:response>".repeat(5000), "</d:response>".repeat(5000));
+        let e = parse(&deep).unwrap_err();
+        assert!(e.starts_with("the server's answer could not be read (the XML is nested too deeply"), "{e}");
     }
 
     // spec: CAL-002

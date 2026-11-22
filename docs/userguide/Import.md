@@ -89,7 +89,8 @@ neighbours with the same alignment share one wrapper. Paragraphs in tables and t
 Everything one Word file brings goes into one folder, `z_media/<year>/<month>/import_docx_<name>/`, named
 after the file (spaces become `-`; a number is added when the name is taken): the pictures in `media/` and, with
 "Keep the original .docx" ticked, the original, which the note names in its properties as `source`. If pandoc
-cannot read the file, nothing is written and a message names the file and pandoc's first error line.
+cannot read the file, nothing is written and a message names the file and pandoc's first error line. A file whose XML is nested
+more than 256 levels deep (no real document is) is refused the same way, before pandoc starts.
 
 # Export to Word
 
