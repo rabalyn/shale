@@ -10,6 +10,18 @@ its section from this file.
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-11-22
+
+### Changed
+
+- The first code block of a language no longer stalls the window: the grammars of the common languages (TypeScript, JavaScript, Rust, Python, shell, JSON, TOML, YAML, C++, Go, HTML, CSS, Markdown) are compiled on a background thread right after start. The first TypeScript block took about 300 ms on the UI thread before (#245).
+- The check of the mail index now starts with the window when a mail account is set up, as a background task "Checking the mail index…" in the busy indicator, so the mail view finds the index ready; opened earlier, the view shows that text with a spinner instead of "Opening the local mail copy…". The integrity check itself stays (#385).
+
+### Fixed
+
+- For developers: the media UI tests wait for the picture workers (MEDIA-024) to finish instead of a fixed number of frames, so they pass on slow and instrumented builds (#529).
+- For developers: the file look-up test waits for the window's repaint after a worker answer instead of checking it at once, so it no longer fails now and then under load (#529).
+
 ## [0.7.2] - 2026-11-22
 
 ### Added
@@ -1920,7 +1932,8 @@ First public version (published before releases were tagged).
 - Ctrl+Shift+F always focuses the search box and selects the previous search.
 - File names with `#` work in links.
 
-[Unreleased]: https://github.com/rabalyn/shale/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/rabalyn/shale/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/rabalyn/shale/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/rabalyn/shale/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/rabalyn/shale/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/rabalyn/shale/compare/v0.6.10...v0.7.0
