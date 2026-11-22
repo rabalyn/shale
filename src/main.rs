@@ -139,6 +139,8 @@ mod tab_order_tests;
 mod table;
 mod table_grid;
 mod table_select;
+#[cfg(test)]
+mod table_tests;
 mod task_box;
 #[cfg(test)]
 mod test_exec;
