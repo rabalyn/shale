@@ -227,9 +227,10 @@ mod tests {
     fn the_windows_form_of_a_file_address_is_read_on_every_system() {
         use crate::media::file_uri_path_for;
         let uri = "file:///C:/Users/Ada/My%20Videos/a.mp4";
-        assert_eq!(file_uri_path_for(uri, true), Some(PathBuf::from("C:/Users/Ada/My Videos/a.mp4")), "Windows: the drive stands first");
+        assert_eq!(file_uri_path_for(uri, true), Some(PathBuf::from(r"C:\Users\Ada\My Videos\a.mp4")), "Windows: the drive stands first, and the separators are those of Windows");
+        assert_eq!(file_uri_path_for("file:////nas/share/a.mp4", true), Some(PathBuf::from(r"\\nas\share\a.mp4")), "a network path");
         assert_eq!(file_uri_path_for(uri, false), Some(PathBuf::from("/C:/Users/Ada/My Videos/a.mp4")), "elsewhere it is a folder called C:");
-        assert_eq!(file_uri_path_for("file:///usr/a.mp4", true), Some(PathBuf::from("/usr/a.mp4")));
+        assert_eq!(file_uri_path_for("file:///usr/a.mp4", true), Some(PathBuf::from(r"\usr\a.mp4")));
         // whichever system this is, the link is a file link
         assert!(matches!(spot(uri), Some(Spot::File(_))));
     }
@@ -273,7 +274,7 @@ mod tests {
         // nothing there: the path is told
         let missing = resolve(&library("Videos", "2024/b.mp4"), &libs);
         assert_eq!(missing, Outside::Missing { abs: library_dir.join("2024/b.mp4") });
-        assert_eq!(missing.notice(), Some(format!("Not found: {}", library_dir.join("2024/b.mp4").display())));
+        assert_eq!(missing.notice(), Some(format!("Not found: {}", library_dir.join("2024").join("b.mp4").display())));
         // a folder of that name is not a file
         std::fs::create_dir_all(library_dir.join("dir.mp4")).unwrap();
         assert!(matches!(resolve(&library("Videos", "dir.mp4"), &libs), Outside::Missing { .. }));

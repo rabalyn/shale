@@ -1240,7 +1240,7 @@ mod tests {
         }
         std::fs::write(v.root.join("in.mp4"), b"v").unwrap();
         v.set_libraries(&[crate::media::outside::Library { name: "Lib".into(), path: src.join("Lib") }]);
-        let abs = src.canonicalize().unwrap();
+        let abs = crate::fsutil::plain_path(src.canonicalize().unwrap());
         let o = Options { folder: PathBuf::new(), tags: vec![], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false };
         let item = |kind, name: &str, path: PathBuf, how| {
             let mut it = media_item(kind, name.into(), MediaData::Path(path));
@@ -1260,7 +1260,7 @@ mod tests {
         let Imported { notes, files, linked, errors } = import(&mut v, &items, &o);
         assert!(notes.is_empty() && errors.is_empty(), "{notes:?} {errors:?}");
         // a linked file keeps its name (no "A cat"), a library link where there is a library
-        assert_eq!(linked, vec![Linked { link: format!("![](<file://{}/cat.png>)", abs.display()), path: abs.join("cat.png") }, Linked { link: "![[@Lib/song.mp3]]".into(), path: abs.join("Lib/song.mp3") }]);
+        assert_eq!(linked, vec![Linked { link: format!("![](<{}>)", media::intake::file_uri(&abs.join("cat.png"))), path: abs.join("cat.png") }, Linked { link: "![[@Lib/song.mp3]]".into(), path: abs.join("Lib/song.mp3") }]);
         // the copy is in the media folder, the file of the vault where it was
         let names: Vec<String> = files.iter().map(|f| rel_to_string(f)).collect();
         assert_eq!(names.len(), 2, "{names:?}");

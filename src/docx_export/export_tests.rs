@@ -836,11 +836,13 @@ fn docx_with_ppr(ppr: &str) -> Vec<u8> {
 // spec: DOCX-010, DEV-036
 #[test]
 fn the_schemas_are_looked_for_in_the_cache_folder_of_the_developer_tools() {
-    let dir = |xdg, home| schema_check::cache_dir(xdg, home).map(|p| p.display().to_string());
-    let tail = format!("shale-dev/docx-schemas/{}", schema_check::COMMIT);
-    assert_eq!(dir(Some("/x"), Some("/h")), Some(format!("/x/{tail}")), "XDG_CACHE_HOME first");
-    assert_eq!(dir(Some(""), Some("/h")), Some(format!("/h/.cache/{tail}")), "an empty one is not set");
-    assert_eq!(dir(None, Some("/h")), Some(format!("/h/.cache/{tail}")));
+    let dir = |xdg, home| schema_check::cache_dir(xdg, home);
+    // joined part by part: Windows puts its own separator between the parts
+    let under = |base: &std::path::Path| base.join("shale-dev").join("docx-schemas").join(schema_check::COMMIT);
+    let cache = std::path::Path::new("/h").join(".cache");
+    assert_eq!(dir(Some("/x"), Some("/h")), Some(under(std::path::Path::new("/x"))), "XDG_CACHE_HOME first");
+    assert_eq!(dir(Some(""), Some("/h")), Some(under(&cache)), "an empty one is not set");
+    assert_eq!(dir(None, Some("/h")), Some(under(&cache)));
     assert_eq!(dir(None, Some("")), None);
     assert_eq!(dir(None, None), None);
 }
