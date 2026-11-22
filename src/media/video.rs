@@ -451,15 +451,13 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_clock_of_a_video_starts_with_its_first_picture_however_slow_ffmpeg_is() {
-        use std::os::unix::fs::PermissionsExt;
         let Some(real) = tools_or_skip() else { return };
         // an ffmpeg that takes 1.5 s to give pictures (a loaded machine), but not the sound
         let dir = std::env::temp_dir().join(format!("shale-slow-ffmpeg-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let slow = dir.join("ffmpeg");
         let script = format!("#!/bin/sh\ncase \"$*\" in *rawvideo*) sleep 1.5;; esac\nexec '{}' \"$@\"\n", real.ffmpeg.display());
-        std::fs::write(&slow, script).unwrap();
-        std::fs::set_permissions(&slow, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::test_exec::write_script(&slow, &script);
         let tools = Tools { ffmpeg: slow, ffprobe: real.ffprobe };
         for clip in ["clip-silent.mp4", "clip.mp4"] {
             playing_with(&tools, clip, |shared, slot, _| {

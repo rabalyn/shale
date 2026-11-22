@@ -45,11 +45,9 @@ printf '## Fake\n\n![[%s/media/image1.png]]\n' "${meta#shale-media=}" > "$out""#
 #[cfg(unix)]
 #[test]
 fn dev_030_a_word_import_is_a_dataflow_diagram() {
-    use std::os::unix::fs::PermissionsExt;
     let dir = temp_dir("docx");
     let pandoc = dir.join("pandoc");
-    crate::fsutil::write_atomic(&pandoc, format!("#!/bin/sh\n{PANDOC}\n").as_bytes()).unwrap();
-    std::fs::set_permissions(&pandoc, std::fs::Permissions::from_mode(0o755)).unwrap();
+    crate::test_exec::write_script(&pandoc, &format!("#!/bin/sh\n{PANDOC}\n"));
     let word = dir.join("Report.docx");
     crate::fsutil::create_new(&word, b"PK fake docx").unwrap();
     let mut vault = Vault::open(&dir.join("vault")).unwrap();

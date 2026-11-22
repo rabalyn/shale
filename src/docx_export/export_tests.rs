@@ -1284,10 +1284,8 @@ fn a_note_without_an_original_gets_a_reference_from_its_print_properties_and_the
 /// A stand-in for pandoc, a shell script with this `body` (unix only).
 #[cfg(unix)]
 fn fake_pandoc(dir: &Path, body: &str) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
     let p = dir.join("pandoc");
-    crate::fsutil::write_atomic(&p, format!("#!/bin/sh\n{body}\n").as_bytes()).unwrap();
-    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    crate::test_exec::write_script(&p, &format!("#!/bin/sh\n{body}\n"));
     p
 }
 

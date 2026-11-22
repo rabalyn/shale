@@ -46,6 +46,7 @@ impl T {
         hl.set_size(egui::Vec2::new(1500.0, 1400.0));
         let mut t = T { app, hl, root, vault };
         t.hl.frames(&mut t.app, 3);
+        t.hl.settle(&mut t.app);
         t
     }
 

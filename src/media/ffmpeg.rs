@@ -292,7 +292,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn an_ffprobe_that_does_not_know_the_side_data_section_still_reads_the_video() {
-        use std::os::unix::fs::PermissionsExt;
         let Some(real) = locate() else {
             println!("skipping: ffmpeg and ffprobe are not installed");
             return;
@@ -304,8 +303,7 @@ mod tests {
             "#!/bin/sh\ncase \"$*\" in *stream_side_data*) echo \"No match for section 'stream_side_data'\" >&2; echo \"Failed to set value '...' for option 'show_entries': Invalid argument\" >&2; exit 1;; esac\nexec '{}' \"$@\"\n",
             real.ffprobe.display()
         );
-        std::fs::write(&old, script).unwrap();
-        std::fs::set_permissions(&old, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::test_exec::write_script(&old, &script);
         let tools = Tools { ffmpeg: real.ffmpeg.clone(), ffprobe: old };
         let clip = super::super::testdata::fixture("clip.mp4");
         let info = tools.probe(&clip).expect("read with the older entry list");

@@ -39,6 +39,7 @@ impl W {
         let mut hl = Headless::new();
         hl.set_size(size);
         let mut w = W { t, hl, seen: vec![], copied: vec![] };
+        w.hl.settle(&mut w.t.app);
         w.settle();
         w
     }

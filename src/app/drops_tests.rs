@@ -40,6 +40,7 @@ impl W {
         let app = ShaleApp::build(Options { screenshot: None, vault: Some(dir), view: None, keys: None }, false);
         let mut w = W { app, hl: Headless::new(), out };
         w.frames(6);
+        w.hl.settle(&mut w.app);
         w
     }
 

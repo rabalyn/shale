@@ -1146,9 +1146,7 @@ fn upd_019_restart_now_asks_the_window_to_close_and_remembers_what_to_start() {
 fn upd_019_the_new_program_is_started_when_the_old_one_has_saved() {
     let d = temp("relaunch");
     let script = d.join("shale");
-    std::fs::write(&script, format!("#!/bin/sh\necho \"$@\" > {}\n", d.join("started").display())).unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    crate::test_exec::write_script(&script, &format!("#!/bin/sh\necho \"$@\" > {}\n", d.join("started").display()));
     let (backend, _) = fake(None);
     let mut st = state(portable_kind(), backend);
     st.start_restart();

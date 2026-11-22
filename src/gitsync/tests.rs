@@ -375,7 +375,6 @@ fn a_conflict_that_cannot_be_resolved_is_undone_and_nothing_is_lost() {
 #[cfg(unix)]
 #[test]
 fn a_rejected_push_is_reported_and_both_histories_stay() {
-    use std::os::unix::fs::PermissionsExt;
     let env = Env::new("reject");
     let remote = env.bare();
     let a = env.vault("a", &remote);
@@ -383,8 +382,7 @@ fn a_rejected_push_is_reported_and_both_histories_stay() {
     env.sync(&a);
     let remote_head = env.git(&remote, &["rev-parse", "main"]);
     let hook = remote.join("hooks").join("pre-receive");
-    crate::fsutil::write_atomic(&hook, b"#!/bin/sh\necho no pushes today >&2\nexit 1\n").unwrap();
-    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+    crate::test_exec::write_script(&hook, "#!/bin/sh\necho no pushes today >&2\nexit 1\n");
     write(&a, "Note.md", "local change\n");
     let e = env.try_sync(&a).unwrap_err();
     assert!(e.contains("push"), "{e}");

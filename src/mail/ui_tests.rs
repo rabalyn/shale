@@ -2611,14 +2611,12 @@ fn compose_toggles_show_the_key_of_every_recipient_refuse_a_missing_one_and_send
 #[cfg(unix)]
 #[test]
 fn a_gnupg_call_that_waits_for_a_dialog_never_blocks_the_window_and_cancel_stops_it() {
-    use std::os::unix::fs::PermissionsExt;
     // a stand-in for gpg that never answers, like one waiting for a passphrase dialog nobody sees
     let dir = std::env::temp_dir().join(format!("shale-slowgpg-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let script = dir.join("slow-gpg");
-    std::fs::write(&script, "#!/bin/sh\nexec sleep 60\n").unwrap();
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+    crate::test_exec::write_script(&script, "#!/bin/sh\nexec sleep 60\n");
     let mut w = W::new("slow-gpg", true);
     w.app.mail.gnupg = crate::mail::gpg::Gnupg { gpg: script.to_string_lossy().into_owned(), gpgsm: script.to_string_lossy().into_owned(), gpgconf: "/nonexistent/gpgconf".into(), home: None };
     w.app.cfg.mail_encryption_consent = Some("2026-11-14 12:00".into());
@@ -2671,11 +2669,8 @@ fn dev_017_opening_the_mail_settings_in_a_plain_harness_runs_no_gnupg() {
 /// A stand-in for `gpg` (or `gpgsm`) that answers after a second, like a slow start of the agent.
 #[cfg(unix)]
 fn slow_gnupg_script(dir: &Path, name: &str, real: &str) -> String {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::create_dir_all(dir).unwrap();
     let script = dir.join(name);
-    std::fs::write(&script, format!("#!/bin/sh\nsleep 1\nexec {real} \"$@\"\n")).unwrap();
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+    crate::test_exec::write_script(&script, &format!("#!/bin/sh\nsleep 1\nexec {real} \"$@\"\n"));
     script.to_string_lossy().into_owned()
 }
 

@@ -61,7 +61,8 @@ impl Stack {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("bin")).unwrap();
         std::fs::create_dir_all(root.join("secrets")).unwrap();
-        std::fs::copy(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/askpass/secret-tool"), root.join("bin/secret-tool")).unwrap();
+        let fake = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/askpass/secret-tool")).unwrap();
+        crate::test_exec::write_script(&root.join("bin/secret-tool"), &fake);
         let mut git = crate::gitsync::wizard::ui_git(&root);
         let rest = std::env::var_os("PATH").unwrap_or_default();
         let path = std::env::join_paths(std::iter::once(root.join("bin")).chain(std::env::split_paths(&rest))).unwrap();

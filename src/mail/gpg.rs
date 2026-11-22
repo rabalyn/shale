@@ -1050,7 +1050,6 @@ pub(crate) mod testkit {
         /// in its cache, so every call asks. What the stub answers is set with [`pinentry_says`](Self::pinentry_says).
         #[cfg(unix)]
         pub fn use_pinentry_stub(&self) {
-            use std::os::unix::fs::PermissionsExt;
             let stub = self.dir.join("pinentry-stub");
             let script = "#!/bin/sh\n\
                 answer() { cat \"$(dirname \"$0\")/pinentry-answer\"; }\n\
@@ -1068,8 +1067,7 @@ pub(crate) mod testkit {
                     *) echo OK ;;\n\
                   esac\n\
                 done\n";
-            std::fs::write(&stub, script).unwrap();
-            std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o700)).unwrap();
+            crate::test_exec::write_script(&stub, script);
             let mut conf = std::fs::read_to_string(self.dir.join("gpg-agent.conf")).unwrap_or_default();
             conf.push_str(&format!("pinentry-program {}\ndefault-cache-ttl 0\nmax-cache-ttl 0\n", stub.display()));
             std::fs::write(self.dir.join("gpg-agent.conf"), conf).unwrap();
@@ -1304,9 +1302,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         // a stand-in for gpg that records how it was called
         let log = dir.write("args.txt", b"").unwrap();
-        let script = dir.write("fake-gpg", format!("#!/bin/sh\nfor a in \"$@\"; do echo \"$a\" >> '{}'; done\necho \"stdin:$(cat)\" >> '{}'\n", log.display(), log.display()).as_bytes()).unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let script = dir.path.join("fake-gpg");
+        crate::test_exec::write_script(&script, &format!("#!/bin/sh\nfor a in \"$@\"; do echo \"$a\" >> '{}'; done\necho \"stdin:$(cat)\" >> '{}'\n", log.display(), log.display()));
         let g = Gnupg { gpg: script.to_string_lossy().into_owned(), home: Some(dir.path.clone()), ..Gnupg::default() };
         g.run(CryptoStandard::OpenPgp, &["--decrypt"], b"cipher; rm -rf / $(evil)", SHORT, &no_cancel()).unwrap();
         let seen = std::fs::read_to_string(&log).unwrap();
@@ -1324,9 +1321,8 @@ mod tests {
     fn dev_017_the_version_is_asked_with_the_home_of_the_gnupg_too() {
         let dir = TempDir::new().unwrap();
         // a stand-in that says which home it was given
-        let script = dir.write("fake-gpg", b"#!/bin/sh\necho \"home:${GNUPGHOME:-UNSET}\"\n").unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let script = dir.path.join("fake-gpg");
+        crate::test_exec::write_script(&script, "#!/bin/sh\necho \"home:${GNUPGHOME:-UNSET}\"\n");
         let program = script.to_string_lossy().into_owned();
         let g = Gnupg { gpg: program.clone(), gpgsm: program, gpgconf: "gpgconf".into(), home: Some(dir.path.clone()) };
         for s in [CryptoStandard::OpenPgp, CryptoStandard::Smime] {
@@ -1416,9 +1412,8 @@ mod tests {
     fn a_call_that_hangs_is_killed_at_its_time_limit_and_by_cancel_without_blocking_forever() {
         let dir = TempDir::new().unwrap();
         // a stand-in for gpg waiting for a passphrase dialog
-        let script = dir.write("slow-gpg", b"#!/bin/sh\nsleep 30\n").unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let script = dir.path.join("slow-gpg");
+        crate::test_exec::write_script(&script, "#!/bin/sh\nsleep 30\n");
         let g = Gnupg { gpg: script.to_string_lossy().into_owned(), ..Gnupg::default() };
         let t = Instant::now();
         let r = g.run(CryptoStandard::OpenPgp, &["--decrypt"], b"data", Duration::from_millis(300), &no_cancel());
