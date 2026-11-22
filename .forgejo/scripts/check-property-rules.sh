@@ -1,9 +1,11 @@
 #!/bin/sh
 # Fails when a property test of a spec rule changes without its rule (spec DEV-043): in the commits
 # BASE..HEAD, a diff that changes or removes the body of a property test must also change the spec
-# row of the rule it checks (a line of that row in `docs/spec/`), or some commit message in the
+# row of the rule it checks in `docs/spec/`, or some commit message in the
 # range must carry a line `rule-unchanged: <ID> <why>` (a rename, a faster generator, a new case).
-# A property that is only added needs nothing. Otherwise a failing property could be made to pass
+# The row counts as changed when it differs without its last column, the Test column (an edit of
+# only the test names, as in a rename, is not a change of the rule); a row that is added or removed
+# or whose status changes (`SHOULD BE` to `IS NOW`) counts. A property that is only added needs nothing. Otherwise a failing property could be made to pass
 # by weakening it, and nothing would notice.
 #   sh .forgejo/scripts/check-property-rules.sh <base> <head>
 #
@@ -101,13 +103,16 @@ if [ ! -s "$HITS" ]; then
   exit 0
 fi
 
-git diff -U0 "$BASE" "$HEAD_REV" -- docs/spec > "$TMP/spec.diff"
+# the row of an ID at a revision without its last (Test) column; `\|` is kept out of the way first
+row() {
+  git grep -h -e "^| $2 |" "$1" -- docs/spec | sed -e 's/\\|/@@/g' -e 's/|[^|]*|[[:space:]]*$/|/'
+}
 git log --format=%B "$BASE..$HEAD_REV" > "$TMP/messages"
 BAD=0
 while read -r f name id; do
-  grep -Eq "^[-+]\| $id \|" "$TMP/spec.diff" && continue
+  [ "$(row "$BASE" "$id")" != "$(row "$HEAD_REV" "$id")" ] && continue
   grep -Eq "^rule-unchanged: $id [^ ]" "$TMP/messages" && continue
-  echo "error: property $name ($f) of $id changed or was removed, but the row $id in docs/spec/ did not change and no commit says why" >&2
+  echo "error: property $name ($f) of $id changed or was removed, but the row $id in docs/spec/ did not change (its Test column does not count) and no commit says why" >&2
   BAD=1
 done < "$HITS"
 if [ "$BAD" = 1 ]; then

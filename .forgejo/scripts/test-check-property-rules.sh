@@ -101,6 +101,9 @@ rule-unchanged: VAULT-019 other rule" 's/0u8..10) {/0u8..9) {/'
 try "a rule-unchanged line without a reason does not help" fail "VAULT-018" "Faster
 
 rule-unchanged: VAULT-018" 's/0u8..10) {/0u8..9) {/'
+try "a changed property with only the Test column of its row edited fails" fail "VAULT-018" "Weaken and rename" 's/prop_assert!(x < 10)/prop_assert!(x < 100)/' 's/`p::vault_018_a`/`p::vault_018_b`/'
+try "a changed property with the rule text reworded passes" pass "Property check passed (1" "Weaken" 's/prop_assert!(x < 10)/prop_assert!(x < 100)/' 's/Typed paths never/Typed paths do never/'
+try "a changed property with the status of its row changed passes" pass "Property check passed (1" "Weaken" 's/prop_assert!(x < 10)/prop_assert!(x < 100)/' 's/IS NOW | `src\/p.rs` | `p::vault_018_a`/SHOULD BE | `src\/p.rs` | `p::vault_018_a`/'
 try "a spec change of another row does not help" fail "VAULT-018" "Weaken" 's/prop_assert!(x < 10)/prop_assert!(x < 100)/' 's/Other rule/Other rules/'
 try "a removed property fails" fail "property vault_018_a" "Drop it" '/fn vault_018_a/,/^    }$/d'
 try "a line inserted into a property fails" fail "VAULT-018" "Extra line" '/prop_assert!(x < 10)/i\        let _ = x;'
