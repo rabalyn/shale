@@ -1,7 +1,7 @@
 //! The static page of the results (BUILD-032): `shale --bench-report docs/perf docs/perf/index.html`
 //! reads every `results/*.json` and draws, without any script or outside file, a table of the
-//! latest run and, per scenario, the median time and the peak memory over the runs, with links to
-//! the flamegraphs in `flamegraphs/`.
+//! latest run and, per scenario, the median time and the peak memory over the runs, with a link to
+//! the flamegraphs of the release (an attachment of its GitHub release, not a folder in git, #400).
 
 use super::runner::{read_report, Report};
 use std::path::Path;
@@ -82,8 +82,32 @@ th:first-child,td:first-child{text-align:left}code{font-size:13px}.mute{color:va
 .card h3{font-size:13px;margin:0 0 4px}svg{width:100%;height:auto}.axis{stroke:var(--line)}.line{fill:none;stroke:var(--acc);stroke-width:2}.dot{fill:var(--acc)}.tick{font-size:10px;fill:var(--mute)}\n\
 a{color:var(--acc)}\n</style>";
 
+const RELEASES: &str = "https://github.com/rabalyn/shale/releases";
+
+/// `0.7.1` of the label `v0.7.1`; `None` for a label that is not a release (`baseline-4ec690f`, a pre-release `v0.8.0-rc.1`).
+fn release_version(label: &str) -> Option<&str> {
+    let v = label.strip_prefix('v')?;
+    let parts: Vec<&str> = v.split('.').collect();
+    (parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))).then_some(v)
+}
+
+/// Where the flamegraphs are (BUILD-041, #400): the release build on GitHub packs them into
+/// `shale-flamegraphs-<version>.tar.gz` (a folder `flamegraphs/` of `<scenario id>.svg`) and attaches it to the
+/// release page, so the latest run is linked to its release's attachment when it is a release; any other run
+/// (a baseline, a branch) points to the releases page.
+fn flamegraph_note(label: &str) -> String {
+    match release_version(label) {
+        Some(v) => format!(
+            "<p class=\"mute\">Flamegraphs of {0}: <a href=\"{RELEASES}/download/v{1}/shale-flamegraphs-{1}.tar.gz\">shale-flamegraphs-{1}.tar.gz</a>, an attachment of the <a href=\"{RELEASES}/tag/v{1}\">release</a> (unpack it: one <code>&lt;scenario&gt;.svg</code> for each scenario that was flagged or among the slowest). Older releases: <a href=\"{RELEASES}\">releases</a>.</p>\n",
+            esc(label),
+            esc(v)
+        ),
+        None => format!("<p class=\"mute\">Flamegraphs are not kept in git: each release has them as the attachment <code>shale-flamegraphs-&lt;version&gt;.tar.gz</code> on its <a href=\"{RELEASES}\">release page</a>.</p>\n"),
+    }
+}
+
 /// One set of runs (the regular runs, the worst case): the latest run as a table, the history as charts.
-fn section(out: &mut String, title: &str, runs: &[Run], flamegraphs: &[String]) {
+fn section(out: &mut String, title: &str, runs: &[Run]) {
     let Some(latest) = runs.last() else {
         out.push_str(&format!("<h2>{}</h2>\n<p>No results yet: run <code>scripts/bench.sh</code> and put the file in <code>docs/perf/</code>.</p>\n", esc(title)));
         return;
@@ -109,7 +133,7 @@ fn section(out: &mut String, title: &str, runs: &[Run], flamegraphs: &[String]) 
     if let Some(p) = prev {
         out.push_str(&format!("<th>Median vs {}</th>", esc(&p.label)));
     }
-    out.push_str("<th>Flamegraph</th></tr>\n");
+    out.push_str("</tr>\n");
     for s in &r.scenarios {
         let change = prev.and_then(|p| p.report.scenarios.iter().find(|o| o.id == s.id)).map(|o| {
             let d = (s.median_ns as f64 - o.median_ns as f64) / o.median_ns.max(1) as f64 * 100.0;
@@ -122,9 +146,8 @@ fn section(out: &mut String, title: &str, runs: &[Run], flamegraphs: &[String]) 
             };
             format!("<span class=\"{class}\">{d:+.1}%</span>")
         });
-        let flame = if flamegraphs.contains(&s.id) { format!("<a href=\"flamegraphs/{0}.svg\">{0}.svg</a>", esc(&s.id)) } else { "-".into() };
         out.push_str(&format!(
-            "<tr><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td>{}<td>{}</td></tr>\n",
+            "<tr><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td>{}</tr>\n",
             esc(&s.id),
             duration(s.median_ns),
             duration(s.p95_ns),
@@ -133,11 +156,11 @@ fn section(out: &mut String, title: &str, runs: &[Run], flamegraphs: &[String]) 
             bytes(s.alloc_bytes),
             bytes(s.peak_bytes),
             if s.retained_bytes < 0 { format!("-{}", bytes(s.retained_bytes.unsigned_abs())) } else { bytes(s.retained_bytes as u64) },
-            if prev.is_some() { format!("<td>{}</td>", change.unwrap_or_else(|| "-".into())) } else { String::new() },
-            flame
+            if prev.is_some() { format!("<td>{}</td>", change.unwrap_or_else(|| "-".into())) } else { String::new() }
         ));
     }
     out.push_str("</table>\n");
+    out.push_str(&flamegraph_note(&latest.label));
     if !r.skipped.is_empty() {
         out.push_str("<p class=\"mute\">Skipped in the latest run:</p>\n<ul>");
         for k in &r.skipped {
@@ -154,21 +177,14 @@ fn section(out: &mut String, title: &str, runs: &[Run], flamegraphs: &[String]) 
 }
 
 /// The page: one section for each set of runs, `(title, runs)`.
-pub fn page(sets: &[(&str, Vec<Run>)], flamegraphs: &[String]) -> String {
+pub fn page(sets: &[(&str, Vec<Run>)]) -> String {
     let mut out =
         format!("<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Shale performance</title>\n{STYLE}</head><body>\n<h1>Shale performance</h1>\n");
     for (title, runs) in sets {
-        section(&mut out, title, runs, flamegraphs);
+        section(&mut out, title, runs);
     }
     out.push_str("</body></html>\n");
     out
-}
-
-/// The IDs that have `flamegraphs/<id>.svg`.
-fn flamegraph_ids(dir: &Path) -> Vec<String> {
-    let mut ids: Vec<String> = std::fs::read_dir(dir.join("flamegraphs")).into_iter().flatten().flatten().filter_map(|e| e.file_name().to_string_lossy().strip_suffix(".svg").map(str::to_string)).collect();
-    ids.sort();
-    ids
 }
 
 pub fn write(dir: &Path, out: &Path) -> Result<(), String> {
@@ -179,7 +195,7 @@ pub fn write(dir: &Path, out: &Path) -> Result<(), String> {
     let sets = [("Every scenario (the full profile)", regular), ("The worst case (the worst profile)", worst)];
     let sets: Vec<(&str, Vec<Run>)> = sets.into_iter().filter(|(_, r)| !r.is_empty()).collect();
     let sets = if sets.is_empty() { vec![("Every scenario (the full profile)", vec![])] } else { sets };
-    std::fs::write(out, page(&sets, &flamegraph_ids(dir))).map_err(|e| format!("{}: {e}", out.display()))?;
+    std::fs::write(out, page(&sets)).map_err(|e| format!("{}: {e}", out.display()))?;
     eprintln!("wrote {} from {count} runs", out.display());
     Ok(())
 }
@@ -223,16 +239,32 @@ mod tests {
 
     // spec: BUILD-032
     #[test]
-    fn the_page_is_self_contained_and_shows_the_table_the_charts_and_the_flamegraph_links() {
-        let html = page(&[("All", vec![run("v0.1.0", "2026-01-01", 10), run("v0.2.0", "2026-02-01", 20)])], &["ui.frame.<x>".into()]);
+    fn the_page_is_self_contained_and_shows_the_table_the_charts_and_the_flamegraph_link() {
+        let html = page(&[("All", vec![run("v0.1.0", "2026-01-01", 10), run("v0.2.0", "2026-02-01", 20)])]);
         assert!(html.starts_with("<!doctype html>"));
-        assert!(!html.contains("<script") && !html.contains("http://") && !html.contains("https://"), "no script and nothing from outside");
+        assert!(!html.contains("<script") && !html.contains("src=") && !html.contains("<link"), "no script and no file loaded from outside");
         assert!(html.contains("ui.frame.&lt;x&gt;"), "IDs are escaped");
         assert!(html.contains("<polyline"), "two runs draw a line");
         assert!(html.contains("+100.0%") && html.contains("class=\"bad\""), "the change against the run before");
-        assert!(html.contains("flamegraphs/ui.frame.&lt;x&gt;.svg"));
+        assert!(!html.contains("flamegraphs/"), "no link into a folder of git");
         assert!(html.contains("2 runs in all"));
-        assert!(page(&[("All", vec![])], &[]).contains("No results yet"));
+        assert!(page(&[("All", vec![])]).contains("No results yet"));
+    }
+
+    // spec: BUILD-032, BUILD-041
+    #[test]
+    fn the_flamegraphs_are_linked_to_the_attachment_of_the_latest_release() {
+        // the latest run is a release: its own attachment and release page
+        let html = page(&[("All", vec![run("v0.1.0", "2026-01-01", 10), run("v0.2.0", "2026-02-01", 20)])]);
+        assert!(html.contains("href=\"https://github.com/rabalyn/shale/releases/download/v0.2.0/shale-flamegraphs-0.2.0.tar.gz\""), "{html}");
+        assert!(html.contains("href=\"https://github.com/rabalyn/shale/releases/tag/v0.2.0\""));
+        assert!(!html.contains("download/v0.1.0"), "only the latest run");
+        // not a release (a baseline, a pre-release): the releases page, no file named
+        for label in ["baseline-4ec690f", "v0.3.0-rc.1", "v1.2", "vx.y.z", "0.2.0"] {
+            let html = page(&[("All", vec![run(label, "2026-01-01", 10)])]);
+            assert!(!html.contains("/download/") && html.contains("href=\"https://github.com/rabalyn/shale/releases\""), "{label}: {html}");
+        }
+        assert_eq!((release_version("v10.0.12"), release_version("v0.7.0-rc.2"), release_version("v0..1")), (Some("10.0.12"), None, None));
     }
 
     // spec: BUILD-032
