@@ -445,6 +445,13 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   count (**Notes 12 · Mail 20+ · Posts 4**, a switched-off source is counted, in grey) lists only that source on a
   click (again: back), or goes in and out of the default selection on Shift+click. Tab / Shift+Tab step through the
   sources. The default selection is saved; the letters are in Settings → Search.
+- **Search syntax** (user guide: *Search syntax*): the sources read the same text differently. **Notes** look for the whole
+  query as one piece of text inside a line, ignoring case, with `*` (any characters) and `?` (one character) as wildcards.
+  **Mail and posts** (full-text index) need all the words in any order, ignoring case and accents; `"phrases"` work, a
+  wildcard only makes the word a prefix (`mee?ing` is `mee*`) and a word that starts with one is dropped; `AND`, `OR`, `NOT`
+  and `-` are plain text. Fields limit a word in mail (`from:` `to:` `cc:` `subject:` `body:`) and posts (`from:` `text:`
+  `body:` `in:` `context:` `link:` `date:`) and are plain text in notes. The mail view's own search has the words,
+  phrases and fields, without wildcards.
 - **Hits of notes are shown rendered** (#483): a found line is drawn with the editor's own inline rendering (bold, italic,
   strikethrough, highlight, code, links and wiki links by their shown text, tags in their colour, a task as `[ ]` / `[x]`,
   a list item with a bullet, a heading without its `#`), in the picker and the sidebar, and the **found text is marked** in
