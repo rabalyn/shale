@@ -30,8 +30,6 @@ CFG-069: config/text.rs::cfg_009_every_key_of_the_file_has_a_description
 DATA-010: fsutil.rs::reads_report_errors_with_the_name
 DATA-013: fsutil.rs::concurrent_writers_never_produce_a_torn_file
 DATA-013: fsutil.rs::only_one_of_many_creators_wins
-DATA-014: config.rs::private_files_are_owner_only_and_replaced_whole
-DATA-014: fsutil.rs::private_files_are_owner_only
 DOCX-001: docx_export/export_tests.rs::the_original_is_the_word_file_the_source_property_links_to
 DOCX-006: docx_export/export_tests.rs::a_marked_paragraph_gets_its_jc_in_the_order_of_the_schema_and_the_mark_goes
 DRAW-012: drawing/ui_tests.rs::a_canvas_is_shown_read_only
