@@ -233,6 +233,10 @@ pub enum Modal {
     LiftPaste {
         text: String,
     },
+    /// pasted files outside the vault: copy them into the vault or link them where they are? (MEDIA-019)
+    OutsideFiles {
+        text: String,
+    },
     /// an Obsidian canvas is being opened: convert it or open it read-only?
     ConvertCanvas {
         rel: PathBuf,
@@ -338,6 +342,10 @@ pub enum Action {
     AskLiftHeadings(String),
     /// paste this text into the open note's editor (the answer to the question above)
     PasteText(String),
+    /// the pasted text names media files outside the vault and the setting is Ask: copy or link? (MEDIA-019)
+    AskOutsideFiles(String),
+    /// bring these pasted files into the open note's editor as the answer says (the answer to the question above)
+    PasteFiles(String, crate::media::intake::Choice),
 }
 
 #[derive(Default)]
@@ -2467,6 +2475,12 @@ impl ShaleApp {
                     self.convert_canvas(&rel, new_tab);
                 }
                 Action::AskLiftHeadings(text) => self.modal = Some(Modal::LiftPaste { text }),
+                Action::AskOutsideFiles(text) => self.modal = Some(Modal::OutsideFiles { text }),
+                Action::PasteFiles(text, how) => {
+                    if let Some(tab) = self.tabbar.tabs.get_mut(self.tabbar.active) {
+                        tab.editor.pending_files = Some((text, how));
+                    }
+                }
                 Action::PasteText(text) => {
                     if let Some(tab) = self.tabbar.tabs.get_mut(self.tabbar.active) {
                         tab.editor.pending_paste = Some(text);
@@ -3056,6 +3070,7 @@ pub fn handle_editor_action(app_actions: &mut Vec<Action>, a: EditorAction, from
         }
         EditorAction::CreatePerson(name) => app_actions.push(Action::CreatePerson(name)),
         EditorAction::AskLiftHeadings(text) => app_actions.push(Action::AskLiftHeadings(text)),
+        EditorAction::AskOutsideFiles(text) => app_actions.push(Action::AskOutsideFiles(text)),
     }
 }
 

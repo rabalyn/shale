@@ -642,6 +642,12 @@ impl Vault {
         }
     }
 
+    /// The library folders of this device (what [`Vault::set_libraries`] was given): the links that
+    /// an import or a pick writes are made with them (MEDIA-020).
+    pub fn libraries(&self) -> &[Library] {
+        &self.libraries
+    }
+
     /// Where a link of a note shows a media file, to be displayed or opened (MEDIA-014, MEDIA-015).
     /// A file of the vault wins (`resolve`), so a link that worked keeps working; otherwise a library
     /// link or a file link to a media file is looked up outside the vault. Never use the result to

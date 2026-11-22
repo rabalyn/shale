@@ -34,7 +34,12 @@ Back to [[Start here]].
   "Date prefix for new notes" on, the new note is named `YYMMDD_<name>` and the link you followed is
   rewritten to `[[261117_Plan|Plan]]` so it still reaches the note.
 - Type `[!` to pick a file: `/` starts at the vault, `~/` at your home folder, and Tab
-  completes like a shell. Files from outside the vault are copied to `z_media/<year>/<month>/`.
+  completes like a shell. A file from outside the vault is copied to `z_media/<year>/<month>/` or, for a
+  picture, PDF, sound or video, linked where it is, as **Settings → Import → Files from outside the
+  vault** says; with **Ask** (the start value) the picker asks "Copy into the vault" (C or Enter) or
+  "Link where it is" (L) after you pick, and Esc goes back to the list. The last line of the picker says what a
+  pick does now; **Alt+Shift+L** changes it for this pick only. Pasting files copied in a file manager
+  (Ctrl+V) does the same. See [[Sounds and videos]] for the links a linked file gets.
 - Type `[[p ` and a name to link a person ([[Tags and people]]).
 - After `[[Note#` (or `[[#` for this note) the list shows that note's headings, indented by level
   and with their numbers, and typing narrows it; picking one inserts the heading's text.

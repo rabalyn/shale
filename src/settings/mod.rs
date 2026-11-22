@@ -109,7 +109,7 @@ impl SettingsTab {
             SettingsTab::Mail => "Fetching and reading mail",
             SettingsTab::Social => "Feeds, new posts and the post search",
             SettingsTab::Search => "Which sources the search looks in, and the letters that choose one in a query",
-            SettingsTab::Import => "What the Import takes in, such as Word files through pandoc",
+            SettingsTab::Import => "What the Import takes in, and what happens to files from outside the vault",
             SettingsTab::Data => "What Shale keeps on disk, and for how long",
             SettingsTab::Latex => "The TeX that exports notes to PDF through LaTeX templates",
             SettingsTab::Updates => "New releases: whether Shale looks for them, downloads them or installs them",

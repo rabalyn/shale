@@ -13,7 +13,7 @@ lcov.info
 /docs/userguide/.trash/
 /tests/tex-env/cache/
 
-# flamegraphs of scripts/bench.sh --flamegraph: made again from any commit, attached to releases (#400)
+# flamegraphs of scripts/bench.sh --flamegraph: made again from any commit; a release has them as the attachment shale-flamegraphs-<version>.tar.gz (#400)
 /docs/perf/flamegraphs/
 /tests/syncthing-env/data/
 /tests/nfs-env/data/

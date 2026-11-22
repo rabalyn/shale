@@ -793,12 +793,16 @@ impl ShaleApp {
             View::Note(rel) => self.note_view(ui, rel),
             View::Drawing(rel) => {
                 let dark = self.cfg.dark_canvas;
+                let outside = self.cfg.outside_files;
                 match (self.drawings.get_mut(&rel), &self.vault) {
-                    (Some(d), Some(v)) => match d.ui(ui, dark, v) {
-                        Some(crate::drawing::DrawingAction::Editor(a)) => handle_editor_action(&mut self.actions, a, &rel),
-                        Some(crate::drawing::DrawingAction::ConvertCanvas) => self.actions.push(Action::ConvertCanvas { rel, new_tab: false }),
-                        None => {}
-                    },
+                    (Some(d), Some(v)) => {
+                        d.set_outside_files(outside);
+                        match d.ui(ui, dark, v) {
+                            Some(crate::drawing::DrawingAction::Editor(a)) => handle_editor_action(&mut self.actions, a, &rel),
+                            Some(crate::drawing::DrawingAction::ConvertCanvas) => self.actions.push(Action::ConvertCanvas { rel, new_tab: false }),
+                            None => {}
+                        }
+                    }
                     _ => self.actions.push(Action::Open { rel, new_tab: false }),
                 }
             }
@@ -960,6 +964,7 @@ impl ShaleApp {
                         tab.editor.esc_cursor = self.cfg.esc_cursor;
                         tab.editor.assist.people_dir = self.vdata.settings.people_dir.clone();
                         tab.editor.assist.numbered_headings = self.cfg.numbered_headings;
+                        tab.editor.assist.outside = self.cfg.outside_files;
                         tab.editor.dark_canvas = self.cfg.dark_canvas;
                         tab.editor.media = self.media.clone();
                         if let Some(sel) = tab.place.restore_cursor.take() {

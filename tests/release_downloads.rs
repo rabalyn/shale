@@ -181,9 +181,39 @@ fn build_024_the_release_job_needs_all_three_attests_everything_and_alone_may_wr
         assert!(j.contains("contents: read") && !j.contains(": write"), "{name} may write");
         assert!(!j.contains("attest-build-provenance") && !j.contains("gh release"), "{name} attests or publishes");
     }
-    assert_eq!(wf.matches("contents: write").count(), 1);
+    // the one other writer is the benchmark job, for its result asset only (BUILD-041)
+    assert_eq!(wf.matches("contents: write").count(), 2);
+    assert!(job(&wf, "bench").contains("contents: write") && !job(&wf, "bench").contains("id-token") && !job(&wf, "bench").contains("attest"));
     assert_eq!(wf.matches("id-token: write").count(), 1);
     assert!(wf.contains("permissions: {}"));
+}
+
+// spec: BUILD-041
+#[test]
+fn build_041_the_benchmark_job_runs_after_the_release_on_all_three_systems_and_can_never_fail_it() {
+    let wf = workflow();
+    let bench = job(&wf, "bench");
+    // after the release page is up, on tags only, not needed by anything: it cannot hold up or stop the release
+    assert!(bench.contains("needs: release") && bench.contains("if: startsWith(github.ref, 'refs/tags/v')"));
+    for other in ["linux", "macos", "windows", "release"] {
+        assert!(!job(&wf, other).contains("bench-github.sh") && !job(&wf, other).contains("needs: bench") && !job(&wf, other).contains("needs: [bench"), "{other} depends on the benchmark job");
+    }
+    // one entry per system, and the run is the script that compares with the same system's earlier asset
+    for system in ["linux-x86_64", "macos-arm64", "windows-x86_64"] {
+        assert!(bench.contains(&format!("system: {system}")), "{system}");
+    }
+    assert!(bench.contains("scripts/bench-github.sh \"$GITHUB_REF_NAME\" \"${{ matrix.system }}\"") && bench.contains("fail-fast: false"));
+    // never fails: the job and every step (a `uses:` or `run:` step) is continue-on-error
+    assert!(bench.contains("\n    continue-on-error: true\n"), "the job itself");
+    let steps = bench.split("\n      - ").skip(1).collect::<Vec<_>>();
+    assert!(steps.len() >= 6);
+    for step in &steps {
+        assert!(step.contains("continue-on-error: true"), "a step can fail the job: {step}");
+    }
+    // the result is an asset of the release and a workflow artifact
+    assert!(bench.contains("gh release upload \"$GITHUB_REF_NAME\" \"$RESULT\" --clobber") && bench.contains("actions/upload-artifact@"));
+    // the cache convention of BUILD-039: the tag run restores, `main` saves
+    assert!(bench.contains("shared-key: release-${{ runner.os }}") && bench.contains("save-if: ${{ github.ref == 'refs/heads/main' }}"));
 }
 
 // spec: BUILD-024
@@ -257,7 +287,8 @@ fn build_039_both_workflows_share_the_rust_cache_key() {
         }
     }
     assert_eq!(mc.matches("rust-cache@").count(), 3);
-    assert_eq!(build.matches("rust-cache@").count(), 3);
+    // the three build jobs and the benchmark job (BUILD-041), which also restores and never saves
+    assert_eq!(build.matches("rust-cache@").count(), 4);
 }
 
 // spec: BUILD-039
