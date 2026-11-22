@@ -438,6 +438,9 @@ jobs:
             libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl-dev libegl-dev >/dev/null
 
       # starts both stacks, runs both ignored suites and always takes the stacks down again
+      # smb_fuse_env (NET-018, #477) needs /dev/fuse and fusermount3 for its rclone mount of the Samba share: this job container
+      # gets neither (no `--device /dev/fuse` is added: what a job container may take is the runner's own configuration, and a
+      # device there is no minimal change), so `env-tests.sh run` says "SKIPPED: smb_fuse_env" and leaves it out; scripts/land.sh runs it
       - name: CalDAV, mail and TeX tests against the real servers
         if: steps.engine.outputs.engine == 'podman' || steps.engine.outputs.engine == 'docker'
         env:
