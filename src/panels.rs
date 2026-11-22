@@ -608,7 +608,10 @@ impl ShaleApp {
             Modal::Picker(p) => {
                 if let Some(v) = &self.vault {
                     let data = crate::search_all::Ctx { vault: v, mail: self.mail.index(), posts: &self.social.index };
-                    let out = crate::picker::show(&ctx, p, &data, &self.keymap);
+                    let out = crate::picker::show(&ctx, p, &data, &self.keymap, &mut self.cfg.search);
+                    if out.save {
+                        self.save_config();
+                    }
                     keep = out.pick.is_none() && !out.close;
                     if let Some(hit) = out.pick {
                         // a note opens in this tab and the keyboard goes into it; a mail or a post has its own view

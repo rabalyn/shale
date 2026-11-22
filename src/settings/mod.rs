@@ -12,6 +12,7 @@ mod help;
 pub(crate) mod import;
 mod latex;
 mod mail_social;
+mod search;
 mod sync_calendar;
 mod vault;
 mod vim;
@@ -34,6 +35,7 @@ pub enum SettingsTab {
     Calendar,
     Mail,
     Social,
+    Search,
     Import,
     Data,
     Latex,
@@ -52,7 +54,7 @@ impl SettingsTab {
     }
 
     /// All tabs in the order of the list.
-    pub const ALL: [SettingsTab; 15] = [
+    pub const ALL: [SettingsTab; 16] = [
         SettingsTab::Vault,
         SettingsTab::Editor,
         SettingsTab::Vim,
@@ -62,6 +64,7 @@ impl SettingsTab {
         SettingsTab::Calendar,
         SettingsTab::Mail,
         SettingsTab::Social,
+        SettingsTab::Search,
         SettingsTab::Import,
         SettingsTab::Data,
         SettingsTab::Latex,
@@ -81,6 +84,7 @@ impl SettingsTab {
             SettingsTab::Calendar => "Calendar",
             SettingsTab::Mail => "Mail",
             SettingsTab::Social => "Feeds",
+            SettingsTab::Search => "Search",
             SettingsTab::Import => "Import",
             SettingsTab::Data => "Data",
             SettingsTab::Latex => "LaTeX",
@@ -104,6 +108,7 @@ impl SettingsTab {
             SettingsTab::Calendar => "Calendars and the week",
             SettingsTab::Mail => "Fetching and reading mail",
             SettingsTab::Social => "Feeds, new posts and the post search",
+            SettingsTab::Search => "Which sources the search looks in, and the letters that choose one in a query",
             SettingsTab::Import => "What the Import takes in, such as Word files through pandoc",
             SettingsTab::Data => "What Shale keeps on disk, and for how long",
             SettingsTab::Latex => "The TeX that exports notes to PDF through LaTeX templates",
@@ -230,6 +235,7 @@ impl ShaleApp {
                     SettingsTab::Calendar => self.calendar_tab(ui, &mut asks),
                     SettingsTab::Mail => self.mail_tab(ui, &mut asks),
                     SettingsTab::Social => self.social_tab(ui, &mut asks),
+                    SettingsTab::Search => self.search_tab(ui),
                     SettingsTab::Import => self.import_tab(ui),
                     SettingsTab::Data => self.data_tab(ui, &mut asks),
                     SettingsTab::Latex => self.latex_tab(ui, &mut asks),

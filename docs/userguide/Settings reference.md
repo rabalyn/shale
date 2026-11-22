@@ -178,6 +178,19 @@ system keyring, never in this file):
 | `social_replies` | off | the tick "Include replies from others" in the Import dialog |
 | `social_check_minutes` | 5 (0 = never) | Settings → Feeds, and Feeds → Accounts… |
 
+## Search ([[Search and pickers]])
+
+| Key | Default | Where |
+|---|---|---|
+| `search` | the group of the four keys below | Settings → Search |
+| `search.prefix_notes` | `f` (one letter: `f:banana` looks in notes only) | Settings → Search, "Prefixes", Notes |
+| `search.prefix_mail` | `m` (one letter: `m:banana` looks in mail only) | Settings → Search, "Prefixes", Mail |
+| `search.prefix_posts` | `s` (one letter: `s:banana` looks in posts only) | Settings → Search, "Prefixes", Posts |
+| `search.sources` | `["notes", "mail", "posts"]` (the sources a query without a prefix looks in and lists; an empty or unknown list means all three) | Settings → Search, "Sources", and Shift+click on a source button above the results |
+
+The three letters must differ, and no combination of them may spell a field of the mail or post search (`to`, `in`, …); letters Shale
+cannot use are shown with the reason in Settings → Search, and read as `f`, `m`, `s` when they are in the file.
+
 ## Import ([[Import]])
 
 | Key | Default | Where |

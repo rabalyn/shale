@@ -102,6 +102,7 @@ mod recovery;
 mod script;
 mod search_all;
 mod search_panel;
+mod search_sources;
 mod secret;
 mod secrets;
 mod settings;

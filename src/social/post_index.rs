@@ -21,7 +21,7 @@ pub const KEEP_DAYS: i64 = 365;
 
 const VERSION: i64 = 1;
 /// The prefixes a person may type in front of a term, and the column each one limits it to.
-const FIELDS: [(&str, &str); 7] = [("from", "author"), ("text", "text"), ("body", "text"), ("in", "context"), ("context", "context"), ("link", "link"), ("date", "date")];
+pub(crate) const FIELDS: [(&str, &str); 7] = [("from", "author"), ("text", "text"), ("body", "text"), ("in", "context"), ("context", "context"), ("link", "link"), ("date", "date")];
 
 /// Where the index lives: `<user data folder>/shale/social-posts.db` (SOC-034).
 pub fn default_path() -> std::path::PathBuf {

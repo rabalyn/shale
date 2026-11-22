@@ -1299,6 +1299,260 @@ mod tests {
         assert_eq!(w.app.current_path(), Some(rel), "the note of the first hit is open");
     }
 
+    /// Where the count button of a source is drawn ("Mail 1": its name, a blank and the count; the
+    /// headings of the groups have two blanks).
+    fn source_button(w: &W, name: &str) -> Pos2 {
+        let one = format!("{name} ");
+        let two = format!("{name}  ");
+        w.text_pos.iter().find(|(t, _)| t.starts_with(&one) && !t.starts_with(&two)).unwrap_or_else(|| panic!("no button {name}: {:?}", w.texts)).1 + Vec2::new(4.0, 4.0)
+    }
+
+    fn button_texts(w: &W) -> Vec<String> {
+        ["Notes", "Mail", "Posts"].iter().filter_map(|n| w.texts.iter().find(|t| t.starts_with(&format!("{n} ")) && !t.starts_with(&format!("{n}  "))).cloned()).collect()
+    }
+
+    fn click_source(w: &mut W, name: &str) {
+        let p = source_button(w, name);
+        click_at(w, p);
+    }
+
+    /// A click on the button of a source with Shift held.
+    fn shift_click_source(w: &mut W, name: &str) {
+        let p = source_button(w, name);
+        let b = |pressed| Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::SHIFT };
+        w.frame(vec![Event::ModifiersChanged(Modifiers::SHIFT), Event::PointerMoved(p)]);
+        w.frame(vec![b(true)]);
+        w.frame(vec![b(false)]);
+        w.frame(vec![Event::ModifiersChanged(Modifiers::NONE)]);
+    }
+
+    fn groups_of(rows: Vec<(&'static str, String)>) -> Vec<&'static str> {
+        let mut g: Vec<&str> = rows.into_iter().map(|r| r.0).collect();
+        g.dedup();
+        g
+    }
+
+    // spec: NAV-052, NAV-050
+    #[test]
+    fn nav_052_the_buttons_of_the_picker_solo_a_source_and_count_the_others() {
+        let mut w = vim_note("buttons-picker");
+        with_mail(&mut w);
+        with_post(&mut w);
+        space_f_g(&mut w);
+        search_for(&mut w, "banana");
+        assert_eq!(button_texts(&w), ["Notes 1", "Mail 1", "Posts 1"], "a button per source with its count");
+        assert_eq!(groups_of(picker_rows(&w)), ["Notes", "Mail", "Posts"]);
+        // a click: only that source is listed, the others are still counted, the query is as typed
+        click_source(&mut w, "Mail");
+        assert_eq!(groups_of(picker_rows(&w)), ["Mail"]);
+        assert_eq!(button_texts(&w), ["Notes 1", "Mail 1", "Posts 1"], "a switched-off source is counted");
+        assert_eq!(picker(&w).query, "banana");
+        // another one while soloed: solo that one; the same again: back
+        click_source(&mut w, "Posts");
+        assert_eq!(groups_of(picker_rows(&w)), ["Posts"]);
+        click_source(&mut w, "Posts");
+        assert_eq!(groups_of(picker_rows(&w)), ["Notes", "Mail", "Posts"], "back to the default selection");
+        assert_eq!(w.app.cfg.search, crate::search_sources::SearchConfig::default(), "a solo is not saved");
+        // a prefix wins over the buttons, and the buttons show it
+        click_source(&mut w, "Notes");
+        w.app.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::Everything)));
+        settle(&mut w);
+        search_for(&mut w, "m:banana");
+        assert_eq!(groups_of(picker_rows(&w)), ["Mail"], "the prefix chooses");
+        assert_eq!(button_texts(&w), ["Notes 1", "Mail 1", "Posts 1"], "the others are counted all the same");
+        // the window of file names has no buttons
+        w.app.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::FileNames)));
+        settle(&mut w);
+        assert!(button_texts(&w).is_empty());
+    }
+
+    // spec: NAV-053, NAV-054
+    #[test]
+    fn nav_053_shift_click_changes_the_saved_default_selection_for_both_views() {
+        let mut w = vim_note("buttons-shift");
+        with_mail(&mut w);
+        with_post(&mut w);
+        space_f_g(&mut w);
+        search_for(&mut w, "banana");
+        shift_click_source(&mut w, "Mail");
+        assert_eq!(w.app.cfg.search.sources, ["notes", "posts"], "Mail is out of the default selection");
+        assert_eq!(groups_of(picker_rows(&w)), ["Notes", "Posts"]);
+        assert_eq!(button_texts(&w), ["Notes 1", "Mail 1", "Posts 1"], "a switched-off source is counted");
+        shift_click_source(&mut w, "Notes");
+        assert_eq!(w.app.cfg.search.sources, ["posts"]);
+        shift_click_source(&mut w, "Posts");
+        assert_eq!(w.app.cfg.search.sources, ["posts"], "the last one cannot be switched off");
+        assert_eq!(groups_of(picker_rows(&w)), ["Posts"]);
+        // the sidebar search uses the same selection
+        w.press(Key::Escape, Modifiers::NONE);
+        w.app.side.left = crate::app::LeftPanel::Search;
+        w.app.search.query = "banana".into();
+        w.app.search.focus = true;
+        settle(&mut w);
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        settle(&mut w);
+        assert_eq!(groups_of(sidebar_rows(&w)), ["Posts"], "the same default selection");
+        assert_eq!(button_texts(&w), ["Notes 1", "Mail 1", "Posts 1"]);
+        // …and Shift+click there changes it for the picker too
+        shift_click_source(&mut w, "Notes");
+        assert_eq!(w.app.cfg.search.sources, ["notes", "posts"]);
+        assert_eq!(groups_of(sidebar_rows(&w)), ["Notes", "Posts"]);
+        w.app.side.left = crate::app::LeftPanel::Files;
+        w.app.focus_editor();
+        settle(&mut w);
+        assert!(w.app.tabbar.tabs[0].editor.vim_normal_keys(&w.ctx), "the keyboard is back in the editor");
+        space_f_g(&mut w);
+        search_for(&mut w, "banana");
+        assert_eq!(groups_of(picker_rows(&w)), ["Notes", "Posts"]);
+        // a solo is on top of the selection, and back goes to the selection
+        click_source(&mut w, "Mail");
+        assert_eq!(groups_of(picker_rows(&w)), ["Mail"]);
+        click_source(&mut w, "Mail");
+        assert_eq!(groups_of(picker_rows(&w)), ["Notes", "Posts"]);
+    }
+
+    // spec: NAV-052
+    #[test]
+    fn nav_052_the_buttons_of_the_sidebar_search_solo_a_source_and_count_the_others() {
+        let mut w = W::new("buttons-sidebar");
+        with_mail(&mut w);
+        with_post(&mut w);
+        w.app.side.left = crate::app::LeftPanel::Search;
+        w.app.search.focus = true;
+        settle(&mut w);
+        w.frame(vec![Event::Text("banana".to_string())]);
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        settle(&mut w);
+        assert_eq!(button_texts(&w), ["Notes 1", "Mail 1", "Posts 1"]);
+        assert_eq!(groups_of(sidebar_rows(&w)), ["Notes", "Mail", "Posts"]);
+        click_source(&mut w, "Posts");
+        assert_eq!(groups_of(sidebar_rows(&w)), ["Posts"]);
+        assert_eq!(button_texts(&w), ["Notes 1", "Mail 1", "Posts 1"], "counted, not listed");
+        assert_eq!(w.app.search.query, "banana", "the buttons leave the query alone");
+        click_source(&mut w, "Notes");
+        assert_eq!(groups_of(sidebar_rows(&w)), ["Notes"], "another one while soloed");
+        click_source(&mut w, "Notes");
+        assert_eq!(groups_of(sidebar_rows(&w)), ["Notes", "Mail", "Posts"], "back");
+        // a prefix in the box
+        w.app.search.query = "s: banana".into();
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        settle(&mut w);
+        assert_eq!(groups_of(sidebar_rows(&w)), ["Posts"]);
+        assert_eq!(button_texts(&w), ["Notes 1", "Mail 1", "Posts 1"]);
+    }
+
+    // spec: NAV-055
+    #[test]
+    fn nav_055_tab_and_shift_tab_solo_the_sources_in_the_picker() {
+        let mut w = vim_note("tab-picker");
+        with_mail(&mut w);
+        with_post(&mut w);
+        space_f_g(&mut w);
+        assert!(w.texts.iter().any(|t| t.contains("Tab next source · Shift+Tab previous source")), "the hint has the keys: {:?}", w.texts);
+        search_for(&mut w, "banana");
+        let solo = |w: &W| picker(w).filter.solo;
+        let mut seen = vec![];
+        for _ in 0..4 {
+            w.press(Key::Tab, Modifiers::NONE);
+            seen.push(groups_of(picker_rows(&w)));
+        }
+        assert_eq!(seen, [vec!["Notes"], vec!["Mail"], vec!["Posts"], vec!["Notes", "Mail", "Posts"]], "Notes, Mail, Posts, then all again");
+        w.press(Key::Tab, Modifiers::SHIFT);
+        assert_eq!(groups_of(picker_rows(&w)), ["Posts"], "Shift+Tab goes backwards");
+        w.press(Key::Tab, Modifiers::SHIFT);
+        assert_eq!(groups_of(picker_rows(&w)), ["Mail"]);
+        assert_eq!(picker(&w).query, "banana", "Tab typed nothing");
+        assert_eq!(note_text(&w), "# A\n");
+        // with a prefix the keys do nothing
+        search_for(&mut w, "x");
+        w.app.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::Everything)));
+        settle(&mut w);
+        search_for(&mut w, "m:banana");
+        w.press(Key::Tab, Modifiers::NONE);
+        assert_eq!(solo(&w), None);
+        // the keys are definable, and the hint follows
+        w.app.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::Everything)));
+        w.app.keymap.set(Action::ListSourceNext, Binding::parse("Ctrl+Alt+S").unwrap()).unwrap();
+        settle(&mut w);
+        assert!(w.texts.iter().any(|t| t.contains("Ctrl+Alt+S next source · Shift+Tab previous source")), "{:?}", w.texts);
+        search_for(&mut w, "banana");
+        w.press(Key::Tab, Modifiers::NONE);
+        assert_eq!(solo(&w), None, "the old key does nothing");
+        w.press(Key::S, CTRL_ALT);
+        assert_eq!(solo(&w), Some(crate::search_sources::Kind::Notes));
+    }
+
+    // spec: NAV-055
+    #[test]
+    fn nav_055_tab_and_shift_tab_solo_the_sources_in_the_sidebar_search_also_while_browsing() {
+        let mut w = W::new("tab-sidebar");
+        with_mail(&mut w);
+        with_post(&mut w);
+        w.app.side.left = crate::app::LeftPanel::Search;
+        w.app.search.focus = true;
+        settle(&mut w);
+        w.frame(vec![Event::Text("banana".to_string())]);
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        settle(&mut w);
+        // in the box
+        w.press(Key::Tab, Modifiers::NONE);
+        settle(&mut w);
+        assert_eq!(groups_of(sidebar_rows(&w)), ["Notes"], "Tab in the box solos the next source");
+        assert!(w.ctx.memory(|m| m.has_focus(egui::Id::unique("search-input"))), "and the box keeps the keyboard");
+        w.press(Key::Tab, Modifiers::SHIFT);
+        w.press(Key::Tab, Modifiers::SHIFT);
+        settle(&mut w);
+        assert_eq!(groups_of(sidebar_rows(&w)), ["Posts"], "Shift+Tab goes back through the default selection to the last source");
+        // while the hits are browsed
+        w.app.search.filter.solo = None;
+        settle(&mut w);
+        w.press(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(w.app.search.sel, Some(0));
+        assert!(w.texts.iter().any(|t| t.contains("Tab next source, Shift+Tab previous source")), "the hint has the keys: {:?}", w.texts);
+        w.press(Key::Tab, Modifiers::NONE);
+        settle(&mut w);
+        assert_eq!(groups_of(sidebar_rows(&w)), ["Notes"]);
+        assert_eq!(w.app.search.sel, Some(0), "still browsing, at the first hit of the new list");
+        assert!(w.ctx.memory(|m| m.focused().is_none()), "Tab did not move the focus");
+        w.press(Key::Tab, Modifiers::NONE);
+        settle(&mut w);
+        assert_eq!(groups_of(sidebar_rows(&w)), ["Mail"]);
+        assert_eq!(w.app.search.sel, Some(0));
+        w.press(Key::Enter, Modifiers::NONE);
+        settle(&mut w);
+        assert_eq!(views(&w), ["mail"], "Enter opens the hit of the soloed source");
+    }
+
+    // spec: NAV-051, CFG-067
+    #[test]
+    fn nav_051_the_search_settings_refuse_clashing_letters_and_keep_the_old_ones() {
+        let mut w = W::new("search-settings");
+        w.app.open_settings(SettingsTab::Search);
+        settle(&mut w);
+        let field = |w: &W, text: &str| w.text_pos.iter().find(|(t, _)| t == text).unwrap_or_else(|| panic!("no field {text}: {:?}", w.texts)).1 + Vec2::new(3.0, 5.0);
+        let type_into = |w: &mut W, old: &str, new: &str| {
+            let at = field(w, old);
+            click_at(w, at);
+            w.press(Key::A, CTRL);
+            w.frame(vec![Event::Text(new.to_string())]);
+            settle(w);
+        };
+        type_into(&mut w, "f", "i");
+        assert_eq!(w.app.cfg.search.prefix_notes, "i", "a letter that is fine is taken");
+        type_into(&mut w, "m", "n");
+        assert_eq!(w.app.cfg.search.prefix_mail, "m", "i and n would spell in:");
+        assert!(w.texts.iter().any(|t| t.contains("“in:”")), "the reason is shown: {:?}", w.texts);
+        type_into(&mut w, "n", "i");
+        assert_eq!(w.app.cfg.search.prefix_mail, "m", "the same letter as notes");
+        assert!(w.texts.iter().any(|t| t.contains("prefix of notes and of mail")), "{:?}", w.texts);
+        // the sources: the last one cannot be unchecked
+        let boxes = |w: &W| ["Notes", "Mail", "Posts"].map(|n| w.text_pos.iter().filter(|(t, _)| t == n).map(|(_, p)| *p).next().unwrap_or_else(|| panic!("no {n}")));
+        let [notes, mail, _] = boxes(&w);
+        click_at(&mut w, notes + Vec2::new(3.0, 5.0));
+        click_at(&mut w, mail + Vec2::new(3.0, 5.0));
+        assert!(w.app.cfg.search.sources.len() <= 2);
+    }
+
     // spec: NAV-022
     #[test]
     fn the_sidebar_search_has_no_mail_group_while_the_mail_store_is_closed() {
