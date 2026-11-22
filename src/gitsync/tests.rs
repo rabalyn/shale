@@ -440,6 +440,70 @@ fn only_plain_remote_urls_are_accepted() {
     }
 }
 
+// spec: SYNC-004
+#[test]
+fn a_folder_path_may_have_spaces_an_address_may_not() {
+    for ok in [
+        "/Users/ada/Library/CloudStorage/Dropbox/My notes.git",
+        "  /srv/my notes/x.git  ",
+        r"C:\Users\Ada\OneDrive - Company\notes.git",
+        "C:/Users/Ada/OneDrive - Company/notes.git",
+        r"\\server\my share\notes.git",
+        "file:///srv/my%20notes/x.git",
+    ] {
+        assert!(check_url(ok).is_ok(), "{ok}");
+    }
+    for bad in [
+        "https://host/my notes.git",
+        "https://host /x.git",
+        "ssh://git@host/my notes.git",
+        "git@host:my notes.git",
+        "host:my notes",
+        "file:///srv/my notes/x.git",
+        "ext::sh -c id /srv/a b",
+        "/srv/my\nnotes.git",
+        "/srv/my\tnotes.git",
+        "/srv/a\0b",
+        "C:\\a\u{7}b",
+        "- /srv/x y",
+        "-C /srv/x y",
+        "--upload-pack=x /srv/a b",
+    ] {
+        assert!(check_url(bad).is_err(), "{bad:?}");
+    }
+    assert!(check_url("https://host/my notes.git").unwrap_err().contains("spaces"));
+}
+
+// spec: SYNC-004
+#[test]
+fn connect_hands_a_folder_with_a_space_to_git_as_one_argument() {
+    let env = Env::new("connect-space");
+    let v = env.folder("v");
+    let spaced = env.root.join("my notes; touch pwned").join("remote.git");
+    std::fs::create_dir_all(&spaced).unwrap();
+    let spaced = spaced.to_string_lossy().into_owned();
+    connect(&env.git, &v, &spaced).unwrap();
+    assert_eq!(remote_url(&env.git, &v).as_deref(), Some(spaced.as_str()));
+    assert!(!env.root.join("pwned").exists() && !v.join("pwned").exists());
+    // a Windows path is kept as typed
+    let win = r"C:\Users\Ada\OneDrive - Company\notes.git";
+    connect(&env.git, &v, win).unwrap();
+    assert_eq!(remote_url(&env.git, &v).as_deref(), Some(win));
+}
+
+// spec: SYNC-004
+#[test]
+fn a_vault_syncs_with_a_remote_in_a_folder_with_a_space() {
+    let env = Env::new("sync-space");
+    let remote = env.root.join("my notes").join("remote.git");
+    std::fs::create_dir_all(&remote).unwrap();
+    assert!(env.git.ok(&remote, args!["init", "--quiet", "--bare"]).is_ok());
+    let v = env.folder("v");
+    connect(&env.git, &v, remote.to_str().unwrap()).unwrap();
+    write(&v, "First.md", "x\n");
+    assert!(env.sync(&v).pushed);
+}
+
 // spec: SEC-010
 #[test]
 fn an_address_with_a_password_or_without_encryption_is_refused() {

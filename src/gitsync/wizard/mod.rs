@@ -208,7 +208,7 @@ impl Wizard {
 /// An absolute path to a folder (or a `file://` address): a remote that needs no sign-in.
 pub fn is_local_remote(text: &str) -> bool {
     let t = text.trim();
-    Path::new(t).is_absolute() || t.starts_with("file://")
+    super::is_folder_path(t) || t.starts_with("file://")
 }
 
 /// What the Settings page and the wizard know about where the vault is (SYNC-059…SYNC-062).

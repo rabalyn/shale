@@ -267,3 +267,26 @@ pub fn list() -> Vec<Scenario> {
         m("git.lfs.sync.media", 1, false, git_lfs).cold(),
     ]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bench::scenarios::Scale;
+
+    // spec: SYNC-004
+    #[test]
+    fn the_git_scenarios_work_in_a_temporary_folder_with_a_space() {
+        if git_available().is_err() {
+            return;
+        }
+        let base = std::env::temp_dir().join(format!("shale bench with space {}", std::process::id()));
+        let mut fx = Fixtures::in_folder(Scale::TINY, base.clone());
+        for prepare in [git_initial, git_incremental, git_pull] {
+            let mut run = prepare(&mut fx).expect("the scenario is prepared in a folder with a space");
+            run();
+        }
+        assert!(base.to_string_lossy().contains(' '));
+        drop(fx);
+        assert!(!base.exists(), "the fixtures are removed again");
+    }
+}

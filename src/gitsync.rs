@@ -140,7 +140,15 @@ pub fn hide_passwords(text: &str) -> String {
     out
 }
 
-/// Check a remote URL typed by the user (SYNC-004).
+/// An absolute folder path as a remote: a Unix path, or on every system a Windows one (`C:\…`,
+/// `C:/…`, `\\server\share\…`), so the check does not depend on the system Shale runs on.
+pub fn is_folder_path(text: &str) -> bool {
+    let b = text.as_bytes();
+    Path::new(text).is_absolute() || (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && matches!(b[2], b'\\' | b'/')) || text.starts_with("\\\\")
+}
+
+/// Check a remote URL typed by the user (SYNC-004). A folder path may have spaces (the folders of
+/// Dropbox or OneDrive do), an address may not; git gets the text as one argument, never a shell.
 pub fn check_url(url: &str) -> Result<(), String> {
     let url = url.trim();
     if url.is_empty() {
@@ -149,8 +157,12 @@ pub fn check_url(url: &str) -> Result<(), String> {
     if url.starts_with('-') {
         return Err("A URL can't start with '-'".into());
     }
-    if url.chars().any(|c| c.is_whitespace() || c.is_control()) {
-        return Err("A URL can't contain spaces or control characters".into());
+    if url.chars().any(|c| c.is_control()) {
+        return Err("A URL can't contain control characters".into());
+    }
+    let folder = is_folder_path(url) && !url.contains("::");
+    if !folder && url.chars().any(|c| c.is_whitespace()) {
+        return Err("An address can't contain spaces (a folder path can; write a space in file:// as %20)".into());
     }
     let lower = url.to_ascii_lowercase();
     if let Some((scheme, rest)) = lower.split_once("://") {
@@ -174,7 +186,7 @@ pub fn check_url(url: &str) -> Result<(), String> {
     if url.contains("::") {
         return Err("Remote helper URLs (like ext::) are not allowed".into());
     }
-    if Path::new(url).is_absolute() {
+    if is_folder_path(url) {
         return Ok(());
     }
     // scp-like: [user@]host:path
