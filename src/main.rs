@@ -123,6 +123,7 @@ mod tab_order_tests;
 mod table;
 mod table_grid;
 mod table_select;
+mod task_box;
 mod theme;
 mod themes;
 #[cfg(test)]

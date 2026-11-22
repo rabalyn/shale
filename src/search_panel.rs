@@ -219,7 +219,8 @@ impl ShaleApp {
                         // (the title is at most search_render::MAX_SHOWN_CHARS long)
                         let job = h.job(Look { rendered, size: 12.5, raw_colour: theme::palette().muted });
                         row(ui, |ui| {
-                            ui.add(egui::Label::new(job).wrap());
+                            let shown = ui.add(egui::Label::new(job.clone()).wrap());
+                            crate::search_render::paint_task_boxes(ui, &job, |_| shown.rect.min);
                         })
                     }
                     Action::Open { rel, .. } if h.group == search_all::NOTES => {

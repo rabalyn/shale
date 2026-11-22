@@ -288,7 +288,10 @@ pub fn show(ctx: &Context, p: &mut Picker, data: &Ctx, keymap: &Keymap, cfg: &mu
                 if !h.detail.is_empty() {
                     job.append(&format!("    {}", h.detail), 0.0, egui::TextFormat { font_id: FontId::proportional(size), color: theme::palette().muted, ..Default::default() });
                 }
-                let resp = ui.selectable_label(i == p.sel, job);
+                let resp = ui.selectable_label(i == p.sel, job.clone());
+                // (the text sits at the left padding, centred in the row)
+                let pad = ui.spacing().button_padding.x;
+                crate::search_render::paint_task_boxes(ui, &job, |g| egui::pos2(resp.rect.min.x + pad, resp.rect.center().y - g.size().y / 2.0));
                 if i == p.sel && (keys.down || keys.up) {
                     resp.scroll_to_me(None);
                 }

@@ -5,7 +5,7 @@ features:
 ![[tasks.png]]
 
 Every `- [ ] task` of every note appears in one list (the check-mark icon in the ribbon).
-Tick a task there and it is saved in its note. Clicking `[ ]` in the editor or the reading view
+Tick a task there and it is saved in its note. Clicking the box of a task in the editor (`[ ]` in raw text) or the reading view
 does the same. Back to [[Start here]].
 
 - Filter by text or `#tag`, show done tasks, or only tasks with a due date.
