@@ -10,9 +10,10 @@ Back to [[Start here]].
 (below), shown in the sidebar: it stays open while you work, is narrow, and lists up to 20 lines
 of each note (the picker lists 3). The results are grouped under **Notes**, **Mail** (only while
 your mail is set up and open) and **Posts** (the posts of your feeds that Shale loaded), each
-group with its count (`200+` when there are more). `*` and `?` are wildcards, and the fields of
-mail and posts work as in their own search (`from:`, `subject:`, `in:`, `date:`; see [[Mail]]
-and [[Feeds]]).
+group with its count (`200+` when there are more). What you can type (wildcards, `"phrases"`,
+the fields `from:`, `subject:`, `in:`, `date:` of mail and posts) is in [[Search syntax]].
+
+![[sidebar-search.png]]
 
 ## Choosing the sources: prefixes and buttons
 
@@ -69,9 +70,11 @@ With vim-style editing on ([[Editor]]), the Space key starts these:
   ignoring case; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the file in this tab, Esc closes.
   It never creates a note, unlike Ctrl+O.
 - **Space f g**: "Search notes, mail and posts" in one list (the same search as the sidebar's), grouped under Notes, Mail and
-  Posts with their counts. `*` (any characters) and `?` (one character) are wildcards. Enter
+  Posts with their counts; the syntax is in [[Search syntax]]. Enter
   opens the hit where it belongs: the note at the found line, the mail in the mail view, the post
   in a Feeds tab.
+
+![[picker-search.png]]
 
 Both windows are bounded and never stall your typing. The search field and, right under it, a
 hint with the keys stay at the top of the window; only the list below scrolls, however many hits
