@@ -89,8 +89,10 @@ pub fn classify(attachments: &mut [Attachment], html: Option<&str>) {
         }
         let cid = a.cid.to_ascii_lowercase();
         let mine: Vec<usize> = refs.iter().filter(|(id, _)| !cid.is_empty() && *id == cid).map(|r| r.1).collect();
+        // a picture the text refers to is content, whatever its name: Outlook calls every inline picture image001.png
+        let in_body = mine.iter().any(|p| start.is_none_or(|s| *p < s));
         let in_signature = start.is_some_and(|s| !mine.is_empty() && mine.iter().all(|p| *p >= s));
-        if in_signature || (a.data.len() < SMALL_PICTURE && typical_name(&a.name)) {
+        if !in_body && (in_signature || (a.data.len() < SMALL_PICTURE && typical_name(&a.name))) {
             a.kind = AttKind::SignatureImage;
         }
     }

@@ -61,7 +61,7 @@ fn pictures_after_the_dash_delimiter_or_a_gmail_container_are_signature_pictures
 // spec: IMP-059
 #[test]
 fn an_outlook_mail_with_image001_and_social_icons_has_signature_pictures() {
-    let html = "<p>Hello</p><p><img src=\"cid:i1\"></p>";
+    let html = "<p>Hello</p><div id=\"Signature\"><img src=\"cid:i1\"></div>";
     let raw = related(html, &[("image001.png", "i1", "inline"), ("linkedin.png", "", "attachment"), ("Facebook_icon.png", "", "attachment"), ("XING.gif", "", "attachment")]);
     let k = kinds(&raw);
     assert!(k.iter().all(|(_, k)| *k == AttKind::SignatureImage), "{k:?}");
@@ -79,4 +79,16 @@ fn a_real_picture_attachment_stays_content_and_so_does_a_big_logo_named_picture(
     m.push_str(&big);
     m.push_str("\r\n--M--\r\n");
     assert_eq!(kinds(m.as_bytes()), vec![("logo-neu.png".to_string(), AttKind::Content)]);
+}
+
+// spec: IMP-059
+#[test]
+fn an_outlook_screenshot_in_the_text_stays_content_whatever_its_name() {
+    let html = "<p>See <img src=\"cid:s1\"></p><div id=\"Signature\"><img src=\"cid:s2\"><img src=\"cid:s3\"></div>";
+    let raw = related(html, &[("image001.png", "s1", "inline"), ("image002.png", "s2", "inline"), ("linkedin.png", "s3", "inline")]);
+    let k: Vec<AttKind> = kinds(&raw).into_iter().map(|k| k.1).collect();
+    assert_eq!(k, vec![AttKind::Content, AttKind::SignatureImage, AttKind::SignatureImage]);
+    // no signature start found: a picture the text refers to is still content
+    let raw = related("<p><img src=\"cid:s1\"></p>", &[("image001.png", "s1", "inline")]);
+    assert_eq!(kinds(&raw)[0].1, AttKind::Content);
 }
