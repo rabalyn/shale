@@ -10,12 +10,36 @@ use crate::vault::Vault;
 use eframe::egui::{self, Align, CornerRadius, Layout, RichText, Sense, Ui};
 use std::path::Path;
 
+/// The filled, rounded box the front matter is drawn in.
+fn boxed<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    egui::Frame::new()
+        .fill(theme::palette().bg_secondary)
+        .corner_radius(CornerRadius::same(6))
+        .inner_margin(8)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            add(ui)
+        })
+        .inner
+}
+
+/// The body of a card by its kind: the header of a mail, an event, the page chip of a Word import or the
+/// rows, and the tags (EDIT-062, EDIT-063).
+fn card_body(ui: &mut Ui, c: &Card, vault: &Vault, rel: &Path, out: &mut Option<ReaderAction>) {
+    match c.kind {
+        Kind::Email => email(ui, c, vault, rel, out),
+        Kind::Event => event(ui, c, vault, rel, out),
+        Kind::Word => word(ui, c),
+        Kind::Generic => generic(ui, c),
+    }
+    tags(ui, c);
+}
+
 /// Draw the front matter of `text`; `raw` are its property lines (between the two `---`).
 pub fn show(ui: &mut Ui, text: &str, raw: &[&str], view: PropertiesView, vault: &Vault, rel: &Path, out: &mut Option<ReaderAction>) {
     let card = Card::parse(text);
     let view = if card.is_none() { PropertiesView::Raw } else { view };
-    egui::Frame::new().fill(theme::palette().bg_secondary).corner_radius(CornerRadius::same(6)).inner_margin(8).show(ui, |ui| {
-        ui.set_width(ui.available_width());
+    boxed(ui, |ui| {
         let open_id = egui::Id::unique(("shale-properties-open", rel));
         let open: bool = ui.ctx().data(|d| d.get_temp(open_id)).unwrap_or(false);
         let mut toggled = false;
@@ -28,13 +52,7 @@ pub fn show(ui: &mut Ui, text: &str, raw: &[&str], view: PropertiesView, vault: 
                 });
             }
             (PropertiesView::Card, Some(c)) => {
-                match c.kind {
-                    Kind::Email => email(ui, c, vault, rel, out),
-                    Kind::Event => event(ui, c, vault, rel, out),
-                    Kind::Word => word(ui, c),
-                    Kind::Generic => generic(ui, c),
-                }
-                tags(ui, c);
+                card_body(ui, c, vault, rel, out);
                 ui.horizontal(|ui| {
                     toggled = toggle(ui, open);
                     ui.label(RichText::new("All properties").small().color(theme::palette().muted));
@@ -49,6 +67,23 @@ pub fn show(ui: &mut Ui, text: &str, raw: &[&str], view: PropertiesView, vault: 
             raw_lines(ui, raw);
         }
     });
+}
+
+/// The card of the front matter of `text` alone, as the editor draws it for a folded front matter
+/// (EDIT-081): the same body as in [`show`] without the "All properties" toggle. False, and nothing
+/// drawn, when the front matter has no property and so no card.
+pub fn card(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, out: &mut Option<ReaderAction>) -> bool {
+    let Some(c) = Card::parse(text) else { return false };
+    boxed(ui, |ui| card_body(ui, &c, vault, rel, out));
+    true
+}
+
+/// How high [`card`] is when it is `width` wide: a sizing pass in an invisible child of `ui` that
+/// draws nothing and takes no room. `None` when there is no card.
+pub fn card_height(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, width: f32) -> Option<f32> {
+    let rect = egui::Rect::from_min_size(ui.max_rect().min, egui::vec2(width, 10_000.0));
+    let mut child = ui.new_child(egui::UiBuilder::new().id_salt("card-height").max_rect(rect).sizing_pass().invisible());
+    card(&mut child, text, vault, rel, &mut None).then(|| child.min_rect().height())
 }
 
 /// The ▸/▾ button; true when it was clicked.

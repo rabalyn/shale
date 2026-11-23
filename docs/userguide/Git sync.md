@@ -9,6 +9,12 @@ Keep a vault on several computers with git. Back to [[Start here]]. The easy way
   and press **Connect** (a folder path may have spaces, like `…/Dropbox/My notes.git`; an address may not), or run `git init` in the vault folder yourself. An address with a password in it, and plain `http://`
   or `git://` (except on this computer), are refused: use the wizard's token, a credential helper or an SSH key.
   A token made through the wizard is kept in your system's keyring and given to git by Shale; it is never in a file.
+- **A folder that already is a git repository.** When you open or add a folder that has its own `.git`, Shale asks
+  whether to use git sync with it. The question says that auto sync will be turned on and that files not committed yet
+  are committed automatically (and pushed when there is a remote). **Use git sync** keeps it on; **Don't sync** turns
+  "Sync this vault automatically" off for that vault (you can turn it on again in Settings → Sync). Nothing is synced
+  until you answer; Esc leaves the question for later and Shale asks again the next time you open the vault. A `.git`
+  that Shale made itself, and a repository in a parent folder (which Shale does not use), are not asked about.
 - Shale then syncs on its own: when the vault opens, every few minutes (default 5; the setting
   is `sync.interval_minutes`) and on **Sync now**. "Sync this vault automatically" switches it
   off (`sync.enabled`). Those settings are in the vault's `.shale/settings.json`, so they travel

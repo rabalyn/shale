@@ -44,6 +44,7 @@ pub enum Icon {
     LocalGraph,
     CalendarPanel,
     History,
+    Thread,
 }
 
 pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
@@ -242,6 +243,13 @@ pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
             p.line_segment([cx, cx + Vec2::new(0.0, -w * 0.2)], s);
             p.line_segment([cx, cx + Vec2::new(w * 0.15, w * 0.08)], s);
         }
+        Icon::Thread => {
+            // a line through three dots: the mails of a thread
+            p.line_segment([cx + Vec2::new(0.0, -w * 0.3), cx + Vec2::new(0.0, w * 0.3)], s);
+            for dy in [-0.3f32, 0.0, 0.3] {
+                p.circle_filled(cx + Vec2::new(0.0, w * dy), w * 0.09, c);
+            }
+        }
         Icon::Sort => {
             for (k, len) in [0.62f32, 0.44, 0.26].iter().enumerate() {
                 let y = cx.y + (k as f32 - 1.0) * w * 0.24;
@@ -294,39 +302,67 @@ impl ShaleApp {
                 ui.add_space(28.0);
                 egui::Frame::new().fill(theme::palette().bg_secondary).corner_radius(CornerRadius::same(10)).inner_margin(20).show(ui, |ui| {
                     ui.set_width(520.0);
+                    // a vault is being read on a worker thread (NET-019): the progress and Cancel, and
+                    // after Cancel or a failure the box is usable again
+                    if let Some(name) = self.vault_load.name() {
+                        ui.horizontal(|ui| {
+                            ui.add(egui::Spinner::new().size(16.0));
+                            ui.label(egui::RichText::new(format!("Opening {name}…")).size(16.0).color(theme::palette().text));
+                            if ui.button("Cancel").clicked() {
+                                self.vault_load.cancel();
+                            }
+                        });
+                        ui.add_space(8.0);
+                    } else if let Some(e) = &self.vault_load.error {
+                        ui.colored_label(theme::palette().warn, e.as_str());
+                        ui.add_space(8.0);
+                    }
                     ui.label(egui::RichText::new("Open a folder as vault").size(16.0).color(theme::palette().text));
                     ui.label(muted("Any folder works, including an existing markdown vault. Type its path:"));
                     ui.add_space(6.0);
-                    ui.add(egui::TextEdit::singleline(&mut self.welcome_path).desired_width(f32::INFINITY));
+                    ui.add_enabled(!self.vault_load.is_loading(), egui::TextEdit::singleline(&mut self.welcome_path).desired_width(f32::INFINITY));
                     ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        let path = PathBuf::from(shellexpand(&self.welcome_path));
-                        if ui.button("Open folder").clicked() {
-                            if path.is_dir() {
-                                self.actions.push(Action::OpenVault(path.clone()));
-                            } else {
-                                self.toast("That folder doesn't exist yet. Use “Create vault”.");
+                    ui.add_enabled_ui(!self.vault_load.is_loading(), |ui| {
+                        ui.horizontal(|ui| {
+                            let path = PathBuf::from(shellexpand(&self.welcome_path));
+                            if ui.button("Open folder").clicked() {
+                                if path.is_dir() {
+                                    self.actions.push(Action::OpenVault(path.clone()));
+                                } else {
+                                    self.toast("That folder doesn't exist yet. Use “Create vault”.");
+                                }
                             }
-                        }
-                        if ui.button("Create vault with sample notes").clicked() {
-                            match std::fs::create_dir_all(&path).and_then(|()| crate::vault::write_sample_vault(&path)) {
-                                Ok(()) => self.actions.push(Action::OpenVault(path.clone())),
-                                Err(e) => self.toast(format!("Could not create the vault: {e}")),
+                            if ui.button("Create vault with sample notes").clicked() {
+                                match std::fs::create_dir_all(&path).and_then(|()| crate::vault::write_sample_vault(&path)) {
+                                    Ok(()) => self.actions.push(Action::OpenVault(path.clone())),
+                                    Err(e) => self.toast(format!("Could not create the vault: {e}")),
+                                }
                             }
-                        }
-                        if ui.button("Create empty vault").clicked() {
-                            match std::fs::create_dir_all(&path) {
-                                Ok(()) => self.actions.push(Action::OpenVault(path.clone())),
-                                Err(e) => self.toast(format!("Could not create the vault: {e}")),
+                            if ui.button("Create empty vault").clicked() {
+                                match std::fs::create_dir_all(&path) {
+                                    Ok(()) => self.actions.push(Action::OpenVault(path.clone())),
+                                    Err(e) => self.toast(format!("Could not create the vault: {e}")),
+                                }
                             }
-                        }
+                        })
                     });
-                    if !self.cfg.recent.is_empty() {
+                    if !self.cfg.vaults.entries().is_empty() {
+                        self.check_vault_folders();
                         ui.add_space(12.0);
                         ui.label(muted("Recent vaults"));
-                        for r in self.cfg.recent.clone() {
-                            if ui.link(r.to_string_lossy()).clicked() {
-                                self.actions.push(Action::OpenVault(r));
+                        for e in self.cfg.vaults.entries().to_vec() {
+                            let shown = self.cfg.vaults.label(&e);
+                            // a vault whose folder is missing is greyed out and does not open (VAULT-038)
+                            // (the answer comes from a worker, once: not a look at the disk in every frame)
+                            let state = self.presence.is_missing(&e.path);
+                            let present = state == Some(false);
+                            let link = match state {
+                                Some(false) => egui::Link::new(shown),
+                                Some(true) => egui::Link::new(egui::RichText::new(format!("{shown} (folder missing)")).color(theme::palette().muted)),
+                                None => egui::Link::new(egui::RichText::new(format!("{shown} (checking…)")).color(theme::palette().muted)),
+                            };
+                            if ui.add_enabled(present && !self.vault_load.is_loading(), link).on_hover_text(e.path.to_string_lossy()).clicked() {
+                                self.actions.push(Action::OpenVault(e.path));
                             }
                         }
                     }
@@ -384,6 +420,7 @@ impl ShaleApp {
             self.panes_ui(ui);
         });
         self.side_drag_tick(ui);
+        self.side_ask_tick(ui.ctx());
     }
 
     /// The middle area: one pane, or several side by side with a draggable border between
@@ -974,7 +1011,7 @@ impl ShaleApp {
                             numbers: reader::Extras::numbers_of(&text, self.cfg.numbered_headings),
                             scroll_to: tab.reader_line.take(),
                             properties: self.cfg.properties_in_reader,
-                            folds: Some(std::cell::RefCell::new(crate::fold_ui::ReaderFolds { ui: &mut tab.editor.fold, summary: self.cfg.properties_in_editor != crate::config::PropertiesView::Raw })),
+                            folds: Some(std::cell::RefCell::new(crate::fold_ui::ReaderFolds { ui: &mut tab.editor.fold, props: self.cfg.properties_in_editor })),
                         };
                         let shown = crate::fonts::with_area(ui, &fonts.rendered, |ui| reader::show(ui, &text, vault, &rel, &mut reader::Caches { scenes: &mut self.scenes, media: &self.media }, (base, dark), &extras));
                         if let Some(a) = shown {
@@ -986,7 +1023,7 @@ impl ShaleApp {
                         tab.editor.numbered_headings = self.cfg.numbered_headings;
                         tab.editor.live_preview = self.cfg.live_preview;
                         tab.editor.preview_raw_lines = self.cfg.preview_raw_lines;
-                        tab.editor.properties_summary = self.cfg.properties_in_editor != crate::config::PropertiesView::Raw;
+                        tab.editor.properties_view = self.cfg.properties_in_editor;
                         tab.editor.table_cell_edit = self.cfg.table_cell_edit;
                         tab.editor.vim_enabled = self.cfg.vim_mode;
                         tab.editor.cursor_style = crate::cursor_style::CursorStyle { shape: self.cfg.cursor_shape, normal_shape: self.cfg.normal_cursor_shape, blink: self.cfg.cursor_blink };

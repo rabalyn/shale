@@ -5,10 +5,11 @@
 
 use crate::app::{Modal, Options, ShaleApp, View};
 use crate::config::{MailAccount, MailSecurity};
-use crate::mail::db::{STATE_FULL, STATE_HEADER, STATE_TOO_LARGE};
+use crate::mail::db::{MessageSummary, STATE_FULL, STATE_HEADER, STATE_TOO_LARGE};
 use crate::mail::imap_client::{Client, ConnectSettings, ImapError, Limits, PlainAuth};
 use crate::mail::imap_fake_tests::{server_cert, FakeServer};
 use crate::mail::imap_sync::{Connector, ConnectorFactory, SyncOptions, NO_PASSWORD};
+use crate::mail::ops;
 use crate::mail::ui::{Body, ListingState, Pane, TestState};
 use crate::secrets::{self, MailSecret};
 use eframe::egui::{self, Color32, Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect, Shape, Vec2};
@@ -280,6 +281,7 @@ impl W {
             Key::M => Some("m"),
             Key::T => Some("t"),
             Key::A => Some("a"),
+            Key::X => Some("x"),
             _ => None,
         };
         let mut ev = vec![Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers }];
@@ -609,6 +611,129 @@ fn sync_fills_the_folders_the_list_and_the_reading_pane_and_attachments_are_save
     assert!(verbs.iter().all(|v| !v.starts_with("SELECT") && !v.starts_with("STORE") && !v.starts_with("EXPUNGE") && !v.starts_with("COPY")), "{verbs:?}");
 }
 
+/// A mail with one attachment of `data` called `name`, written with the content type `mime`.
+fn with_sound(subject: &str, name: &str, mime: &str, data: &[u8]) -> Vec<u8> {
+    let b64 = crate::mail::imap_client::base64_encode(data);
+    format!("From: Carol <carol@x.de>\r\nTo: ada@example.com\r\nSubject: {subject}\r\nDate: 12 Nov 2026 09:00:00 +0100\r\nMessage-ID: <{}@fake>\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b1\"\r\n\r\n--b1\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nListen to this.\r\n--b1\r\nContent-Type: {mime}; name=\"{name}\"\r\nContent-Disposition: attachment; filename=\"{name}\"\r\nContent-Transfer-Encoding: base64\r\n\r\n{b64}\r\n--b1--\r\n", subject.replace(' ', "-")).into_bytes()
+}
+
+/// The first bytes of a sound of the test files (a mail of the pretend server may be 20,000 bytes).
+fn sound_bytes(ext: &str) -> Vec<u8> {
+    let mut v = std::fs::read(crate::media::testdata::fixture(&format!("tone.{ext}"))).unwrap();
+    v.truncate(6000);
+    v
+}
+
+// spec: MAIL-240
+#[test]
+fn mail_240_the_reading_pane_offers_the_player_for_every_audio_type_and_nothing_plays_by_itself() {
+    let mut w = W::new("audio", true);
+    let mut cases: Vec<(String, String, String, Vec<u8>, bool)> =
+        crate::media::AUDIO_EXTS.iter().map(|ext| (format!("Sound {ext}"), format!("voice.{ext}"), crate::media::audio_mime_for_ext(ext).unwrap().to_string(), sound_bytes(ext), true)).collect();
+    // a .wav the sender called application/octet-stream, a sound with no extension in its name, one that is no sound
+    cases.push(("Octet wav".into(), "memo.WAV".into(), "application/octet-stream".into(), sound_bytes("wav"), true));
+    cases.push(("Nameless sound".into(), "voice".into(), "audio/x-wav".into(), sound_bytes("wav"), true));
+    cases.push(("Unknown sound".into(), "voice".into(), "audio/x-unknown".into(), vec![1, 2, 3], false));
+    cases.push(("Plain text".into(), "notes.txt".into(), "text/plain".into(), b"hello".to_vec(), false));
+    {
+        let mut s = w.server.state();
+        for (subject, name, mime, data, _) in &cases {
+            s.add_message("INBOX", with_sound(subject, name, mime, data), NOW - 86_400);
+        }
+    }
+    w.app.media.use_silent_output();
+    w.sync_and_wait();
+    let mut last: Option<PathBuf> = None;
+    for (subject, name, _, data, player) in &cases {
+        w.open_mail(subject);
+        w.frame(vec![]);
+        w.frame(vec![]);
+        assert!(w.shows(name) && w.shows("Open") && w.has("mail:att-open:0") && w.has("mail:att-save:0"), "{subject}: the row of the attachment stays");
+        assert_eq!(w.has("mail:att-player:0"), *player, "{subject}: the player");
+        // the earlier message's copy is gone
+        if let Some(old) = last.take() {
+            assert!(!old.exists(), "the temp copy of the message before is removed: {old:?}");
+        }
+        if *player {
+            let file = w.app.mail.att_audio.as_ref().and_then(|a| a.files[0].clone()).unwrap_or_else(|| panic!("{subject}: no temp copy"));
+            assert_eq!(std::fs::read(&file).unwrap(), *data, "{subject}: the copy is the attachment");
+            assert!(crate::media::is_audio(&file), "{subject}: the player knows it by its extension: {file:?}");
+            last = Some(file);
+        } else {
+            assert!(w.app.mail.att_audio.is_none(), "{subject}: nothing is copied");
+        }
+        assert!(w.app.media.current().is_none(), "{subject}: nothing plays by itself");
+    }
+    // the message with the PDF of the seed has no player either
+    w.open_mail("Report attached");
+    w.frame(vec![]);
+    assert!(w.shows("report.pdf") && !w.has("mail:att-player:0"));
+}
+
+/// What the reading pane of a mail from a real server shows for its first attachment (MAIL-242).
+pub(super) struct EnvReading {
+    /// the attachment as the sync stored it
+    pub mime: String,
+    pub data: Vec<u8>,
+    /// the reading pane offers the player, and nothing plays by itself
+    pub player: bool,
+    pub playing: bool,
+    /// the private temp copy the player reads
+    pub copy: Option<Vec<u8>>,
+}
+
+/// The app's mail view on an account of the container environment (`factory` connects to it): sync, open the mail
+/// `subject` and look at its reading pane (MAIL-242).
+pub(super) fn reading_pane_of_env_mail(factory: ConnectorFactory, account: MailAccount, password: &str, subject: &str) -> EnvReading {
+    let mut w = W::new("env-audio", false);
+    w.app.cfg.mail_accounts = vec![account.clone()];
+    assert!(secrets::set_mail_secret(&account.id, MailSecret::Password, password));
+    w.account = account;
+    w.app.mail.factory = factory;
+    w.app.mail.opts = SyncOptions::default();
+    w.app.media.use_silent_output();
+    w.sync_and_wait();
+    assert!(w.app.mail.syncs[&w.account.id].errors.is_empty(), "{:?}", w.app.mail.syncs[&w.account.id].errors);
+    w.open_mail(subject);
+    w.frame(vec![]);
+    w.frame(vec![]);
+    let Some(Body::Ready(l)) = w.app.mail.open.as_ref().map(|o| &o.body) else { panic!("the mail is not read") };
+    let att = l.mail.attachments[0].clone();
+    EnvReading {
+        mime: att.mime,
+        data: att.data.to_vec(),
+        player: w.has("mail:att-player:0"),
+        playing: w.app.media.current().is_some(),
+        copy: w.app.mail.att_audio.as_ref().and_then(|a| a.files[0].clone()).map(|f| std::fs::read(f).unwrap()),
+    }
+}
+
+// spec: MAIL-240
+#[test]
+fn mail_240_the_player_plays_from_the_temp_copy_when_asked_and_leaving_the_message_stops_it_and_removes_the_copy() {
+    let mut w = W::new("audio-play", true);
+    w.server.state().add_message("INBOX", with_sound("Voice memo", "memo.wav", "audio/wav", &sound_bytes("wav")), NOW - 86_400);
+    w.app.media.use_silent_output();
+    w.sync_and_wait();
+    w.open_mail("Voice memo");
+    w.frame(vec![]);
+    w.frame(vec![]);
+    let file = w.app.mail.att_audio.as_ref().and_then(|a| a.files[0].clone()).expect("the temp copy");
+    assert!(w.app.media.current().is_none());
+    // the round button of the card starts it
+    let card = w.rect("mail:att-player:0");
+    let art = crate::media::widget::geometry(&file, card.width()).art.center();
+    w.click_at(card.min + art.to_vec2(), Modifiers::NONE);
+    w.until("the sound is loaded", |a| a.media.current().is_some());
+    assert_eq!(w.app.media.current(), Some(file.clone()));
+    // another message: the sound stops and the copy is removed
+    w.open_mail("Invoice 2026");
+    w.frame(vec![]);
+    assert!(w.app.media.current().is_none(), "the sound stopped");
+    assert!(!file.exists(), "the copy is removed");
+    assert!(w.app.mail.att_audio.is_none());
+}
+
 // spec: MAIL-053
 #[test]
 fn html_mail_is_shown_as_plain_text_and_never_loads_anything() {
@@ -735,6 +860,211 @@ fn a_mail_deleted_on_the_server_is_dimmed_and_says_so() {
     assert!(w.shows("deleted on the server"));
     assert!(w.shows("Pizza at noon"), "its text is still readable");
     assert!(w.app.mail.open.as_ref().unwrap().msg.gone_on_server);
+}
+
+/// Delete the mails with these subjects on the pretend server, and sync.
+fn delete_on_server(w: &mut W, subjects: &[&str]) {
+    {
+        let mut s = w.server.state();
+        for subject in subjects {
+            let uid = s.folder_mut("INBOX").msgs.iter().find(|m| String::from_utf8_lossy(&m.raw).contains(subject)).unwrap().uid;
+            s.delete_message("INBOX", uid);
+        }
+    }
+    w.sync_and_wait();
+    w.until("the list shows them", |a| a.mail.total == 3);
+    w.frame(vec![]);
+}
+
+fn shift_d(w: &mut W) {
+    w.press(Key::D, Modifiers::SHIFT);
+}
+
+// spec: MAIL-238, MAIL-061
+#[test]
+fn mail_238_delete_local_copy_asks_first_works_on_several_marked_mails_and_touches_neither_server_nor_vault() {
+    let mut w = W::new("localdel", true);
+    w.sync_and_wait();
+    w.until("the Inbox is open", |a| a.mail.total == 3);
+    // import one mail to the vault, then it is deleted on the server: the note must stay
+    w.open_mail("Invoice 2026");
+    w.click("mail:import");
+    w.until("the dialog opens", |a| matches!(a.modal, Some(Modal::Import(_))));
+    w.settle();
+    w.click("import");
+    w.settle();
+    w.app.show_view(View::Mail, false);
+    w.settle();
+    let vault_before = w.vault_files();
+    assert!(vault_before.iter().any(|f| f.ends_with("Invoice 2026.md")), "{vault_before:?}");
+    let store = w.app.mail.ready_store().unwrap();
+    let paths: Vec<_> = ["Invoice 2026", "Lunch plans"]
+        .iter()
+        .map(|s| {
+            let i = w.row_of(s);
+            store.abs_path(&w.app.mail.row(i).unwrap().path)
+        })
+        .collect();
+    delete_on_server(&mut w, &["Invoice 2026", "Lunch plans"]);
+    let server_before = w.server_uids("INBOX");
+
+    // a mail that is still on the server: no dialog, a note, nothing deleted
+    let other = w.subjects().into_iter().find(|s| s != "Invoice 2026" && s != "Lunch plans").unwrap();
+    w.open_mail(&other);
+    w.frame(vec![]);
+    assert!(!w.has("mail:delete-local"), "no button on a mail that is on the server");
+    shift_d(&mut w);
+    assert!(w.app.mail.local_delete.is_none());
+    assert!(w.app.toasts.iter().any(|(n, _)| n.contains("deleted on the server can be deleted")), "{:?}", w.app.toasts);
+    assert_eq!(w.app.mail.total, 3);
+
+    // the mail that is gone: the button, the dialog with the count, Esc / Enter / Cancel do nothing
+    w.open_mail("Lunch plans");
+    w.frame(vec![]);
+    assert!(w.has("mail:delete-local"));
+    w.click("mail:delete-local");
+    w.frame(vec![]);
+    assert!(w.app.mail.local_delete.is_some());
+    assert!(w.shows("Delete the local copy of 1 message?"), "the dialog names the count");
+    w.press(Key::Enter, Modifiers::NONE);
+    assert!(w.app.mail.local_delete.is_some() && w.app.mail.total == 3, "Enter does not confirm");
+    w.press(Key::Escape, Modifiers::NONE);
+    assert!(w.app.mail.local_delete.is_none() && w.app.mail.total == 3);
+    shift_d(&mut w);
+    assert!(w.app.mail.local_delete.is_some(), "the key asks the same question");
+    w.click("mail:local-delete-cancel");
+    assert!(w.app.mail.local_delete.is_none() && w.app.mail.total == 3);
+    assert!(paths.iter().all(|p| p.is_file()));
+
+    // three marked mails, one of them still on the server: only the two gone ones are offered
+    w.press(Key::Escape, Modifiers::NONE);
+    w.app.mail.pane = Pane::List;
+    let others = w.subjects();
+    for subject in others.iter().map(|s| s.as_str()) {
+        let i = w.row_of(subject);
+        w.app.mail.cursor = Some(i);
+        w.press(Key::X, Modifiers::NONE);
+    }
+    w.frame(vec![]);
+    assert!(w.has("mail:marked-delete-local"), "the marked bar offers it");
+    w.click("mail:marked-delete-local");
+    w.frame(vec![]);
+    assert!(w.app.toasts.iter().any(|(n, _)| n.contains("1 selected mail is still on the server")), "{:?}", w.app.toasts);
+    assert!(w.shows("Delete the local copy of 2 messages?"), "several at once, the count is named");
+    w.click("mail:local-delete-confirm");
+    w.settle();
+    assert!(w.app.mail.local_delete.is_none());
+    assert_eq!(w.app.mail.total, 1, "both rows are gone from the list, the one on the server stays");
+    assert!(w.app.mail.marked.is_empty());
+    assert!(paths.iter().all(|p| !p.exists()), "the files are no longer in the folder of the mail");
+    let trash = store.abs_path(".trash");
+    let mut trashed = vec![];
+    for e in walk_files(&trash) {
+        trashed.push(e);
+    }
+    assert_eq!(trashed.iter().filter(|p| p.extension().is_some_and(|x| x == "eml")).count(), 2, "the files went to the local trash: {trashed:?}");
+    assert_eq!(w.vault_files(), vault_before, "the imported note and its original stay");
+    assert_eq!(w.server_uids("INBOX"), server_before, "the server was not asked to change anything");
+    // a later sync does not bring them back
+    w.sync_and_wait();
+    w.settle();
+    assert_eq!(w.app.mail.total, 1);
+}
+
+fn walk_files(dir: &Path) -> Vec<PathBuf> {
+    let mut out = vec![];
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                out.extend(walk_files(&p));
+            } else {
+                out.push(p);
+            }
+        }
+    }
+    out
+}
+
+// spec: MAIL-238, MAIL-072
+#[test]
+fn mail_238_the_row_menu_offers_delete_local_copy_only_for_a_mail_that_is_gone_from_the_server() {
+    let mut w = W::new("localdelmenu", true);
+    w.sync_and_wait();
+    w.until("the Inbox is open", |a| a.mail.total == 3);
+    delete_on_server(&mut w, &["Lunch plans"]);
+    let right_click = |w: &mut W, subject: &str| {
+        let i = w.row_of(subject);
+        let p = w.rect(&format!("mail:row:{i}")).center();
+        let b = |pressed| Event::PointerButton { pos: p, button: PointerButton::Secondary, pressed, modifiers: Modifiers::NONE };
+        w.frame(vec![Event::PointerMoved(p)]);
+        w.frame(vec![b(true)]);
+        w.frame(vec![b(false)]);
+        w.frame(vec![]);
+    };
+    right_click(&mut w, "Invoice 2026");
+    assert!(w.has("mail:ctx-delete"), "the menu is open");
+    assert!(!w.has("mail:ctx-delete-local"), "not for a mail on the server");
+    w.press(Key::Escape, Modifiers::NONE);
+    assert!(!w.has("mail:ctx-delete"));
+    right_click(&mut w, "Lunch plans");
+    assert!(w.has("mail:ctx-delete-local"));
+    w.click("mail:ctx-delete-local");
+    w.frame(vec![]);
+    assert!(w.shows("Delete the local copy of 1 message?"));
+    w.click("mail:local-delete-confirm");
+    w.settle();
+    assert_eq!(w.app.mail.total, 2);
+    assert!(!w.subjects().contains(&"Lunch plans".to_string()));
+}
+
+// spec: MAIL-238
+#[test]
+fn mail_238_the_store_refuses_a_mail_on_the_server_a_wrong_count_and_a_mail_with_a_waiting_action() {
+    let mut w = W::new("localdelstore", true);
+    w.sync_and_wait();
+    w.until("the Inbox is open", |a| a.mail.total == 3);
+    let store = w.app.mail.ready_store().unwrap();
+    let i = w.row_of("Lunch plans");
+    let live = w.app.mail.row(i).unwrap().clone();
+    // still on the server: left out with a note, nothing removed
+    let out = ops::delete_local_copies(&store, std::slice::from_ref(&live), ops::Confirmed::after_dialog(1), "2026-11-23").unwrap();
+    assert_eq!(out.removed, 0);
+    assert!(out.notes[0].contains("still on the server"), "{:?}", out.notes);
+    assert!(store.abs_path(&live.path).is_file());
+    // a count that is not the one asked about
+    assert!(ops::delete_local_copies(&store, std::slice::from_ref(&live), ops::Confirmed::after_dialog(2), "2026-11-23").is_err());
+    // gone from the server but with a change waiting: left out too
+    delete_on_server(&mut w, &["Lunch plans"]);
+    let i = w.row_of("Lunch plans");
+    let mut gone = w.app.mail.row(i).unwrap().clone();
+    assert!(ops::local_deletable(&gone));
+    store
+        .commit(vec![crate::mail::db::Op::PendingAdd(Box::new(crate::mail::db::PendingRow {
+            id: 0,
+            account: gone.account.clone(),
+            kind: "flags".into(),
+            folder: gone.folder_id,
+            uidvalidity: gone.uidvalidity,
+            uid: gone.uid,
+            target: None,
+            flags_add: "\\Seen".into(),
+            flags_remove: String::new(),
+            prev_flags: String::new(),
+            created: NOW,
+            attempts: 0,
+            last_error: None,
+        }))])
+        .unwrap();
+    gone = store.reader().unwrap().message_by_id(gone.id).unwrap().unwrap();
+    assert!(!ops::local_deletable(&gone));
+    let out = ops::delete_local_copies(&store, std::slice::from_ref(&gone), ops::Confirmed::after_dialog(1), "2026-11-23").unwrap();
+    assert_eq!(out.removed, 0);
+    assert!(out.notes[0].contains("waiting"), "{:?}", out.notes);
+    // a mail that is not in the index any more: a note
+    let ghost = MessageSummary { id: 9_999_999, ..gone };
+    let out = ops::delete_local_copies(&store, &[ghost], ops::Confirmed::after_dialog(1), "2026-11-23").unwrap();
+    assert!(out.notes[0].contains("not in the local copy"));
 }
 
 // spec: MAIL-058
@@ -914,9 +1244,9 @@ fn search_waits_for_a_pause_runs_in_a_job_and_the_keys_work_without_the_mouse() 
     assert_eq!(w.app.mail.cursor, Some(1));
     w.press(Key::ArrowUp, Modifiers::NONE);
     assert_eq!(w.app.mail.cursor, Some(0));
-    w.press(Key::Space, Modifiers::NONE);
+    w.press(Key::X, Modifiers::NONE);
     assert_eq!(w.app.mail.marked.len(), 1, "Space marks");
-    w.press(Key::Space, Modifiers::NONE);
+    w.press(Key::X, Modifiers::NONE);
     assert!(w.app.mail.marked.is_empty(), "and unmarks");
     let inbox = w.folder_id("INBOX");
     assert_eq!(w.app.mail.folder, Some(inbox));
@@ -986,9 +1316,9 @@ fn import_hands_the_stored_mail_to_the_import_dialog_and_writes_nothing_until_im
     w.open_folder("INBOX");
     w.frame(vec![]);
     w.press(Key::J, Modifiers::NONE);
-    w.press(Key::Space, Modifiers::NONE);
+    w.press(Key::X, Modifiers::NONE);
     w.press(Key::J, Modifiers::NONE);
-    w.press(Key::Space, Modifiers::NONE);
+    w.press(Key::X, Modifiers::NONE);
     assert_eq!(w.app.mail.marked.len(), 2);
     w.frame(vec![]);
     w.click("mail:import-marked");
@@ -1370,9 +1700,9 @@ fn keys_mark_read_flag_delete_and_move_work_on_the_cursor_and_on_the_marked_mail
     // Space marks two mails, d moves both to Trash (never STORE \Deleted + EXPUNGE)
     w.frame(vec![Event::PointerMoved(Pos2::new(5.0, 5.0))]);
     w.app.mail.cursor = Some(0);
-    w.press(Key::Space, Modifiers::NONE);
+    w.press(Key::X, Modifiers::NONE);
     w.press(Key::J, Modifiers::NONE);
-    w.press(Key::Space, Modifiers::NONE);
+    w.press(Key::X, Modifiers::NONE);
     assert_eq!(w.app.mail.marked.len(), 2);
     w.press(Key::D, Modifiers::NONE);
     assert!(w.app.mail.marked.is_empty(), "the marks are used up");
@@ -1448,7 +1778,7 @@ fn the_reading_pane_buttons_the_marked_bar_and_the_row_menu_do_the_same_things()
     w.frame(vec![]);
     w.app.mail.cursor = Some(0);
     w.app.mail.pane = Pane::List; // the clicks into the reading pane gave it the keyboard
-    w.press(Key::Space, Modifiers::NONE);
+    w.press(Key::X, Modifiers::NONE);
     w.frame(vec![]);
     w.click("mail:marked-flag");
     w.settle_ops();
@@ -2926,7 +3256,7 @@ fn j_and_k_act_in_the_pane_that_has_the_keyboard_only() {
     w.app.mail.cursor = Some(0);
     w.press(Key::D, Modifiers::NONE);
     w.press(Key::U, Modifiers::NONE);
-    w.press(Key::Space, Modifiers::NONE);
+    w.press(Key::X, Modifiers::NONE);
     w.frame(vec![]);
     assert!(w.pending_is_empty() && w.app.mail.marked.is_empty() && w.app.mail.problems.is_empty());
     assert_eq!(w.server_uids("INBOX").len(), 4);
@@ -3182,7 +3512,7 @@ fn the_menu_of_a_row_opens_by_key_and_is_driven_by_the_arrows_enter_and_esc() {
     let (mut w, _smtp) = compose_world("menukey", 30);
     w.press(Key::J, Modifiers::NONE);
     assert_eq!(w.app.mail.cursor, Some(0));
-    w.press(Key::Space, Modifiers::NONE);
+    w.press(Key::X, Modifiers::NONE);
     assert_eq!(w.app.mail.marked.len(), 1);
     // Shift+F10 opens the menu at the row, the first entry is marked
     w.press(Key::F10, Modifiers::SHIFT);
@@ -3424,15 +3754,15 @@ fn key_hints_on_menu_entries_and_tooltips_follow_the_registry() {
     w.hover("mail:outbox:edit");
     assert!(w.shows("(e)"), "Edit shows e");
     w.unhover();
-    w.app.keymap.set(KeyAction::MailRetry, Binding::parse("X").unwrap()).unwrap();
+    w.app.keymap.set(KeyAction::MailRetry, Binding::parse("Y").unwrap()).unwrap();
     w.frame(vec![]);
-    assert!(w.shows_exactly("x") && !w.shows_exactly("Shift+S"), "the rebound key is painted");
+    assert!(w.shows_exactly("y") && !w.shows_exactly("Shift+S"), "the rebound key is painted");
     w.hover("mail:outbox:retry");
-    assert!(w.shows("Send the mail again (x)") && !w.shows("Shift+S"), "the rebound key");
+    assert!(w.shows("Send the mail again (y)") && !w.shows("Shift+S"), "the rebound key");
     w.unhover();
     w.app.keymap.clear(KeyAction::MailRetry);
     w.frame(vec![]);
-    assert!(!w.shows_exactly("x") && !w.shows_exactly("Shift+S") && w.shows_exactly("Retry"), "unbound: no key on the button");
+    assert!(!w.shows_exactly("y") && !w.shows_exactly("Shift+S") && w.shows_exactly("Retry"), "unbound: no key on the button");
     w.hover("mail:outbox:retry");
     assert!(w.shows_exactly("Send the mail again"), "no key, no hint: {:?}", w.texts);
 }

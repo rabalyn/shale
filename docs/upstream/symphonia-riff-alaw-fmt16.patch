@@ -1,0 +1,59 @@
+symphonia-format-riff: accept the 16-byte `fmt ` chunk of A-law and µ-law WAV files
+
+WAVE_FORMAT_ALAW (0x0006) and WAVE_FORMAT_MULAW (0x0007) files are written by phone systems,
+answering machines (FRITZ!Box call recordings) and many recorders with the plain 16-byte `fmt `
+chunk, without the cbSize field. read_alaw_pcm_fmt and read_mulaw_pcm_fmt accept only the 18-byte
+chunk and fail with "wav: malformed fmt_alaw chunk" for those files, which VLC, ffmpeg and other
+players read. This accepts both 16 (no cbSize) and 18 bytes (cbSize read and skipped, as before).
+
+Made against symphonia-format-riff 0.6.1; the file is symphonia-format-riff/src/wave/chunks.rs.
+Shale (#581) works around the bug in src/media/wavfix.rs until a release has this.
+
+--- a/symphonia-format-riff/src/wave/chunks.rs
++++ b/symphonia-format-riff/src/wave/chunks.rs
+@@ -363,14 +363,18 @@
+         num_channels: u16,
+         len: u32,
+     ) -> Result<FormatData> {
+-        if len != 18 {
++        // Many recorders write the 16-byte chunk (without cbSize) for this format; the 18-byte
++        // chunk with cbSize is the extended form.
++        if len != 16 && len != 18 {
+             return decode_error("wav: malformed fmt_alaw chunk");
+         }
+
+-        let extra_size = reader.read_u16()?;
++        if len == 18 {
++            let extra_size = reader.read_u16()?;
+
+-        if extra_size > 0 {
+-            reader.ignore_bytes(u64::from(extra_size))?;
++            if extra_size > 0 {
++                reader.ignore_bytes(u64::from(extra_size))?;
++            }
+         }
+
+         let channels = map_wave_channel_count(num_channels)?;
+@@ -382,14 +386,18 @@
+         num_channels: u16,
+         len: u32,
+     ) -> Result<FormatData> {
+-        if len != 18 {
++        // Many recorders write the 16-byte chunk (without cbSize) for this format; the 18-byte
++        // chunk with cbSize is the extended form.
++        if len != 16 && len != 18 {
+             return decode_error("wav: malformed fmt_mulaw chunk");
+         }
+
+-        let extra_size = reader.read_u16()?;
++        if len == 18 {
++            let extra_size = reader.read_u16()?;
+
+-        if extra_size > 0 {
+-            reader.ignore_bytes(u64::from(extra_size))?;
++            if extra_size > 0 {
++                reader.ignore_bytes(u64::from(extra_size))?;
++            }
+         }
+
+         let channels = map_wave_channel_count(num_channels)?;

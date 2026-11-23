@@ -157,7 +157,8 @@ fn find_front(doc: &Doc) -> Vec<Raw> {
     }
 }
 
-/// A line `-- ` (or `--`) up to the next heading, or the end of the note.
+/// A line `-- ` (or `--`) up to the next heading, or the end of the note; behind quote marks up to
+/// the end of that quoted mail's segment (EDIT-083).
 fn find_signatures(doc: &Doc) -> Vec<Raw> {
     let mut out: Vec<Raw> = Vec::new();
     for l in 0..doc.lines.len() {
@@ -166,6 +167,12 @@ fn find_signatures(doc: &Doc) -> Vec<Raw> {
         }
         let end = (l + 1..doc.lines.len()).find(|&n| !doc.skip(n) && markdown::heading_level(doc.lines[n]).is_some()).unwrap_or(doc.lines.len());
         out.push(Raw { kind: FoldKind::Signature, header: l, end: doc.trim_blank(l, end) });
+    }
+    // the signature of a mail quoted in the note: `> -- ` up to where that quote's depth changes
+    for (l, end) in crate::import::mail_segments::quoted_signatures(&doc.lines, |l| doc.skip(l)) {
+        if !out.iter().any(|r| r.header < l && l < r.end) {
+            out.push(Raw { kind: FoldKind::Signature, header: l, end: doc.trim_blank(l, end) });
+        }
     }
     out
 }
@@ -694,8 +701,13 @@ mod tests {
         assert_eq!(found(t), vec![(FoldKind::Signature, 2, 5), (FoldKind::Heading, 6, 8)]);
         // without the space, and to the end of the note
         assert_eq!(found("Hi\n--\nAnna\nAcme"), vec![(FoldKind::Signature, 1, 4)]);
-        // not in code, not in a quote, not a longer rule
-        assert!(found("```\n-- \nx\n```\n> -- \n> quoted\n---\nz").iter().all(|(k, ..)| *k != FoldKind::Signature));
+        // not in code, not a longer rule
+        assert!(found("```\n-- \nx\n```\n> ```\n> -- \n> ```\n---\nz").iter().all(|(k, ..)| *k != FoldKind::Signature));
+        // in a quote it ends with the quoted mail's segment: at a change of the quote depth or a reply header
+        let q = "> text\n> -- \n> Anna\n> Acme\n>\n> > older\n";
+        assert_eq!(found(q).iter().filter(|(k, ..)| *k == FoldKind::Signature).collect::<Vec<_>>(), vec![&(FoldKind::Signature, 1, 5)]);
+        let q = "> text\n> -- \n> Anna\n> On Mon, 1 Jan 2026, Bob wrote:\n> > older\n";
+        assert_eq!(found(q).iter().filter(|(k, ..)| *k == FoldKind::Signature).collect::<Vec<_>>(), vec![&(FoldKind::Signature, 1, 3)]);
         // a second one inside the first is part of it
         assert_eq!(found("-- \na\n-- \nb").iter().filter(|(k, ..)| *k == FoldKind::Signature).count(), 1);
     }

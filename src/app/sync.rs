@@ -70,6 +70,9 @@ pub struct SyncState {
     /// How many media files the open vault links from outside it, counted from the index once for
     /// each state of it, with that state (its number and generation): the note in the settings (MEDIA-023).
     outside_media: Option<((u64, u64), usize)>,
+    /// The open vault has a repository of its own that nobody was asked about: no sync before the
+    /// answer (SYNC-076).
+    pub(crate) repo_ask: Option<super::git_ask::RepoAsk>,
     /// Where the settings controls were drawn (for UI tests).
     pub(crate) rects: Vec<(&'static str, egui::Rect)>,
 }
@@ -241,6 +244,7 @@ impl ShaleApp {
     /// Every frame: collect a finished sync, start one when it is due (SYNC-002).
     pub(crate) fn sync_tick(&mut self, ctx: &egui::Context) {
         self.wizard_tick(ctx);
+        self.repo_ask_tick(ctx);
         self.lfs_pull_tick(ctx);
         if self.lfs_job_done(ctx) {
             return;
@@ -259,7 +263,7 @@ impl ShaleApp {
             self.after_sync(&root, r);
             return;
         }
-        if !self.persist_config || !self.vdata.settings.sync.enabled {
+        if !self.persist_config || !self.vdata.settings.sync.enabled || self.sync.repo_ask.is_some() {
             return;
         }
         let Some(root) = self.vault.as_ref().map(|v| v.root.clone()) else { return };
@@ -285,7 +289,7 @@ impl ShaleApp {
     /// host once, SYNC-058). False: nothing started (another job runs, or there is no vault).
     pub(crate) fn start_sync_with(&mut self, git: Git) -> bool {
         // a snapshot and the sync never run on the repository at once (SYNC-035)
-        if self.sync.running() || self.sync.lfs_job.is_some() || self.history.busy() {
+        if self.sync.running() || self.sync.lfs_job.is_some() || self.history.busy() || self.sync.repo_ask.is_some() {
             return false;
         }
         let Some(root) = self.vault.as_ref().map(|v| v.root.clone()) else { return false };

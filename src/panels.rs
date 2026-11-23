@@ -13,10 +13,31 @@ use std::path::{Path, PathBuf};
 
 impl ShaleApp {
     pub fn left_sidebar(&mut self, ui: &mut Ui) {
-        match self.side.left {
-            LeftPanel::Files => self.file_explorer(ui),
-            LeftPanel::Search => self.search_panel(ui),
-            LeftPanel::Tags => self.tags_panel(ui),
+        match self.left_view() {
+            Some(LeftPanel::Files) => self.file_explorer(ui),
+            Some(LeftPanel::Search) => self.search_panel(ui),
+            Some(LeftPanel::Tags) => self.tags_panel(ui),
+            None => {
+                ui.label(muted("No view is here. Drag Files, Search or Tags from the right sidebar to the ribbon, or right-click its icon and choose Move or Copy."));
+            }
+        }
+    }
+
+    /// The view the left sidebar shows: the chosen one, or the first of Files, Search and Tags
+    /// that is in the ribbon when the chosen one has moved to the right (LAY-025). None: none is.
+    pub(crate) fn left_view(&self) -> Option<LeftPanel> {
+        let in_ribbon = |p: LeftPanel| self.side.layout.on_left(p.item());
+        [self.side.left, LeftPanel::Files, LeftPanel::Search, LeftPanel::Tags].into_iter().find(|p| in_ribbon(*p))
+    }
+
+    /// The body of a view of the right sidebar that is a view of the left one (LAY-020). A copy
+    /// draws the same state as the one on the other side (LAY-024).
+    pub(crate) fn movable_view_body(&mut self, ui: &mut Ui, item: crate::sidebar::Item) {
+        match item {
+            crate::sidebar::Item::Files => self.file_explorer(ui),
+            crate::sidebar::Item::Search => self.search_panel(ui),
+            crate::sidebar::Item::Tags => self.tags_panel(ui),
+            _ => {}
         }
     }
 
@@ -53,7 +74,7 @@ impl ShaleApp {
             });
         });
         ui.add_space(4.0);
-        let vault_name = self.vault.as_ref().and_then(|v| v.root.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_default();
+        let vault_name = self.vault.as_ref().map(|v| self.cfg.vaults.label_of(&v.root)).unwrap_or_default();
         let bottom_h = 30.0;
         let avail = ui.available_height() - bottom_h;
         egui::ScrollArea::vertical().max_height(avail).auto_shrink([false, false]).show(ui, |ui| {
@@ -107,7 +128,10 @@ impl ShaleApp {
         });
         ui.separator();
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(format!("▣  {vault_name}")).color(theme::palette().text).size(13.0)).on_hover_text(self.vault.as_ref().map(|v| v.root.to_string_lossy().into_owned()).unwrap_or_default());
+            let path = self.vault.as_ref().map(|v| v.root.to_string_lossy().into_owned()).unwrap_or_default();
+            if crate::vault_menu::vault_label(ui, &vault_name, &path) {
+                self.open_vault_menu();
+            }
         });
     }
 
@@ -359,6 +383,10 @@ impl ShaleApp {
             self.history_panel_body(ui);
             return;
         }
+        if panel == RightPanel::Thread {
+            self.thread_panel_body(ui);
+            return;
+        }
         let Some(rel) = self.current_path() else {
             ui.label(muted("Open a note to see its links."));
             return;
@@ -472,7 +500,7 @@ impl ShaleApp {
                     }
                 });
             }
-            RightPanel::Calendar | RightPanel::History => {}
+            RightPanel::Calendar | RightPanel::History | RightPanel::Thread => {}
             RightPanel::LocalGraph => {
                 ui.horizontal(|ui| {
                     ui.label(muted("Depth"));
@@ -819,7 +847,8 @@ impl ShaleApp {
                     keep = false;
                 }
             }
-            Modal::TexSetup
+            Modal::Vaults(_)
+            | Modal::TexSetup
             | Modal::Export(_)
             | Modal::ExportDocx(_)
             | Modal::Calendars(_)
@@ -1027,6 +1056,9 @@ impl ShaleApp {
             if close_asked && !d.busy() {
                 keep = false;
             }
+        }
+        if let Modal::Vaults(m) = &mut modal {
+            keep = self.vault_modal(&ctx, m);
         }
         if let Modal::TexSetup = &modal {
             keep = self.tex_setup_dialog(&ctx);
@@ -1316,7 +1348,7 @@ mod move_tests {
     use crate::app::{Options, ShaleApp};
     use std::path::{Path, PathBuf};
 
-    // spec: VAULT-015
+    // spec: VAULT-015, VAULT-042
     #[test]
     fn moving_notes_and_folders_into_folders() {
         let d = std::env::temp_dir().join(format!("shale-move-{}", std::process::id()));

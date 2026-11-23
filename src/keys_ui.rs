@@ -262,7 +262,11 @@ pub fn show(ui: &mut Ui, d: &mut KeyDialog, keys: &mut Keymap) -> bool {
                     }
                     _ => {
                         let text = keys.display(def.action);
-                        ui.label(if keys.is_default(def.action) { RichText::new(text) } else { RichText::new(format!("{text}  (changed)")).color(theme::palette().accent) });
+                        // several keys wrap, so that the buttons stay inside the dialog (KEY-039)
+                        ui.scope(|ui| {
+                            ui.set_max_width(140.0);
+                            ui.add(egui::Label::new(if keys.is_default(def.action) { RichText::new(text) } else { RichText::new(format!("{text}  (changed)")).color(theme::palette().accent) }).wrap());
+                        });
                     }
                 }
                 let buttons = ui.horizontal(|ui| {
@@ -941,6 +945,143 @@ mod tests {
         typed(&mut w, Key::Tab, "");
         w.frame(vec![]);
         assert!(!w.texts.iter().any(|t| t.starts_with("Space")), "{:?}", w.texts);
+    }
+
+    /// Is the search of everything (Space f g) open, or the file finder (Space f f)?
+    fn open_source(w: &W) -> Option<crate::picker::Source> {
+        match &w.app.modal {
+            Some(Modal::Picker(p)) => Some(p.source),
+            _ => None,
+        }
+    }
+
+    fn space_f(w: &mut W, second: (Key, &str)) {
+        for (key, text) in [(Key::Space, " "), (Key::F, "f"), second] {
+            typed(w, key, text);
+        }
+        settle(w);
+    }
+
+    // spec: KEY-041, KEY-040
+    #[test]
+    fn key_041_space_f_g_and_space_f_f_work_in_every_main_view_without_vim_mode() {
+        let mut w = W::new("main-views");
+        assert!(!w.app.cfg.vim_mode);
+        // a note in the reading view, then the other views
+        w.app.toggle_reading_view();
+        settle(&mut w);
+        let views = [None, Some(View::Calendar), Some(View::Mail), Some(View::Social(None)), Some(View::Graph), Some(View::Tasks), Some(View::Empty)];
+        for view in views {
+            if let Some(v) = view.clone() {
+                w.app.show_view(v, false);
+                settle(&mut w);
+            }
+            for (second, source) in [((Key::G, "g"), crate::picker::Source::Everything), ((Key::F, "f"), crate::picker::Source::FileNames)] {
+                space_f(&mut w, second);
+                assert_eq!(open_source(&w), Some(source), "{view:?}");
+                w.app.modal = None;
+                settle(&mut w);
+            }
+        }
+        // the editor: vim normal mode only (the text box has the keyboard otherwise)
+        let mut w = vim_note("main-views-vim");
+        space_f(&mut w, (Key::G, "g"));
+        assert_eq!(open_source(&w), Some(crate::picker::Source::Everything));
+        assert_eq!(note_text(&w), "# A\n", "nothing was typed");
+        // a drawing keeps Space for panning
+        let mut w = W::new("main-views-drawing");
+        w.app.open(Path::new("Map.excalidraw"), false);
+        settle(&mut w);
+        space_f(&mut w, (Key::G, "g"));
+        assert_eq!(open_source(&w), None);
+    }
+
+    // spec: KEY-042, KEY-038
+    #[test]
+    fn key_042_not_while_a_text_field_has_the_keyboard_and_not_under_a_dialog() {
+        let mut w = W::new("main-views-blocked");
+        w.app.show_view(View::Mail, false);
+        settle(&mut w);
+        // the search field of the mail view has the keyboard: the keys are typed
+        let search = egui::Id::unique("mail-search");
+        w.ctx.memory_mut(|m| m.request_focus(search));
+        settle(&mut w);
+        assert!(w.ctx.text_edit_focused(), "the mail search field has the keyboard");
+        space_f(&mut w, (Key::G, "g"));
+        assert_eq!(open_source(&w), None);
+        // and the editor of a note without vim mode: typing
+        let mut w = W::new("main-views-typing");
+        w.app.focus_editor();
+        settle(&mut w);
+        assert!(w.ctx.text_edit_focused());
+        space_f(&mut w, (Key::G, "g"));
+        assert_eq!(open_source(&w), None);
+        assert!(note_text(&w).contains(" fg"), "the keys were typed: {:?}", note_text(&w));
+        // under a modal dialog nothing fires, a half typed sequence is forgotten
+        let mut w = W::new("main-views-modal");
+        w.app.show_view(View::Calendar, false);
+        settle(&mut w);
+        typed(&mut w, Key::Space, " ");
+        w.app.open_settings(SettingsTab::Vault);
+        settle(&mut w);
+        let is_settings = |w: &W| matches!(w.app.modal, Some(Modal::Settings { .. }));
+        for second in [(Key::G, "g"), (Key::F, "f")] {
+            space_f(&mut w, second);
+            assert!(is_settings(&w), "the dialog stays: no picker over it");
+        }
+        w.app.modal = None;
+        settle(&mut w);
+        typed(&mut w, Key::F, "g");
+        assert_eq!(open_source(&w), None, "the Space before the dialog was forgotten");
+        space_f(&mut w, (Key::G, "g"));
+        assert_eq!(open_source(&w), Some(crate::picker::Source::Everything), "works again with the dialog closed");
+    }
+
+    // spec: KEY-043, MAIL-061
+    #[test]
+    fn key_043_in_the_mail_view_space_is_a_leader_and_its_single_keys_still_work() {
+        let mut w = W::new("main-views-mail");
+        w.app.show_view(View::Mail, false);
+        settle(&mut w);
+        space_f(&mut w, (Key::G, "g"));
+        assert_eq!(open_source(&w), Some(crate::picker::Source::Everything));
+        w.app.modal = None;
+        settle(&mut w);
+        // Space F is not the flag key f: the f after the Space belongs to the sequence
+        // a single key of the mail view still reaches it: `/` focuses the search, no sequence is pending
+        typed(&mut w, Key::Slash, "/");
+        settle(&mut w);
+        assert!(w.ctx.text_edit_focused(), "the mail key `/` still opens the search field");
+        assert_eq!(w.app.keymap.pending_text(w.t), None);
+        // Space then another key: the sequence ends, the key works as a mail key afterwards
+        let mut w = W::new("main-views-mail2");
+        w.app.show_view(View::Mail, false);
+        settle(&mut w);
+        typed(&mut w, Key::Space, " ");
+        assert!(w.app.keymap.pending_text(w.t).is_some(), "Space started a sequence");
+        typed(&mut w, Key::Slash, "/");
+        settle(&mut w);
+        assert_eq!(open_source(&w), None);
+        assert!(w.ctx.text_edit_focused(), "the key that did not continue the sequence worked as a mail key");
+    }
+
+    // spec: KEY-044, KEY-001
+    #[test]
+    fn key_044_the_keybindings_tab_shows_the_main_views_scope_with_its_keys() {
+        let mut w = W::new("main-views-tab");
+        w.open_dialog();
+        // the filter of the list leaves the two actions and the heading of their scope
+        if let Some(Modal::Settings { keys, .. }) = &mut w.app.modal {
+            keys.filter = "Space f".to_string();
+        }
+        settle(&mut w);
+        assert!(shows(&w, Scope::MainViews.label()), "{:?}", w.texts);
+        assert!(shows(&w, "Search notes, mail and posts") && shows(&w, "Find a file by name"), "{:?}", w.texts);
+        assert!(w.dialog().rects.iter().any(|r| r.0 == "key:normal.search_all"));
+        // they are rebindable there, and a clash with a mail key is refused with its name
+        w.app.keymap.set(Action::NormalSearchAll, Binding::parse("Space s").unwrap()).unwrap();
+        assert_eq!(w.app.keymap.display(Action::NormalSearchAll), "Space s");
+        assert!(w.app.keymap.set(Action::MailMark, Binding::parse("Space s").unwrap()).unwrap_err().contains("already used by “Search notes, mail and posts”"));
     }
 
     fn kind(w: &W) -> &'static str {

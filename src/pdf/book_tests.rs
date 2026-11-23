@@ -353,6 +353,29 @@ fn the_contents_list_parts_chapters_and_first_level_headings_with_links_to_their
     clean(&d);
 }
 
+// spec: BOOK-018
+#[test]
+fn the_introduction_follows_the_contents_on_a_new_page_unless_asked_otherwise() {
+    let (v, d) = handbook("tocbreak");
+    let page_of = |bytes: &[u8], word: &str| page_streams(bytes).iter().position(|p| p.contains(&hex(word))).unwrap_or_else(|| panic!("{word} is on no page"));
+    let with = export_book(&v, Path::new("Handbook"), &opts(), None).unwrap();
+    assert_eq!(page_of(&with, "Contents"), 1);
+    assert_eq!(page_of(&with, "Welcome"), 2, "the introduction starts the page after the contents");
+    // off: the introduction follows the contents on the same page, and the first chapter still starts its own
+    let off = ExportOptions { toc_break: false, ..opts() };
+    let without = export_book(&v, Path::new("Handbook"), &off, None).unwrap();
+    assert_eq!(page_of(&without, "Welcome"), 1, "below the contents");
+    assert_eq!(page_of(&without, "things"), page_of(&with, "things") - 1, "the chapters start pages as before, one page earlier");
+    // the top folder note says it
+    let text = HANDBOOK[0].1.replace("---\ntitle", "---\nprint-toc-page-break: false\ntitle");
+    let said = ExportOptions::for_note().with_toc_break_property(&text);
+    assert!(!said.toc_break);
+    // without contents there is nothing to break after
+    let none = export_book(&v, Path::new("Handbook"), &ExportOptions { toc: false, ..opts() }, None).unwrap();
+    assert_eq!(page_of(&none, "Welcome"), 1);
+    clean(&d);
+}
+
 // spec: BOOK-008
 #[test]
 fn a_page_of_a_chapter_has_its_title_at_the_top_but_not_its_first_page() {
@@ -441,7 +464,98 @@ fn code_text(text: &str) -> String {
     out
 }
 
-// spec: BOOK-012
+/// The first stream that draws `title`: the title page. (`page_streams` takes the stream of a picture for a page
+/// when its bytes happen to contain " Tf".)
+fn title_stream(bytes: &[u8], title: &str) -> String {
+    page_streams(bytes).into_iter().find(|s| s.contains(&hex(title)) && s.contains("BT")).unwrap()
+}
+
+/// The `[x, y, width, height]` (PDF points, y from the page's foot) of the pictures on the title page.
+fn logo_boxes(bytes: &[u8], title: &str) -> Vec<[f32; 4]> {
+    title_stream(bytes, title)
+        .lines()
+        .filter(|l| l.starts_with("q ") && l.contains(" cm /Im"))
+        .map(|l| {
+            let n: Vec<f32> = l.split_whitespace().skip(1).take(6).filter_map(|v| v.parse().ok()).collect();
+            [n[4], n[5], n[0], n[3]]
+        })
+        .collect()
+}
+
+/// The y (from the page's foot) of the baseline of the line of page 1 that says `word`.
+fn text_y(bytes: &[u8], word: &str) -> f32 {
+    let line = title_stream(bytes, word).lines().find(|l| l.contains(&hex(word))).unwrap().to_string();
+    let tm: Vec<&str> = line.split(" Tm").next().unwrap().split_whitespace().collect();
+    tm[tm.len() - 1].parse().unwrap()
+}
+
+/// A tiny PNG of a given size for a logo.
+fn png(w: u32, h: u32) -> Vec<u8> {
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::RgbaImage::from_pixel(w, h, image::Rgba([105, 65, 198, 255])).write_to(&mut out, image::ImageFormat::Png).unwrap();
+    out.into_inner()
+}
+
+/// A book `B` whose folder note has `logo: <logo>`; a PNG is written at `png_at` (a path in the vault).
+fn vault_with_logo(tag: &str, logo: Option<&str>, png_at: Option<&str>) -> (Vault, PathBuf) {
+    let front = logo.map_or(String::new(), |l| format!("logo: {l}\n"));
+    let (_, dir) = vault_with(tag, &[("B/index.md", &format!("---\ntitle: Logo book\n{front}---\nHello.\n")), ("B/One.md", "x\n")]);
+    if let Some(at) = png_at {
+        std::fs::create_dir_all(dir.join(at).parent().unwrap()).unwrap();
+        std::fs::write(dir.join(at), png(40, 20)).unwrap();
+    }
+    (Vault::open(&dir).unwrap(), dir)
+}
+
+// spec: BOOK-019
+#[test]
+fn a_logo_of_the_folder_note_is_a_picture_centred_above_the_title_on_page_1() {
+    for (value, at) in [("B/z_media/logo.png", "B/z_media/logo.png"), ("![[logo.png]]", "B/z_media/logo.png"), ("\"[[logo.png|the logo]]\"", "B/z_media/logo.png"), ("logo.png", "B/logo.png")] {
+        let (v, d) = vault_with_logo("logo", Some(value), Some(at));
+        let bytes = export_book(&v, Path::new("B"), &opts(), None).unwrap();
+        let boxes = logo_boxes(&bytes, "Logo book");
+        assert_eq!(boxes.len(), 1, "{value}: one picture on the title page");
+        let [x, y, w, h] = boxes[0];
+        assert!((h - 100.0).abs() < 0.1 && (w - 200.0).abs() < 0.1, "{value}: 100 pt high, the picture's shape: {w} x {h}");
+        assert!((x + w / 2.0 - 595.28 / 2.0).abs() < 1.0, "{value}: centred, x = {x}");
+        assert!(y > text_y(&bytes, "Logo book"), "{value}: above the title (the PDF's y goes up)");
+        clean(&d);
+    }
+}
+
+// spec: BOOK-019
+#[test]
+fn no_logo_property_means_no_picture_and_no_title_page_means_none_either() {
+    let (v, d) = vault_with_logo("no-logo", None, Some("B/logo.png"));
+    assert!(logo_boxes(&export_book(&v, Path::new("B"), &opts(), None).unwrap(), "Logo book").is_empty());
+    clean(&d);
+    let (v, d) = vault_with_logo("no-title", Some("logo.png"), Some("B/logo.png"));
+    let bytes = export_book(&v, Path::new("B"), &ExportOptions { title: false, ..opts() }, None).unwrap();
+    assert!(!String::from_utf8_lossy(&bytes).contains("/Subtype /Image"));
+    clean(&d);
+}
+
+// spec: BOOK-019
+#[test]
+fn a_missing_or_unreadable_logo_is_skipped_with_a_reason_and_the_export_goes_on() {
+    let (v, d) = vault_with_logo("missing", Some("nothing.png"), None);
+    let plan = book::plan(&v, Path::new("B")).unwrap();
+    let why = crate::pdf::book_export::logo_picture(&v, &plan).unwrap_err();
+    assert!(why.contains("nothing.png") && why.contains("not a file of the vault"), "{why}");
+    let bytes = export_book(&v, Path::new("B"), &opts(), None).unwrap();
+    assert!(logo_boxes(&bytes, "Logo book").is_empty(), "the title page is there without the picture");
+    clean(&d);
+    let (_, d) = vault_with_logo("broken", Some("logo.png"), None);
+    std::fs::write(d.join("B/logo.png"), "not a picture").unwrap();
+    let v = Vault::open(&d).unwrap();
+    let plan = book::plan(&v, Path::new("B")).unwrap();
+    let why = crate::pdf::book_export::logo_picture(&v, &plan).unwrap_err();
+    assert!(why.contains("cannot be read as a picture"), "{why}");
+    assert!(logo_boxes(&export_book(&v, Path::new("B"), &opts(), None).unwrap(), "Logo book").is_empty());
+    clean(&d);
+}
+
+// spec: BOOK-012, BOOK-019
 #[test]
 fn the_user_guide_is_a_book_with_every_note_once_in_the_order_of_start_here() {
     let guide = Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/userguide");
@@ -479,6 +593,10 @@ fn the_user_guide_is_a_book_with_every_note_once_in_the_order_of_start_here() {
     assert_eq!(marks.iter().filter(|m| m.1 == "1 Notes and links").count(), 1);
     assert!(c.matches(&hex("1 Notes and links")).count() > 2, "the contents and the running header of the chapter's later pages");
     assert!(c.contains(&hex("Contents")) && c.contains(&hex("Shale user guide")));
+    // the Shale logo is on the title page, above the title (BOOK-019)
+    assert_eq!(plan.logo.as_deref(), Some("z_media/shale-logo.png"));
+    let why = crate::pdf::book_export::logo_picture(&v, &plan).err();
+    assert_eq!((why, logo_boxes(&bytes, "Shale user guide").len()), (None, 1), "the guide's logo is on page 1");
     // every character of the guide has a glyph in the PDF fonts (PDF-010): arrows, ellipses, calendars
     let missing: std::collections::BTreeSet<char> = printed.iter().flat_map(|n| v.notes[n].text.chars()).filter(|c| !crate::pdf::write::has_glyph(*c)).collect();
     assert!(missing.is_empty(), "no glyph for {missing:?}");

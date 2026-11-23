@@ -51,7 +51,7 @@ pub trait Source: Send + Sync {
     fn cancel_scheduled(&self, _id: &str) -> Result<(), ActionError> {
         Err("this pretend server does not take writes".into())
     }
-    /// Tell the server that the notifications up to `mark` were read (SOC-072).
+    /// Tell the server that the notifications up to `mark` were read (SOC-079).
     fn mark_read(&self, _mark: &str) -> Result<(), String> {
         Ok(())
     }
@@ -109,7 +109,7 @@ pub struct Timeline {
     pub next_check: Option<Instant>,
     /// how often the list was replaced by a first page (a view that sees a new number starts at the top)
     pub reloads: u32,
-    /// Notifications: the `rank` of the newest notification the server was told is read (SOC-072)
+    /// Notifications: the `rank` of the newest notification the server was told is read (SOC-079)
     pub marked: i64,
 }
 
@@ -133,7 +133,7 @@ impl Timeline {
         if let (Some(cursor), Some(last)) = (fresh.gap, fresh_new.last()) {
             self.gaps.push(Gap { above: post_key(last), cursor });
         }
-        // a group that this check cut from the one that waits is one entry again (SOC-071)
+        // a group that this check cut from the one that waits is one entry again (SOC-078)
         if let (Some(last), Some(first)) = (fresh_new.last(), self.waiting.first()) {
             if super::notifications::same_group(last, first) && !self.gaps.iter().any(|g| g.above == post_key(last)) {
                 let last = fresh_new.pop().expect("not empty");
@@ -188,7 +188,7 @@ impl Timeline {
                 self.gaps.push(Gap { above: post_key(new.last().expect("not empty")), cursor });
             }
         }
-        // a group cut by the gap is one entry again (SOC-071)
+        // a group cut by the gap is one entry again (SOC-078)
         if new.first().is_some_and(|f| super::notifications::same_group(&self.posts[at], f)) {
             let first = new.remove(0);
             super::notifications::merge_into(&mut self.posts[at], first);
@@ -297,7 +297,7 @@ pub struct SocialState {
 /// Identifies a post in the feed: the same post boosted by two people shows twice.
 pub fn post_key(p: &Post) -> String {
     let boost = p.reposted_by.as_ref().map(|b| b.id.as_str()).unwrap_or("");
-    // a notification entry is told from the same post in another entry (SOC-071)
+    // a notification entry is told from the same post in another entry (SOC-078)
     match &p.notice {
         Some(n) => format!("{}|{boost}|{}", p.id, n.id),
         None => format!("{}|{boost}", p.id),
@@ -636,7 +636,7 @@ impl SocialState {
         let Some(t) = self.timelines.get_mut(key) else { return 0 };
         let have: HashSet<String> = t.posts.iter().map(post_key).collect();
         let mut fresh: Vec<Post> = std::mem::take(&mut t.waiting).into_iter().filter(|p| !have.contains(&post_key(p))).collect();
-        // a group that a check cut from the one in the list is one entry again (SOC-071)
+        // a group that a check cut from the one in the list is one entry again (SOC-078)
         if let (Some(last), Some(first)) = (fresh.last(), t.posts.first()) {
             if super::notifications::same_group(last, first) && !t.gaps.iter().any(|g| g.above == post_key(last)) {
                 let last = fresh.pop().expect("not empty");
@@ -648,14 +648,14 @@ impl SocialState {
         n
     }
 
-    /// How many new posts wait for a feed; of notifications the unread ones (SOC-072).
+    /// How many new posts wait for a feed; of notifications the unread ones (SOC-079).
     pub fn waiting_count(&self, account: &str, feed: &str) -> usize {
         let unread = |p: &&Post| p.notice.as_ref().is_none_or(|n| n.unread);
         self.timelines.get(&(account.to_string(), feed.to_string())).map(|t| t.waiting.iter().filter(unread).count()).unwrap_or(0)
     }
 
     /// The Notifications feed is on screen: tell the server that what the list shows is read
-    /// (SOC-072). Only when the newest entry shown was unread and was not sent before; entries
+    /// (SOC-079). Only when the newest entry shown was unread and was not sent before; entries
     /// that wait behind the "new" button are not read yet. A failure is said once.
     pub fn read_notifications(&mut self, ctx: &Context, e: &SocialAccountEntry, feed: &Feed) {
         let key = (e.account.id.clone(), feed.id.clone());
@@ -806,7 +806,7 @@ impl SocialState {
                                 // a page with nothing new would be asked for again and again
                                 t.cursor = if fresh.is_empty() { None } else { page.cursor };
                                 let mut fresh = fresh;
-                                // a group that the page boundary cut is one entry again (SOC-071)
+                                // a group that the page boundary cut is one entry again (SOC-078)
                                 if let (Some(last), Some(first)) = (t.posts.last(), fresh.first()) {
                                     if super::notifications::same_group(last, first) && !t.gaps.iter().any(|g| g.above == post_key(last)) {
                                         let first = fresh.remove(0);

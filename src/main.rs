@@ -81,6 +81,7 @@ mod jobs;
 mod key_badges;
 mod keys;
 mod keys_ui;
+mod known_vaults;
 mod layout;
 mod link_assist;
 mod link_preview;
@@ -95,6 +96,8 @@ mod math;
 #[cfg(test)]
 mod math_ui_tests;
 mod media;
+#[cfg(test)]
+mod modal_keys_ui_tests;
 #[cfg(test)]
 mod netshare_env_tests;
 #[cfg(test)]
@@ -142,12 +145,15 @@ mod social;
 mod start_dialog_tests;
 mod syntax;
 #[cfg(test)]
+mod tab_keys_ui_tests;
+#[cfg(test)]
 mod tab_order_tests;
 mod table;
 mod table_grid;
 mod table_select;
 #[cfg(test)]
 mod table_tests;
+mod tag_assist;
 mod task_box;
 #[cfg(test)]
 mod test_exec;
@@ -155,6 +161,11 @@ mod test_exec;
 mod test_exec_tests;
 mod theme;
 mod themes;
+mod thread;
+#[cfg(test)]
+mod thread_tests;
+#[cfg(test)]
+mod thread_ui_tests;
 #[cfg(test)]
 mod ui_test_support;
 mod undo;
@@ -169,6 +180,9 @@ mod utf8_tests;
 mod vault;
 mod vault_cache;
 mod vault_check;
+mod vault_menu;
+#[cfg(test)]
+mod vault_menu_tests;
 mod vault_path;
 #[cfg(test)]
 mod vault_path_tests;

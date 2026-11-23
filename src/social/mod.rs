@@ -262,7 +262,7 @@ pub struct Post {
     /// Mastodon: the poll of the status (SOC-061)
     #[serde(default)]
     pub poll: Option<poll::Poll>,
-    /// Set on the entries of the Notifications feed: why the post is there and who did it (SOC-071)
+    /// Set on the entries of the Notifications feed: why the post is there and who did it (SOC-078)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notice: Option<Box<notifications::Notice>>,
 }
@@ -797,7 +797,7 @@ impl Client {
     }
 
     /// Tell the server that the notifications up to `mark` (`Notice::mark` of the newest one shown)
-    /// were read (SOC-072).
+    /// were read (SOC-079).
     pub fn mark_notifications(&mut self, mark: &str) -> Result<(), String> {
         match &mut self.backend {
             Backend::Mastodon { token, .. } => notifications::mastodon_mark(&self.account.server, token.expose(), mark),

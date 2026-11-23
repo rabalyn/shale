@@ -38,7 +38,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   text: moving into a fold (or a link or search jumping there) opens it. Folds are kept per note across restarts (EDIT-079, in the vault's `.shale/state.json`; a fold whose block is gone and a note that is gone are dropped, a renamed or moved note keeps its folds) and
   are never written into the file. Also foldable (EDIT-080 to EDIT-085): **code blocks**, the **front matter** and a
   **signature** (a line `-- ` up to the next heading). A note's front matter starts folded to one muted line
-  `▸ Properties · email · Anna Müller · 2026-11-12` (the setting "Properties in the editor": folded or card; raw leaves it
+  `▸ Properties · email · Anna Müller · 2026-11-12` (the setting "Properties in the editor": folded, or card, which draws the reading view's typed card there instead of the line; raw leaves it
   open); the cursor moving into it opens the YAML and folds it again when it leaves. In a **mail note**
   (`type: email`) the quotes (`… n quoted lines`) and the signature start folded too.
 - **Folding in the reading view** (EDIT-095 to EDIT-099, rabalyn/shale#364): the reading view folds the same blocks with
@@ -70,7 +70,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   Normal text to H6), bullet and numbered lists, tasks, quotes, code blocks, rules, page breaks, alignment (left, centre, right), tables, `[[note]]`
   and `[text](url)` links, embeds (it opens the `[!` file picker) and "Clear formatting". With a
   selection a button wraps it (or takes the markers off again); with none it puts the markers in and the
-  cursor between them; a line button works on every line the selection touches. Each click is one undo
+  cursor between them, and the same key again just before the closing marker steps out behind it (an empty
+  pair is taken off); a line button works on every line the selection touches. Each click is one undo
   step and the keyboard stays in the note, also with the Markdown preview and with vim-style editing.
   Every button of the toolbar, the view header (edit / reading view, preview, ⋯ menu), the tab bar (New tab)
   and the ribbon has an Alt key (Alt+B bold, Alt+V reading view, Alt+1 … Alt+0 ribbon items, Alt+, and Alt+.
@@ -118,6 +119,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 - Type `[[` to get matching notes; ↑/↓ or Ctrl+J/Ctrl+K move through the list, Enter, Tab or a
   click picks an entry, and the last entry creates a new note. Esc closes the list.
+- Type `#` and a letter (or a word in the `tags:` property at the top of a note) to get the vault's
+  tags that match, best match first: `#prj` finds `projects/shale`, nested tags included; ↑/↓ or
+  Ctrl+J/Ctrl+K choose, Enter, Tab or a click picks, Esc closes. Nothing opens in code, in a link, in
+  a URL or on a heading (EDIT-120).
 - Type `[!` to pick a file: `/` starts at the vault, `~/` at your home folder, and Tab completes
   like a shell; ↑/↓ or Ctrl+J/Ctrl+K choose, Enter or a click picks. A file from outside the vault is
   copied to `z_media/<year>/<month>/`, or (a picture, PDF, sound or video) linked where it is, or
@@ -129,8 +134,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   or a small question asks which (the same setting). Other text pastes as usual.
 
 - **Sound players.** `![[song.mp3]]` shows a small player instead of a link, in the editor, the
-  markdown preview and the reading view (mp3, ogg, oga, flac, m4a, aac and wav play; opus files
-  are recognised but cannot be played yet). It shows the cover from the file's tags (or a tile
+  markdown preview and the reading view (mp3, ogg, oga, flac, m4a, aac and wav play, also the A-law and µ-law WAV files of phone systems
+  and answering machines such as FRITZ!Box call recordings; what Shale cannot decode itself, opus and
+  ADPCM WAV among it, plays through ffmpeg when that is installed, and otherwise the player says what
+  the file holds instead of calling it damaged). It shows the cover from the file's tags (or a tile
   with the file name), a round play/pause button over it (in the reading view Space too, once a click gave the player
   the keyboard; in the editor a click on the player leaves the keyboard and the cursor with the text), a progress bar (click to jump, drag to choose and seek on release) with the time,
   and a mute button and volume slider. Only one file plays at a time; it keeps playing while
@@ -198,7 +205,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   out, and the PDF has bookmarks for its `#`–`######` headings; the title is printed once: when the note's first
   heading is a `#` that says the same as the title, the separate title is left out, PDF-008; a note's
   properties set how it is printed, see below), insert a
-  new drawing, rename the note (links in other notes are updated), or move it to the trash. The
+  new drawing, rename the note (links in other notes are updated: wikilinks, embeds of notes and files, Markdown links and links in properties, also when a file or folder is moved or renamed from the title line; one history step), or move it to the trash. The
   trash keeps the original folder (`.trash/<date>/<path>`) and nothing in it is replaced or
   emptied; right-click the empty space of the file list and choose "Restore last deleted" to put
   the last item you trashed back.
@@ -222,6 +229,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
     each; anything else is ignored); they replace the usual proportions
   - `print-title`: `true` or `false`, the note's name as a title
   - `print-toc`: `true` or `false`, the contents page
+  - `print-toc-page-break` (#578, PDF-031): `true` (the default) or `false`; with `true` the text after the contents starts a new page
+    (the dialogs of the PDF, LaTeX, Word and folder-book exports have the box "Page break after the table of contents")
   - `print-break-before`: a heading level 1 to 6; every heading up to that level starts a new page
     (`1`: every `#`; the dialog has a box "Start each # heading on a new page" for it)
   - **Paper look** (#367): a note with any of these keys is printed plainly: list marks and quotes in the text
@@ -246,7 +255,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 - **A folder as one PDF, a book** (BOOK, #306): **Export to PDF…** in the menu of a folder in the file list,
   or of the vault (right-click the empty space under the tree), writes the notes of the folder and its
-  subfolders as one PDF: a title page (the folder note's `title`, `subtitle`, `author`, `date`), one
+  subfolders as one PDF: a title page (the folder note's `title`, `subtitle`, `author`, `date`, and a `logo:` picture above the title, BOOK-019), one
   contents page (parts, chapters and the first level of headings, with numbers, a dotted leader and the
   page, each a link), every note on a new page (a box), numbered headings that continue the chapter's number,
   a small grey running header with the chapter's title, links between the chapters that go to the page
@@ -256,7 +265,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   links, then the rest by name with numbers by value. The dialog has a folded **Reading order** to check the
   tree; the export is a background job with Cancel.
   `shale --export-pdf <folder> <file.pdf>` does it without a window, and `scripts/userguide-pdf.sh` makes the PDF of this
-  user guide (BOOK-001 to BOOK-012), which every release has as `shale-userguide-<version>.pdf`.
+  user guide (BOOK-001 to BOOK-012, BOOK-019), which every release has as `shale-userguide-<version>.pdf`.
 - **A folder through a LaTeX template** (#309): the folder's export dialog has the engine choice of a note's.
   With **LaTeX template** and a kind of the article or book family (publication, report, exercise, thesis,
   PhD; slides, letters and posters are greyed) the book is one LaTeX document: in a thesis the subfolders are
@@ -347,7 +356,9 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   moving still just selects the tab, and the ✕ or a middle click closes it.
 - Right-click a tab and choose **Pin tab** (or **Unpin tab**): pinned tabs move to the far left,
   show a small pin and keep their order. Drag reorders pinned tabs among themselves and the
-  others among themselves, never across the border. A pinned tab can still be closed.
+  others among themselves, never across the border. A pinned tab can still be closed. A pinned tab is
+  never replaced: opening a note any way (an import, a link, a search result, the quick switcher, the
+  file tree, back and forward) opens it in a new tab instead.
 - The order of all open tabs (notes, drawings and Feeds tabs) and which of them are pinned come
   back at the next start.
 
@@ -433,7 +444,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   action already uses asks “Overwrite it?” (Yes takes it from that action and leaves it without a key, No
   changes nothing; Enter answers No), and a binding can be a sequence of keys. While you record, a note
   under the keys says which action they would clash with.
-- Ctrl+PageUp / Ctrl+PageDown (macOS: Cmd+Opt+← / Cmd+Opt+→) switch to the previous / next tab, also from the file list and from
+- Ctrl+PageUp / Ctrl+PageDown and Ctrl+Shift+Tab / Ctrl+Tab (macOS: Cmd+Opt+← / Cmd+Opt+→) switch to the previous / next tab of the focused pane, also from the file list and from
   mail, calendar and Feeds; after the last tab comes the first.
 - In the search results j / k go from hit to hit and Ctrl+J / Ctrl+K from file to file (in the mail and posts groups from group to group).
 - **Markdown preview** (Settings → Editor, or the eye icon in the top right of the editor;
@@ -480,7 +491,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   after a restart too). The status bar shows NORMAL, INSERT, VISUAL or V-LINE.
 - In normal mode (and in a calendar, Feeds, … tab) **Space Tab** goes back to the note or sub-app
   this tab showed just before, and again to come back, like vim's alternate file. Space is the
-  leader key of its own list in the Keybindings tab; **Space f f** opens a window to find a file by its
+  leader key of its own list in the Keybindings tab; **Space f f** (and Space f g) work in every main view, not only in normal mode: the editor in normal mode, the reading view, mail, calendar, Feeds, tasks, graph; not while a text field has the keyboard, under a dialog or in a drawing (scope "Main views" of the Keybindings tab; in the mail view the mark of a message is **x**, Space is the leader); **Space f f** opens a window to find a file by its
   name (it never creates a note, unlike Ctrl+O); **Space f g** searches the text of notes, mail
   and posts in one list grouped by source (`*` and `?` are wildcards); the vim keys themselves cannot be rebound.
 - **Choose the sources of the search** (the sidebar search, Ctrl+Shift+F, and `Space f g`): a prefix at the start of
@@ -569,7 +580,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   lines: an e-mail as a mail header (sender, date, to / cc, subject, tag chips), an event with its time, place, attendees and a repeats badge, a Word import as one page chip
   (`A4 · 2.5 cm margins · 11 pt`), any other note as key and value rows. Ids and `print-*` settings are left out, a ▸ toggle shows every property, and people with a contact
   note are links. `properties::summary` gives the one line for a folded view (`email · Anna Müller · 2026-11-12 · #work #mail`). Settings → Appearance → "Properties in the editor"
-  / "Properties in the reading view": folded, card or raw (defaults: folded in the editor, card in the reading view). In the editor a note's front matter starts folded to its summary line unless the setting is raw (EDIT-081, EDIT-084). The date of an e-mail card and the start of an event card are links: a click shows that day in the calendar (EDIT-108).
+  / "Properties in the reading view": folded, card or raw (defaults: folded in the editor, card in the reading view). In the editor a note's front matter starts folded, to its summary line or, with the setting card, to the typed card of the reading view (a click on it opens the lines), unless the setting is raw (EDIT-081, EDIT-084). The date of an e-mail card and the start of an event card are links: a click shows that day in the calendar (EDIT-108).
 - **Title line and date prefix** (VAULT-025, CFG-043): above line 1 a note shows its title line, its file name without `.md` and without a
   leading date prefix `YYMMDD_` (`261117_Plan.md` shows `Plan`); editing it renames the file and keeps the prefix. Tabs and the PDF title show the name without the prefix; the file
   list, the quick switcher and links keep the full name, so the list sorts by date. Settings → Editor → "Date prefix for new notes" (on by default) names a note made by Shale
@@ -606,14 +617,20 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   between two icons shows where the icon lands; Esc, or letting go anywhere else, cancels. The
   sidebar toggles at the top and bottom and the settings button stay where they are.
 - The right sidebar is a stack of **views**. Each view has its own menubar of panel icons
-  (Backlinks, Outgoing links, Outline, Graph, Calendar, History) and shows the panel of the selected
+  (Backlinks, Outgoing links, Outline, Graph, Calendar, History, Thread) and shows the panel of the selected
   icon, so several panels can be open at once.
 - Drag a panel icon over the content of the right sidebar: the area lights up ("Drop to open
   this icon in a new view") and dropping makes a new view below it. Drag icons from one
   menubar to another, from a view to the ribbon (it then is a shortcut that shows the panel
-  below the views) and back. Icons that are no panels (Files, Mail, …) cannot go to the right
+  below the views) and back. Icons that are no panels and no views of the left sidebar (Mail, Feeds, …) cannot go to the right
   sidebar: the pointer shows "not allowed" and nothing changes. Taking the last icon out of a
   view removes the view. Esc cancels a drag.
+- **Files, Search and Tags on either side** (LAY-020 to LAY-027): drag the icon of Files, Search or Tags from the
+  ribbon to a right menubar or the right sidebar's content, or from a right menubar back to the ribbon. On release
+  Shale asks **Move or copy?** (Move takes it from the side it came from; Copy shows it on both sides; Cancel or Esc
+  changes nothing). Right-click the icon for **Move to / Copy to the right (left) sidebar** instead of dragging. A copy
+  shows the same state: one file tree, one search. If the left sidebar's view has moved, it shows the next one (or says
+  none is left); Ctrl+Shift+F shows Search where it is. The places are kept in the settings (`sidebars`).
 - Drag the border between two views up or down to change their heights (they start equal; a
   view never gets lower than a small minimum).
 - A middle click on the **Mail**, **Feeds** or **Calendar** icon opens that view in a new tab.
@@ -679,6 +696,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   on a CalDAV calendar changes its address, user name or password (empty password = keep the saved
   one); a new user name or password also goes to the other calendars of the same server and user.
 
+In a narrow sidebar the header wraps: the month name on its own line, the buttons below it, never over it (LAY-019).
+
 ![Calendar in the sidebar](userguide/z_media/screenshots/calendar-sidebar.png)
 
 ## Mail
@@ -697,7 +716,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - **No HTML, no tracking.** The message text comes from the plain text part, or from the HTML
   turned into text. Nothing is rendered, no pictures are fetched, no scripts run. An attachment
   is opened from a private temporary copy through your default program (never a program or
-  script), or saved into the vault's media folder.
+  script), or saved into the vault's media folder. A sound (every format of the media list, also a
+  `.wav` sent as a plain file) gets the player of the notes under its line in the reading pane,
+  playing from a private temporary copy and never by itself; sounds you attach go out with their
+  `audio/*` type.
 - **The local copy is not encrypted** (like Thunderbird's). Use full-disk encryption.
 
 ![Mail accounts](userguide/z_media/screenshots/mail-accounts.png)
@@ -729,7 +751,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - The first sync fetches the mail of the last three years, newest first, several folders at once,
   and can be stopped and resumed. **Sync** and the status bar show the progress; new mail is also
   fetched every 10 minutes (changeable, 0 = off) while Shale runs. A mail deleted on the server
-  stays here, dimmed, with a note.
+  stays here, dimmed, with a note; **Delete local copy…** (the button in the open mail and in the
+  bar of the marked mails, the row menu, or Shift+D) removes Shale's own copy of such mails, after
+  you confirm, several at once. Mail that is still on the server never gets it. The server and the
+  notes you imported from the mail are not touched, and the file goes to the local `.trash`.
 - **Changes in another mail program show up within seconds.** While the mail view is open, the
   folder you have open and each account's Inbox are watched over a read-only connection with IMAP
   IDLE: a flag removed, mail read, new or deleted mail in Thunderbird or on your phone appears here
@@ -744,7 +769,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   "meeting") and `*` / `?` work as in Space f g. Choose all folders or only the open one.
 - **Import to vault** (button, or `i`) hands the mail to the same Import dialog as a dragged
   `.eml` file: attachments, people and tags work the same, a mail that was imported before is
-  recognised, and nothing is written until you press Import. Mark several mails (Space or
+  recognised, and nothing is written until you press Import. Mark several mails (x or
   Ctrl+click) to import them together.
 - **Keyboard first.** One of the three panes has the keyboard and is framed in the accent
   colour; Ctrl+H / Ctrl+L (Cmd+Shift+H / Cmd+Shift+L on macOS; the keys that go between the file list and the editor) move it between
@@ -770,7 +795,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   change is undone in the list and you are told why. "Delete" is always a move to the Trash
   folder. "Delete forever" removes only the mails you chose (never the ones another program
   marked as deleted). A mail that another program moved or deleted meanwhile is left alone and
-  dimmed. Shale never deletes its own local copy: files of mail that moved or were deleted go to
+  dimmed. Shale never deletes a file of its own local copy: files of mail that moved or were deleted go to
   `.trash/<date>/` inside the mail folder. A server without `MOVE` is handled by a verified copy
   first; a server without `UIDPLUS` cannot delete forever, and for it deleting without `MOVE` is
   refused rather than risked.
@@ -906,7 +931,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 - **Export to Word** (DOCX-001 to DOCX-010, rabalyn/shale#487): a note's ⋯ menu and its context menu in the file list have **Export to Word…**,
   the reverse of the Word import, by the same `pandoc` (the Word import setting need not be on). The dialog saves to `<vault>/exports/<name>.docx`
   and has the boxes **Use the original Word file as the template** (for a note imported with its original kept, its `source:` property),
-  **Table of contents** and **Open the file afterwards**; the export is a background job that Cancel stops, and nothing is written when it
+  **Table of contents**, **Page break after the table of contents** (on; DOCX-013) and **Open the file afterwards**; the export is a background job that Cancel stops, and nothing is written when it
   fails. Shale cleans the note's text (front matter off, embeds by their vault path), pandoc reads it with commonmark and a Lua filter of
   Shale's (highlights, text and background colours, underline, sub- and superscript, strike-through, line breaks, links to notes as their words,
   pictures as wide as in the editor with their captions as alternative text, page breaks, alignment wrappers, the import's title block as Word's
@@ -926,6 +951,29 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   mail (`smime.p7s`, `signature.asc`) and the pictures of a signature block (logos, social icons,
   `image001.png`) start unticked and say why; the box **Skip signatures** (Import dialog, start value
   in Settings → Import) lets them start ticked (IMP-059, IMP-060, IMP-061, CFG-074).
+- The text of an imported mail is read as **segments**: the sender's own text and each mail it quotes
+  (`>` runs, "On … wrote:", "Am … schrieb …:", `-----Original Message-----`, Outlook's From / Sent / To /
+  Subject block, `blockquote` and `gmail_quote` of HTML mails), and each segment has its own signature
+  (`-- ` at any quote depth, the HTML markers of Thunderbird, Gmail, Outlook and Apple Mail, a closing
+  greeting with a short block of contact lines, a disclaimer). **Skip signatures** also removes the own
+  signature and the signatures inside the quoted mails and keeps the quoted text; **Leave out quoted
+  mails** (off at first, Settings → Import sets the start value) drops the quoted mails. What is not
+  clearly a signature stays (IMP-063 to IMP-066, CFG-076). The editor folds a signature inside a quote
+  too (EDIT-083).
+- **A follow-up mail continues its thread** (ADR-0032, #575). A mail note has `in-reply-to`, `references`
+  and `thread-id` besides `message-id` (IMP-067). The Import dialog looks in the vault for notes of the same
+  thread by the reply headers only (never the subject, sender or text) and offers "Continues [[note]]" with a
+  tick box and, with several matches, a choice (IMP-068); the folder of the import follows the matched
+  note unless a folder was dropped on or typed (IMP-069). Ticked, the new note gets `previous` / `next`
+  links in date order and the last note of the thread its `next`: one line of one other note (IMP-070). An
+  older mail asks "Keep the thread in date order?" with **Update** or **Leave the chain**; an import never
+  rewrites more than two other notes, open notes are saved first (IMP-071). The new note and the neighbour
+  lines are one history snapshot (IMP-072); a rename keeps the chain because `previous` and `next` are
+  links, and old notes with only a `message-id` still match as the parent (IMP-073).
+- **Thread view** (NAV-070, KEY-050): a panel of the right sidebar lists the notes with the same
+  `thread-id` as the open note, oldest first, with date, sender and title and the current one marked; a
+  click opens the note (a pinned tab is not replaced). Ctrl+Shift+PageUp / Ctrl+Shift+PageDown step to
+  the previous / next mail of the thread, Ctrl+Shift+T opens the view and gives it the keyboard.
 - Drop onto a folder in the file list to import into that folder, or onto a note to also add
   links to the new notes there.
 - After an import of two or more items a window, **Import summary**, says what was made: the new
@@ -939,6 +987,8 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 - On Wayland, Shale reads what Thunderbird hands over. When that is only a link to the message,
   Shale finds the message in Thunderbird's local copy (for IMAP accounts this needs "Keep
   messages for this account on this computer").
+
+- A calendar event becomes a note without dragging: the **Import** button of its details popup (left click) and the **Import** entry of its right-click menu open the same Import dialog as a drop, for a repeating event with the clicked date (CAL-034).
 
 ![Dragging an event onto a folder](userguide/z_media/screenshots/drag-event.png)
 
@@ -1129,7 +1179,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   and is not committed by git sync. In a vault in a cloud-synced or network folder, `state.json` and the undo
   histories are kept outside the vault, in Shale's data folder, so two computers do not overwrite each other's
   tabs, and leftover `.shale-tmp-*` files and `state.sync-conflict-*` copies are removed. Settings of the program itself (appearance, calendars,
-  recent vaults) stay in `~/.config/shale/config.toml`.
+  known vaults) stay in `~/.config/shale/config.toml`.
 - The files carry a format version and are upgraded on load. A settings file that can't be read
   is kept as `….broken-<date>` and you are told; a file from a newer Shale is used but not
   changed.
@@ -1253,6 +1303,10 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 - Every commit ends with the lines `Shale-Reason:` (`sync`, `merge`, or why a version was kept, see File history) and
   `Shale-Device:` (the name of the computer), after the optional suffix. The sync pushes the version commits of File
   history as they are: no squash, no rewrite.
+- **A folder with its own `.git`** (SYNC-076). When one is opened or added as a vault, Shale asks whether to use git sync
+  with it and syncs nothing before the answer. **Use git sync** keeps `sync.enabled` on, **Don't sync** turns it off in
+  the vault's `.shale/settings.json`; Esc asks again the next time. A `.git` Shale made itself, the user guide and the
+  demo vault do not ask. The answer is remembered in a file inside `.git`, which is never committed.
 - **Media in Git LFS.** Audio and video files are large, so they do not belong in the git history.
   With `git-lfs` installed, a repository Shale creates (Connect on a folder that is no repository
   yet) stores media with Git LFS from the start, and for an existing repository Settings → Sync
@@ -1351,6 +1405,9 @@ Whatever runs longer than a moment says what it does, cannot be started twice an
   Point at it, or click it to keep it open (a second click closes it): it lists every task with how long it has run and **Cancel**
   where the work can stop. It disappears when nothing runs.
   ![The indicator with two tasks listed](userguide/z_media/screenshots/busy-indicator.png)
+- **Known vaults** (VAULT-029, VAULT-031, VAULT-040, CFG-075, #582): the global `config.toml` keeps a list of the vaults Shale has opened, each with a name (by default the folder's name, local to the computer) and its canonical path, so a folder is never listed twice and the list has no length cap. It replaces the recent list and is converted from it at the first start. A vault is added when it has loaded (also one from `--vault` or a second start, never one that failed to load). The start screen lists the names; the window title shows the name of the open vault, with the parent folder after it when two known vaults have the same name.
+- **Vault dropdown** (VAULT-030, VAULT-032 to VAULT-034, VAULT-038, VAULT-039, #583): the vault label at the bottom left of the window (name and ▾) opens a list of the known vaults, the open one marked, then **Open…** and **Create…**. A click or Enter opens a vault; arrows, Enter and Esc work. A right-click on a vault offers **Rename** (an empty name is refused). Open… and Create… use the app's own folder picker (a path field, the folders below, Up); Create takes an empty folder (hidden files do not count; a new path is made), can start with sample notes, and offers to open a folder with content instead. A vault whose folder is missing is greyed out in the list and on the start screen with **Locate…** (pick the new folder, the name stays) and **Forget**, and Shale never makes that folder again by itself. A folder inside a known vault, or around one, is allowed and warned about once. Close, and the "Switch vault" command, follow in #584.
+- **Opening a vault** (NET-019, #513): a vault is read on a background thread. While it loads, the start screen shows a spinner, "Opening ‹folder›…" and **Cancel** (a vault on a slow network share or an online-only folder no longer freezes the window); the main window appears when the vault has arrived. This covers the last vault at start, `--vault`, a folder a second start hands over, the user guide and Open or Create in the start dialog.
 - **Moved so far:** the git sync and the Git LFS setup, the check of the vault's names (Cancel stops it) and the PDF export of a
   folder (Cancel stops it), and the check of the mail index (JOB-015: it starts with the window when a mail account is set up, so the mail view finds the index ready, and the view shows "Checking the mail index…" with a spinner when it is opened earlier). The other long actions follow; the list of all of them, with what each shows today, is
   [docs/spec/busy-states.md](spec/busy-states.md).
@@ -1368,12 +1425,14 @@ Text editing keys and vim keys are fixed.
 | Ctrl+E | Edit / reading view |
 | Ctrl+, | Settings |
 | Ctrl+Shift+D | Data usage: what Shale keeps on disk, and its caches |
+| Ctrl+Shift+PageUp / Ctrl+Shift+PageDown | Previous / next message of the thread of the note (the mails with the same thread-id, by date; nothing happens at the ends, without a thread or in a dialog) |
+| Ctrl+Shift+T | Thread overview: opens the Thread view in the right sidebar and gives it the keyboard (↑ ↓ move, Enter jumps, Esc returns to the note) |
 | F1 | Open the user guide (built into Shale, unpacked into its data folder and opened as a vault) |
 | Ctrl+S | Save now (notes also save automatically) |
 | Ctrl+W | Close tab |
 | Ctrl+Shift+F | Search notes, mail and posts |
 | Ctrl+H / Ctrl+L | Keyboard one place left / right: through the split panes in screen order, left of the first pane into the left sidebar, from there into the first pane (macOS: Cmd+Shift+H / Cmd+Shift+L, because Cmd+H hides the app) |
-| Ctrl+PageUp / Ctrl+PageDown | Previous / next tab (from the last tab on to the first), wherever the keyboard is (macOS: Cmd+Opt+← / Cmd+Opt+→) |
+| Ctrl+PageUp / Ctrl+PageDown, Ctrl+Shift+Tab / Ctrl+Tab | Previous / next tab of the focused pane in the order of the tab bar (from the last tab on to the first), wherever the keyboard is (macOS: Cmd+Opt+← / Cmd+Opt+→ only, Cmd+Tab is the system's) |
 | Ctrl+\ | Split right: open this tab in a new pane to the right (panes sit side by side, each with its own tabs) |
 | F6 / Shift+F6 | Focus the next / previous pane |
 | Ctrl+Shift+W | Close the pane with all its tabs (macOS: Cmd+Shift+W) |
@@ -1391,15 +1450,17 @@ Text editing keys and vim keys are fixed.
 | Alt+, / Alt+. | Show or hide the left / right sidebar |
 | Hold Alt | A small badge with its key appears at the corner of each of these buttons that has an Alt key (it follows a key you changed). On macOS, where Option+letter types characters, these actions, and the Alt keys of the open mail, have no key until you give them one in Settings → Keybindings (scope Note view, Mail view and Everywhere) |
 | Ctrl+6 | Alternate view, in every view (also mail and drawings, where Space is taken): swap with the view this tab showed just before; again: back |
-| Space Tab | Vim-style editing, normal mode: back to the view this tab showed just before (note, calendar, Feeds, …); again: forward to this one |
+| Space Tab | Vim-style editing, normal mode (not in the mail view, where Ctrl+6 does it): back to the view this tab showed just before (note, calendar, Feeds, …); again: forward to this one |
 | Space … | A started key sequence (e.g. `Space f`) shows in the status bar and is dropped after 1.5 s without a key |
-| Space f f | Vim-style editing, normal mode: find a file by name (↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens it in this tab, Esc closes) |
-| Space f g | Vim-style editing, normal mode: search the text of notes, mail and posts (`*` and `?` are wildcards; `f:` `m:` `s:` at the start look in notes, mail or posts only; results grouped with counts; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the hit where it belongs, Esc closes) |
+| Space f f | In every main view (editor in normal mode, reading view, mail, calendar, Feeds, tasks, graph; not while a text field has the keyboard or a dialog is open; scope "Main views" in Settings → Keybindings): find a file by name (↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens it in this tab, Esc closes) |
+| Space f g | In every main view (as Space f f): search the text of notes, mail and posts (`*` and `?` are wildcards; `f:` `m:` `s:` at the start look in notes, mail or posts only; results grouped with counts; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the hit where it belongs, Esc closes) |
 | ↓ or Ctrl+J, ↑ or Ctrl+K, Enter, Esc | In a picker window (Space f f, Space f g), the quick switcher (Ctrl+O) and the font list: next line, previous line, open, close. The hint between the search field and the list shows the keys as they are bound now; all four can be changed in Settings → Keybindings ("List windows") |
 | Shift+K | Vim-style editing, normal mode: preview the link under the cursor (a note as in the reading view, a web page's title and text; press it again to move the keyboard into the preview: j / k or ↓ / ↑ scroll, Enter opens the link like `gt`, Ctrl+Enter opens it in a new pane on the right, Esc closes). Definable, e.g. as Space Space |
 | Alt+↑ / Alt+↓ | Move the current line |
 | Tab / Shift+Tab | Indent lists or change heading levels |
 | Shift+arrows | In a table cell edited in the grid: select a block of cells (formatting buttons and Delete / Backspace work on all of them; typing ends it) |
+
+While a dialog (Settings, an import, a confirmation, a wizard, …) is open, these shortcuts and the editor's keys do nothing; Esc closes the dialog and its own keys (Enter, Tab, typing, the key capture of the Keybindings tab) work. Shortcuts of the system are not affected.
 
 ### Mail view keys
 
@@ -1414,13 +1475,14 @@ only while no text field has the keyboard. Every key can be changed in Settings 
 | j / ↓, k / ↑ | Next / previous: folder in the folder pane, message in the list, scroll in the message pane |
 | Enter | Folder pane: go to the list; list: open the message (Drafts: open the draft; Outbox: show the mail) |
 | Ctrl+J / Ctrl+K | Next / previous folder, from any pane |
-| Space | Mark the message for a selection (list) |
+| x | Mark the message for a selection (list); Space is the leader of Space f f / Space f g in the mail view too |
 | / | Search mail (Esc leaves the field, ↓ or Enter go into the results) |
 | t | Search all folders or only this one |
 | i | Import to vault |
 | u | Mark read or unread |
 | s or f | Set or clear the flag |
 | d or Delete | Delete (Trash: asks first); in Drafts and Outbox discard the draft or the record |
+| Shift+D | Delete the local copy of a mail that was deleted on the server (the dimmed ones; asks first; the server and imported notes are not touched) |
 | m | Move to a folder |
 | c | Write a new mail |
 | r, Shift+R, Shift+F | Reply, reply all, forward |

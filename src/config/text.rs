@@ -28,7 +28,9 @@ const NONE_WORD: &str = "none";
 const DESCRIPTIONS: &[(&str, &str)] = &[
     ("version", "Format version of this file. Do not change it."),
     ("vault", "The vault that was open last; it opens again at the next start."),
-    ("recent", "The vaults opened lately, newest first (at most 8)."),
+    ("vaults", "The vaults Shale knows, the one opened last first: the start screen lists them. Names are only used on this computer."),
+    ("vaults.name", "What the vault is called in the window. An empty name becomes the name of the folder."),
+    ("vaults.path", "The folder of the vault."),
     ("ctrl_to_follow", "true: a link is followed only with Ctrl+click; false: a plain click follows it."),
     ("new_notes_next_to_current", "true: a note made from a red link goes next to the current note; false: into the vault's top folder."),
     ("update_links_on_rename", "true: renaming a note changes the links to it in other notes."),
@@ -75,8 +77,8 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
     ("inline_images", "true: pictures show inside the editor; the link shows while the cursor is on it."),
     ("line_numbers", "true: a column with line numbers sits left of the text in the editor."),
     ("date_prefix_new_notes", "true: a note made by Shale (new note, red link, quick switcher) is named YYMMDD_name.md with today's date; its title line shows the name without the prefix."),
-    ("properties_in_editor", "How the editor shows the properties (front matter) of a note: Folded (one line), Card or Raw."),
-    ("properties_in_reader", "How the reading view shows the properties (front matter) of a note: Folded (one line), Card or Raw."),
+    ("properties_in_editor", "How the editor shows the properties (front matter) of a note: Folded (one line), Card (the typed card of the reading view) or Raw."),
+    ("properties_in_reader", "How the reading view shows the properties (front matter) of a note: Folded (one line), Card (the typed card of the reading view) or Raw."),
     ("numbered_headings", "true: the headings of a note (# and deeper) are shown with numbers 1, 1.1, 1.2; a note's front matter numbered-headings: true or false overrides it."),
     ("format_toolbar", "true: the formatting toolbar is shown above the text of a note."),
     ("toolbar_size", "The size of the toolbar's buttons in percent of the base size, 80 to 200."),
@@ -154,6 +156,10 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
     (
         "import_skip_signatures",
         "true: the Import dialog starts with the signature parts of an e-mail (smime.p7s, signature.asc) and the pictures of its signature block unticked. false: they start ticked like other attachments (Settings > Import).",
+    ),
+    (
+        "import_leave_out_quoted",
+        "true: the Import dialog starts with 'Leave out quoted mails' ticked: an imported e-mail keeps only the text its sender wrote, not the earlier mails it quotes. false: the quoted mails stay (Settings > Import).",
     ),
     ("social_accounts", "The Mastodon and Bluesky accounts of the feed view. Their tokens are kept in the system keyring when there is one."),
     ("social_accounts.id", "A name that identifies the account, such as \"mastodon:ada@mastodon.social\"."),
@@ -428,7 +434,7 @@ mod tests {
         use crate::calendar::store::{CalendarSource, SourceKind};
         let mut c = Config {
             vault: Some("/v".into()),
-            recent: vec!["/v".into(), "/w".into()],
+            vaults: serde_json::from_str(r#"[{"name":"V","path":"/v"},{"name":"w","path":"/w"}]"#).unwrap(),
             fonts: crate::fonts::FontsCfg {
                 same_everywhere: false,
                 all: crate::fonts::FontChoice { family: Some("Sans".into()), size: 17.0 },
@@ -592,11 +598,11 @@ mod tests {
     fn cfg_009_keys_that_need_quotes_are_quoted_and_long_lists_take_a_line_per_entry() {
         let mut c = Config::default();
         c.keybindings.insert("tabs.next one".into(), vec!["Ctrl+Tab".into()]);
-        c.recent = (0..6).map(|i| format!("/home/someone/Documents/a-long-folder-name/vault-number-{i}").into()).collect();
+        c.sidebars.hidden = (0..6).map(|i| format!("/home/someone/Documents/a-long-folder-name/vault-number-{i}")).collect();
         let text = to_toml(&c);
         assert!(text.contains("\"tabs.next one\" = [\"Ctrl+Tab\"]"), "{text}");
-        assert!(text.contains("recent = [\n  \"/home/someone/Documents/a-long-folder-name/vault-number-0\",\n"), "{text}");
-        assert_eq!(Config::parse_text(&text).unwrap().0.recent, c.recent);
+        assert!(text.contains("hidden = [\n  \"/home/someone/Documents/a-long-folder-name/vault-number-0\",\n"), "{text}");
+        assert_eq!(Config::parse_text(&text).unwrap().0.sidebars.hidden, c.sidebars.hidden);
         assert_eq!(Config::parse_text(&text).unwrap().0.keybindings, c.keybindings);
     }
 }

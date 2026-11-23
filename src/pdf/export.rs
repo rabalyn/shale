@@ -113,6 +113,9 @@ pub struct ExportOptions {
     /// notes: the deepest heading level that starts a new page (`print-break-before`, PDF-021):
     /// 1 is every `#`, 2 every `#` and `##`, …; 0 none
     pub break_before: u8,
+    /// a page break after the table of contents (`print-toc-page-break`, PDF-031): what follows the
+    /// contents starts on a new page; false: it follows on the same page
+    pub toc_break: bool,
     /// a book (BOOK-005): every part and chapter starts on a new page
     pub new_page_each: bool,
     /// drawings
@@ -146,6 +149,7 @@ impl ExportOptions {
             heading_sizes: None,
             paper_look: false,
             break_before: 0,
+            toc_break: true,
             new_page_each: true,
             background: Background::White,
             fill_page: true,
@@ -176,6 +180,7 @@ impl ExportOptions {
             heading_sizes: None,
             paper_look: false,
             break_before: 0,
+            toc_break: true,
             new_page_each: false,
             background: Background::White,
             fill_page: true,
@@ -240,7 +245,17 @@ impl ExportOptions {
         if let Some(level) = props.get("print-break-before").and_then(|v| v.trim().parse::<u8>().ok()).filter(|l| *l <= 6) {
             o.break_before = level;
         }
-        o
+        o.with_toc_break_property(text)
+    }
+
+    /// These options with what `print-toc-page-break` says (PDF-031): `false` takes the page break
+    /// after the table of contents away, `true` puts it. A missing or bad value leaves it as it was.
+    /// A book reads it from its top folder note's text.
+    pub fn with_toc_break_property(mut self, text: &str) -> Self {
+        if let Some(b) = print_properties(text).get("print-toc-page-break").and_then(|v| parse_bool(v)) {
+            self.toc_break = b;
+        }
+        self
     }
 
     /// The properties of the note that are not choices of the export dialog (PDF-013): `print-font`,
@@ -319,7 +334,7 @@ impl ExportOptions {
 
 /// The `print-*` properties the export knows (PDF-013, PDF-023): one of them in a note switches the
 /// paper look on (PDF-024); an unknown `print-*` key does not.
-const KNOWN_PRINT_KEYS: [&str; 13] = [
+const KNOWN_PRINT_KEYS: [&str; 14] = [
     "print-paper",
     "print-margins",
     "print-font",
@@ -332,6 +347,7 @@ const KNOWN_PRINT_KEYS: [&str; 13] = [
     "print-heading-sizes",
     "print-title",
     "print-toc",
+    "print-toc-page-break",
     "print-break-before",
 ];
 
@@ -720,7 +736,7 @@ impl<'a> Writer<'a> {
     /// Room for the *Contents* list (PDF-008): its title is printed now (under the note's title,
     /// when there is one), and each of the `count` entries gets a line (page and distance from
     /// the page's top), going on at new pages as needed. The note's text starts on a new page after
-    /// them. The entries are drawn later by [`Writer::draw_contents`], when the pages of the
+    /// them (with `toc_break` off, the text goes on below the list instead, PDF-031). The entries are drawn later by [`Writer::draw_contents`], when the pages of the
     /// headings are known.
     pub(super) fn reserve_contents(&mut self, count: usize) -> Vec<(usize, f32)> {
         self.reserve_contents_gapped(&vec![0.0; count])
@@ -761,7 +777,11 @@ impl<'a> Writer<'a> {
             slots.push((self.page, self.y));
             self.y += base * CONTENTS_LINE;
         }
-        self.new_page();
+        if self.opts.toc_break {
+            self.new_page();
+        } else {
+            self.y += base * 0.8;
+        }
         slots
     }
 
@@ -1745,7 +1765,7 @@ pub(super) fn finish_from(mut doc: Doc, opts: &ExportOptions, first: usize) -> R
 // ---------------------------------------------------------------- drawings
 
 /// A picture in the PDF writer's form (alpha only when it is used).
-fn pdf_image(img: &image::RgbaImage) -> Image {
+pub(super) fn pdf_image(img: &image::RgbaImage) -> Image {
     let has_alpha = img.pixels().any(|p| p[3] < 255);
     let rgb: Vec<u8> = img.pixels().flat_map(|p| [p[0], p[1], p[2]]).collect();
     let alpha = has_alpha.then(|| img.pixels().map(|p| p[3]).collect());
@@ -3092,6 +3112,32 @@ pub(crate) mod tests {
     }
     fn words(n: usize) -> String {
         (0..n).map(|i| ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "kilo"][i % 10].to_string() + &"x".repeat(i % 4)).collect::<Vec<_>>().join(" ")
+    }
+
+    // spec: PDF-031, PDF-008
+    #[test]
+    fn the_text_starts_on_a_new_page_after_the_contents_unless_the_box_or_the_note_says_otherwise_pdf_031() {
+        let text = "# One\n\nfiller text\n\n## Two\n\nmore\n";
+        let base = ExportOptions { title: false, page_numbers: false, ..ExportOptions::for_note() };
+        assert!(base.toc_break, "on by default");
+        let with = pages_of(text, &base);
+        assert_eq!(with.len(), 2, "the contents page and the text");
+        assert!(with[0].contains(&hex("Contents")) && !with[0].contains(&hex("filler")) && with[1].contains(&hex("filler")));
+        let without = pages_of(text, &ExportOptions { toc_break: false, ..base.clone() });
+        assert_eq!(without.len(), 1, "the text follows the contents on the same page");
+        assert!(without[0].contains(&hex("Contents")) && without[0].contains(&hex("filler")) && without[0].contains(&hex("more")));
+        // the note says it: `print-toc-page-break`, read into the options the dialog starts from; a bad value changes nothing
+        let read = |v: &str| ExportOptions::for_note().with_note_properties(&front(&format!("print-toc-page-break: {v}"), "x")).toc_break;
+        assert!(!read("false") && !read("no") && read("true") && read("yes") && read("maybe") && read(""));
+        let off = front("print-toc-page-break: false", text);
+        let opts = ExportOptions { title: false, page_numbers: false, ..ExportOptions::for_note() }.with_note_properties(&off);
+        assert_eq!(pages_of(&off, &opts).len(), 1, "from the note's property");
+        // the property counts as a print property of the paper look (PDF-024), like `print-toc`
+        assert!(ExportOptions::for_note().with_note_properties(&off).paper_look);
+        // the dialog's value wins over the note's
+        assert_eq!(pages_of(&off, &ExportOptions { toc_break: true, ..opts }).len(), 2);
+        // no contents, no break: nothing is added
+        assert_eq!(pages_of(text, &ExportOptions { toc: false, ..base }).len(), 1);
     }
 
     // spec: PDF-013

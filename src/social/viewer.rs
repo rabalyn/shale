@@ -2,7 +2,7 @@
 //! fitted to the window, with zoom, stepping through the pictures and videos of the post and the
 //! description of each. The pictures come through the `ImageCache` (SOC-013) and the videos
 //! through `Clips`, so the window never waits for the network; a video plays in the app's media
-//! player (MEDIA-025) and stops when the viewer closes or steps away from it.
+//! player (MEDIA-028) and stops when the viewer closes or steps away from it.
 
 use super::clips::{Clip, Clips, Source};
 use super::feed_ui::open_web;

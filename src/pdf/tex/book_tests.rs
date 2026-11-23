@@ -59,6 +59,22 @@ fn handbook(tag: &str) -> (Vault, PathBuf) {
     )
 }
 
+// spec: BOOK-018
+#[test]
+fn the_introduction_of_a_latex_book_starts_a_page_after_the_contents_unless_asked_otherwise() {
+    let (v, dir) = handbook("tocbreak");
+    for kind_id in ["thesis", "pub"] {
+        let on = tex_of(&v, kind_id, &ExportOptions::for_note());
+        assert!(on.contains("\\tableofcontents\n\\newpage\n\n\\shaleanchor{shale-1}\nIntro text"), "{kind_id}: {on}");
+        assert_eq!(on.matches("\\tableofcontents").count(), 1);
+        let off = tex_of(&v, kind_id, &ExportOptions { toc_break: false, ..ExportOptions::for_note() });
+        assert!(off.contains("\\tableofcontents\n\\shaleanchor{shale-1}\nIntro text") && !off.contains("\\newpage"), "{kind_id}: {off}");
+    }
+    // no contents: no break
+    assert!(!tex_of(&v, "thesis", &ExportOptions { toc: false, ..ExportOptions::for_note() }).contains("\\newpage"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 // spec: BOOK-014
 #[test]
 fn a_book_kind_has_parts_for_the_subfolders_chapters_for_the_notes_and_the_headings_below() {
@@ -66,7 +82,7 @@ fn a_book_kind_has_parts_for_the_subfolders_chapters_for_the_notes_and_the_headi
     let tex = tex_of(&v, "thesis", &ExportOptions::for_note());
     // the reading order by name: Appendix, Getting started, R&D (Deep, Lists); the intro first
     let order = [
-        "\\maketitle\n\\tableofcontents\n\\shaleanchor{shale-1}\nIntro text",
+        "\\maketitle\n\\tableofcontents\n\\newpage\n\n\\shaleanchor{shale-1}\nIntro text",
         "\\section*{Intro head}\\shaleanchor{shale-1-1}\n\n",
         "\\chapter{Appendix}\\shaleanchor{shale-2}\n\nThe end",
         "\\chapter{Getting started}\\shaleanchor{shale-3}\n\nStart here",

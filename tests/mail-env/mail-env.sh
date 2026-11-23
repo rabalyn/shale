@@ -35,6 +35,19 @@ wait_for() { # host port seconds
   return 1
 }
 
+# waits until IMAPS answers with a real IMAP greeting through TLS (an open port is not enough: the
+# published port accepts connections before Dovecot listens behind it); gives up after $1 seconds
+wait_for_imap() { # seconds
+  i=0
+  while [ "$i" -lt "$1" ]; do
+    greeting=$(printf 'a logout\r\n' | timeout 5 openssl s_client -quiet -connect 127.0.0.1:10993 2>/dev/null | head -n 1 || true)
+    case "$greeting" in "* OK"*) return 0 ;; esac
+    i=$((i + 1))
+    sleep 1
+  done
+  return 1
+}
+
 # no container started below may keep the lock's file descriptor (7): a daemon that outlived the script would hold the lock
 case "${1:-}" in up|down|reset|revoke) . ../env-lock.sh; shale_env_lock ;; esac
 
@@ -58,7 +71,7 @@ case "${1:-}" in
     $COMPOSE -f compose.yaml start dovecot 7>&-
     wait_for 127.0.0.1 10993 60 || { echo "Dovecot did not come back" >&2; exit 1; }
     wait_for 127.0.0.1 18025 60 || { echo "the mail sink did not come back" >&2; exit 1; }
-    sleep 2
+    wait_for_imap 30 || { echo "Dovecot did not greet with IMAP within 30 s (see: $0 logs)" >&2; exit 1; }
     echo "The provider was restarted: all tokens it handed out are invalid now."
     ;;
   status) $COMPOSE -f compose.yaml ps ;;

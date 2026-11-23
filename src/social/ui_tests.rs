@@ -46,7 +46,7 @@ pub(crate) struct Script {
     /// the scheduled posts the server holds (SOC-064) and the ids asked to be cancelled
     pub scheduled: Mutex<Vec<Scheduled>>,
     pub cancelled: Mutex<Vec<String>>,
-    /// the marks the account was told its notifications were read up to (SOC-072)
+    /// the marks the account was told its notifications were read up to (SOC-079)
     pub marks: Mutex<Vec<String>>,
 }
 
@@ -916,7 +916,7 @@ impl W {
     }
 }
 
-fn hit_of(account: &str, feed: &str, post: Post) -> crate::social::post_index::PostHit {
+pub(super) fn hit_of(account: &str, feed: &str, post: Post) -> crate::social::post_index::PostHit {
     crate::social::post_index::PostHit {
         account: account.into(),
         feed: feed.into(),

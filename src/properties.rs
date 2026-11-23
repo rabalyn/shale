@@ -29,7 +29,7 @@ pub enum Kind {
 /// (EDIT-061). `print-*` keys are technical as a whole.
 pub fn is_technical(key: &str) -> bool {
     let k = key.trim().to_lowercase().replace('_', "-");
-    k.starts_with("print-") || matches!(k.as_str(), "message-id" | "in-reply-to" | "references" | "event-uid" | "uid" | "id" | "source" | "numbered-headings")
+    k.starts_with("print-") || matches!(k.as_str(), "message-id" | "in-reply-to" | "references" | "thread-id" | "event-uid" | "uid" | "id" | "source" | "numbered-headings")
 }
 
 /// A person of an address list: `"Müller, Hans" <h@x.de>` is name `Hans Müller`, email `h@x.de`.
@@ -193,6 +193,13 @@ mod tests {
     #[test]
     fn a_mail_is_summed_up_as_type_sender_date_and_tags() {
         assert_eq!(summary(MAIL).as_deref(), Some("email · Anna Müller · 2026-11-12 · #work #mail"));
+    }
+
+    // spec: EDIT-060, EDIT-067
+    #[test]
+    fn a_quoted_display_name_of_a_sender_shows_without_escapes() {
+        let text = "---\ntype: email\nfrom: \"\\\"Nils Mundhenke\\\" <nils@example.org>\"\ndate: 2026-11-12 14:30\n---\n";
+        assert_eq!(summary(text).as_deref(), Some("email · Nils Mundhenke · 2026-11-12"));
     }
 
     // spec: EDIT-060

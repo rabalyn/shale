@@ -651,6 +651,19 @@ fn imp_052_the_dialog_starts_with_the_setting_and_a_ticked_box_writes_the_list()
     assert!(listed.contains("\n- **From:** ") && listed.contains("\n- **Date:** 2026-11-13 "), "{listed}");
 }
 
+// spec: IMP-066, CFG-076
+#[test]
+fn imp_066_the_dialog_starts_with_the_leave_out_quoted_setting() {
+    let mut w = W::new("leave-out-quoted");
+    let items = vec![crate::import::email_item(crate::mail::parse(&crate::mail::tests::sample_eml()), ("m.eml".into(), vec![]))];
+    w.app.open_import(items.clone(), vec![], None);
+    assert!(!w.dialog().leave_out_quoted, "off by default");
+    w.app.modal = None;
+    w.app.cfg.import_leave_out_quoted = true;
+    w.app.open_import(items, vec![], None);
+    assert!(w.dialog().leave_out_quoted);
+}
+
 // spec: IMP-061, CFG-074
 #[test]
 fn imp_061_the_dialog_starts_with_the_skip_signatures_setting() {
@@ -758,4 +771,89 @@ fn imp_056_one_result_opens_as_before_and_errors_of_several_are_in_the_summary()
     assert!(s.errors[0].contains("gone"), "{:?}", s.errors);
     assert!(!w.app.toasts.iter().any(|(t, _)| t.contains("gone")), "{:?}", w.app.toasts);
     assert!(w.painted("Went wrong") && w.painted(&s.errors[0]), "{:?}", w.hl.text);
+}
+
+/// A local calendar "Work" with a daily event of four dates, the second one changed.
+fn calendar_with_series(w: &mut W) -> Vec<crate::calendar::store::Occ> {
+    use crate::calendar::ics::{to_ics, Event};
+    let dir = w.app.vault.as_ref().unwrap().root.join("calendars");
+    std::fs::create_dir_all(&dir).unwrap();
+    w.app.calendar.local_dir = dir.clone();
+    w.app.calendar.trash_dir = dir.join(".trash");
+    let src = w.app.calendar.new_local_source("Work", &[]);
+    w.app.cfg.calendars = vec![src.clone()];
+    w.app.calendar.set_sources(vec![src.clone()]);
+    let master = Event { uid: "standup".into(), summary: "Stand/up".into(), start: 1_800_000_000, end: 1_800_001_800, rrule: Some("FREQ=DAILY;COUNT=4".into()), ..Default::default() };
+    let moved = Event { summary: "Standup (moved)".into(), recurrence_id: Some(1_800_086_400), ..master.override_at(1_800_090_000, 1_800_091_800) };
+    std::fs::write(crate::calendar::store::file_of(&src).unwrap(), to_ics(&src.name, &[master, moved])).unwrap();
+    w.app.calendar.reload_local();
+    let day = 1_800_000_000_i64.div_euclid(86_400);
+    w.app.calendar.occurrences(day - 2, day + 8)
+}
+
+/// What the open Import dialog holds, to compare two ways into it.
+fn dialog_state(w: &W) -> String {
+    let d = w.dialog();
+    let (ev, calendar, original) = w.dialog_event();
+    format!("{ev:?}|{calendar}|{original:?}|{}|{:?}|{}|{}", d.folder, d.link_into, d.link_on, d.items[0].title)
+}
+
+// spec: CAL-034
+#[test]
+fn cal_034_import_from_the_calendar_opens_the_same_dialog_as_a_drop_of_every_occurrence() {
+    let mut w = W::new("cal-import");
+    let occs = calendar_with_series(&mut w);
+    assert_eq!(occs.len(), 4);
+    let nowhere = w.nowhere();
+    for o in occs {
+        let drag = crate::calendar::ui::CalDrag::new(&w.app.calendar, &o).expect("the event of the occurrence");
+        // the drop on nothing in particular
+        eframe::egui::DragAndDrop::set_payload(w.hl.ctx(), drag.clone());
+        w.hl.frame(&mut w.app, vec![eframe::egui::Event::PointerMoved(nowhere)]);
+        w.frames(2);
+        w.hl.release(&mut w.app, nowhere);
+        let dropped = dialog_state(&w);
+        w.close_dialog();
+        // the Import button and entry of the calendar
+        w.app.calendar_action(crate::calendar::ui::CalAction::Import(o.clone()));
+        assert!(w.dialog_open(), "{:?}", w.app.toasts);
+        assert_eq!(dialog_state(&w), dropped);
+        // the clicked date, not the first one of the series
+        let (ev, calendar, _) = w.dialog_event();
+        assert_eq!((ev.start, ev.end, calendar.as_str()), (o.start, o.end, "Work"));
+        w.close_dialog();
+    }
+    // a date of the series nobody changed keeps the series' rule and gets its own date
+    let day = 1_800_000_000_i64.div_euclid(86_400);
+    let plain = w.app.calendar.occurrences(day - 2, day + 8).into_iter().find(|o| o.start == 1_800_000_000 + 2 * 86_400).unwrap();
+    w.app.calendar_action(crate::calendar::ui::CalAction::Import(plain));
+    let (ev, _, original) = w.dialog_event();
+    assert_eq!((ev.recurrence_id, ev.href.as_deref()), (Some(1_800_000_000 + 2 * 86_400), None));
+    assert_eq!(original.unwrap().0, "Stand-up.ics");
+}
+
+// spec: CAL-034
+#[test]
+fn cal_034_importing_from_the_calendar_makes_the_note_a_drop_makes_and_an_open_dialog_takes_the_second() {
+    let mut w = W::new("cal-import-note");
+    let occs = calendar_with_series(&mut w);
+    w.app.calendar_action(crate::calendar::ui::CalAction::Import(occs[0].clone()));
+    w.app.calendar_action(crate::calendar::ui::CalAction::Import(occs[2].clone()));
+    assert_eq!(w.dialog().items.len(), 2, "a second event goes into the open dialog, as with a drop");
+    let Some(Modal::Import(mut d)) = w.app.modal.take() else { panic!("no dialog") };
+    assert!(w.app.import_action(&mut d, crate::import::dialog::ImportAction::Import));
+    let root = w.app.vault.as_ref().unwrap().root.clone();
+    let notes = std::fs::read_dir(&root).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().contains("Stand")).count();
+    assert_eq!(notes, 2);
+}
+
+// spec: CAL-034
+#[test]
+fn cal_034_import_without_a_vault_says_so() {
+    let mut w = W::new("cal-import-novault");
+    let occs = calendar_with_series(&mut w);
+    w.app.vault = None;
+    w.app.calendar_action(crate::calendar::ui::CalAction::Import(occs[0].clone()));
+    assert!(w.app.toasts.iter().any(|(t, _)| t.contains("Open a vault first")), "{:?}", w.app.toasts);
+    assert!(!w.dialog_open());
 }

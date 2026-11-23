@@ -130,7 +130,7 @@ fn is_unseen(line: &str) -> bool {
     !line.contains("\\Seen")
 }
 
-// spec: MAIL-091, MAIL-092, DEV-026
+// spec: MAIL-091, MAIL-092, MAIL-242, DEV-026
 #[test]
 #[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
 fn mail_env_password_account_syncs_end_to_end_and_changes_nothing_on_the_server() {
@@ -170,7 +170,7 @@ fn mail_env_password_account_syncs_end_to_end_and_changes_nothing_on_the_server(
 
     // the 3-year window: "Ancient history" (1200 days) and "Nested old" are not fetched, "Two years ago" is
     let inbox = subjects(&store, &rows, "INBOX");
-    assert_eq!(inbox, ["Big attachment", "Grüße aus Köln", "HTML only newsletter", "Invoice 2026", "Lunch plans", "Meeting notes", "Two years ago"], "INBOX");
+    assert_eq!(inbox, ["Big attachment", "Grüße aus Köln", "HTML only newsletter", "Invoice 2026", "Lunch plans", "Meeting notes", "Two years ago", "Voice memo"], "INBOX");
     assert_eq!(subjects(&store, &rows, "Work"), ["Work item"]);
     assert_eq!(subjects(&store, &rows, "Work/Projects"), ["Project plan"], "a nested folder, with the old mail left out");
     assert_eq!(subjects(&store, &rows, "Sent"), ["Re: Invoice 2026"]);
@@ -182,7 +182,7 @@ fn mail_env_password_account_syncs_end_to_end_and_changes_nothing_on_the_server(
     // when the count differs, say which folders hold the messages (#417: a suite of another checkout had added mail)
     let total = store.reader().unwrap().count_messages().unwrap();
     let per_folder: Vec<String> = rows.iter().map(|r| (r.name.clone(), messages(&store, &rows, &r.name).len())).filter(|(_, n)| *n > 0).map(|(name, n)| format!("{name}: {n}")).collect();
-    assert_eq!(total, 10, "10 messages are expected; the folders hold {per_folder:?}");
+    assert_eq!(total, 11, "11 messages are expected; the folders hold {per_folder:?}");
 
     // a large mail with an attachment, fully downloaded
     let inbox_msgs = messages(&store, &rows, "INBOX");
@@ -195,6 +195,10 @@ fn mail_env_password_account_syncs_end_to_end_and_changes_nothing_on_the_server(
     let html = inbox_msgs.iter().find(|m| m.subject == "HTML only newsletter").unwrap();
     let text = store.read_mail(html).unwrap().text;
     assert!(text.contains("Spring news") && text.contains("reader") && !text.contains("<h1>") && !text.contains("<body"), "{text}");
+    // a WAV attachment arrives as it was sent (MAIL-242)
+    let voice = inbox_msgs.iter().find(|m| m.subject == "Voice memo").unwrap();
+    let wav = &store.read_mail(voice).unwrap().attachments;
+    assert_eq!((wav.len(), wav[0].name.as_str(), wav[0].mime.as_str(), wav[0].data.len()), (1, "voice.wav", "audio/wav", 1644));
     // headers and a body in ISO-8859-1
     let latin = inbox_msgs.iter().find(|m| m.subject.starts_with("Gr")).unwrap();
     assert!(latin.from.contains("Jürgen Müller"), "{}", latin.from);
@@ -499,6 +503,78 @@ fn mail_env_flag_unflag_move_delete_and_delete_forever_change_dovecot_as_asked_a
         let _ = std::fs::remove_dir_all(dir);
     });
     crate::dataflow::verify_flow(&forest, "mail_ops", &crate::dataflow::doc("mail-ops.md"));
+}
+
+// spec: MAIL-239
+#[test]
+#[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
+fn mail_env_a_mail_deleted_on_the_server_shows_as_gone_and_its_local_copy_is_deleted_by_the_action_and_nothing_else() {
+    let _turn = turn();
+    clean_scratch();
+    let (dir, store) = temp_store("localdelete");
+    let connector = EnvConnector { auth: Arc::new(PasswordAuth { user: USER.into(), password: "shale-test-pw".into() }) };
+    let watched = ["INBOX", "Work", "Work/Projects", "Sent", "Drafts", "Junk", "Trash"];
+    let before: Vec<Vec<String>> = watched.iter().map(|m| server_view(m)).collect();
+    doveadm(&["mailbox", "create", "-u", USER, "Scratch"], None).unwrap();
+    for s in ["Scratch six", "Scratch seven"] {
+        put_message("Scratch", s);
+    }
+    only_scratch_is_synced(&store, &connector);
+    let sum = sync(&store, "alice", &connector);
+    assert!(sum.errors.is_empty() && sum.messages_added == 2, "{sum:?}");
+    let rows_now = || store.reader().unwrap().folders(Some("alice")).unwrap();
+    let by_subject = |subject: &str| -> MessageSummary { messages(&store, &rows_now(), "Scratch").into_iter().find(|m| m.subject == subject).unwrap_or_else(|| panic!("{subject} not in Scratch")) };
+    let (six, seven) = (by_subject("Scratch six"), by_subject("Scratch seven"));
+    assert!(!six.gone_on_server && !seven.gone_on_server);
+    assert!(!ops::local_deletable(&six), "a mail that is on the server has no such action");
+
+    // another program deletes "Scratch six" on the server; the next sync marks it
+    doveadm(&["expunge", "-u", USER, "mailbox", "Scratch", "header", "Subject", "Scratch six"], None).unwrap();
+    let sum = sync(&store, "alice", &connector);
+    assert!(sum.errors.is_empty(), "{sum:?}");
+    let (six, seven) = (by_subject("Scratch six"), by_subject("Scratch seven"));
+    assert!(six.gone_on_server && !seven.gone_on_server, "only the mail that left the server is marked");
+    assert!(ops::local_deletable(&six) && !ops::local_deletable(&seven));
+    assert!(store.abs_path(&six.path).is_file());
+    let server_before = server_view("Scratch");
+
+    // the action: the mail that is still on the server is refused, the other one goes
+    let day = "2026-11-23";
+    let out = ops::delete_local_copies(&store, &[six.clone(), seven.clone()], Confirmed::after_dialog(2), day).unwrap();
+    assert_eq!(out.removed, 1, "{out:?}");
+    assert!(out.notes.iter().any(|n| n.contains("still on the server")), "{:?}", out.notes);
+    assert_eq!(subjects(&store, &rows_now(), "Scratch"), ["Scratch seven"]);
+    assert!(!store.abs_path(&six.path).exists(), "the file left the folder of the mail");
+    assert!(store.abs_path(&seven.path).is_file(), "the copy of a mail on the server stays");
+    let trashed = store.abs_path(&format!(".trash/{day}/{}", six.path));
+    assert!(trashed.is_file(), "the file is kept in the local trash: {trashed:?}");
+    assert_eq!(server_view("Scratch"), server_before, "the server was not asked to change anything");
+
+    // a sync afterwards does not bring it back, and agrees with the server
+    let sum = sync(&store, "alice", &connector);
+    assert!(sum.errors.is_empty(), "{sum:?}");
+    assert_eq!(subjects(&store, &rows_now(), "Scratch"), ["Scratch seven"]);
+
+    clean_scratch();
+    for (i, m) in watched.iter().enumerate() {
+        assert_eq!(server_view(m), before[i], "{m} was changed");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+// spec: MAIL-242
+#[test]
+#[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
+fn mail_env_the_reading_pane_offers_the_player_for_the_wav_attachment_of_a_mail_from_the_server() {
+    let _turn = turn();
+    let account = MailAccount { id: "alice".into(), name: "Alice".into(), host: "localhost".into(), port: IMAPS_PORT, user: USER.into(), ..MailAccount::default() };
+    let factory: crate::mail::imap_sync::ConnectorFactory = Arc::new(|_, _| Ok(Arc::new(EnvConnector { auth: Arc::new(PasswordAuth { user: USER.into(), password: "shale-test-pw".into() }) }) as Arc<dyn Connector>));
+    let r = crate::mail::ui_tests::reading_pane_of_env_mail(factory, account, "shale-test-pw", "Voice memo");
+    assert_eq!(r.mime, "audio/wav");
+    assert!(r.data.len() == 1644 && r.data.starts_with(b"RIFF") && r.data[8..12] == *b"WAVE", "the attachment is the WAV the seed wrote");
+    assert!(r.player, "the reading pane offers the player for it");
+    assert!(!r.playing, "and nothing plays by itself");
+    assert_eq!(r.copy.as_deref(), Some(r.data.as_slice()), "the player reads a private copy of the attachment");
 }
 
 // ------------------------------------------------------------ phase 3: sending (MAIL-160)
@@ -883,4 +959,78 @@ fn mail_env_a_flag_that_another_connection_sets_and_removes_shows_in_the_store_w
         let _ = std::fs::remove_dir_all(dir);
     });
     crate::dataflow::verify_flow(&forest, "mail_watch", &crate::dataflow::doc("mail-watch.md"));
+}
+
+// ------------------------------------------------------------ threads of imported mails (IMP-068…IMP-072)
+
+/// A reply thread of three mails with real reply headers, saved into a mailbox of its own.
+fn put_thread_mail(id: &str, date: &str, subject: &str, reply: Option<&str>, refs: &[&str]) {
+    let mut raw = format!("From: Sender <sender@shale.test>\r\nTo: {USER}\r\nSubject: {subject}\r\nMessage-ID: <{id}@thread.shale.test>\r\nDate: {date}\r\n");
+    if let Some(r) = reply {
+        raw.push_str(&format!("In-Reply-To: <{r}@thread.shale.test>\r\n"));
+    }
+    if !refs.is_empty() {
+        raw.push_str(&format!("References: {}\r\n", refs.iter().map(|r| format!("<{r}@thread.shale.test>")).collect::<Vec<_>>().join(" ")));
+    }
+    raw.push_str(&format!("\r\nText of {subject}.\r\n"));
+    doveadm(&["save", "-u", USER, "-m", "ScratchThread"], Some(raw.as_bytes())).unwrap_or_else(|e| panic!("could not put {subject:?}: {e}"));
+}
+
+// spec: IMP-068, IMP-070, IMP-071
+#[test]
+#[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
+fn mail_env_a_reply_thread_from_the_server_is_imported_into_a_chain_in_date_order() {
+    use crate::import::{self, Options};
+    let _turn = turn();
+    let _ = doveadm(&["mailbox", "delete", "-u", USER, "ScratchThread"], None);
+    doveadm(&["mailbox", "create", "-u", USER, "ScratchThread"], None).unwrap();
+    put_thread_mail("root", "Mon, 16 Nov 2026 12:00:00 +0000", "Thread root", None, &[]);
+    put_thread_mail("one", "Tue, 17 Nov 2026 12:00:00 +0000", "Re: Thread root", Some("root"), &["root"]);
+    put_thread_mail("two", "Wed, 18 Nov 2026 12:00:00 +0000", "Re: Re: Thread root", Some("one"), &["root", "one"]);
+
+    let (dir, store) = temp_store("thread");
+    let connector = EnvConnector { auth: Arc::new(PasswordAuth { user: USER.into(), password: "shale-test-pw".into() }) };
+    let rows = discover_folders(&store, &connector, "alice", "Alice").expect("folders");
+    for f in &rows {
+        store.commit(vec![Op::SyncEnabled { folder: f.id, enabled: f.name == "ScratchThread" }]).unwrap();
+    }
+    let sum = sync(&store, "alice", &connector);
+    assert!(sum.errors.is_empty() && sum.messages_added == 3, "{sum:?}");
+    let rows = store.reader().unwrap().folders(Some("alice")).unwrap();
+    let all = messages(&store, &rows, "ScratchThread");
+
+    // the vault: the three mails are imported one by one, the newest before the middle one
+    let vault_dir = dir.join("vault");
+    std::fs::create_dir_all(&vault_dir).unwrap();
+    let mut vault = crate::vault::Vault::open(&vault_dir).unwrap();
+    let options = Options { folder: PathBuf::from("Threads"), tags: vec![], keep_original: false, keep_docx: false, people_dir: "Adressbuch".into(), header_list: false, cut: Default::default() };
+    let import_one = |vault: &mut crate::vault::Vault, subject: &str| -> (PathBuf, import::Imported) {
+        let m = all.iter().find(|m| m.subject == subject).unwrap_or_else(|| panic!("{subject} was not synced"));
+        let mut items = vec![import::eml_item(store.read_raw(m).unwrap(), None)];
+        import::find_continues(vault, &mut items);
+        let done = import::import(vault, &items, &options);
+        assert!(done.errors.is_empty(), "{:?}", done.errors);
+        (done.notes[0].clone(), done)
+    };
+    let (root, first) = import_one(&mut vault, "Thread root");
+    assert!(first.touched.is_empty());
+    let (two, second) = import_one(&mut vault, "Re: Re: Thread root");
+    assert_eq!(second.touched, vec![root.clone()], "the newest is appended: the last note gets its next");
+    let (one, third) = import_one(&mut vault, "Re: Thread root");
+    assert_eq!(third.touched.len(), 2, "the older mail changes its two neighbours: {third:?}");
+    let read = |p: &Path| std::fs::read_to_string(vault.abs(p)).unwrap();
+    let stem = |p: &Path| p.file_stem().unwrap().to_string_lossy().into_owned();
+    let link = |k: &str, p: &Path| format!("{k}: \"[[{}]]\"", stem(p));
+    assert!(read(&root).contains(&link("next", &one)) && !read(&root).contains("previous:"), "{}", read(&root));
+    assert!(read(&one).contains(&link("previous", &root)) && read(&one).contains(&link("next", &two)), "{}", read(&one));
+    assert!(read(&two).contains(&link("previous", &one)) && !read(&two).contains("next:"), "{}", read(&two));
+    for p in [&root, &one, &two] {
+        assert!(read(p).contains("thread-id: \"<root@thread.shale.test>\""), "{}", read(p));
+    }
+    // the overview's order is the dates
+    let rows = crate::thread::Index::build(&vault).thread_of(&two).unwrap();
+    assert_eq!(rows.iter().map(|r| &r.rel).collect::<Vec<_>>(), vec![&root, &one, &two]);
+
+    let _ = doveadm(&["mailbox", "delete", "-u", USER, "ScratchThread"], None);
+    let _ = std::fs::remove_dir_all(dir);
 }

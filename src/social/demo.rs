@@ -171,7 +171,7 @@ pub fn own_posts() -> Vec<Post> {
     vec![a, b, c]
 }
 
-/// The Notifications feed of the demo account (SOC-071), newest first: five people favourited
+/// The Notifications feed of the demo account (SOC-078), newest first: five people favourited
 /// the first post (one entry), a reply, a boost, a follow, a mention and an older favourite that
 /// was read. The server's marker is 895: the ones above it are unread.
 pub fn notifications() -> Vec<Post> {

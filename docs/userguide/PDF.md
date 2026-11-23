@@ -10,7 +10,8 @@ The same note can also become a Word file: see [[Import#Export to Word]].
 
 A **Table of contents** (a checkbox in the dialog, on by default) puts a *Contents* page after the title: the
 `#`–`###` headings, indented by level, with their numbers (see [[Notes and links]]), a dotted leader and the page
-they start on; each line is a link to that page, and the text starts on the next page. The PDF also has
+they start on; each line is a link to that page, and the text starts on the next page (the box **Page break after the table of
+contents**, on by default, below the *Table of contents* box: off, the text follows the list on the same page). The PDF also has
 bookmarks for the `#`–`######` headings in your PDF reader's outline, and the headings in the text carry
 their numbers. A note without such headings gets no contents page. The title (the box "The note's name as a title") is the
 title line without a `YYMMDD_` date prefix; when the note's first heading is a `#` that says the same, the title is
@@ -71,6 +72,7 @@ when you export. Every key is optional, and a value Shale cannot read is ignored
 | `print-heading-sizes` | six sizes in points for the levels 1 to 6, such as `"16 13 12 11 11 11"` (each 4 to 72; spaces or commas) | the usual proportions of the body size | The size of each heading level. Fewer or more than six numbers, or one out of range, and the whole value is ignored. |
 | `print-title` | `true`, `false` | `true` | Whether the note's name is printed as a title. |
 | `print-toc` | `true`, `false` | `true` | Whether a *Contents* page is printed. |
+| `print-toc-page-break` | `true`, `false` | `true` | Whether the text starts on a new page after the contents (the box "Page break after the table of contents"). It holds for the LaTeX export, the Word export and a folder book too; a book reads it from its top folder note. |
 | `print-break-before` | a heading level, `1` to `6` | none | Every heading up to that level starts a new page: `1` is every `#` heading, `2` every `#` and `##`. The export dialog shows it as the box "Start each # heading on a new page" with the level next to it. |
 
 ```
@@ -142,7 +144,8 @@ folder in the file list (or the empty space under the tree, for the whole vault)
 **Export to PDF…**. The PDF has a title page, one **Contents** page, and every note one after the other,
 each on a new page, with a running header (the chapter's title, small and grey, top right) from the
 first chapter on. The paper, margins, text size, embeds, plain tables and page numbers of the dialog apply
-to the whole book; **Title page**, **Table of contents** and **Each note on a new page** are boxes of the
+to the whole book; **Title page**, **Table of contents**, **Page break after the table of contents** (the introduction starts a new page after the
+contents) and **Each note on a new page** are boxes of the
 dialog, and the folded **Reading order** shows the tree as it will be printed (the notes left out are
 greyed), so you can check it before you export. The export runs in the background, with **Cancel**.
 The dialog can also write the book through a LaTeX template (below).
@@ -170,7 +173,10 @@ Handbook/                     the book: its title is the folder note's `title`, 
 - **The folder note** introduces a folder: `index.md`, else `README.md`, else the note named like the
   folder, else the one note whose properties say `folder-note: true`. Its text is printed first in the
   folder's part, under the part's heading. The top folder's note also gives the title page its `title`,
-  `subtitle`, `author` and `date`.
+  `subtitle`, `author` and `date`, and a picture above the title: `logo: z_media/logo.png` (a path in
+  the vault, a file name or `![[logo.png]]`; PNG, JPEG, WebP, BMP or GIF, drawn 3.5 cm high and centred;
+  a picture that is missing or unreadable is left out). This guide's title page shows Shale's logo that
+  way. The LaTeX templates take their logo from the template set instead.
 - **The reading order** is, in a folder: the notes and folders its folder note names in `order:` (a list
   of names without `.md`), else the ones its links point to, in the order of their first link (a link
   to a subfolder's folder note stands for the subfolder), then all others by name, numbers by value (`2 Lists`
@@ -488,7 +494,8 @@ always exported with the built-in engine.
 - The **fields** of the kind are text boxes, filled from the note's properties (below); a field
   with a star must have a value. The page size, margins, text size, title and page numbers are not
   in the dialog: the template decides them. **Table of contents** is there for the kinds that have
-  one (publication, report, exercise sheet, thesis, doctoral thesis) and greyed out for the others;
+  one (publication, report, exercise sheet, thesis, doctoral thesis) and greyed out for the others,
+  and so is **Page break after the table of contents** (on: the text starts on a new page after the contents);
   the box for embedded pictures stays. **Department logo** appears when the set has one (see "The
   department logo"): on by default, greyed out for a kind that does not show it.
 - A line under the fields says which TeX is used, or **No TeX: install it in Settings → LaTeX**

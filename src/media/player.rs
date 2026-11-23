@@ -50,13 +50,13 @@ struct Playback {
     /// a video: the newest picture from ffmpeg, and the texture it is shown in
     frames: Arc<FrameSlot>,
     frame_tex: Option<egui::TextureHandle>,
-    /// plays again from the start when it ends (a post's GIF, MEDIA-025)
+    /// plays again from the start when it ends (a post's GIF, MEDIA-028)
     looping: bool,
     /// plays without sound whatever the volume says, until the person unmutes (a post's GIF)
     silent: bool,
 }
 
-/// How a file outside the vault starts when the person opened it (MEDIA-025).
+/// How a file outside the vault starts when the person opened it (MEDIA-028).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Start {
     /// a video: with the sound, once
@@ -223,7 +223,7 @@ impl MediaPlayer {
     }
 
     /// Start `abs`, a file outside the vault that the person opened (a video of a post in the
-    /// feed viewer, MEDIA-025): it plays at once, once or, for a GIF, muted and looped. `owner`
+    /// feed viewer, MEDIA-028): it plays at once, once or, for a GIF, muted and looped. `owner`
     /// stands in for a note (`stop_for_note` stops it). Nothing happens when it is the current
     /// file already, so a pause or the end of the clip stays.
     pub fn play_outside(&self, ctx: &egui::Context, abs: &Path, owner: &Path, how: Start) {

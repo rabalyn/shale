@@ -66,6 +66,8 @@ pub enum CalAction {
     DeleteOne(Occ),
     /// open the event's link (checked before it is opened)
     OpenUrl(String),
+    /// import this event, or this one date of a repeating event, as a note (CAL-034)
+    Import(Occ),
 }
 
 /// Round a time up to the next full or half hour (local clock); a time already on one stays.
@@ -90,7 +92,7 @@ pub struct CalDrag {
 }
 
 impl CalDrag {
-    fn new(store: &CalendarStore, o: &Occ) -> Option<Self> {
+    pub(crate) fn new(store: &CalendarStore, o: &Occ) -> Option<Self> {
         let mut event = store.event(o)?.clone();
         if event.rrule.is_some() && event.recurrence_id.is_none() {
             // one date of a repeating event
@@ -134,6 +136,8 @@ pub struct CalendarView {
     scroll_done: bool,
     popup_rect: Option<Rect>,
     frame: u64,
+    /// "Import" chosen in the right-click menu of an event (CAL-034), handed out by `show`
+    import_asked: Option<Occ>,
 }
 
 fn parse_hex(c: &str) -> Color32 {
@@ -214,10 +218,55 @@ struct ChipSpec<'a> {
     show_time: bool,
 }
 
+/// A button of the header's right group.
+#[derive(Clone, Copy)]
+enum HeaderTool {
+    Spinner,
+    New,
+    Large,
+    Settings,
+}
+
+impl HeaderTool {
+    /// The room it takes, a little more than it will.
+    fn width(self, ui: &Ui) -> f32 {
+        match self {
+            HeaderTool::Spinner => ui.spacing().interact_size.y + 2.0,
+            HeaderTool::New => button_w(ui, "＋", true),
+            HeaderTool::Large => button_w(ui, "⤢", true),
+            HeaderTool::Settings => button_w(ui, "⚙", true),
+        }
+    }
+}
+
+/// The right group of the header, left to right: the spinner while loading, new event (when there is a calendar), the big tab (not in it), settings.
+fn header_tools(store: &CalendarStore, large: bool) -> Vec<HeaderTool> {
+    let mut v = vec![];
+    if store.is_loading() {
+        v.push(HeaderTool::Spinner);
+    }
+    if !store.sources.is_empty() {
+        v.push(HeaderTool::New);
+    }
+    if !large {
+        v.push(HeaderTool::Large);
+    }
+    v.push(HeaderTool::Settings);
+    v
+}
+
+/// The width a button with this text takes (a little more than it will).
+fn button_w(ui: &Ui, text: &str, small: bool) -> f32 {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let w = ui.painter().layout_no_wrap(text.to_string(), font, Color32::WHITE).size().x;
+    let pad = ui.spacing().button_padding.x * if small { 1.0 } else { 2.0 };
+    w + pad * 2.0 + 2.0
+}
+
 impl CalendarView {
     pub fn new(size: Size) -> Self {
         let today = t::today();
-        CalendarView { mode: Mode::Month, size, anchor: today, selected: today, popup: None, rects: vec![], scroll_done: false, popup_rect: None, frame: 0 }
+        CalendarView { mode: Mode::Month, size, anchor: today, selected: today, popup: None, rects: vec![], scroll_done: false, popup_rect: None, frame: 0, import_asked: None }
     }
 
     fn rec(&mut self, key: impl Into<String>, r: Rect) {
@@ -227,6 +276,57 @@ impl CalendarView {
     fn week_start(&self, day: i64, monday: bool) -> i64 {
         let off = if monday { t::weekday(day) as i64 } else { (t::weekday(day) as i64 + 1) % 7 };
         day - off
+    }
+
+    fn header_nav(&mut self, ui: &mut Ui) {
+        let b = ui.button("‹").on_hover_text("Previous");
+        self.rec("prev", b.rect);
+        if b.clicked() {
+            self.step(-1);
+        }
+        let b = ui.button("Today");
+        self.rec("today", b.rect);
+        if b.clicked() {
+            self.anchor = t::today();
+            self.selected = self.anchor;
+        }
+        let b = ui.button("›").on_hover_text("Next");
+        self.rec("next", b.rect);
+        if b.clicked() {
+            self.step(1);
+        }
+    }
+
+    fn header_tool(&mut self, ui: &mut Ui, tool: HeaderTool) -> Option<CalAction> {
+        let mut action = None;
+        match tool {
+            HeaderTool::Spinner => {
+                ui.spinner();
+            }
+            HeaderTool::New => {
+                let b = ui.small_button("＋").on_hover_text("New event (or double-click a day or time)");
+                self.rec("new", b.rect);
+                if b.clicked() {
+                    let day = if self.mode == Mode::Month { self.selected } else { self.anchor };
+                    action = Some(CalAction::NewEventAt(new_event_start(day)));
+                }
+            }
+            HeaderTool::Large => {
+                let b = ui.small_button("⤢").on_hover_text("Open the calendar in a big tab");
+                self.rec("large", b.rect);
+                if b.clicked() {
+                    action = Some(CalAction::OpenLarge);
+                }
+            }
+            HeaderTool::Settings => {
+                let b = ui.small_button("⚙").on_hover_text("Calendar settings");
+                self.rec("settings", b.rect);
+                if b.clicked() {
+                    action = Some(CalAction::Settings);
+                }
+            }
+        }
+        action
     }
 
     /// Draw the whole panel. `large`: shown as a big tab (more room) instead of the sidebar.
@@ -254,52 +354,55 @@ impl CalendarView {
             }
             Mode::Day => t::long_date(self.anchor),
         };
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 3.0;
-            let b = ui.button("‹").on_hover_text("Previous");
-            self.rec("prev", b.rect);
-            if b.clicked() {
-                self.step(-1);
-            }
-            let b = ui.button("Today");
-            self.rec("today", b.rect);
-            if b.clicked() {
-                self.anchor = t::today();
-                self.selected = self.anchor;
-            }
-            let b = ui.button("›").on_hover_text("Next");
-            self.rec("next", b.rect);
-            if b.clicked() {
-                self.step(1);
-            }
-            ui.label(egui::RichText::new(&title).size(crate::fonts::px(if large { 18.0 } else { 14.0 })).color(theme::palette().text_strong));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let b = ui.small_button("⚙").on_hover_text("Calendar settings");
-                self.rec("settings", b.rect);
-                if b.clicked() {
-                    action = Some(CalAction::Settings);
-                }
-                if !large {
-                    let b = ui.small_button("⤢").on_hover_text("Open the calendar in a big tab");
-                    self.rec("large", b.rect);
-                    if b.clicked() {
-                        action = Some(CalAction::OpenLarge);
+        let title_size = crate::fonts::px(if large { 18.0 } else { 14.0 });
+        let title_text = egui::RichText::new(&title).size(title_size).color(theme::palette().text_strong);
+        let tools = header_tools(store, large);
+        let avail = ui.available_width();
+        let title_w = ui.painter().layout_no_wrap(title.clone(), egui::FontId::proportional(title_size), Color32::WHITE).size().x;
+        let nav_w = ["‹", "Today", "›"].iter().map(|t| button_w(ui, t, false)).sum::<f32>();
+        let tools_w = tools.iter().map(|t| t.width(ui)).sum::<f32>();
+        let gap = 3.0;
+        if nav_w + title_w + tools_w + 6.0 * gap <= avail {
+            // everything on one line
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                self.header_nav(ui);
+                let r = ui.label(title_text).rect;
+                self.rec("title", r);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    for t in tools.iter().rev() {
+                        action = self.header_tool(ui, *t).or(action.take());
                     }
-                }
-                if !store.sources.is_empty() {
-                    let b = ui.small_button("＋").on_hover_text("New event (or double-click a day or time)");
-                    self.rec("new", b.rect);
-                    if b.clicked() {
-                        let day = if self.mode == Mode::Month { self.selected } else { self.anchor };
-                        action = Some(CalAction::NewEventAt(new_event_start(day)));
-                    }
-                }
-                if store.is_loading() {
-                    ui.spinner();
-                }
+                });
             });
-        });
-        ui.horizontal(|ui| {
+        } else {
+            // the buttons do not fit next to the title (LAY-019): the title on a line of its own, the buttons below it
+            let r = ui.label(title_text).rect;
+            self.rec("title", r);
+            if nav_w + tools_w + 5.0 * gap <= avail {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = gap;
+                    self.header_nav(ui);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        for t in tools.iter().rev() {
+                            action = self.header_tool(ui, *t).or(action.take());
+                        }
+                    });
+                });
+            } else {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = gap;
+                    self.header_nav(ui);
+                });
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = gap;
+                    for t in tools.iter() {
+                        action = self.header_tool(ui, *t).or(action.take());
+                    }
+                });
+            }
+        }
+        ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             for (m, label) in [(Mode::Month, "Month"), (Mode::Week, "Week"), (Mode::Day, "Day")] {
                 let b = ui.selectable_label(self.mode == m, label);
@@ -355,6 +458,9 @@ impl CalendarView {
         if let Some(a) = self.popup_ui(ui, store) {
             action = Some(a);
         }
+        if let Some(o) = self.import_asked.take() {
+            action = Some(CalAction::Import(o));
+        }
         action
     }
 
@@ -387,6 +493,7 @@ impl CalendarView {
         p.text(rect.left_center() + Vec2::new(if o.all_day { 4.0 } else { 6.0 }, 0.0), Align2::LEFT_CENTER, label, crate::fonts::font(size), if o.all_day { Color32::WHITE } else { theme::palette().text });
         let resp = ui.interact(rect, ui.scope_id().with((&key, o.start)), Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::PointingHand);
         self.rec(key, rect);
+        self.event_menu(&resp, o);
         if resp.clicked() {
             *clicked = Some((o.clone(), resp.interact_pointer_pos().unwrap_or(rect.center())));
         }
@@ -692,8 +799,25 @@ impl CalendarView {
             }
         }
         self.rec(key, r);
+        self.event_menu(&resp, o);
         if resp.clicked() {
             *clicked = Some((o.clone(), resp.interact_pointer_pos().unwrap_or(r.center())));
+        }
+    }
+
+    /// The right-click menu of an event: Import (CAL-034).
+    fn event_menu(&mut self, resp: &egui::Response, o: &Occ) {
+        let mut item = None;
+        resp.context_menu(|ui| {
+            let b = ui.button("Import").on_hover_text("Import the event as a note");
+            item = Some(b.rect);
+            if b.clicked() {
+                self.import_asked = Some(o.clone());
+                ui.close();
+            }
+        });
+        if let Some(r) = item {
+            self.rec("menu-import", r);
         }
     }
 
@@ -816,6 +940,12 @@ impl CalendarView {
                     if b.clicked() {
                         close = true;
                     }
+                    let b = ui.button("Import").on_hover_text("Import the event as a note");
+                    rects.push(("popup-import".into(), b.rect));
+                    if b.clicked() {
+                        action = Some(CalAction::Import(occ.clone()));
+                        close = true;
+                    }
                     if !series {
                         let b = ui.button("Edit").on_hover_text("Change the event or move it to another calendar");
                         rects.push(("popup-edit".into(), b.rect));
@@ -913,6 +1043,7 @@ mod tests {
                     CalAction::EditOne(o) => format!("edit-one:{}:{}", store.event(&o).map(|e| e.summary.clone()).unwrap_or_default(), o.start),
                     CalAction::DeleteOne(o) => format!("delete-one:{}:{}", store.event(&o).map(|e| e.uid.clone()).unwrap_or_default(), o.start),
                     CalAction::Delete(o) => format!("delete:{}", store.event(&o).map(|e| e.uid.clone()).unwrap_or_default()),
+                    CalAction::Import(o) => format!("import:{}:{}", store.event(&o).map(|e| e.summary.clone()).unwrap_or_default(), o.start),
                 });
             }
         }
@@ -925,6 +1056,13 @@ mod tests {
         }
         fn click_at(&mut self, v: &mut CalendarView, store: &CalendarStore, large: bool, p: Pos2) {
             let b = |pressed| Event::PointerButton { pos: p, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+            self.frame(v, store, large, vec![Event::PointerMoved(p)]);
+            self.frame(v, store, large, vec![b(true)]);
+            self.frame(v, store, large, vec![b(false)]);
+            self.frame(v, store, large, vec![]);
+        }
+        fn right_click_at(&mut self, v: &mut CalendarView, store: &CalendarStore, large: bool, p: Pos2) {
+            let b = |pressed| Event::PointerButton { pos: p, button: PointerButton::Secondary, pressed, modifiers: Modifiers::NONE };
             self.frame(v, store, large, vec![Event::PointerMoved(p)]);
             self.frame(v, store, large, vec![b(true)]);
             self.frame(v, store, large, vec![b(false)]);
@@ -1019,6 +1157,53 @@ mod tests {
         h.click(&mut v, &store, false, "agenda:Retro");
         h.click_at(&mut v, &store, false, Pos2::new(1150.0, 880.0));
         assert!(v.popup.is_none(), "click outside");
+    }
+
+    // spec: CAL-034
+    #[test]
+    fn cal_034_the_popup_of_a_clicked_event_has_an_import_button() {
+        let (store, _) = store_with_samples("import-popup");
+        let mut v = CalendarView::new(Size::Small);
+        let mut h = H { ctx: egui::Context::default(), t: 0.0, actions: vec![] };
+        h.frame(&mut v, &store, false, vec![]);
+        h.frame(&mut v, &store, false, vec![]);
+        h.click(&mut v, &store, false, "agenda:Design review");
+        assert!(v.popup.is_some());
+        h.click(&mut v, &store, false, "popup-import");
+        assert_eq!(h.actions.len(), 1, "{:?}", h.actions);
+        assert!(h.actions[0].starts_with("import:Design review:"), "{:?}", h.actions);
+        assert!(v.popup.is_none(), "the popup closes");
+    }
+
+    // spec: CAL-034
+    #[test]
+    fn cal_034_the_right_click_menu_of_an_event_has_an_import_entry_in_every_view() {
+        let (store, _) = store_with_samples("import-menu");
+        let mut v = CalendarView::new(Size::Small);
+        let mut h = H { ctx: egui::Context::default(), t: 0.0, actions: vec![] };
+        h.frame(&mut v, &store, false, vec![]);
+        h.frame(&mut v, &store, false, vec![]);
+        // the list under the small grid
+        let p = H::rect(&v, "agenda:Design review").center();
+        h.right_click_at(&mut v, &store, false, p);
+        assert!(v.popup.is_none(), "a right click opens the menu, not the popup");
+        h.click(&mut v, &store, false, "menu-import");
+        assert_eq!(h.actions.len(), 1, "{:?}", h.actions);
+        assert!(h.actions[0].starts_with("import:Design review:"), "{:?}", h.actions);
+        // a chip of the month grid and a block of the week grid
+        let today = t::today();
+        for mode in [Mode::Month, Mode::Week, Mode::Day] {
+            let mut v = CalendarView::new(Size::Large);
+            v.mode = mode;
+            h.actions.clear();
+            h.frame(&mut v, &store, true, vec![]);
+            h.frame(&mut v, &store, true, vec![]);
+            let r = H::rect(&v, &format!("event:Design review:{today}"));
+            h.right_click_at(&mut v, &store, true, r.center());
+            h.click(&mut v, &store, true, "menu-import");
+            assert_eq!(h.actions.len(), 1, "{mode:?}: {:?}", h.actions);
+            assert!(h.actions[0].starts_with("import:Design review:"), "{:?}", h.actions);
+        }
     }
 
     #[test]
@@ -1198,5 +1383,58 @@ mod tests {
         assert_eq!(when_text(&o), "Fri, 20 Nov 2026 – Sun, 22 Nov 2026 (3 days)");
         assert_eq!(rrule_text("FREQ=WEEKLY;BYDAY=MO,WE;COUNT=6"), "weekly on Mon, Wed, 6 times");
         assert_eq!(rrule_text("FREQ=MONTHLY;INTERVAL=2"), "every 2 months");
+    }
+
+    /// Lay the header out in a pane `w` points wide; the rects of its parts by key.
+    fn header_at(w: f32, large: bool) -> Vec<(String, Rect)> {
+        let (store, _) = store_with_samples(&format!("hdr{}", w as i32));
+        let mut v = CalendarView::new(Size::Small);
+        let ctx = egui::Context::default();
+        for k in 0..3 {
+            let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(w, 600.0))), time: Some(k as f64 * 0.05), ..Default::default() };
+            let mut out = ctx.run_ui(raw, |ui| {
+                egui::CentralPanel::default().frame(egui::Frame::new()).show(ui, |ui| {
+                    v.show(ui, &store, true, large);
+                });
+            });
+            out.textures_delta.clear();
+        }
+        v.rects.into_iter().filter(|(k, _)| ["title", "prev", "today", "next", "settings", "large", "new"].contains(&k.as_str()) || k.starts_with("mode:") || k.starts_with("size:")).collect()
+    }
+
+    // spec: LAY-019
+    #[test]
+    fn lay_019_the_calendar_header_wraps_and_never_overlaps_at_any_width() {
+        for w in [120.0, 150.0, 185.0, 200.0, 230.0, 260.0, 330.0, 560.0, 1200.0] {
+            for large in [false, true] {
+                let parts = header_at(w, large);
+                assert!(parts.len() >= 10, "at {w}: {parts:?}");
+                for (k, r) in &parts {
+                    assert!(r.min.x >= -0.5 && r.max.x <= w + 0.5, "{k} leaves the pane at width {w}: {r:?}");
+                }
+                for (i, (ka, a)) in parts.iter().enumerate() {
+                    for (kb, b) in &parts[i + 1..] {
+                        assert!(!a.shrink(0.5).intersects(b.shrink(0.5)), "{ka} {a:?} overlaps {kb} {b:?} at width {w}");
+                    }
+                }
+            }
+        }
+    }
+
+    // spec: LAY-019
+    #[test]
+    fn lay_019_the_header_is_one_line_when_wide_and_the_buttons_go_below_the_title_when_narrow() {
+        let get = |parts: &[(String, Rect)], k: &str| parts.iter().find(|(n, _)| n == k).map(|p| p.1).unwrap();
+        let wide = header_at(1200.0, false);
+        let (title, prev, settings) = (get(&wide, "title"), get(&wide, "prev"), get(&wide, "settings"));
+        assert!((title.center().y - prev.center().y).abs() < 6.0 && (settings.center().y - prev.center().y).abs() < 6.0, "one line when wide");
+        assert!(title.min.x > prev.max.x && settings.min.x > title.max.x);
+        for w in [150.0, 185.0, 230.0] {
+            let narrow = header_at(w, false);
+            let title = get(&narrow, "title");
+            for k in ["prev", "today", "next", "settings", "large", "new"] {
+                assert!(get(&narrow, k).min.y >= title.max.y - 0.5, "{k} is below the title at width {w}");
+            }
+        }
     }
 }

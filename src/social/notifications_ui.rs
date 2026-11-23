@@ -1,4 +1,4 @@
-//! How an entry of the Notifications feed is drawn (SOC-071): a row above the card that says what
+//! How an entry of the Notifications feed is drawn (SOC-078): a row above the card that says what
 //! happened and who did it, with the age and a dot while it is unread; a notification about a
 //! person (a follow) shows only the person and "Open in browser".
 

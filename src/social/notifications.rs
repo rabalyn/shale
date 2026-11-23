@@ -107,7 +107,7 @@ pub struct Notice {
     pub who: Vec<Author>,
     /// when the newest of them did it, seconds since 1970
     pub at: i64,
-    /// the server had not been told that it was read when the list was loaded (SOC-072)
+    /// the server had not been told that it was read when the list was loaded (SOC-079)
     pub unread: bool,
     /// what the server is told to mark it read: Mastodon's id, Bluesky's `indexedAt`
     pub mark: String,
@@ -179,7 +179,7 @@ fn person_post(network: Network, r: &Raw) -> Post {
 }
 
 /// The entries of a page of notifications, newest first: likes and boosts that come one after the
-/// other for the same post are one entry (SOC-071).
+/// other for the same post are one entry (SOC-078).
 pub(super) fn entries(network: Network, raws: Vec<Raw>) -> Vec<Post> {
     let mut out: Vec<Post> = vec![];
     for r in raws {
@@ -209,7 +209,7 @@ pub(super) fn entries(network: Network, raws: Vec<Raw>) -> Vec<Post> {
 }
 
 /// Two neighbouring entries are about the same thing and one entry: likes or boosts of the same
-/// post (a page boundary or a later check cut the group, SOC-071).
+/// post (a page boundary or a later check cut the group, SOC-078).
 pub fn same_group(a: &Post, b: &Post) -> bool {
     match (a.notice.as_deref(), b.notice.as_deref()) {
         (Some(x), Some(y)) => x.kind.groups() && x.kind == y.kind && a.id == b.id,

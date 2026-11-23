@@ -129,12 +129,23 @@ impl NoteDoc {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub enum LeftPanel {
     #[default]
     Files,
     Search,
     Tags,
+}
+
+impl LeftPanel {
+    /// The ribbon icon of this view of the left sidebar.
+    pub fn item(self) -> crate::sidebar::Item {
+        match self {
+            LeftPanel::Files => crate::sidebar::Item::Files,
+            LeftPanel::Search => crate::sidebar::Item::Search,
+            LeftPanel::Tags => crate::sidebar::Item::Tags,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -146,6 +157,8 @@ pub enum RightPanel {
     Calendar,
     /// the file history of the note (HIST-002)
     History,
+    /// the thread of the note: its mails, oldest first (NAV-070)
+    Thread,
 }
 
 #[cfg(test)]
@@ -159,6 +172,9 @@ mod docx_export;
 mod drops;
 #[cfg(all(test, target_os = "linux"))]
 mod drops_tests;
+mod git_ask;
+#[cfg(test)]
+mod git_ask_tests;
 #[cfg(test)]
 mod handover_tests;
 mod history;
@@ -174,10 +190,14 @@ mod social;
 mod sync;
 mod tabs;
 mod tex_setup;
+mod thread_ui;
 #[cfg(all(test, target_os = "linux"))]
 mod tree_ui_tests;
 mod usage;
 mod userguide;
+pub mod vault_load;
+#[cfg(test)]
+mod vault_load_tests;
 
 /// A file "dropped" by a `--keys` script.
 #[derive(Debug)]
@@ -229,6 +249,8 @@ pub enum Modal {
     Changes,
     /// a conflict copy next to its original (NET-015)
     Conflict(Box<conflict::View>),
+    /// the vault dropdown and the dialogs under it (VAULT-030)
+    Vaults(Box<crate::vault_menu::VaultModal>),
     /// the "Turn on sync" wizard (SYNC-047); its state is `ShaleApp::sync.setup.wizard`
     SyncWizard,
     Export(Box<crate::pdf::export_dialog::ExportDialog>),
@@ -395,7 +417,13 @@ pub struct ShaleApp {
     pub sync: sync::SyncState,
     /// The file history of the open vault: snapshots and restore (ADR-0028).
     pub history: history::HistoryState,
+    /// the thread overview (NAV-070)
+    pub thread: thread_ui::ThreadState,
     pub vault: Option<Vault>,
+    /// the vault being read on a worker thread, behind the start screen's spinner (NET-019)
+    pub vault_load: vault_load::VaultLoad,
+    /// which known vaults have their folder (VAULT-038), looked up off the UI thread
+    pub presence: crate::vault_menu::Presence,
     /// the open tabs, the active one and what the tab bar drew last frame
     pub tabbar: tabs::TabBar,
     /// the panes of the middle area; `tabbar` is the tab bar of the focused one (NAV-032)
@@ -469,6 +497,8 @@ pub struct ShaleApp {
     shot: screenshot::ScreenshotRun,
     /// the `cursor_blink` setting that the visuals of egui follow (true at the start; screenshots start steady)
     blink_applied: bool,
+    /// the title the window has been given (VAULT-031)
+    title_applied: String,
     /// the frames drawn so far (paces screenshots and scripted input)
     frames: u32,
     /// the last failure to save the global settings (shown once)
@@ -507,7 +537,9 @@ impl ShaleApp {
         }
         let persist = opts.screenshot.is_none();
         let scripted = opts.keys.is_some();
-        let mut app = Self::build(opts, persist);
+        // the window reads the vault on a worker thread (NET-019); the start screen shows it
+        // (a screenshot run has no one to wait for the load: it reads the vault here)
+        let mut app = Self::build_with(opts, persist, persist.then_some(&cc.egui_ctx));
         if scripted {
             // icon buttons tell the script their tooltips (BUILD-007), kept in this window's context
             crate::script::collect_hints(&cc.egui_ctx);
@@ -536,7 +568,7 @@ impl ShaleApp {
         if path.is_dir() {
             let same = self.vault.as_ref().is_some_and(|v| std::fs::canonicalize(&v.root).ok() == std::fs::canonicalize(path).ok());
             if !same {
-                self.open_vault(path);
+                self.open_vault_in_background(path, vault_load::After::Nothing);
             }
             return;
         }
@@ -551,7 +583,14 @@ impl ShaleApp {
     }
 
     /// Set up the app without a window. `persist` = read/write the user's config file.
+    #[cfg(any(test, feature = "bench"))]
     pub fn build(opts: Options, persist: bool) -> Self {
+        Self::build_with(opts, persist, None)
+    }
+
+    /// [`build`](Self::build); with a window's context the vault is read in the background
+    /// (NET-019) instead of here, so a slow share does not freeze the start.
+    fn build_with(opts: Options, persist: bool, window: Option<&egui::Context>) -> Self {
         let screenshot = opts.screenshot.clone();
         // screenshots only: SHALE_FAKE_NOW=2026-11-15T10:00:00 freezes the clock and the build stamp
         if screenshot.is_some() {
@@ -642,8 +681,11 @@ impl ShaleApp {
             persist_config,
             vdata: crate::vault_state::VaultData::default(),
             history: Default::default(),
+            thread: Default::default(),
             sync: sync::SyncState::with_managed(crate::gitsync::install_ui::ManagedState::new(persist, &tag)),
             vault: None,
+            vault_load: Default::default(),
+            presence: Default::default(),
             tabbar: tabs::TabBar::new(),
             panes: panes::Panes::new(),
             notes: HashMap::new(),
@@ -687,6 +729,7 @@ impl ShaleApp {
             shot: screenshot::ScreenshotRun::new(screenshot),
             frames: 0,
             blink_applied: true,
+            title_applied: "Shale".into(),
             cfg_error: None,
             sf: crate::settings_file::SettingsFile::new(),
             fonts: crate::fonts::FontState::new(),
@@ -707,6 +750,8 @@ impl ShaleApp {
         };
         // the mail view's check of the index is a task of the window's registry (JOB-015)
         app.mail.busy = app.busy.clone();
+        // the audio attachments play in the app's one player (MAIL-240, MEDIA-007)
+        app.mail.media = app.media.clone();
         if persist {
             app.refresh_git();
         }
@@ -714,8 +759,12 @@ impl ShaleApp {
         if let Some(p) = cfg_problem {
             app.toast(p);
         }
-        if let Some(p) = vault_path {
-            app.open_vault(&p);
+        if let (Some(p), Some(ctx)) = (&vault_path, window) {
+            app.ctx = Some(ctx.clone());
+            app.open_vault_in_background(p, opts.view.clone().map_or(vault_load::After::Nothing, vault_load::After::View));
+        } else if let Some(p) = vault_path {
+            // (the demo vault of a screenshot is nobody's vault)
+            app.open_vault_as(&p, opts.vault.is_some());
             if app.shot.path.is_some() && p.join("Welcome.md").is_file() {
                 app.open(Path::new("Welcome.md"), false);
             }
@@ -747,67 +796,7 @@ impl ShaleApp {
                     Err(e) => eprintln!("could not make the demo mail: {e}"),
                 }
             }
-            match opts.view.as_deref() {
-                Some("calendar") => app.show_view(View::Calendar, false),
-                Some("mail") => app.show_view(View::Mail, false),
-                Some("calendar-side") => {
-                    app.side.layout.show_panel(RightPanel::Calendar);
-                }
-                // the vault as it is, with the made-up mail and posts indexed, so that a search finds all three sources
-                Some("search") => {
-                    let demo = crate::social::demo::account();
-                    app.social.index.add(&demo.account.id, "home", &crate::social::demo::posts());
-                }
-                Some("tasks") => app.show_view(View::Tasks, false),
-                Some("keybindings") => app.open_settings(SettingsTab::Keybindings),
-                // the Data usage dialog with made-up cache files in the temporary folders
-                Some("data-usage") => {
-                    if let Err(e) = crate::data_usage::seed_demo(&app.usage.places) {
-                        eprintln!("could not make the demo caches: {e}");
-                    }
-                    app.open_data_usage();
-                }
-                Some("graph") => app.show_view(View::Graph, false),
-                // the feed view with made-up posts (no network); "social-import": and the dialog for saving some of them; "social-thread": the conversation of a post
-                Some(v @ ("social" | "social-import" | "social-thread" | "social-notifications")) => {
-                    let demo = crate::social::demo::account();
-                    app.cfg.social_accounts = vec![demo.clone()];
-                    app.social.load_demo(&demo);
-                    app.show_view(View::Social(None), false);
-                    if v == "social-thread" {
-                        // the conversation of the first reply to the demo thread (SOC-045)
-                        let post = crate::social::demo::replies().remove(0).post;
-                        app.social.threads.open(&demo.account.id, &post);
-                        app.show_view(View::Social(Some(crate::social::FeedRef { thread: Some(post.id), ..crate::social::FeedRef::new(demo.account.id.clone(), "home") })), false);
-                    }
-                    if v == "social-notifications" {
-                        // the Notifications feed of the demo account, loaded already (SOC-071)
-                        let key = (demo.account.id.clone(), crate::social::notifications::NOTIFICATIONS.to_string());
-                        app.social.timelines.insert(key.clone(), crate::social::state::Timeline { posts: crate::social::demo::notifications(), loaded: true, ..Default::default() });
-                        app.show_view(View::Social(Some(crate::social::FeedRef::new(key.0, key.1))), false);
-                    }
-                    if v == "social-import" {
-                        let posts = crate::social::demo::posts();
-                        let items = [3, 4].iter().map(|i| crate::import::social_item(crate::social::demo::saved(&posts[*i]), "Mastodon", false)).collect();
-                        app.open_import(items, vec![], Some((PathBuf::from("Social"), None)));
-                    }
-                }
-                Some("drawing") => app.open(Path::new("Sketch.excalidraw"), false),
-                // any file of the vault, e.g. `--view "open:Excalidraw/Plan.excalidraw.md"`
-                Some(v) if v.starts_with("open:") => app.open(Path::new(&v["open:".len()..]), false),
-                // a canvas shown read-only without the question, e.g. `--view "read-only:Map.canvas"`
-                Some(v) if v.starts_with("read-only:") => app.open_canvas_read_only(Path::new(&v["read-only:".len()..]), false),
-                // a canvas converted to a drawing (as the "Convert" button does), e.g. `--view "convert:Map.canvas"`
-                Some(v) if v.starts_with("convert:") => {
-                    app.convert_canvas(Path::new(&v["convert:".len()..]), false);
-                }
-                Some("reading") => {
-                    if let Some(t) = app.tabbar.tabs.get_mut(app.tabbar.active) {
-                        t.reading = true;
-                    }
-                }
-                _ => {}
-            }
+            app.show_start_view(opts.view.as_deref());
         }
         // SHALE_INPUT_LOG=1 turns the key recording on from the command line too
         if std::env::var_os("SHALE_INPUT_LOG").is_some() {
@@ -823,6 +812,71 @@ impl ShaleApp {
         let _ = cfg;
         app.settings_file_baseline();
         app
+    }
+
+    /// What `--view` asked for, shown once the vault is open (NET-019: when it has arrived).
+    pub(crate) fn show_start_view(&mut self, view: Option<&str>) {
+        match view {
+            Some("calendar") => self.show_view(View::Calendar, false),
+            Some("mail") => self.show_view(View::Mail, false),
+            Some("calendar-side") => {
+                self.side.layout.show_panel(RightPanel::Calendar);
+            }
+            // the vault as it is, with the made-up mail and posts indexed, so that a search finds all three sources
+            Some("search") => {
+                let demo = crate::social::demo::account();
+                self.social.index.add(&demo.account.id, "home", &crate::social::demo::posts());
+            }
+            Some("tasks") => self.show_view(View::Tasks, false),
+            Some("keybindings") => self.open_settings(SettingsTab::Keybindings),
+            // the Data usage dialog with made-up cache files in the temporary folders
+            Some("data-usage") => {
+                if let Err(e) = crate::data_usage::seed_demo(&self.usage.places) {
+                    eprintln!("could not make the demo caches: {e}");
+                }
+                self.open_data_usage();
+            }
+            Some("graph") => self.show_view(View::Graph, false),
+            // the feed view with made-up posts (no network); "social-import": and the dialog for saving some of them; "social-thread": the conversation of a post
+            Some(v @ ("social" | "social-import" | "social-thread" | "social-notifications")) => {
+                let demo = crate::social::demo::account();
+                self.cfg.social_accounts = vec![demo.clone()];
+                self.social.load_demo(&demo);
+                self.show_view(View::Social(None), false);
+                if v == "social-thread" {
+                    // the conversation of the first reply to the demo thread (SOC-045)
+                    let post = crate::social::demo::replies().remove(0).post;
+                    self.social.threads.open(&demo.account.id, &post);
+                    self.show_view(View::Social(Some(crate::social::FeedRef { thread: Some(post.id), ..crate::social::FeedRef::new(demo.account.id.clone(), "home") })), false);
+                }
+                if v == "social-notifications" {
+                    // the Notifications feed of the demo account, loaded already (SOC-078)
+                    let key = (demo.account.id.clone(), crate::social::notifications::NOTIFICATIONS.to_string());
+                    self.social.timelines.insert(key.clone(), crate::social::state::Timeline { posts: crate::social::demo::notifications(), loaded: true, ..Default::default() });
+                    self.show_view(View::Social(Some(crate::social::FeedRef::new(key.0, key.1))), false);
+                }
+                if v == "social-import" {
+                    let posts = crate::social::demo::posts();
+                    let items = [3, 4].iter().map(|i| crate::import::social_item(crate::social::demo::saved(&posts[*i]), "Mastodon", false)).collect();
+                    self.open_import(items, vec![], Some((PathBuf::from("Social"), None)));
+                }
+            }
+            Some("drawing") => self.open(Path::new("Sketch.excalidraw"), false),
+            // any file of the vault, e.g. `--view "open:Excalidraw/Plan.excalidraw.md"`
+            Some(v) if v.starts_with("open:") => self.open(Path::new(&v["open:".len()..]), false),
+            // a canvas shown read-only without the question, e.g. `--view "read-only:Map.canvas"`
+            Some(v) if v.starts_with("read-only:") => self.open_canvas_read_only(Path::new(&v["read-only:".len()..]), false),
+            // a canvas converted to a drawing (as the "Convert" button does), e.g. `--view "convert:Map.canvas"`
+            Some(v) if v.starts_with("convert:") => {
+                self.convert_canvas(Path::new(&v["convert:".len()..]), false);
+            }
+            Some("reading") => {
+                if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active) {
+                    t.reading = true;
+                }
+            }
+            _ => {}
+        }
     }
 
     /// The player settings go to the media player each frame; a volume that was set in a player
@@ -901,74 +955,104 @@ impl ShaleApp {
         self.undo.open_vault(root, unix_now());
     }
 
-    pub fn open_vault(&mut self, path: &Path) {
+    /// Save what is open before another vault takes its place; false (with a toast) when an edit
+    /// could not be saved, because closing the buffers would lose it (DATA-009).
+    pub(crate) fn prepare_vault_switch(&mut self) -> bool {
         self.flush_all();
         self.history_flush_now();
-        // closing the buffers would lose edits that could not be saved (DATA-009)
         if let Some(bad) = self.notes.iter().find(|(_, d)| d.dirty).map(|(k, _)| k).or_else(|| self.drawings.iter().find(|(_, d)| d.dirty).map(|(k, _)| k)) {
             let bad = rel_to_string(bad);
             self.toast(format!("“{bad}” has changes that could not be saved, so the vault is not switched"));
+            return false;
+        }
+        true
+    }
+
+    /// Open a vault here and now, on the calling thread: for headless paths (screenshots, scripts
+    /// and tests). The window opens vaults with [`Self::open_vault_in_background`] (NET-019).
+    #[cfg(test)]
+    pub fn open_vault(&mut self, path: &Path) {
+        self.open_vault_as(path, true);
+    }
+
+    /// [`Self::open_vault`]; `known` false: the vault is not added to the known vaults and not
+    /// remembered as the one opened last (the user guide and the demo vault, VAULT-029).
+    fn open_vault_as(&mut self, path: &Path, known: bool) {
+        if !self.prepare_vault_switch() {
             return;
         }
         let _flow = tracing::info_span!("flow.vault_open", peer = "app").entered();
         match tracing::info_span!("flow.vault_open.scan", peer = "disk").in_scope(|| Vault::open(path)) {
-            Ok(v) => {
-                let had_files = !v.files.is_empty();
-                // the vault being left keeps its open tabs
-                self.remember_open_files();
-                if self.persist_config {
-                    if let Err(e) = tracing::info_span!("flow.vault_open.save_state", peer = "disk").in_scope(|| self.vdata.save()) {
-                        self.toast(e);
-                    }
-                }
-                self.load_vault_data(&v.root);
-                self.media.stop();
-                self.vault = Some(v);
-                self.tabbar.tabs.clear();
-                self.panes.reset();
-                self.notes.clear();
-                self.drawings.clear();
-                self.tabbar.active = 0;
-                self.cfg.remember_vault(path.to_path_buf());
-                // (opening a note rewrites the saved list, so read it first)
-                let saved_panes: Vec<crate::vault_state::SavedPane> = if self.vdata.state.panes.is_empty() {
-                    // (a file from before panes: its last tab was the open one)
-                    vec![crate::vault_state::SavedPane { tabs: self.vdata.state.tabs.clone(), active: self.vdata.state.tabs.len().saturating_sub(1), ..Default::default() }]
-                } else {
-                    self.vdata.state.panes.clone()
-                };
-                let saved_focus = self.vdata.state.focused_pane;
-                for (pi, sp) in saved_panes.iter().enumerate() {
-                    if pi > 0 {
-                        self.add_pane_right();
-                    }
-                    self.restore_pane_tabs(sp);
-                    // a pane whose tabs are all gone is not brought back
-                    if pi > 0 && self.tabbar.tabs.is_empty() {
-                        self.close_pane(self.panes.focused);
-                    }
-                }
-                if self.tabbar.tabs.is_empty() && self.panes.len() == 1 {
-                    let first = self.vault.as_ref().and_then(|v| v.files.iter().find(|f| f.link_name.eq_ignore_ascii_case("welcome")).or_else(|| v.files.iter().find(|f| f.kind == FileKind::Note)).map(|f| f.rel.clone()));
-                    match first {
-                        Some(r) => self.open(&r, false),
-                        None => self.tabbar.new_tab(View::Empty),
-                    }
-                }
-                // the widths as they were (only when every pane that was saved came back)
-                if saved_panes.len() == self.panes.len() && saved_panes.iter().all(|p| p.weight.is_finite() && p.weight > 0.0) {
-                    self.panes.weights = saved_panes.iter().map(|p| p.weight).collect();
-                }
-                self.focus_pane(saved_focus);
-                self.remember_open_files();
-                if !had_files {
-                    self.toast("Empty vault opened. Create a note with Ctrl+N.");
-                }
-                self.sync_vault_opened();
-                self.save_config();
-            }
+            Ok(v) => self.finish_open_vault(path, v, known),
             Err(e) => self.toast(format!("Could not open vault: {e}")),
         }
+    }
+
+    /// The vault has been read: make it the open one (state, tabs restored from its state, sync).
+    pub(crate) fn finish_open_vault(&mut self, path: &Path, v: Vault, known: bool) {
+        let had_files = !v.files.is_empty();
+        // the vault being left keeps its open tabs
+        self.remember_open_files();
+        if self.persist_config {
+            if let Err(e) = tracing::info_span!("flow.vault_open.save_state", peer = "disk").in_scope(|| self.vdata.save()) {
+                self.toast(e);
+            }
+        }
+        self.load_vault_data(&v.root);
+        self.media.stop();
+        self.vault = Some(v);
+        self.tabbar.tabs.clear();
+        self.panes.reset();
+        self.notes.clear();
+        self.drawings.clear();
+        self.tabbar.active = 0;
+        // the folders are looked at again the next time the list is shown
+        self.presence.clear();
+        if known {
+            // a folder that is new to the list and lies in or around another vault: warned once (VAULT-039)
+            let nesting = if self.cfg.vaults.contains(path) { None } else { self.cfg.vaults.nested_with(path, None) };
+            self.cfg.remember_vault(path.to_path_buf());
+            if let Some(n) = nesting {
+                self.toast(n.warning());
+            }
+        }
+        // (opening a note rewrites the saved list, so read it first)
+        let saved_panes: Vec<crate::vault_state::SavedPane> = if self.vdata.state.panes.is_empty() {
+            // (a file from before panes: its last tab was the open one)
+            vec![crate::vault_state::SavedPane { tabs: self.vdata.state.tabs.clone(), active: self.vdata.state.tabs.len().saturating_sub(1), ..Default::default() }]
+        } else {
+            self.vdata.state.panes.clone()
+        };
+        let saved_focus = self.vdata.state.focused_pane;
+        for (pi, sp) in saved_panes.iter().enumerate() {
+            if pi > 0 {
+                self.add_pane_right();
+            }
+            self.restore_pane_tabs(sp);
+            // a pane whose tabs are all gone is not brought back
+            if pi > 0 && self.tabbar.tabs.is_empty() {
+                self.close_pane(self.panes.focused);
+            }
+        }
+        if self.tabbar.tabs.is_empty() && self.panes.len() == 1 {
+            let first = self.vault.as_ref().and_then(|v| v.files.iter().find(|f| f.link_name.eq_ignore_ascii_case("welcome")).or_else(|| v.files.iter().find(|f| f.kind == FileKind::Note)).map(|f| f.rel.clone()));
+            match first {
+                Some(r) => self.open(&r, false),
+                None => self.tabbar.new_tab(View::Empty),
+            }
+        }
+        // the widths as they were (only when every pane that was saved came back)
+        if saved_panes.len() == self.panes.len() && saved_panes.iter().all(|p| p.weight.is_finite() && p.weight > 0.0) {
+            self.panes.weights = saved_panes.iter().map(|p| p.weight).collect();
+        }
+        self.focus_pane(saved_focus);
+        self.remember_open_files();
+        if !had_files {
+            self.toast("Empty vault opened. Create a note with Ctrl+N.");
+        }
+        self.sync_vault_opened();
+        self.ask_about_existing_repo(known);
+        self.save_config();
     }
 
     /// Open the tabs of one saved pane in the (empty) focused pane: pinned tabs left-most, the
@@ -1059,6 +1143,9 @@ impl ShaleApp {
         self.show_view(view, new_tab);
     }
 
+    /// Show `view`: the one way every note, drawing and view is opened (NAV-062). A tab that is
+    /// pinned is never replaced: the view opens in a new tab instead, so an import, a followed link,
+    /// a search result, the quick switcher, the file tree or the history never take its place.
     pub fn show_view(&mut self, view: View, new_tab: bool) {
         if self.tabbar.tabs.is_empty() || new_tab {
             self.tabbar.new_tab(view);
@@ -1077,6 +1164,10 @@ impl ShaleApp {
             return;
         }
         let tab = &mut self.tabbar.tabs[self.tabbar.active];
+        if tab.pinned && tab.view != view {
+            self.tabbar.new_tab(view);
+            return;
+        }
         if tab.view != view {
             let old = std::mem::replace(&mut tab.view, view);
             if old != View::Empty {
@@ -1866,7 +1957,7 @@ impl ShaleApp {
     /// Put the keyboard into the left sidebar (Ctrl+H, Ctrl+Shift+B): browse the file list with
     /// the open note selected, or type in the search box.
     pub fn focus_sidebar(&mut self, ctx: &egui::Context) {
-        self.cfg.show_left = true;
+        self.show_left_view(self.side.left);
         if let Some(f) = ctx.memory(|m| m.focused()) {
             ctx.memory_mut(|m| m.surrender_focus(f));
         }
@@ -2012,6 +2103,11 @@ impl ShaleApp {
                 }
             }
             CalAction::OpenLarge => self.show_view(View::Calendar, false),
+            CalAction::Import(occ) => {
+                if let Some(drag) = crate::calendar::ui::CalDrag::new(&self.calendar, &occ) {
+                    self.import_calendar_event(&drag, None);
+                }
+            }
             CalAction::NewEventAt(start) => {
                 let srcs = &self.calendar.sources;
                 let target = self.cal.last_event_calendar.as_ref().and_then(|id| srcs.iter().find(|s| s.id == *id)).or_else(|| srcs.iter().find(|s| s.enabled)).or_else(|| srcs.first()).map(|s| s.id.clone());
@@ -2148,12 +2244,13 @@ impl ShaleApp {
         self.flush_all();
         let Some(v) = &self.vault else { return };
         let name = dir.file_name().or_else(|| v.root.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Vault".to_string());
-        let opts = crate::pdf::export::ExportOptions { numbered_headings: self.cfg.numbered_headings, ..crate::pdf::export::ExportOptions::for_note() };
         let path = v.root.join("exports").join(format!("{name}.pdf"));
         let book = crate::pdf::book_dialog::BookExport::new(v, dir, &self.busy);
         let plan = book.plan.as_ref().ok();
         let title = plan.map(|p| p.title.clone()).unwrap_or_else(|| name.clone());
         let text = plan.and_then(|p| p.note.as_deref()).map(|n| self.note_text(n)).unwrap_or_default();
+        // the top folder note may say `print-toc-page-break` (BOOK-018)
+        let opts = crate::pdf::export::ExportOptions { numbered_headings: self.cfg.numbered_headings, ..crate::pdf::export::ExportOptions::for_note() }.with_toc_break_property(&text);
         let last = &self.vdata.state.latex_export;
         let noted = crate::pdf::tex::dialog::note_choice(&crate::markdown::front_matter_values(&text));
         let engine = if noted.is_some() || last.latex { ExportEngine::Latex } else { ExportEngine::Builtin };
@@ -2374,6 +2471,24 @@ impl ShaleApp {
         }
     }
 
+    /// The search and find keys of the main views (KEY-040) are read: no dialog, no text field with
+    /// the keyboard (the note in the editor only in vim normal mode, where the keys are not typed),
+    /// not the file list or the sidebar search (Space is theirs), not a drawing (Space pans) and not
+    /// the compose window of mail. Independent of Vim-style editing.
+    pub(crate) fn main_keys_active(&self, ctx: &egui::Context) -> bool {
+        if self.shortcuts_blocked() || self.vault.is_none() || self.tree.sel.is_some() || self.search.sel.is_some() {
+            return false;
+        }
+        let Some(tab) = self.tabbar.tabs.get(self.tabbar.active) else { return false };
+        match tab.view {
+            View::Note(_) if !tab.reading => tab.editor.vim_normal_keys(ctx) || ctx.memory(|m| m.focused().is_none()),
+            View::Drawing(_) => false,
+            View::Mail => self.mail.compose.is_none() && !self.mail.away && !ctx.text_edit_focused(),
+            // another widget with the keyboard (a player after a click, a button after Tab) keeps Space
+            _ => ctx.memory(|m| m.focused().is_none()),
+        }
+    }
+
     /// Swap the view of this tab with the one before it in its history, so that doing it again
     /// swaps back (NAV-019). A note gets the keyboard.
     pub fn swap_alternate(&mut self) {
@@ -2426,6 +2541,14 @@ impl ShaleApp {
     }
 
     pub fn go_back(&mut self) {
+        // a pinned tab is never navigated away from (NAV-062): the earlier view opens beside it
+        if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active).filter(|t| t.pinned) {
+            if let Some(prev) = t.back.last().cloned() {
+                self.tabbar.new_tab(prev);
+                self.remember_open_files();
+            }
+            return;
+        }
         if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active) {
             if let Some(prev) = t.back.pop() {
                 let cur = std::mem::replace(&mut t.view, prev);
@@ -2436,6 +2559,13 @@ impl ShaleApp {
     }
 
     pub fn go_forward(&mut self) {
+        if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active).filter(|t| t.pinned) {
+            if let Some(next) = t.fwd.last().cloned() {
+                self.tabbar.new_tab(next);
+                self.remember_open_files();
+            }
+            return;
+        }
         if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active) {
             if let Some(next) = t.fwd.pop() {
                 let cur = std::mem::replace(&mut t.view, next);
@@ -2481,7 +2611,7 @@ impl ShaleApp {
                 Action::KeepConflict { copy, this: false } => self.conflict_keep_other(&copy),
                 Action::RestoreTrashed => self.restore_trashed(),
                 Action::NewFolder(parent) => self.modal = Some(Modal::NewFolder { parent, name: String::new() }),
-                Action::OpenVault(p) => self.open_vault(&p),
+                Action::OpenVault(p) => self.open_vault_in_background(&p, vault_load::After::Nothing),
                 Action::Export(rel) => self.open_export_dialog(&rel),
                 Action::ExportDocx(rel) => self.open_docx_export_dialog(&rel),
                 Action::ExportFolder(dir) => self.open_export_folder_dialog(&dir),
@@ -2518,7 +2648,22 @@ impl ShaleApp {
         }
     }
 
+    /// Is a modal dialog open, so that Shale's own shortcuts (the keymap's actions of every scope
+    /// and the editor's keys) do not fire (KEY-038)? The one place every dispatcher asks; the dialog's
+    /// own keys (Enter, Tab, text, Esc, the key capture of the Keybindings tab) are no keymap
+    /// action and are not affected.
+    pub(crate) fn shortcuts_blocked(&self) -> bool {
+        self.modal.is_some() || self.repo_ask_shown()
+    }
+
     fn shortcuts(&mut self, ui: &Ui) {
+        if self.shortcuts_blocked() {
+            // a half typed sequence is forgotten; the keys stay for the dialog
+            for scope in Scope::ALL {
+                self.keymap.cancel(scope);
+            }
+            return;
+        }
         // mouse side buttons: back / forward through the notes opened in this tab
         let (mouse_back, mouse_fwd) = ui.input(|i| (i.pointer.button_pressed(egui::PointerButton::Extra1), i.pointer.button_pressed(egui::PointerButton::Extra2)));
         // Ctrl+H / Ctrl+L (like vim's h / l): keyboard into the sidebar / back into the editor;
@@ -2545,6 +2690,13 @@ impl ShaleApp {
         } else if is(KeyAction::ClosePane) {
             self.close_pane(self.panes.focused);
         }
+        // the thread of the note (KEY-050)
+        match action {
+            Some(KeyAction::ThreadPrevious) => self.step_thread(-1),
+            Some(KeyAction::ThreadNext) => self.step_thread(1),
+            Some(KeyAction::ThreadOverview) => self.show_thread_overview(ui.ctx()),
+            _ => {}
+        }
         // the alternate view from every view, also mail and drawings (KEY-011)
         if is(KeyAction::AlternateView) && self.modal.is_none() {
             self.swap_alternate();
@@ -2569,10 +2721,13 @@ impl ShaleApp {
         } else {
             self.keymap.cancel(Scope::NoteView);
         }
-        // Space sequences of vim-style normal mode (EDIT-015); a half typed one is forgotten
-        // when the keys are not read any more
-        if self.normal_keys_active(ui.ctx()) {
-            match ui.input_mut(|i| self.keymap.poll(i, Scope::EditorNormal)) {
+        // Space sequences: the search and find keys of the main views (KEY-040), and with Vim-style
+        // normal mode (EDIT-015) its own; both start with Space, so one sequence reads both. A half
+        // typed one is forgotten when the keys are not read any more
+        let normal = self.normal_keys_active(ui.ctx());
+        if normal || self.main_keys_active(ui.ctx()) {
+            let scopes: &[Scope] = if normal { &[Scope::MainViews, Scope::EditorNormal] } else { &[Scope::MainViews] };
+            match ui.input_mut(|i| self.keymap.poll_in(i, scopes)) {
                 Some(KeyAction::NormalAlternate) => self.swap_alternate(),
                 Some(KeyAction::NormalFindFile) => self.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::FileNames))),
                 Some(KeyAction::NormalSearchAll) => self.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::Everything))),
@@ -2580,6 +2735,7 @@ impl ShaleApp {
                 _ => {}
             }
         } else {
+            self.keymap.cancel(Scope::MainViews);
             self.keymap.cancel(Scope::EditorNormal);
         }
         let in_mail = matches!(self.tabbar.tabs.get(self.tabbar.active).map(|t| &t.view), Some(View::Mail));
@@ -2638,8 +2794,7 @@ impl ShaleApp {
             self.close_tab(a);
         }
         if search {
-            self.side.left = LeftPanel::Search;
-            self.cfg.show_left = true;
+            self.show_left_view(LeftPanel::Search);
             self.search.focus = true;
         }
         if save {
@@ -2707,7 +2862,8 @@ impl ShaleApp {
     /// Testing aid (`--keys`): add the next scripted step to this frame's input.
     fn feed_script(&mut self, raw: &mut egui::RawInput) {
         use crate::script::{Button, Step};
-        if self.script.steps.is_empty() || self.frames < 30 || !self.frames.is_multiple_of(6) {
+        // (a vault that is still being read holds the script: the window has nothing to type into)
+        if self.script.steps.is_empty() || self.frames < 30 || !self.frames.is_multiple_of(6) || self.vault_load.is_loading() {
             return;
         }
         // waiting for a text to be drawn (a view that fills in later) holds the whole script
@@ -2951,6 +3107,14 @@ impl eframe::App for ShaleApp {
 }
 
 impl ShaleApp {
+    /// The title of the window: the open vault's name, then Shale (VAULT-031).
+    fn window_title(&self) -> String {
+        match &self.vault {
+            Some(v) => format!("{} – Shale", self.cfg.vaults.label_of(&v.root)),
+            None => "Shale".into(),
+        }
+    }
+
     /// One frame of the window (the body of `eframe::App::ui`; tests call it directly).
     pub(crate) fn run_frame(&mut self, ui: &mut Ui) {
         self.drag.drop_zones.clear();
@@ -2961,6 +3125,11 @@ impl ShaleApp {
             self.blink_applied = self.cfg.cursor_blink;
             let blink = self.cfg.cursor_blink && !self.shot.active();
             ui.ctx().all_styles_mut(|s| s.visuals.text_cursor.blink = blink);
+        }
+        let title = self.window_title();
+        if self.title_applied != title {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.title_applied = title;
         }
         self.keyboard_guard(ui.ctx());
         self.shortcuts(ui);
@@ -3019,13 +3188,15 @@ impl ShaleApp {
         if self.calendar.is_loading() {
             ui.ctx().request_repaint_after(Duration::from_millis(250));
         }
+        self.vault_load_tick(ui.ctx());
+        self.presence.poll();
         self.rescan_tick(ui.ctx());
         if self.notes.values().any(|d| d.dirty) || self.drawings.values().any(|d| d.dirty) {
             ui.ctx().request_repaint_after(Duration::from_millis(300));
         }
         ui.ctx().request_repaint_after(Duration::from_secs(3));
 
-        if self.vault.is_none() {
+        if self.vault.is_none() || self.vault_load.is_loading() {
             self.welcome(ui);
         } else {
             self.layout(ui);
@@ -3085,6 +3256,7 @@ pub fn handle_editor_action(app_actions: &mut Vec<Action>, a: EditorAction, from
     match a {
         EditorAction::OpenLink { target, heading, new_tab } => app_actions.push(Action::OpenLink { target, heading, from: Some(from.to_path_buf()), new_tab }),
         EditorAction::OpenUrl(url) => app_actions.push(Action::OpenUrl(url)),
+        EditorAction::OpenDay(day) => app_actions.push(Action::OpenCalendarDay(day)),
         EditorAction::FilesChanged => app_actions.push(Action::Rescan),
         EditorAction::Pasted(msg) => {
             app_actions.push(Action::Rescan);
@@ -3694,7 +3866,7 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
-    // spec: VAULT-013
+    // spec: VAULT-013, VAULT-042
     #[test]
     fn rename_keeps_open_buffers_in_step() {
         let (mut app, d) = test_app("rename");

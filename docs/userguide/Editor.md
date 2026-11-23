@@ -51,8 +51,10 @@ editor folds them to one muted line, `▸ Properties · email · Anna Müller ·
 or a Word import starts with its text, not with a block of YAML. Click the line, or move the cursor into it (arrow
 keys, `gg`, Ctrl+Home), and the properties open as raw, editable lines; when the cursor leaves them again they fold
 again. If you opened them with the ▸ marker, the badge or a fold key, they stay open. **Settings → Appearance →
-Properties in the editor** is `Folded` (the default; `Card` looks the same in the editor, the card is for the reading
-view) or `Raw`, which opens a note with its properties unfolded.
+Properties in the editor** is `Folded` (the default: the one line), `Card` (the folded properties are drawn as the same
+card as in the reading view, a mail header for a mail, the time and place for an event, and so on; a click on the card
+opens the lines, and a person with a note or a date in it works as in the reading view) or `Raw`, which opens a note
+with its properties unfolded.
 
 ## Mail notes
 
@@ -119,6 +121,10 @@ embed (it opens the `[!` file picker of [[Notes and links]]); and "Clear formatt
 
 - With text selected, an inline button wraps it in the markers; click it again and they come
   off. With nothing selected it puts the markers in and the cursor between them.
+  Press the same style key (or button) again with the cursor just before the closing marker and
+  the cursor steps out behind it instead of opening a new pair, so you can write
+  `text`, Alt+B, bold, Alt+B, `text`. Inside bold, Alt+I opens an italic and Alt+I again leaves it;
+  only the same style leaves. On an empty pair the second press takes the pair off again.
 - A line button (heading, list, task, quote) works on every line the selection touches, and
   toggles off when they all have it. A heading replaces a list marker and the other way round.
 - Every click is one undo step, and the keyboard stays in the note, with the Markdown preview on
@@ -369,7 +375,7 @@ at least 240 x 160, and never bigger than the window) with a **Reset size** butt
 
 The status bar shows NORMAL, INSERT, VISUAL or V-LINE. The vim keys themselves cannot be
 rebound. In normal mode **Space Tab** goes back to the view this tab showed just before, and
-again to return. **Space f f** and **Space f g** open the pickers of [[Search and pickers]].
+again to return. **Space f f** and **Space f g** open the pickers of [[Search and pickers]] (in every view, not only here).
 
 # Keyboard only
 

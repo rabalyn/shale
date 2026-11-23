@@ -77,6 +77,8 @@ pub struct Mail {
     /// when it was sent (UTC seconds), if the date could be read
     pub date: Option<i64>,
     pub message_id: String,
+    /// the `In-Reply-To` Message-ID as written (threads of imported mails, IMP-067)
+    pub in_reply_to: String,
     /// `Reply-To` and `References` as written (replies, MAIL-126)
     pub reply_to: String,
     pub references: String,
@@ -491,16 +493,45 @@ fn decode_entities(s: &str) -> String {
     out
 }
 
+/// In `html_to_text`'s buffer: a quoted block (`<blockquote>`) opens and closes ...
+const QUOTE_OPEN: char = '\u{E000}';
+const QUOTE_CLOSE: char = '\u{E001}';
+/// ... and a signature container (`moz-signature`, `gmail_signature`, Outlook's `Signature`,
+/// `AppleMailSignature`) starts here.
+const SIGNATURE_START: char = '\u{E002}';
+
+/// What an open element of `html_to_text` is.
+#[derive(Clone, Copy, PartialEq)]
+enum Open {
+    Plain,
+    Quote,
+    Signature,
+}
+
+/// The elements whose end `html_to_text` has to find (those that can hold a quote or a signature).
+fn tracks(name: &str) -> bool {
+    matches!(name, "div" | "blockquote" | "pre" | "span" | "p" | "table" | "td" | "font" | "section" | "center")
+}
+
+/// Whether the start tag (lower case, without `<` and `>`) opens the container of a signature.
+fn signature_container(tag: &str) -> bool {
+    ["moz-signature", "gmail_signature", "id=\"signature\"", "id=\"x_signature\"", "id='signature'", "applemailsignature"].iter().any(|m| tag.contains(m))
+}
+
 /// A readable plain-text version of an HTML mail (paragraphs, line breaks, lists, links as
-/// markdown links; styles, scripts and the head left out).
+/// markdown links; styles, scripts and the head left out). A `<blockquote>` becomes lines with
+/// `> ` marks, and a signature container gets a delimiter line `-- ` before it when its text has
+/// none, so the text carries what the HTML knew (IMP-063, IMP-064).
 pub fn html_to_text(html: &str) -> String {
+    let mut open: Vec<(String, Open)> = Vec::new();
     let mut out = String::new();
     let mut i = 0;
     let lower = html.to_ascii_lowercase();
     let b = html.as_bytes();
     let mut link: Option<(String, usize)> = None; // href, where its text starts in out
     let push_nl = |out: &mut String, n: usize| {
-        let have = out.chars().rev().take_while(|c| *c == '\n').count();
+        // the marks of quotes and signatures are no text: a line end before them counts
+        let have = out.chars().rev().filter(|c| !matches!(*c, QUOTE_OPEN | QUOTE_CLOSE | SIGNATURE_START)).take_while(|c| *c == '\n').count();
         if !out.is_empty() && have < n {
             for _ in have..n {
                 out.push('\n');
@@ -524,6 +555,38 @@ pub fn html_to_text(html: &str) -> String {
             if !closing && matches!(name.as_str(), "style" | "script" | "head" | "title") {
                 i = lower[end..].find(&format!("</{name}")).map(|e| end + e).and_then(|e| lower[e..].find('>').map(|g| e + g + 1)).unwrap_or(b.len());
                 continue;
+            }
+            if tracks(&name) {
+                if closing {
+                    if let Some(at) = open.iter().rposition(|(n, _)| *n == name) {
+                        for (_, kind) in open.drain(at..) {
+                            if kind == Open::Quote {
+                                out.push(QUOTE_CLOSE);
+                            }
+                        }
+                    }
+                } else if !tag.ends_with('/') {
+                    let inside_signature = open.iter().any(|(_, k)| *k == Open::Signature);
+                    let kind = if name == "blockquote" {
+                        Open::Quote
+                    } else if signature_container(tag) && !inside_signature {
+                        Open::Signature
+                    } else {
+                        Open::Plain
+                    };
+                    open.push((name.clone(), kind));
+                    match kind {
+                        Open::Quote => {
+                            push_nl(&mut out, 2);
+                            out.push(QUOTE_OPEN);
+                        }
+                        Open::Signature => {
+                            push_nl(&mut out, 1);
+                            out.push(SIGNATURE_START);
+                        }
+                        Open::Plain => {}
+                    }
+                }
             }
             match (name.as_str(), closing) {
                 ("br", _) => out.push('\n'),
@@ -582,18 +645,71 @@ pub fn html_to_text(html: &str) -> String {
             i = next;
         }
     }
-    // tidy: trim line ends, at most one empty line in a row
-    let mut tidy = String::new();
+    tidy_html_text(&out)
+}
+
+/// The buffer of `html_to_text` as lines: trimmed, at most one empty line in a row, quoted lines
+/// with their `> ` marks, a `--` line before a signature container that has none.
+fn tidy_html_text(out: &str) -> String {
+    // (quote depth, text) of every line
+    let mut lines: Vec<(usize, String)> = Vec::new();
+    let mut depth = 0usize;
+    // a signature container has started and its first text is not there yet
+    let mut pending = false;
+    for raw in out.split('\n') {
+        let mut text = String::new();
+        let mut line_depth = None;
+        let mut signature = false;
+        for c in raw.chars() {
+            match c {
+                QUOTE_OPEN => depth += 1,
+                QUOTE_CLOSE => depth = depth.saturating_sub(1),
+                SIGNATURE_START => signature = true,
+                c => {
+                    if line_depth.is_none() && !c.is_whitespace() {
+                        line_depth = Some(depth);
+                    }
+                    text.push(c);
+                }
+            }
+        }
+        let text = text.trim().to_string();
+        let d = line_depth.unwrap_or(depth);
+        pending |= signature;
+        if pending && !text.is_empty() {
+            pending = false;
+            let after_delimiter = lines.iter().rev().find(|(_, l)| !l.is_empty()).is_some_and(|(_, l)| l == "--");
+            if text != "--" && !after_delimiter {
+                lines.push((d, "--".to_string()));
+            }
+        }
+        lines.push((d, text));
+    }
     let mut blank = 0;
-    for l in out.lines() {
-        let l = l.trim();
+    let mut kept: Vec<(usize, &str)> = Vec::new();
+    for (i, (d, l)) in lines.iter().enumerate() {
         if l.is_empty() {
+            // an empty line at the end of a quote is no part of it
+            if *d > 0 && lines.get(i + 1).is_none_or(|n| n.0 < *d) {
+                continue;
+            }
             blank += 1;
-            if blank > 1 || tidy.is_empty() {
+            if blank > 1 || kept.is_empty() {
                 continue;
             }
         } else {
             blank = 0;
+        }
+        kept.push((*d, l));
+    }
+    let mut tidy = String::new();
+    for (d, l) in kept {
+        if d > 0 {
+            tidy.push_str(&"> ".repeat(d - 1));
+            tidy.push('>');
+            if !l.is_empty() {
+                tidy.push(' ');
+            }
         }
         tidy.push_str(l);
         tidy.push('\n');
@@ -747,6 +863,7 @@ pub fn parse(raw: &[u8]) -> Mail {
         date: parse_date(&date_raw),
         date_raw,
         message_id: header(&h, "message-id").unwrap_or("").trim().to_string(),
+        in_reply_to: header(&h, "in-reply-to").unwrap_or("").split_whitespace().next().unwrap_or("").to_string(),
         reply_to: get("reply-to"),
         references: header(&h, "references").unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" "),
         text: text.trim_end().to_string(),
@@ -902,7 +1019,7 @@ pub(crate) mod tests {
         assert_eq!(decode_charset(&[], "iso-8859-1"), "");
     }
 
-    // spec: IMP-010
+    // spec: IMP-010, IMP-063
     #[test]
     fn html_to_text_handles_links_comments_scripts_odd_markup_and_cut_off_input() {
         let h = html_to_text;
@@ -927,7 +1044,7 @@ pub(crate) mod tests {
         assert_eq!(h("<h1>T</h1><p>x</p><hr>y"), "T\n\nx\n\n———\ny");
         assert_eq!(h("<table><tr><td>a</td><td>b</td></tr><tr><th>c</th><td>d</td></tr></table>"), "a  b\nc  d");
         assert_eq!(h("<ol><li>x<li>y</ol>"), "- x\n- y");
-        assert_eq!(h("<blockquote>q</blockquote>after"), "q\n\nafter");
+        assert_eq!(h("<blockquote>q</blockquote>after"), "> q\n\nafter", "a quote gets its marks (IMP-063)");
         // white space: runs collapse, no-break spaces are spaces, blank lines are at most one, ends are trimmed
         assert_eq!(h("  a \n\t b&nbsp;&nbsp;c  "), "a b c");
         assert_eq!(h("<p>a</p><p></p><p></p><p>b</p>"), "a\n\nb");

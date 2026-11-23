@@ -616,6 +616,8 @@ pub enum EditorAction {
     },
     /// A web link: open it in the default browser.
     OpenUrl(String),
+    /// A date of the front matter's card: show this day (a day number, `calendar::time`) in the calendar (EDIT-081)
+    OpenDay(i64),
     /// A file was copied into the vault; the file list should be refreshed.
     FilesChanged,
     /// `[[p Name` picked "new contact": make a contact note in the people folder
@@ -745,7 +747,7 @@ pub struct NoteEditor {
     pub(crate) fold: crate::fold_ui::FoldUi,
     /// a folded front matter shows a summary line, and a note opens with it folded: the setting
     /// "properties in the editor" is not Raw (EDIT-081, set from the app's settings)
-    pub properties_summary: bool,
+    pub properties_view: crate::config::PropertiesView,
 }
 
 impl NoteEditor {
@@ -787,7 +789,7 @@ impl NoteEditor {
             table_cell_edit: true,
             focus_before_press: false,
             fold: Default::default(),
-            properties_summary: true,
+            properties_view: crate::config::PropertiesView::Folded,
             vim_follow: false,
             vim_cursor_rect: None,
             cursor_style: crate::cursor_style::CursorStyle::default(),
@@ -1643,7 +1645,7 @@ impl NoteEditor {
         }
 
         // the folds of this frame; a fold command first (EDIT-073): one that hides the cursor's line puts the cursor on the header
-        let mut fold = self.fold.begin(rel, text, self.properties_summary);
+        let mut fold = self.fold.begin(rel, text, self.properties_view);
         let mut had_cmd = false;
         if let Some(cmd) = self.fold.request.take() {
             had_cmd = true;
@@ -1653,7 +1655,7 @@ impl NoteEditor {
                 let end = text[at..].find('\n').map_or(text.len(), |p| at + p);
                 self.pending_cursor = Some(markdown::byte_to_char(text, end));
             }
-            fold = self.fold.begin(rel, text, self.properties_summary);
+            fold = self.fold.begin(rel, text, self.properties_view);
             ui.ctx().request_repaint();
         }
 
@@ -1698,6 +1700,8 @@ impl NoteEditor {
         // the widest a shown embed can be (where the text can go)
         let max_w = (ui.available_width() - gutter - 8.0).max(80.0);
         self.column = Some(max_w);
+        // a folded front matter drawn as a card: the room its row has to give it (EDIT-081)
+        let card_h = if fold.shows_card() { crate::properties_ui::card_height(ui, text, vault, rel, max_w) } else { None };
         // the raw lines of the markdown preview (EDIT-016, EDIT-017); embeds on them are raw too
         let preview = self.live_preview.then(|| self.preview_lines(ui, text));
         // the tables away from the cursor are drawn as grids (EDIT-024); their text is hidden
@@ -1820,7 +1824,7 @@ impl NoteEditor {
             }
             ranges.extend(folds.view.byte_ranges(s).into_iter().map(|r| (r, 0.0)));
             // a folded front matter: its first line hidden, the summary is painted over its row
-            ranges.extend(folds.veiled(s).map(|r| (r, -1.0)));
+            ranges.extend(folds.veiled(s, card_h));
             // what the layout depends on, the cursor only by the raw lines it makes (EDIT-105)
             let ctx = ui.ctx();
             let settled = crate::fonts::settled(ctx);
@@ -2143,8 +2147,12 @@ impl NoteEditor {
             ui.painter().set(slot, Shape::Vec(shapes));
         }
         // the markers and the badges of the folds (EDIT-071, EDIT-074)
-        let painted = crate::fold_ui::Painted { id: self.id, index: &index, rel, galley: &output.galley, pos: output.galley_pos, area: resp.rect, base: base_size };
-        self.fold.paint(ui, &fold, &painted);
+        let painted = crate::fold_ui::Painted { id: self.id, index: &index, rel, galley: &output.galley, pos: output.galley_pos, area: resp.rect, base: base_size, vault, card: card_h.map(|h| (max_w, h)) };
+        match self.fold.paint(ui, &fold, &painted) {
+            Some(crate::reader::ReaderAction::OpenLink { target, heading, new_tab }) => action = Some(EditorAction::OpenLink { target, heading, new_tab }),
+            Some(crate::reader::ReaderAction::OpenDay(day)) => action = Some(EditorAction::OpenDay(day)),
+            _ => {}
+        }
         // the copy button of the code boxes (EDIT-090) and the key that copies the block at the cursor (EDIT-092)
         if std::mem::take(&mut self.fold.copy_code) {
             let all: Vec<&str> = output.galley.job.text.split('\n').collect();
@@ -3842,6 +3850,131 @@ mod tests {
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text(" [[We".into())]);
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         assert!(ed.assist.ac_active, "a new [[ opens the suggestions");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A vault with tags `projects/shale`, `prj-x`, `alpha` and `my-projects`, and an editor with focus.
+    fn tag_vault(tag: &str) -> (Vault, std::path::PathBuf) {
+        let (_, d) = vault_for_tests(tag);
+        std::fs::write(d.join("Tagged.md"), "#projects/shale #prj-x\n#alpha\n---\ntags: [my-projects]\n---\n").unwrap();
+        std::fs::write(d.join("Tagged2.md"), "---\ntags: [my-projects]\n---\nbody\n").unwrap();
+        (Vault::open(&d).unwrap(), d)
+    }
+
+    // spec: EDIT-120
+    #[test]
+    fn edit_120_typing_a_tag_lists_the_matches_best_first_and_the_keys_choose_and_pick() {
+        let (v, d) = tag_vault("tagac");
+        let rel = Path::new("Welcome.md");
+        let key = |key: Key| Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers: Modifiers::NONE };
+        let mut text = String::new();
+        let mut ed = NoteEditor::new(egui::Id::unique("t-tagac"));
+        ed.request_focus = true;
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("see #prj".into())]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert!(ed.assist.tags.active && ed.assist.is_open());
+        assert_eq!(ed.assist.tags.items[0], "prj-x", "the prefix first");
+        assert!(["projects/shale", "my-projects"].iter().all(|t| ed.assist.tags.items.iter().any(|i| i == t)), "then those with the letters in order: {:?}", ed.assist.tags.items);
+        // typing on filters
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("e".into())]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        let (a, b) = (ed.assist.tags.items.iter().position(|t| t == "my-projects"), ed.assist.tags.items.iter().position(|t| t == "projects/shale"));
+        assert!(a < b && b.is_some(), "equal matches go alphabetically: {:?}", ed.assist.tags.items);
+        let sel = b.unwrap();
+        // ↓ and ↑ move, Ctrl+J as well, and nothing is typed
+        let n = ed.assist.tags.items.len();
+        for _ in 0..sel {
+            h.frame(&mut ed, &mut text, &v, rel, vec![key(Key::ArrowDown)]);
+        }
+        assert_eq!(ed.assist.tags.sel, sel);
+        h.frame(&mut ed, &mut text, &v, rel, vec![key(Key::ArrowUp)]);
+        assert_eq!(ed.assist.tags.sel, sel - 1);
+        h.frame(&mut ed, &mut text, &v, rel, vec![key(Key::ArrowDown)]);
+        assert_eq!(ed.assist.tags.sel, sel);
+        for _ in 0..n - sel {
+            h.frame(&mut ed, &mut text, &v, rel, vec![key(Key::ArrowDown)]);
+        }
+        assert_eq!(ed.assist.tags.sel, 0, "wraps round");
+        for _ in 0..n - sel {
+            h.frame(&mut ed, &mut text, &v, rel, vec![key(Key::ArrowUp)]);
+        }
+        assert_eq!(ed.assist.tags.sel, sel);
+        assert_eq!(text, "see #prje");
+        // Enter picks the chosen tag instead of a new line
+        h.frame(&mut ed, &mut text, &v, rel, vec![key(Key::Enter)]);
+        assert_eq!(text, "see #projects/shale");
+        assert!(!ed.assist.tags.active, "the list closes after the pick");
+        // Tab picks as well
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text(" #alp".into())]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![key(Key::Tab)]);
+        assert_eq!(text, "see #projects/shale #alpha");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: EDIT-120
+    #[test]
+    fn edit_120_escape_closes_the_tag_list_for_that_tag_and_enter_is_a_new_line_again() {
+        let (v, d) = tag_vault("tagesc");
+        let rel = Path::new("Welcome.md");
+        let key = |key: Key| Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers: Modifiers::NONE };
+        let mut text = String::new();
+        let mut ed = NoteEditor::new(egui::Id::unique("t-tagesc"));
+        ed.request_focus = true;
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("#al".into())]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert!(ed.assist.tags.active);
+        h.frame(&mut ed, &mut text, &v, rel, vec![key(Key::Escape)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert!(!ed.assist.tags.active, "Esc closes the list");
+        h.frame(&mut ed, &mut text, &v, rel, vec![key(Key::Enter)]);
+        assert_eq!(text, "#al\n", "no pick: a new line");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: EDIT-120
+    #[test]
+    fn edit_120_no_tag_list_in_code_in_a_url_on_a_heading_or_for_a_tag_nobody_has() {
+        let (v, d) = tag_vault("tagno");
+        let rel = Path::new("Welcome.md");
+        for typed in ["```\n#al", "use `x #al", "https://example.com/#al", "# al", "## al", "#zzzz"] {
+            let mut text = String::new();
+            let mut ed = NoteEditor::new(egui::Id::unique(("t-tagno", typed)));
+            ed.request_focus = true;
+            let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+            h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text(typed.into())]);
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+            assert!(!ed.assist.tags.active, "no list for {typed:?}");
+        }
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: EDIT-120
+    #[test]
+    fn edit_120_a_tags_property_in_the_front_matter_lists_tags_and_a_pick_completes_the_word() {
+        let (v, d) = tag_vault("tagfm");
+        let rel = Path::new("Welcome.md");
+        let key = |key: Key| Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers: Modifiers::NONE };
+        let mut text = String::new();
+        let mut ed = NoteEditor::new(egui::Id::unique("t-tagfm"));
+        ed.request_focus = true;
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("---\ntags: [a, shale".into())]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert!(ed.assist.tags.active, "open in the tags property");
+        assert_eq!(ed.assist.tags.items, ["projects/shale"]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![key(Key::Enter)]);
+        assert_eq!(text, "---\ntags: [a, projects/shale");
+        // another property has none
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("]\ntitle: alp".into())]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert!(!ed.assist.tags.active, "no list in another property");
         let _ = std::fs::remove_dir_all(&d);
     }
 

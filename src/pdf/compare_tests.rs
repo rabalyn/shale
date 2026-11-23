@@ -30,7 +30,7 @@ fn dev_024_compare_export_writes_the_pdf_of_a_docx_or_a_note() {
         let word = env_path("SHALE_COMPARE_DOCX").expect("SHALE_COMPARE_DOCX or SHALE_COMPARE_MD names the input");
         let pandoc = docx::locate("").expect("pandoc is not installed");
         let item = docx::docx_item(word, Some(pandoc));
-        let opts = Options { folder: PathBuf::from("In"), tags: vec![], keep_original: false, keep_docx: false, people_dir: "Adressbuch".into(), header_list: false };
+        let opts = Options { folder: PathBuf::from("In"), tags: vec![], keep_original: false, keep_docx: false, people_dir: "Adressbuch".into(), header_list: false, cut: Default::default() };
         docx::import_item(&mut vault, &item, &opts).unwrap()
     };
     let text = std::fs::read_to_string(vault.root.join(&rel)).unwrap();

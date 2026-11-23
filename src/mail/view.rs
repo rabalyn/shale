@@ -24,6 +24,8 @@ pub(crate) enum Act {
     Flag,
     Move,
     Delete,
+    /// Delete the local copy of mails that are gone from the server (MAIL-238).
+    DeleteLocal,
 }
 
 fn pending_word(kind: &str) -> &'static str {
@@ -150,6 +152,7 @@ impl MailView {
                 self.panes(ui, cfg, body, &mut actions, &mut rects);
                 self.mover_window(ui, cfg, &mut rects);
                 self.forever_window(ui, cfg, &mut rects);
+                self.local_delete_window(ui, &mut rects);
                 self.unsent_window(ui, cfg, &mut rects);
                 self.row_menu_window(ui, cfg, &mut rects);
             }
@@ -188,7 +191,7 @@ impl MailView {
         // another field (or a dialog) has the keyboard: j and k type, they do not browse; a row of
         // a list that Tab moved to does not take the keys away (MAIL-224)
         let other_focus = ctx.memory(|m| m.focused()).is_some_and(|f| Some(f) != row_focus);
-        if modal_open || self.mover.is_some() || self.forever.is_some() || other_focus {
+        if modal_open || self.mover.is_some() || self.forever.is_some() || self.local_delete.is_some() || other_focus {
             return;
         }
         let (enter, esc) = ui.input_mut(|i| (i.consume_key(Modifiers::NONE, Key::Enter), i.consume_key(Modifiers::NONE, Key::Escape)));
@@ -239,6 +242,7 @@ impl MailView {
             Some(KeyAction::MailFlag) if on_messages => self.toggle_flag(cfg),
             Some(KeyAction::MailDelete) if on_messages => self.delete_selected(cfg),
             Some(KeyAction::MailDelete) if beside_folders && local => self.local_discard(),
+            Some(KeyAction::MailDeleteLocal) if on_messages => self.delete_local_selected(),
             Some(KeyAction::MailEdit) if beside_folders && local => self.local_edit(),
             Some(KeyAction::MailRetry) if beside_folders && local => self.local_retry(),
             Some(KeyAction::MailMenu) if beside_folders => self.open_menu_by_key(),
@@ -695,12 +699,16 @@ impl MailView {
                 let read = if marked.iter().all(|m| m.is_seen()) { "Mark unread" } else { "Mark read" };
                 let flag = if marked.iter().all(|m| m.is_flagged()) { "Unflag" } else { "Flag" };
                 let del = if marked.iter().all(|m| self.in_trash(m)) { "Delete forever…" } else { "Delete" };
-                for (key, label, a, k) in [
+                let mut entries = vec![
                     ("mail:marked-read", read, Act::Read, KeyAction::MailRead),
                     ("mail:marked-flag", flag, Act::Flag, KeyAction::MailFlag),
                     ("mail:marked-move", "Move…", Act::Move, KeyAction::MailMove),
                     ("mail:marked-delete", del, Act::Delete, KeyAction::MailDelete),
-                ] {
+                ];
+                if marked.iter().any(crate::mail::ops::local_deletable) {
+                    entries.push(("mail:marked-delete-local", "Delete local copy…", Act::DeleteLocal, KeyAction::MailDeleteLocal));
+                }
+                for (key, label, a, k) in entries {
                     let r = ui.small_button(label);
                     rec(rects, key, &r);
                     if r.on_hover_text(self.tip(label.trim_end_matches('…'), k)).clicked() {
@@ -787,6 +795,7 @@ impl MailView {
             Act::Flag => self.toggle_flag_on(cfg, t),
             Act::Move => self.open_mover_on(t),
             Act::Delete => self.delete_on(cfg, t),
+            Act::DeleteLocal => self.delete_local_on(t),
         }
     }
 
@@ -868,6 +877,9 @@ impl MailView {
     }
 
     fn reading_pane(&mut self, ui: &mut Ui, cfg: &Config, actions: &mut Vec<MailAction>, rects: &mut Vec<(String, Rect)>) {
+        if self.local_view.is_some() || self.open.is_none() {
+            self.release_att_audio();
+        }
         match &self.local_view {
             Some(LocalView::Outbox(_)) => {
                 let mut out = LocalOut::default();
@@ -901,6 +913,8 @@ impl MailView {
         let mut answer: Option<Kind> = None;
         let mut strip = StripOut::default();
         let sel_att = self.att_sel;
+        // the audio attachments are played from private temp copies; nothing plays by itself (MAIL-240)
+        let audio = self.att_audio_files();
         let scroll = std::mem::take(&mut self.read_scroll);
         let read = egui::ScrollArea::vertical().id_salt("mail-read").auto_shrink([false, false]).show(ui, |ui| {
             if scroll != 0.0 {
@@ -989,6 +1003,12 @@ impl MailView {
             if msg.gone_on_server {
                 ui.add_space(4.0);
                 ui.label(RichText::new("This mail was deleted on the server. This is the copy Shale kept.").color(theme::palette().link_missing).size(crate::fonts::px(12.5)));
+                let n = if self.marked.is_empty() { String::new() } else { format!(" {}", self.marked.len()) };
+                let r = ui.add_enabled(crate::mail::ops::local_deletable(&msg) || !self.marked.is_empty(), egui::Button::new(format!("Delete{n} local copy…")));
+                rec(rects, "mail:delete-local", &r);
+                if r.on_hover_text(self.tip("Remove this copy from Shale after you confirm; the server and notes imported from it are not touched", KeyAction::MailDeleteLocal)).clicked() {
+                    act = Some(Act::DeleteLocal);
+                }
             }
             ui.separator();
             match &self.open.as_ref().map(|o| &o.body) {
@@ -1046,6 +1066,11 @@ impl MailView {
                                     save_att = Some(i);
                                 }
                             });
+                            // a sound gets the player of the notes (MEDIA-001), under its row (MAIL-240)
+                            if let Some(Some(file)) = audio.get(i) {
+                                let card = crate::media::widget::show(ui, &self.media, file, file, None);
+                                rec(rects, format!("mail:att-player:{i}"), &card);
+                            }
                         }
                         ui.separator();
                     }
@@ -1182,6 +1207,45 @@ impl MailView {
                 let f = cands.swap_remove(k);
                 self.move_to(cfg, &f);
             }
+        }
+    }
+
+    /// "Delete the local copy?": nothing happens until the button is pressed (Enter does not confirm).
+    fn local_delete_window(&mut self, ui: &mut Ui, rects: &mut Vec<(String, Rect)>) {
+        let Some(n) = self.local_delete.as_ref().map(|a| a.msgs.len()) else { return };
+        if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+            self.local_delete = None;
+            return;
+        }
+        let (mut yes, mut no) = (false, false);
+        let title = format!("Delete the local copy of {n} message{}?", if n == 1 { "" } else { "s" });
+        let resp = crate::dialog::Dialog::new("mail-local-delete", title).width(380.0).non_modal().show(ui.ctx(), |ui| {
+            crate::theme::prose(
+                ui,
+                muted(
+                    "These mails were deleted on the server. Shale removes its own copy; the files go to the folder “.trash” of its mail folder, and nothing is brought back from the server. Notes you imported from them stay as they are.",
+                )
+                .size(crate::fonts::px(12.5)),
+            );
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                let r = ui.button(RichText::new(format!("Delete {n} local cop{}", if n == 1 { "y" } else { "ies" })).color(theme::palette().link_missing));
+                rec(rects, "mail:local-delete-confirm", &r);
+                if r.clicked() {
+                    yes = true;
+                }
+                let r = ui.button("Cancel");
+                rec(rects, "mail:local-delete-cancel", &r);
+                if r.clicked() {
+                    no = true;
+                }
+            });
+        });
+        no |= resp.should_close();
+        if yes {
+            self.confirm_local_delete();
+        } else if no {
+            self.local_delete = None;
         }
     }
 

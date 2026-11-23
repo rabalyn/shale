@@ -211,6 +211,11 @@ pub struct ForeverAsk {
     pub msgs: Vec<MessageSummary>,
 }
 
+/// "Delete the local copy?": waits for the person's confirmation (MAIL-238).
+pub struct LocalDeleteAsk {
+    pub msgs: Vec<MessageSummary>,
+}
+
 /// What the window must do for the app, returned by `show`.
 pub enum MailAction {
     OpenAccounts,
@@ -409,6 +414,7 @@ pub struct MailView {
     read_timer: Option<(i64, Instant)>,
     pub mover: Option<MovePicker>,
     pub forever: Option<ForeverAsk>,
+    pub local_delete: Option<LocalDeleteAsk>,
     /// Actions the server refused or that could not be done, until the person dismisses them.
     pub problems: Vec<String>,
     // phase 3: writing and sending (ADR-0010)
@@ -463,6 +469,46 @@ pub struct MailView {
     pub att_sel: usize,
     pub(crate) att_open: bool,
     pub(crate) att_save: bool,
+    /// The app's one player (MEDIA-007), which plays the audio attachments of the open message (MAIL-240); the app hands over its own.
+    pub media: crate::media::MediaPlayer,
+    /// The private temp copies of the audio attachments of the open message, which the player plays from (MAIL-240).
+    pub(crate) att_audio: Option<AttAudio>,
+}
+
+/// The audio attachments of one open message as private temp files (SEC-006): the player reads files, a mail's
+/// attachment is in memory. The files are removed when another message opens or the view goes (MAIL-240).
+pub(crate) struct AttAudio {
+    /// The message and the parsed mail the files were made from.
+    pub(crate) msg: i64,
+    pub(crate) mail: Arc<Loaded>,
+    /// Per attachment of the mail: the file of an audio attachment, None for any other.
+    pub(crate) files: Vec<Option<PathBuf>>,
+}
+
+impl AttAudio {
+    /// The temp copies of the audio attachments of `l`; one that cannot be written has no player (the Open button stays).
+    pub(crate) fn make(msg: i64, l: &Arc<Loaded>) -> AttAudio {
+        let files = l
+            .mail
+            .attachments
+            .iter()
+            .map(|a| {
+                let ext = crate::media::attachment_audio_ext(&a.name, &a.mime)?;
+                // the player knows a sound by its extension: a name without a sound's one gets it
+                let name = if a.name.rsplit_once('.').is_some_and(|(_, e)| e.eq_ignore_ascii_case(ext)) { a.name.clone() } else { format!("{}.{ext}", if a.name.trim().is_empty() { "attachment" } else { a.name.as_str() }) };
+                crate::opener::save_temp_copy(&name, &a.data).ok()
+            })
+            .collect();
+        AttAudio { msg, mail: l.clone(), files }
+    }
+}
+
+impl Drop for AttAudio {
+    fn drop(&mut self) {
+        for f in self.files.iter().flatten() {
+            crate::opener::discard_temp_copy(f);
+        }
+    }
 }
 
 /// What the folder pane lists.
@@ -544,6 +590,7 @@ impl MailView {
             read_timer: None,
             mover: None,
             forever: None,
+            local_delete: None,
             problems: vec![],
             smtp_factory: real_smtp_factory(),
             compose: None,
@@ -578,6 +625,8 @@ impl MailView {
             att_sel: 0,
             att_open: false,
             att_save: false,
+            media: crate::media::MediaPlayer::default(),
+            att_audio: None,
         }
     }
 
@@ -1509,6 +1558,34 @@ impl MailView {
     pub fn close_message(&mut self) {
         self.cancel_crypto();
         self.open = None;
+        self.release_att_audio();
+    }
+
+    /// The temp files of the audio attachments of the open message, made when it is first shown (MAIL-240): a
+    /// message that has changed (another one, or the same one read again with GnuPG's answer) gets new ones.
+    pub(crate) fn att_audio_files(&mut self) -> Vec<Option<PathBuf>> {
+        let ready = match self.open.as_ref() {
+            Some(OpenMail { msg, body: Body::Ready(l) }) => Some((msg.id, l.clone())),
+            _ => None,
+        };
+        let same = matches!((&self.att_audio, &ready), (Some(a), Some((id, l))) if a.msg == *id && Arc::ptr_eq(&a.mail, l));
+        if !same {
+            self.release_att_audio();
+            if let Some((id, l)) = ready.filter(|(_, l)| l.mail.attachments.iter().any(|a| crate::media::attachment_audio_ext(&a.name, &a.mime).is_some())) {
+                self.att_audio = Some(AttAudio::make(id, &l));
+            }
+        }
+        self.att_audio.as_ref().map(|a| a.files.clone()).unwrap_or_default()
+    }
+
+    /// Stops a sound of the open message that plays and removes the temp files (MAIL-240).
+    pub(crate) fn release_att_audio(&mut self) {
+        if let Some(a) = self.att_audio.take() {
+            // each attachment's player is owned by its own file
+            for f in a.files.iter().flatten() {
+                self.media.stop_for_note(f);
+            }
+        }
     }
 
     /// Ask GnuPG about the open message in a job (MAIL-171, MAIL-173, MAIL-182): signatures, and decryption when the
@@ -1915,6 +1992,51 @@ impl MailView {
         let n = ask.msgs.len();
         if self.apply(cfg, ask.msgs, Action::DeleteForever(Confirmed::after_dialog(n))) > 0 {
             self.after_leaving();
+        }
+    }
+
+    /// Shift+D: ask whether to delete the local copy of the mails that are deleted on the server (MAIL-238).
+    pub fn delete_local_selected(&mut self) {
+        let t = self.targets();
+        self.delete_local_on(t);
+    }
+
+    pub fn delete_local_on(&mut self, t: Vec<MessageSummary>) {
+        let (ok, rest): (Vec<_>, Vec<_>) = t.into_iter().partition(ops::local_deletable);
+        if ok.is_empty() {
+            if !rest.is_empty() {
+                self.notices.push("Only the copy of a mail that was deleted on the server can be deleted here; a mail that is still on the server would come back with the next sync.".into());
+            }
+            return;
+        }
+        if !rest.is_empty() {
+            self.notices.push(format!("{} selected mail{} still on the server: only the others are offered.", rest.len(), if rest.len() == 1 { " is" } else { "s are" }));
+        }
+        self.local_delete = Some(LocalDeleteAsk { msgs: ok });
+    }
+
+    /// The confirmed "Delete local copy" (the dialog's button): no server is involved.
+    pub fn confirm_local_delete(&mut self) {
+        let Some(ask) = self.local_delete.take() else { return };
+        let Some(store) = self.ready_store() else { return };
+        let n = ask.msgs.len();
+        match ops::delete_local_copies(&store, &ask.msgs, Confirmed::after_dialog(n), &crate::mail::store::today_string()) {
+            Ok(done) => {
+                self.notices.extend(done.notes);
+                if done.removed > 0 {
+                    self.notices.push(format!("The local copy of {} mail{} was deleted (the files are in the local trash).", done.removed, if done.removed == 1 { "" } else { "s" }));
+                }
+                self.dirty = true;
+                self.refresh();
+                self.marked.clear();
+                if self.open.as_ref().is_some_and(|o| ask.msgs.iter().any(|m| m.id == o.msg.id)) {
+                    self.close_message();
+                }
+            }
+            Err(e) => {
+                self.problems.push(e.clone());
+                self.notices.push(e);
+            }
         }
     }
 

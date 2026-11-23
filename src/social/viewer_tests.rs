@@ -1,4 +1,4 @@
-//! The viewer with videos and GIFs (SOC-076, MEDIA-025): stepping across pictures and videos,
+//! The viewer with videos and GIFs (SOC-076, MEDIA-028): stepping across pictures and videos,
 //! the spinner and the error of a clip, the player that starts, pauses with Space and stops
 //! when the viewer steps away or closes, a GIF that is muted and loops, and the message of a
 //! machine without ffmpeg. Tests that need the real ffmpeg skip with a note when it is not
@@ -147,7 +147,7 @@ fn soc_076_a_video_on_its_way_shows_a_spinner_and_one_that_fails_an_error_and_st
     assert!(st.viewer.is_none());
 }
 
-// spec: SOC-076, MEDIA-025
+// spec: SOC-076, MEDIA-028
 #[test]
 fn soc_076_a_video_plays_when_opened_pauses_with_space_and_stops_when_the_viewer_steps_away_or_closes() {
     if !have_ffmpeg() {
@@ -202,7 +202,7 @@ fn soc_076_a_video_plays_when_opened_pauses_with_space_and_stops_when_the_viewer
     assert_eq!(current(&h), None);
 }
 
-// spec: SOC-076, MEDIA-025
+// spec: SOC-076, MEDIA-028
 #[test]
 fn soc_076_a_gif_plays_muted_and_loops_and_the_person_can_unmute_it() {
     if !have_ffmpeg() {

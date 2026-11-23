@@ -5,7 +5,7 @@ features:
 ![[calendar-month.png]]
 
 A calendar in the right sidebar (a small month) and as a big tab, with Month, Week and Day
-views in three sizes. Back to [[Start here]].
+views in three sizes. In a narrow sidebar the buttons move to a line below the month name instead of covering it. Back to [[Start here]].
 
 ![[calendar-sidebar.png]]
 
@@ -33,6 +33,9 @@ have no Edit button.
 - Click an event for its details: when, how it repeats, where, organizer, attendees,
   categories, reminders and notes. **Edit** and **Delete** work for local and CalDAV calendars.
   Delete asks first, and a copy is kept in `calendar-trash` in the data folder.
+- **Import** (in the details, and in the right-click menu of an event) turns the event into a
+  note, the same as dragging it out of the calendar: the Import dialog opens, see [[Import]]. For
+  a repeating event it imports the date you clicked.
 - A repeating event asks what you mean: **Edit this date** or **Edit all repeats**, **Delete
   this date** or **Delete all repeats**.
 - If a local calendar's `.ics` file was deleted outside Shale, Delete shows an error ("the calendar
@@ -54,6 +57,6 @@ have no Edit button.
   you did not change.
 - The first day of the week is Monday or Sunday (Calendars… dialog, `week_starts_monday`).
 
-Events can also become notes: drag one onto a folder, see [[Import]].
+Events can also become notes: use **Import**, or drag one onto a folder, see [[Import]].
 
 #userguide #calendar

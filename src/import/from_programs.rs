@@ -8,7 +8,7 @@ use super::*;
 fn text_item(text: String) -> Item {
     let first = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("Text");
     let title = safe_title(&format!("{} {}", ymd_text(today_ymd()), first.chars().take(60).collect::<String>()));
-    Item { source: Source::Text(text), include: true, title, att_on: vec![], already: None, people: vec![] }
+    Item { source: Source::Text(text), include: true, title, att_on: vec![], already: None, people: vec![], continues: None }
 }
 
 /// Text from a drop: UTF-8, or UTF-16 (which some programs send).
@@ -284,7 +284,7 @@ mod tests {
         let mut v = Vault::open(&d).unwrap();
         let (items, _) = items_from_drop("text/plain", "Beamer tauschen\nim Hörsaal".as_bytes());
         assert_eq!(items.len(), 1);
-        let o = Options { folder: PathBuf::from("Projekte"), tags: vec!["status".into()], keep_original: true, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false };
+        let o = Options { folder: PathBuf::from("Projekte"), tags: vec!["status".into()], keep_original: true, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false, cut: Default::default() };
         let Imported { notes: made, errors: errs, .. } = import(&mut v, &items, &o);
         assert!(errs.is_empty(), "{errs:?}");
         assert_eq!(made.len(), 1);

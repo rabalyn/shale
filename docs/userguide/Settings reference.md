@@ -61,7 +61,7 @@ change within a second.
 |---|---|---|
 | `ctrl_to_follow` | off (a plain click follows a link) | Settings → Editor → Links |
 | `new_notes_next_to_current` | off (new notes go to the vault root) | Settings → Editor → Links |
-| `update_links_on_rename` | on | Settings → Editor → Links |
+| `update_links_on_rename` | on (links, embeds and property links in other notes follow a rename or move) | Settings → Editor → Links |
 | `auto_convert_canvas` | off (asks) | Settings → Editor → Drawings; or the tick in the canvas question |
 | `file_sort` | `NameAsc` (file name A to Z); also `NameDesc`, `ModifiedDesc`, `ModifiedAsc`, `CreatedDesc`, `CreatedAsc` | the sort icon above the file list |
 
@@ -105,7 +105,7 @@ Inside each of these tables: `family` and `size`. The old `font_size` of earlier
 size of the two editor areas when you updated.
 | `line_numbers` | on | Editor, "Show line numbers in the editor" |
 | `date_prefix_new_notes` | on | Editor, "Date prefix for new notes": a note Shale makes (new note, red link, quick switcher, new drawing) is named `YYMMDD_name.md` with today's date; the title line shows the name without the prefix (see [[Editor]]) |
-| `properties_in_editor` | Folded | Appearance, "Properties in the editor": how the properties (the lines between the two `---` at the top of a note) show: `Folded` (one line), `Card` or `Raw` (all lines). In the editor `Folded` and `Card` start a note with its properties folded to a summary line, `Raw` opens it unfolded (see [[Editor]]) |
+| `properties_in_editor` | Folded | Appearance, "Properties in the editor": how the properties (the lines between the two `---` at the top of a note) show: `Folded` (one line), `Card` or `Raw` (all lines). In the editor `Folded` and `Card` start a note with its properties folded, `Folded` to a summary line and `Card` to the card of the reading view, `Raw` opens it unfolded (see [[Editor]]) |
 | `properties_in_reader` | Card | Appearance, "Properties in the reading view": the same choice for the reading view; a card is made for the type of the note (see [[Reading view]]) |
 | `numbered_headings` | on | Editor, "Number headings": `#` and deeper show 1, 1.1, 1.2 before their text; a note's front matter `numbered-headings: true` or `false` overrides it for that note (see [[Notes and links]]) |
 | `format_toolbar` | on | Settings → Editor → Editing, "Show formatting toolbar above the text of a note" |
@@ -128,14 +128,16 @@ size of the two editor areas when you updated.
 
 | Key | Default | Where |
 |---|---|---|
-| `version` | the format version of the file (1) | written by Shale |
+| `version` | the format version of the file (3) | written by Shale |
 | `vault` | none | the vault opened last; Settings → Vault → Vault folder |
-| `recent` | empty | the recent vaults of the start screen |
+| `vaults` | empty | the known vaults, the one opened last first: a `[[vaults]]` table each, with `name` and `path`; the start screen lists them. Shale adds a vault when it has opened it. An empty `name` becomes the folder's name. Replaces the old `recent` list, which is turned into `vaults` at the first start |
+| `vaults.name` | the folder's name | what the vault is called in the list and in the window title; only on this computer, never in the vault |
+| `vaults.path` | none | the folder of the vault, with symbolic links resolved |
 | `show_left` | on | the left sidebar toggle of the ribbon |
 | `show_right` | on | the right sidebar toggle of the ribbon |
 | `sidebars` | empty (default icons and layout) | dragging icons, see [[Window layout]] |
-| `sidebars.ribbon` | empty: default order | drag the icons of the ribbon |
-| `sidebars.right` | empty: one view with all panels | drag panel icons into views |
+| `sidebars.ribbon` | empty: default order | drag the icons of the ribbon; `files`, `search` and `tags` in this list and in `sidebars.right` at once are a copy (see [[Window layout]]) |
+| `sidebars.right` | empty: one view with all panels | drag panel icons, and Files, Search and Tags (`files`, `search`, `tags`), into views |
 | `sidebars.hidden` | empty | right-click an icon: Remove / Restore |
 | `right[].icons`, `right[].active`, `right[].weight` | per view: its icons, the shown icon, its share of the height (0 = equal) | the right sidebar's views |
 
@@ -221,7 +223,8 @@ cannot use are shown with the reason in Settings → Search, and read as `f`, `m
 | `outside_files` | `"Ask"` (`"Copy"`, `"Link"`) | Settings → Import, "Files from outside the vault": what a `[!` pick, a paste or an import does with a picture, PDF, sound or video that is not in the vault: ask, copy it into `z_media/` or link it where it is; the start value of the Copy / Link choice in the Import dialog (Ask starts at Copy); other files are always copied; global config; see [[Sounds and videos]] |
 | `docx_import` | off | Settings → Import, "Import Word files as notes (needs pandoc)"; global config |
 | `import_header_list` | off | Settings → Import, "Header list in the note body" (e-mails, events and saved posts); the start value of the box of the same name in the Import dialog |
-| `import_skip_signatures` | on | Settings → Import, "Skip signatures": the start value of the box of the same name in the Import dialog; the signature files of signed mail and the pictures of signature blocks start unticked |
+| `import_skip_signatures` | on | Settings → Import, "Skip signatures": the start value of the box of the same name in the Import dialog; the signature files of signed mail and the pictures of signature blocks start unticked, and the signature text of the mail and of the mails it quotes is cut |
+| `import_leave_out_quoted` | off | Settings → Import, "Leave out quoted mails": the start value of the box of the same name in the Import dialog; an imported e-mail keeps only the text its sender wrote, not the earlier mails it quotes |
 | `pandoc_path` | empty (search `PATH`, then `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, and on Windows `%LOCALAPPDATA%\Pandoc` and `%ProgramFiles%\Pandoc`) | Settings → Import, "pandoc program" (the Word export looks for pandoc the same way) |
 
 To set it up: install pandoc (Linux `sudo pacman -S pandoc-cli` or `sudo apt install pandoc`, macOS `brew install pandoc`,
@@ -280,7 +283,7 @@ Settings → Updates is the table `[updates]` in the settings file. `SHALE_UPDAT
 Some behaviour is decided by a note's own properties (front matter) instead of a setting; they are not stored in any settings file.
 `numbered-headings` (`true` or `false`) overrides the setting `numbered_headings` for the note ([[Notes and links]]). The PDF export reads
 `print-paper`, `print-margins`, `print-font`, `print-font-size`, `print-line-spacing`, `print-paragraph-spacing`, `print-align`,
-`print-heading-color`, `print-heading-weight`, `print-heading-sizes`, `print-break-before`, `print-title` and `print-toc` (any of them also switches on the plain paper look of the PDF); each has its values, default and effect in the table of
+`print-heading-color`, `print-heading-weight`, `print-heading-sizes`, `print-break-before`, `print-title`, `print-toc` and `print-toc-page-break` (any of them also switches on the plain paper look of the PDF); each has its values, default and effect in the table of
 [[PDF#Print properties of a note]]. Every one is optional, and a value that cannot be read is ignored.
 
 # Vault settings (`<vault>/.shale/settings.json`)
@@ -290,7 +293,7 @@ Some behaviour is decided by a note's own properties (front matter) instead of a
 | `version` | 1 | written by Shale |
 | `people_dir` | `Adressbuch` | Settings → Vault → People, "People folder" ([[Tags and people]]) |
 | `sync` | the group of the four keys below | Settings → Sync |
-| `sync.enabled` | on (only matters when the vault is a git repository) | Settings → Sync, "Sync this vault automatically" ([[Git sync]]) |
+| `sync.enabled` | on (only matters when the vault is a git repository; a folder with its own `.git` asks first when it is opened, "Don't sync" sets it off) | Settings → Sync, "Sync this vault automatically" ([[Git sync]]) |
 | `sync.interval_minutes` | 5 (1 to 1440) | Git sync, "Every … minutes" |
 | `sync.commit_prefix` | empty | Git sync, "Commit message prefix" |
 | `sync.commit_suffix` | empty | Git sync, "suffix" |

@@ -59,11 +59,40 @@ fn an_import_brings_only_the_ticked_attachments() {
     std::fs::create_dir_all(&dir).unwrap();
     let mut v = Vault::open(&dir).unwrap();
     let item = email_item(mail::parse(&mixed_mail()), ("m.eml".into(), mixed_mail()));
-    let o = Options { folder: PathBuf::from("In"), tags: vec![], keep_original: true, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false };
+    let o = Options { folder: PathBuf::from("In"), tags: vec![], keep_original: true, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false, cut: Default::default() };
     let Imported { notes, errors, .. } = import(&mut v, &[item], &o);
     assert!(errors.is_empty(), "{errors:?}");
     let text = std::fs::read_to_string(v.abs(&notes[0])).unwrap();
     assert!(text.contains("holiday.png") && !text.contains("firm.png") && !text.contains("smime.p7s"), "{text}");
     assert!(text.contains(".eml"), "the original keeps everything: {text}");
+    let _ = std::fs::remove_dir_all(&v.root);
+}
+
+/// A reply of an HTML mail with a signature of its own and a quote that has one, too.
+fn thread_mail() -> Vec<u8> {
+    b"From: Jane <j@x.org>\r\nTo: b@x.org\r\nSubject: Plan\r\nDate: Sat, 14 Nov 2026 10:00:00 +0000\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<div>Friday is fine.</div><div class=\"moz-signature\">Jane Doe<br>Acme GmbH</div><div class=\"moz-cite-prefix\">On 12.11.26 09:15, Bob wrote:<br></div><blockquote type=\"cite\"><p>Can we meet?</p><div class=\"moz-signature\">-- <br>Bob<br>Tel 0301234567</div></blockquote>".to_vec()
+}
+
+// spec: IMP-065, IMP-066
+#[test]
+fn imp_065_an_import_cuts_the_signatures_and_the_quoted_mails_the_options_ask_for() {
+    let dir = std::env::temp_dir().join(format!("shale-import-cut-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut v = Vault::open(&dir).unwrap();
+    let mut message = |cut: mail_segments::TextCut, folder: &str| {
+        let item = email_item(mail::parse(&thread_mail()), ("m.eml".into(), vec![]));
+        let o = Options { folder: PathBuf::from(folder), tags: vec![], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false, cut };
+        let Imported { notes, errors, .. } = import(&mut v, &[item], &o);
+        assert!(errors.is_empty(), "{errors:?}");
+        std::fs::read_to_string(v.abs(&notes[0])).unwrap()
+    };
+    let all = message(mail_segments::TextCut::default(), "A");
+    assert!(all.contains("Acme GmbH") && all.contains("Tel 0301234567") && all.contains("> Can we meet?"), "off: the text as it is: {all}");
+    let skip = message(mail_segments::TextCut { skip_signatures: true, leave_out_quoted: false }, "B");
+    assert!(skip.contains("Friday is fine.") && skip.contains("On 12.11.26 09:15, Bob wrote:") && skip.contains("> Can we meet?"), "own text and quote stay: {skip}");
+    assert!(!skip.contains("Acme GmbH") && !skip.contains("Tel 0301234567") && !skip.contains("Jane Doe"), "both signatures go: {skip}");
+    let quotes = message(mail_segments::TextCut { skip_signatures: false, leave_out_quoted: true }, "C");
+    assert!(quotes.contains("Friday is fine.") && quotes.contains("Acme GmbH") && !quotes.contains("Can we meet?") && !quotes.contains("wrote:"), "{quotes}");
     let _ = std::fs::remove_dir_all(&v.root);
 }

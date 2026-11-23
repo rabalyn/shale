@@ -109,6 +109,7 @@ impl ShaleApp {
         };
         import::word_items(&mut items, &self.word_import());
         import::mark_duplicates(v, &mut items);
+        import::find_continues(v, &mut items);
         import::find_people(v, &self.vdata.settings.people_dir, &mut items);
         // files from outside the vault start with what the setting says (Ask: Copy, the dialog asks)
         import::preset_how(&mut items, self.cfg.outside_files.preset());
@@ -119,15 +120,19 @@ impl ShaleApp {
             d.notes.extend(notes);
             if let Some((folder, note)) = zone {
                 d.folder = rel_to_string(&folder);
+                d.folder_follows = false;
                 if note.is_some() {
                     d.link_into = note;
                     d.link_on = true;
                 }
+            } else if d.folder_follows {
+                d.follow_continued_folder();
             }
             self.suggest_tags(&mut d);
             self.modal = Some(Modal::Import(d));
             return;
         }
+        let zone_given = zone.is_some();
         let (folder, link_into, link_on) = match zone {
             Some((f, note)) => (rel_to_string(&f), note.clone(), note.is_some()),
             None => {
@@ -146,6 +151,12 @@ impl ShaleApp {
         d.root = v.root.clone();
         d.header_list = self.cfg.import_header_list;
         d.skip_signatures = self.cfg.import_skip_signatures;
+        d.leave_out_quoted = self.cfg.import_leave_out_quoted;
+        // a continued mail goes next to the note it continues, unless a folder was dropped on (IMP-069)
+        if !zone_given {
+            d.folder_follows = true;
+            d.follow_continued_folder();
+        }
         import::apply_skip_signatures(&mut d.items, d.skip_signatures);
         self.suggest_tags(&mut d);
         self.modal = Some(Modal::Import(d));
@@ -199,6 +210,7 @@ impl ShaleApp {
                 import::preset_how(&mut items, self.cfg.outside_files.preset());
                 if let Some(v) = &self.vault {
                     import::mark_duplicates(v, &mut items);
+                    import::find_continues(v, &mut items);
                 }
                 if let Some(v) = &self.vault {
                     import::find_people(v, &self.vdata.settings.people_dir, &mut items);
@@ -207,6 +219,9 @@ impl ShaleApp {
                     d.add_path.clear();
                 }
                 d.items.extend(items);
+                if d.folder_follows {
+                    d.follow_continued_folder();
+                }
                 self.suggest_tags(d);
                 d.notes = notes;
                 false
@@ -221,19 +236,47 @@ impl ShaleApp {
                 };
                 let tags = import::parse_tags(&d.tags);
                 let social_only = d.items.iter().filter(|i| i.include).all(|i| matches!(i.source, import::Source::Social { .. }));
-                let opts = import::Options { folder: folder.clone(), tags: tags.clone(), keep_original: d.keep_original, keep_docx: d.keep_docx, people_dir: self.vdata.settings.people_dir.clone(), header_list: d.header_list };
+                let opts = import::Options {
+                    folder: folder.clone(),
+                    tags: tags.clone(),
+                    keep_original: d.keep_original,
+                    keep_docx: d.keep_docx,
+                    people_dir: self.vdata.settings.people_dir.clone(),
+                    header_list: d.header_list,
+                    cut: import::mail_segments::TextCut { skip_signatures: d.skip_signatures, leave_out_quoted: d.leave_out_quoted },
+                };
+                // a mail in a thread rewrites the line of its neighbours: unsaved edits are saved first,
+                // as for a rename (IMP-071, VAULT-042)
+                let chains = d.items.iter().any(|i| i.include && i.continues.as_ref().is_some_and(|c| c.on));
+                let _tree = if chains {
+                    let Some(g) = self.hold_sync_tree() else {
+                        d.error = Some("The sync is still changing files in the vault; try again in a moment.".into());
+                        return false;
+                    };
+                    self.flush_dirty();
+                    Some(g)
+                } else {
+                    None
+                };
                 let Some(v) = &mut self.vault else { return true };
                 // pandoc takes its time: the Word files are converted in a job first (IMP-035), and
                 // the dialog calls this again when it is done
                 if d.converting.is_none() && d.start_conversion(v.root.clone()) {
                     return false;
                 }
-                let import::Imported { notes: made, files, linked, errors } = import::import(v, &d.items, &opts);
+                let import::Imported { notes: made, files, linked, errors, touched } = import::import(v, &d.items, &opts);
+                // the open buffers of the neighbours show the line that was written
+                for c in &touched {
+                    if let (Some(doc), Some(n)) = (self.notes.get_mut(c), v.notes.get(c)) {
+                        doc.reload(n.text.clone(), n.unreadable.clone());
+                    }
+                }
                 if made.is_empty() && files.is_empty() && linked.is_empty() {
                     d.error = Some(if errors.is_empty() { "Nothing was imported.".into() } else { errors.join("\n") });
                     d.forget_conversions();
                     return false;
                 }
+                self.history_imported(&made, &touched);
                 if d.link_on {
                     if let Some(note) = d.link_into.clone() {
                         self.add_links(&note, &made, &files, &linked);
@@ -513,9 +556,7 @@ impl ShaleApp {
             if ctx.input(|i| i.pointer.any_released()) {
                 egui::DragAndDrop::clear_payload(&ctx);
                 if !over_calendar {
-                    let file = format!("{}.ics", if drag.event.summary.trim().is_empty() { "event".to_string() } else { drag.event.summary.replace(['/', '\\'], "-") });
-                    let item = import::event_item(drag.event.clone(), drag.calendar.clone(), Some((file, crate::calendar::ics::to_ics("", std::slice::from_ref(&drag.event)).into_bytes())));
-                    self.open_import(vec![item], vec![], zone.map(|z| (z.folder, z.note)));
+                    self.import_calendar_event(drag, zone.map(|z| (z.folder, z.note)));
                 }
             } else if over_calendar {
                 self.paint_hint_text(&ctx, p, &format!("Event: {}\ndrag it onto a note, a folder or the editor to import it", drag.event.summary));
@@ -539,6 +580,14 @@ impl ShaleApp {
             }
             ctx.request_repaint();
         }
+    }
+
+    /// Open the Import dialog for a calendar event: the one path of the drop of an event and of
+    /// the Import button and menu entry of the calendar (IMP-002, CAL-034).
+    pub(crate) fn import_calendar_event(&mut self, drag: &crate::calendar::ui::CalDrag, zone: Option<(PathBuf, Option<PathBuf>)>) {
+        let file = format!("{}.ics", if drag.event.summary.trim().is_empty() { "event".to_string() } else { drag.event.summary.replace(['/', '\\'], "-") });
+        let item = import::event_item(drag.event.clone(), drag.calendar.clone(), Some((file, crate::calendar::ics::to_ics("", std::slice::from_ref(&drag.event)).into_bytes())));
+        self.open_import(vec![item], vec![], zone);
     }
 
     fn paint_drop_hint(&self, ctx: &egui::Context, p: Pos2, zone: Option<&DropZone>, what: &str) {

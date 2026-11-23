@@ -25,6 +25,8 @@ pub struct ImportDialog {
     pub header_list: bool,
     /// leave out the crypto signature parts and the signature pictures of e-mails (IMP-061)
     pub skip_signatures: bool,
+    /// leave the quoted mails out of the text of e-mails (IMP-066)
+    pub leave_out_quoted: bool,
     /// pandoc runs for the Word files that are going on in a job (IMP-035)
     pub converting: Option<Receiver<Result<Vec<Converted>, String>>>,
     /// set when the dialog is let go: a pandoc run that is still going stops
@@ -44,6 +46,8 @@ pub struct ImportDialog {
     pub suggested: Vec<(String, Vec<String>)>,
     /// the people folder (shown in the people list)
     pub people_dir: String,
+    /// the folder was preset by a continued mail and the person has not chosen one (IMP-069)
+    pub folder_follows: bool,
     /// the vault's folder: files from outside it can be copied or linked (MEDIA-019)
     pub root: PathBuf,
 }
@@ -66,6 +70,7 @@ impl ImportDialog {
             keep_docx: true,
             header_list: false,
             skip_signatures: true,
+            leave_out_quoted: false,
             converting: None,
             cancel: Arc::new(AtomicBool::new(false)),
             link_into,
@@ -77,6 +82,7 @@ impl ImportDialog {
             auto_tags: vec![],
             suggested: vec![],
             people_dir: crate::import::people::DEFAULT_DIR.into(),
+            folder_follows: false,
             root: PathBuf::new(),
         }
     }
@@ -151,6 +157,14 @@ impl ImportDialog {
         }
     }
 
+    /// Preset the folder to that of the note the first ticked mail continues (IMP-069); nothing
+    /// changes when no mail does.
+    pub fn follow_continued_folder(&mut self) {
+        if let Some(f) = import::continued_folder(&self.items) {
+            self.folder = f;
+        }
+    }
+
     pub fn count(&self) -> usize {
         self.items.iter().filter(|i| i.include).count()
     }
@@ -186,6 +200,44 @@ pub(crate) fn size_text(n: usize) -> String {
 const OUTSIDE_CHOICES: [(&str, &str, Choice, &str); 2] =
     [("copy", "Copy into the vault", Choice::Copy, "A copy goes to the media folder (z_media/)"), ("link", "Link where it is", Choice::Link, "The note links the file where it is; nothing is copied")];
 
+/// "Continues [[note]]" of a mail that answers a note of the vault (IMP-068): the tick box, the
+/// choice when several notes qualify and, when the mail is older than a note of its thread, the
+/// question "Keep the thread in date order?" (IMP-071). True when the choice that decides the
+/// folder changed (IMP-069).
+fn continues_line(ui: &mut Ui, i: usize, c: &mut import::Continues, rec: &mut impl FnMut(String, egui::Response) -> egui::Response) -> bool {
+    let name = |p: &std::path::Path| p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let (was_on, was) = (c.on, c.chosen);
+    ui.horizontal_wrapped(|ui| {
+        rec(format!("continues:{i}"), ui.checkbox(&mut c.on, egui::RichText::new("Continues").size(12.5)))
+            .on_hover_text("Found by the reply headers of the mail (In-Reply-To, References). Ticked: the new note is linked into the thread (previous and next) and goes in the folder of that note. Unticked: it gets its ids only and no other note is touched");
+        if c.candidates.len() > 1 {
+            let label = c.anchor().map(name).unwrap_or_default();
+            egui::ComboBox::from_id_salt(format!("continues-pick:{i}")).selected_text(format!("[[{label}]]")).show_ui(ui, |ui| {
+                for (k, cand) in c.candidates.iter().enumerate() {
+                    rec(format!("continues-pick:{i}:{k}"), ui.selectable_value(&mut c.chosen, k, format!("[[{}]]  {}", name(&cand.rel), cand.date_key))).on_hover_text(cand.rel.to_string_lossy());
+                }
+            });
+        } else if let Some(a) = c.anchor() {
+            ui.label(egui::RichText::new(format!("[[{}]]", name(a))).size(12.5).color(theme::palette().link)).on_hover_text(a.to_string_lossy());
+        }
+    });
+    if c.on {
+        if let Some(plan) = c.plan().filter(|p| p.is_older()) {
+            let n = plan.changes();
+            ui.horizontal_wrapped(|ui| {
+                ui.label(egui::RichText::new(format!("Keep the thread in date order? This changes the previous and next of {n} note{}.", if n == 1 { "" } else { "s" })).size(12.0).color(theme::palette().muted));
+                if rec(format!("continues-update:{i}"), ui.selectable_label(c.update, "Update")).on_hover_text("Insert the mail at its place: it gets both links and its neighbours get a new next / previous line").clicked() {
+                    c.update = true;
+                }
+                if rec(format!("continues-leave:{i}"), ui.selectable_label(!c.update, "Leave the chain")).on_hover_text("Write the mail without previous and next; no other note is touched").clicked() {
+                    c.update = false;
+                }
+            });
+        }
+    }
+    c.on != was_on || c.chosen != was
+}
+
 /// `folders`: the vault's folders; `tag_choices`: recently used and common tags.
 pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: &[String]) -> Option<ImportAction> {
     let mut rects: Vec<(String, Rect)> = Vec::new();
@@ -200,6 +252,7 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
         crate::theme::prose(ui, muted("Nothing to import yet. Drop e-mails, calendar events, pictures or other files on the window, or add a file below."));
     }
     let outside: Vec<bool> = d.items.iter().map(|it| it.outside_media(&d.root)).collect();
+    let mut refollow = false;
     for (i, it) in d.items.iter_mut().enumerate() {
         let outside_media = outside[i];
         egui::Frame::new().fill(theme::palette().bg_secondary).corner_radius(6).inner_margin(8).show(ui, |ui| {
@@ -262,6 +315,13 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
                 rec(format!("lift:{i}"), ui.checkbox(lift, egui::RichText::new("Lift headings (## → #, ### → ##, …)").size(12.5)))
                     .on_hover_text("When the document has no # heading: every heading moves up by the same number of levels so that the highest becomes #");
             }
+            let mut follow = false;
+            if let Some(c) = &mut it.continues {
+                follow = continues_line(ui, i, c, &mut rec);
+            }
+            if follow {
+                refollow = true;
+            }
             if let Source::Email { mail, .. } = &it.source {
                 for (k, (a, on)) in mail.attachments.iter().zip(it.att_on.iter_mut()).enumerate() {
                     let label = format!("{}  ({}, {}{}{})", a.name, a.mime, size_text(a.data.len()), if a.inline { ", in the text" } else { "" }, crate::mail::signature::reason(a).map(|r| format!(", {r}")).unwrap_or_default());
@@ -280,6 +340,9 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
             }
         });
         ui.add_space(4.0);
+    }
+    if refollow && d.folder_follows {
+        d.follow_continued_folder();
     }
     for n in &d.notes {
         ui.add(egui::Label::new(egui::RichText::new(n).size(12.0).color(theme::palette().link_missing)).wrap());
@@ -312,14 +375,18 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
     egui::Grid::new("import-opts").num_columns(2).spacing([10.0, 8.0]).show(ui, |ui| {
         ui.label(muted("Folder"));
         ui.horizontal(|ui| {
-            rec("folder".into(), ui.add(egui::TextEdit::singleline(&mut d.folder).hint_text("Projects/New lecture hall").desired_width(380.0))).on_hover_text("A new folder is made if needed");
+            if rec("folder".into(), ui.add(egui::TextEdit::singleline(&mut d.folder).hint_text("Projects/New lecture hall").desired_width(380.0))).on_hover_text("A new folder is made if needed").changed() {
+                d.folder_follows = false;
+            }
             let combo = egui::ComboBox::from_id_salt("import-folder").selected_text("Pick…").width(90.0).show_ui(ui, |ui| {
                 if rec("folder-pick:/".into(), ui.selectable_label(d.folder.is_empty(), "(vault root)")).clicked() {
                     d.folder.clear();
+                    d.folder_follows = false;
                 }
                 for f in folders {
                     if rec(format!("folder-pick:{f}"), ui.selectable_label(d.folder == *f, f)).clicked() {
                         d.folder = f.clone();
+                        d.folder_follows = false;
                     }
                 }
             });
@@ -372,10 +439,14 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
     }
     if d.items.iter().any(|i| matches!(i.source, Source::Email { .. }))
         && rec("skip-signatures".into(), ui.checkbox(&mut d.skip_signatures, "Skip signatures"))
-            .on_hover_text("Leave out the signature parts of signed mail (smime.p7s, signature.asc) and the pictures of signature blocks (logos, social icons); you can still tick each one below. Settings → Import sets the start value")
+            .on_hover_text("Leave out the signature text of the message and of the mails it quotes (the quoted text stays), the signature parts of signed mail (smime.p7s, signature.asc) and the pictures of signature blocks (logos, social icons); you can still tick each attachment below. Only what is clearly a signature goes. Settings → Import sets the start value")
             .changed()
     {
         import::apply_skip_signatures(&mut d.items, d.skip_signatures);
+    }
+    if d.items.iter().any(|i| matches!(i.source, Source::Email { .. })) {
+        rec("leave-out-quoted".into(), ui.checkbox(&mut d.leave_out_quoted, "Leave out quoted mails"))
+            .on_hover_text("Keep only what the sender wrote in each message and drop the earlier mails it quotes (the reply header lines too). A thread is often imported mail by mail. Settings → Import sets the start value");
     }
     if d.items.iter().any(|i| matches!(i.source, Source::Email { .. } | Source::Event { .. } | Source::Social { .. })) {
         rec("header-list".into(), ui.checkbox(&mut d.header_list, "Header list in the note body"))
@@ -620,6 +691,21 @@ mod tests {
         let mut d = ImportDialog::new(vec![import::markdown_item("Top.md".into(), "# A\n".into())], vec![], String::new(), String::new(), None, false);
         h.frame(vec![], &mut d, &[], &[]);
         assert!(!d.rects.iter().any(|r| r.0 == "skip-signatures"), "no signatures in a Markdown note");
+    }
+
+    // spec: IMP-066
+    #[test]
+    fn the_leave_out_quoted_box_is_off_and_only_there_for_messages() {
+        let mail = crate::mail::parse(&crate::mail::tests::sample_eml());
+        let mut d = ImportDialog::new(vec![import::email_item(mail, ("m.eml".into(), vec![]))], vec![], String::new(), String::new(), None, false);
+        let mut h = H { ctx: egui::Context::default(), t: 0.0 };
+        h.frame(vec![], &mut d, &[], &[]);
+        assert!(!d.leave_out_quoted, "off at first");
+        h.click("leave-out-quoted", &mut d, &[], &[]);
+        assert!(d.leave_out_quoted);
+        let mut d = ImportDialog::new(vec![import::markdown_item("Top.md".into(), "# A\n".into())], vec![], String::new(), String::new(), None, false);
+        h.frame(vec![], &mut d, &[], &[]);
+        assert!(!d.rects.iter().any(|r| r.0 == "leave-out-quoted"), "no quotes in a Markdown note");
     }
 
     // spec: IMP-034

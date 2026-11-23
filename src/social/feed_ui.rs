@@ -544,7 +544,7 @@ pub(super) fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, look: Look) -> CardO
                 ui.label(RichText::new(format!("@{}", p.author.handle)).size(crate::fonts::px(12.5)).color(theme::palette().muted));
             });
         });
-        // a notification about a person: nothing but the person (SOC-071)
+        // a notification about a person: nothing but the person (SOC-078)
         if p.notice.as_ref().is_some_and(|n| n.kind.is_person()) {
             super::notifications_ui::person_actions(ui, cx, p, idx);
             return;

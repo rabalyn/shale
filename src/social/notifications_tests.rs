@@ -46,7 +46,7 @@ fn mastodon_items() -> Value {
     ])
 }
 
-// spec: SOC-069, SOC-071
+// spec: SOC-069, SOC-078
 #[test]
 fn soc_069_mastodon_notifications_become_entries_with_their_kind_unread_state_and_grouped_likes() {
     let posts = super::notifications::mastodon_entries(mastodon_items().as_array().unwrap(), "https://m.test", 905);
@@ -76,7 +76,7 @@ fn soc_069_mastodon_notifications_become_entries_with_their_kind_unread_state_an
     assert_ne!(post_key(&again[0]), post_key(&posts[0]), "another notification about the post is another entry");
 }
 
-// spec: SOC-068, SOC-069, SOC-072, SOC-074
+// spec: SOC-068, SOC-069, SOC-079, SOC-074
 #[test]
 fn soc_069_mastodon_notifications_page_check_and_mark_read_and_your_posts_ask_for_the_account_against_a_mock_server() {
     if std::process::Command::new("curl").arg("--version").output().is_err() {
@@ -134,9 +134,9 @@ fn soc_069_mastodon_notifications_page_check_and_mark_read_and_your_posts_ask_fo
     assert_eq!(seen.iter().filter(|r| r.contains("verify_credentials")).count(), 1, "{seen:?}");
 }
 
-// spec: SOC-072
+// spec: SOC-079
 #[test]
-fn soc_072_a_mark_that_is_no_notification_id_is_refused_before_a_request_is_made() {
+fn soc_079_a_mark_that_is_no_notification_id_is_refused_before_a_request_is_made() {
     assert!(super::notifications::mastodon_mark("https://m.test", "tok", "").is_err());
     assert!(super::notifications::mastodon_mark("https://m.test", "tok", "12/../x").is_err());
     let mut api = super::bluesky::Api::new("https://bsky.test", "ada.test", "pw");
@@ -163,9 +163,9 @@ fn bsky_note(uri: &str, reason: &str, who: &str, subject: Option<&str>, at: &str
     v
 }
 
-// spec: SOC-068, SOC-070, SOC-071, SOC-072, SOC-074
+// spec: SOC-068, SOC-077, SOC-078, SOC-079, SOC-074
 #[test]
-fn soc_070_bluesky_notifications_fetch_their_posts_in_batches_stop_a_check_at_a_known_notification_and_mark_seen_against_a_mock_server() {
+fn soc_077_bluesky_notifications_fetch_their_posts_in_batches_stop_a_check_at_a_known_notification_and_mark_seen_against_a_mock_server() {
     if std::process::Command::new("curl").arg("--version").output().is_err() {
         return;
     }
@@ -253,9 +253,9 @@ fn soc_070_bluesky_notifications_fetch_their_posts_in_batches_stop_a_check_at_a_
 
 // ---------------------------------------------------------------- the entries
 
-// spec: SOC-071
+// spec: SOC-078
 #[test]
-fn soc_071_the_names_of_an_entry_and_what_groups() {
+fn soc_078_the_names_of_an_entry_and_what_groups() {
     let own = post("o1", "ada", 1, None);
     let other = post("o2", "ada", 2, None);
     let posts = entries(
@@ -328,9 +328,9 @@ fn on_page(tag: &str, page: Page, next: Option<Page>) -> W {
     w
 }
 
-// spec: SOC-068, SOC-071, SOC-072
+// spec: SOC-068, SOC-078, SOC-079
 #[test]
-fn soc_071_the_notifications_feed_shows_a_row_and_the_post_as_a_card_and_reads_what_it_shows() {
+fn soc_078_the_notifications_feed_shows_a_row_and_the_post_as_a_card_and_reads_what_it_shows() {
     let mut w = on_notifications("notif-feed");
     assert_eq!(w.view(0), View::Social(Some(notifications_ref())));
     assert_eq!(w.title(0), "Mastodon · Notifications");
@@ -360,9 +360,9 @@ fn soc_071_the_notifications_feed_shows_a_row_and_the_post_as_a_card_and_reads_w
     assert_eq!(w.view(0), View::Social(Some(FeedRef { thread: Some("rep1".into()), ..notifications_ref() })));
 }
 
-// spec: SOC-072, SOC-023, SOC-027
+// spec: SOC-079, SOC-023, SOC-027
 #[test]
-fn soc_072_new_notifications_wait_behind_the_button_count_in_the_title_and_are_read_when_shown() {
+fn soc_079_new_notifications_wait_behind_the_button_count_in_the_title_and_are_read_when_shown() {
     let mut w = on_notifications("notif-new");
     w.wait_for("the marker was not sent", |w| !w.script.marks.lock().unwrap().is_empty());
     // two new ones: one unread, one that the server already counts as read (read on another device)
@@ -454,9 +454,9 @@ fn soc_075_a_saved_tab_names_the_new_feeds_and_a_removed_account_takes_them_with
     assert!(w.rects_has("add-account"), "no account: the feed view asks for one");
 }
 
-// spec: SOC-072
+// spec: SOC-079
 #[test]
-fn soc_072_unread_waiting_entries_are_counted_and_the_marker_is_sent_again_after_a_reload() {
+fn soc_079_unread_waiting_entries_are_counted_and_the_marker_is_sent_again_after_a_reload() {
     let mut w = on_notifications("notif-count");
     let key = (notifications_ref().account, NOTIFICATIONS.to_string());
     w.wait_for("the marker was not sent", |w| !w.script.marks.lock().unwrap().is_empty());
@@ -479,9 +479,9 @@ fn likes(ids: &[(i64, &str)]) -> Vec<Post> {
     entries(Network::Mastodon, ids.iter().map(|(id, who)| raw(*id, Kind::Like, who, Some(own.clone()), true)).collect())
 }
 
-// spec: SOC-071
+// spec: SOC-078
 #[test]
-fn soc_071_a_group_that_a_page_boundary_cut_is_one_entry_again() {
+fn soc_078_a_group_that_a_page_boundary_cut_is_one_entry_again() {
     let key = (notifications_ref().account, NOTIFICATIONS.to_string());
     let who = |w: &W| w.app.social.timelines[&key].posts.iter().map(|p| p.notice.as_ref().unwrap().who_text()).collect::<Vec<_>>();
     // the boundary is between a follow and likes: nothing to merge
@@ -501,9 +501,9 @@ fn soc_071_a_group_that_a_page_boundary_cut_is_one_entry_again() {
     assert_eq!((n.who_text().as_str(), n.ids.len(), n.rank, n.id.as_str()), ("CY and BOB", 2, 20, "20"));
 }
 
-// spec: SOC-071
+// spec: SOC-078
 #[test]
-fn soc_071_a_group_that_a_check_cut_is_one_entry_again_while_it_waits_and_when_it_is_shown() {
+fn soc_078_a_group_that_a_check_cut_is_one_entry_again_while_it_waits_and_when_it_is_shown() {
     let mut first = likes(&[(20, "cy")]);
     first.extend(entries(Network::Mastodon, vec![raw(10, Kind::Follow, "dee", None, false)]));
     let mut w = on_page("notif-check-cut", Page { posts: first, top: Some("20".into()), ..Default::default() }, None);

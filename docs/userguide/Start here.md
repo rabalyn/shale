@@ -1,6 +1,7 @@
 ---
 folder-note: true
 title: Shale user guide
+logo: z_media/shale-logo.png
 subtitle: Notes, links, drawings, mail, calendar and feeds in one native app
 ---
 Welcome. You are reading this guide **in Shale**: it is a vault, a plain folder of markdown
@@ -40,6 +41,7 @@ Your other data:
 - [[Mail]]: IMAP, writing, signing and encrypting.
 - [[Feeds]]: Mastodon and Bluesky.
 - [[Import]]: mails, events and files become notes, and notes become Word files.
+- [[Thread view]]: the mails of one conversation, in date order, and keys to step through them.
 - [[PDF]]: export notes, read PDFs.
 
 Keeping it safe and tidy:

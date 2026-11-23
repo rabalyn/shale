@@ -22,6 +22,7 @@ pub mod testdata;
 #[cfg(test)]
 mod ui_tests;
 pub mod video;
+mod wavfix;
 pub mod widget;
 
 pub use player::MediaPlayer;
@@ -35,6 +36,41 @@ const IMAGE_EXTS: [&str; 6] = ["png", "jpg", "jpeg", "webp", "gif", "bmp"];
 /// The one list of media file extensions (lower case): sounds. Import (IMP-031), the player
 /// (MEDIA-001) and the Git LFS patterns (SYNC-017) all come from `AUDIO_EXTS` and `VIDEO_EXTS` (#206).
 pub const AUDIO_EXTS: [&str; 8] = ["mp3", "ogg", "oga", "opus", "m4a", "aac", "wav", "flac"];
+/// The one table of sounds' content types (MAIL-241, #579): per extension of `AUDIO_EXTS` the type a
+/// mail goes out with and the other names the type is known by. The first entry of a type is the
+/// extension `ext_for_mime` gives it (`audio/ogg` is `ogg`; `oga` is the same container). A mail's
+/// attachment gets its type from here when it is sent (`audio_mime_for_ext`), and a received
+/// attachment its extension from here (`ext_for_mime`), so the two directions cannot drift apart.
+const AUDIO_TYPES: [(&str, &str, &[&str]); 8] = [
+    ("mp3", "audio/mpeg", &["audio/mp3"]),
+    ("ogg", "audio/ogg", &[]),
+    ("oga", "audio/ogg", &[]),
+    ("opus", "audio/opus", &[]),
+    ("m4a", "audio/mp4", &["audio/x-m4a", "audio/m4a"]),
+    ("aac", "audio/aac", &["audio/aacp"]),
+    ("wav", "audio/wav", &["audio/x-wav", "audio/wave", "audio/vnd.wave"]),
+    ("flac", "audio/flac", &["audio/x-flac"]),
+];
+
+/// The content type of a sound file by its extension (any case, no dot), None for any other.
+pub fn audio_mime_for_ext(ext: &str) -> Option<&'static str> {
+    let ext = ext.to_ascii_lowercase();
+    AUDIO_TYPES.iter().find(|(e, _, _)| *e == ext).map(|(_, m, _)| *m)
+}
+
+/// The extension of `AUDIO_EXTS` for a sound's content type (parameters and case ignored).
+pub(crate) fn audio_ext_for_mime(mime: &str) -> Option<&'static str> {
+    AUDIO_TYPES.iter().find(|(_, m, aliases)| m.eq_ignore_ascii_case(mime) || aliases.iter().any(|a| a.eq_ignore_ascii_case(mime))).map(|(e, _, _)| *e)
+}
+
+/// The sound extension of a mail attachment, None when it is no sound the player can be given (MAIL-240): the
+/// extension of its name when that is one of `AUDIO_EXTS` (whatever type the sender wrote, `.wav` often comes
+/// as `application/octet-stream`), else the extension of its `audio/*` type (a name without a sound's extension).
+pub fn attachment_audio_ext(name: &str, mime: &str) -> Option<&'static str> {
+    let from_name = name.rsplit_once('.').and_then(|(_, e)| AUDIO_EXTS.into_iter().find(|a| a.eq_ignore_ascii_case(e)));
+    from_name.or_else(|| audio_ext_for_mime(mime.split(';').next().unwrap_or("").trim()))
+}
+
 /// The video half of the one list; every one of them has a player (MEDIA-009), decoded by ffmpeg.
 pub const VIDEO_EXTS: [&str; 7] = ["mp4", "m4v", "webm", "mkv", "mov", "avi", "ogv"];
 
@@ -83,6 +119,9 @@ pub fn media_kind(p: &Path) -> Option<Kind> {
 #[cfg(target_os = "linux")]
 pub fn ext_for_mime(mime: &str) -> Option<&'static str> {
     let m = mime.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+    if let Some(ext) = audio_ext_for_mime(&m) {
+        return Some(ext);
+    }
     Some(match m.as_str() {
         "image/png" => "png",
         "image/jpeg" | "image/jpg" => "jpg",
@@ -90,13 +129,6 @@ pub fn ext_for_mime(mime: &str) -> Option<&'static str> {
         "image/gif" => "gif",
         "image/bmp" => "bmp",
         "application/pdf" => "pdf",
-        "audio/mpeg" | "audio/mp3" => "mp3",
-        "audio/ogg" => "ogg",
-        "audio/opus" => "opus",
-        "audio/mp4" | "audio/x-m4a" => "m4a",
-        "audio/aac" => "aac",
-        "audio/wav" | "audio/x-wav" | "audio/wave" => "wav",
-        "audio/flac" | "audio/x-flac" => "flac",
         "video/mp4" => "mp4",
         "video/x-m4v" => "m4v",
         "video/webm" => "webm",
@@ -476,6 +508,36 @@ mod tests {
     }
 
     use super::*;
+
+    // spec: MAIL-241
+    #[test]
+    fn mail_241_every_audio_extension_has_a_type_and_the_two_directions_agree() {
+        for ext in AUDIO_EXTS {
+            let mime = audio_mime_for_ext(ext).unwrap_or_else(|| panic!("no content type for .{ext}"));
+            assert!(mime.starts_with("audio/"), "{ext}: {mime}");
+            // `oga` is the same container as `ogg`: a received audio/ogg gets the first of the two
+            let back = audio_ext_for_mime(mime).unwrap_or_else(|| panic!("no extension for {mime}"));
+            assert!(back == ext || (ext, back) == ("oga", "ogg"), "{ext} → {mime} → {back}");
+            assert!(AUDIO_EXTS.contains(&back));
+            assert_eq!(audio_mime_for_ext(&ext.to_ascii_uppercase()), Some(mime), "any case");
+        }
+        // the other names of a type give the same extension, with parameters and in any case
+        for (mime, ext) in [("audio/x-wav", "wav"), ("audio/WAVE", "wav"), ("audio/mp3", "mp3"), ("audio/x-m4a", "m4a"), ("audio/x-flac", "flac")] {
+            assert_eq!(audio_ext_for_mime(mime), Some(ext), "{mime}");
+        }
+        assert_eq!(audio_mime_for_ext("txt"), None);
+        assert_eq!(audio_ext_for_mime("audio/x-nothing"), None);
+        assert_eq!(attachment_audio_ext("voice", "audio/ogg; codecs=vorbis"), Some("ogg"));
+        assert_eq!(attachment_audio_ext("memo.WAV", "application/octet-stream"), Some("wav"));
+        assert_eq!(attachment_audio_ext("notes.txt", "text/plain"), None);
+        // ext_for_mime (the import from programs, Linux) reads the same table and still answers the other kinds
+        #[cfg(target_os = "linux")]
+        {
+            assert_eq!(ext_for_mime("audio/WAVE; x=1"), Some("wav"));
+            assert_eq!(ext_for_mime("image/jpeg"), Some("jpg"));
+            assert_eq!(ext_for_mime("video/mp4"), Some("mp4"));
+        }
+    }
 
     // spec: VAULT-012
     #[test]

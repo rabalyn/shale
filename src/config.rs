@@ -317,7 +317,8 @@ pub struct Config {
     pub version: u64,
     /// The vault opened last.
     pub vault: Option<PathBuf>,
-    pub recent: Vec<PathBuf>,
+    /// The known vaults, the one opened last first (VAULT-029, CFG-075).
+    pub vaults: crate::known_vaults::KnownVaults,
     /// Follow links only with Ctrl+click (plain click edits). Default: plain click follows.
     pub ctrl_to_follow: bool,
     /// Notes created from a red link go next to the current note instead of the vault root.
@@ -436,6 +437,8 @@ pub struct Config {
     pub import_header_list: bool,
     /// The Import dialog leaves out the signature parts and signature pictures of e-mails at first (IMP-061).
     pub import_skip_signatures: bool,
+    /// The Import dialog leaves the quoted mails out of the text of e-mails at first (IMP-066).
+    pub import_leave_out_quoted: bool,
     /// Mastodon and Bluesky accounts for the feed view (secrets are in the keyring).
     pub social_accounts: Vec<crate::social::SocialAccountEntry>,
     /// The account and feed shown last in the feed view.
@@ -491,7 +494,7 @@ impl Default for Config {
         Config {
             version: <Config as Versioned>::CURRENT,
             vault: None,
-            recent: vec![],
+            vaults: Default::default(),
             ctrl_to_follow: false,
             new_notes_next_to_current: false,
             update_links_on_rename: true,
@@ -544,6 +547,7 @@ impl Default for Config {
             pandoc_path: String::new(),
             import_header_list: false,
             import_skip_signatures: true,
+            import_leave_out_quoted: false,
             social_accounts: vec![],
             social_last: None,
             social_replies: false,
@@ -567,7 +571,7 @@ impl Default for Config {
 }
 
 impl Versioned for Config {
-    const CURRENT: u64 = 2;
+    const CURRENT: u64 = 3;
     const WHAT: &'static str = "settings";
     fn step(json: &mut serde_json::Map<String, serde_json::Value>, from: u64) {
         match from {
@@ -576,6 +580,8 @@ impl Versioned for Config {
             0 => {}
             // 1 → 2: the one text size of the editor became the fonts of the areas (CFG-034).
             1 => move_font_size(json),
+            // 2 → 3: the recent list became the known vaults (CFG-075).
+            2 => crate::known_vaults::migrate_recent(json),
             _ => unreachable!("no migration from version {from}"),
         }
     }
@@ -754,9 +760,7 @@ impl Config {
     }
 
     pub fn remember_vault(&mut self, path: PathBuf) {
-        self.recent.retain(|p| p != &path);
-        self.recent.insert(0, path.clone());
-        self.recent.truncate(8);
+        self.vaults.add(&path);
         self.vault = Some(path);
     }
 }
@@ -810,7 +814,7 @@ mod tests {
         use crate::fonts::{Area, FontChoice};
         // a size of its own: the editor has it, the other areas keep their look
         let (c, newer) = crate::vault_state::parse::<Config>(br#"{"font_size": 18.0, "vault": "/v"}"#).unwrap();
-        assert!(!newer && c.version == 2 && c.vault == Some(PathBuf::from("/v")));
+        assert!(!newer && c.version == 3 && c.vault == Some(PathBuf::from("/v")));
         assert!(!c.fonts.same_everywhere);
         assert_eq!((c.fonts.choice(Area::EditorRaw).size, c.fonts.choice(Area::EditorRendered).size), (18.0, 18.0));
         assert_eq!((c.fonts.choice(Area::Ui).size, c.fonts.choice(Area::Mail).size), (14.0, 14.0));
@@ -838,7 +842,7 @@ mod tests {
         assert!(c.vim_mode && !c.fonts.same_everywhere && c.fonts.editor_raw.size == 19.0);
         c.save().unwrap();
         let text = std::fs::read_to_string(t.file()).unwrap();
-        assert!(!text.contains("font_size") && text.contains("version = 2") && text.contains("[fonts.editor_raw]\n# ") && text.contains("size = 19.0"), "{text}");
+        assert!(!text.contains("font_size") && text.contains("version = 3") && text.contains("[fonts.editor_raw]\n# ") && text.contains("size = 19.0"), "{text}");
         assert_eq!(Config::load().0.fonts, c.fonts);
     }
 
@@ -847,7 +851,7 @@ mod tests {
     fn old_config_files_still_load() {
         let (c, newer) = crate::vault_state::parse::<Config>(br#"{"vault": "/tmp/v"}"#).unwrap();
         assert!(!newer);
-        assert_eq!(c.version, 2);
+        assert_eq!(c.version, 3);
         assert_eq!(c.vault, Some(PathBuf::from("/tmp/v")));
         assert!(c.update_links_on_rename);
         assert!(!c.ctrl_to_follow);
@@ -888,7 +892,7 @@ mod tests {
         assert_eq!(c.toolbar_size, 110, "the buttons a bit bigger than the base size by default");
         assert_eq!(c.font_colours.len(), 5);
         assert_eq!(c.highlight_colours, vec![[255, 255, 0], [0x39, 0xFF, 0x14], [0, 255, 255], [255, 0, 255]], "neon yellow, green, cyan, magenta");
-        assert_eq!(c.version, 2, "new fields with defaults need no migration (CFG-001)");
+        assert_eq!(c.version, 3, "new fields with defaults need no migration (CFG-001)");
         let c: Config = serde_json::from_str(r#"{"format_toolbar": false, "toolbar_size": 150, "font_colours": [[1, 2, 3]], "highlight_colours": []}"#).unwrap();
         let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
         assert_eq!((back.format_toolbar, back.toolbar_size, back.font_colours, back.highlight_colours), (false, 150, vec![[1, 2, 3]], vec![]));
@@ -902,7 +906,7 @@ mod tests {
         assert_eq!((c.search.prefixes(), c.search.selection()), (Prefixes::default(), Selection::ALL));
         let (old, _) = crate::vault_state::parse::<Config>(br#"{"toolbar_size": 120}"#).unwrap();
         assert_eq!(old.search, SearchConfig::default(), "a file from before: f, m, s and all sources");
-        assert_eq!(old.version, 2, "a new field with a default needs no migration (CFG-001)");
+        assert_eq!(old.version, 3, "a new field with a default needs no migration (CFG-001)");
         let (c, _) = crate::vault_state::parse::<Config>(br#"{"search": {"sources": ["mail"]}}"#).unwrap();
         assert_eq!((c.search.selection(), c.search.prefix_notes.as_str()), (Selection::only(Kind::Mail), "f"), "a missing field takes its default");
         let (c, _) = crate::vault_state::parse::<Config>(br#"{"search": {"sources": []}}"#).unwrap();
@@ -959,7 +963,7 @@ mod tests {
     fn the_link_preview_size_has_defaults_loads_from_old_files_and_round_trips() {
         let (c, _) = crate::vault_state::parse::<Config>(br#"{"toolbar_size": 120}"#).unwrap();
         assert_eq!((c.link_preview_width, c.link_preview_height), (640, 480), "an old file has the default size");
-        assert_eq!(c.version, 2, "new fields with defaults need no migration (CFG-001)");
+        assert_eq!(c.version, 3, "new fields with defaults need no migration (CFG-001)");
         let c = Config { link_preview_width: 700, link_preview_height: 333, ..Config::default() };
         let text = text::to_toml(&c);
         assert!(text.contains("link_preview_width = 700") && text.contains("link_preview_height = 333"), "{text}");
@@ -972,7 +976,7 @@ mod tests {
     fn cfg_041_the_tab_width_has_no_value_by_default_loads_from_old_files_and_round_trips() {
         let (c, _) = crate::vault_state::parse::<Config>(br#"{"toolbar_size": 120}"#).unwrap();
         assert_eq!(c.settings_tab_width, None, "an old file has no tab width");
-        assert_eq!(c.version, 2, "a new field with a default needs no migration (CFG-001)");
+        assert_eq!(c.version, 3, "a new field with a default needs no migration (CFG-001)");
         assert!(!text::to_toml(&Config::default()).contains("settings_tab_width ="), "no value: left out of the file");
         let c = Config { settings_tab_width: Some(140), ..Config::default() };
         let text = text::to_toml(&c);
@@ -986,7 +990,7 @@ mod tests {
     fn lay_018_the_sidebar_widths_have_no_value_by_default_load_from_old_files_and_round_trip() {
         let (c, _) = crate::vault_state::parse::<Config>(br#"{"toolbar_size": 120}"#).unwrap();
         assert_eq!((c.left_sidebar_width, c.right_sidebar_width), (None, None), "an old file has no widths");
-        assert_eq!(c.version, 2, "a new field with a default needs no migration (CFG-001)");
+        assert_eq!(c.version, 3, "a new field with a default needs no migration (CFG-001)");
         let none = text::to_toml(&Config::default());
         assert!(!none.contains("left_sidebar_width =") && !none.contains("right_sidebar_width ="), "no value: left out of the file");
         let c = Config { left_sidebar_width: Some(300), right_sidebar_width: Some(350), ..Config::default() };
@@ -1001,7 +1005,7 @@ mod tests {
     fn the_word_import_settings_are_off_and_empty_by_default_load_from_old_files_and_round_trip() {
         let (c, _) = crate::vault_state::parse::<Config>(br#"{"toolbar_size": 120}"#).unwrap();
         assert!(!c.docx_import && c.pandoc_path.is_empty(), "an old file: off, searching");
-        assert_eq!(c.version, 2, "new fields with defaults need no migration (CFG-001)");
+        assert_eq!(c.version, 3, "new fields with defaults need no migration (CFG-001)");
         let c = Config { docx_import: true, pandoc_path: "/opt/pandoc/bin/pandoc".into(), ..Config::default() };
         let text = text::to_toml(&c);
         assert!(text.contains("docx_import = true") && text.contains("pandoc_path = \"/opt/pandoc/bin/pandoc\""), "{text}");
@@ -1020,6 +1024,16 @@ mod tests {
         assert!(!Config::parse_text(&text).unwrap().0.import_skip_signatures);
     }
 
+    // spec: CFG-076, CFG-001
+    #[test]
+    fn the_leave_out_quoted_setting_is_off_by_default_loads_from_old_files_and_round_trips() {
+        let (c, _) = crate::vault_state::parse::<Config>(br#"{"toolbar_size": 120}"#).unwrap();
+        assert!(!c.import_leave_out_quoted, "an old file: off");
+        let text = text::to_toml(&Config { import_leave_out_quoted: true, ..Config::default() });
+        assert!(text.contains("import_leave_out_quoted = true"), "{text}");
+        assert!(Config::parse_text(&text).unwrap().0.import_leave_out_quoted);
+    }
+
     // spec: CFG-060, CFG-001
     #[test]
     fn the_header_list_setting_is_off_by_default_loads_from_old_files_and_round_trips() {
@@ -1035,7 +1049,7 @@ mod tests {
     fn the_media_settings_have_defaults_and_round_trip_without_a_version_bump() {
         let (c, _) = crate::vault_state::parse::<Config>(br#"{"vault": "/tmp/v"}"#).unwrap();
         assert_eq!((c.media_volume, c.media_play_button_opacity), (0.8, 0.6), "an older file gets the defaults");
-        assert_eq!(c.version, 2, "new fields with defaults need no migration (CFG-001)");
+        assert_eq!(c.version, 3, "new fields with defaults need no migration (CFG-001)");
         let c: Config = serde_json::from_str(r#"{"media_volume": 0.25, "media_play_button_opacity": 1.0}"#).unwrap();
         let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
         assert_eq!((back.media_volume, back.media_play_button_opacity), (0.25, 1.0));
@@ -1047,7 +1061,7 @@ mod tests {
         use crate::media::outside::Library;
         let (c, _) = crate::vault_state::parse::<Config>(br#"{"toolbar_size": 120}"#).unwrap();
         assert!(c.media_libraries.is_empty(), "an old file: no library");
-        assert_eq!(c.version, 2, "a new field with a default needs no migration (CFG-001)");
+        assert_eq!(c.version, 3, "a new field with a default needs no migration (CFG-001)");
         let libs = vec![Library { name: "Videos".into(), path: "/media/Videos".into() }, Library { name: "Pics".into(), path: "/home/ada/My Pictures".into() }];
         let text = text::to_toml(&Config { media_libraries: libs.clone(), ..Config::default() });
         assert!(text.contains("[[media_libraries]]") && text.contains("name = \"Videos\"") && text.contains("path = \"/media/Videos\""), "{text}");
@@ -1063,7 +1077,7 @@ mod tests {
         use crate::media::intake::OutsideFiles;
         let (c, _) = crate::vault_state::parse::<Config>(br#"{"toolbar_size": 120}"#).unwrap();
         assert_eq!(c.outside_files, OutsideFiles::Ask, "an old file: Ask");
-        assert_eq!(c.version, 2, "a new field with a default needs no migration (CFG-001)");
+        assert_eq!(c.version, 3, "a new field with a default needs no migration (CFG-001)");
         assert_eq!(Config::default().outside_files, OutsideFiles::Ask);
         for (value, word) in [(OutsideFiles::Ask, "Ask"), (OutsideFiles::Copy, "Copy"), (OutsideFiles::Link, "Link")] {
             let text = text::to_toml(&Config { outside_files: value, ..Config::default() });
@@ -1201,7 +1215,7 @@ mod tests {
         for k in ["people_dir", "open_files", "recent_tags", "last_import_folder"] {
             assert!(!out.contains(k), "{k} still in {out}");
         }
-        assert!(out.contains("\"version\":2"));
+        assert!(out.contains("\"version\":3"));
         assert!(c.take_legacy().is_empty());
         c.restore_legacy(legacy.clone());
         assert_eq!(c.take_legacy(), legacy);
@@ -1243,7 +1257,7 @@ mod tests {
         assert!(problem.is_none());
         assert_eq!(back.toolbar_size, 21);
         assert_eq!(back.vault, Some(PathBuf::from("/some/vault")));
-        assert_eq!(back.recent, vec![PathBuf::from("/some/vault")]);
+        assert_eq!(back.vaults.entries().iter().map(|e| e.path.clone()).collect::<Vec<_>>(), vec![PathBuf::from("/some/vault")]);
     }
 
     // spec: CFG-004
@@ -1317,13 +1331,35 @@ mod tests {
         assert_eq!(std::fs::read_dir(t.file().parent().unwrap()).unwrap().count(), 1, "no temporary file left");
     }
 
-    // spec: VAULT-006
+    // spec: VAULT-006, VAULT-029
     #[test]
     fn recent_list_is_unique() {
         let mut c = Config::default();
         c.remember_vault("/a".into());
         c.remember_vault("/b".into());
         c.remember_vault("/a".into());
-        assert_eq!(c.recent, vec![PathBuf::from("/a"), PathBuf::from("/b")]);
+        assert_eq!(c.vaults.entries().iter().map(|e| e.path.clone()).collect::<Vec<_>>(), vec![PathBuf::from("/a"), PathBuf::from("/b")]);
+        assert_eq!(c.vault, Some(PathBuf::from("/a")), "the vault opened last");
+    }
+
+    // spec: CFG-075
+    #[test]
+    fn cfg_075_a_config_with_recent_is_migrated_and_recent_is_not_written_again() {
+        let t = TestConfig::new("migration-075");
+        let (a, b) = (t.file().parent().unwrap().join("alpha"), t.file().parent().unwrap().join("beta"));
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        let old = format!("version = 2\nvault = {:?}\nrecent = [{:?}, {:?}]\ntoolbar_size = 19\n", a.to_string_lossy(), a.to_string_lossy(), b.to_string_lossy());
+        std::fs::write(t.file(), old).unwrap();
+        let (c, problem) = Config::load();
+        assert!(problem.is_none(), "{problem:?}");
+        assert_eq!((c.version, c.toolbar_size, c.vault.clone()), (3, 19, Some(a.clone())));
+        let listed: Vec<_> = c.vaults.entries().iter().map(|e| (e.name.clone(), e.path.clone())).collect();
+        assert_eq!(listed, [("alpha".to_string(), crate::known_vaults::canonical(&a)), ("beta".to_string(), crate::known_vaults::canonical(&b))]);
+        c.save().unwrap();
+        let text = std::fs::read_to_string(t.file()).unwrap();
+        assert!(!text.contains("recent = ") && text.contains("[[vaults]]") && text.contains("name = \"alpha\""), "{text}");
+        let (back, _) = Config::load();
+        assert_eq!(back.vaults, c.vaults, "and the file reads back the same");
     }
 }

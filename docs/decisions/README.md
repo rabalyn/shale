@@ -21,7 +21,7 @@ way it is. They are append-only. *What* Shale does today is in the living specs 
 | [0011](0011-mail-encryption.md) | Mail phase 4: OpenPGP and S/MIME with the system's GnuPG | Proposed |
 | [0012](0012-social-feeds.md) | Social feeds: Mastodon and Bluesky, saved as notes | Proposed |
 | [0013](0013-forgejo-and-issue-tracking.md) | Forgejo is the home of development; its issues track all work; GitHub builds and distributes releases | Accepted, amended by 0017 |
-| [0014](0014-sidebar-layout.md) | The sidebar layout: one list of icons per menubar, stacked views on the right | Accepted |
+| [0014](0014-sidebar-layout.md) | The sidebar layout: one list of icons per menubar, stacked views on the right | Accepted, amended by 0033 |
 | [0015](0015-media-playback-and-storage.md) | Media playback in notes (own audio engine, ffmpeg for video) and media files in Git LFS | Accepted |
 | [0016](0016-local-landing.md) | Changes land locally: merged, checked and pushed by `scripts/land.sh`; CI checks `main` afterwards | Accepted, amended by 0018 |
 | [0017](0017-github-issues-forgejo-ci.md) | GitHub is the public home and holds the issues (numbers kept); Forgejo keeps git and CI; GitHub builds only releases | Accepted, amended by 0018 and 0025 |
@@ -39,6 +39,8 @@ way it is. They are append-only. *What* Shale does today is in the living specs 
 | [0029](0029-sync-wizard-and-git-credentials.md) | The sync wizard, git credentials through GIT_ASKPASS and detection of shared folders | Accepted |
 | [0030](0030-media-outside-the-vault.md) | Media outside the vault: library links and file links | Accepted |
 | [0031](0031-performance-gates-on-the-workstation.md) | Performance gates only on the owner's workstation (a flagged time regression is confirmed by an interleaved re-run); statistics only on GitHub, nothing on Forgejo | Accepted |
+| [0032](0032-thread-links-of-imported-items.md) | Thread links of imported mails and posts: `previous` / `next` wikilinks, a `thread-id`, reply-header matching, a thread view in the right sidebar | Accepted |
+| [0033](0033-views-on-either-side.md) | Files, Search and Tags on either side of the window: move or copy, one shared state, the same stored layout | Accepted |
 
 Format: Context, Decision, Consequences (and Alternatives if any). Statuses: *Proposed* →
 *Accepted* → (*Superseded by NNNN*). An accepted ADR is not edited; a new one supersedes it.
