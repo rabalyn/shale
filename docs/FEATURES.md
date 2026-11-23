@@ -997,6 +997,11 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   later, and a hit whose post is gone from both index and feed is fetched from the server.
   **Settings → Feeds → Post search index** shows how many posts are indexed, **Rebuild**s it
   from the posts your open feeds hold, or **Clear…**s it (after a question). (Mouse only for now.)
+- **Pictures open big in a viewer** over the tab (click one): fitted to the window, its description
+  (alt text) below, **◀ ▶** or Left / Right to step through the post's pictures, mouse wheel or
+  `+` `-` to zoom, **100%** / **Fit** (`0`), drag to pan, Esc or **Close** to leave. The full size file
+  comes through the background picture cache (spinner while it loads, a message when it fails);
+  pictures behind a content warning stay closed until Show; video previews still open in the browser.
 - **Save to vault** copies the post, and the whole thread when it is a thread by one author,
   into the Import dialog: choose the folder (default `Social`), tags and which pictures to
   bring along. **Open in browser** and **Copy link** are next to it.

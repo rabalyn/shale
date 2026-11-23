@@ -120,6 +120,12 @@ impl ImageCache {
         }
     }
 
+    /// Tests: an address that is on its way and never arrives (the loading state).
+    #[cfg(test)]
+    pub fn hold(&self, url: &str) {
+        self.slots.lock().unwrap_or_else(|e| e.into_inner()).insert(url.to_string(), Slot::Pending);
+    }
+
     /// Whether this address could not be fetched (show a placeholder instead of waiting).
     pub fn failed(&self, url: &str) -> bool {
         self.slots.lock().unwrap_or_else(|e| e.into_inner()).get(url) == Some(&Slot::Failed)

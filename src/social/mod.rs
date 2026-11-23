@@ -32,6 +32,7 @@ mod post_index_tests;
 pub mod state;
 #[cfg(test)]
 mod ui_tests;
+pub mod viewer;
 
 use crate::calendar::dav::{self, check_url, Origin};
 use crate::calendar::time as t;

@@ -205,6 +205,8 @@ pub struct SocialState {
     pub fetch_wanted: Vec<(u64, String, String, String)>,
     /// the Settings dialog asked "Clear the post search index?" and waits for the answer (SOC-040)
     pub confirm_clear: bool,
+    /// the picture viewer open over a tab (SOC-044)
+    pub viewer: Option<super::viewer::Viewer>,
     clients: HashMap<String, Client>,
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
@@ -250,6 +252,7 @@ impl SocialState {
             focus: None,
             fetch_wanted: vec![],
             confirm_clear: false,
+            viewer: None,
             clients: HashMap::new(),
             tx,
             rx,

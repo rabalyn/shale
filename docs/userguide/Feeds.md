@@ -22,6 +22,13 @@ social` shows made-up posts.
 - Pick the account and the feed (Mastodon: Home and your lists; Bluesky: Following and saved
   feeds). Posts show avatar, name, time, boosts, pictures, quoted posts and link cards. A
   content warning stays closed until you click Show.
+- **Pictures big:** click a picture to see it large over the tab, fitted to the window, with its
+  description (alt text) below. **◀ ▶** or the Left / Right keys step through the pictures of the
+  post; the mouse wheel, **+** / **−** (also the keys `+` `-`) zoom, **100%** / **Fit** (key `0`)
+  switch between the picture's own size and the whole picture, and you can drag a zoomed
+  picture. **Esc** or **Close** goes back to the feed. A spinner shows while the picture loads, and a
+  message says when it cannot be loaded. Pictures behind a content warning open only after
+  **Show**. A video or GIF preview still opens in the browser.
 - **Several feeds at once:** every Feeds tab has its own feed and scroll position. **New tab**
   next to a feed (or Shift+click, middle-click) opens it in another tab. Open Feeds tabs come
   back at the next start ([[Tabs]]).

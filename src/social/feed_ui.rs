@@ -4,6 +4,7 @@
 
 use super::images::ImageCache;
 use super::state::{post_key, FeedsState, SocialState};
+use super::viewer::{self, Viewer};
 use super::{FeedRef, MediaKind, Network, Post, SocialAccountEntry};
 use crate::media;
 use crate::theme;
@@ -227,6 +228,9 @@ struct Cx<'a> {
     saving: &'a HashSet<String>,
     rects: &'a mut Vec<(String, Rect)>,
     now: i64,
+    /// the tab drawn, and the viewer a click on a picture opens in it (SOC-044)
+    tab: u64,
+    viewer: &'a mut Option<Viewer>,
 }
 
 impl Cx<'_> {
@@ -252,7 +256,7 @@ fn avatar(ui: &mut Ui, cx: &Cx, url: &str, name: &str, size: f32) {
 }
 
 /// A picture (or the preview of a video) in a cell; None while it is still coming.
-fn thumb(ui: &mut Ui, cx: &mut Cx, key: String, m: &super::Media, cell: Vec2, natural: bool) {
+fn thumb(ui: &mut Ui, cx: &mut Cx, key: String, m: &super::Media, cell: Vec2, natural: bool) -> bool {
     let url = if m.preview_url.is_empty() && m.kind == MediaKind::Image { &m.url } else { &m.preview_url };
     let tex = cx.images.get(url).and_then(|p| media::texture(ui.ctx(), &p));
     // a single picture keeps its shape; several fill equal cells
@@ -301,9 +305,12 @@ fn thumb(ui: &mut Ui, cx: &mut Cx, key: String, m: &super::Media, cell: Vec2, na
     }
     let resp = cx.rec(key, resp);
     let resp = if m.alt.trim().is_empty() { resp } else { resp.on_hover_text(m.alt.trim()) };
-    if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+    let clicked = resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked();
+    if clicked && m.kind != MediaKind::Image {
+        // videos open at their web address (SOC-044)
         open_web(&m.url);
     }
+    clicked && m.kind == MediaKind::Image
 }
 
 fn media_block(ui: &mut Ui, cx: &mut Cx, p: &Post, idx: usize, width: f32) {
@@ -311,12 +318,16 @@ fn media_block(ui: &mut Ui, cx: &mut Cx, p: &Post, idx: usize, width: f32) {
     let visual: Vec<(usize, &super::Media)> = shown.iter().copied().enumerate().filter(|(_, m)| matches!(m.kind, MediaKind::Image | MediaKind::Video | MediaKind::Gifv)).collect();
     if visual.len() == 1 {
         let (k, m) = visual[0];
-        thumb(ui, cx, format!("media:{idx}:{k}"), m, Vec2::new(width, 340.0), true);
+        if thumb(ui, cx, format!("media:{idx}:{k}"), m, Vec2::new(width, 340.0), true) {
+            *cx.viewer = Viewer::open(cx.tab, p, k);
+        }
     } else if !visual.is_empty() {
         let cell = Vec2::new((width - 6.0) / 2.0, 170.0);
         egui::Grid::new(("social-media", idx)).spacing([6.0, 6.0]).show(ui, |ui| {
             for (n, (k, m)) in visual.iter().enumerate() {
-                thumb(ui, cx, format!("media:{idx}:{k}"), m, cell, false);
+                if thumb(ui, cx, format!("media:{idx}:{k}"), m, cell, false) {
+                    *cx.viewer = Viewer::open(cx.tab, p, *k);
+                }
                 if n % 2 == 1 {
                     ui.end_row();
                 }
@@ -496,6 +507,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
     let mut asks = vec![];
     let ctx = ui.ctx().clone();
     st.rects.clear();
+    let tab_rect = ui.max_rect();
     let full = ui.available_width();
     let width = (full - 32.0).clamp(280.0, 700.0);
     let Some(entry) = SocialState::account_for(accounts, tab.feed.as_ref().map(|f| f.account.as_str()), tab.last.as_ref()).cloned() else {
@@ -683,12 +695,12 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
     let mut post_rects: Vec<(String, Rect)> = vec![];
     let mut content_top = 0.0;
     let out = {
-        let SocialState { images, revealed, saving, rects, card_heights, .. } = st;
+        let SocialState { images, revealed, saving, rects, card_heights, viewer, .. } = st;
         if card_heights.len() > 50_000 {
             card_heights.clear();
         }
         let Some(images) = images.as_ref() else { return asks };
-        let mut cx = Cx { images, revealed, saving, rects, now: crate::calendar::time::now() };
+        let mut cx = Cx { images, revealed, saving, rects, now: crate::calendar::time::now(), tab: tab.id, viewer };
         let mut area = egui::ScrollArea::vertical().id_salt(("social-scroll", tab.id, &aid, &feed.id)).auto_shrink([false, false]);
         if let Some(off) = applied {
             area = area.vertical_scroll_offset(off);
@@ -809,6 +821,12 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
     }
     if let Some(p) = save_post {
         st.save(&ctx, &entry, &feed.id, &p);
+    }
+    // the picture viewer covers the tab (SOC-044)
+    if let (Some(v), Some(images)) = (st.viewer.as_mut().filter(|v| v.tab == tab.id), st.images.as_ref()) {
+        if viewer::show(&ctx, tab_rect, v, images, &mut st.rects, tab.keys) {
+            st.viewer = None;
+        }
     }
     if st.images.as_ref().map(|i| i.pending() > 0).unwrap_or(false) {
         ctx.request_repaint_after(std::time::Duration::from_millis(300));
@@ -951,6 +969,156 @@ mod tests {
         assert_eq!(st.timelines[&key].posts.len(), demo::posts().len(), "the posts stay");
         h.click("retry", &mut st, &accounts);
         assert!(st.timelines[&key].loading);
+    }
+
+    impl H {
+        fn key(&mut self, key: egui::Key, st: &mut SocialState, accounts: &[SocialAccountEntry]) {
+            let k = |pressed| Ev::Key { key, physical_key: Some(key), pressed, repeat: false, modifiers: Modifiers::NONE };
+            self.frame(vec![k(true)], st, accounts);
+            self.frame(vec![k(false)], st, accounts);
+        }
+        /// Frames until a control of the viewer shows (the picture is decoded on a worker).
+        fn wait_for(&mut self, name: &str, st: &mut SocialState, accounts: &[SocialAccountEntry]) {
+            for _ in 0..300 {
+                self.frame(vec![], st, accounts);
+                if st.rects.iter().any(|r| r.0 == name) {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            panic!("no {name}: {:?}", st.rects.iter().map(|r| &r.0).collect::<Vec<_>>());
+        }
+    }
+
+    fn has(st: &SocialState, name: &str) -> bool {
+        st.rects.iter().any(|r| r.0 == name)
+    }
+
+    fn at(st: &SocialState) -> Option<usize> {
+        st.viewer.as_ref().map(|v| v.index)
+    }
+
+    // spec: SOC-044
+    #[test]
+    fn soc_044_a_click_opens_the_picture_big_and_the_pictures_of_the_post_can_be_stepped_through_and_closed() {
+        let (mut st, accounts) = demo_state();
+        let mut h = H::new();
+        h.frame(vec![], &mut st, &accounts);
+        assert!(st.viewer.is_none() && !has(&st, "viewer:close"));
+        h.click("media:3:0", &mut st, &accounts);
+        assert_eq!(at(&st), Some(0));
+        assert_eq!(st.viewer.as_ref().unwrap().items.len(), 2);
+        h.wait_for("viewer:image", &mut st, &accounts);
+        // fitted to the window: bigger than the preview, inside the tab
+        let big = st.rects.iter().find(|r| r.0 == "viewer:image").unwrap().1;
+        let small = st.rects.iter().find(|r| r.0 == "media:3:0").unwrap().1;
+        assert!(big.width() > small.width() && big.height() <= 4000.0 && big.width() <= 1000.0, "{big:?} {small:?}");
+        // the description of the picture is shown
+        assert!(has(&st, "viewer:alt") && has(&st, "viewer:count"));
+        assert_eq!(st.viewer.as_ref().unwrap().items[0].alt, "A hill with a bright sun in an orange sky");
+        // step: the button, the keys; the ends stop
+        h.click("viewer:next", &mut st, &accounts);
+        assert_eq!(at(&st), Some(1));
+        assert_eq!(st.viewer.as_ref().unwrap().items[1].alt, "The same hill a minute later, more purple");
+        h.key(egui::Key::ArrowRight, &mut st, &accounts);
+        assert_eq!(at(&st), Some(1), "no step past the last picture");
+        h.key(egui::Key::ArrowLeft, &mut st, &accounts);
+        assert_eq!(at(&st), Some(0));
+        h.key(egui::Key::ArrowLeft, &mut st, &accounts);
+        assert_eq!(at(&st), Some(0), "no step before the first picture");
+        h.key(egui::Key::ArrowRight, &mut st, &accounts);
+        h.click("viewer:prev", &mut st, &accounts);
+        assert_eq!(at(&st), Some(0));
+        // zoom: the buttons, the keys, the wheel; "100%" and "Fit" toggle; stepping fits again
+        h.wait_for("viewer:image", &mut st, &accounts);
+        h.click("viewer:zoom-in", &mut st, &accounts);
+        let z1 = st.viewer.as_ref().unwrap().zoom.expect("zoomed in");
+        h.key(egui::Key::Plus, &mut st, &accounts);
+        let z2 = st.viewer.as_ref().unwrap().zoom.unwrap();
+        assert!(z2 > z1);
+        h.key(egui::Key::Minus, &mut st, &accounts);
+        h.click("viewer:zoom-out", &mut st, &accounts);
+        assert!((st.viewer.as_ref().unwrap().zoom.unwrap() - z1 / 1.25).abs() < 0.001, "zoomed in twice and out twice from {z1}");
+        let over = st.rects.iter().find(|r| r.0 == "viewer:image").unwrap().1.center();
+        let before = st.viewer.as_ref().unwrap().zoom.unwrap();
+        h.frame(vec![Ev::PointerMoved(over)], &mut st, &accounts);
+        for _ in 0..6 {
+            h.frame(vec![Ev::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: Vec2::new(0.0, 100.0), modifiers: Modifiers::NONE, phase: egui::TouchPhase::Move, source: egui::MouseWheelSource::Wheel }], &mut st, &accounts);
+        }
+        assert!(st.viewer.as_ref().unwrap().zoom.unwrap() > before, "the wheel zooms in");
+        h.click("viewer:fit", &mut st, &accounts);
+        assert_eq!(st.viewer.as_ref().unwrap().zoom, None, "zoomed: the button fits it again");
+        h.click("viewer:fit", &mut st, &accounts);
+        assert_eq!(st.viewer.as_ref().unwrap().zoom, Some(1.0), "fitted: the button shows the picture's own size");
+        h.key(egui::Key::Num0, &mut st, &accounts);
+        assert_eq!(st.viewer.as_ref().unwrap().zoom, None, "fitted again");
+        h.click("viewer:zoom-in", &mut st, &accounts);
+        h.click("viewer:next", &mut st, &accounts);
+        assert_eq!(st.viewer.as_ref().unwrap().zoom, None, "the next picture starts fitted");
+        // the viewer covers only its own tab
+        st.viewer.as_mut().unwrap().tab = 2;
+        h.frame(vec![], &mut st, &accounts);
+        assert!(!has(&st, "viewer:close"));
+        st.viewer.as_mut().unwrap().tab = 1;
+        h.frame(vec![], &mut st, &accounts);
+        assert!(has(&st, "viewer:close"));
+        // Esc closes it, and so does the button
+        h.key(egui::Key::Escape, &mut st, &accounts);
+        assert!(st.viewer.is_none());
+        h.frame(vec![], &mut st, &accounts);
+        assert!(!has(&st, "viewer:close"));
+        h.click("media:3:1", &mut st, &accounts);
+        assert_eq!(at(&st), Some(1), "the second picture opens at the second picture");
+        h.click("viewer:close", &mut st, &accounts);
+        assert!(st.viewer.is_none());
+    }
+
+    // spec: SOC-044
+    #[test]
+    fn soc_044_a_picture_on_its_way_shows_a_spinner_and_one_that_fails_an_error() {
+        let (mut st, accounts) = demo_state();
+        let mut h = H::new();
+        h.frame(vec![], &mut st, &accounts);
+        let (slow, bad) = ("https://slow.test/a.png", "http://example.invalid/b.png");
+        for t in st.timelines.values_mut() {
+            t.posts[3].media[0].url = slow.into();
+            t.posts[3].media[0].alt = String::new();
+            t.posts[3].media[1].url = bad.into();
+        }
+        st.images.as_ref().unwrap().hold(slow);
+        h.click("media:3:0", &mut st, &accounts);
+        assert_eq!(at(&st), Some(0));
+        assert!(has(&st, "viewer:spinner") && !has(&st, "viewer:image") && !has(&st, "viewer:error"));
+        assert!(!has(&st, "viewer:alt"), "no description, no line for it");
+        // the next picture is refused: an error message, and the viewer still steps and closes
+        h.click("viewer:next", &mut st, &accounts);
+        h.wait_for("viewer:error", &mut st, &accounts);
+        assert!(!has(&st, "viewer:spinner"));
+        h.click("viewer:prev", &mut st, &accounts);
+        assert!(has(&st, "viewer:spinner"));
+        h.key(egui::Key::Escape, &mut st, &accounts);
+        assert!(st.viewer.is_none());
+    }
+
+    // spec: SOC-044
+    #[test]
+    fn soc_044_pictures_behind_a_content_warning_cannot_be_opened_and_videos_do_not_open_the_viewer() {
+        let (mut st, accounts) = demo_state();
+        for t in st.timelines.values_mut() {
+            t.posts[3].content_warning = Some("Sunrises".into());
+            // a video: it keeps its way to the web address (a non-web address is ignored by `open_web`)
+            t.posts[1].media = vec![super::super::Media { kind: MediaKind::Video, url: "video:none".into(), preview_url: String::new(), alt: String::new(), file_name_hint: "v.mp4".into(), blob_cid: None }];
+        }
+        let mut h = H::new();
+        h.frame(vec![], &mut st, &accounts);
+        assert!(!has(&st, "media:3:0") && !has(&st, "media:3:1"), "hidden pictures cannot be clicked");
+        assert!(st.viewer.is_none());
+        h.click("cw:3", &mut st, &accounts);
+        h.click("media:3:1", &mut st, &accounts);
+        assert_eq!(at(&st), Some(1), "after Show the picture opens");
+        h.key(egui::Key::Escape, &mut st, &accounts);
+        h.click("media:1:0", &mut st, &accounts);
+        assert!(st.viewer.is_none(), "a video preview is not opened in the viewer");
     }
 
     #[test]
