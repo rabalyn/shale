@@ -965,6 +965,8 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   Shale finds the message in Thunderbird's local copy (for IMAP accounts this needs "Keep
   messages for this account on this computer").
 
+- A calendar event becomes a note without dragging: the **Import** button of its details popup (left click) and the **Import** entry of its right-click menu open the same Import dialog as a drop, for a repeating event with the clicked date (CAL-034).
+
 ![Dragging an event onto a folder](userguide/z_media/screenshots/drag-event.png)
 
 ![An imported e-mail](userguide/z_media/screenshots/imported-note.png)

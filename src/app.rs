@@ -2043,6 +2043,11 @@ impl ShaleApp {
                 }
             }
             CalAction::OpenLarge => self.show_view(View::Calendar, false),
+            CalAction::Import(occ) => {
+                if let Some(drag) = crate::calendar::ui::CalDrag::new(&self.calendar, &occ) {
+                    self.import_calendar_event(&drag, None);
+                }
+            }
             CalAction::NewEventAt(start) => {
                 let srcs = &self.calendar.sources;
                 let target = self.cal.last_event_calendar.as_ref().and_then(|id| srcs.iter().find(|s| s.id == *id)).or_else(|| srcs.iter().find(|s| s.enabled)).or_else(|| srcs.first()).map(|s| s.id.clone());
