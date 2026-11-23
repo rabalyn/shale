@@ -30,13 +30,16 @@ struct Cell {
     /// the sum of the positions of the notes inside, then their centre of mass
     sum: Vec2,
     children: [u32; 4],
-    /// the notes of a leaf (several only at the deepest level)
-    bodies: Vec<u32>,
+    /// the first note of a leaf, `NONE` for none; the others follow by `Tree::next` (several only at the deepest level)
+    head: u32,
 }
+
+/// No note, no next note.
+const NONE: u32 = u32::MAX;
 
 impl Cell {
     fn new(centre: Vec2, half: f32) -> Cell {
-        Cell { centre, half, mass: 0.0, sum: Vec2::ZERO, children: [0; 4], bodies: Vec::new() }
+        Cell { centre, half, mass: 0.0, sum: Vec2::ZERO, children: [0; 4], head: NONE }
     }
 
     fn is_leaf(&self) -> bool {
@@ -48,28 +51,49 @@ impl Cell {
     }
 }
 
+/// The quadtree. It is built again into the same buffers every step, so a step allocates nothing
+/// once they have grown (PERF-003).
+#[derive(Default)]
 pub struct Tree {
     cells: Vec<Cell>,
+    /// the note after a note in the same leaf, `NONE` for the last
+    next: Vec<u32>,
 }
 
 impl Tree {
+    #[cfg(test)]
     pub fn build(pos: &[Vec2]) -> Tree {
+        let mut tree = Tree::default();
+        tree.build_into(pos);
+        tree
+    }
+
+    /// Builds the tree of `pos` into this tree's buffers.
+    pub fn build_into(&mut self, pos: &[Vec2]) {
         let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
         for p in pos {
             lo = lo.min(*p);
             hi = hi.max(*p);
         }
         let half = ((hi - lo).max_elem() / 2.0).max(1.0) + 1.0;
-        let mut tree = Tree { cells: vec![Cell::new((lo + hi) / 2.0, half)] };
+        self.cells.clear();
+        self.cells.push(Cell::new((lo + hi) / 2.0, half));
+        self.next.clear();
+        self.next.resize(pos.len(), NONE);
         for i in 0..pos.len() {
-            tree.insert(pos, i as u32);
+            self.insert(pos, i as u32);
         }
-        for c in &mut tree.cells {
+        for c in &mut self.cells {
             if c.mass > 0.0 {
                 c.sum /= c.mass;
             }
         }
-        tree
+    }
+
+    /// Puts a note at the front of a leaf.
+    fn add_body(&mut self, at: usize, body: u32) {
+        self.next[body as usize] = self.cells[at].head;
+        self.cells[at].head = body;
     }
 
     fn insert(&mut self, pos: &[Vec2], body: u32) {
@@ -80,18 +104,20 @@ impl Tree {
             self.cells[at].mass += 1.0;
             self.cells[at].sum += p;
             if self.cells[at].is_leaf() {
-                if self.cells[at].bodies.is_empty() || depth >= MAX_DEPTH {
-                    self.cells[at].bodies.push(body);
+                if self.cells[at].head == NONE || depth >= MAX_DEPTH {
+                    self.add_body(at, body);
                     return;
                 }
                 // a leaf that holds a note splits: that note goes one level down
-                let held = std::mem::take(&mut self.cells[at].bodies);
-                for h in held {
+                let mut held = std::mem::replace(&mut self.cells[at].head, NONE);
+                while held != NONE {
+                    let h = held;
+                    held = self.next[h as usize];
                     let q = self.cells[at].quadrant(pos[h as usize]);
                     let child = self.child(at, q);
                     self.cells[child].mass += 1.0;
                     self.cells[child].sum += pos[h as usize];
-                    self.cells[child].bodies.push(h);
+                    self.add_body(child, h);
                 }
             }
             let q = self.cells[at].quadrant(p);
@@ -122,10 +148,12 @@ impl Tree {
                 continue;
             }
             if cell.is_leaf() {
-                for &b in &cell.bodies {
+                let mut b = cell.head;
+                while b != NONE {
                     if b as usize != i {
                         total += push(pos[i], pos[b as usize], 1.0);
                     }
+                    b = self.next[b as usize];
                 }
                 continue;
             }
@@ -142,9 +170,11 @@ impl Tree {
     }
 }
 
-/// The push of every note on every note, by the pair rule: `O(n²)`.
-pub fn exact_forces(pos: &[Vec2]) -> Vec<Vec2> {
-    let mut force = vec![Vec2::ZERO; pos.len()];
+/// The push of every note on every note, by the pair rule: `O(n²)`. It fills `force`, which keeps
+/// its buffer from step to step, so a small graph allocates nothing per step (PERF-003).
+fn exact_forces_into(pos: &[Vec2], force: &mut Vec<Vec2>) {
+    force.clear();
+    force.resize(pos.len(), Vec2::ZERO);
     for i in 0..pos.len() {
         for j in (i + 1)..pos.len() {
             let f = push(pos[i], pos[j], 1.0);
@@ -152,17 +182,40 @@ pub fn exact_forces(pos: &[Vec2]) -> Vec<Vec2> {
             force[j] -= f;
         }
     }
+}
+
+/// The push of every note on every note, by the pair rule: `O(n²)`.
+#[cfg(test)]
+pub fn exact_forces(pos: &[Vec2]) -> Vec<Vec2> {
+    let mut force = Vec::new();
+    exact_forces_into(pos, &mut force);
     force
 }
 
-/// The push on every note: the exact one for a small graph, the quadtree's for a big one.
-pub fn forces(pos: &[Vec2]) -> Vec<Vec2> {
+/// The push on every note, into `force` (whose buffer is reused): the exact one for a small
+/// graph, the quadtree's for a big one.
+pub fn forces_into(pos: &[Vec2], force: &mut Vec<Vec2>, scratch: &mut Scratch) {
     if pos.len() < EXACT_BELOW {
-        return exact_forces(pos);
+        return exact_forces_into(pos, force);
     }
-    let tree = Tree::build(pos);
-    let mut todo = Vec::new();
-    (0..pos.len()).map(|i| tree.force_on(pos, i, &mut todo)).collect()
+    scratch.tree.build_into(pos);
+    force.clear();
+    force.extend((0..pos.len()).map(|i| scratch.tree.force_on(pos, i, &mut scratch.todo)));
+}
+
+/// The buffers `forces_into` works in, kept from step to step.
+#[derive(Default)]
+pub struct Scratch {
+    tree: Tree,
+    todo: Vec<usize>,
+}
+
+/// The push on every note, in a new vector.
+#[cfg(test)]
+pub fn forces(pos: &[Vec2]) -> Vec<Vec2> {
+    let mut force = Vec::new();
+    forces_into(pos, &mut force, &mut Scratch::default());
+    force
 }
 
 #[cfg(test)]
