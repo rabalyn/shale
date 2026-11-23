@@ -293,6 +293,59 @@ fn soc_057_a_sent_post_waits_above_the_list_without_moving_the_view_and_is_index
     assert_eq!(home_post(&w, "new-post-1").text_markdown, "Hello again");
 }
 
+// spec: SOC-057
+#[test]
+fn soc_057_a_retry_of_the_same_draft_has_the_same_key_and_a_changed_draft_a_new_one() {
+    let mut w = W::new("keys");
+    w.click("new-post");
+    type_text(&mut w, "Hello");
+    w.script.send_answers.lock().unwrap().push(Err(ActionError::Failed("timed out".into())));
+    send_it(&mut w);
+    wait_for(&mut w, |w| w.app.social.compose.as_ref().is_some_and(|c| c.stage == Stage::Edit && c.error.is_some()));
+    // the same draft again: the same key
+    send_it(&mut w);
+    wait_for(&mut w, |w| w.script.sends.lock().unwrap().len() == 2);
+    wait_for(&mut w, |w| w.app.social.compose.is_none());
+    // a new draft in a new box: another key
+    w.click("new-post");
+    type_text(&mut w, "Hello");
+    send_it(&mut w);
+    wait_for(&mut w, |w| w.script.sends.lock().unwrap().len() == 3);
+    let keys: Vec<String> = w.script.sends.lock().unwrap().iter().map(|d| d.key.clone()).collect();
+    assert_eq!(keys[0], keys[1], "a retry");
+    assert_ne!(keys[1], keys[2]);
+    assert!(keys.iter().all(|k| k.len() == 13), "{keys:?}");
+}
+
+// spec: SOC-057
+#[test]
+fn soc_057_every_change_of_the_draft_makes_a_new_key_and_keys_only_grow() {
+    let (m, mut c) = (InstanceInfo::defaults(Network::Mastodon), Compose::new(1, "a", "home"));
+    c.text = "one".into();
+    let k1 = c.draft(Network::Mastodon, &m).key;
+    assert_eq!(c.draft(Network::Mastodon, &m).key, k1, "nothing changed");
+    c.text = "two".into();
+    let k2 = c.draft(Network::Mastodon, &m).key;
+    c.visibility = Visibility::Direct;
+    let k3 = c.draft(Network::Mastodon, &m).key;
+    c.cw_on = true;
+    c.cw = "w".into();
+    let k4 = c.draft(Network::Mastodon, &m).key;
+    c.pictures.push(super::actions::DraftPicture { path: "a.png".into(), alt: String::new() });
+    let k5 = c.draft(Network::Mastodon, &m).key;
+    c.pictures[0].alt = "alt".into();
+    let k6 = c.draft(Network::Mastodon, &m).key;
+    c.reply = Some(Box::new(post("p", "bob", 1, None)));
+    let k7 = c.draft(Network::Mastodon, &m).key;
+    c.quote = Some(Box::new(post("q", "bob", 1, None)));
+    let k8 = c.draft(Network::Mastodon, &m).key;
+    let all = [k1, k2, k3, k4, k5, k6, k7, k8];
+    for i in 1..all.len() {
+        assert!(all[i] > all[i - 1], "{} after {}", all[i], all[i - 1]);
+    }
+    assert!(all.iter().all(|k| k.len() == 13 && k.chars().all(|c| "234567abcdefghijklmnopqrstuvwxyz".contains(c))), "{all:?}");
+}
+
 // spec: SOC-056
 #[test]
 fn soc_056_a_send_that_the_server_refuses_for_its_permissions_keeps_the_text_and_opens_the_sign_in() {

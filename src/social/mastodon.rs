@@ -383,7 +383,10 @@ pub fn send(server: &str, token: &str, d: &Draft, poll: std::time::Duration) -> 
         return Err(format!("This server takes at most {} pictures in a post.", d.info.max_pictures).into());
     }
     let media = d.pictures.iter().map(|p| upload(&server, token, p, d.info.image_bytes, poll)).collect::<Result<Vec<_>, _>>()?;
-    let v = api("POST", &format!("{server}/api/v1/statuses"), Some(token), Some(&status_body(d, &media))).map_err(write_error)?;
+    // the same key for a retry of the same draft: the server answers with the post it made the first time (SOC-057)
+    let key = format!("Idempotency-Key: {}", d.key);
+    let extra: Vec<&str> = if d.key.is_empty() { vec![] } else { vec![&key] };
+    let v = api_with("POST", &format!("{server}/api/v1/statuses"), Some(token), Some(&status_body(d, &media)), &extra).map_err(write_error)?;
     parse_status(&v, &server).ok_or_else(|| "the server's answer is not a post".into())
 }
 
@@ -599,7 +602,7 @@ mod tests {
     }
 
     fn draft(text: &str) -> Draft {
-        Draft { text: text.into(), cw: String::new(), visibility: Visibility::Public, reply_to: None, quote: None, pictures: vec![], info: InstanceInfo::defaults(Network::Mastodon) }
+        Draft { text: text.into(), cw: String::new(), visibility: Visibility::Public, reply_to: None, quote: None, pictures: vec![], info: InstanceInfo::defaults(Network::Mastodon), key: "keymasto0000a".into() }
     }
 
     // spec: SOC-051, SOC-052, SOC-054
@@ -636,6 +639,23 @@ mod tests {
         // too many pictures are refused before anything is sent
         let many = Draft { pictures: vec![DraftPicture { path: "a.png".into(), alt: String::new() }; 5], ..draft("t") };
         assert!(send(&base, "tok-1", &many, std::time::Duration::ZERO).unwrap_err().to_string().contains("at most 4 pictures"));
+    }
+
+    // spec: SOC-057
+    #[test]
+    fn a_status_carries_the_key_of_its_draft_so_a_retry_cannot_post_twice() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let (base, handle) = mock_http(3, |_, _, headers, _| {
+            let key = headers.lines().find_map(|l| l.to_ascii_lowercase().strip_prefix("idempotency-key: ").map(String::from)).unwrap_or_default();
+            // a server that knows the key answers with the post it made the first time
+            let id = if key == "k1" { "500" } else { "501" };
+            (200, status(id, "1", "ada", "2024-05-17T10:00:00Z", None, "<p>x</p>").to_string())
+        });
+        let go = |key: &str| send(&base, "tok-1", &Draft { key: key.into(), ..draft("x") }, std::time::Duration::ZERO).unwrap().id;
+        assert_eq!((go("k1"), go("k1"), go("k2")), ("500".to_string(), "500".to_string(), "501".to_string()));
+        handle.join().unwrap();
     }
 
     // spec: SOC-052

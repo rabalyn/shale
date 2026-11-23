@@ -173,6 +173,26 @@ pub struct Draft {
     pub quote: Option<Post>,
     pub pictures: Vec<DraftPicture>,
     pub info: InstanceInfo,
+    /// names this draft for the server: the same for a retry of the same draft, another one after a
+    /// change (a TID, `new_key`); Mastodon sends it as `Idempotency-Key`, Bluesky as the `rkey` (SOC-057)
+    pub key: String,
+}
+
+/// A fresh key: a TID (13 characters of the base32-sortable alphabet, 53 bits of microseconds and
+/// 10 of a counter), which is also what Bluesky wants as a record key.
+pub fn new_key() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static LAST: AtomicU64 = AtomicU64::new(0);
+    let micros = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_micros() as u64).unwrap_or(0);
+    // always above the one before, also within one microsecond
+    let mut id = (micros & ((1 << 53) - 1)) << 10;
+    let prev = LAST.fetch_max(id, Ordering::SeqCst);
+    if id <= prev {
+        id = prev + 1;
+        LAST.store(id, Ordering::SeqCst);
+    }
+    const ALPHABET: &[u8; 32] = b"234567abcdefghijklmnopqrstuvwxyz";
+    (0..13).rev().map(|i| ALPHABET[((id >> (5 * i)) & 31) as usize] as char).collect()
 }
 
 // ---------------------------------------------------------------- pictures

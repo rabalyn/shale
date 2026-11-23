@@ -400,7 +400,13 @@ fn json_text(v: &Value) -> Zeroizing<String> {
 /// One JSON request to an API. `token`: sent as `Authorization: Bearer …` (inside curl's input,
 /// never on its command line); only ever to this one address.
 pub(crate) fn api(method: &str, url: &str, token: Option<&str>, body: Option<&Value>) -> Result<Value, ApiError> {
+    api_with(method, url, token, body, &[])
+}
+
+/// Like `api` with more headers (`Idempotency-Key: …`, SOC-057): nothing secret may be in them.
+pub(crate) fn api_with(method: &str, url: &str, token: Option<&str>, body: Option<&Value>, extra: &[&str]) -> Result<Value, ApiError> {
     let mut hs = vec!["Accept: application/json"];
+    hs.extend_from_slice(extra);
     // the body can hold a password or client secret, the header holds the token: both are wiped
     let text = body.map(json_text).unwrap_or_default();
     if body.is_some() {

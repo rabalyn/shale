@@ -41,6 +41,8 @@ pub struct Compose {
     pub error: Option<String>,
     /// the text field takes the keyboard when the box opens
     pub focus: bool,
+    /// the key of the draft sent last and what it was (`draft`, SOC-057)
+    pub attempt: Option<(String, String)>,
 }
 
 /// Characters of a text as Mastodon counts them: an address counts 23, a mention `@user@host` only `@user`.
@@ -81,6 +83,7 @@ impl Compose {
             path: String::new(),
             stage: Stage::Edit,
             error: None,
+            attempt: None,
             focus: true,
         }
     }
@@ -158,8 +161,9 @@ impl Compose {
     }
 
     /// The post as it is sent.
-    pub fn draft(&self, network: Network, info: &InstanceInfo) -> Draft {
-        Draft {
+    /// The same draft sent again (after a failure or a timeout) has the same key; any change makes a new one (SOC-057).
+    pub fn draft(&mut self, network: Network, info: &InstanceInfo) -> Draft {
+        let mut d = Draft {
             text: self.final_text(network, info),
             cw: if network == Network::Mastodon && self.cw_on { self.cw.trim().to_string() } else { String::new() },
             visibility: self.visibility,
@@ -167,7 +171,15 @@ impl Compose {
             quote: if self.real_quote(network, info) { self.quote.as_deref().cloned() } else { None },
             pictures: self.pictures.clone(),
             info: info.clone(),
-        }
+            key: String::new(),
+        };
+        let what = format!("{:?}", (&d.text, &d.cw, d.visibility, d.reply_to.as_ref().map(|p| &p.id), d.quote.as_ref().map(|p| &p.id), &d.pictures));
+        d.key = match &self.attempt {
+            Some((key, same)) if *same == what => key.clone(),
+            _ => new_key(),
+        };
+        self.attempt = Some((d.key.clone(), what));
+        d
     }
 }
 

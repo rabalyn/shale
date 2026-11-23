@@ -602,6 +602,12 @@ pub fn facets(text: &str, mut resolve: impl FnMut(&str) -> Option<String>) -> Ve
     out
 }
 
+/// The answer to a createRecord with a record key that is taken: status 409, or words that say so.
+fn is_conflict(message: &str) -> bool {
+    let m = message.to_ascii_lowercase();
+    m.contains("status 409") || m.contains("already exist") || m.contains("duplicate") || m.contains("conflict")
+}
+
 /// "ada.bsky.social": labels of letters, digits and hyphens, at least two.
 fn is_handle(h: &str) -> bool {
     let labels: Vec<&str> = h.split('.').collect();
@@ -653,8 +659,17 @@ pub fn send(api: &mut Api, d: &Draft) -> Result<Post, ActionError> {
         (Some(e), None) | (None, Some(e)) => record["embed"] = e,
         (None, None) => {}
     }
-    let v = api.call("POST", "com.atproto.repo.createRecord", &[], Some(&json!({"repo": did, "collection": "app.bsky.feed.post", "record": record})))?;
-    let (uri, cid) = (text(&v["uri"]), text(&v["cid"]));
+    // the record key is the key of the draft: a retry of a send that went through but did not
+    // answer finds its record there already, which counts as posted (SOC-057)
+    let mut body = json!({"repo": did, "collection": "app.bsky.feed.post", "record": record});
+    if !d.key.is_empty() {
+        body["rkey"] = json!(d.key);
+    }
+    let (uri, cid) = match api.call("POST", "com.atproto.repo.createRecord", &[], Some(&body)) {
+        Ok(v) => (text(&v["uri"]), text(&v["cid"])),
+        Err(e) if !d.key.is_empty() && is_conflict(&e) => (format!("at://{did}/app.bsky.feed.post/{}", d.key), String::new()),
+        Err(e) => return Err(e.into()),
+    };
     if !uri.starts_with("at://") {
         return Err("the server did not name the new post".into());
     }
@@ -803,7 +818,7 @@ mod tests {
     }
 
     fn draft(text: &str) -> Draft {
-        Draft { text: text.into(), cw: String::new(), visibility: super::super::actions::Visibility::Public, reply_to: None, quote: None, pictures: vec![], info: InstanceInfo::defaults(Network::Bluesky) }
+        Draft { text: text.into(), cw: String::new(), visibility: super::super::actions::Visibility::Public, reply_to: None, quote: None, pictures: vec![], info: InstanceInfo::defaults(Network::Bluesky), key: "keybsky00000a".into() }
     }
 
     // spec: SOC-051, SOC-052, SOC-054
@@ -868,6 +883,38 @@ mod tests {
         assert!(send(&mut api, &draft(&long)).unwrap_err().to_string().contains("at most 300"));
         let calls = handle.join().unwrap();
         assert_eq!(calls.iter().filter(|c| c.contains("createRecord")).count(), 4, "{calls:?}");
+    }
+
+    // spec: SOC-057
+    #[test]
+    fn the_record_key_is_the_key_of_the_draft_and_a_taken_key_on_a_retry_counts_as_posted() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let taken = Arc::new(AtomicBool::new(false));
+        let keys = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let (taken2, keys2) = (taken.clone(), keys.clone());
+        let (base, handle) = writing_server(4, move |method, nsid, body| match (method, nsid) {
+            ("POST", "com.atproto.repo.createRecord") => {
+                let key = body["rkey"].as_str().unwrap_or("").to_string();
+                keys2.lock().unwrap().push(key.clone());
+                // the first try made the record but the answer was lost; the retry meets the record
+                if key == "keybsky00000a" && taken2.swap(true, Ordering::SeqCst) {
+                    return (400, json!({"error": "InvalidRequest", "message": "Record already exists"}).to_string());
+                }
+                (200, json!({"uri": format!("at://did:plc:ada/app.bsky.feed.post/{key}"), "cid": "c1"}).to_string())
+            }
+            ("GET", "app.bsky.feed.getPosts") => (200, json!({"posts": [post_view("keybsky00000a", "did:plc:ada", "ada.test", "2024-05-17T10:30:00Z", None, "same")]}).to_string()),
+            _ => (404, json!({"error": "NotFound"}).to_string()),
+        });
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        let first = send(&mut api, &draft("same")).unwrap();
+        let retry = send(&mut api, &draft("same")).unwrap();
+        assert_eq!((first.id.as_str(), retry.id.as_str()), ("at://did:plc:ada/app.bsky.feed.post/keybsky00000a", "at://did:plc:ada/app.bsky.feed.post/keybsky00000a"), "the retry is the post, read back");
+        assert_eq!(*keys.lock().unwrap(), ["keybsky00000a", "keybsky00000a"], "the same record key");
+        // other refusals are errors, not posted
+        assert!(is_conflict("the server answered with status 409") && !is_conflict("the server answered with status 500: Internal error"));
+        handle.join().unwrap();
     }
 
     // spec: SOC-053, SOC-054
