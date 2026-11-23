@@ -105,7 +105,7 @@ Inside each of these tables: `family` and `size`. The old `font_size` of earlier
 size of the two editor areas when you updated.
 | `line_numbers` | on | Editor, "Show line numbers in the editor" |
 | `date_prefix_new_notes` | on | Editor, "Date prefix for new notes": a note Shale makes (new note, red link, quick switcher, new drawing) is named `YYMMDD_name.md` with today's date; the title line shows the name without the prefix (see [[Editor]]) |
-| `properties_in_editor` | Folded | Appearance, "Properties in the editor": how the properties (the lines between the two `---` at the top of a note) show: `Folded` (one line), `Card` or `Raw` (all lines). In the editor `Folded` and `Card` start a note with its properties folded to a summary line, `Raw` opens it unfolded (see [[Editor]]) |
+| `properties_in_editor` | Folded | Appearance, "Properties in the editor": how the properties (the lines between the two `---` at the top of a note) show: `Folded` (one line), `Card` or `Raw` (all lines). In the editor `Folded` and `Card` start a note with its properties folded, `Folded` to a summary line and `Card` to the card of the reading view, `Raw` opens it unfolded (see [[Editor]]) |
 | `properties_in_reader` | Card | Appearance, "Properties in the reading view": the same choice for the reading view; a card is made for the type of the note (see [[Reading view]]) |
 | `numbered_headings` | on | Editor, "Number headings": `#` and deeper show 1, 1.1, 1.2 before their text; a note's front matter `numbered-headings: true` or `false` overrides it for that note (see [[Notes and links]]) |
 | `format_toolbar` | on | Settings → Editor → Editing, "Show formatting toolbar above the text of a note" |

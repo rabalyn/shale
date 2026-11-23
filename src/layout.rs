@@ -974,7 +974,7 @@ impl ShaleApp {
                             numbers: reader::Extras::numbers_of(&text, self.cfg.numbered_headings),
                             scroll_to: tab.reader_line.take(),
                             properties: self.cfg.properties_in_reader,
-                            folds: Some(std::cell::RefCell::new(crate::fold_ui::ReaderFolds { ui: &mut tab.editor.fold, summary: self.cfg.properties_in_editor != crate::config::PropertiesView::Raw })),
+                            folds: Some(std::cell::RefCell::new(crate::fold_ui::ReaderFolds { ui: &mut tab.editor.fold, props: self.cfg.properties_in_editor })),
                         };
                         let shown = crate::fonts::with_area(ui, &fonts.rendered, |ui| reader::show(ui, &text, vault, &rel, &mut reader::Caches { scenes: &mut self.scenes, media: &self.media }, (base, dark), &extras));
                         if let Some(a) = shown {
@@ -986,7 +986,7 @@ impl ShaleApp {
                         tab.editor.numbered_headings = self.cfg.numbered_headings;
                         tab.editor.live_preview = self.cfg.live_preview;
                         tab.editor.preview_raw_lines = self.cfg.preview_raw_lines;
-                        tab.editor.properties_summary = self.cfg.properties_in_editor != crate::config::PropertiesView::Raw;
+                        tab.editor.properties_view = self.cfg.properties_in_editor;
                         tab.editor.table_cell_edit = self.cfg.table_cell_edit;
                         tab.editor.vim_enabled = self.cfg.vim_mode;
                         tab.editor.cursor_style = crate::cursor_style::CursorStyle { shape: self.cfg.cursor_shape, normal_shape: self.cfg.normal_cursor_shape, blink: self.cfg.cursor_blink };

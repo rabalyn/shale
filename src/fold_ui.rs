@@ -3,8 +3,11 @@
 //! front matter, the folds a note starts with and the commands. The blocks and the commands
 //! themselves are in `fold.rs`.
 
+use crate::config::PropertiesView;
 use crate::fold::{find_blocks, Block, FoldCmd, FoldKind, Key, NoteFolds, View};
+use crate::reader::ReaderAction;
 use crate::theme;
+use crate::vault::Vault;
 use eframe::egui::{self, text::CCursor, Galley, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2};
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -23,8 +26,9 @@ pub struct Frame {
     pub view: View,
     /// a mail note (EDIT-082): its quotes are "quoted lines"
     pub mail: bool,
-    /// a folded front matter shows its summary line instead of `---` (EDIT-081)
-    pub summary: bool,
+    /// how the front matter shows in the editor (CFG-050): a folded one shows its summary line or its card
+    /// instead of `---`, `Raw` leaves it open (EDIT-081)
+    pub props: PropertiesView,
 }
 
 /// A fast hash of a text, to tell whether it is the one the folds were found in (EDIT-100): eight bytes
@@ -44,10 +48,10 @@ pub(crate) fn hash_of(text: &str) -> u64 {
 }
 
 impl Frame {
-    fn new(hash: u64, blocks: Arc<Vec<Block>>, mail: bool, folds: Arc<NoteFolds>, summary: bool) -> Frame {
+    fn new(hash: u64, blocks: Arc<Vec<Block>>, mail: bool, folds: Arc<NoteFolds>, props: PropertiesView) -> Frame {
         let folded = folds.folded(&blocks);
         let view = View::of(&blocks, &folded);
-        Frame { hash, blocks, folds, folded, view, mail, summary }
+        Frame { hash, blocks, folds, folded, view, mail, props }
     }
 
     /// Is `text` a mail note whose quotes say "quoted lines" (EDIT-082)?
@@ -55,16 +59,23 @@ impl Frame {
         blocks.iter().any(|b| b.kind == FoldKind::Quote) && crate::fold::is_mail(text)
     }
 
-    /// The folded front matter's block, when its first line is shown as a summary (EDIT-081).
+    /// The folded front matter's block, when its first line is shown as a summary line or a card (EDIT-081).
     fn front_summary(&self) -> Option<&Block> {
         let b = self.blocks.iter().find(|b| b.kind == FoldKind::Front)?;
-        (self.summary && self.folded.iter().any(|&i| self.blocks[i].header == b.header && self.blocks[i].kind == FoldKind::Front)).then_some(b)
+        (self.props != PropertiesView::Raw && self.folded.iter().any(|&i| self.blocks[i].header == b.header && self.blocks[i].kind == FoldKind::Front)).then_some(b)
     }
 
-    /// The bytes of the first line of `text` while a summary is painted over it: its own text is
-    /// hidden but keeps its row (EDIT-081).
-    pub fn veiled(&self, text: &str) -> Option<Range<usize>> {
-        self.front_summary().map(|_| 0..text.find('\n').map_or(text.len(), |p| p + 1))
+    /// Whether the folded front matter is drawn as a card (EDIT-081): the editor then measures the card
+    /// ([`crate::properties_ui::card_height`]) and gives that to [`Frame::veiled`].
+    pub fn shows_card(&self) -> bool {
+        self.props == PropertiesView::Card && self.front_summary().is_some()
+    }
+
+    /// The bytes of the first line of `text` while a summary or a card is painted over it, with the
+    /// height of its row: its own text is hidden but keeps its row, which is `card` high (plus a gap)
+    /// when there is a card, else a negative height for a row of text (EDIT-081).
+    pub fn veiled(&self, text: &str, card: Option<f32>) -> Option<(Range<usize>, f32)> {
+        self.front_summary().map(|_| (0..text.find('\n').map_or(text.len(), |p| p + 1), card.map_or(-1.0, |h| h + CARD_GAP)))
     }
 
     /// The same folds on `text`: this frame when the text is the one it was made for, else the folds
@@ -76,7 +87,7 @@ impl Frame {
         } else {
             let blocks = find_blocks(text);
             let mail = Frame::mail_of(text, &blocks);
-            Cow::Owned(Frame::new(hash, Arc::new(blocks), mail, self.folds.clone(), self.summary))
+            Cow::Owned(Frame::new(hash, Arc::new(blocks), mail, self.folds.clone(), self.props))
         }
     }
 }
@@ -95,7 +106,15 @@ pub struct Painted<'a> {
     pub area: Rect,
     /// the size of the text
     pub base: f32,
+    /// the vault, for the people of a card
+    pub vault: &'a Vault,
+    /// the width and the height the card of a folded front matter was measured at (EDIT-081); none
+    /// when there is no card
+    pub card: Option<(f32, f32)>,
 }
+
+/// The room between a card and the text under it.
+pub const CARD_GAP: f32 = 4.0;
 
 /// What the last frame drew for one header line (for the tests).
 #[derive(Clone, Debug)]
@@ -143,7 +162,7 @@ pub const MARKER: f32 = 12.0;
 /// setting that folds a note's front matter when the note is first shown (EDIT-081).
 pub struct ReaderFolds<'a> {
     pub ui: &'a mut FoldUi,
-    pub summary: bool,
+    pub props: PropertiesView,
 }
 
 /// The ▸ / ▾ marker in `rect`: drawn, with its hand cursor and its hint; true when it was clicked.
@@ -164,12 +183,12 @@ pub fn marker_button(ui: &mut Ui, id: egui::Id, rect: Rect, folded: bool) -> boo
 
 impl FoldUi {
     /// The folds of `text` of the note `rel` for this frame; forgets the folds whose block is gone.
-    /// The first time a note is shown it gets the folds it starts with (EDIT-081, EDIT-082); `summary`
+    /// The first time a note is shown it gets the folds it starts with (EDIT-081, EDIT-082); `props`
     /// is the setting that folds the front matter (Folded and Card; Raw leaves it open).
-    pub fn begin(&mut self, rel: &Path, text: &str, summary: bool) -> Frame {
+    pub fn begin(&mut self, rel: &Path, text: &str, props: PropertiesView) -> Frame {
         let hash = hash_of(text);
         // the blocks of the last frame while the text is the same (EDIT-100)
-        let same = self.last.get(rel).filter(|f| f.hash == hash && f.summary == summary);
+        let same = self.last.get(rel).filter(|f| f.hash == hash && f.props == props);
         let (blocks, mail) = match same {
             Some(f) => (f.blocks.clone(), f.mail),
             None => {
@@ -180,7 +199,7 @@ impl FoldUi {
         };
         if !self.seen.contains(rel) {
             self.seen.insert(rel.to_path_buf());
-            let start = NoteFolds::defaults(&blocks, crate::fold::is_mail(text), summary);
+            let start = NoteFolds::defaults(&blocks, crate::fold::is_mail(text), props != PropertiesView::Raw);
             if !start.is_empty() {
                 self.initial.insert(rel.to_path_buf(), start.clone());
                 self.notes.insert(rel.to_path_buf(), start);
@@ -206,7 +225,7 @@ impl FoldUi {
         if folds.is_empty() {
             self.notes.remove(rel);
         }
-        let frame = Frame::new(hash, blocks, mail, Arc::new(folds), summary);
+        let frame = Frame::new(hash, blocks, mail, Arc::new(folds), props);
         if self.last.len() >= MAX_CACHED {
             self.last.clear();
         }
@@ -321,7 +340,7 @@ impl FoldUi {
     /// key pressed with the cursor in it) opens it, and the cursor leaving it folds it again when
     /// the cursor opened it. `line` is the cursor's line while the editor has the keyboard.
     pub fn follow_cursor(&mut self, rel: &Path, frame: &Frame, line: Option<usize>, typed: bool) {
-        let Some(fi) = frame.blocks.iter().position(|b| b.kind == FoldKind::Front).filter(|_| frame.summary) else { return };
+        let Some(fi) = frame.blocks.iter().position(|b| b.kind == FoldKind::Front).filter(|_| frame.props != PropertiesView::Raw) else { return };
         let Some(line) = line else {
             self.in_front.remove(rel);
             return;
@@ -347,8 +366,9 @@ impl FoldUi {
     }
 
     /// Draw the markers and the badges over the laid-out text and do what a click on one asks.
-    pub fn paint(&mut self, ui: &mut Ui, frame: &Frame, at: &Painted) {
-        let Painted { id, index, rel, galley, pos, area, base } = *at;
+    pub fn paint(&mut self, ui: &mut Ui, frame: &Frame, at: &Painted) -> Option<ReaderAction> {
+        let Painted { id, index, rel, galley, pos, area, base, vault, card } = *at;
+        let mut action = None;
         self.widgets.clear();
         let text = galley.job.text.as_str();
         let frame = frame.at(text);
@@ -421,24 +441,41 @@ impl FoldUi {
                 Err(i) => self.widgets.insert(i, Widget { line: header, marker: None, badge: Some(rect), copy: None }),
             }
         }
-        // the folded front matter: its summary line in place of `---`, a click opens it (EDIT-081)
+        // the folded front matter: its card or its summary line in place of `---`, a click opens it (EDIT-081)
         if let Some(b) = frame.front_summary().filter(|b| b.header < lines.len()) {
             let row = row_of(b.header, 0);
             if row.max.y >= clip.min.y && row.min.y <= clip.max.y {
-                let label = match crate::properties::summary(text) {
-                    Some(s) => format!("Properties \u{b7} {s}"),
-                    None => "Properties".to_string(),
+                let open = match card {
+                    Some((width, height)) => {
+                        let rect = Rect::from_min_size(Pos2::new(pos.x, row.min.y), Vec2::new(width, height));
+                        // under the card, so that its own links and dates take the click first; it takes drags too (EDIT-112)
+                        let resp = ui.interact(rect, id.with("fold-card"), Sense::click_and_drag());
+                        if resp.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
+                        let mut child = ui.new_child(egui::UiBuilder::new().id_salt("fold-card").max_rect(rect));
+                        child.set_clip_rect(clip.intersect(rect));
+                        crate::properties_ui::card(&mut child, text, vault, rel, &mut action);
+                        resp.clicked()
+                    }
+                    None => {
+                        let label = match crate::properties::summary(text) {
+                            Some(s) => format!("Properties \u{b7} {s}"),
+                            None => "Properties".to_string(),
+                        };
+                        let hit = Rect::from_min_max(Pos2::new(pos.x, row.min.y), Pos2::new(area.right(), row.max.y));
+                        // takes drags too, so the text box under it does not get the press (EDIT-112)
+                        let resp = ui.interact(hit, id.with("fold-summary"), Sense::click_and_drag());
+                        let colour = if resp.hovered() { theme::palette().text } else { theme::palette().muted };
+                        let g = painter.layout_no_wrap(label, egui::FontId::proportional((base * 0.9).max(9.0)), colour);
+                        painter.with_clip_rect(hit.intersect(clip)).galley(Pos2::new(pos.x, row.center().y - g.size().y / 2.0), g, colour);
+                        if resp.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
+                        resp.on_hover_text("Open the properties").clicked()
+                    }
                 };
-                let hit = Rect::from_min_max(Pos2::new(pos.x, row.min.y), Pos2::new(area.right(), row.max.y));
-                // takes drags too, so the text box under it does not get the press (EDIT-112)
-                let resp = ui.interact(hit, id.with("fold-summary"), Sense::click_and_drag());
-                let colour = if resp.hovered() { theme::palette().text } else { theme::palette().muted };
-                let g = painter.layout_no_wrap(label, egui::FontId::proportional((base * 0.9).max(9.0)), colour);
-                painter.with_clip_rect(hit.intersect(clip)).galley(Pos2::new(pos.x, row.center().y - g.size().y / 2.0), g, colour);
-                if resp.hovered() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                }
-                if resp.on_hover_text("Open the properties").clicked() {
+                if open {
                     self.auto.insert(rel.to_path_buf());
                     if let Some(i) = frame.blocks.iter().position(|x| x.kind == FoldKind::Front) {
                         self.set(rel, &frame, i, false);
@@ -452,6 +489,7 @@ impl FoldUi {
             self.apply(rel, &frame, cmd, line);
             ui.ctx().request_repaint();
         }
+        action
     }
 }
 

@@ -478,6 +478,72 @@ fn edit_081_the_setting_raw_leaves_the_front_matter_open_and_a_note_without_one_
     assert_eq!(w.hidden(), 0);
 }
 
+/// A mail note with a date, from the contact note `B`, for the card in the editor.
+const CARD_MAIL: &str = "---\ntype: email\nfrom: B <b@example.org>\ndate: 2026-11-12 14:30\nsubject: Hi there\n---\nHello\n\nWorld";
+
+fn card_on(app: &mut ShaleApp) {
+    app.cfg.properties_in_editor = crate::config::PropertiesView::Card;
+}
+
+/// Where the text `needle` was painted last frame.
+fn at(w: &W, needle: &str) -> Pos2 {
+    w.hl.text.iter().find(|(t, _)| t == needle).unwrap_or_else(|| panic!("{needle:?} not painted: {:?}", w.hl.text.iter().map(|t| &t.0).collect::<Vec<_>>())).1
+}
+
+// spec: EDIT-081, CFG-050
+#[test]
+fn edit_081_the_setting_card_draws_the_card_in_place_of_the_summary_line_and_a_click_opens_the_front_matter() {
+    let mut w = W::new_with("card", CARD_MAIL, true, card_on);
+    // folded as with Folded, but the card is drawn, not the summary line
+    let n = w.numbers();
+    assert!(n.contains(&1) && n.contains(&7) && !n.contains(&2) && !n.contains(&5), "folded: {n:?}");
+    assert!(!w.hl.text.iter().any(|(t, _)| t.starts_with("Properties \u{b7}")), "no summary line: {:?}", w.hl.text);
+    assert!(w.painted("Hi there") && w.painted("B"), "the card: {:?}", w.hl.text);
+    assert!(!w.painted("All properties"), "no raw-lines toggle in the editor");
+    // the row of the first line is as high as the card and the text starts under it
+    let row = w.row_of("---");
+    let (subject, hello) = (at(&w, "Hi there"), w.row_of("Hello"));
+    assert!(row.height() > 40.0, "room for the card: {row:?}");
+    assert!(subject.y >= row.min.y && subject.y < row.max.y, "the card is in its row: {subject:?} {row:?}");
+    assert!(hello.min.y >= row.max.y - 0.5, "the text is under the card: {hello:?} {row:?}");
+    assert_eq!(w.text(), CARD_MAIL, "the text is as it was");
+    // a click on the card, away from the people and the dates, opens the lines with the cursor in them
+    let x = w.text_x();
+    w.click(Pos2::new(x + 300.0, row.min.y + 3.0));
+    assert!(w.numbers().contains(&2), "open: {:?}", w.numbers());
+    assert!(!w.painted("Hi there"), "the card is gone");
+    assert!((1..=5).contains(&w.cursor_line()), "{}", w.cursor_line());
+    // the cursor leaving folds it, and the card is back
+    w.cursor_in("Hello");
+    assert!(!w.numbers().contains(&2), "folded again: {:?}", w.numbers());
+    assert!(w.painted("Hi there"), "the card again: {:?}", w.hl.text);
+    assert_eq!(std::fs::read_to_string(w.dir.join(NOTE)).unwrap(), CARD_MAIL);
+    // Folded still has the line and Raw neither
+    let w = W::new("card-folded", CARD_MAIL, true);
+    assert!(w.painted("Properties \u{b7} email \u{b7} B \u{b7} 2026-11-12") && !w.painted("Hi there"), "{:?}", w.hl.text);
+}
+
+// spec: EDIT-081
+#[test]
+fn edit_081_a_person_of_the_card_opens_the_note_and_a_front_matter_without_a_card_keeps_the_summary_line() {
+    let mut w = W::new_with("card-links", CARD_MAIL, true, card_on);
+    let name = at(&w, "B");
+    w.click(name + egui::vec2(3.0, 5.0));
+    assert!(matches!(&w.app.tabbar.tabs[w.app.tabbar.active].view, crate::app::View::Note(p) if p == Path::new("B.md")), "the contact note opened");
+    // the date shows its day in the calendar
+    let mut w = W::new_with("card-date", CARD_MAIL, true, card_on);
+    let day = crate::calendar::time::days_from_civil(2026, 11, 12);
+    let date = at(&w, "2026-11-12 14:30");
+    // the position of a right-aligned text is its right edge
+    w.click(date + egui::vec2(-40.0, 5.0));
+    assert!(w.app.cal.side.selected == day || w.app.cal.main.selected == day, "the calendar shows the day: {} {}", w.app.cal.side.selected, w.app.cal.main.selected);
+    assert_eq!(w.text(), CARD_MAIL);
+    // a front matter with no property has no card: the summary line stays
+    let w = W::new_with("card-none", "---\nnothing to see\n---\nBody", true, card_on);
+    assert!(w.painted("Properties"), "the summary line: {:?}", w.hl.text);
+    assert!(w.row_of("---").height() < 40.0, "an ordinary row");
+}
+
 // spec: EDIT-084
 #[test]
 fn edit_084_the_cursor_entering_the_front_matter_opens_it_and_leaving_folds_it_again() {
@@ -909,7 +975,7 @@ fn large_note_timing() {
     let mut state = crate::fold_ui::FoldUi::default();
     let (t, e) = (text.clone(), edited.clone());
     let mut flip = false;
-    println!("FoldUi::begin, nothing folded, unchanged text: {:?}", avg(20, Box::new(move || drop(state.begin(Path::new("A.md"), &t, false)))));
+    println!("FoldUi::begin, nothing folded, unchanged text: {:?}", avg(20, Box::new(move || drop(state.begin(Path::new("A.md"), &t, crate::config::PropertiesView::Raw)))));
     let mut state = crate::fold_ui::FoldUi::default();
     let t = text.clone();
     println!(
@@ -918,17 +984,17 @@ fn large_note_timing() {
             20,
             Box::new(move || {
                 flip = !flip;
-                drop(state.begin(Path::new("A.md"), if flip { &t } else { &e }, false))
+                drop(state.begin(Path::new("A.md"), if flip { &t } else { &e }, crate::config::PropertiesView::Raw))
             })
         )
     );
     let mut state = crate::fold_ui::FoldUi::default();
-    let frame = state.begin(Path::new("A.md"), &text, false);
+    let frame = state.begin(Path::new("A.md"), &text, crate::config::PropertiesView::Raw);
     state.apply(Path::new("A.md"), &frame, crate::fold::FoldCmd::FoldAll, 0);
     let t = text.clone();
     let mut again = crate::fold_ui::FoldUi::default();
     again.apply(Path::new("A.md"), &frame, crate::fold::FoldCmd::FoldAll, 0);
-    println!("FoldUi::begin, everything folded, unchanged text: {:?}", avg(20, Box::new(move || drop(state.begin(Path::new("A.md"), &t, false)))));
+    println!("FoldUi::begin, everything folded, unchanged text: {:?}", avg(20, Box::new(move || drop(state.begin(Path::new("A.md"), &t, crate::config::PropertiesView::Raw)))));
     let (t, e) = (text.clone(), edited.clone());
     let mut flip = false;
     println!(
@@ -937,7 +1003,7 @@ fn large_note_timing() {
             20,
             Box::new(move || {
                 flip = !flip;
-                drop(again.begin(Path::new("A.md"), if flip { &t } else { &e }, false))
+                drop(again.begin(Path::new("A.md"), if flip { &t } else { &e }, crate::config::PropertiesView::Raw))
             })
         )
     );
@@ -1019,7 +1085,7 @@ fn large_note_timing() {
     crate::theme::apply(&ctx);
     let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::Vec2::new(900.0, 700.0))), ..Default::default() };
     let mut folds = crate::fold_ui::FoldUi::default();
-    let frame = folds.begin(Path::new("A.md"), &text, false);
+    let frame = folds.begin(Path::new("A.md"), &text, crate::config::PropertiesView::Raw);
     let _ = ctx.run_ui(raw, |ui| {
         let s = Instant::now();
         let galley = ui.painter().layout(text.clone(), egui::FontId::monospace(14.0), egui::Color32::WHITE, 800.0);
@@ -1048,38 +1114,38 @@ fn edit_100_an_unchanged_text_reuses_the_blocks_and_any_change_of_the_text_finds
     let rel = Path::new("A.md");
     let text = "# One\nfirst\n## Sub\nsecond\n# Two\nthird\n```rust\nlet a = 1;\n```\n";
     let mut ui = crate::fold_ui::FoldUi::default();
-    let a = ui.begin(rel, text, false);
-    let b = ui.begin(rel, text, false);
+    let a = ui.begin(rel, text, crate::config::PropertiesView::Raw);
+    let b = ui.begin(rel, text, crate::config::PropertiesView::Raw);
     assert!(Arc::ptr_eq(&a.blocks, &b.blocks), "the same text parses nothing");
     // the same length, one byte different: found again
     let edited = text.replace("# Two", "# Tw0");
     assert_eq!(edited.len(), text.len());
-    let c = ui.begin(rel, &edited, false);
+    let c = ui.begin(rel, &edited, crate::config::PropertiesView::Raw);
     assert!(!Arc::ptr_eq(&a.blocks, &c.blocks));
     assert_eq!(*c.blocks, find_blocks(&edited));
     assert_eq!(c.blocks[2].title, "# Tw0");
     // a change at the very end, a longer and a shorter text
     for t in [format!("{edited}x"), text.to_string(), text[..text.len() - 1].to_string(), String::new()] {
-        let f = ui.begin(rel, &t, false);
+        let f = ui.begin(rel, &t, crate::config::PropertiesView::Raw);
         assert_eq!(*f.blocks, find_blocks(&t), "{t:?}");
-        assert!(Arc::ptr_eq(&f.blocks, &ui.begin(rel, &t, false).blocks));
+        assert!(Arc::ptr_eq(&f.blocks, &ui.begin(rel, &t, crate::config::PropertiesView::Raw).blocks));
     }
     // a command changes the folds of the same text: the frame follows, from the cached blocks, and equals the uncached one
-    let frame = ui.begin(rel, text, false);
+    let frame = ui.begin(rel, text, crate::config::PropertiesView::Raw);
     ui.apply(rel, &frame, FoldCmd::FoldAll, 0);
-    let folded = ui.begin(rel, text, false);
+    let folded = ui.begin(rel, text, crate::config::PropertiesView::Raw);
     assert!(Arc::ptr_eq(&frame.blocks, &folded.blocks) && folded.folded.len() == folded.blocks.len());
     assert_eq!(folded.view, View::of(&find_blocks(text), &folded.folded));
     // folds survive an edit of another line, and a fresh state with the same folds gives the same frame
     let moved = text.replace("first", "1st!!");
-    let after = ui.begin(rel, &moved, false);
+    let after = ui.begin(rel, &moved, crate::config::PropertiesView::Raw);
     let mut fresh = crate::fold_ui::FoldUi::default();
-    let f0 = fresh.begin(rel, &moved, false);
+    let f0 = fresh.begin(rel, &moved, crate::config::PropertiesView::Raw);
     fresh.apply(rel, &f0, FoldCmd::FoldAll, 0);
-    let expected = fresh.begin(rel, &moved, false);
+    let expected = fresh.begin(rel, &moved, crate::config::PropertiesView::Raw);
     assert_eq!((&after.folded, &after.view), (&expected.folded, &expected.view));
     ui.apply(rel, &after, FoldCmd::UnfoldAll, 0);
-    assert!(ui.begin(rel, &moved, false).folded.is_empty());
+    assert!(ui.begin(rel, &moved, crate::config::PropertiesView::Raw).folded.is_empty());
 }
 
 // spec: EDIT-103
