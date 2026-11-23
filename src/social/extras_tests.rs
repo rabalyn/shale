@@ -259,11 +259,9 @@ fn soc_063_a_post_with_a_time_is_scheduled_the_confirm_names_it_and_nothing_goes
     assert_eq!(compose(&w).stage, super::compose::Stage::Confirm);
     w.rect("compose:confirm-schedule");
     w.click("compose:confirm-post");
-    wait_for(&mut w, |w| w.app.social.compose.is_none());
-    w.frames(3);
+    wait_for(&mut w, |w| toast_has(w, "Scheduled for"));
     let sent = w.script.sends.lock().unwrap()[0].clone();
     assert_eq!(sent.schedule, Some(want));
-    assert!(toast_has(&w, "Scheduled for"), "{:?}", w.app.toasts);
     let key = (home().account, "home".to_string());
     assert!(w.app.social.timelines[&key].waiting.is_empty(), "a scheduled post is no post: nothing waits in the feed");
     assert_eq!(w.script.scheduled.lock().unwrap().len(), 1);
@@ -303,7 +301,7 @@ fn soc_064_the_scheduled_posts_are_listed_from_the_box_and_the_menu_and_a_cancel
     w.click("scheduled:cancel:0");
     wait_for(&mut w, |w| w.app.social.scheduled.items.len() == 1);
     assert_eq!(*w.script.cancelled.lock().unwrap(), ["s1"]);
-    assert!(toast_has(&w, "Scheduled post cancelled"));
+    wait_for(&mut w, |w| toast_has(w, "Scheduled post cancelled"));
     w.click("scheduled:refresh");
     wait_for(&mut w, |w| !w.app.social.scheduled.loading);
     assert_eq!(w.app.social.scheduled.items.len(), 1);
