@@ -261,3 +261,32 @@ fn tex_env_long_code_breaks_across_pages_on_its_box_in_articles_and_books() {
         assert!(squash(&pages.concat()).contains("Afterthecode"), "{kind}");
     }
 }
+
+// spec: TEX-015, TEX-041, TEX-042, TEX-008, TEX-027
+#[test]
+#[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
+fn tex_env_media_cards_emoji_tags_and_quotes_compile_with_their_look() {
+    crate::env_lock::hold();
+    let note = "# Plan\n\nA task 📅 2026-12-01 about #ideas.\n\n> quoted words\n\n![[tone-cover.mp3]]\n\n![[tone.wav]]\n";
+    let media: Vec<(String, Vec<u8>)> = ["tone-cover.mp3", "tone.wav"].iter().map(|n| (n.to_string(), std::fs::read(crate::media::testdata::fixture(n)).unwrap())).collect();
+    let files: Vec<(&str, &[u8])> = media.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();
+    let (v, dir) = temp_vault("media", &[&[("Plan.md", note.as_bytes())][..], &files].concat());
+    let set = the_set();
+    let engine = container_engine(&mounted_root());
+    for kind_id in ["pub", "thesis", "beamer"] {
+        let kind = &set.kinds.iter().find(|(i, _)| i == kind_id).unwrap().1;
+        let doc = write(&Request { vault: &v, rel: Path::new("Plan.md"), text: note, opts: &ExportOptions::for_note(), set: &set, kind, fields: &fields(&[AUTHOR, &[("reviewer", "Prof. A")]].concat()) })
+            .unwrap_or_else(|e| panic!("{kind_id}: {e}"));
+        let owned: Vec<(&str, &[u8])> = doc.files.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();
+        let out = compile_with_set(&engine, &set, "main.tex", &doc.tex, &owned, patient()).unwrap_or_else(|e| panic!("{kind_id}: LuaLaTeX failed: {e}\n{}\n--- main.tex:\n{}", e.log_tail, doc.tex));
+        let pdf = out.output.pdf;
+        let text = squashed(pdf.clone());
+        for want in ["2026-12-01", "ideas", "quotedwords", "tone-cover.mp3", "tone.wav", "0:00"] {
+            assert!(text.contains(want), "{kind_id}: {want} is not in {text}\n{}", doc.tex);
+        }
+        assert!(text.contains('\u{1F4C5}'), "{kind_id}: the calendar has a glyph of the emoji font, not a box: {text}");
+        assert!(fills_with(&pdf, [149, 121, 215]), "{kind_id}: the bar of the quote");
+        assert_eq!(pictures_drawn(pdf), 1, "{kind_id}: the cover of the sound");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
