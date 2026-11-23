@@ -90,18 +90,18 @@ your own.
 - **A video**: one per post, never together with pictures or a poll. MP4, QuickTime, WebM and MPEG
   files work, up to what your server allows (Mastodon: its video limit, 40 MB if it names none) and
   never more than 100 MB. Give it a description. Mastodon converts the video first, which can take
-  a minute; Bluesky's video service does the same, and Shale waits for it (up to five minutes). Before
+  a minute; Bluesky's video service does the same, and Shale waits for it (up to five minutes). Bluesky takes videos up to ten minutes: with ffmpeg installed Shale checks that before it uploads, and sends the picture's size so the video is not drawn with bars. Before
   it uploads, Bluesky is asked whether your account may upload a video now and its answer is shown if
   not. A GIF is added as a picture.
 - **Language**: the box has a **Language** list (it starts with **Settings → Feeds → Post language**, which
   starts as the language of your system). It is sent with the post so others can filter by it; choose
-  "No language" to send none. The next post of the account starts with the language you chose last.
+  "No language" to send none. The next post of the account starts with the language you chose last (Shale keeps it, also after a restart).
 - **A poll** (Mastodon only): **Add poll** gives you two or more options (the server says how many and
   how long they may be), how long the poll stays open, **People may choose several options** and
   **Hide the totals until the poll ends**. A poll and pictures or a video cannot be in one post on
   Mastodon, so the box offers only one of them. Bluesky has no polls.
-- **Schedule…** (Mastodon only): type a date (`2026-11-23`) and a time (`14:30`) in your local time,
-  at least five minutes ahead. The server keeps the post and sends it then; Shale says "Scheduled for
+- **Schedule…** (Mastodon only): pick a date in the month grid (📅; or type it, `2026-11-23`) and set the
+  hour and the minute (click a number to type it) in your local time, at least five minutes ahead. The server keeps the post and sends it then; Shale says "Scheduled for
   …" and nothing appears in your feed. **Scheduled posts…** (in the box, and in the feed's ⋯ menu)
   lists what is waiting and lets you **Cancel post**. Bluesky cannot schedule posts.
 - **Quote**: Bluesky and Mastodon 4.5 or later quote the post for real. On an older Mastodon

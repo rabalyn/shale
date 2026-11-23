@@ -105,6 +105,10 @@ pub struct Account {
     /// known (an account from before, a pasted token). Not a secret (SOC-056).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scopes: Option<String>,
+    /// The language this account's posts started with last (ISO 639-1, "" = none); None: the
+    /// setting "Post language" decides (SOC-065). Not a secret.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_language: Option<String>,
 }
 
 /// An account as the settings file holds it: the account and, only when no system keyring took
@@ -145,7 +149,7 @@ impl Account {
     /// A new account; the id is made from network and handle.
     pub fn new(network: Network, server: &str, handle: &str, display_name: &str) -> Account {
         let handle = handle.trim().trim_start_matches('@').to_string();
-        Account { id: format!("{}:{handle}", network.key()), network, server: server.trim().trim_end_matches('/').to_string(), handle, display_name: display_name.to_string(), scopes: None }
+        Account { id: format!("{}:{handle}", network.key()), network, server: server.trim().trim_end_matches('/').to_string(), handle, display_name: display_name.to_string(), scopes: None, post_language: None }
     }
 
     /// Whether the account may write: `Some(false)` for a Mastodon token that was given only

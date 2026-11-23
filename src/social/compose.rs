@@ -350,7 +350,7 @@ impl SocialState {
         self.ensure_info(ctx, e);
         let mut c = Compose::new(tab, &e.account.id, feed);
         c.visibility = self.writes.last_visibility;
-        c.language = self.writes.last_language.get(&e.account.id).cloned().unwrap_or_else(|| self.post_language.clone());
+        c.language = e.account.post_language.clone().unwrap_or_else(|| self.post_language.clone());
         if let Some(p) = reply {
             if e.account.network == Network::Mastodon {
                 if !p.author.handle.eq_ignore_ascii_case(&e.account.handle) {
@@ -411,7 +411,7 @@ impl SocialState {
                     if account.starts_with("mastodon:") {
                         self.writes.last_visibility = c.visibility;
                     }
-                    self.writes.last_language.insert(account.to_string(), c.language.clone());
+                    self.writes.language_to_save.push((account.to_string(), c.language.clone()));
                 }
                 let post = match sent {
                     Sent::Posted(post) => *post,

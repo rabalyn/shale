@@ -260,6 +260,8 @@ pub struct SocialState {
     pub scheduled: ScheduledState,
     /// the language a new post starts with (the setting "Post language", SOC-065)
     pub post_language: String,
+    /// the calendar week starts on Monday (the date picker of the schedule uses the calendar's, SOC-063)
+    pub week_monday: bool,
     pub(super) clients: HashMap<String, Client>,
     pub(super) tx: Sender<Msg>,
     rx: Receiver<Msg>,
@@ -313,6 +315,7 @@ impl SocialState {
             polls: Default::default(),
             scheduled: Default::default(),
             post_language: super::language::system(),
+            week_monday: true,
             clients: HashMap::new(),
             tx,
             rx,

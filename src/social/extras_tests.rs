@@ -333,6 +333,16 @@ fn soc_065_a_post_starts_with_the_language_of_the_setting_and_the_last_choice_of
     send_it(&mut w);
     wait_for(&mut w, |w| w.app.social.compose.is_none());
     assert_eq!(w.script.sends.lock().unwrap()[0].language, "fr");
+    // the choice is kept in the account's entry of the settings (it survives a restart) and is no secret
+    w.frames(3);
+    assert_eq!(w.app.cfg.social_accounts[0].account.post_language.as_deref(), Some("fr"));
+    let json = serde_json::to_string(&w.app.cfg.social_accounts[0]).unwrap();
+    assert!(json.contains(r#""post_language":"fr""#), "{json}");
+    let back: crate::social::SocialAccountEntry = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.account.post_language.as_deref(), Some("fr"));
+    let old: crate::social::Account = serde_json::from_str(r#"{"id":"a","network":"mastodon","server":"https://m.test","handle":"a@m.test","display_name":"A"}"#).unwrap();
+    assert_eq!(old.post_language, None, "an account from before has none: the setting decides");
+    assert!(!serde_json::to_string(&old).unwrap().contains("post_language"));
     // the next post of the account starts with that choice, not with the setting
     w.click("new-post");
     assert_eq!(compose(&w).language, "fr");
@@ -342,6 +352,8 @@ fn soc_065_a_post_starts_with_the_language_of_the_setting_and_the_last_choice_of
     send_it(&mut w);
     wait_for(&mut w, |w| w.app.social.compose.is_none());
     assert_eq!(w.script.sends.lock().unwrap()[1].language, "");
+    w.frames(3);
+    assert_eq!(w.app.cfg.social_accounts[0].account.post_language.as_deref(), Some(""), "No language is a choice too");
     // a setting that is no code is the system's language
     w.app.cfg.social_post_language = "Deutsch".into();
     w.frames(3);
@@ -427,4 +439,34 @@ fn soc_066_a_video_goes_out_with_the_post() {
     wait_for(&mut w, |w| w.app.social.compose.is_none());
     let sent = w.script.sends.lock().unwrap()[0].clone();
     assert_eq!(sent.video.map(|v| v.path), Some(v));
+}
+
+// spec: SOC-063
+#[test]
+fn soc_063_the_date_is_picked_in_the_calendars_month_grid_and_the_time_is_two_numbers_and_typing_still_works() {
+    let mut w = W::new("schedule-pick");
+    open_box(&mut w, InstanceInfo::defaults(Network::Mastodon));
+    w.click("compose:schedule");
+    let now = crate::calendar::time::now();
+    let target = ScheduleInput::at(now + 5 * 86_400);
+    // the 📅 button opens the month of the date in the field; a click on a day sets the field
+    w.click("pick:schedule-day");
+    w.click(&format!("pick-day:{}", target.date));
+    assert_eq!(compose(&w).schedule.as_ref().unwrap().date, target.date);
+    // the hour and the minute: click one, type a number, Enter
+    w.click("compose:schedule-hour");
+    w.frame(vec![Event::Text("9".into())]);
+    w.frame(vec![Event::Key { key: eframe::egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: eframe::egui::Modifiers::NONE }]);
+    w.frames(3);
+    w.click("compose:schedule-minute");
+    w.frame(vec![Event::Text("45".into())]);
+    w.frame(vec![Event::Key { key: eframe::egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: eframe::egui::Modifiers::NONE }]);
+    w.frames(3);
+    assert_eq!(compose(&w).schedule.as_ref().unwrap().time, "09:45");
+    let got = compose(&w).schedule.as_ref().unwrap().parse(now).unwrap();
+    assert_eq!(crate::calendar::time::utc_to_local(got).1, 9 * 3600 + 45 * 60);
+    // typing the date and a time like "9" or "0930" stays possible
+    let typed = |d: &str, t: &str| ScheduleInput { date: d.into(), time: t.into() }.parse(now).unwrap();
+    assert_eq!(typed("2099-01-01", "0930"), typed("2099-01-01", "9:30"));
+    assert_eq!(typed("2099-01-01", "9"), typed("2099-01-01", "09:00"));
 }

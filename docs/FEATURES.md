@@ -1039,9 +1039,9 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   description each** (**Choose pictures…** opens the system's file dialog, or drop picture files
   on the box, or paste a picture with Ctrl+V, or type the path of a file or of one in the vault;
   JPEG, PNG, GIF, WebP; Bluesky takes 1 MB, so bigger pictures are scaled down) or **one video** (MP4, QuickTime, WebM, MPEG; up to
-  what the server allows and 100 MB; on Bluesky it goes through the video service), a **language** for the post (starts with the
+  what the server allows and 100 MB; on Bluesky it goes through the video service, with its size sent along and a video over 10 minutes refused when ffmpeg is installed), a **language** for the post (starts with the
   setting Post language), on Mastodon a **poll** (options, duration, several choices, hidden totals; not together with
-  pictures or a video) and **Schedule…** to let the server send the post later (local date and time, at least 5 minutes ahead;
+  pictures or a video) and **Schedule…** to let the server send the post later (a date picked in a month grid or typed, an hour and a minute, local time, at least 5 minutes ahead;
   **Scheduled posts…** lists them and cancels one), and **Send** (Ctrl+Enter), which
   always asks **"Post this?"** with your handle, who may see it and the time of a scheduled post before anything is posted.
   Mastodon **polls on cards** show their options with bars and percentages (after you voted, when the poll is closed and on your

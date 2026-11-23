@@ -424,8 +424,8 @@ pub struct Writes {
     pub asking: std::collections::HashSet<String>,
     /// the visibility the last post had: the next one starts with it
     pub last_visibility: Visibility,
-    /// the language chosen for the last post of each account: the next one starts with it (SOC-065)
-    pub last_language: HashMap<String, String>,
+    /// (account, language) of posts that went out: the app keeps it in the account's entry so the next post starts with it (SOC-065)
+    pub language_to_save: Vec<(String, String)>,
 }
 
 /// Identifies a reaction in `Writes::busy`.

@@ -105,7 +105,7 @@ pub(super) fn poll_section(ui: &mut Ui, c: &mut Compose, info: &InstanceInfo, re
 
 /// Sending the post later (Mastodon): the date and time in the local time zone, and the way to
 /// the list of the scheduled posts. `list` is set when that was pressed.
-pub(super) fn schedule_section(ui: &mut Ui, c: &mut Compose, list: &mut bool, rects: &mut Vec<(String, Rect)>) {
+pub(super) fn schedule_section(ui: &mut Ui, c: &mut Compose, monday_first: bool, list: &mut bool, rects: &mut Vec<(String, Rect)>) {
     ui.horizontal(|ui| {
         if c.schedule.is_none() {
             let b = ui.button("Schedule…").on_hover_text("Let the server send this post later");
@@ -127,10 +127,20 @@ pub(super) fn schedule_section(ui: &mut Ui, c: &mut Compose, list: &mut bool, re
     let Some(s) = c.schedule.as_mut() else { return };
     ui.horizontal(|ui| {
         ui.label(muted("Send on"));
+        // the date can be typed or picked in the calendar's month grid; the time is two numbers (click one to type)
         let r = ui.add(egui::TextEdit::singleline(&mut s.date).hint_text("2026-11-23").desired_width(86.0));
         rects.push(("compose:schedule-date".into(), r.rect));
-        let r = ui.add(egui::TextEdit::singleline(&mut s.time).hint_text("14:30").desired_width(50.0));
-        rects.push(("compose:schedule-time".into(), r.rect));
+        crate::calendar::dialog::date_picker(ui, "schedule-day", &mut s.date, monday_first, rects);
+        let secs = crate::calendar::dialog::parse_time(&s.time);
+        let (mut h, mut m) = secs.map_or((12, 0), |v| (v / 3600, v % 3600 / 60));
+        let hour = ui.add(egui::DragValue::new(&mut h).range(0..=23).custom_formatter(|n, _| format!("{:02}", n as i64)));
+        rects.push(("compose:schedule-hour".into(), hour.rect));
+        ui.label(":");
+        let minute = ui.add(egui::DragValue::new(&mut m).range(0..=59).custom_formatter(|n, _| format!("{:02}", n as i64)));
+        rects.push(("compose:schedule-minute".into(), minute.rect));
+        if hour.changed() || minute.changed() {
+            s.time = format!("{h:02}:{m:02}");
+        }
         ui.label(muted("your local time, at least 5 minutes ahead"));
     });
     let line = match s.parse(crate::calendar::time::now()) {

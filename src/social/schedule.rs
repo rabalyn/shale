@@ -74,14 +74,8 @@ impl ScheduleInput {
     /// The moment (UTC seconds), or why the input is no usable time.
     pub fn parse(&self, now: i64) -> Result<i64, String> {
         let days = t::parse_ymd(self.date.trim()).ok_or("Type the date as year-month-day, for example 2026-11-23.")?;
-        let (h, m) = self
-            .time
-            .trim()
-            .split_once(':')
-            .and_then(|(h, m)| Some((h.trim().parse::<i64>().ok()?, m.trim().parse::<i64>().ok()?)))
-            .filter(|(h, m)| (0..24).contains(h) && (0..60).contains(m))
-            .ok_or("Type the time as hours:minutes, for example 14:30.")?;
-        let at = t::local_to_utc(days, h * 3600 + m * 60);
+        let secs = crate::calendar::dialog::parse_time(&self.time).ok_or("Type the time as hours:minutes, for example 14:30.")?;
+        let at = t::local_to_utc(days, secs);
         if at < now + MIN_AHEAD {
             return Err("A scheduled post must be at least 5 minutes ahead.".into());
         }

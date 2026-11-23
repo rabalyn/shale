@@ -48,6 +48,8 @@ pub struct Api {
     pub(super) video_service: String,
     /// how long to wait between two looks at a video the service processes (SOC-067)
     pub(super) video_poll: std::time::Duration,
+    /// what is known of a video file: its size and length (ffprobe; a test gives its own, SOC-067)
+    pub(super) probe: fn(&std::path::Path) -> Option<crate::media::ffmpeg::Info>,
 }
 
 impl std::fmt::Debug for Api {
@@ -110,7 +112,8 @@ impl Api {
             password: Secret::new(password),
             session: None,
             video_service: super::video::VIDEO_SERVICE.to_string(),
-            video_poll: std::time::Duration::from_secs(1),
+            video_poll: std::time::Duration::from_millis(1500),
+            probe: super::video::probe_file,
         }
     }
 
@@ -1186,7 +1189,8 @@ mod tests {
                     }
                 }
                 ("GET", "app.bsky.video.getJobStatus") => {
-                    bearer("svc-app.bsky.video.getJobStatus");
+                    // the status of a job is public: the Bluesky app asks without a token
+                    assert!(!low.contains("authorization:"), "{headers}");
                     assert!(query.contains("jobId=j1"));
                     let blob = json!({"$type": "blob", "ref": {"$link": "bafyvideo"}, "mimeType": "video/mp4", "size": 324});
                     if already || polled.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0 {
@@ -1218,11 +1222,12 @@ mod tests {
             return;
         }
         let records = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
-        // createSession, 3 service tokens, limits, upload, 2 looks at the job, the record, the read back
-        let (base, handle) = video_server(false, true, records.clone(), 10);
+        // createSession, 2 service tokens, limits, upload, 2 looks at the job, the record, the read back
+        let (base, handle) = video_server(false, true, records.clone(), 9);
         let mut api = Api::new(&base, "ada.test", "app-pw");
         api.video_service = base.clone();
         api.video_poll = std::time::Duration::from_millis(2);
+        api.probe = |_| Some(crate::media::ffmpeg::Info { duration: Some(12.5), width: 720, height: 1280, fps: 30.0, has_audio: true });
         let video = DraftVideo { path: mp4_clip("bsky-clip.mp4"), alt: " A clip ".into() };
         send(&mut api, &Draft { video: Some(video), language: "de".into(), ..draft("Ein Video") }).unwrap();
         let seen = handle.join().unwrap();
@@ -1235,7 +1240,6 @@ mod tests {
                 "app.bsky.video.getUploadLimits",
                 "com.atproto.server.getServiceAuth",
                 "app.bsky.video.uploadVideo",
-                "com.atproto.server.getServiceAuth",
                 "app.bsky.video.getJobStatus",
                 "app.bsky.video.getJobStatus",
                 "com.atproto.repo.createRecord",
@@ -1246,6 +1250,7 @@ mod tests {
         assert_eq!(r["embed"]["$type"], "app.bsky.embed.video");
         assert_eq!((r["embed"]["video"]["ref"]["$link"].as_str(), r["embed"]["alt"].as_str()), (Some("bafyvideo"), Some("A clip")));
         assert_eq!(r["langs"], json!(["de"]));
+        assert_eq!(r["embed"]["aspectRatio"], json!({"width": 720, "height": 1280}), "the size ffprobe read");
         // no language: no `langs`
         assert!(send_record_without_language().is_none());
     }
@@ -1270,15 +1275,17 @@ mod tests {
         let video = DraftVideo { path: mp4_clip("bsky-clip2.mp4"), alt: String::new() };
         // 409 "already exists": the answer names the job, whose status holds the blob
         let records = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
-        let (base, handle) = video_server(true, true, records.clone(), 9);
+        let (base, handle) = video_server(true, true, records.clone(), 8);
         let mut api = Api::new(&base, "ada.test", "app-pw");
         api.video_service = base.clone();
         api.video_poll = std::time::Duration::ZERO;
+        api.probe = |_| None;
         send(&mut api, &Draft { video: Some(video.clone()), ..draft("again") }).unwrap();
         handle.join().unwrap();
         let r = records.lock().unwrap()[0].clone();
         assert_eq!(r["embed"]["video"]["ref"]["$link"], "bafyvideo");
         assert!(r["embed"].get("alt").is_none(), "no description, none sent");
+        assert!(r["embed"].get("aspectRatio").is_none(), "without ffprobe (here: no information) no aspect ratio is sent");
         // the service says no: its message is the answer, nothing is uploaded
         let (base, handle) = video_server(false, false, records, 3);
         let mut api = Api::new(&base, "ada.test", "app-pw");
@@ -1286,6 +1293,41 @@ mod tests {
         let e = send(&mut api, &Draft { video: Some(video), ..draft("no") }).unwrap_err().to_string();
         assert!(e.contains("does not take a video from this account now: You have reached your daily limit"), "{e}");
         assert_eq!(handle.join().unwrap().len(), 3, "session, token, limits: no upload");
+    }
+
+    // spec: SOC-067
+    #[test]
+    fn a_video_longer_than_the_apps_limit_is_refused_before_any_request_and_a_missing_ffprobe_leaves_it_to_the_service() {
+        let video = DraftVideo { path: mp4_clip("bsky-long.mp4"), alt: String::new() };
+        let mut api = Api::new("http://127.0.0.1:9", "a", "pw");
+        api.probe = |_| Some(crate::media::ffmpeg::Info { duration: Some(601.0), width: 1920, height: 1080, fps: 30.0, has_audio: true });
+        let e = crate::social::video::bluesky_embed(&mut api, &video).unwrap_err().to_string();
+        assert!(e.contains("bsky-long.mp4 is 10 minutes long; Bluesky takes videos up to 10 minutes."), "{e}");
+        assert_eq!(crate::social::video::BLUESKY_MAX_SECONDS, 600.0, "VIDEO_MAX_DURATION_MS of the Bluesky app");
+        // no ffmpeg: nothing is known, nothing is refused here (the service decides)
+        assert!(crate::social::video::probe_with(None, &video.path).is_none());
+        // an unknown length is no reason to refuse: the first request after the checks is the session
+        api.probe = |_| Some(crate::media::ffmpeg::Info { duration: None, width: 1, height: 1, fps: 30.0, has_audio: false });
+        let e = crate::social::video::bluesky_embed(&mut api, &video).unwrap_err().to_string();
+        assert!(!e.contains("minutes long"), "{e}");
+    }
+
+    // spec: SOC-067
+    #[test]
+    fn the_size_and_length_are_read_from_a_real_video_when_ffmpeg_is_installed() {
+        let Some(tools) = crate::media::ffmpeg::locate() else { return };
+        let dir = std::env::temp_dir().join(format!("shale-probe-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("t.mp4");
+        let made = std::process::Command::new(&tools.ffmpeg).args(["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=160x90:rate=10:duration=1", "-pix_fmt", "yuv420p"]).arg(&file).status();
+        if !made.is_ok_and(|s| s.success()) {
+            return;
+        }
+        let info = crate::social::video::probe_with(Some(&tools), &file).unwrap();
+        assert_eq!((info.width, info.height), (160, 90));
+        assert!(info.duration.is_some_and(|d| (0.9..1.2).contains(&d)), "{:?}", info.duration);
+        assert!(crate::social::video::probe_with(Some(&tools), &dir.join("missing.mp4")).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // spec: SOC-063, SOC-066, SOC-067
@@ -1467,7 +1509,7 @@ mod tests {
     #[test]
     fn sessions_do_not_show_their_tokens() {
         let s = Session { pds: "https://p".into(), did: "did:plc:a".into(), handle: "a".into(), access_jwt: "jwt-secret-1".into(), refresh_jwt: "jwt-secret-2".into() };
-        let api = Api { server: "https://bsky.social".into(), handle: "a".into(), password: "pw-secret-3".into(), session: Some(s), video_service: String::new(), video_poll: std::time::Duration::ZERO };
+        let api = Api { server: "https://bsky.social".into(), handle: "a".into(), password: "pw-secret-3".into(), session: Some(s), video_service: String::new(), video_poll: std::time::Duration::ZERO, probe: |_| None };
         let d = format!("{api:?}");
         assert!(!d.contains("secret") && d.contains("***"), "{d}");
         let doc = json!({"service": [{"id": "#other", "serviceEndpoint": "https://no"}, {"id": "#atproto_pds", "type": "AtprotoPersonalDataServer", "serviceEndpoint": "https://pds.example"}]});

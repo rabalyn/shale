@@ -195,6 +195,7 @@ system keyring, never in this file):
 | `social_last` | none; the account and feed shown last | set by Shale |
 | `social_replies` | off | the tick "Include replies from others" in the Import dialog |
 | `social_check_minutes` | 5 (0 = never) | Settings → Feeds, and Feeds → Accounts… |
+| `social_accounts[].post_language` | the language of the account's last post | kept by Shale: the next post of the account starts with it |
 | `social_post_language` | the language of the system's locale ("en" without one); "" = none | Settings → Feeds → Post language: the language a new post in the feed view starts with (two-letter code) |
 
 ## Search ([[Search and pickers]])

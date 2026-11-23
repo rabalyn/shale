@@ -172,8 +172,21 @@ impl ShaleApp {
                 self.modal = Some(Modal::Social(d));
             }
         }
+        // the language of the posts that went out is kept with their account (SOC-065)
+        let languages = std::mem::take(&mut self.social.writes.language_to_save);
+        let mut save = false;
+        for (id, language) in languages {
+            if let Some(e) = self.cfg.social_accounts.iter_mut().find(|e| e.account.id == id).filter(|e| e.account.post_language.as_deref() != Some(language.as_str())) {
+                e.account.post_language = Some(language);
+                save = true;
+            }
+        }
+        if save {
+            self.save_config();
+        }
         // the feeds open in tabs look for new posts every few minutes
         self.social.check_every = Duration::from_secs(u64::from(self.cfg.social_check_minutes) * 60);
+        self.social.week_monday = self.cfg.week_starts_monday;
         // a code that is no code (a hand-edited settings file) is the system's language
         self.social.post_language = if crate::social::language::is_code(&self.cfg.social_post_language) { self.cfg.social_post_language.clone() } else { crate::social::language::system() };
         let (accounts, open) = (self.cfg.social_accounts.clone(), self.open_feed_refs());

@@ -15,6 +15,15 @@ use eframe::egui::{self, Key, Modifiers, Rect, RichText, Ui, Vec2};
 /// The width of the box.
 const WIDTH: f32 = 480.0;
 
+/// What the box is told about its surroundings.
+#[derive(Clone, Copy)]
+struct Env {
+    /// the file dialog is open
+    picking: bool,
+    /// the calendar's week starts on Monday (the date picker)
+    monday: bool,
+}
+
 /// What the box asked for this frame.
 #[derive(Default)]
 struct Out {
@@ -76,7 +85,7 @@ pub fn show(ctx: &egui::Context, tab_rect: Rect, st: &mut SocialState, entry: &S
             ui.add_space(4.0);
             match c.stage {
                 Stage::Confirm => confirm(ui, &c, entry, &info, &mut rects, &mut out),
-                _ => edit(ui, &mut c, entry, &info, st.intake.picking, &mut rects, &mut out),
+                _ => edit(ui, &mut c, entry, &info, Env { picking: st.intake.picking, monday: st.week_monday }, &mut rects, &mut out),
             }
         });
     st.rects.extend(rects);
@@ -110,7 +119,7 @@ pub fn show(ctx: &egui::Context, tab_rect: Rect, st: &mut SocialState, entry: &S
     }
 }
 
-fn edit(ui: &mut Ui, c: &mut Compose, entry: &SocialAccountEntry, info: &super::actions::InstanceInfo, picking: bool, rects: &mut Vec<(String, Rect)>, out: &mut Out) {
+fn edit(ui: &mut Ui, c: &mut Compose, entry: &SocialAccountEntry, info: &super::actions::InstanceInfo, env: Env, rects: &mut Vec<(String, Rect)>, out: &mut Out) {
     let network = entry.account.network;
     let sending = c.stage == Stage::Sending;
     if let Some(r) = &c.reply {
@@ -199,7 +208,7 @@ fn edit(ui: &mut Ui, c: &mut Compose, entry: &SocialAccountEntry, info: &super::
     if c.pictures.len() < info.max_pictures && c.poll.is_none() && c.video.is_none() {
         ui.horizontal(|ui| {
             let b = ui
-                .add_enabled(!sending && !picking, egui::Button::new(if picking { "Choosing…" } else { "Choose pictures or video…" }))
+                .add_enabled(!sending && !env.picking, egui::Button::new(if env.picking { "Choosing…" } else { "Choose pictures or video…" }))
                 .on_hover_text("Pick picture or video files in a dialog. You can also drop files on this box or paste a picture (Ctrl+V). A post has up to four pictures or one video.");
             rects.push(("compose:choose".into(), b.rect));
             out.pick |= b.clicked();
@@ -212,7 +221,7 @@ fn edit(ui: &mut Ui, c: &mut Compose, entry: &SocialAccountEntry, info: &super::
         });
     }
     if network == Network::Mastodon {
-        ui.add_enabled_ui(!sending, |ui| extras::schedule_section(ui, c, &mut out.scheduled_list, rects));
+        ui.add_enabled_ui(!sending, |ui| extras::schedule_section(ui, c, env.monday, &mut out.scheduled_list, rects));
     }
     if let Some(e) = &c.error {
         let r = ui.add(egui::Label::new(RichText::new(e).color(theme::palette().link_missing)).wrap());
