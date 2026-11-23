@@ -10,6 +10,7 @@ use super::engine::Engine;
 use super::sets::{self, KindManifest, LogoStatus, Mapping, SetInfo};
 use super::setup::Step;
 use super::writer::{self, Document};
+use crate::busy::{self, Busy, Key};
 use crate::pdf::export::ExportOptions;
 use crate::theme;
 use eframe::egui::{self, Ui};
@@ -52,7 +53,20 @@ pub struct Failure {
     pub set_dir: PathBuf,
 }
 
-/// A running export. Dropping it (the dialog closed) stops LuaLaTeX.
+/// The PDF export through LaTeX, as a task of the busy registry (JOB-017).
+pub const TEX_EXPORT: Key = Key::new("tex-export");
+
+/// A running export of the dialog, a task of the registry. Dropping it (the dialog closed, or
+/// Cancel) stops LuaLaTeX.
+pub struct ExportJob(pub(super) busy::Job<Result<Made, Failure>>);
+
+impl Drop for ExportJob {
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
+}
+
+/// A running compile of the guided setup's test page. Dropping it stops LuaLaTeX.
 pub struct Job {
     pub(super) rx: Receiver<Result<Result<Made, Failure>, String>>,
     pub(super) cancel: Arc<AtomicBool>,
@@ -77,7 +91,7 @@ pub struct TexExport {
     /// What is in the field boxes, by key. A value is kept when the kind changes.
     pub values: BTreeMap<String, String>,
     pub status: TexStatus,
-    pub job: Option<Job>,
+    pub job: Option<ExportJob>,
     pub failure: Option<Failure>,
     /// "Save the .tex" was pressed: the window writes the folder.
     pub save_requested: bool,
@@ -213,21 +227,26 @@ impl TexExport {
         self.job.is_some()
     }
 
-    /// Whether Export can be pressed: a TeX, a kind, no export running.
-    pub fn can_export(&self) -> bool {
-        matches!(self.status, TexStatus::Ready(_)) && self.current_kind().is_some() && self.job.is_none()
+    /// Whether Export can be pressed: a TeX, a kind, no export running (in this dialog or in one
+    /// that was closed while its export was still stopping, JOB-005).
+    pub fn can_export(&self, busy: &Busy) -> bool {
+        matches!(self.status, TexStatus::Ready(_)) && self.current_kind().is_some() && self.job.is_none() && !busy.is_running(&TEX_EXPORT)
     }
 
-    /// Compile a document against the chosen set as a job (TEX-004).
-    pub fn start(&mut self, engine: Engine, document: Document, notify: impl FnOnce() + Send + 'static) {
-        let Some(set) = self.current_set().cloned() else { return };
+    /// Compile a document against the chosen set as a task of the registry (TEX-004, JOB-017).
+    /// False: a LaTeX export already runs, and nothing starts.
+    pub fn start(&mut self, busy: &Busy, engine: Engine, document: Document, notify: impl FnOnce() + Send + 'static) -> bool {
+        let Some(set) = self.current_set().cloned() else { return true };
+        let Some(mut task) = busy.begin(TEX_EXPORT, format!("Exporting “{}” to PDF with LaTeX…", self.title)) else { return false };
         self.failure = None;
-        self.job = Some(spawn_compile(engine, set, Arc::new(document), notify));
+        let (doc, cancel) = (Arc::new(document), task.cancellable().flag());
+        self.job = Some(ExportJob(task.run(move || compile_job(&engine, &set, &doc, cancel), notify)));
+        true
     }
 
     /// What the finished job made, once; a failure is kept for the dialog to show.
     pub fn poll(&mut self) -> Option<Made> {
-        let got = self.job.as_ref()?.rx.try_recv().ok()?;
+        let got = self.job.as_ref()?.0.try_recv().ok()?;
         self.job = None;
         match got {
             Ok(Ok(made)) => Some(made),

@@ -1,14 +1,16 @@
 //! The "Import" dialog shown when e-mails, events or files are dropped on the window (or
 //! chosen with the Import button): what to import, the folder, tags and a few options.
 
+use crate::busy::{self, Busy, Key};
 use crate::import::{self, docx, Item, Source};
 use crate::media::intake::Choice;
 use crate::theme;
 use eframe::egui::{self, Rect, Ui};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::Arc;
+
+/// The conversion of the Word files with pandoc, as a task of the busy registry (JOB-019).
+pub const IMPORT_CONVERT: Key = Key::new("import-convert");
 
 /// The result of pandoc for the item at this place of the list.
 pub type Converted = (usize, Result<Arc<docx::Prepared>, String>);
@@ -27,10 +29,10 @@ pub struct ImportDialog {
     pub skip_signatures: bool,
     /// leave the quoted mails out of the text of e-mails (IMP-066)
     pub leave_out_quoted: bool,
-    /// pandoc runs for the Word files that are going on in a job (IMP-035)
-    pub converting: Option<Receiver<Result<Vec<Converted>, String>>>,
-    /// set when the dialog is let go: a pandoc run that is still going stops
-    pub cancel: Arc<AtomicBool>,
+    /// pandoc runs for the Word files that are going on in a job, a task of the registry (IMP-035,
+    /// JOB-019); letting go of the dialog stops it (JOB-010)
+    pub converting: Option<busy::Job<Vec<Converted>>>,
+    busy: Busy,
     /// a note to add links to the new notes to (where it was dropped / the open note)
     pub link_into: Option<PathBuf>,
     pub link_on: bool,
@@ -72,7 +74,7 @@ impl ImportDialog {
             skip_signatures: true,
             leave_out_quoted: false,
             converting: None,
-            cancel: Arc::new(AtomicBool::new(false)),
+            busy: Busy::default(),
             link_into,
             link_on,
             add_path: String::new(),
@@ -87,9 +89,16 @@ impl ImportDialog {
         }
     }
 
-    /// Start pandoc, in a job, on the Word files that have not been converted yet (IMP-035). False
-    /// when there is nothing to do.
-    pub fn start_conversion(&mut self, root: PathBuf) -> bool {
+    /// The registry the conversion is a task of (the window's; a dialog made without one has its own).
+    pub fn with_busy(mut self, busy: &Busy) -> Self {
+        self.busy = busy.clone();
+        self
+    }
+
+    /// Start pandoc, in a task of the registry (JOB-019), on the Word files that have not been
+    /// converted yet (IMP-035). `Ok(false)` when there is nothing to do; an error when a conversion
+    /// of another dialog still runs (JOB-005) and nothing starts.
+    pub fn start_conversion(&mut self, root: PathBuf) -> Result<bool, String> {
         let todo: Vec<(usize, PathBuf, PathBuf)> = self
             .items
             .iter()
@@ -101,10 +110,11 @@ impl ImportDialog {
             })
             .collect();
         if todo.is_empty() {
-            return false;
+            return Ok(false);
         }
-        let (keep, cancel, date) = (self.keep_docx, self.cancel.clone(), crate::media::local_date());
-        self.converting = Some(crate::jobs::spawn(
+        let Some(mut task) = self.busy.begin(IMPORT_CONVERT, "Converting the Word files with pandoc…") else { return Err("Word files are still being converted for another import; try again in a moment.".into()) };
+        let (keep, cancel, date) = (self.keep_docx, task.cancellable().flag(), crate::media::local_date());
+        self.converting = Some(task.run(
             move || {
                 let mut reserved = std::collections::HashSet::new();
                 todo.into_iter()
@@ -116,17 +126,14 @@ impl ImportDialog {
             },
             || {},
         ));
-        true
+        Ok(true)
     }
 
     /// Take the result of the job when it has ended. True when it has: the import can go on.
     pub fn poll_conversion(&mut self) -> bool {
-        let Some(rx) = &self.converting else { return false };
-        let done = match rx.try_recv() {
-            Ok(r) => r,
-            Err(TryRecvError::Empty) => return false,
-            Err(TryRecvError::Disconnected) => Err("the conversion stopped without a result".into()),
-        };
+        let Some(job) = &self.converting else { return false };
+        // the result always arrives, also after a panic (JOB-002): an empty channel is a job that runs
+        let Ok(done) = job.try_recv() else { return false };
         self.converting = None;
         match done {
             Ok(results) => {
@@ -184,7 +191,9 @@ impl ImportDialog {
 
 impl Drop for ImportDialog {
     fn drop(&mut self) {
-        self.cancel.store(true, Ordering::SeqCst);
+        if let Some(job) = &self.converting {
+            job.cancel();
+        }
     }
 }
 
@@ -466,7 +475,10 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
         rec("keep-docx".into(), ui.checkbox(&mut d.keep_docx, "Keep the original .docx")).on_hover_text("Copies each Word file into its import folder and names it in the note's properties");
     }
     if d.converting.is_some() {
-        ui.label(muted("Converting the Word files with pandoc…"));
+        ui.horizontal(|ui| {
+            ui.add(egui::Spinner::new().size(14.0));
+            ui.label(muted("Converting the Word files with pandoc… Cancel stops it."));
+        });
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
     }
     let included = || d.items.iter().filter(|i| i.include);
@@ -756,7 +768,7 @@ mod tests {
         assert!(!d.rects.iter().any(|r| r.0 == "keep-docx"));
     }
 
-    // spec: IMP-035
+    // spec: IMP-035, JOB-019
     #[test]
     fn the_result_of_the_conversion_job_is_taken_and_a_crash_fails_the_files_waiting_for_it() {
         let ready = |d: &ImportDialog| -> Vec<Option<bool>> { d.items.iter().map(|i| if let Source::Docx { ready, .. } = &i.source { ready.as_ref().map(|r| r.is_ok()) } else { None }).collect() };
@@ -764,36 +776,69 @@ mod tests {
         let mut d = ImportDialog::new(vec![item(), import::markdown_item("n.md".into(), "x".into())], vec![], String::new(), String::new(), None, false);
         assert!(!d.poll_conversion(), "nothing is running");
         // the job runs pandoc, which is not there: the file fails with the words for it
-        assert!(d.start_conversion(std::env::temp_dir().join("shale-dialog-conv-never-used")));
+        assert_eq!(d.start_conversion(std::env::temp_dir().join("shale-dialog-conv-never-used")), Ok(true));
         let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
         while !d.poll_conversion() {
             assert!(std::time::Instant::now() < end);
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         assert_eq!(ready(&d), vec![Some(false), None]);
-        assert!(!d.start_conversion(std::env::temp_dir()), "what has a result is not run again");
+        assert_eq!(d.start_conversion(std::env::temp_dir()), Ok(false), "what has a result is not run again");
         d.forget_conversions();
         assert_eq!(ready(&d), vec![None, None]);
-        // a job that ends without a result
-        let (tx, rx) = std::sync::mpsc::channel::<Result<Vec<Converted>, String>>();
-        drop(tx);
-        d.converting = Some(rx);
-        assert!(d.poll_conversion());
-        match &d.items[0].source {
-            Source::Docx { ready: Some(Err(e)), .. } => assert!(e.contains("without a result"), "{e}"),
-            other => panic!("{other:?}"),
-        }
         // a job that crashed
         d.forget_conversions();
-        let (tx, rx) = std::sync::mpsc::channel();
-        tx.send(Err("the background job crashed: boom".to_string())).unwrap();
-        d.converting = Some(rx);
+        d.converting = Some(Busy::default().spawn(IMPORT_CONVERT, "x", || -> Vec<Converted> { panic!("boom") }, || {}).unwrap());
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while !d.poll_conversion() {
+            assert!(std::time::Instant::now() < end);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(matches!(&d.items[0].source, Source::Docx { ready: Some(Err(e)), .. } if e.contains("boom")), "{:?}", d.items[0].source);
+    }
+
+    // spec: JOB-010, JOB-019
+    #[cfg(unix)]
+    #[test]
+    fn the_conversion_is_a_task_with_its_text_and_closing_the_dialog_stops_it_and_takes_it_off_the_list() {
+        let dir = std::env::temp_dir().join(format!("shale-dialog-conv-task-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let pandoc = dir.join("pandoc");
+        crate::test_exec::write_script(&pandoc, "#!/bin/sh\nsleep 30\n");
+        let item = || import::docx::docx_item(PathBuf::from("/in/a.docx"), Some(pandoc.clone()));
+        let wait_idle = |busy: &Busy| {
+            let end = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            while busy.is_running(&IMPORT_CONVERT) {
+                assert!(std::time::Instant::now() < end, "the task ends with its job");
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        };
+        let busy = Busy::default();
+        let mut d = ImportDialog::new(vec![item()], vec![], String::new(), String::new(), None, false).with_busy(&busy);
+        assert_eq!(d.start_conversion(dir.join("vault")), Ok(true));
+        let listed = busy.info(&IMPORT_CONVERT);
+        assert!(listed.as_ref().is_some_and(|t| t.cancellable && t.label == "Converting the Word files with pandoc…"), "{listed:?}");
+        // a second dialog waits: the registry refuses a second conversion (JOB-005)
+        let mut other = ImportDialog::new(vec![item()], vec![], String::new(), String::new(), None, false).with_busy(&busy);
+        assert!(other.start_conversion(dir.join("vault")).unwrap_err().contains("still being converted"));
+        assert!(other.converting.is_none());
+        // the dialog shows that it works, and Import waits
+        let mut h = H { ctx: egui::Context::default(), t: 0.0 };
+        h.frame(vec![], &mut d, &[], &[]);
+        assert_eq!(h.click("import", &mut d, &[], &[]), None, "Import is off while pandoc works");
+        // the list's own Cancel stops the work, and the dialog goes on with the files failed
+        assert!(busy.cancel(busy.list()[0].id));
+        wait_idle(&busy);
         assert!(d.poll_conversion());
-        assert!(matches!(&d.items[0].source, Source::Docx { ready: Some(Err(e)), .. } if e.contains("boom")));
-        // letting go of the dialog stops a run that is still going
-        let flag = d.cancel.clone();
+        assert!(matches!(&d.items[0].source, Source::Docx { ready: Some(Err(_)), .. }));
+        // Cancel or closing the dialog (the same, JOB-010) stops pandoc and the task goes
+        d.forget_conversions();
+        assert_eq!(d.start_conversion(dir.join("vault")), Ok(true));
         drop(d);
-        assert!(flag.load(Ordering::SeqCst));
+        wait_idle(&busy);
+        assert!(busy.list().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // spec: SOC-020

@@ -3,8 +3,10 @@
 //! size, orientation, margins, text size, what to include, background and scale for drawings,
 //! where to save, and whether to open the PDF afterwards.
 
-use crate::pdf::book_dialog::BookExport;
+use crate::busy::Busy;
+use crate::pdf::book_dialog::{BookExport, PDF_EXPORT};
 use crate::pdf::export::{Background, ExportOptions, Paper};
+use crate::pdf::note_export::NoteExport;
 use crate::pdf::tex::dialog::TexExport;
 use crate::theme;
 use eframe::egui::{self, Rect, Ui};
@@ -32,6 +34,9 @@ pub struct ExportDialog {
     pub tex: Option<Box<TexExport>>,
     /// A folder as one PDF (BOOK-010): its reading order and the job; none for a note or drawing.
     pub book: Option<Box<BookExport>>,
+    /// The export of a note or drawing with the built-in writer, while it runs (JOB-016).
+    pub note: Option<NoteExport>,
+    busy: Busy,
     /// screen rect of every control (used by the UI tests)
     pub rects: Vec<(String, Rect)>,
 }
@@ -45,7 +50,29 @@ pub enum DialogResult {
 
 impl ExportDialog {
     pub fn new(rel: PathBuf, drawing: bool, name: String, opts: ExportOptions, default_path: PathBuf) -> Self {
-        ExportDialog { rel, drawing, name, opts, path: default_path.to_string_lossy().into_owned(), open_after: false, error: None, engine: ExportEngine::Builtin, tex: None, book: None, rects: vec![] }
+        ExportDialog { rel, drawing, name, opts, path: default_path.to_string_lossy().into_owned(), open_after: false, error: None, engine: ExportEngine::Builtin, tex: None, book: None, note: None, busy: Busy::default(), rects: vec![] }
+    }
+
+    /// The registry the exports of this dialog are tasks of (the window's; a dialog made without
+    /// one has its own).
+    pub fn with_busy(mut self, busy: &Busy) -> Self {
+        self.busy = busy.clone();
+        self
+    }
+
+    /// The registry the exports of this dialog are tasks of.
+    pub fn busy(&self) -> &Busy {
+        &self.busy
+    }
+
+    /// Whether the built-in export of a note or drawing runs.
+    pub fn note_working(&self) -> bool {
+        self.note.is_some()
+    }
+
+    /// Stop the export of a note or drawing that is running.
+    pub fn cancel_note(&mut self) {
+        self.note = None;
     }
 
     /// A note's dialog with the LaTeX choices, on this engine.
@@ -107,7 +134,7 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
     };
     let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::palette().muted);
     if d.tex.is_some() {
-        let busy = d.tex.as_ref().is_some_and(|t| t.working()) || d.book.as_ref().is_some_and(|b| b.working());
+        let busy = d.tex.as_ref().is_some_and(|t| t.working()) || d.book.as_ref().is_some_and(|b| b.working()) || d.note_working();
         ui.horizontal(|ui| {
             ui.label(muted("Engine"));
             ui.add_enabled_ui(!busy, |ui| {
@@ -243,6 +270,12 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
     if let Some(book) = d.book.as_deref_mut() {
         book.show(ui, &mut rec);
     }
+    if d.note_working() {
+        ui.horizontal(|ui| {
+            ui.add(egui::Spinner::new().size(14.0));
+            rec("working", ui.label(muted("Exporting to PDF… Cancel stops it.")));
+        });
+    }
     rec("open-after", ui.checkbox(&mut d.open_after, "Open the PDF after exporting"));
     d.rects = rects;
 }
@@ -255,7 +288,9 @@ pub fn footer(ui: &mut Ui, d: &mut ExportDialog) -> DialogResult {
         crate::theme::problem(ui, e);
     }
     // LaTeX needs a TeX, a kind and no export running (TEX-016)
-    let ready = (!d.latex() || d.tex.as_ref().is_some_and(|t| t.can_export())) && d.book.as_ref().is_none_or(|b| b.can_export());
+    // the built-in export of a note: none runs, here or in a dialog that was closed while it stopped (JOB-005)
+    let note_free = d.latex() || d.book.is_some() || (d.note.is_none() && !d.busy.is_running(&PDF_EXPORT));
+    let ready = (!d.latex() || d.tex.as_ref().is_some_and(|t| t.can_export(&d.busy))) && d.book.as_ref().is_none_or(|b| b.can_export()) && note_free;
     ui.horizontal(|ui| {
         let mut rec = |k: &str, r: egui::Response| -> egui::Response {
             d.rects.push((k.to_string(), r.rect));
@@ -456,5 +491,40 @@ mod tests {
         // a drawing has no contents and so no such box
         let (_, d) = setup(true);
         assert!(!d.rects.iter().any(|r| r.0 == "toc-break"));
+    }
+
+    // spec: JOB-005, JOB-010, JOB-016
+    #[test]
+    fn export_is_off_while_a_built_in_export_runs_in_this_dialog_or_another_and_the_dialog_says_it_works() {
+        use crate::pdf::note_export::{NoteExport, What, Work};
+        let busy = Busy::default();
+        let opts = ExportOptions::for_note();
+        let mut d = ExportDialog::new(PathBuf::from("x.md"), false, "X".into(), opts.clone(), PathBuf::from("/tmp/x.pdf")).with_busy(&busy);
+        let mut h = H { ctx: egui::Context::default(), t: 0.0, last: DialogResult::Open };
+        h.frame(&mut d, vec![]);
+        h.frame(&mut d, vec![]);
+        assert!(!d.note_working() && !d.rects.iter().any(|r| r.0 == "working"));
+        // an export of a folder (or a dialog that was closed while its export stopped) holds the key
+        let held = busy.begin(PDF_EXPORT, "Exporting “Handbook” to PDF…").unwrap();
+        h.click(&mut d, "export");
+        assert_eq!(h.last, DialogResult::Open, "Export is off beside another export (JOB-005)");
+        drop(held);
+        h.click(&mut d, "export");
+        assert_eq!(h.last, DialogResult::Export);
+        // this dialog's own export: the spinner and the line, Export off, Cancel still there
+        let root = std::env::temp_dir().join(format!("shale-dialog-note-job-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        d.note = NoteExport::start(&busy, Work { root: root.clone(), rel: PathBuf::from("x.md"), name: "X".into(), opts, what: What::Note("x\n".into()) }, || {});
+        assert!(d.note_working());
+        h.last = DialogResult::Open;
+        h.frame(&mut d, vec![]);
+        assert!(d.rects.iter().any(|r| r.0 == "working"), "the dialog says that it works");
+        h.click(&mut d, "export");
+        assert_eq!(h.last, DialogResult::Open, "no second export beside the running one");
+        h.click(&mut d, "cancel");
+        assert_eq!(h.last, DialogResult::Cancel, "Cancel is there while it works");
+        d.cancel_note();
+        assert!(!d.note_working());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -289,7 +289,7 @@ pub fn export_book(vault: &Vault, dir: &Path, opts: &ExportOptions, progress: Op
     for (i, s) in secs.iter().enumerate() {
         if let Some(p) = progress {
             if p.cancel.is_cancelled() {
-                return Err("The export was cancelled".into());
+                return Err(crate::pdf::export::CANCELLED.into());
             }
             p.done.store(i, Ordering::SeqCst);
         }

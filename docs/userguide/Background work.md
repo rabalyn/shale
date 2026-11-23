@@ -20,8 +20,12 @@ and you cannot start it twice by accident.
   and it shows the same text with a spinner until the check is done.
 - **The buttons that would start the same thing again are off** while it runs. Point at one and it
   says what is still running. A key or the timer cannot start it a second time either.
+- **Exports and the Word import** are listed too: the PDF export of a note or drawing (the window no longer waits
+  for a long note with many pictures), the export through LaTeX, the export to Word and the conversion of
+  Word files in the Import dialog. Each shows a spinner in its dialog and a line in the indicator.
 - **Cancel** stands next to the spinner where the work can be stopped, for example the check of file names
-  (Settings → Vault) and the PDF export of a folder. A git sync has no Cancel: stopping it between
+  (Settings → Vault), the exports and the conversion of Word files. A PDF that is stopped is never written
+  half way: nothing appears in the folder. A git sync has no Cancel: stopping it between
   saving your notes and sending them would leave the repository half way. It is quick, and it finishes.
 
 # The indicator at the top right
@@ -34,6 +38,11 @@ row of the tabs. With several panes it is at the right of the rightmost one.
   how long it has been running, and a **Cancel** button for the ones that can be stopped. A task
   that was cancelled shows "Stopping…" until it has ended.
 - It is gone when nothing runs.
+
+**Closing a dialog stops its work.** An export dialog and the Import dialog save or write the result themselves,
+so Cancel (or Esc, or a click outside) stops the work and the task leaves the list when it has ended. In an
+export dialog the first Cancel stops the running export and a second one closes the dialog. Stopping from the
+indicator leaves the dialog open and says why.
 
 [[Git sync]] has the git side, [[PDF]] the export, [[Vault settings]] the check of file names.
 Not every long action is on the indicator yet; they are moved one by one.
