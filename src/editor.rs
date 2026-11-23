@@ -616,6 +616,8 @@ pub enum EditorAction {
     },
     /// A web link: open it in the default browser.
     OpenUrl(String),
+    /// A date of the front matter's card: show this day (a day number, `calendar::time`) in the calendar (EDIT-081)
+    OpenDay(i64),
     /// A file was copied into the vault; the file list should be refreshed.
     FilesChanged,
     /// `[[p Name` picked "new contact": make a contact note in the people folder
@@ -745,7 +747,7 @@ pub struct NoteEditor {
     pub(crate) fold: crate::fold_ui::FoldUi,
     /// a folded front matter shows a summary line, and a note opens with it folded: the setting
     /// "properties in the editor" is not Raw (EDIT-081, set from the app's settings)
-    pub properties_summary: bool,
+    pub properties_view: crate::config::PropertiesView,
 }
 
 impl NoteEditor {
@@ -787,7 +789,7 @@ impl NoteEditor {
             table_cell_edit: true,
             focus_before_press: false,
             fold: Default::default(),
-            properties_summary: true,
+            properties_view: crate::config::PropertiesView::Folded,
             vim_follow: false,
             vim_cursor_rect: None,
             cursor_style: crate::cursor_style::CursorStyle::default(),
@@ -1643,7 +1645,7 @@ impl NoteEditor {
         }
 
         // the folds of this frame; a fold command first (EDIT-073): one that hides the cursor's line puts the cursor on the header
-        let mut fold = self.fold.begin(rel, text, self.properties_summary);
+        let mut fold = self.fold.begin(rel, text, self.properties_view);
         let mut had_cmd = false;
         if let Some(cmd) = self.fold.request.take() {
             had_cmd = true;
@@ -1653,7 +1655,7 @@ impl NoteEditor {
                 let end = text[at..].find('\n').map_or(text.len(), |p| at + p);
                 self.pending_cursor = Some(markdown::byte_to_char(text, end));
             }
-            fold = self.fold.begin(rel, text, self.properties_summary);
+            fold = self.fold.begin(rel, text, self.properties_view);
             ui.ctx().request_repaint();
         }
 
@@ -1698,6 +1700,8 @@ impl NoteEditor {
         // the widest a shown embed can be (where the text can go)
         let max_w = (ui.available_width() - gutter - 8.0).max(80.0);
         self.column = Some(max_w);
+        // a folded front matter drawn as a card: the room its row has to give it (EDIT-081)
+        let card_h = if fold.shows_card() { crate::properties_ui::card_height(ui, text, vault, rel, max_w) } else { None };
         // the raw lines of the markdown preview (EDIT-016, EDIT-017); embeds on them are raw too
         let preview = self.live_preview.then(|| self.preview_lines(ui, text));
         // the tables away from the cursor are drawn as grids (EDIT-024); their text is hidden
@@ -1820,7 +1824,7 @@ impl NoteEditor {
             }
             ranges.extend(folds.view.byte_ranges(s).into_iter().map(|r| (r, 0.0)));
             // a folded front matter: its first line hidden, the summary is painted over its row
-            ranges.extend(folds.veiled(s).map(|r| (r, -1.0)));
+            ranges.extend(folds.veiled(s, card_h));
             // what the layout depends on, the cursor only by the raw lines it makes (EDIT-105)
             let ctx = ui.ctx();
             let settled = crate::fonts::settled(ctx);
@@ -2143,8 +2147,12 @@ impl NoteEditor {
             ui.painter().set(slot, Shape::Vec(shapes));
         }
         // the markers and the badges of the folds (EDIT-071, EDIT-074)
-        let painted = crate::fold_ui::Painted { id: self.id, index: &index, rel, galley: &output.galley, pos: output.galley_pos, area: resp.rect, base: base_size };
-        self.fold.paint(ui, &fold, &painted);
+        let painted = crate::fold_ui::Painted { id: self.id, index: &index, rel, galley: &output.galley, pos: output.galley_pos, area: resp.rect, base: base_size, vault, card: card_h.map(|h| (max_w, h)) };
+        match self.fold.paint(ui, &fold, &painted) {
+            Some(crate::reader::ReaderAction::OpenLink { target, heading, new_tab }) => action = Some(EditorAction::OpenLink { target, heading, new_tab }),
+            Some(crate::reader::ReaderAction::OpenDay(day)) => action = Some(EditorAction::OpenDay(day)),
+            _ => {}
+        }
         // the copy button of the code boxes (EDIT-090) and the key that copies the block at the cursor (EDIT-092)
         if std::mem::take(&mut self.fold.copy_code) {
             let all: Vec<&str> = output.galley.job.text.split('\n').collect();

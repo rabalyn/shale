@@ -3073,6 +3073,7 @@ pub fn handle_editor_action(app_actions: &mut Vec<Action>, a: EditorAction, from
     match a {
         EditorAction::OpenLink { target, heading, new_tab } => app_actions.push(Action::OpenLink { target, heading, from: Some(from.to_path_buf()), new_tab }),
         EditorAction::OpenUrl(url) => app_actions.push(Action::OpenUrl(url)),
+        EditorAction::OpenDay(day) => app_actions.push(Action::OpenCalendarDay(day)),
         EditorAction::FilesChanged => app_actions.push(Action::Rescan),
         EditorAction::Pasted(msg) => {
             app_actions.push(Action::Rescan);

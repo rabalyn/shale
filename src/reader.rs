@@ -749,20 +749,20 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
     let target = jump_target(ui.ctx(), &notes);
     // the folds: fold all / unfold all by key first, then whatever hides a line that is asked for (a footnote
     // jump, a heading of the outline) is unfolded (EDIT-097)
-    let summary = folds.as_ref().is_some_and(|f| f.summary);
+    let props = folds.as_ref().map_or(crate::config::PropertiesView::Raw, |f| f.props);
     let mut frame = folds.as_mut().map(|f| {
         f.ui.widgets.clear();
-        f.ui.begin(rel, text, summary)
+        f.ui.begin(rel, text, props)
     });
     if let (Some(f), Some(fr)) = (folds.as_mut(), frame.as_mut()) {
         if let Some(cmd) = f.ui.request.filter(|c| matches!(c, FoldCmd::FoldAll | FoldCmd::UnfoldAll)) {
             f.ui.request = None;
             f.ui.apply(rel, fr, cmd, 0);
-            *fr = f.ui.begin(rel, text, summary);
+            *fr = f.ui.begin(rel, text, props);
         }
         for line in target.into_iter().chain(extras.scroll_to) {
             if f.ui.reveal_line(rel, fr, line) {
-                *fr = f.ui.begin(rel, text, summary);
+                *fr = f.ui.begin(rel, text, props);
             }
         }
     }

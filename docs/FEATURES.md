@@ -38,7 +38,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   text: moving into a fold (or a link or search jumping there) opens it. Folds are kept per note across restarts (EDIT-079, in the vault's `.shale/state.json`; a fold whose block is gone and a note that is gone are dropped, a renamed or moved note keeps its folds) and
   are never written into the file. Also foldable (EDIT-080 to EDIT-085): **code blocks**, the **front matter** and a
   **signature** (a line `-- ` up to the next heading). A note's front matter starts folded to one muted line
-  `▸ Properties · email · Anna Müller · 2026-11-12` (the setting "Properties in the editor": folded or card; raw leaves it
+  `▸ Properties · email · Anna Müller · 2026-11-12` (the setting "Properties in the editor": folded, or card, which draws the reading view's typed card there instead of the line; raw leaves it
   open); the cursor moving into it opens the YAML and folds it again when it leaves. In a **mail note**
   (`type: email`) the quotes (`… n quoted lines`) and the signature start folded too.
 - **Folding in the reading view** (EDIT-095 to EDIT-099, rabalyn/shale#364): the reading view folds the same blocks with
@@ -569,7 +569,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   lines: an e-mail as a mail header (sender, date, to / cc, subject, tag chips), an event with its time, place, attendees and a repeats badge, a Word import as one page chip
   (`A4 · 2.5 cm margins · 11 pt`), any other note as key and value rows. Ids and `print-*` settings are left out, a ▸ toggle shows every property, and people with a contact
   note are links. `properties::summary` gives the one line for a folded view (`email · Anna Müller · 2026-11-12 · #work #mail`). Settings → Appearance → "Properties in the editor"
-  / "Properties in the reading view": folded, card or raw (defaults: folded in the editor, card in the reading view). In the editor a note's front matter starts folded to its summary line unless the setting is raw (EDIT-081, EDIT-084). The date of an e-mail card and the start of an event card are links: a click shows that day in the calendar (EDIT-108).
+  / "Properties in the reading view": folded, card or raw (defaults: folded in the editor, card in the reading view). In the editor a note's front matter starts folded, to its summary line or, with the setting card, to the typed card of the reading view (a click on it opens the lines), unless the setting is raw (EDIT-081, EDIT-084). The date of an e-mail card and the start of an event card are links: a click shows that day in the calendar (EDIT-108).
 - **Title line and date prefix** (VAULT-025, CFG-043): above line 1 a note shows its title line, its file name without `.md` and without a
   leading date prefix `YYMMDD_` (`261117_Plan.md` shows `Plan`); editing it renames the file and keeps the prefix. Tabs and the PDF title show the name without the prefix; the file
   list, the quick switcher and links keep the full name, so the list sorts by date. Settings → Editor → "Date prefix for new notes" (on by default) names a note made by Shale

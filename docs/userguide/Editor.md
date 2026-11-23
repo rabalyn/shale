@@ -51,8 +51,10 @@ editor folds them to one muted line, `▸ Properties · email · Anna Müller ·
 or a Word import starts with its text, not with a block of YAML. Click the line, or move the cursor into it (arrow
 keys, `gg`, Ctrl+Home), and the properties open as raw, editable lines; when the cursor leaves them again they fold
 again. If you opened them with the ▸ marker, the badge or a fold key, they stay open. **Settings → Appearance →
-Properties in the editor** is `Folded` (the default; `Card` looks the same in the editor, the card is for the reading
-view) or `Raw`, which opens a note with its properties unfolded.
+Properties in the editor** is `Folded` (the default: the one line), `Card` (the folded properties are drawn as the same
+card as in the reading view, a mail header for a mail, the time and place for an event, and so on; a click on the card
+opens the lines, and a person with a note or a date in it works as in the reading view) or `Raw`, which opens a note
+with its properties unfolded.
 
 ## Mail notes
 
