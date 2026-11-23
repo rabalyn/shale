@@ -262,7 +262,7 @@ pub fn show(ctx: &egui::Context, rect: Rect, v: &mut Viewer, env: &Env, rects: &
                 let state = match env.images.get(&url) {
                     Some(path) => crate::media::picture(ctx, &path),
                     None if url.is_empty() || env.images.failed(&url) => Pic::Broken,
-                    None => Pic::Loading,
+                    None => Pic::Loading(None),
                 };
                 match state {
                     Pic::Ready(t) => {
@@ -291,7 +291,7 @@ pub fn show(ctx: &egui::Context, rect: Rect, v: &mut Viewer, env: &Env, rects: &
                     }
                     Pic::Broken if note.is_some() => {}
                     Pic::Broken => message(ui, pic, "Could not load this picture.", "viewer:error", rects),
-                    Pic::Loading => spinner(ui, ctx, pic, rects),
+                    Pic::Loading(_) => spinner(ui, ctx, pic, rects),
                 }
                 if let Some(n) = note {
                     let at = Rect::from_min_max(egui::pos2(rect.min.x + 16.0, pic.max.y), egui::pos2(rect.max.x - 16.0, pic.max.y + NOTE));

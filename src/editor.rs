@@ -598,8 +598,9 @@ enum Art {
     Download(std::path::PathBuf),
     /// an outside file that cannot be shown: what is wrong, in a strip in its place (MEDIA-016)
     Notice(String),
-    /// a file that is still looked up or decoded on a worker: a quiet strip with its name (MEDIA-024)
-    Loading(String),
+    /// a file that is still looked up or decoded on a worker: a quiet strip with its name (MEDIA-024);
+    /// `true` when the box has the size the picture will have (MEDIA-029): a faint tile with the name in it
+    Loading(String, bool),
 }
 
 /// The name of a file, for the strip that stands in for it.
@@ -1747,7 +1748,7 @@ impl NoteEditor {
                     // a quiet strip while the file is looked for, the reason when it is not there (MEDIA-016, MEDIA-024)
                     let art = match (shown.notice(), shown.checking()) {
                         (Some(text), _) => Some(Art::Notice(text)),
-                        (None, Some(abs)) => Some(Art::Loading(file_name_of(abs))),
+                        (None, Some(abs)) => Some(Art::Loading(file_name_of(abs), false)),
                         (None, None) => None,
                     };
                     if let Some(art) = art {
@@ -1769,10 +1770,10 @@ impl NoteEditor {
                             let size = crate::embed_size::picture(tex.size_vec2(), asked, max_w);
                             images.push((l.range.clone(), size.y + 6.0 + caption_h, Art::Tex(tex), size));
                         }
-                        // the size is not known before the picture is: the strip of the other placeholders (MEDIA-024)
-                        crate::media::look::Pic::Loading => {
-                            let size = crate::embed_size::not_downloaded(max_w);
-                            images.push((l.range.clone(), size.y + 6.0 + caption_h, Art::Loading(file_name_of(&abs)), size));
+                        // a size read from the header gives the placeholder the picture's own size, else the strip of the other placeholders (MEDIA-024, MEDIA-029)
+                        crate::media::look::Pic::Loading(known) => {
+                            let size = known.map_or_else(|| crate::embed_size::not_downloaded(max_w), |natural| crate::embed_size::picture(natural, asked, max_w));
+                            images.push((l.range.clone(), size.y + 6.0 + caption_h, Art::Loading(file_name_of(&abs), known.is_some()), size));
                         }
                         crate::media::look::Pic::Broken => continue,
                     }
@@ -1986,7 +1987,10 @@ impl NoteEditor {
                     Art::Notice(text) => {
                         ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| crate::media::widget::show_notice(ui, text));
                     }
-                    Art::Loading(name) => {
+                    Art::Loading(name, sized) => {
+                        if *sized {
+                            painter.rect_filled(rect, egui::CornerRadius::same(4), theme::palette().bg_hover);
+                        }
                         ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| crate::media::widget::show_loading(ui, name));
                     }
                     Art::Pdf(tex, total) => {

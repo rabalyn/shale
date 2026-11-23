@@ -185,7 +185,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   files the vault links and their size (USE-026), both in background jobs. The window never waits for
   the disk of a shown picture or media file: whether a file is there, its date and its decoding are looked
   up in the background and asked again every few seconds, and an embed says "Loading …" until the answer
-  is there, so a NAS or USB disk that does not answer freezes nothing (MEDIA-024). The Import tab of Settings is
+  is there, so a NAS or USB disk that does not answer freezes nothing (MEDIA-024). The placeholder of a picture has its size from the file's header, so the text below does not jump when it arrives (MEDIA-029), and the decoded pictures are kept up to 256 MiB, the ones shown longest ago going first (MEDIA-030). The Import tab of Settings is
   shown under "Importing e-mails, events and files".
 
 ![Reading view](userguide/z_media/screenshots/reading.png)
