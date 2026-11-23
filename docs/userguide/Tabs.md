@@ -9,7 +9,7 @@ features:
   moving just selects the tab; the ✕ or a middle click closes it.
 - Right-click a tab and choose **Pin tab** (or **Unpin tab**): pinned tabs move to the far
   left, show a small pin and keep their order. Pinned tabs can still be closed.
-- Ctrl+PageUp / Ctrl+PageDown switch to the previous / next tab, after the last comes the first (on macOS Cmd+Opt+← / Cmd+Opt+→, because Cmd+Opt+H would hide the other apps).
+- Ctrl+PageUp / Ctrl+PageDown, or Ctrl+Shift+Tab / Ctrl+Tab, switch to the previous / next tab of the focused pane, in the order of the tab bar (pinned tabs first), after the last comes the first (on macOS Cmd+Opt+← / Cmd+Opt+→ only, because Cmd+Opt+H would hide the other apps and Cmd+Tab is the system's).
 - Right-click a tab and choose **Open in split right**, or press Ctrl+\, to open it in a new
   **pane** to the right: the middle area can hold any number of panes side by side, each with its
   own tab bar, tabs and back / forward history.
