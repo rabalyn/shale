@@ -691,7 +691,7 @@ fn sync_073_a_failed_move_connects_nothing_and_says_why() {
     let hist = t.app.usage.places.history.clone();
     let id = gitsync::history::vault_id(&t.vault).unwrap();
     // a socket in the history cannot be copied, by any user
-    let _socket = std::os::unix::net::UnixListener::bind(hist.join(&id).join("s")).unwrap();
+    let _socket = crate::fsutil::bind_unix_socket(&hist.join(&id).join("s"));
     let remote = t.bare();
     t.open_wizard();
     t.click("Sync with a server");

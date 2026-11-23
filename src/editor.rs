@@ -5122,7 +5122,7 @@ mod tests {
         assert_eq!(pasted_toast(a), "Linked 2 files where they are");
         assert!(ed.pending_files.is_none());
         paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
-        assert!(text.contains("![[@Lib/song.mp3]]") && text.contains(&format!("file://{}/a b.mp4", abs.display())), "{text}");
+        assert!(text.contains("![[@Lib/song.mp3]]") && text.contains(&crate::media::intake::file_uri(&abs.join("a b.mp4"))), "{text}");
         assert_eq!(walk_files(&d), before);
         // the answer Copy: copies
         let mut text = String::new();
@@ -5146,7 +5146,7 @@ mod tests {
         let mixed = format!("{}\n{}", file_uri(&d.join("in.mp4")), file_uri(&out.join("doc.pdf")));
         let a = paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::Paste(mixed)]);
         assert_eq!(pasted_toast(a), "Saved 1 file to the media folder; Linked 1 file where it is");
-        assert_eq!(text, format!("![[in.mp4]]\n[doc.pdf](<file://{}/doc.pdf>)", abs.display()));
+        assert_eq!(text, format!("![[in.mp4]]\n[doc.pdf](<{}>)", crate::media::intake::file_uri(&abs.join("doc.pdf"))));
         let _ = std::fs::remove_dir_all(&out);
         let _ = std::fs::remove_dir_all(&d);
     }
