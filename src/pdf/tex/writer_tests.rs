@@ -102,7 +102,7 @@ fn text_is_escaped_everywhere_so_hostile_input_stays_text() {
     assert!(tex.contains("\\author{\\textbackslash{}input\\{/etc/passwd\\}"), "{tex}");
 }
 
-// spec: TEX-008
+// spec: TEX-008, TEX-032
 #[test]
 fn inline_markup_is_written_as_commands_and_links_as_href() {
     let t = doc("a *it* **bo** ~~st~~ `co de` ==hi== <mark style=\"background: #FFFF00;\">m</mark> <span style=\"color: #FF0000;\">r</span> [w](https://e.com/a_b?x=1&y=2#f) [[Wiki|shown]] [[Plain]] #tag\n", "pub");
@@ -193,7 +193,7 @@ fn stored_column_sizes_become_the_proportions_of_the_columns() {
     assert!(!b.contains("shale-table"), "the comment line is not text");
 }
 
-// spec: TEX-008
+// spec: TEX-008, TEX-018
 #[test]
 fn the_front_matter_is_not_printed_and_the_properties_fill_the_fields() {
     let note = "---\ntitle: The Real Title\nauthor: [Ada, Bob]\nsubtitle: Sub & more\ndate: 2026-11-17\nsecret: printed?\n---\nBody text\n";
@@ -212,7 +212,7 @@ fn the_front_matter_is_not_printed_and_the_properties_fill_the_fields() {
     assert!(t.contains("\\author{A \\and B \\textbackslash{}input\\{x\\}}"), "{t}");
 }
 
-// spec: TEX-008
+// spec: TEX-008, TEX-018
 #[test]
 fn a_required_field_with_no_value_stops_the_export_and_names_the_field() {
     let e = doc_with("# Plan\ntext\n", "pub", &ExportOptions::for_note(), &[], &[]).unwrap_err();
@@ -222,7 +222,7 @@ fn a_required_field_with_no_value_stops_the_export_and_names_the_field() {
     assert!(doc_with("---\nauthor: X\n---\ntext", "pub", &ExportOptions::for_note(), &[], &[]).is_ok(), "a property is enough");
 }
 
-// spec: TEX-009
+// spec: TEX-009, TEX-010
 #[test]
 fn headings_of_an_article_kind_are_levels_by_nesting_and_the_title_heading_is_not_repeated() {
     let note = "# Plan\nintro\n## A\n#### Deep under A\n## B\n### C\n###### D\n# Other\n";
@@ -290,7 +290,7 @@ fn doc_department(kind_id: &str, filled: bool, wanted: bool) -> String {
     out.unwrap_or_else(|e| panic!("{e}")).tex
 }
 
-// spec: TEX-037
+// spec: TEX-037, TEX-035
 #[test]
 fn the_department_logo_lines_are_written_after_the_preamble_only_when_the_slot_is_filled_the_box_is_on_and_the_kind_has_a_place() {
     for id in ["pub", "report", "thesis", "phd", "beamer", "letter", "poster", "sciposter", "leaflet"] {
@@ -515,7 +515,7 @@ fn the_document_has_the_kinds_lines_the_helpers_and_one_main_file() {
     let _ = std::fs::remove_dir_all(d);
 }
 
-// spec: TEX-013
+// spec: TEX-013, TEX-018
 #[test]
 fn the_dialog_is_prefilled_from_the_properties_and_the_title_is_the_notes_name() {
     let set = tuda_set(SetSettings::default());

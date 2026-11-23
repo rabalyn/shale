@@ -53,6 +53,17 @@ impl W {
         self.hl.click(&mut self.app, p + egui::vec2(12.0, 8.0), button);
     }
 
+    /// A line that starts with `text` (a hit of the quick switcher has its detail after the title).
+    fn painted_start(&self, text: &str) -> bool {
+        self.hl.text.iter().any(|(t, _)| t.starts_with(text))
+    }
+
+    /// Click the last text on the screen that is `text`: the button, not the title of the same name.
+    fn click_last(&mut self, text: &str) {
+        let p = self.hl.text.iter().rev().find(|(t, _)| t.trim() == text).map(|(_, p)| *p).unwrap_or_else(|| panic!("“{text}” is not on the screen: {:?}", self.all_text()));
+        self.hl.click(&mut self.app, p + egui::vec2(12.0, 8.0), PointerButton::Primary);
+    }
+
     fn click_text(&mut self, text: &str) {
         self.click(text, PointerButton::Primary);
     }
@@ -130,7 +141,7 @@ fn vault_030_a_click_on_a_vault_opens_it_and_a_click_on_the_open_one_does_nothin
     assert_eq!(w.names(), ["two", "one"], "the vault opened last is first");
 }
 
-// spec: VAULT-030
+// spec: VAULT-030, VAULT-044
 #[test]
 fn vault_030_it_works_by_keyboard_arrows_enter_and_esc() {
     let mut w = W::new("keys");
@@ -144,11 +155,12 @@ fn vault_030_it_works_by_keyboard_arrows_enter_and_esc() {
     w.key(Key::Escape);
     assert!(w.app.modal.is_none(), "Esc closes the list");
     assert_eq!(w.root(), Some(w.dir("two")));
-    // the last lines are Open… and Create…
+    // the last lines are Open…, Create… and Close current vault (VAULT-044)
     w.open_dropdown();
     w.key(Key::ArrowUp);
+    w.key(Key::ArrowUp);
     w.key(Key::Enter);
-    assert!(matches!(&w.app.modal, Some(Modal::Vaults(m)) if matches!(&**m, VaultModal::Folder(p) if p.purpose == Purpose::Create)), "Up from the first line wraps to Create…");
+    assert!(matches!(&w.app.modal, Some(Modal::Vaults(m)) if matches!(&**m, VaultModal::Folder(p) if p.purpose == Purpose::Create)), "Up twice from the first line wraps to Create…");
 }
 
 // spec: VAULT-031, VAULT-032
@@ -157,7 +169,7 @@ fn vault_032_a_right_click_renames_a_vault_and_the_name_shows_in_the_window() {
     let mut w = W::new("rename");
     w.open_dropdown();
     w.click("two", PointerButton::Secondary);
-    assert!(w.painted("Rename") && !w.painted("Close"), "the menu of the vault: {:?}", w.all_text());
+    assert!(w.painted("Rename") && w.painted("Close"), "the menu of the vault: {:?}", w.all_text());
     w.click_text("Rename");
     assert!(w.painted("Rename vault"));
     w.type_over("Work");
@@ -465,4 +477,108 @@ fn vault_038_a_folder_that_has_not_been_looked_up_yet_is_checking_and_cannot_be_
     w.click_text("two");
     w.settle();
     assert_eq!(w.root(), Some(w.dir("two")));
+}
+
+/// What Close leaves in a vault folder to look at: Shale's folders and the repository.
+fn shale_files(dir: &std::path::Path) {
+    for f in [".shale/state.json", ".trash/2026-11-23/Old.md", ".git/HEAD"] {
+        let p = dir.join(f);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, "x").unwrap();
+    }
+}
+
+// spec: VAULT-044, VAULT-036
+#[test]
+fn vault_044_close_current_vault_asks_first_and_closes_with_the_list_open_on_the_start_screen() {
+    let mut w = W::new("close-current");
+    shale_files(&w.dir("one"));
+    w.open_dropdown();
+    assert!(w.painted("Close current vault"), "{:?}", w.all_text());
+    w.click_text("Close current vault");
+    assert!(w.painted("Close vault") && w.painted("Cancel"), "the question: {:?}", w.all_text());
+    assert_eq!(w.root(), Some(w.dir("one")), "nothing happened yet");
+    // Esc cancels
+    w.key(Key::Escape);
+    assert!(w.app.modal.is_none() && w.root().is_some());
+    w.open_dropdown();
+    w.click_text("Close current vault");
+    w.click_last("Close vault");
+    w.settle();
+    assert_eq!(w.root(), None, "the vault is closed");
+    assert_eq!(w.names(), ["two"], "and forgotten");
+    assert!(matches!(&w.app.modal, Some(Modal::Vaults(m)) if matches!(&**m, VaultModal::Menu { .. })), "the list is open");
+    assert!(w.painted("Open a folder as vault"), "the start dialog is shown: {:?}", w.all_text());
+    assert!(w.dir("one").join("Welcome.md").is_file() && w.dir("one").join(".shale/state.json").is_file() && w.dir("one").join(".trash/2026-11-23/Old.md").is_file(), "by default nothing is removed");
+    assert!(!w.painted("Close current vault"), "no vault is open to close");
+}
+
+// spec: VAULT-044, VAULT-035
+#[test]
+fn vault_044_a_right_click_close_asks_which_folders_to_remove_and_removes_only_those() {
+    let mut w = W::new("close-right-click");
+    shale_files(&w.dir("two"));
+    w.open_dropdown();
+    w.click("two", PointerButton::Secondary);
+    w.click_text("Close");
+    assert!(w.painted("Close vault") && w.painted("Also remove .shale/ (this vault's settings and state)") && w.painted("Also remove .trash/"), "{:?}", w.all_text());
+    assert!(!w.painted(".trash/ holds the notes you deleted from this vault. Removing it deletes them for good."), "the warning comes with the box");
+    w.click_text("Also remove .trash/");
+    assert!(w.painted(".trash/ holds the notes you deleted from this vault. Removing it deletes them for good."), "{:?}", w.all_text());
+    w.click_last("Close vault");
+    w.settle();
+    assert_eq!(w.names(), ["one"], "forgotten");
+    assert_eq!(w.root(), Some(w.dir("one")), "the open vault stays open");
+    assert!(w.dir("two").join(".shale/state.json").is_file(), ".shale/ was not ticked");
+    assert!(!w.dir("two").join(".trash").exists(), ".trash/ was ticked");
+    assert!(w.dir("two").join(".git/HEAD").is_file() && w.dir("two").join("Welcome.md").is_file(), "the repository and the notes are never touched");
+}
+
+// spec: VAULT-035
+#[test]
+fn vault_035_cancel_and_esc_keep_the_vault_in_the_list_and_remove_nothing() {
+    let mut w = W::new("close-cancel");
+    shale_files(&w.dir("two"));
+    w.open_dropdown();
+    w.click("two", PointerButton::Secondary);
+    w.click_text("Close");
+    w.click_text("Also remove .shale/ (this vault's settings and state)");
+    w.click_text("Cancel");
+    assert!(w.app.modal.is_none());
+    assert_eq!(w.names(), ["one", "two"]);
+    assert!(w.dir("two").join(".shale/state.json").is_file());
+    // Enter in the question closes, with the boxes as they are
+    w.open_dropdown();
+    w.click("two", PointerButton::Secondary);
+    w.click_text("Close");
+    w.key(Key::Enter);
+    w.settle();
+    assert_eq!(w.names(), ["one"]);
+    assert!(w.dir("two").join(".shale/state.json").is_file() && w.dir("two").join(".trash").is_dir(), "both boxes were off");
+}
+
+// spec: VAULT-044
+#[test]
+fn vault_044_the_quick_switcher_has_a_switch_vault_command_that_opens_the_list() {
+    let mut w = W::new("switch-command");
+    w.app.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::FileNames)));
+    w.hl.frames(&mut w.app, 2);
+    w.hl.frame(&mut w.app, vec![Event::Text("switch vau".to_string())]);
+    w.hl.frames(&mut w.app, 2);
+    assert!(w.painted_start("Switch vault"), "the command is listed: {:?}", w.all_text());
+    w.key(Key::Enter);
+    w.settle();
+    assert!(matches!(&w.app.modal, Some(Modal::Vaults(m)) if matches!(&**m, VaultModal::Menu { .. })), "the same list as the label's");
+    assert!(w.painted("Close current vault") && w.painted("two"));
+    // no command without typing, and none for a text that is not part of its name
+    for typed in ["", "zzz"] {
+        w.key(Key::Escape);
+        w.app.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::FileNames)));
+        w.hl.frames(&mut w.app, 2);
+        if !typed.is_empty() {
+            w.hl.frame(&mut w.app, vec![Event::Text(typed.to_string())]);
+            w.hl.frames(&mut w.app, 2);
+        }
+        assert!(!w.painted_start("Switch vault"), "{typed:?}: {:?}", w.all_text());
+    }
 }

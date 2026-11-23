@@ -100,7 +100,7 @@ fn pdf_title_and_pages(pdf: Vec<u8>) -> (Option<String>, usize) {
     (doc.metadata().title.as_ref().map(|t| text(t)).filter(|t| !t.is_empty()), doc.pages().len())
 }
 
-// spec: TEX-006, TEX-021
+// spec: TEX-006, TEX-021, TEX-005
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_the_pinned_tuda_ci_archive_is_imported_with_docstrip_and_every_class_of_the_kinds_exists() {

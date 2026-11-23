@@ -4,6 +4,7 @@
 //! (VAULT-038). The folder picker of Open…, Create… and Locate… is the app's own dialog (a path
 //! field and the folders below it): there is no native one yet.
 
+use crate::app::vault_close::Remove;
 use crate::app::{muted, Action, Modal, ShaleApp};
 use crate::known_vaults::{canonical, KnownVault};
 use crate::layout::shellexpand;
@@ -27,6 +28,11 @@ pub enum VaultModal {
         path: PathBuf,
         name: String,
         error: Option<String>,
+    },
+    /// Close asks which of Shale's folders to remove (VAULT-035); both are off at first
+    Close {
+        path: PathBuf,
+        remove: Remove,
     },
 }
 
@@ -213,6 +219,7 @@ impl ShaleApp {
             VaultModal::Menu { sel } => self.vault_menu_dialog(ctx, sel),
             VaultModal::Folder(p) => self.folder_dialog(ctx, p),
             VaultModal::Rename { path, name, error } => self.vault_rename_dialog(ctx, path, name, error),
+            VaultModal::Close { path, remove } => self.vault_close_dialog(ctx, path, remove),
         };
         match next {
             Next::Keep => true,
@@ -229,7 +236,8 @@ impl ShaleApp {
         let entries: Vec<KnownVault> = self.cfg.vaults.entries().to_vec();
         let labels: Vec<String> = entries.iter().map(|e| self.cfg.vaults.label(e)).collect();
         let open = self.vault.as_ref().map(|v| canonical(&v.root));
-        let n = entries.len() + 2;
+        // Close current vault is the last line, when a vault is open (VAULT-044)
+        let n = entries.len() + 2 + usize::from(open.is_some());
         let mut next = Next::Keep;
         let mut pick: Option<usize> = None;
         let resp = crate::dialog::Dialog::new("vaults", "Vaults").width(460.0).show(ctx, |ui| {
@@ -261,6 +269,10 @@ impl ShaleApp {
                             next = Next::Show(VaultModal::Rename { path: e.path.clone(), name: e.name.clone(), error: None });
                             ui.close();
                         }
+                        if ui.button("Close").clicked() {
+                            next = Next::Show(VaultModal::Close { path: e.path.clone(), remove: Remove::default() });
+                            ui.close();
+                        }
                     });
                     if state.is_none() {
                         ui.label(muted("checking…"));
@@ -286,6 +298,12 @@ impl ShaleApp {
             if ui.selectable_label(*sel == create_row, "Create…").clicked() {
                 pick = Some(create_row);
             }
+            if open.is_some() {
+                ui.separator();
+                if ui.selectable_label(*sel == create_row + 1, "Close current vault").clicked() {
+                    pick = Some(create_row + 1);
+                }
+            }
             crate::theme::prose(ui, muted(ListKeys::hint(&self.keymap)).size(11.5));
         });
         if let Some(p) = pick {
@@ -301,7 +319,12 @@ impl ShaleApp {
                     }
                 }
                 p if p == entries.len() => next = Next::Show(VaultModal::Folder(Box::new(FolderPicker::new(Purpose::Open)))),
-                _ => next = Next::Show(VaultModal::Folder(Box::new(FolderPicker::new(Purpose::Create)))),
+                p if p == entries.len() + 1 => next = Next::Show(VaultModal::Folder(Box::new(FolderPicker::new(Purpose::Create)))),
+                _ => {
+                    if let Some(path) = open {
+                        next = Next::Show(VaultModal::Close { path, remove: Remove::default() });
+                    }
+                }
             }
         }
         if resp.should_close() {
@@ -329,6 +352,35 @@ impl ShaleApp {
                         }
                         Err(e) => *error = Some(e),
                     }
+                }
+                if ui.button("Cancel").clicked() {
+                    next = Next::Close;
+                }
+            });
+        });
+        if resp.should_close() {
+            next = Next::Close;
+        }
+        next
+    }
+
+    /// VAULT-035: Close forgets the vault; which of Shale's folders go with it is asked here.
+    fn vault_close_dialog(&mut self, ctx: &Context, path: &Path, remove: &mut Remove) -> Next {
+        let mut next = Next::Keep;
+        let name = self.cfg.vaults.label_of(path);
+        let resp = crate::dialog::Dialog::new("vault-close", "Close vault").width(460.0).show(ctx, |ui| {
+            crate::theme::paragraph(ui, format!("Close “{name}”? It is removed from the list of vaults. Its notes and attachments stay where they are, and you can open the folder again later."));
+            ui.add_space(6.0);
+            ui.checkbox(&mut remove.shale, "Also remove .shale/ (this vault's settings and state)");
+            ui.checkbox(&mut remove.trash, "Also remove .trash/");
+            if remove.trash {
+                crate::theme::problem(ui, ".trash/ holds the notes you deleted from this vault. Removing it deletes them for good.");
+            }
+            let enter = ui.input(|i| i.key_pressed(Key::Enter));
+            ui.horizontal(|ui| {
+                if ui.button(egui::RichText::new("Close vault").strong()).clicked() || enter {
+                    self.actions.push(Action::CloseVault { path: path.to_path_buf(), remove: *remove });
+                    next = Next::Close;
                 }
                 if ui.button("Cancel").clicked() {
                     next = Next::Close;

@@ -160,6 +160,20 @@ impl HistoryState {
         unix_now()
     }
 
+    /// The vault is left (VAULT-037): its snapshots, queue, panel and lists are dropped. What is
+    /// kept is what belongs to the window (a screenshot's made-up history, the test clock).
+    pub(crate) fn drop_vault(&mut self) {
+        let kept = HistoryState {
+            demo: self.demo,
+            #[cfg(test)]
+            fake_now: self.fake_now,
+            #[cfg(test)]
+            on: self.on,
+            ..Default::default()
+        };
+        *self = kept;
+    }
+
     /// A snapshot job is running.
     pub fn busy(&self) -> bool {
         self.job.is_some() || self.thin.is_some()

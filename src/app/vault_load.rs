@@ -137,7 +137,14 @@ impl ShaleApp {
     /// finishes the open when the vault has arrived.
     pub fn open_vault_in_background(&mut self, path: &Path, after: After) {
         // one load at a time: Cancel it first
-        if self.vault_load.is_loading() || !self.prepare_vault_switch() {
+        if self.vault_load.is_loading() {
+            return;
+        }
+        // a running sync ends first, without freezing the window (VAULT-037)
+        if self.vault.is_some() && self.defer_leave(super::vault_close::Leave::Open(path.to_path_buf(), after.clone())) {
+            return;
+        }
+        if !self.prepare_vault_switch() {
             return;
         }
         // a known vault's folder is never made silently (VAULT-038); that is looked at on the worker
