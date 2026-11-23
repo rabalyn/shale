@@ -614,7 +614,7 @@ mod fake {
     }
 }
 
-// spec: TEX-016
+// spec: TEX-016, TEX-033
 #[test]
 fn a_note_that_names_its_template_is_exported_through_it_whatever_was_chosen_last() {
     let mut t = T::new("dlg-noted", usable());

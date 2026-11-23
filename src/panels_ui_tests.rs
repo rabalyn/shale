@@ -567,7 +567,7 @@ fn shown_labels(p: &mut P) -> Vec<String> {
     p.look(Show::Modals).into_iter().map(|(_, l, _)| l).collect()
 }
 
-// spec: CFG-020
+// spec: CFG-020, TEX-023
 #[test]
 fn set_001_every_tab_of_the_settings_shows_the_settings_of_its_domain() {
     let mut p = P::new("settings-tabs", &[]);

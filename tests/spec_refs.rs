@@ -469,7 +469,7 @@ fn tests_without_their_id(tree: &[(String, String)], specs: &[(&str, &str)]) -> 
 const ALLOWLIST: &str = "tests/spec_refs_allowlist.txt";
 
 /// The number of entries of `ALLOWLIST`. Lower it when you remove entries; never raise it.
-const ALLOWLIST_LEN: usize = 304;
+const ALLOWLIST_LEN: usize = 258;
 
 /// The entries of an allowlist text.
 fn allowlist_entries(text: &str) -> Vec<&str> {
