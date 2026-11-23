@@ -98,6 +98,16 @@ impl SocialDialog {
         self.job.is_some()
     }
 
+    /// Tests: the dialog is busy with a sign-in that never ends (`false`: it is idle again).
+    #[cfg(test)]
+    pub fn pretend_busy(&mut self, on: bool) {
+        self.job = on.then(|| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::mem::forget(tx);
+            rx
+        });
+    }
+
     /// The server as typed, cleaned up; the error text when it is not usable.
     fn server_ok(&self) -> Result<String, String> {
         if self.server.trim().is_empty() {

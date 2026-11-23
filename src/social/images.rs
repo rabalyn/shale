@@ -147,6 +147,7 @@ impl ImageCache {
 mod tests {
     use super::*;
 
+    // spec: SOC-015
     // spec: SOC-013
     #[test]
     fn local_files_are_used_as_they_are_and_names_are_stable() {
@@ -168,6 +169,36 @@ mod tests {
         }
         assert!(c.failed("http://example.invalid/x.png"));
         assert_eq!(c.pending(), 0);
+    }
+
+    // spec: SOC-013
+    #[test]
+    fn a_picture_is_fetched_once_without_a_login_into_a_file_named_by_its_address_and_the_second_ask_is_free() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let (base, handle) = crate::calendar::dav::tests::mock_http(1, |_, _, headers, _| {
+            assert!(!headers.to_ascii_lowercase().contains("authorization"), "no login: {headers}");
+            (200, "GIF89a-pretend-picture".into())
+        });
+        let dir = std::env::temp_dir().join(format!("shale-img-fetch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let c = ImageCache::new(&egui::Context::default(), dir.clone());
+        let url = format!("{base}/a.gif");
+        assert_eq!(c.get(&url), None, "the window never waits: the first ask only queues it");
+        assert_eq!(c.get(&url), None);
+        let mut got = None;
+        for _ in 0..500 {
+            got = c.get(&url);
+            if got.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_eq!(got, Some(dir.join(format!("{:016x}.gif", fnv(&url)))));
+        assert_eq!(std::fs::read(got.unwrap()).unwrap(), b"GIF89a-pretend-picture");
+        assert_eq!(handle.join().unwrap().len(), 1, "one request for any number of asks");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // spec: USE-010

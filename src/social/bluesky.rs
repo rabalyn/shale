@@ -1492,6 +1492,7 @@ mod tests {
         assert!(parse_feed_item(&json!({"post": post_view("1", "did:plc:ada", "ada.test", "2024-05-17T10:30:00Z", None, "hi")})).unwrap().reposted_by.is_none());
     }
 
+    // spec: SOC-002
     #[test]
     fn saved_feeds_from_preferences() {
         let g = |n: &str| format!("at://did:plc:x/app.bsky.feed.generator/{n}");
@@ -1503,6 +1504,7 @@ mod tests {
         assert!(saved_feed_uris(&json!({})).is_empty());
     }
 
+    // spec: SOC-014, SOC-019
     #[test]
     fn thread_from_a_fixture() {
         let d = "did:plc:ada";
@@ -1523,6 +1525,7 @@ mod tests {
         assert_eq!(r.iter().map(|r| (r.post.text_markdown.as_str(), r.depth)).collect::<Vec<_>>(), [("post c1", 0), ("post a9", 1), ("post c2", 0)]);
     }
 
+    // spec: SOC-003
     #[test]
     fn sessions_do_not_show_their_tokens() {
         let s = Session { pds: "https://p".into(), did: "did:plc:a".into(), handle: "a".into(), access_jwt: "jwt-secret-1".into(), refresh_jwt: "jwt-secret-2".into() };
@@ -1534,6 +1537,7 @@ mod tests {
         assert!(resolve_pds("did:plc:a/../b").is_err() && resolve_pds("did:key:abc").is_err() && resolve_pds("did:web:evil.com/x").is_err());
     }
 
+    // spec: SOC-002, SOC-039
     #[test]
     fn sign_in_expiry_feeds_paging_thread_and_media_against_a_mock_server() {
         if std::process::Command::new("curl").arg("--version").output().is_err() {

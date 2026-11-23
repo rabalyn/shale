@@ -729,6 +729,7 @@ mod tests {
         assert_eq!(s.recent_tags, vec!["x".to_string()]);
     }
 
+    // spec: SOC-024
     // spec: NAV-026
     #[test]
     fn an_old_state_file_with_two_lists_loads_as_one_ordered_tab_list() {

@@ -1166,6 +1166,7 @@ pub(super) mod tests {
         (st, accounts)
     }
 
+    // spec: SOC-007
     // spec: SOC-006
     #[test]
     fn the_feed_shows_posts_hides_content_warnings_and_saves_without_network() {
