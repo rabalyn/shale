@@ -622,9 +622,15 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - Drag a panel icon over the content of the right sidebar: the area lights up ("Drop to open
   this icon in a new view") and dropping makes a new view below it. Drag icons from one
   menubar to another, from a view to the ribbon (it then is a shortcut that shows the panel
-  below the views) and back. Icons that are no panels (Files, Mail, …) cannot go to the right
+  below the views) and back. Icons that are no panels and no views of the left sidebar (Mail, Feeds, …) cannot go to the right
   sidebar: the pointer shows "not allowed" and nothing changes. Taking the last icon out of a
   view removes the view. Esc cancels a drag.
+- **Files, Search and Tags on either side** (LAY-020 to LAY-027): drag the icon of Files, Search or Tags from the
+  ribbon to a right menubar or the right sidebar's content, or from a right menubar back to the ribbon. On release
+  Shale asks **Move or copy?** (Move takes it from the side it came from; Copy shows it on both sides; Cancel or Esc
+  changes nothing). Right-click the icon for **Move to / Copy to the right (left) sidebar** instead of dragging. A copy
+  shows the same state: one file tree, one search. If the left sidebar's view has moved, it shows the next one (or says
+  none is left); Ctrl+Shift+F shows Search where it is. The places are kept in the settings (`sidebars`).
 - Drag the border between two views up or down to change their heights (they start equal; a
   view never gets lower than a small minimum).
 - A middle click on the **Mail**, **Feeds** or **Calendar** icon opens that view in a new tab.

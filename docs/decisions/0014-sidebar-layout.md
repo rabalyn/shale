@@ -1,6 +1,6 @@
 # ADR-0014: The sidebar layout: one list of icons per menubar, views stacked on the right
 
-- **Status**: Accepted (2026-11-15)
+- **Status**: Accepted (2026-11-15), amended by [0032](0032-views-on-either-side.md)
 - **Date**: 2026-11-15
 - **Specs**: LAY-001…LAY-011
 - **Issues**: Forgejo raba/shale#20, #21, #22

@@ -384,6 +384,7 @@ impl ShaleApp {
             self.panes_ui(ui);
         });
         self.side_drag_tick(ui);
+        self.side_ask_tick(ui.ctx());
     }
 
     /// The middle area: one pane, or several side by side with a draggable border between

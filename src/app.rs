@@ -129,12 +129,23 @@ impl NoteDoc {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub enum LeftPanel {
     #[default]
     Files,
     Search,
     Tags,
+}
+
+impl LeftPanel {
+    /// The ribbon icon of this view of the left sidebar.
+    pub fn item(self) -> crate::sidebar::Item {
+        match self {
+            LeftPanel::Files => crate::sidebar::Item::Files,
+            LeftPanel::Search => crate::sidebar::Item::Search,
+            LeftPanel::Tags => crate::sidebar::Item::Tags,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -1861,7 +1872,7 @@ impl ShaleApp {
     /// Put the keyboard into the left sidebar (Ctrl+H, Ctrl+Shift+B): browse the file list with
     /// the open note selected, or type in the search box.
     pub fn focus_sidebar(&mut self, ctx: &egui::Context) {
-        self.cfg.show_left = true;
+        self.show_left_view(self.side.left);
         if let Some(f) = ctx.memory(|m| m.focused()) {
             ctx.memory_mut(|m| m.surrender_focus(f));
         }
@@ -2664,8 +2675,7 @@ impl ShaleApp {
             self.close_tab(a);
         }
         if search {
-            self.side.left = LeftPanel::Search;
-            self.cfg.show_left = true;
+            self.show_left_view(LeftPanel::Search);
             self.search.focus = true;
         }
         if save {
