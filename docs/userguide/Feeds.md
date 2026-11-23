@@ -22,6 +22,17 @@ social` shows made-up posts.
 - Pick the account and the feed (Mastodon: Home and your lists; Bluesky: Following and saved
   feeds). Posts show avatar, name, time, boosts, pictures, quoted posts and link cards. A
   content warning stays closed until you click Show.
+- **Replies and the thread of a post:** click the number of replies under a post, or **Show thread**
+  (offered for a post that has replies or is a reply). The conversation opens in the same tab: what
+  the post replies to is above it, the post itself is highlighted, and the replies are below as a
+  tree, moved in a little more for each step down (after six steps they stay at the same
+  indent). The replies are cards like in the feed: pictures open big, links work, content
+  warnings hide, and **Save to vault**, **Open in browser** and **Copy link** are there. A spinner
+  shows while the conversation loads; if it fails you get the message and **Retry**. **← Back**
+  (or the tab's Back button) returns to the feed exactly where you were; clicking the replies of
+  another post in the conversation opens that one as the next step. **Shift+click** or a middle
+  click opens the conversation in a new Feeds tab. When the server did not send all replies a note
+  says so, with **Open in browser** to read the rest on the server's page.
 - **Pictures big:** click a picture to see it large over the tab, fitted to the window, with its
   description (alt text) below. **◀ ▶** or the Left / Right keys step through the pictures of the
   post; the mouse wheel, **+** / **−** (also the keys `+` `-`) zoom, **100%** / **Fit** (key `0`)

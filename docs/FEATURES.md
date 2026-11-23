@@ -997,6 +997,13 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   later, and a hit whose post is gone from both index and feed is fetched from the server.
   **Settings → Feeds → Post search index** shows how many posts are indexed, **Rebuild**s it
   from the posts your open feeds hold, or **Clear…**s it (after a question). (Mouse only for now.)
+- **The conversation of a post** opens in the same tab with a click on its reply count or **Show
+  thread** (Shift+click or middle click: a new tab): what it replies to above, the post highlighted,
+  and the replies below as a tree, moved in for each level (up to 6). It is fetched in the
+  background (spinner, an error with **Retry**) and drawn with the cards of the feed: pictures and
+  the viewer, links, content warnings, Save to vault, Open in browser and Copy link. **← Back** (or
+  the tab's Back) returns to the feed at the same place; another post's reply count opens that
+  conversation as the next step. Replies the server leaves out are noted, with Open in browser.
 - **Pictures open big in a viewer** over the tab (click one): fitted to the window, its description
   (alt text) below, **◀ ▶** or Left / Right to step through the post's pictures, mouse wheel or
   `+` `-` to zoom, **100%** / **Fit** (`0`), drag to pan, Esc or **Close** to leave. The full size file

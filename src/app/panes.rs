@@ -278,7 +278,7 @@ impl ShaleApp {
                 let mut active = 0;
                 for (k, t) in bar.tabs.iter().enumerate() {
                     let saved = match &t.view {
-                        View::Social(Some(f)) if !f.feed.is_empty() => SavedTab { feed: Some(f.clone()), pinned: t.pinned, ..Default::default() },
+                        View::Social(Some(f)) if !f.feed.is_empty() => SavedTab { feed: Some(f.feed_only()), pinned: t.pinned, ..Default::default() },
                         View::Mail => SavedTab { view: Some(SavedTab::MAIL.into()), mail: self.mail.saved_place(), pinned: t.pinned, ..Default::default() },
                         View::Calendar => {
                             let c = &self.cal.main;

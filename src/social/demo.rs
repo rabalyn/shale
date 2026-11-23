@@ -147,6 +147,18 @@ impl super::state::Source for DemoSource {
     fn post(&self, id: &str) -> Result<Post, String> {
         posts().into_iter().chain(thread()).chain(new_posts()).find(|p| p.id == id).ok_or_else(|| "no such post".to_string())
     }
+    fn thread(&self, post: &Post) -> Result<ThreadView, String> {
+        let all = thread();
+        match all.iter().position(|p| p.id == post.id) {
+            // the posts of the demo thread, and the replies of other people to it
+            Some(at) => {
+                let mut below: Vec<Post> = all[at + 1..].to_vec();
+                below.extend(replies().into_iter().map(|r| r.post));
+                Ok(super::thread_view_of(post, all[..at].to_vec(), &below))
+            }
+            None => Ok(super::thread_view_of(post, vec![], &[])),
+        }
+    }
     fn newer(&self, _feed: &Feed, since: &Since) -> Result<Fresh, String> {
         Ok(Fresh { posts: new_posts().into_iter().filter(|p| !since.known.contains(&super::state::post_key(p))).collect(), ..Default::default() })
     }

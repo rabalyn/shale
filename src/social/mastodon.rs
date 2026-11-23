@@ -197,6 +197,22 @@ pub fn thread_full(server: &str, token: &str, post: &Post) -> Result<(Vec<Post>,
     Ok((t, r))
 }
 
+/// The conversation around a post: the ancestors, and all descendants as a tree (SOC-045).
+pub fn thread_view(server: &str, token: &str, post: &Post) -> Result<ThreadView, String> {
+    let server = base(server)?;
+    if post.id.is_empty() || !post.id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err("bad post id".into());
+    }
+    let v = api("GET", &format!("{server}/api/v1/statuses/{}/context", post.id), Some(token), None)?;
+    Ok(thread_view_from_context(post, &v, &server))
+}
+
+/// The conversation from a `/context` answer. (Separate so it can be tested with fixtures.)
+pub fn thread_view_from_context(post: &Post, context: &Value, server: &str) -> ThreadView {
+    let list = |k: &str| -> Vec<Post> { context[k].as_array().into_iter().flatten().filter_map(|s| parse_status(s, server)).collect() };
+    thread_view_of(post, list("ancestors"), &list("descendants"))
+}
+
 /// One post by its id (a boost is not fetched: its id is the original's).
 pub fn fetch_post(server: &str, token: &str, id: &str) -> Result<Post, String> {
     let server = base(server)?;
@@ -472,5 +488,54 @@ mod tests {
         let f = newer(&base, "tok-1", &Feed { id: "home".into(), title: "Home".into() }, Some("10"), 200).unwrap();
         assert_eq!((f.posts.len(), f.top.as_deref()), (2, Some("12")));
         assert_eq!(handle.join().unwrap().len(), 2);
+    }
+
+    fn counted(mut s: Value, replies: u32) -> Value {
+        s["replies_count"] = json!(replies);
+        s
+    }
+
+    // spec: SOC-045, SOC-046
+    #[test]
+    fn the_conversation_of_a_post_from_a_context_fixture() {
+        let ctx = json!({
+            "ancestors": [counted(status("1", "2", "bob", "2024-05-17T10:00:00Z", None, "<p>question</p>"), 1), counted(status("2", "1", "ada", "2024-05-17T10:01:00Z", Some("1"), "<p>answer 1/3</p>"), 1)],
+            "descendants": [
+                counted(status("6", "1", "ada", "2024-05-17T10:05:00Z", Some("5"), "<p>reply to cy</p>"), 0),
+                counted(status("4", "1", "ada", "2024-05-17T10:04:00Z", Some("3"), "<p>answer 3/3</p>"), 0),
+                counted(status("5", "3", "cy", "2024-05-17T10:03:00Z", Some("3"), "<p>nice</p>"), 1)]});
+        let root = parse_status(&counted(status("3", "1", "ada", "2024-05-17T10:02:00Z", Some("2"), "<p>answer 2/3</p>"), 2), "https://m.test").unwrap();
+        let v = thread_view_from_context(&root, &ctx, "https://m.test");
+        let texts = |l: &[Post]| l.iter().map(|p| p.text_markdown.clone()).collect::<Vec<_>>();
+        assert_eq!(texts(&v.ancestors), ["question", "answer 1/3"], "everything above it, also by other authors");
+        assert_eq!(v.post.id, "3");
+        // everything below it, also the author's own posts: depth first, oldest first among siblings
+        assert_eq!(v.replies.iter().map(|r| (r.post.text_markdown.as_str(), r.depth)).collect::<Vec<_>>(), [("nice", 0), ("reply to cy", 1), ("answer 3/3", 0)]);
+        assert!(!v.cut);
+        // the post counts a reply the server did not send
+        let more = Post { reply_count: 3, ..root };
+        assert!(thread_view_from_context(&more, &ctx, "https://m.test").cut);
+    }
+
+    // spec: SOC-045, SOC-046
+    #[test]
+    fn the_conversation_of_a_post_is_asked_from_the_servers_context() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let ctx = json!({"ancestors": [counted(status("2", "1", "ada", "2024-05-17T10:01:00Z", None, "<p>above</p>"), 1)], "descendants": [counted(status("4", "3", "cy", "2024-05-17T10:03:00Z", Some("3"), "<p>below</p>"), 0)]});
+        let (base, handle) = mock_http(2, move |method, path, headers, _| match (method, path) {
+            ("GET", "/api/v1/statuses/3/context") if headers.to_ascii_lowercase().contains("authorization: bearer tok-1") => (200, ctx.to_string()),
+            _ => (500, json!({"error": "Internal error"}).to_string()),
+        });
+        let mut c = Client::new(Account::new(Network::Mastodon, &base, "ada@127.0.0.1", "Ada"), "tok-1");
+        let post = parse_status(&counted(status("3", "1", "ada", "2024-05-17T10:02:00Z", Some("2"), "<p>middle</p>"), 1), &base).unwrap();
+        let v = c.thread_view(&post).unwrap();
+        assert_eq!((v.ancestors.len(), v.replies.len(), v.post.text_markdown.as_str(), v.cut), (1, 1, "middle", false));
+        // a failing server is an error, not an empty conversation
+        let gone = Post { id: "9".into(), ..post.clone() };
+        assert!(c.thread_view(&gone).is_err());
+        assert!(c.thread_view(&Post { id: "../x".into(), ..post }).unwrap_err().contains("bad post id"));
+        assert_eq!(handle.join().unwrap(), ["GET /api/v1/statuses/3/context", "GET /api/v1/statuses/9/context"]);
     }
 }

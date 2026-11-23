@@ -6,7 +6,8 @@
 use super::images::ImageCache;
 use super::note::SavedPost;
 use super::post_index::PostIndex;
-use super::{Client, Feed, FeedRef, Fresh, Page, Post, Since, SocialAccountEntry};
+use super::thread::{ThreadStatus, Threads};
+use super::{Client, Feed, FeedRef, Fresh, Page, Post, Since, SocialAccountEntry, ThreadView};
 use eframe::egui::{Context, Rect};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -24,6 +25,8 @@ pub trait Source: Send + Sync {
     fn newer(&self, feed: &Feed, since: &Since) -> Result<Fresh, String>;
     /// One post by its id (SOC-039).
     fn post(&self, id: &str) -> Result<Post, String>;
+    /// The conversation around a post (SOC-045).
+    fn thread(&self, post: &Post) -> Result<ThreadView, String>;
 }
 
 /// A hole in a list: posts between the post `above` (a `post_key`) and the one below it were not
@@ -161,6 +164,7 @@ enum Msg {
     Check { key: (String, String), client: Option<Client>, result: Result<Fresh, String> },
     Gap { key: (String, String), above: String, client: Option<Client>, result: Result<Page, String> },
     Saved { post: String, account: String, feed: String, label: &'static str, result: Result<SavedPost, String> },
+    Thread { account: String, feed: String, id: String, client: Option<Client>, result: Result<Box<ThreadView>, String> },
     Fetched { tab: u64, account: String, feed: String, client: Option<Client>, result: Result<Box<Post>, String> },
 }
 
@@ -207,6 +211,8 @@ pub struct SocialState {
     pub confirm_clear: bool,
     /// the picture viewer open over a tab (SOC-044)
     pub viewer: Option<super::viewer::Viewer>,
+    /// the conversations opened from posts (SOC-045)
+    pub threads: Threads,
     clients: HashMap<String, Client>,
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
@@ -253,6 +259,7 @@ impl SocialState {
             fetch_wanted: vec![],
             confirm_clear: false,
             viewer: None,
+            threads: Threads::default(),
             clients: HashMap::new(),
             tx,
             rx,
@@ -338,6 +345,7 @@ impl SocialState {
         self.feeds.remove(account);
         self.feed_of.remove(account);
         self.timelines.retain(|k, _| k.0 != account);
+        self.threads.forget(account);
     }
 
     /// The signed-in client of an account is dropped: the next request signs in with the secret
@@ -535,6 +543,37 @@ impl SocialState {
         );
     }
 
+    /// Start the job for a conversation that was opened and not fetched yet (SOC-045). `feed` is
+    /// the feed of the tab: the posts that come are indexed with it.
+    pub fn fetch_thread(&mut self, ctx: &Context, e: &SocialAccountEntry, feed: &str, id: &str) {
+        let key = (e.account.id.clone(), id.to_string());
+        if !self.threads.map.get(&key).is_some_and(|t| matches!(t.status, ThreadStatus::Wanted)) {
+            return;
+        }
+        let (client, src) = (self.client_source(e), self.source.clone());
+        let Some(t) = self.threads.map.get_mut(&key) else { return };
+        t.status = ThreadStatus::Loading;
+        let post = t.post.clone();
+        let (account, feed, id) = (e.account.id.clone(), feed.to_string(), id.to_string());
+        let (account2, feed2, id2) = (account.clone(), feed.clone(), id.clone());
+        run(
+            ctx,
+            &self.tx,
+            move || {
+                let (client, result) = match src {
+                    Some(s) => (None, s.thread(&post)),
+                    None => {
+                        let mut c = client();
+                        let r = c.thread_view(&post);
+                        (Some(c), r)
+                    }
+                };
+                Msg::Thread { account, feed, id, client, result: result.map(Box::new) }
+            },
+            move |m| Msg::Thread { account: account2, feed: feed2, id: id2, client: None, result: Err(m) },
+        );
+    }
+
     /// Fetch the thread and the media of a post for the Import dialog.
     pub fn save(&mut self, ctx: &Context, e: &SocialAccountEntry, feed: &str, post: &Post) {
         let key = post_key(post);
@@ -653,6 +692,14 @@ impl SocialState {
                         Err(e) => self.messages.push(format!("Could not save the post: {e}")),
                     }
                 }
+                Msg::Thread { account, feed, id, client, result } => {
+                    if let Some(c) = client {
+                        self.clients.insert(account.clone(), c);
+                    }
+                    // the conversation's posts are posts of the account too (SOC-045, SOC-037)
+                    let posts = self.threads.arrived(&account, &id, result);
+                    self.index.add(&account, &feed, &posts);
+                }
                 Msg::Fetched { tab, account, feed, client, result } => {
                     if let Some(c) = client {
                         self.clients.insert(account.clone(), c);
@@ -766,6 +813,9 @@ mod tests {
 
     impl Source for Fake {
         fn post(&self, _id: &str) -> Result<Post, String> {
+            Err("no such post".into())
+        }
+        fn thread(&self, _post: &Post) -> Result<ThreadView, String> {
             Err("no such post".into())
         }
         fn page(&self, _feed: &Feed, cursor: Option<&str>) -> Result<Page, String> {
@@ -916,7 +966,7 @@ mod tests {
         let (mut st, e, fake, ctx) = ready();
         let accounts = vec![e.clone()];
         st.check_every = Duration::from_secs(300);
-        let at = |f: &str| FeedRef { account: e.account.id.clone(), feed: f.into() };
+        let at = |f: &str| FeedRef::new(e.account.id.clone(), f);
         let t0 = Instant::now();
         // the first look plans the first check
         st.tick(&ctx, &accounts, &[at("home")], t0);
@@ -929,7 +979,7 @@ mod tests {
         assert!(fake.newer_calls.lock().unwrap().is_empty());
         // due: the feed open in two tabs is asked once, the feed that is not open never
         let due = planned + Duration::from_secs(1);
-        st.tick(&ctx, &accounts, &[at("home"), at("home"), at(""), FeedRef { account: "gone".into(), feed: "home".into() }], due);
+        st.tick(&ctx, &accounts, &[at("home"), at("home"), at(""), FeedRef::new("gone", "home")], due);
         wait(&mut st, |s| !s.timelines[&home_key(&e)].checking);
         let calls = fake.newer_calls.lock().unwrap();
         assert_eq!(calls.iter().map(|c| c.0.as_str()).collect::<Vec<_>>(), ["home"]);
@@ -954,7 +1004,7 @@ mod tests {
         assert!(!st.check(&ctx, &e, &home_feed()), "one check of this feed is running");
         st.check_every = Duration::from_secs(60);
         st.timelines.get_mut(&key).unwrap().next_check = Some(Instant::now());
-        st.tick(&ctx, std::slice::from_ref(&e), &[FeedRef { account: e.account.id.clone(), feed: "home".into() }], Instant::now() + Duration::from_secs(1000));
+        st.tick(&ctx, std::slice::from_ref(&e), &[FeedRef::new(e.account.id.clone(), "home")], Instant::now() + Duration::from_secs(1000));
         // the other feed is not held back by it
         assert!(st.check(&ctx, &e, &crate::social::demo::feeds().remove(1)));
         release.send(()).unwrap();

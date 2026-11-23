@@ -30,6 +30,10 @@ pub mod post_index;
 #[cfg(test)]
 mod post_index_tests;
 pub mod state;
+pub mod thread;
+#[cfg(test)]
+mod thread_tests;
+pub mod thread_ui;
 #[cfg(test)]
 mod ui_tests;
 pub mod viewer;
@@ -220,6 +224,22 @@ pub struct Feed {
 pub struct FeedRef {
     pub account: String,
     pub feed: String,
+    /// the id of a post whose conversation the tab shows instead of the feed (SOC-045); the tab
+    /// is a step in the history of the feed's tab and is never saved
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<String>,
+}
+
+impl FeedRef {
+    /// A feed (no conversation).
+    pub fn new(account: impl Into<String>, feed: impl Into<String>) -> FeedRef {
+        FeedRef { account: account.into(), feed: feed.into(), thread: None }
+    }
+
+    /// The same feed without a conversation.
+    pub fn feed_only(&self) -> FeedRef {
+        FeedRef { thread: None, ..self.clone() }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -556,6 +576,36 @@ pub fn conversation(thread: &[Post], descendants: &[Post]) -> Vec<Reply> {
     out
 }
 
+/// The conversation around one post, as the thread view shows it (SOC-045).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ThreadView {
+    /// what the post replies to, from the top of the conversation down to its parent
+    pub ancestors: Vec<Post>,
+    /// the post that was opened
+    pub post: Post,
+    /// everything below it as a tree (depth first, oldest first among siblings); depth 0 answers `post`
+    pub replies: Vec<Reply>,
+    /// the server's answer left replies out: it was cut off at its depth limit, or the replies are
+    /// hidden from this account
+    pub cut: bool,
+}
+
+/// Put a thread view together from a context answer: the ancestors, the opened post, and all
+/// posts below it in any order (`conversation` makes the tree).
+pub fn thread_view_of(post: &Post, ancestors: Vec<Post>, descendants: &[Post]) -> ThreadView {
+    let post = Post { reposted_by: None, ..post.clone() };
+    let replies = conversation(std::slice::from_ref(&post), descendants);
+    // a post that counts more replies than the tree holds below it: the answer was cut off
+    let mut below: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
+    for r in &replies {
+        if let Some(parent) = &r.post.reply_to {
+            *below.entry(parent.as_str()).or_default() += 1;
+        }
+    }
+    let cut = replies.len() < descendants.len().min(MAX_REPLIES) || std::iter::once(&post).chain(replies.iter().map(|r| &r.post)).any(|p| p.reply_count > below.get(p.id.as_str()).copied().unwrap_or(0));
+    ThreadView { ancestors, post, replies, cut }
+}
+
 // ---------------------------------------------------------------- the client
 
 /// A signed-in account ready to use: one type for both networks. It is `Clone + Send`: give a
@@ -628,6 +678,14 @@ impl Client {
         match &mut self.backend {
             Backend::Mastodon { token } => mastodon::thread_full(&self.account.server, token.expose(), post),
             Backend::Bluesky(api) => bluesky::thread_full(api, post),
+        }
+    }
+
+    /// The conversation around `post`: what it replies to and everything below it (SOC-045).
+    pub fn thread_view(&mut self, post: &Post) -> Result<ThreadView, String> {
+        match &mut self.backend {
+            Backend::Mastodon { token } => mastodon::thread_view(&self.account.server, token.expose(), post),
+            Backend::Bluesky(api) => bluesky::thread_view(api, post),
         }
     }
 
@@ -752,5 +810,31 @@ pub(crate) mod tests {
         let anc = vec![p("a1", "ada", 1, None), p("b1", "bob", 2, Some("a1"))];
         let ids: Vec<String> = self_thread(p("a2", "ada", 3, Some("b1")), anc, vec![]).into_iter().map(|p| p.id).collect();
         assert_eq!(ids, ["a2"]);
+    }
+
+    // spec: SOC-045, SOC-046
+    #[test]
+    fn a_thread_view_is_the_tree_below_the_post_and_notices_replies_that_are_missing() {
+        let counted = |p: Post, n: u32| Post { reply_count: n, ..p };
+        let root = Post { reposted_by: Some(Author::default()), ..counted(post("r", "ada", 10, Some("up")), 2) };
+        let all = vec![counted(post("b", "cy", 30, Some("r")), 0), counted(post("a", "bob", 20, Some("r")), 1), post("a1", "ada", 25, Some("a"))];
+        let v = thread_view_of(&root, vec![post("up", "bob", 5, None)], &all);
+        assert_eq!(v.replies.iter().map(|r| (r.post.id.as_str(), r.depth)).collect::<Vec<_>>(), [("a", 0), ("a1", 1), ("b", 0)], "depth first, oldest first among siblings");
+        assert!(v.post.reposted_by.is_none(), "the opened post is the post, not a boost of it");
+        assert!(!v.cut);
+        // a reply whose parent the server did not send, a post that counts more replies than it has below it
+        assert!(thread_view_of(&root, vec![], &[post("lost", "cy", 40, Some("gone"))]).cut);
+        assert!(thread_view_of(&counted(root, 5), vec![], &all).cut);
+        assert!(!thread_view_of(&post("alone", "ada", 1, None), vec![], &[]).cut);
+    }
+
+    // spec: SOC-045
+    #[test]
+    fn a_feed_ref_names_a_conversation_only_in_memory() {
+        let f = FeedRef { thread: Some("12".into()), ..FeedRef::new("mastodon:ada", "home") };
+        assert_eq!(f.feed_only(), FeedRef::new("mastodon:ada", "home"));
+        // the saved form of a tab has no conversation, and the state files from before still load
+        assert_eq!(serde_json::to_string(&f.feed_only()).unwrap(), r#"{"account":"mastodon:ada","feed":"home"}"#);
+        assert_eq!(serde_json::from_str::<FeedRef>(r#"{"account":"mastodon:ada","feed":"home"}"#).unwrap().thread, None);
     }
 }

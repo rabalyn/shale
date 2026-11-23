@@ -1317,7 +1317,7 @@ mod tests {
         settle(&mut w);
         assert!(w.app.modal.is_none());
         assert_eq!(w.app.tabbar.tabs.len(), tabs + 1, "a new tab");
-        let feed = crate::social::FeedRef { account: crate::social::demo::account().account.id, feed: "home".into() };
+        let feed = crate::social::FeedRef::new(crate::social::demo::account().account.id, "home");
         assert_eq!(w.app.tabbar.tabs[w.app.tabbar.active].view, View::Social(Some(feed)));
         assert_eq!(w.app.notes[Path::new("A.md")].text, "# A\n");
     }
@@ -1447,7 +1447,7 @@ mod tests {
         w.press(Key::Enter, Modifiers::NONE);
         settle(&mut w);
         assert_eq!(w.app.tabbar.tabs.len(), tabs + 1);
-        let feed = crate::social::FeedRef { account: crate::social::demo::account().account.id, feed: "home".into() };
+        let feed = crate::social::FeedRef::new(crate::social::demo::account().account.id, "home");
         assert_eq!(w.app.tabbar.tabs[w.app.tabbar.active].view, View::Social(Some(feed)));
         // Enter on a note line puts the cursor on the found text
         browse_sidebar(&mut w, "ban*");

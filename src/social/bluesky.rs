@@ -263,6 +263,31 @@ pub fn thread_full(api: &mut Api, post: &Post) -> Result<(Vec<Post>, Vec<Reply>)
     Ok((t, r))
 }
 
+/// The conversation around a post: the ancestors, and all replies as a tree (SOC-045).
+pub fn thread_view(api: &mut Api, post: &Post) -> Result<ThreadView, String> {
+    let v = api.get("app.bsky.feed.getPostThread", &[("uri", &post.id), ("depth", "10"), ("parentHeight", "80")])?;
+    Ok(thread_view_from_response(post, &v))
+}
+
+/// The conversation from a `getPostThread` answer. (Separate so it can be tested with fixtures.)
+pub fn thread_view_from_response(post: &Post, resp: &Value) -> ThreadView {
+    let node = &resp["thread"];
+    let root = parse_post_view(&node["post"]).unwrap_or_else(|| post.clone());
+    let mut ancestors = Vec::new();
+    let mut up = &node["parent"];
+    while text(&up["$type"]).ends_with("#threadViewPost") {
+        match parse_post_view(&up["post"]) {
+            Some(p) => ancestors.push(p),
+            None => break,
+        }
+        up = &up["parent"];
+    }
+    ancestors.reverse();
+    let mut descendants = Vec::new();
+    collect_replies(node, &mut descendants);
+    thread_view_of(&root, ancestors, &descendants)
+}
+
 /// One post by its at:// address.
 pub fn fetch_post(api: &mut Api, id: &str) -> Result<Post, String> {
     let v = api.get("app.bsky.feed.getPosts", &[("uris", id)])?;
@@ -747,5 +772,86 @@ mod tests {
         let f = newer_with(&keys(&[]), 200, |c| Ok(if c.is_none() { page_of(&["a", "b"], Some("x")) } else { page_of(&["b", "c"], None) })).unwrap();
         assert_eq!(f.posts.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["a", "b", "c"]);
         assert!(newer_with(&keys(&[]), 200, |_| Err("offline".into())).is_err());
+    }
+
+    fn thread_node(n: &str, who: (&str, &str), min: u32, parent: Option<&str>, kids: Vec<Value>, replies: u32) -> Value {
+        let mut v = post_view(n, who.0, who.1, &format!("2024-05-17T10:0{min}:00Z"), parent, &format!("post {n}"));
+        v["replyCount"] = json!(replies);
+        json!({"$type": "app.bsky.feed.defs#threadViewPost", "post": v, "replies": kids})
+    }
+
+    /// The answer for the post `p2` of ada: two posts above it, replies of others and of ada herself below it.
+    fn conversation_fixture(root_replies: u32) -> Value {
+        let (d, cy) = ("did:plc:ada", ("did:plc:cy", "cy.test"));
+        let ada = (d, "ada.test");
+        let at = |who: &str, n: &str| format!("at://{who}/app.bsky.feed.post/{n}");
+        let mut root = thread_node(
+            "p2",
+            ada,
+            2,
+            Some("p1"),
+            vec![
+                thread_node("c1", cy, 3, Some(&at(d, "p2")), vec![thread_node("a9", ada, 9, Some(&at(cy.0, "c1")), vec![], 0)], 1),
+                thread_node("p3", ada, 4, Some("p2"), vec![thread_node("p4", ada, 5, Some("p3"), vec![], 0), thread_node("c2", cy, 6, Some(&at(d, "p3")), vec![], 0)], 2),
+                json!({"$type": "app.bsky.feed.defs#notFoundPost", "uri": "at://x/y/z", "notFound": true}),
+            ],
+            root_replies,
+        );
+        root["parent"] = {
+            let mut p1 = thread_node("p1", ada, 1, Some("b0"), vec![], 1);
+            p1["parent"] = thread_node("b0", ("did:plc:bob", "bob.test"), 0, None, vec![], 1);
+            p1
+        };
+        json!({"thread": root})
+    }
+
+    // spec: SOC-045, SOC-046
+    #[test]
+    fn the_conversation_of_a_post_from_a_thread_fixture() {
+        let resp = conversation_fixture(2);
+        let root = parse_post_view(&resp["thread"]["post"]).unwrap();
+        let v = thread_view_from_response(&root, &resp);
+        let texts = |l: &[Post]| l.iter().map(|p| p.text_markdown.clone()).collect::<Vec<_>>();
+        assert_eq!(texts(&v.ancestors), ["post b0", "post p1"], "from the top of the conversation down");
+        assert_eq!(v.post.text_markdown, "post p2");
+        // depth first, oldest first among siblings; the author's own posts are replies here; a post that is gone is left out
+        assert_eq!(v.replies.iter().map(|r| (r.post.text_markdown.as_str(), r.depth)).collect::<Vec<_>>(), [("post c1", 0), ("post a9", 1), ("post p3", 0), ("post p4", 1), ("post c2", 1)]);
+        assert!(!v.cut);
+        // the post counts more replies than the answer holds (the server stopped at its depth limit)
+        let resp = conversation_fixture(3);
+        assert!(thread_view_from_response(&root, &resp).cut);
+    }
+
+    // spec: SOC-045, SOC-046
+    #[test]
+    fn the_conversation_of_a_post_is_asked_with_get_post_thread() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let (base, handle) = mock_http(3, move |method, path, headers, _| {
+            let host = headers.lines().find_map(|l| l.strip_prefix("Host: ")).unwrap_or("").trim().to_string();
+            let did = format!("did:web:{}", host.replace(':', "%3A"));
+            match (method, path.split('?').next().unwrap()) {
+                ("POST", "/xrpc/com.atproto.server.createSession") => {
+                    (200, json!({"accessJwt": "jwt-1", "refreshJwt": "ref-1", "did": did, "handle": "ada.test", "didDoc": {"service": [{"id": "#atproto_pds", "serviceEndpoint": format!("http://{host}")}]}}).to_string())
+                }
+                ("GET", "/xrpc/app.bsky.feed.getPostThread") if path.contains("missing") => (400, json!({"error": "NotFound", "message": "Post not found"}).to_string()),
+                ("GET", "/xrpc/app.bsky.feed.getPostThread") => {
+                    assert!(path.contains("depth=10") && path.contains("parentHeight=80"), "{path}");
+                    let mut up = thread_node("p1", (&did, "ada.test"), 1, None, vec![], 1);
+                    let mut root = thread_node("p2", (&did, "ada.test"), 2, Some("p1"), vec![thread_node("p3", ("did:plc:cy", "cy.test"), 3, Some(&format!("at://{did}/app.bsky.feed.post/p2")), vec![], 0)], 1);
+                    up["replies"] = json!([]);
+                    root["parent"] = up;
+                    (200, json!({"thread": root}).to_string())
+                }
+                _ => (404, json!({"error": "NotFound"}).to_string()),
+            }
+        });
+        let mut c = Client::new(Account::new(Network::Bluesky, &base, "ada.test", "Ada"), "app-pw");
+        let post = crate::social::tests::post("at://x/app.bsky.feed.post/p2", "ada", 1, None);
+        let v = c.thread_view(&post).unwrap();
+        assert_eq!((v.ancestors.len(), v.post.text_markdown.as_str(), v.replies.len(), v.cut), (1, "post p2", 1, false));
+        assert!(c.thread_view(&Post { id: "at://x/app.bsky.feed.post/missing".into(), ..post }).unwrap_err().to_lowercase().contains("not found"));
+        assert_eq!(handle.join().unwrap().len(), 3);
     }
 }

@@ -4,7 +4,7 @@
 
 use super::state::{post_key, Source, Timeline};
 use super::tests::post;
-use super::{demo, Feed, FeedRef, Fresh, Page, Post, Since};
+use super::{demo, Feed, FeedRef, Fresh, Page, Post, Since, ThreadView};
 use crate::app::{Options, ShaleApp, View};
 use eframe::egui::{self, Event, Modifiers, MouseWheelUnit, PointerButton, Pos2, RawInput, Rect, Vec2};
 use std::path::PathBuf;
@@ -19,6 +19,11 @@ pub(crate) struct Script {
     /// what fetching a post by id gives (SOC-039); missing ids fail
     pub posts: Mutex<Vec<Post>>,
     pub post_calls: Mutex<Vec<String>>,
+    /// what the conversation of a post (by id) answers, one answer per request (the last one stays); missing ids fail (SOC-045)
+    pub threads: Mutex<std::collections::HashMap<String, Vec<Result<ThreadView, String>>>>,
+    pub thread_calls: Mutex<Vec<String>>,
+    /// a request for a conversation waits for this to be sent a message
+    pub thread_gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
 }
 
 impl Source for Script {
@@ -28,6 +33,18 @@ impl Source for Script {
     fn post(&self, id: &str) -> Result<Post, String> {
         self.post_calls.lock().unwrap().push(id.to_string());
         self.posts.lock().unwrap().iter().find(|p| p.id == id).cloned().ok_or_else(|| "the server does not know this post".to_string())
+    }
+    fn thread(&self, post: &Post) -> Result<ThreadView, String> {
+        self.thread_calls.lock().unwrap().push(post.id.clone());
+        if let Some(rx) = self.thread_gate.lock().unwrap().as_ref() {
+            let _ = rx.recv();
+        }
+        let mut all = self.threads.lock().unwrap();
+        match all.get_mut(&post.id) {
+            Some(answers) if answers.len() > 1 => answers.remove(0),
+            Some(answers) if !answers.is_empty() => answers[0].clone(),
+            _ => Err("the server does not know this conversation".to_string()),
+        }
     }
     fn newer(&self, feed: &Feed, _since: &Since) -> Result<Fresh, String> {
         let mut q = self.newer.lock().unwrap();
@@ -51,11 +68,11 @@ pub(crate) fn feed_posts(prefix: &str, n: usize) -> Vec<Post> {
 }
 
 pub(crate) fn home() -> FeedRef {
-    FeedRef { account: demo::account().account.id, feed: "home".into() }
+    FeedRef::new(demo::account().account.id, "home")
 }
 
 pub(crate) fn list() -> FeedRef {
-    FeedRef { account: demo::account().account.id, feed: "list:1".into() }
+    FeedRef::new(demo::account().account.id, "list:1")
 }
 
 impl W {
@@ -263,7 +280,7 @@ fn choosing_another_feed_is_a_step_in_the_tab_history() {
 }
 
 /// Wait (up to 2 s) until a background job of the feeds has delivered, as `until` sees it.
-fn wait_for(w: &mut W, until: impl Fn(&W) -> bool) {
+pub(crate) fn wait_for(w: &mut W, until: impl Fn(&W) -> bool) {
     for _ in 0..200 {
         w.frame(vec![]);
         if until(w) {
