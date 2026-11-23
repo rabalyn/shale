@@ -1034,7 +1034,7 @@ pub mod tests {
         }
     }
 
-    // spec: MAIL-130
+    // spec: MAIL-130, MAIL-132
     #[test]
     fn a_draft_and_an_outbox_entry_with_the_same_id_leave_only_the_outbox_entry() {
         let root = temp("both");
@@ -1070,6 +1070,7 @@ pub mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    // spec: MAIL-130
     #[test]
     fn a_missing_attachment_file_is_told_and_the_rest_of_the_draft_opens() {
         let root = temp("missing-att");

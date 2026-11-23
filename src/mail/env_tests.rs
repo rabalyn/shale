@@ -130,7 +130,7 @@ fn is_unseen(line: &str) -> bool {
     !line.contains("\\Seen")
 }
 
-// spec: MAIL-091, MAIL-092, MAIL-242, DEV-026
+// spec: MAIL-091, MAIL-092, MAIL-242, DEV-026, MAIL-090
 #[test]
 #[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
 fn mail_env_password_account_syncs_end_to_end_and_changes_nothing_on_the_server() {
@@ -258,7 +258,7 @@ fn sign_in_headless(acct: &MailAccount) -> Result<oauth::SignedIn, oauth::OAuthE
     oauth::sign_in(acct, None, &AtomicBool::new(false), Duration::from_secs(60), &|_| {})
 }
 
-// spec: MAIL-091
+// spec: MAIL-091, MAIL-090
 #[test]
 #[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
 fn mail_env_oauth_account_signs_in_syncs_renews_its_token_and_a_dead_sign_in_is_said_in_words() {
@@ -717,7 +717,7 @@ fn send_end_to_end(acct: &MailAccount, smtp: EnvSmtp, imap: EnvConnector, tag: &
     let _ = std::fs::remove_dir_all(dir);
 }
 
-// spec: MAIL-160
+// spec: MAIL-160, MAIL-124
 #[test]
 #[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
 fn mail_env_password_and_oauth_accounts_send_with_an_attachment_and_dovecot_has_one_sent_copy_each() {

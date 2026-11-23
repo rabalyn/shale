@@ -1018,7 +1018,7 @@ mod tests {
         assert!(seen.iter().all(|l| !l.contains("LOGIN") && !l.contains("AUTHENTICATE") && !l.contains("secret")), "{seen:?}");
     }
 
-    // spec: MAIL-022
+    // spec: MAIL-022, MAIL-092
     #[test]
     fn a_certificate_the_system_does_not_trust_is_refused() {
         let server = seeded(MailSecurity::ImplicitTls);
@@ -1043,7 +1043,7 @@ mod tests {
         assert_eq!(format!("{bad:?}"), "PlainAuth(ada, ***)");
     }
 
-    // spec: MAIL-023
+    // spec: MAIL-023, MAIL-100
     #[test]
     fn the_client_never_sends_anything_that_changes_the_mailbox() {
         let server = seeded(MailSecurity::ImplicitTls);
@@ -1069,7 +1069,7 @@ mod tests {
         assert!(verbs.iter().any(|v| v.starts_with("EXAMINE")));
     }
 
-    // spec: MAIL-023
+    // spec: MAIL-023, MAIL-230
     #[test]
     fn the_guard_refuses_what_could_change_a_mailbox() {
         for ok in ["CAPABILITY", "LIST \"\" \"*\"", "EXAMINE \"INBOX\"", "UID SEARCH ALL", "UID FETCH 1:* (UID FLAGS)", "UID FETCH 5 (UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[])", "uid fetch 5 (BODY.PEEK[HEADER])", "IDLE", "LOGOUT"] {
@@ -1285,7 +1285,7 @@ mod tests {
         server.state().verbs().into_iter().filter(|v| ["SELECT", "UID STORE", "UID MOVE", "UID COPY", "UID EXPUNGE", "EXPUNGE", "STORE"].iter().any(|w| v.starts_with(w))).collect()
     }
 
-    // spec: MAIL-101
+    // spec: MAIL-101, MAIL-140
     #[test]
     fn typed_commands_become_exact_text_and_the_write_gate_takes_only_those_shapes() {
         let cmds = [
@@ -1370,7 +1370,7 @@ mod tests {
         }
     }
 
-    // spec: MAIL-101
+    // spec: MAIL-101, MAIL-140
     #[test]
     fn no_text_of_a_write_command_exists_outside_the_typed_enum() {
         fn files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
