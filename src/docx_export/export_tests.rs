@@ -1643,10 +1643,19 @@ mod dialog_tests {
         assert_eq!(found.pandoc.as_deref(), Some(Path::new("/opt/pandoc/bin/pandoc")));
     }
 
-    // spec: DOCX-002
+    // spec: DOCX-002, JOB-010, JOB-019
     #[cfg(unix)]
     #[test]
-    fn the_export_runs_as_a_job_the_dialog_shows_it_and_cancel_and_closing_stop_it() {
+    fn the_export_runs_as_a_task_the_dialog_shows_it_and_cancel_and_closing_stop_it() {
+        use crate::busy::Busy;
+        use dialog::DOCX_EXPORT;
+        let wait_idle = |busy: &Busy| {
+            let start = std::time::Instant::now();
+            while busy.is_running(&DOCX_EXPORT) {
+                assert!(start.elapsed() < Duration::from_secs(30), "the task ends with its job");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
         let dir = temp_dir("dialog-job");
         let default = dir.join("default.docx");
         std::fs::write(&default, zip_of(&[("[Content_Types].xml", "<t/>"), ("word/styles.xml", &pandoc_styles())])).unwrap();
@@ -1658,19 +1667,27 @@ mod dialog_tests {
             d
         };
         let slow = fake_pandoc(&sub("slow"), &format!("if [ \"$1\" = \"--print-default-data-file\" ]; then cat '{}'; exit 0; fi\nsleep 30", default.display()));
-        let mut d = dialog(Some("/usr/bin/pandoc"), None);
+        let busy = Busy::default();
+        let mut d = dialog(Some("/usr/bin/pandoc"), None).with_busy(&busy);
         let mut h = H::new(&mut d);
-        assert!(d.poll().is_none() && !d.working());
-        d.start(job_with(slow.clone(), &dir, "x\n"), || {});
+        assert!(d.poll().is_none() && !d.working() && busy.list().is_empty());
+        assert!(d.start(job_with(slow.clone(), &dir, "x\n"), || {}));
         h.frame(&mut d, vec![]);
         assert!(d.working() && has(&d, "working"), "the dialog shows that it works");
+        let listed = busy.info(&DOCX_EXPORT);
+        assert!(listed.as_ref().is_some_and(|t| t.cancellable && t.label == "Exporting “Report” to Word…"), "the task is listed with its text and Cancel: {listed:?}");
         h.click(&mut d, "export");
         assert_eq!(h.last, DialogResult::Open, "no second export beside the running one");
+        let other = dialog(Some("/usr/bin/pandoc"), None).with_busy(&busy);
+        assert!(!other.can_export(), "another dialog waits too (JOB-005)");
+        // Cancel stops the work (JOB-010): the task leaves the list when pandoc is gone
         d.cancel();
         assert!(!d.working() && d.poll().is_none());
+        wait_idle(&busy);
+        assert!(busy.list().is_empty() && other.can_export());
         // a job that has ended hands its result over once
         let nothing = fake_pandoc(&sub("nothing"), "exit 7");
-        d.start(job_with(nothing, &dir, "x\n"), || {});
+        assert!(d.start(job_with(nothing, &dir, "x\n"), || {}));
         let start = std::time::Instant::now();
         let got = loop {
             if let Some(g) = d.poll() {
@@ -1683,11 +1700,12 @@ mod dialog_tests {
         // dropping the dialog stops pandoc
         let marker = dir.join("still-running");
         let waiting = fake_pandoc(&sub("waiting"), &format!("if [ \"$1\" = \"--print-default-data-file\" ]; then cat '{}'; exit 0; fi\nsleep 3\ntouch '{}'", default.display(), marker.display()));
-        d.start(job_with(waiting, &dir, "x\n"), || {});
+        assert!(d.start(job_with(waiting, &dir, "x\n"), || {}));
         std::thread::sleep(Duration::from_millis(500));
         drop(d);
+        wait_idle(&busy);
         std::thread::sleep(Duration::from_millis(3500));
-        assert!(!marker.exists(), "pandoc was killed with the dialog");
+        assert!(!marker.exists(), "pandoc was killed with the dialog, and its task is gone");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

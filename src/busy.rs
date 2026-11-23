@@ -47,6 +47,11 @@ impl Cancel {
     pub fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::SeqCst)
     }
+
+    /// The same request as the plain flag that the older jobs (pandoc, LuaLaTeX) look at.
+    pub fn flag(&self) -> Arc<AtomicBool> {
+        self.0.clone()
+    }
 }
 
 /// What the registry knows of a running task.

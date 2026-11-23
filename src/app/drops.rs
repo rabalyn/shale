@@ -146,7 +146,7 @@ impl ShaleApp {
                 (folder, open_note, false)
             }
         };
-        let mut d = Box::new(ImportDialog::new(items, notes, folder, String::new(), link_into, link_on));
+        let mut d = Box::new(ImportDialog::new(items, notes, folder, String::new(), link_into, link_on).with_busy(&self.busy));
         d.people_dir = self.vdata.settings.people_dir.clone();
         d.root = v.root.clone();
         d.header_list = self.cfg.import_header_list;
@@ -261,8 +261,15 @@ impl ShaleApp {
                 let Some(v) = &mut self.vault else { return true };
                 // pandoc takes its time: the Word files are converted in a job first (IMP-035), and
                 // the dialog calls this again when it is done
-                if d.converting.is_none() && d.start_conversion(v.root.clone()) {
-                    return false;
+                if d.converting.is_none() {
+                    match d.start_conversion(v.root.clone()) {
+                        Ok(true) => return false,
+                        Ok(false) => {}
+                        Err(e) => {
+                            d.error = Some(e);
+                            return false;
+                        }
+                    }
                 }
                 let import::Imported { notes: made, files, linked, errors, touched } = import::import(v, &d.items, &opts);
                 // the open buffers of the neighbours show the line that was written

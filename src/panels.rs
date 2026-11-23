@@ -1138,8 +1138,8 @@ impl ShaleApp {
         if let Modal::Export(d) = &mut modal {
             let title = if d.book.is_some() { format!("Export the folder “{}” to PDF", d.name) } else { format!("Export “{}” to PDF", d.name) };
             // a LaTeX export that is running or has just ended (TEX-016), or the book of a folder (BOOK-010)
-            let finished = self.tex_export_tick(d, &ctx).or_else(|| self.book_export_tick(d));
-            if d.tex.as_ref().is_some_and(|t| t.working()) || d.book.as_ref().is_some_and(|b| b.working()) {
+            let finished = self.tex_export_tick(d, &ctx).or_else(|| self.book_export_tick(d)).or_else(|| self.note_export_tick(d));
+            if d.tex.as_ref().is_some_and(|t| t.working()) || d.book.as_ref().is_some_and(|b| b.working()) || d.note_working() {
                 ctx.request_repaint_after(std::time::Duration::from_millis(250));
             }
             let mut st = (&mut **d, crate::pdf::export_dialog::DialogResult::Open);
@@ -1172,13 +1172,9 @@ impl ShaleApp {
                         b.cancel();
                     }
                 }
-                crate::pdf::export_dialog::DialogResult::Export => match self.run_export(d) {
-                    Ok(out) => {
-                        done(self, d, out);
-                        keep = false;
-                    }
-                    Err(e) => d.error = Some(e),
-                },
+                // Cancel stops the export of a note that is running, and a second one closes the dialog (JOB-010)
+                crate::pdf::export_dialog::DialogResult::Cancel if d.note_working() => d.cancel_note(),
+                crate::pdf::export_dialog::DialogResult::Export => d.error = self.start_note_export(d, &ctx).err(),
                 crate::pdf::export_dialog::DialogResult::Cancel => keep = false,
                 crate::pdf::export_dialog::DialogResult::Open => {}
             }
