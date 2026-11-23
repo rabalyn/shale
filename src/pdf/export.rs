@@ -1765,7 +1765,7 @@ pub(super) fn finish_from(mut doc: Doc, opts: &ExportOptions, first: usize) -> R
 // ---------------------------------------------------------------- drawings
 
 /// A picture in the PDF writer's form (alpha only when it is used).
-fn pdf_image(img: &image::RgbaImage) -> Image {
+pub(super) fn pdf_image(img: &image::RgbaImage) -> Image {
     let has_alpha = img.pixels().any(|p| p[3] < 255);
     let rgb: Vec<u8> = img.pixels().flat_map(|p| [p[0], p[1], p[2]]).collect();
     let alpha = has_alpha.then(|| img.pixels().map(|p| p[3]).collect());
