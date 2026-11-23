@@ -693,6 +693,68 @@ fn exec_expunge(store: &MailStore, client: &mut Client, folder: &FolderRow, grou
     Ok(d)
 }
 
+// ---------------------------------------------------------------- delete the local copy
+
+/// What [`delete_local_copies`] did.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LocalDeleted {
+    /// Messages whose row went from the index (their file is in the local trash).
+    pub removed: usize,
+    /// Messages that were left out, and why.
+    pub notes: Vec<String>,
+}
+
+/// Whether the local copy of this mail may be deleted: only a mail that is gone from the server, and
+/// that no queued action waits for (MAIL-238). A mail that is still on the server would come back with the next sync.
+pub fn local_deletable(m: &MessageSummary) -> bool {
+    m.gone_on_server && m.pending.is_none()
+}
+
+/// Delete the local copy of mails that are gone from the server (MAIL-238): the row leaves the index
+/// and the file moves to `.trash/<date>/` (MAIL-009, nothing deletes a file). The server is not
+/// asked and not changed, and notes imported from the mail stay in the vault. Needs the [`Confirmed`] of the
+/// dialog, which names the count; the state of every message is read again from the index, and one that is still on
+/// the server (or has an action waiting) is left out with a note, so nothing is lost by a stale list.
+pub fn delete_local_copies(store: &MailStore, msgs: &[MessageSummary], confirmed: Confirmed, date: &str) -> Result<LocalDeleted, String> {
+    if confirmed.count != msgs.len() {
+        return Err(format!("deleting the local copy was confirmed for {} message(s), not for {}", confirmed.count, msgs.len()));
+    }
+    let reader = store.reader().map_err(err)?;
+    let mut out = LocalDeleted::default();
+    let mut ops = vec![];
+    let mut files = vec![];
+    for m in msgs {
+        let Some(cur) = reader.message_by_id(m.id).map_err(err)? else {
+            out.notes.push(format!("“{}” is not in the local copy any more", short(&m.subject)));
+            continue;
+        };
+        let label = short(&cur.subject);
+        if !cur.gone_on_server {
+            out.notes.push(format!("“{label}” is still on the server, so its local copy stays (the next sync would fetch it again)"));
+            continue;
+        }
+        if cur.pending.is_some() {
+            out.notes.push(format!("“{label}” has a change waiting for the server; its local copy stays"));
+            continue;
+        }
+        ops.push(Op::Remove { folder: cur.folder_id, uidvalidity: cur.uidvalidity, uid: cur.uid });
+        if !cur.path.is_empty() {
+            files.push(cur.path.clone());
+        }
+    }
+    out.removed = ops.len();
+    if ops.is_empty() {
+        return Ok(out);
+    }
+    store.commit(ops).map_err(err)?;
+    for rel in &files {
+        if let Err(e) = store.archive_file(rel, date) {
+            out.notes.push(format!("The file {rel} could not be moved to the local trash: {e}"));
+        }
+    }
+    Ok(out)
+}
+
 // ---------------------------------------------------------------- the copy of a sent mail (ADR-0010)
 
 /// Local copies of sent mail that the server has not got yet are kept under UIDVALIDITY 0

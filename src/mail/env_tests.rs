@@ -501,6 +501,63 @@ fn mail_env_flag_unflag_move_delete_and_delete_forever_change_dovecot_as_asked_a
     crate::dataflow::verify_flow(&forest, "mail_ops", &crate::dataflow::doc("mail-ops.md"));
 }
 
+// spec: MAIL-239
+#[test]
+#[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
+fn mail_env_a_mail_deleted_on_the_server_shows_as_gone_and_its_local_copy_is_deleted_by_the_action_and_nothing_else() {
+    let _turn = turn();
+    clean_scratch();
+    let (dir, store) = temp_store("localdelete");
+    let connector = EnvConnector { auth: Arc::new(PasswordAuth { user: USER.into(), password: "shale-test-pw".into() }) };
+    let watched = ["INBOX", "Work", "Work/Projects", "Sent", "Drafts", "Junk", "Trash"];
+    let before: Vec<Vec<String>> = watched.iter().map(|m| server_view(m)).collect();
+    doveadm(&["mailbox", "create", "-u", USER, "Scratch"], None).unwrap();
+    for s in ["Scratch six", "Scratch seven"] {
+        put_message("Scratch", s);
+    }
+    only_scratch_is_synced(&store, &connector);
+    let sum = sync(&store, "alice", &connector);
+    assert!(sum.errors.is_empty() && sum.messages_added == 2, "{sum:?}");
+    let rows_now = || store.reader().unwrap().folders(Some("alice")).unwrap();
+    let by_subject = |subject: &str| -> MessageSummary { messages(&store, &rows_now(), "Scratch").into_iter().find(|m| m.subject == subject).unwrap_or_else(|| panic!("{subject} not in Scratch")) };
+    let (six, seven) = (by_subject("Scratch six"), by_subject("Scratch seven"));
+    assert!(!six.gone_on_server && !seven.gone_on_server);
+    assert!(!ops::local_deletable(&six), "a mail that is on the server has no such action");
+
+    // another program deletes "Scratch six" on the server; the next sync marks it
+    doveadm(&["expunge", "-u", USER, "mailbox", "Scratch", "header", "Subject", "Scratch six"], None).unwrap();
+    let sum = sync(&store, "alice", &connector);
+    assert!(sum.errors.is_empty(), "{sum:?}");
+    let (six, seven) = (by_subject("Scratch six"), by_subject("Scratch seven"));
+    assert!(six.gone_on_server && !seven.gone_on_server, "only the mail that left the server is marked");
+    assert!(ops::local_deletable(&six) && !ops::local_deletable(&seven));
+    assert!(store.abs_path(&six.path).is_file());
+    let server_before = server_view("Scratch");
+
+    // the action: the mail that is still on the server is refused, the other one goes
+    let day = "2026-11-23";
+    let out = ops::delete_local_copies(&store, &[six.clone(), seven.clone()], Confirmed::after_dialog(2), day).unwrap();
+    assert_eq!(out.removed, 1, "{out:?}");
+    assert!(out.notes.iter().any(|n| n.contains("still on the server")), "{:?}", out.notes);
+    assert_eq!(subjects(&store, &rows_now(), "Scratch"), ["Scratch seven"]);
+    assert!(!store.abs_path(&six.path).exists(), "the file left the folder of the mail");
+    assert!(store.abs_path(&seven.path).is_file(), "the copy of a mail on the server stays");
+    let trashed = store.abs_path(&format!(".trash/{day}/{}", six.path));
+    assert!(trashed.is_file(), "the file is kept in the local trash: {trashed:?}");
+    assert_eq!(server_view("Scratch"), server_before, "the server was not asked to change anything");
+
+    // a sync afterwards does not bring it back, and agrees with the server
+    let sum = sync(&store, "alice", &connector);
+    assert!(sum.errors.is_empty(), "{sum:?}");
+    assert_eq!(subjects(&store, &rows_now(), "Scratch"), ["Scratch seven"]);
+
+    clean_scratch();
+    for (i, m) in watched.iter().enumerate() {
+        assert_eq!(server_view(m), before[i], "{m} was changed");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 // ------------------------------------------------------------ phase 3: sending (MAIL-160)
 
 const SUBMISSIONS_PORT: u16 = 10465;

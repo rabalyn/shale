@@ -3853,6 +3853,131 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    /// A vault with tags `projects/shale`, `prj-x`, `alpha` and `my-projects`, and an editor with focus.
+    fn tag_vault(tag: &str) -> (Vault, std::path::PathBuf) {
+        let (_, d) = vault_for_tests(tag);
+        std::fs::write(d.join("Tagged.md"), "#projects/shale #prj-x\n#alpha\n---\ntags: [my-projects]\n---\n").unwrap();
+        std::fs::write(d.join("Tagged2.md"), "---\ntags: [my-projects]\n---\nbody\n").unwrap();
+        (Vault::open(&d).unwrap(), d)
+    }
+
+    // spec: EDIT-120
+    #[test]
+    fn edit_120_typing_a_tag_lists_the_matches_best_first_and_the_keys_choose_and_pick() {
+        let (v, d) = tag_vault("tagac");
+        let rel = Path::new("Welcome.md");
+        let key = |key: Key| Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers: Modifiers::NONE };
+        let mut text = String::new();
+        let mut ed = NoteEditor::new(egui::Id::unique("t-tagac"));
+        ed.request_focus = true;
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("see #prj".into())]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert!(ed.assist.tags.active && ed.assist.is_open());
+        assert_eq!(ed.assist.tags.items[0], "prj-x", "the prefix first");
+        assert!(["projects/shale", "my-projects"].iter().all(|t| ed.assist.tags.items.iter().any(|i| i == t)), "then those with the letters in order: {:?}", ed.assist.tags.items);
+        // typing on filters
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("e".into())]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        let (a, b) = (ed.assist.tags.items.iter().position(|t| t == "my-projects"), ed.assist.tags.items.iter().position(|t| t == "projects/shale"));
+        assert!(a < b && b.is_some(), "equal matches go alphabetically: {:?}", ed.assist.tags.items);
+        let sel = b.unwrap();
+        // ↓ and ↑ move, Ctrl+J as well, and nothing is typed
+        let n = ed.assist.tags.items.len();
+        for _ in 0..sel {
+            h.frame(&mut ed, &mut text, &v, rel, vec![key(Key::ArrowDown)]);
+        }
+        assert_eq!(ed.assist.tags.sel, sel);
+        h.frame(&mut ed, &mut text, &v, rel, vec![key(Key::ArrowUp)]);
+        assert_eq!(ed.assist.tags.sel, sel - 1);
+        h.frame(&mut ed, &mut text, &v, rel, vec![key(Key::ArrowDown)]);
+        assert_eq!(ed.assist.tags.sel, sel);
+        for _ in 0..n - sel {
+            h.frame(&mut ed, &mut text, &v, rel, vec![key(Key::ArrowDown)]);
+        }
+        assert_eq!(ed.assist.tags.sel, 0, "wraps round");
+        for _ in 0..n - sel {
+            h.frame(&mut ed, &mut text, &v, rel, vec![key(Key::ArrowUp)]);
+        }
+        assert_eq!(ed.assist.tags.sel, sel);
+        assert_eq!(text, "see #prje");
+        // Enter picks the chosen tag instead of a new line
+        h.frame(&mut ed, &mut text, &v, rel, vec![key(Key::Enter)]);
+        assert_eq!(text, "see #projects/shale");
+        assert!(!ed.assist.tags.active, "the list closes after the pick");
+        // Tab picks as well
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text(" #alp".into())]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![key(Key::Tab)]);
+        assert_eq!(text, "see #projects/shale #alpha");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: EDIT-120
+    #[test]
+    fn edit_120_escape_closes_the_tag_list_for_that_tag_and_enter_is_a_new_line_again() {
+        let (v, d) = tag_vault("tagesc");
+        let rel = Path::new("Welcome.md");
+        let key = |key: Key| Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers: Modifiers::NONE };
+        let mut text = String::new();
+        let mut ed = NoteEditor::new(egui::Id::unique("t-tagesc"));
+        ed.request_focus = true;
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("#al".into())]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert!(ed.assist.tags.active);
+        h.frame(&mut ed, &mut text, &v, rel, vec![key(Key::Escape)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert!(!ed.assist.tags.active, "Esc closes the list");
+        h.frame(&mut ed, &mut text, &v, rel, vec![key(Key::Enter)]);
+        assert_eq!(text, "#al\n", "no pick: a new line");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: EDIT-120
+    #[test]
+    fn edit_120_no_tag_list_in_code_in_a_url_on_a_heading_or_for_a_tag_nobody_has() {
+        let (v, d) = tag_vault("tagno");
+        let rel = Path::new("Welcome.md");
+        for typed in ["```\n#al", "use `x #al", "https://example.com/#al", "# al", "## al", "#zzzz"] {
+            let mut text = String::new();
+            let mut ed = NoteEditor::new(egui::Id::unique(("t-tagno", typed)));
+            ed.request_focus = true;
+            let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+            h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text(typed.into())]);
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+            assert!(!ed.assist.tags.active, "no list for {typed:?}");
+        }
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: EDIT-120
+    #[test]
+    fn edit_120_a_tags_property_in_the_front_matter_lists_tags_and_a_pick_completes_the_word() {
+        let (v, d) = tag_vault("tagfm");
+        let rel = Path::new("Welcome.md");
+        let key = |key: Key| Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers: Modifiers::NONE };
+        let mut text = String::new();
+        let mut ed = NoteEditor::new(egui::Id::unique("t-tagfm"));
+        ed.request_focus = true;
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("---\ntags: [a, shale".into())]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert!(ed.assist.tags.active, "open in the tags property");
+        assert_eq!(ed.assist.tags.items, ["projects/shale"]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![key(Key::Enter)]);
+        assert_eq!(text, "---\ntags: [a, projects/shale");
+        // another property has none
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("]\ntitle: alp".into())]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert!(!ed.assist.tags.active, "no list in another property");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     // spec: EDIT-009
     #[test]
     fn clicking_a_web_link_opens_the_browser_action() {

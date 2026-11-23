@@ -119,6 +119,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 - Type `[[` to get matching notes; ↑/↓ or Ctrl+J/Ctrl+K move through the list, Enter, Tab or a
   click picks an entry, and the last entry creates a new note. Esc closes the list.
+- Type `#` and a letter (or a word in the `tags:` property at the top of a note) to get the vault's
+  tags that match, best match first: `#prj` finds `projects/shale`, nested tags included; ↑/↓ or
+  Ctrl+J/Ctrl+K choose, Enter, Tab or a click picks, Esc closes. Nothing opens in code, in a link, in
+  a URL or on a heading (EDIT-120).
 - Type `[!` to pick a file: `/` starts at the vault, `~/` at your home folder, and Tab completes
   like a shell; ↑/↓ or Ctrl+J/Ctrl+K choose, Enter or a click picks. A file from outside the vault is
   copied to `z_media/<year>/<month>/`, or (a picture, PDF, sound or video) linked where it is, or
@@ -201,7 +205,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   out, and the PDF has bookmarks for its `#`–`######` headings; the title is printed once: when the note's first
   heading is a `#` that says the same as the title, the separate title is left out, PDF-008; a note's
   properties set how it is printed, see below), insert a
-  new drawing, rename the note (links in other notes are updated), or move it to the trash. The
+  new drawing, rename the note (links in other notes are updated: wikilinks, embeds of notes and files, Markdown links and links in properties, also when a file or folder is moved or renamed from the title line; one history step), or move it to the trash. The
   trash keeps the original folder (`.trash/<date>/<path>`) and nothing in it is replaced or
   emptied; right-click the empty space of the file list and choose "Restore last deleted" to put
   the last item you trashed back.
@@ -438,7 +442,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   action already uses asks “Overwrite it?” (Yes takes it from that action and leaves it without a key, No
   changes nothing; Enter answers No), and a binding can be a sequence of keys. While you record, a note
   under the keys says which action they would clash with.
-- Ctrl+PageUp / Ctrl+PageDown (macOS: Cmd+Opt+← / Cmd+Opt+→) switch to the previous / next tab, also from the file list and from
+- Ctrl+PageUp / Ctrl+PageDown and Ctrl+Shift+Tab / Ctrl+Tab (macOS: Cmd+Opt+← / Cmd+Opt+→) switch to the previous / next tab of the focused pane, also from the file list and from
   mail, calendar and Feeds; after the last tab comes the first.
 - In the search results j / k go from hit to hit and Ctrl+J / Ctrl+K from file to file (in the mail and posts groups from group to group).
 - **Markdown preview** (Settings → Editor, or the eye icon in the top right of the editor;
@@ -684,6 +688,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   on a CalDAV calendar changes its address, user name or password (empty password = keep the saved
   one); a new user name or password also goes to the other calendars of the same server and user.
 
+In a narrow sidebar the header wraps: the month name on its own line, the buttons below it, never over it (LAY-019).
+
 ![Calendar in the sidebar](userguide/z_media/screenshots/calendar-sidebar.png)
 
 ## Mail
@@ -734,7 +740,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - The first sync fetches the mail of the last three years, newest first, several folders at once,
   and can be stopped and resumed. **Sync** and the status bar show the progress; new mail is also
   fetched every 10 minutes (changeable, 0 = off) while Shale runs. A mail deleted on the server
-  stays here, dimmed, with a note.
+  stays here, dimmed, with a note; **Delete local copy…** (the button in the open mail and in the
+  bar of the marked mails, the row menu, or Shift+D) removes Shale's own copy of such mails, after
+  you confirm, several at once. Mail that is still on the server never gets it. The server and the
+  notes you imported from the mail are not touched, and the file goes to the local `.trash`.
 - **Changes in another mail program show up within seconds.** While the mail view is open, the
   folder you have open and each account's Inbox are watched over a read-only connection with IMAP
   IDLE: a flag removed, mail read, new or deleted mail in Thunderbird or on your phone appears here
@@ -775,7 +784,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   change is undone in the list and you are told why. "Delete" is always a move to the Trash
   folder. "Delete forever" removes only the mails you chose (never the ones another program
   marked as deleted). A mail that another program moved or deleted meanwhile is left alone and
-  dimmed. Shale never deletes its own local copy: files of mail that moved or were deleted go to
+  dimmed. Shale never deletes a file of its own local copy: files of mail that moved or were deleted go to
   `.trash/<date>/` inside the mail folder. A server without `MOVE` is handled by a verified copy
   first; a server without `UIDPLUS` cannot delete forever, and for it deleting without `MOVE` is
   refused rather than risked.
@@ -1311,7 +1320,7 @@ Text editing keys and vim keys are fixed.
 | Ctrl+W | Close tab |
 | Ctrl+Shift+F | Search notes, mail and posts |
 | Ctrl+H / Ctrl+L | Keyboard one place left / right: through the split panes in screen order, left of the first pane into the left sidebar, from there into the first pane (macOS: Cmd+Shift+H / Cmd+Shift+L, because Cmd+H hides the app) |
-| Ctrl+PageUp / Ctrl+PageDown | Previous / next tab (from the last tab on to the first), wherever the keyboard is (macOS: Cmd+Opt+← / Cmd+Opt+→) |
+| Ctrl+PageUp / Ctrl+PageDown, Ctrl+Shift+Tab / Ctrl+Tab | Previous / next tab of the focused pane in the order of the tab bar (from the last tab on to the first), wherever the keyboard is (macOS: Cmd+Opt+← / Cmd+Opt+→ only, Cmd+Tab is the system's) |
 | Ctrl+\ | Split right: open this tab in a new pane to the right (panes sit side by side, each with its own tabs) |
 | F6 / Shift+F6 | Focus the next / previous pane |
 | Ctrl+Shift+W | Close the pane with all its tabs (macOS: Cmd+Shift+W) |
@@ -1361,6 +1370,7 @@ only while no text field has the keyboard. Every key can be changed in Settings 
 | u | Mark read or unread |
 | s or f | Set or clear the flag |
 | d or Delete | Delete (Trash: asks first); in Drafts and Outbox discard the draft or the record |
+| Shift+D | Delete the local copy of a mail that was deleted on the server (the dimmed ones; asks first; the server and imported notes are not touched) |
 | m | Move to a folder |
 | c | Write a new mail |
 | r, Shift+R, Shift+F | Reply, reply all, forward |

@@ -5,7 +5,7 @@ features:
 ![[calendar-month.png]]
 
 A calendar in the right sidebar (a small month) and as a big tab, with Month, Week and Day
-views in three sizes. Back to [[Start here]].
+views in three sizes. In a narrow sidebar the buttons move to a line below the month name instead of covering it. Back to [[Start here]].
 
 ![[calendar-sidebar.png]]
 

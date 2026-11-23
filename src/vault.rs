@@ -2372,7 +2372,7 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
-    // spec: VAULT-016
+    // spec: VAULT-016, VAULT-041
     #[test]
     fn rename_keeps_folder_alias_heading_brackets_and_md() {
         let (mut v, d) = vault_with("keep", &[("Projects/Old.md", ""), ("Top.md", "[[Projects/Old#Goal|the plan]] [[Projects/Old.md]] ![[Projects/Old]] [x](Projects/Old.md#Intro) [y](<Projects/Old.md>) [z](Projects/Old)")]);
@@ -2380,6 +2380,52 @@ mod tests {
         assert_eq!(text(&v, "Top.md"), "[[Projects/New Plan#Goal|the plan]] [[Projects/New Plan.md]] ![[Projects/New Plan]] [x](Projects/New%20Plan.md#Intro) [y](<Projects/New Plan.md>) [z](Projects/New%20Plan)");
         let n = &v.notes[Path::new("Top.md")];
         assert!(n.resolved.iter().all(|r| r.as_deref() == Some(Path::new("Projects/New Plan.md"))), "every link still finds the note");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-013, VAULT-041
+    #[test]
+    fn rename_of_a_picture_pdf_or_attachment_rewrites_embeds_and_links_to_it() {
+        let top = "![[img/pic.png]] ![[pic.png|300]] ![[img/pic.png|300x200]] [[pic.png]] ![[doc.pdf#page=2]] [[doc.pdf|the paper]] [a](img/pic.png) ![b](<img/pic.png>) [d](doc.pdf) ![[data.zip]]";
+        let (mut v, d) = vault_with("filelinks", &[("img/pic.png", ""), ("doc.pdf", ""), ("data.zip", ""), ("Top.md", top), ("sub/Deep.md", "![[../img/pic.png]] ![x](../img/pic.png) [y](../doc.pdf)")]);
+        v.rename(Path::new("img/pic.png"), Path::new("img/photo 1.png"), true).unwrap();
+        v.rename(Path::new("doc.pdf"), Path::new("paper.pdf"), true).unwrap();
+        v.rename(Path::new("data.zip"), Path::new("data v2.zip"), true).unwrap();
+        assert_eq!(
+            text(&v, "Top.md"),
+            "![[img/photo 1.png]] ![[photo 1.png|300]] ![[img/photo 1.png|300x200]] [[photo 1.png]] ![[paper.pdf#page=2]] [[paper.pdf|the paper]] [a](img/photo%201.png) ![b](<img/photo 1.png>) [d](paper.pdf) ![[data v2.zip]]"
+        );
+        assert_eq!(text(&v, "sub/Deep.md"), "![[../img/photo 1.png]] ![x](../img/photo%201.png) [y](../paper.pdf)");
+        let n = &v.notes[Path::new("Top.md")];
+        assert!(n.resolved.iter().all(|r| r.is_some()), "every link and embed still finds its file: {:?}", n.resolved);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-015, VAULT-041
+    #[test]
+    fn moving_a_picture_and_a_note_with_markdown_links_keeps_them_working() {
+        let (mut v, d) =
+            vault_with("mdmove", &[("a/Note.md", "![p](pic.png) ![q](./pic.png) [s](../Root.md) [t](./Sib.md) ![[pic.png]]"), ("a/pic.png", ""), ("Root.md", "![x](a/pic.png) ![[a/pic.png]] [[pic.png]]"), ("a/Sib.md", ""), ("b/x", "")]);
+        v.move_into(Path::new("a/pic.png"), Path::new("b")).unwrap();
+        // a link by name still finds the picture, so it stays a name; the relative one follows it
+        assert_eq!(text(&v, "a/Note.md"), "![p](pic.png) ![q](../b/pic.png) [s](../Root.md) [t](./Sib.md) ![[pic.png]]");
+        assert_eq!(text(&v, "Root.md"), "![x](b/pic.png) ![[b/pic.png]] [[pic.png]]");
+        v.move_into(Path::new("a/Note.md"), Path::new("b")).unwrap();
+        assert_eq!(text(&v, "b/Note.md"), "![p](pic.png) ![q](../b/pic.png) [s](../Root.md) [t](../a/Sib.md) ![[pic.png]]");
+        let n = &v.notes[Path::new("b/Note.md")];
+        assert!(n.resolved.iter().all(|r| r.is_some()), "{:?}", n.resolved);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-016, VAULT-041
+    #[test]
+    fn links_in_front_matter_properties_follow_a_rename_and_a_move() {
+        let fm = "---\nrelated: \"[[Other]]\"\nlinks:\n  - \"[[Other|the other]]\"\n  - \"[[Sub/Third#Part]]\"\ncover: \"[[pic.png]]\"\nplain: [[Other]]\n---\nBody [[Other]]\n";
+        let (mut v, d) = vault_with("fmlinks", &[("Other.md", ""), ("Sub/Third.md", ""), ("pic.png", ""), ("Top.md", fm)]);
+        v.rename(Path::new("Other.md"), Path::new("Second.md"), true).unwrap();
+        v.move_into(Path::new("Sub/Third.md"), Path::new("")).unwrap();
+        v.rename(Path::new("pic.png"), Path::new("cover.png"), true).unwrap();
+        assert_eq!(text(&v, "Top.md"), "---\nrelated: \"[[Second]]\"\nlinks:\n  - \"[[Second|the other]]\"\n  - \"[[Third#Part]]\"\ncover: \"[[cover.png]]\"\nplain: [[Second]]\n---\nBody [[Second]]\n");
         let _ = fs::remove_dir_all(&d);
     }
 

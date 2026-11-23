@@ -3720,7 +3720,7 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
-    // spec: VAULT-013
+    // spec: VAULT-013, VAULT-042
     #[test]
     fn rename_keeps_open_buffers_in_step() {
         let (mut app, d) = test_app("rename");

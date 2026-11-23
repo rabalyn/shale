@@ -14,6 +14,11 @@ so it works offline and search is instant. Back to [[Start here]].
 - **Syncing only reads.** Fetching never changes the server; only your own actions are written
   back: read or unread, flag, move, delete (always to Trash) and, inside Trash, delete forever.
   A change shows at once and is sent in the background; without a network it waits.
+- **A mail deleted on the server stays here**, dimmed, with a note. To clean up, choose **Delete
+  local copy…** (button, right-click menu, or Shift+D; on several marked mails at once) and confirm.
+  Only mail that is gone from the server has it, because Shale would fetch any other again. The
+  server is not asked, the file goes to the `.trash` folder of the mail folder, and notes you
+  imported from the mail stay as they are.
 - **No HTML, no tracking.** Nothing is rendered, no pictures are fetched, no scripts run.
 - **The local copy is not encrypted** (like Thunderbird's): use full-disk encryption.
 
@@ -41,7 +46,7 @@ folder you left is closed. The regular sync every 10 minutes still looks at all 
 
 Search with `/` (words, `"phrases"` and fields such as `from:` and `subject:`: [[Search syntax]]). One of the three
 panes has the keyboard and is framed; Ctrl+H / Ctrl+L (macOS: Cmd+Shift+H / Cmd+Shift+L) move it. j / k, `u` read or unread, `s`
-or `f` flag, `d` delete, `m` move, `i` import to the vault ([[Import]]). All mail keys are in
+or `f` flag, `d` delete, Shift+D delete the local copy of a mail deleted on the server, `m` move, `i` import to the vault ([[Import]]). All mail keys are in
 [[Keyboard shortcuts]] and can be changed in Settings → Keybindings.
 
 After a restart a Mail tab comes back on the folder and the message you had open (the first folder if

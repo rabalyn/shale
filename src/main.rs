@@ -144,12 +144,15 @@ mod social;
 mod start_dialog_tests;
 mod syntax;
 #[cfg(test)]
+mod tab_keys_ui_tests;
+#[cfg(test)]
 mod tab_order_tests;
 mod table;
 mod table_grid;
 mod table_select;
 #[cfg(test)]
 mod table_tests;
+mod tag_assist;
 mod task_box;
 #[cfg(test)]
 mod test_exec;
