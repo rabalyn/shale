@@ -320,6 +320,8 @@ Text editing keys and vim keys are fixed.
 | Shift+K | Vim-style editing, normal mode: preview the link under the cursor (a note as in the reading view, a web page's title and text; press it again to move the keyboard into the preview: j / k or ↓ / ↑ scroll, Enter opens the link like `gt`, Ctrl+Enter opens it in a new pane on the right, Esc closes). Definable, e.g. as Space Space |
 | Ctrl+, | Settings |
 | Ctrl+Shift+D | Data usage: what Shale keeps on disk, and its caches |
+| Ctrl+Shift+PageUp / Ctrl+Shift+PageDown | Previous / next message of the thread of the note (the mails with the same thread-id, by date; nothing happens at the ends, without a thread or in a dialog) |
+| Ctrl+Shift+T | Thread overview: opens the Thread view in the right sidebar and gives it the keyboard (↑ ↓ move, Enter jumps, Esc returns to the note) |
 | F1 | Open the user guide (built into Shale, unpacked into its data folder and opened as a vault) |
 | Click on a link | Open it (or create it if it's red) |
 | Ctrl+click on a link | Put the cursor in it so you can edit it (you can swap this in Settings) |

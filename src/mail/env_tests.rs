@@ -960,3 +960,77 @@ fn mail_env_a_flag_that_another_connection_sets_and_removes_shows_in_the_store_w
     });
     crate::dataflow::verify_flow(&forest, "mail_watch", &crate::dataflow::doc("mail-watch.md"));
 }
+
+// ------------------------------------------------------------ threads of imported mails (IMP-068…IMP-072)
+
+/// A reply thread of three mails with real reply headers, saved into a mailbox of its own.
+fn put_thread_mail(id: &str, date: &str, subject: &str, reply: Option<&str>, refs: &[&str]) {
+    let mut raw = format!("From: Sender <sender@shale.test>\r\nTo: {USER}\r\nSubject: {subject}\r\nMessage-ID: <{id}@thread.shale.test>\r\nDate: {date}\r\n");
+    if let Some(r) = reply {
+        raw.push_str(&format!("In-Reply-To: <{r}@thread.shale.test>\r\n"));
+    }
+    if !refs.is_empty() {
+        raw.push_str(&format!("References: {}\r\n", refs.iter().map(|r| format!("<{r}@thread.shale.test>")).collect::<Vec<_>>().join(" ")));
+    }
+    raw.push_str(&format!("\r\nText of {subject}.\r\n"));
+    doveadm(&["save", "-u", USER, "-m", "ScratchThread"], Some(raw.as_bytes())).unwrap_or_else(|e| panic!("could not put {subject:?}: {e}"));
+}
+
+// spec: IMP-068, IMP-070, IMP-071
+#[test]
+#[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
+fn mail_env_a_reply_thread_from_the_server_is_imported_into_a_chain_in_date_order() {
+    use crate::import::{self, Options};
+    let _turn = turn();
+    let _ = doveadm(&["mailbox", "delete", "-u", USER, "ScratchThread"], None);
+    doveadm(&["mailbox", "create", "-u", USER, "ScratchThread"], None).unwrap();
+    put_thread_mail("root", "Mon, 16 Nov 2026 12:00:00 +0000", "Thread root", None, &[]);
+    put_thread_mail("one", "Tue, 17 Nov 2026 12:00:00 +0000", "Re: Thread root", Some("root"), &["root"]);
+    put_thread_mail("two", "Wed, 18 Nov 2026 12:00:00 +0000", "Re: Re: Thread root", Some("one"), &["root", "one"]);
+
+    let (dir, store) = temp_store("thread");
+    let connector = EnvConnector { auth: Arc::new(PasswordAuth { user: USER.into(), password: "shale-test-pw".into() }) };
+    let rows = discover_folders(&store, &connector, "alice", "Alice").expect("folders");
+    for f in &rows {
+        store.commit(vec![Op::SyncEnabled { folder: f.id, enabled: f.name == "ScratchThread" }]).unwrap();
+    }
+    let sum = sync(&store, "alice", &connector);
+    assert!(sum.errors.is_empty() && sum.messages_added == 3, "{sum:?}");
+    let rows = store.reader().unwrap().folders(Some("alice")).unwrap();
+    let all = messages(&store, &rows, "ScratchThread");
+
+    // the vault: the three mails are imported one by one, the newest before the middle one
+    let vault_dir = dir.join("vault");
+    std::fs::create_dir_all(&vault_dir).unwrap();
+    let mut vault = crate::vault::Vault::open(&vault_dir).unwrap();
+    let options = Options { folder: PathBuf::from("Threads"), tags: vec![], keep_original: false, keep_docx: false, people_dir: "Adressbuch".into(), header_list: false, cut: Default::default() };
+    let import_one = |vault: &mut crate::vault::Vault, subject: &str| -> (PathBuf, import::Imported) {
+        let m = all.iter().find(|m| m.subject == subject).unwrap_or_else(|| panic!("{subject} was not synced"));
+        let mut items = vec![import::eml_item(store.read_raw(m).unwrap(), None)];
+        import::find_continues(vault, &mut items);
+        let done = import::import(vault, &items, &options);
+        assert!(done.errors.is_empty(), "{:?}", done.errors);
+        (done.notes[0].clone(), done)
+    };
+    let (root, first) = import_one(&mut vault, "Thread root");
+    assert!(first.touched.is_empty());
+    let (two, second) = import_one(&mut vault, "Re: Re: Thread root");
+    assert_eq!(second.touched, vec![root.clone()], "the newest is appended: the last note gets its next");
+    let (one, third) = import_one(&mut vault, "Re: Thread root");
+    assert_eq!(third.touched.len(), 2, "the older mail changes its two neighbours: {third:?}");
+    let read = |p: &Path| std::fs::read_to_string(vault.abs(p)).unwrap();
+    let stem = |p: &Path| p.file_stem().unwrap().to_string_lossy().into_owned();
+    let link = |k: &str, p: &Path| format!("{k}: \"[[{}]]\"", stem(p));
+    assert!(read(&root).contains(&link("next", &one)) && !read(&root).contains("previous:"), "{}", read(&root));
+    assert!(read(&one).contains(&link("previous", &root)) && read(&one).contains(&link("next", &two)), "{}", read(&one));
+    assert!(read(&two).contains(&link("previous", &one)) && !read(&two).contains("next:"), "{}", read(&two));
+    for p in [&root, &one, &two] {
+        assert!(read(p).contains("thread-id: \"<root@thread.shale.test>\""), "{}", read(p));
+    }
+    // the overview's order is the dates
+    let rows = crate::thread::Index::build(&vault).thread_of(&two).unwrap();
+    assert_eq!(rows.iter().map(|r| &r.rel).collect::<Vec<_>>(), vec![&root, &one, &two]);
+
+    let _ = doveadm(&["mailbox", "delete", "-u", USER, "ScratchThread"], None);
+    let _ = std::fs::remove_dir_all(dir);
+}

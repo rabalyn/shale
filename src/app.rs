@@ -146,6 +146,8 @@ pub enum RightPanel {
     Calendar,
     /// the file history of the note (HIST-002)
     History,
+    /// the thread of the note: its mails, oldest first (NAV-070)
+    Thread,
 }
 
 #[cfg(test)]
@@ -174,6 +176,7 @@ mod social;
 mod sync;
 mod tabs;
 mod tex_setup;
+mod thread_ui;
 #[cfg(all(test, target_os = "linux"))]
 mod tree_ui_tests;
 mod usage;
@@ -398,6 +401,8 @@ pub struct ShaleApp {
     pub sync: sync::SyncState,
     /// The file history of the open vault: snapshots and restore (ADR-0028).
     pub history: history::HistoryState,
+    /// the thread overview (NAV-070)
+    pub thread: thread_ui::ThreadState,
     pub vault: Option<Vault>,
     /// the vault being read on a worker thread, behind the start screen's spinner (NET-019)
     pub vault_load: vault_load::VaultLoad,
@@ -656,6 +661,7 @@ impl ShaleApp {
             persist_config,
             vdata: crate::vault_state::VaultData::default(),
             history: Default::default(),
+            thread: Default::default(),
             sync: sync::SyncState::with_managed(crate::gitsync::install_ui::ManagedState::new(persist, &tag)),
             vault: None,
             vault_load: Default::default(),
@@ -2631,6 +2637,13 @@ impl ShaleApp {
             self.step_pane(-1);
         } else if is(KeyAction::ClosePane) {
             self.close_pane(self.panes.focused);
+        }
+        // the thread of the note (KEY-050)
+        match action {
+            Some(KeyAction::ThreadPrevious) => self.step_thread(-1),
+            Some(KeyAction::ThreadNext) => self.step_thread(1),
+            Some(KeyAction::ThreadOverview) => self.show_thread_overview(ui.ctx()),
+            _ => {}
         }
         // the alternate view from every view, also mail and drawings (KEY-011)
         if is(KeyAction::AlternateView) && self.modal.is_none() {

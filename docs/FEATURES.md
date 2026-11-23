@@ -617,7 +617,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   between two icons shows where the icon lands; Esc, or letting go anywhere else, cancels. The
   sidebar toggles at the top and bottom and the settings button stay where they are.
 - The right sidebar is a stack of **views**. Each view has its own menubar of panel icons
-  (Backlinks, Outgoing links, Outline, Graph, Calendar, History) and shows the panel of the selected
+  (Backlinks, Outgoing links, Outline, Graph, Calendar, History, Thread) and shows the panel of the selected
   icon, so several panels can be open at once.
 - Drag a panel icon over the content of the right sidebar: the area lights up ("Drop to open
   this icon in a new view") and dropping makes a new view below it. Drag icons from one
@@ -954,6 +954,20 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   mails** (off at first, Settings → Import sets the start value) drops the quoted mails. What is not
   clearly a signature stays (IMP-063 to IMP-066, CFG-076). The editor folds a signature inside a quote
   too (EDIT-083).
+- **A follow-up mail continues its thread** (ADR-0032, #575). A mail note has `in-reply-to`, `references`
+  and `thread-id` besides `message-id` (IMP-067). The Import dialog looks in the vault for notes of the same
+  thread by the reply headers only (never the subject, sender or text) and offers "Continues [[note]]" with a
+  tick box and, with several matches, a choice (IMP-068); the folder of the import follows the matched
+  note unless a folder was dropped on or typed (IMP-069). Ticked, the new note gets `previous` / `next`
+  links in date order and the last note of the thread its `next`: one line of one other note (IMP-070). An
+  older mail asks "Keep the thread in date order?" with **Update** or **Leave the chain**; an import never
+  rewrites more than two other notes, open notes are saved first (IMP-071). The new note and the neighbour
+  lines are one history snapshot (IMP-072); a rename keeps the chain because `previous` and `next` are
+  links, and old notes with only a `message-id` still match as the parent (IMP-073).
+- **Thread view** (NAV-070, KEY-050): a panel of the right sidebar lists the notes with the same
+  `thread-id` as the open note, oldest first, with date, sender and title and the current one marked; a
+  click opens the note (a pinned tab is not replaced). Ctrl+Shift+PageUp / Ctrl+Shift+PageDown step to
+  the previous / next mail of the thread, Ctrl+Shift+T opens the view and gives it the keyboard.
 - Drop onto a folder in the file list to import into that folder, or onto a note to also add
   links to the new notes there.
 - After an import of two or more items a window, **Import summary**, says what was made: the new
@@ -1332,6 +1346,8 @@ Text editing keys and vim keys are fixed.
 | Ctrl+E | Edit / reading view |
 | Ctrl+, | Settings |
 | Ctrl+Shift+D | Data usage: what Shale keeps on disk, and its caches |
+| Ctrl+Shift+PageUp / Ctrl+Shift+PageDown | Previous / next message of the thread of the note (the mails with the same thread-id, by date; nothing happens at the ends, without a thread or in a dialog) |
+| Ctrl+Shift+T | Thread overview: opens the Thread view in the right sidebar and gives it the keyboard (↑ ↓ move, Enter jumps, Esc returns to the note) |
 | F1 | Open the user guide (built into Shale, unpacked into its data folder and opened as a vault) |
 | Ctrl+S | Save now (notes also save automatically) |
 | Ctrl+W | Close tab |

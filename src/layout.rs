@@ -44,6 +44,7 @@ pub enum Icon {
     LocalGraph,
     CalendarPanel,
     History,
+    Thread,
 }
 
 pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
@@ -241,6 +242,13 @@ pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
             p.circle_stroke(cx, w * 0.34, s);
             p.line_segment([cx, cx + Vec2::new(0.0, -w * 0.2)], s);
             p.line_segment([cx, cx + Vec2::new(w * 0.15, w * 0.08)], s);
+        }
+        Icon::Thread => {
+            // a line through three dots: the mails of a thread
+            p.line_segment([cx + Vec2::new(0.0, -w * 0.3), cx + Vec2::new(0.0, w * 0.3)], s);
+            for dy in [-0.3f32, 0.0, 0.3] {
+                p.circle_filled(cx + Vec2::new(0.0, w * dy), w * 0.09, c);
+            }
         }
         Icon::Sort => {
             for (k, len) in [0.62f32, 0.44, 0.26].iter().enumerate() {

@@ -40,6 +40,18 @@ Turn mails, events and files into notes. Back to [[Start here]].
 - **Leave out quoted mails** (off at first; **Settings → Import → Leave out quoted mails** sets the start
   value) drops the earlier mails of the thread from the note and keeps what the sender wrote, with the
   answers between the quoted lines. A thread is often imported mail by mail.
+- **A follow-up mail continues its thread.** Shale looks, by the reply headers of the mail
+  (`In-Reply-To` and `References`, never the subject, the sender or the text), for notes of your vault that
+  belong to the same thread. When it finds one, the mail shows **Continues** and the note's name with a tick box
+  (ticked; with several notes a choice, the note the mail answers first). Ticked, the new note goes
+  into the folder of that note (a folder you dropped it on or typed stays), gets `previous` and
+  `next` links in the date order of the thread, and the last note of the thread gets its `next`; only
+  that one line of the neighbour changes. Unticked, the note only gets its ids (`message-id`,
+  `in-reply-to`, `references`, `thread-id`) and no other note is touched. A mail that is **older** than a
+  note of the thread asks "Keep the thread in date order?": **Update** puts it at its place (its two
+  neighbours get a new `next` / `previous` line), **Leave the chain** writes it without links. The new
+  note and the neighbour lines are one entry of the file history (see [[File history]]). Renaming a
+  note keeps the chain, because `previous` and `next` are links. See [[Thread view]].
 - Drop onto a folder in the file list to import into it, or onto a note to also add links to the
   new notes there.
 - A picture, PDF, sound or video from outside the vault has a choice in the dialog: **Copy into the

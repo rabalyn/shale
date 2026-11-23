@@ -160,6 +160,11 @@ mod test_exec;
 mod test_exec_tests;
 mod theme;
 mod themes;
+mod thread;
+#[cfg(test)]
+mod thread_tests;
+#[cfg(test)]
+mod thread_ui_tests;
 #[cfg(test)]
 mod ui_test_support;
 mod undo;

@@ -690,6 +690,15 @@ impl ShaleApp {
         self.history.queue.push_back(Queued { req: Request::new(Reason::Rename, paths), then: None, scheduled: false });
     }
 
+    /// An import wrote notes and rewrote the `previous` / `next` line of neighbours in a thread: one
+    /// snapshot of all of them (IMP-072, ADR-0028).
+    pub(crate) fn history_imported(&mut self, made: &[PathBuf], touched: &[PathBuf]) {
+        let paths: Vec<PathBuf> = made.iter().chain(touched).cloned().collect();
+        if !paths.is_empty() {
+            self.history.queue.push_back(Queued { req: Request::new(Reason::Import, paths), then: None, scheduled: false });
+        }
+    }
+
     /// Before a note or folder goes to the trash, the caller holding the tree lock (SYNC-046): the saved
     /// text that no snapshot has yet is snapshotted, now.
     pub(crate) fn history_before_trash(&mut self, rel: &Path) {

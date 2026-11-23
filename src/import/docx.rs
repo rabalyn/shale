@@ -64,7 +64,7 @@ pub fn version(pandoc: &Path) -> Result<String, String> {
 pub fn docx_item(path: PathBuf, pandoc: Option<PathBuf>) -> Item {
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| name.clone());
-    Item { source: Source::Docx { name, path, pandoc, lift: true, ready: None }, include: true, title: super::safe_title(&stem), att_on: vec![], already: None, people: vec![] }
+    Item { source: Source::Docx { name, path, pandoc, lift: true, ready: None }, include: true, title: super::safe_title(&stem), att_on: vec![], already: None, people: vec![], continues: None }
 }
 
 /// The name of the folder for the Word file `stem` (IMP-038): `import_docx_<name>`, the name with

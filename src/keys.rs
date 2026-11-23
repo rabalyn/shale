@@ -249,6 +249,10 @@ actions! {
     PrevPane => "global.prev_pane", "Focus the previous pane", Global, ["Shift+F6"];
     ClosePane => "global.close_pane", "Close the pane (with its tabs)", Global, ["Ctrl+Shift+W"];
     AlternateView => "global.alternate_view", "Alternate view: swap with the previous view of this tab (again: back)", Global, ["Ctrl+6"];
+    // The thread of the note (KEY-050): Ctrl and Shift, so macOS has the same keys with Cmd
+    ThreadPrevious => "global.thread_previous", "Previous message of the thread of the note", Global, ["Ctrl+Shift+PageUp"];
+    ThreadNext => "global.thread_next", "Next message of the thread of the note", Global, ["Ctrl+Shift+PageDown"];
+    ThreadOverview => "global.thread_overview", "Thread overview (the keyboard goes into its list)", Global, ["Ctrl+Shift+T"];
     // The ribbon (KEY-015): its first ten shown items by position, and the sidebar toggles; no default on macOS
     RibbonSlot1 => "global.ribbon_1", "Ribbon: 1st item", Global, ["Alt+1"];
     RibbonSlot2 => "global.ribbon_2", "Ribbon: 2nd item", Global, ["Alt+2"];
@@ -768,7 +772,7 @@ mod tests {
             assert_eq!(mac.display(d.action), on_mac, "{}", d.id);
         }
         assert_eq!(DEFS.iter().filter(|d| d.scope == Scope::NoteView).count(), 26 + 5);
-        assert_eq!(DEFS.len(), 29 + 37 + 6 + 12 + 6 + 26 + 5 + 2);
+        assert_eq!(DEFS.len(), 32 + 37 + 6 + 12 + 6 + 26 + 5 + 2);
     }
 
     // spec: KEY-014

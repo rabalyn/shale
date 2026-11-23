@@ -1105,3 +1105,104 @@ fn docx_002_a_pandoc_that_fails_leaves_the_dialog_open_with_its_first_error_line
     p.click(Show::Modals, "Cancel");
     assert!(p.app.modal.is_none());
 }
+
+/// A mail note of a thread, as an import writes it.
+fn thread_note(id: &str, date: &str, root: &str) -> String {
+    format!("---\ntype: email\nsubject: \"{id}\"\nfrom: \"Ann <ann@x.example>\"\ndate: {date}\nmessage-id: \"<{id}@h>\"\nthread-id: \"<{root}@h>\"\n---\n\n# {id}\n")
+}
+
+fn mail_items(raw: Vec<u8>) -> Vec<crate::import::Item> {
+    vec![crate::import::eml_item(raw, None)]
+}
+
+/// The notes of the folder whose name has `part`.
+fn made_in(p: &P, folder: &str, part: &str) -> Vec<String> {
+    std::fs::read_dir(p.dir.join(folder)).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.contains(part)).collect()
+}
+
+// spec: IMP-068, IMP-069
+#[test]
+fn imp_068_a_reply_shows_continues_with_a_tick_box_and_the_folder_follows_unless_a_path_is_typed() {
+    use crate::thread_tests::{eml, D17};
+    let mut p = P::with_files("continues", &[("Mail/2026-11-16 Plan.md", &thread_note("a", "2026-11-16 12:00", "a")), ("Other/Else.md", "# Else\n")]);
+    p.app.open_import(mail_items(eml("b@h", D17, "Re: Plan", Some("a@h"), &["a@h"])), vec![], None);
+    p.look(Show::Modals);
+    assert!(p.shows(Show::Modals, "Continues") && p.shows(Show::Modals, "[[2026-11-16 Plan]]"));
+    let Some(Modal::Import(d)) = &p.app.modal else { panic!("no dialog") };
+    assert_eq!(d.folder, "Mail", "the folder of the matched note (IMP-069)");
+    assert!(d.items[0].continues.as_ref().is_some_and(|c| c.on), "ticked");
+    // a path typed by hand wins, also when the tick box is clicked afterwards
+    fill(&mut p, "folder", "Other");
+    click_control(&mut p, "continues:0");
+    click_control(&mut p, "continues:0");
+    let Some(Modal::Import(d)) = &p.app.modal else { panic!() };
+    assert_eq!((d.folder.as_str(), d.items[0].continues.as_ref().unwrap().on), ("Other", true));
+    // unticked: the note is written with its ids but no link, and the old note is not touched
+    click_control(&mut p, "continues:0");
+    p.click(Show::Modals, "Import 1 item");
+    assert!(p.app.modal.is_none());
+    let made = made_in(&p, "Other", "Re");
+    assert_eq!(made.len(), 1, "{made:?}");
+    let text = std::fs::read_to_string(p.dir.join("Other").join(&made[0])).unwrap();
+    assert!(text.contains("thread-id: \"<a@h>\"") && !text.contains("previous:"), "{text}");
+    assert!(!std::fs::read_to_string(p.dir.join("Mail/2026-11-16 Plan.md")).unwrap().contains("next:"));
+}
+
+// spec: IMP-069
+#[test]
+fn imp_069_a_folder_that_was_dropped_on_wins_over_the_matched_folder() {
+    use crate::thread_tests::{eml, D17};
+    let mut p = P::with_files("continues-zone", &[("Mail/2026-11-16 Plan.md", &thread_note("a", "2026-11-16 12:00", "a")), ("Other/Else.md", "# Else\n")]);
+    p.app.open_import(mail_items(eml("b@h", D17, "Re: Plan", Some("a@h"), &["a@h"])), vec![], Some((PathBuf::from("Other"), None)));
+    let Some(Modal::Import(d)) = &p.app.modal else { panic!("no dialog") };
+    assert_eq!(d.folder, "Other");
+    assert!(d.items[0].continues.is_some(), "it still offers the continuation");
+}
+
+// spec: IMP-071
+#[test]
+fn imp_071_an_older_mail_asks_to_keep_the_thread_in_date_order_and_leave_the_chain_changes_nothing() {
+    use crate::thread_tests::{eml, D17};
+    let files = [("Mail/2026-11-16 A.md", thread_note("a", "2026-11-16 12:00", "a")), ("Mail/2026-11-18 C.md", thread_note("c", "2026-11-18 12:00", "a"))];
+    let mut p = P::with_files("older", &[(files[0].0, &files[0].1), (files[1].0, &files[1].1)]);
+    p.app.open_import(mail_items(eml("b@h", D17, "Middle", Some("a@h"), &["a@h"])), vec![], None);
+    p.look(Show::Modals);
+    assert!(p.shows(Show::Modals, "Keep the thread in date order? This changes the previous and next of 2 notes."));
+    // Leave the chain: written without links, the two notes are as they were
+    click_control(&mut p, "continues-leave:0");
+    p.click(Show::Modals, "Import 1 item");
+    assert!(p.app.modal.is_none());
+    let made = made_in(&p, "Mail", "Middle");
+    assert_eq!(made.len(), 1, "{made:?}");
+    let t = std::fs::read_to_string(p.dir.join("Mail").join(&made[0])).unwrap();
+    assert!(!t.contains("previous:") && !t.contains("next:"), "{t}");
+    for (f, text) in &files {
+        assert_eq!(&std::fs::read_to_string(p.dir.join(f)).unwrap(), text, "{f} is untouched");
+    }
+}
+
+// spec: IMP-071
+#[test]
+fn imp_071_update_puts_the_older_mail_in_its_place_and_saves_open_notes_first() {
+    use crate::thread_tests::{eml, D17};
+    let files = [("Mail/2026-11-16 A.md", thread_note("a", "2026-11-16 12:00", "a")), ("Mail/2026-11-18 C.md", thread_note("c", "2026-11-18 12:00", "a"))];
+    let mut p = P::with_files("update", &[(files[0].0, &files[0].1), (files[1].0, &files[1].1)]);
+    // the note after it is open with an edit that is not saved
+    p.app.open(Path::new("Mail/2026-11-18 C.md"), false);
+    let doc = p.app.notes.get_mut(Path::new("Mail/2026-11-18 C.md")).unwrap();
+    doc.text.push_str("\nMy own words.\n");
+    doc.dirty = true;
+    p.app.open_import(mail_items(eml("b@h", D17, "Middle", Some("a@h"), &["a@h"])), vec![], None);
+    p.look(Show::Modals);
+    assert!(p.shows(Show::Modals, "Update"));
+    p.click(Show::Modals, "Import 1 item");
+    assert!(p.app.modal.is_none());
+    let b = made_in(&p, "Mail", "Middle")[0].trim_end_matches(".md").to_string();
+    let a = std::fs::read_to_string(p.dir.join(files[0].0)).unwrap();
+    let c = std::fs::read_to_string(p.dir.join(files[1].0)).unwrap();
+    assert!(a.contains(&format!("next: \"[[{b}]]\"")), "{a}");
+    assert!(c.contains(&format!("previous: \"[[{b}]]\"")) && c.contains("My own words."), "the edit was saved first and kept: {c}");
+    // the open buffer shows what is on disk now
+    assert_eq!(p.app.notes[Path::new("Mail/2026-11-18 C.md")].text, c);
+    assert!(!p.app.notes[Path::new("Mail/2026-11-18 C.md")].dirty);
+}
