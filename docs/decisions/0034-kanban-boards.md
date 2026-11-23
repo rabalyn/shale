@@ -2,7 +2,7 @@
 
 - **Status**: Accepted (2026-11-23)
 - **Date**: 2026-11-23
-- **Specs**: BOARD-001…BOARD-032 ([boards.md](../spec/boards.md)), QUERY-001…QUERY-028 ([search-queries.md](../spec/search-queries.md)), VAULT-044…VAULT-046 (note properties)
+- **Specs**: BOARD-001…BOARD-032 ([boards.md](../spec/boards.md)), QUERY-001…QUERY-028 ([search-queries.md](../spec/search-queries.md)), VAULT-045…VAULT-047 (note properties)
 - **Issues**: rabalyn/shale#596 (epic), #597, #598, #599, #600, #601, #602, #603, #604, #605
 
 ## Context
@@ -47,7 +47,7 @@ the board with its notes. Three things stand in the way.
 5. **One filter and sort form** for the lane settings and the picker (QUERY-021…QUERY-028),
    with an **Advanced** switch to the text. The form never simplifies a query: when a query does
    not fit the form it is shown read-only.
-6. **Note properties** `created:`, `modified:` and `priority:` (VAULT-044…VAULT-046). `modified:`
+6. **Note properties** `created:`, `modified:` and `priority:` (VAULT-045…VAULT-047). `modified:`
    changes only when the body changes.
 7. **The board view** is a main-area tab like Graph and Calendar (BOARD-007…BOARD-014). The
    peek is the floating frame of the link preview (EDIT-033, EDIT-037) with a real editor in it.
@@ -80,7 +80,7 @@ the board with its notes. Three things stand in the way.
   synchronous call to a request and a result that arrives later (a spinner, the last list stays).
 - The vault changes its note store to `Arc<NoteIndex>`; an edit replaces one pointer.
 - Notes written by Shale get `created:` and `modified:` lines in their front matter. Notes
-  edited by another editor are noticed only at the next save from Shale (VAULT-045).
+  edited by another editor are noticed only at the next save from Shale (VAULT-046).
 - A drag changes a card's note on disk (its front matter), so a board in a git-synced vault
   produces diffs in the cards. That is the price of the notes being the data.
 - A drawing can be matched only by name, path and links until drawings get tags.

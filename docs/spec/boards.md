@@ -4,7 +4,7 @@
 Format: [ADR-0001](../decisions/0001-spec-driven-development.md). Decision:
 [ADR-0034](../decisions/0034-kanban-boards.md). Issues: #596 (epic), #601, #602, #603, #604, #605.
 The query language of the lanes is in [search-queries.md](search-queries.md) (QUERY); the note
-properties `created:`, `modified:` and `priority:` are VAULT-044…VAULT-046. Every row here is
+properties `created:`, `modified:` and `priority:` are VAULT-045…VAULT-047. Every row here is
 planned work; none is true yet.
 
 A board is a Markdown note. Its lanes are made from queries, its cards are notes.
@@ -46,10 +46,10 @@ drop: status: doing
 | BOARD-007 | **A main-area tab** (#601). The board is a view of the main area, a tab like Graph and Calendar (ADR-0033). A strip at its top lists every `type: board` note of the vault; one click switches. | SHOULD BE | `board/view.rs` (planned) | — |
 | BOARD-008 | **A key for the boards** (#601). The definable action `main.boards` (scope Main views, KEY-040) opens the board view; the proposed default is `Space b` (free: the defaults of KEY-040 are `Space f f` and `Space f g`). The clash rules (KEY-004, KEY-017) apply. | SHOULD BE | `keys::DEFS` (planned) | — |
 | BOARD-009 | **Exclusive lanes** (#601). A card is in the first lane whose query matches. With `cards: every-lane` (BOARD-005) it is in every lane it matches. | SHOULD BE | `board/lanes.rs` (planned) | — |
-| BOARD-010 | **Cards** (#601). A card shows the title, chips for the due date (red when overdue), status, priority (VAULT-046) and tags, as `card-shows` (BOARD-005) says, and a thumbnail for a drawing. | SHOULD BE | `board/view.rs` (planned) | — |
+| BOARD-010 | **Cards** (#601). A card shows the title, chips for the due date (red when overdue), status, priority (VAULT-047) and tags, as `card-shows` (BOARD-005) says, and a thumbnail for a drawing. | SHOULD BE | `board/view.rs` (planned) | — |
 | BOARD-011 | **Drawings on a board** (#601). A drawing can be matched by name, path and links only, until drawings get tags; its other fields are empty. | SHOULD BE | `board/lanes.rs` (planned) | — |
 | BOARD-012 | **Click selects and opens the peek** (#601). A click on a card selects it and opens its peek: the floating frame of the link preview (EDIT-033, size of EDIT-037, draggable and resizable). Esc closes the peek. | SHOULD BE | `board/peek.rs` (planned) | — |
-| BOARD-013 | **The peek is an editor** (#601). The peek holds a real editor that saves as the editor does (a checked save, `Vault::save_checked`, DATA-003). It has a control to set the priority (VAULT-046). | SHOULD BE | `board/peek.rs` (planned) | — |
+| BOARD-013 | **The peek is an editor** (#601). The peek holds a real editor that saves as the editor does (a checked save, `Vault::save_checked`, DATA-003). It has a control to set the priority (VAULT-047). | SHOULD BE | `board/peek.rs` (planned) | — |
 | BOARD-014 | **Open in a tab** (#601). Ctrl+Click on a card, or Enter on the selected card, opens its note in a tab. | SHOULD BE | `board/view.rs` (planned) | — |
 | BOARD-032 | **Pinned cards are taken first** (#601). A card pinned in a lane (BOARD-004) is in that lane; the lanes before and after it do not show it, even when their query matches. | SHOULD BE | `board/lanes.rs` (planned) | — |
 
@@ -58,7 +58,7 @@ drop: status: doing
 | ID | Rule | Status | Code | Test |
 |---|---|---|---|---|
 | BOARD-015 | **The sort line** (#601, #603). `sort: priority desc, due asc` sorts the lane by the keys in order. A key has `asc` (default) or `desc`, except `dependencies` (BOARD-026). | SHOULD BE | `board/sort.rs` (planned) | — |
-| BOARD-016 | **Sort keys** (#601, #603). `created` is the front matter `created:` (VAULT-044), else the `YYMMDD_` name prefix (VAULT-025), else the file time. `modified` is `modified:`, else the file time. `due` is `due:`, else the earliest open task due date of the note (TASK-002). `priority` is VAULT-046. `title` is the title line. `dependencies` is BOARD-026. | SHOULD BE | `board/sort.rs` (planned) | — |
+| BOARD-016 | **Sort keys** (#601, #603). `created` is the front matter `created:` (VAULT-045), else the `YYMMDD_` name prefix (VAULT-025), else the file time. `modified` is `modified:`, else the file time. `due` is `due:`, else the earliest open task due date of the note (TASK-002). `priority` is VAULT-047. `title` is the title line. `dependencies` is BOARD-026. | SHOULD BE | `board/sort.rs` (planned) | — |
 | BOARD-017 | **No value sorts last** (#601). A note without a value for a key sorts after the others, in either direction. | SHOULD BE | `board/sort.rs` (planned) | — |
 | BOARD-018 | **Without a sort line** (#601). Pinned cards first, then the others by title. | SHOULD BE | `board/sort.rs` (planned) | — |
 
@@ -67,7 +67,7 @@ drop: status: doing
 | ID | Rule | Status | Code | Test |
 |---|---|---|---|---|
 | BOARD-019 | **A drop writes the lane's property** (#602). Dropping a card on a lane writes the lane's `drop:` property into the card note's front matter. A lane with a simple query such as `status:doing` and no `drop:` line uses the property the query says (`status: doing`). | SHOULD BE | `board/drag.rs` (planned) | — |
-| BOARD-020 | **A drop does not count as a change** (#602). The front matter write of a drop does not change `modified:` (VAULT-045). The write is a checked save (DATA-003). | SHOULD BE | `board/drag.rs` (planned) | — |
+| BOARD-020 | **A drop does not count as a change** (#602). The front matter write of a drop does not change `modified:` (VAULT-046). The write is a checked save (DATA-003). | SHOULD BE | `board/drag.rs` (planned) | — |
 | BOARD-021 | **A lane without a drop property** (#602). A drop on a lane with no `drop:` line and no simple query only reorders its pinned cards (BOARD-022); the card note is not changed. | SHOULD BE | `board/drag.rs` (planned) | — |
 | BOARD-022 | **Manual order is the link list** (#602). The order of the pinned cards of a lane is the order of its `- [[link]]` lines in the board file; a drop inside a lane or onto a manual lane rewrites that list. | SHOULD BE | `board/drag.rs`, `board/file.rs` (planned) | — |
 
