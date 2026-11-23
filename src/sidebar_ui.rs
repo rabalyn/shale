@@ -286,7 +286,9 @@ impl ShaleApp {
                 self.side.bodies.push((n, body));
                 p
             };
-            let mut body_ui = ui.new_child(UiBuilder::new().max_rect(body));
+            // an id of its own per place and panel (a panel does not inherit the offset of the one before it): the scroll areas of the panels would share one otherwise,
+            // and the wheel would scroll none of them
+            let mut body_ui = ui.new_child(UiBuilder::new().id_salt(("right-view-body", i, panel)).max_rect(body));
             body_ui.set_clip_rect(body.intersect(ui.clip_rect()));
             self.right_panel_body(&mut body_ui, panel);
         }

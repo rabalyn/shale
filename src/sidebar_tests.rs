@@ -18,11 +18,19 @@ pub(crate) struct W {
 
 impl W {
     pub fn new(tag: &str) -> W {
+        W::with_files(tag, &[])
+    }
+
+    /// A window on a vault with these notes more.
+    pub fn with_files(tag: &str, files: &[(String, String)]) -> W {
         let dir = std::env::temp_dir().join(format!("shale-sideui-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("Welcome.md"), "# Welcome\n\n## First\n\n[[Other]]\n\n## Second\n").unwrap();
         std::fs::write(dir.join("Other.md"), "# Other\n\nSee [[Welcome]].\n").unwrap();
+        for (name, text) in files {
+            std::fs::write(dir.join(name), text).unwrap();
+        }
         let app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
         let mut w = W { app, hl: Headless::new(), dir };
         w.frames(4);
@@ -66,6 +74,20 @@ impl W {
     pub fn drag_and_drop(&mut self, from: Pos2, to: Pos2) {
         self.drag_to(from, to);
         self.release(to);
+    }
+
+    /// The mouse wheel turned by `dy` points over `at`.
+    pub fn wheel(&mut self, at: Pos2, dy: f32) {
+        let wheel = Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: Vec2::new(0.0, dy), modifiers: Modifiers::NONE, phase: egui::TouchPhase::Move, source: egui::MouseWheelSource::Wheel };
+        self.frame(vec![Event::PointerMoved(at)]);
+        self.frame(vec![wheel]);
+        self.frames(2);
+    }
+
+    /// Where the right sidebar draws the first text that contains `text`.
+    pub fn right_text_at(&self, text: &str) -> Option<Pos2> {
+        let x = self.app.side.right_rect?.min.x;
+        self.hl.text.iter().find(|(t, p)| p.x >= x && t.contains(text)).map(|(_, p)| *p)
     }
 
     pub fn press_esc(&mut self) {
@@ -647,4 +669,56 @@ fn lay_018_the_sidebar_widths_are_kept_after_a_restart_and_reset_with_the_layout
     assert_eq!((w.app.cfg.left_sidebar_width, w.app.cfg.right_sidebar_width), (None, None));
     assert!((tab_x(&w) - tab0).abs() < 1.5, "{} and {}", tab_x(&w), tab0);
     assert!((w.app.side.right_rect.unwrap().width() - right0.width()).abs() < 1.5);
+}
+
+/// A note with many links, linked from many notes, with many headings: every panel overflows.
+fn long_hub(tag: &str) -> W {
+    let mut files: Vec<(String, String)> = (0..40).map(|i| (format!("Src{i}.md"), format!("# Src{i}\n\nSee [[Hub]].\n"))).collect();
+    let body: String = (0..40).map(|i| format!("## Head{i}\n\n[[Target{i}]]\n\n")).collect();
+    files.push(("Hub.md".into(), format!("# Hub\n\n{body}")));
+    let mut w = W::with_files(tag, &files);
+    w.app.open(std::path::Path::new("Hub.md"), false);
+    w.frames(6);
+    w
+}
+
+/// The wheel over the panel of a view scrolls it: `probe` is a text at the top of the panel.
+fn assert_wheel_scrolls(w: &mut W, body: Rect, probe: &str, what: &str) {
+    assert!(!w.right_text().iter().any(|t| t.contains("use of")), "{what}: egui reports an id used twice: {:?}", w.right_text());
+    let before = w.right_text_at(probe).unwrap_or_else(|| panic!("{what}: no {probe:?} in {:?}", w.right_text()));
+    w.wheel(body.center(), -120.0);
+    let after = w.right_text_at(probe).unwrap_or_else(|| panic!("{what}: no {probe:?} after the wheel"));
+    assert!(after.y < before.y - 20.0, "{what}: the wheel over the panel scrolls it ({before:?} -> {after:?})");
+}
+
+// spec: LAY-003
+#[test]
+fn lay_003_the_wheel_scrolls_each_of_the_stacked_views() {
+    let mut w = long_hub("wheel-stacked");
+    let panels = [(RightPanel::Outline, "Head2"), (RightPanel::Backlinks, "Src11"), (RightPanel::Outgoing, "Target3")];
+    w.app.side.layout.views = panels.iter().map(|(p, _)| crate::sidebar::View::new(vec![panel(*p)], panel(*p))).collect();
+    w.frames(4);
+    for (i, (p, probe)) in panels.iter().enumerate() {
+        let body = w.body(i);
+        assert_wheel_scrolls(&mut w, body, probe, &format!("{p:?} in view {i}"));
+    }
+}
+
+// spec: LAY-003
+#[test]
+fn lay_003_the_wheel_scrolls_a_single_view_and_the_panel_of_a_shortcut() {
+    let mut w = long_hub("wheel-single");
+    assert_eq!(w.views().len(), 1);
+    let body = w.body(0);
+    assert_wheel_scrolls(&mut w, body, "Src11", "the only view");
+    // another panel in the same view starts at its top, not at the offset of the one before
+    w.click_at(w.bar_icon(0, panel(RightPanel::Outgoing)).center());
+    w.frames(3);
+    let top = w.right_text_at("Links").expect("the header of the Outgoing panel is at the top");
+    assert!(top.y < w.body(0).min.y + 40.0, "the new panel is not scrolled: {top:?}");
+    // the panel of a ribbon shortcut below the view
+    w.app.side.peek = Some(RightPanel::Outline);
+    w.frames(4);
+    let peek = w.body(1);
+    assert_wheel_scrolls(&mut w, peek, "Head2", "the shortcut's panel");
 }
