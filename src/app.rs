@@ -243,6 +243,8 @@ pub enum Modal {
     Changes,
     /// a conflict copy next to its original (NET-015)
     Conflict(Box<conflict::View>),
+    /// the vault dropdown and the dialogs under it (VAULT-030)
+    Vaults(Box<crate::vault_menu::VaultModal>),
     /// the "Turn on sync" wizard (SYNC-047); its state is `ShaleApp::sync.setup.wizard`
     SyncWizard,
     Export(Box<crate::pdf::export_dialog::ExportDialog>),
@@ -981,7 +983,12 @@ impl ShaleApp {
         self.drawings.clear();
         self.tabbar.active = 0;
         if known {
+            // a folder that is new to the list and lies in or around another vault: warned once (VAULT-039)
+            let nesting = if self.cfg.vaults.contains(path) { None } else { self.cfg.vaults.nested_with(path, None) };
             self.cfg.remember_vault(path.to_path_buf());
+            if let Some(n) = nesting {
+                self.toast(n.warning());
+            }
         }
         // (opening a note rewrites the saved list, so read it first)
         let saved_panes: Vec<crate::vault_state::SavedPane> = if self.vdata.state.panes.is_empty() {

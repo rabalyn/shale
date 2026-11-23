@@ -175,6 +175,9 @@ mod utf8_tests;
 mod vault;
 mod vault_cache;
 mod vault_check;
+mod vault_menu;
+#[cfg(test)]
+mod vault_menu_tests;
 mod vault_path;
 #[cfg(test)]
 mod vault_path_tests;

@@ -138,6 +138,11 @@ impl ShaleApp {
         if self.vault_load.is_loading() || !self.prepare_vault_switch() {
             return;
         }
+        // a known vault's folder is never made silently (VAULT-038)
+        if self.cfg.vaults.contains(path) && !path.is_dir() {
+            self.toast(format!("The folder of “{}” is missing. Use Locate… or Forget in the vault list.", self.cfg.vaults.label_of(path)));
+            return;
+        }
         let ctx = self.ctx.clone();
         self.vault_load.start(&self.busy, path, after, ctx);
     }

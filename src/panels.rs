@@ -74,7 +74,7 @@ impl ShaleApp {
             });
         });
         ui.add_space(4.0);
-        let vault_name = self.vault.as_ref().and_then(|v| v.root.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_default();
+        let vault_name = self.vault.as_ref().map(|v| self.cfg.vaults.label_of(&v.root)).unwrap_or_default();
         let bottom_h = 30.0;
         let avail = ui.available_height() - bottom_h;
         egui::ScrollArea::vertical().max_height(avail).auto_shrink([false, false]).show(ui, |ui| {
@@ -128,7 +128,10 @@ impl ShaleApp {
         });
         ui.separator();
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(format!("▣  {vault_name}")).color(theme::palette().text).size(13.0)).on_hover_text(self.vault.as_ref().map(|v| v.root.to_string_lossy().into_owned()).unwrap_or_default());
+            let path = self.vault.as_ref().map(|v| v.root.to_string_lossy().into_owned()).unwrap_or_default();
+            if crate::vault_menu::vault_label(ui, &vault_name, &path) {
+                self.open_vault_menu();
+            }
         });
     }
 
@@ -840,7 +843,8 @@ impl ShaleApp {
                     keep = false;
                 }
             }
-            Modal::TexSetup
+            Modal::Vaults(_)
+            | Modal::TexSetup
             | Modal::Export(_)
             | Modal::ExportDocx(_)
             | Modal::Calendars(_)
@@ -1048,6 +1052,9 @@ impl ShaleApp {
             if close_asked && !d.busy() {
                 keep = false;
             }
+        }
+        if let Modal::Vaults(m) = &mut modal {
+            keep = self.vault_modal(&ctx, m);
         }
         if let Modal::TexSetup = &modal {
             keep = self.tex_setup_dialog(&ctx);

@@ -343,7 +343,10 @@ impl ShaleApp {
                         ui.label(muted("Recent vaults"));
                         for e in self.cfg.vaults.entries().to_vec() {
                             let shown = self.cfg.vaults.label(&e);
-                            if ui.add_enabled(!self.vault_load.is_loading(), egui::Link::new(shown)).on_hover_text(e.path.to_string_lossy()).clicked() {
+                            // a vault whose folder is missing is greyed out and does not open (VAULT-038)
+                            let present = e.path.is_dir();
+                            let link = if present { egui::Link::new(shown) } else { egui::Link::new(egui::RichText::new(format!("{shown} (folder missing)")).color(theme::palette().muted)) };
+                            if ui.add_enabled(present && !self.vault_load.is_loading(), link).on_hover_text(e.path.to_string_lossy()).clicked() {
                                 self.actions.push(Action::OpenVault(e.path));
                             }
                         }
