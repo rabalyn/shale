@@ -5,7 +5,7 @@
 use crate::busy::Cancel;
 use crate::markdown;
 use crate::pdf::book::{self, Item, Plan};
-use crate::pdf::export::{book_scale, finish_from, fit_text, wrap_pieces, Entry, ExportOptions, Piece, Writer};
+use crate::pdf::export::{book_scale, finish_from, fit_text, pdf_image, wrap_pieces, Entry, ExportOptions, Piece, Writer};
 use crate::pdf::write::{text_width, Bookmark, Dest, FontKind, Rgba, TextStyle};
 use crate::vault::Vault;
 use std::collections::HashMap;
@@ -15,6 +15,22 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 const BLACK: Rgba = Rgba(0, 0, 0, 255);
 const GREY: Rgba = Rgba(120, 120, 120, 255);
 const NUMBER: Rgba = Rgba(130, 130, 130, 255);
+
+/// How high the logo of the title page is, in points (about 3.5 cm, BOOK-019), and the space under it.
+const LOGO_HEIGHT: f32 = 100.0;
+const LOGO_GAP: f32 = 28.0;
+
+/// The picture of the title page (BOOK-019): what the top folder note's `logo:` names, read as a picture.
+/// `Ok(None)` without the property; `Err` says why the picture is skipped.
+pub(super) fn logo_picture(vault: &Vault, plan: &Plan) -> Result<Option<image::RgbaImage>, String> {
+    let Some(target) = &plan.logo else { return Ok(None) };
+    let rel = match vault.resolve_media(target, plan.note.as_deref()) {
+        crate::vault::Shown::Vault(rel) => rel,
+        _ => return Err(format!("the logo “{target}” is not a file of the vault")),
+    };
+    let img = image::open(vault.abs(&rel)).map_err(|e| format!("the logo “{target}” cannot be read as a picture: {e}"))?;
+    Ok(Some(img.to_rgba8()))
+}
 
 /// How far a book export is, and whether it is to stop (JOB-001): shared with the window.
 #[derive(Default)]
@@ -136,7 +152,7 @@ fn section(kind: Kind, rel: Option<PathBuf>, level: usize, number: Option<String
 
 impl Writer<'_> {
     /// The title page (BOOK-005): the title large, a short rule, the subtitle, and the author and date near the foot.
-    fn title_page(&mut self, plan: &Plan) {
+    fn title_page(&mut self, plan: &Plan, logo: Option<&image::RgbaImage>) {
         let (w, h) = (self.w, self.h);
         let cw = self.cw() * 0.85;
         let centred = |page: &mut crate::pdf::write::Page, style: TextStyle, y: f32, s: &str| {
@@ -145,6 +161,14 @@ impl Writer<'_> {
         };
         let mut y = h * 0.32;
         let size = 34.0;
+        if let Some(img) = logo {
+            // centred above the title, LOGO_HEIGHT high (as wide as the picture's shape says, at most half the text width)
+            let scale = (LOGO_HEIGHT / img.height() as f32).min(self.cw() * 0.5 / img.width() as f32);
+            let (lw, lh) = (img.width() as f32 * scale, img.height() as f32 * scale);
+            let top = (y - size - LOGO_GAP - lh).max(self.top);
+            let idx = self.doc.add_image(pdf_image(img));
+            self.p().image(idx, (w - lw) / 2.0, top, lw, lh);
+        }
         let title = TextStyle { bold: true, ..TextStyle::plain(FontKind::Sans, size, BLACK) };
         for line in wrap_pieces(&[Piece::plain(&plan.title, size, BLACK, true)], cw) {
             let text: String = line.iter().map(|p| p.text.as_str()).collect();
@@ -238,7 +262,11 @@ pub fn export_book(vault: &Vault, dir: &Path, opts: &ExportOptions, progress: Op
     w.members = Some(book::members(&plan));
     let base = opts.font_pt;
     if opts.title {
-        w.title_page(&plan);
+        let logo = logo_picture(vault, &plan).unwrap_or_else(|why| {
+            tracing::warn!("book title page: {why}; the title page has no picture");
+            None
+        });
+        w.title_page(&plan, logo.as_ref());
         w.new_page();
     }
     // the contents: parts, chapters and the first level of headings inside a chapter (BOOK-007)

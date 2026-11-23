@@ -127,7 +127,7 @@ refused. Tab and Shift+Tab can be changed in **Settings → Keybindings** ("List
 | Where | Keys | What it searches | Syntax |
 |---|---|---|---|
 | Sidebar search | **Ctrl+Shift+F** | notes, mail and posts, in groups with counts; up to 20 lines per note, 200 hits per group | all of this note; the sources and buttons as above |
-| Search picker | **Space f g** (vim-style editing on, [[Editor]]) | the same search in a window; 3 lines per note, 20 hits per group | the same |
+| Search picker | **Space f g** (every view, [[Search and pickers]]) | the same search in a window; 3 lines per note, 20 hits per group | the same |
 | File picker | **Space f f** | **file names** only: the letters you type must be in the name in this order | letters in order, no wildcards, no fields; never creates a note |
 | Quick switcher | **Ctrl+O** | note names, like the file picker | letters in order; creates the note when nothing matches |
 | The search of the mail view | **/** in the mail view, or the field above the list | mail only, **all folders** or **this folder** (**t** switches) | the same as mail above: words as word starts, wildcards, `"phrases"` and the five fields. The empty field reminds you of them |
