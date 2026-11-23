@@ -371,9 +371,9 @@ fn job_007_the_summary_is_the_text_of_one_task_or_the_number_of_several_and_time
     assert_eq!((ui::elapsed(Duration::from_secs(5)), ui::elapsed(Duration::from_secs(59)), ui::elapsed(Duration::from_secs(125))), ("5 s".into(), "59 s".into(), "2 min".into()));
 }
 
-// spec: JOB-030
+// spec: JOB-024
 #[test]
-fn job_030_a_quiet_task_is_known_to_its_views_at_once_but_listed_only_after_two_seconds() {
+fn job_024_a_quiet_task_is_known_to_its_views_at_once_but_listed_only_after_two_seconds() {
     const QUIET: Key = Key::quiet("test-quiet");
     let busy = Busy::default();
     let (job, release) = gated(&busy, QUIET, "Saving a version…");

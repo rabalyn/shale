@@ -21,7 +21,7 @@ pub(crate) const GIT_SYNC: Key = Key::new("git-sync");
 /// "Store media with Git LFS" as a task; like the sync, it is not stopped half way.
 pub(crate) const LFS_SETUP: Key = Key::new("git-lfs-setup");
 
-/// The LFS download queue as a task (JOB-032): one download runs at a time, the others wait in
+/// The LFS download queue as a task (JOB-026): one download runs at a time, the others wait in
 /// `pulls`. It cannot be stopped, because `git lfs pull` writes the files itself.
 pub(crate) const LFS_DOWNLOAD: Key = Key::new("git-lfs-download");
 
@@ -1175,9 +1175,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    // spec: JOB-032
+    // spec: JOB-026
     #[test]
-    fn job_032_the_lfs_download_queue_is_a_task_that_names_the_file_cannot_stop_and_shows_in_the_settings() {
+    fn job_026_the_lfs_download_queue_is_a_task_that_names_the_file_cannot_stop_and_shows_in_the_settings() {
         let root = std::env::temp_dir().join(format!("shale-app-lfs-task-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();

@@ -418,7 +418,7 @@ fn the_test_page_without_a_usable_tex_says_so_and_a_swatchless_set_takes_the_col
     assert_eq!(load_settings(&dir).unwrap().accent, "9c");
 }
 
-// spec: TEX-017, JOB-035
+// spec: TEX-017, JOB-029
 #[test]
 fn cancel_closes_the_setup_and_stops_what_it_started() {
     let mut t = T::new("su-cancel", usable());

@@ -707,9 +707,9 @@ fn sync_073_a_failed_move_connects_nothing_and_says_why() {
     assert!(!t.wizard().history_moved);
 }
 
-// spec: JOB-033
+// spec: JOB-027
 #[test]
-fn job_033_a_call_of_the_wizard_is_a_task_with_its_text_that_stops_at_a_safe_point_and_the_page_shows_it() {
+fn job_027_a_call_of_the_wizard_is_a_task_with_its_text_that_stops_at_a_safe_point_and_the_page_shows_it() {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     let mut t = T::new("job033-call");
@@ -744,9 +744,9 @@ fn job_033_a_call_of_the_wizard_is_a_task_with_its_text_that_stops_at_a_safe_poi
     let _ = seen.join();
 }
 
-// spec: JOB-033
+// spec: JOB-027
 #[test]
-fn job_033_the_test_sync_of_the_wizard_shows_the_sync_task() {
+fn job_027_the_test_sync_of_the_wizard_shows_the_sync_task() {
     let mut t = T::new("job033-test");
     t.open_wizard();
     t.wizard().step = Step::Test;
@@ -757,9 +757,9 @@ fn job_033_the_test_sync_of_the_wizard_shows_the_sync_task() {
     drop(held);
 }
 
-// spec: JOB-033
+// spec: JOB-027
 #[test]
-fn job_033_the_detection_is_a_quiet_task_and_waits_while_its_task_is_listed() {
+fn job_027_the_detection_is_a_quiet_task_and_waits_while_its_task_is_listed() {
     let mut t = T::new("job033-detect");
     t.app.sync.setup.forget_vault();
     let held = t.app.busy.begin(super::VAULT_PLACE, "held by the test").unwrap();
@@ -778,10 +778,10 @@ fn job_033_the_detection_is_a_quiet_task_and_waits_while_its_task_is_listed() {
     assert!(t.app.busy.list().is_empty() && !t.app.busy.is_running(&super::VAULT_PLACE));
 }
 
-// spec: JOB-033
+// spec: JOB-027
 #[cfg(unix)]
 #[test]
-fn job_033_moving_the_repository_out_is_a_task_that_cannot_stop_and_its_button_is_off_while_it_runs() {
+fn job_027_moving_the_repository_out_is_a_task_that_cannot_stop_and_its_button_is_off_while_it_runs() {
     let mut t = T::new("job033-move");
     let git = hermetic();
     gitsync::connect(&git, &t.vault, t.bare().to_str().unwrap()).unwrap();
@@ -809,10 +809,10 @@ fn job_033_moving_the_repository_out_is_a_task_that_cannot_stop_and_its_button_i
     let _ = std::fs::remove_dir_all(t.app.usage.places.history.join(&id));
 }
 
-// spec: JOB-033
+// spec: JOB-027
 #[cfg(unix)]
 #[test]
-fn job_033_advanced_connect_is_a_task_with_its_text_and_its_button_is_off_while_it_runs() {
+fn job_027_advanced_connect_is_a_task_with_its_text_and_its_button_is_off_while_it_runs() {
     let mut t = T::new("job033-join");
     local_history(&mut t);
     let remote = t.bare();
@@ -837,7 +837,7 @@ fn job_033_advanced_connect_is_a_task_with_its_text_and_its_button_is_off_while_
     assert!(t.app.busy.list().is_empty());
 }
 
-// spec: JOB-033, JOB-010
+// spec: JOB-027, JOB-010
 #[test]
 fn job_010_closing_the_wizard_stops_its_call_at_the_next_safe_point_and_keeps_nothing() {
     use std::sync::atomic::{AtomicBool, Ordering};

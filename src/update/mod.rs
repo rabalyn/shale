@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// The three tasks of an update (JOB-036), all looking at the one cancel flag of the state. The
+/// The three tasks of an update (JOB-030), all looking at the one cancel flag of the state. The
 /// check is quiet (it also runs by itself, every day) and can stop; the download can stop and its
 /// partial file is removed; the install cannot, because it is a few file operations that undo
 /// themselves on an error and must not end half way.

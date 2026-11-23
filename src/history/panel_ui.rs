@@ -94,7 +94,7 @@ impl ShaleApp {
         if let Some(e) = panel.error.clone() {
             theme::problem(ui, e);
         } else if panel.loading && !shown {
-            // the read that runs is a task (JOB-031); before it starts the request only waits in the queue
+            // the read that runs is a task (JOB-025); before it starts the request only waits in the queue
             if !crate::busy::ui::status(ui, &self.busy, &crate::app::history::HISTORY_QUERY) {
                 ui.label(muted("Reading the history\u{2026}"));
             }

@@ -640,10 +640,10 @@ fn an_import_that_rewrites_neighbours_is_one_snapshot_with_the_import_reason() {
     assert!(paths.iter().any(|p| p == "Mail/2026-11-16 A.md") && paths.iter().any(|p| p == "Mail/2026-11-18 C.md") && paths.iter().any(|p| p.contains("Middle")), "{paths:?}");
 }
 
-// spec: JOB-031
+// spec: JOB-025
 #[cfg(unix)]
 #[test]
-fn job_031_a_snapshot_is_a_quiet_task_that_cannot_stop_and_is_gone_when_its_job_ends() {
+fn job_025_a_snapshot_is_a_quiet_task_that_cannot_stop_and_is_gone_when_its_job_ends() {
     let mut t = setup("job031-snap", true);
     t.start();
     let gate = crate::gitsync::hold_git(&mut t.app.sync.git, &t.root);
@@ -661,10 +661,10 @@ fn job_031_a_snapshot_is_a_quiet_task_that_cannot_stop_and_is_gone_when_its_job_
     assert!(!t.app.busy.is_running(&HISTORY_SNAPSHOT) && t.app.busy.list().is_empty());
 }
 
-// spec: JOB-031
+// spec: JOB-025
 #[cfg(unix)]
 #[test]
-fn job_031_the_thinning_and_a_read_are_tasks_of_their_own() {
+fn job_025_the_thinning_and_a_read_are_tasks_of_their_own() {
     let mut t = setup("job031-thin", true);
     t.start();
     let gate = crate::gitsync::hold_git(&mut t.app.sync.git, &t.root);
@@ -686,9 +686,9 @@ fn job_031_the_thinning_and_a_read_are_tasks_of_their_own() {
     assert!(t.app.busy.list().is_empty() && !t.app.busy.is_running(&HISTORY_QUERY));
 }
 
-// spec: JOB-031
+// spec: JOB-025
 #[test]
-fn job_031_work_that_finds_its_task_still_listed_waits_for_the_next_frame() {
+fn job_025_work_that_finds_its_task_still_listed_waits_for_the_next_frame() {
     let mut t = setup("job031-again", true);
     t.start();
     let snapshot = t.app.busy.begin(HISTORY_SNAPSHOT, "held by the test").unwrap();

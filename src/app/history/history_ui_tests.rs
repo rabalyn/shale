@@ -487,10 +487,10 @@ fn hist_018_a_made_up_history_has_a_version_per_step_an_hour_apart_ending_an_hou
     assert!(t.app.history_active(), "the window keeps the made-up history");
 }
 
-// spec: JOB-031
+// spec: JOB-025
 #[cfg(unix)]
 #[test]
-fn job_031_the_panel_shows_the_read_that_runs_as_a_task_with_a_spinner() {
+fn job_025_the_panel_shows_the_read_that_runs_as_a_task_with_a_spinner() {
     let mut w = W::new("job031-panel", WIDE);
     let gate = crate::gitsync::hold_git(&mut w.t.app.sync.git, &w.t.root);
     w.t.app.history.panel = Default::default();

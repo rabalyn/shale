@@ -139,9 +139,9 @@ fn a_running_import_shows_its_progress_and_cancel_asks_the_job_to_stop() {
     assert!(handle.cancelled());
 }
 
-// spec: JOB-035
+// spec: JOB-029
 #[test]
-fn job_035_an_import_is_a_task_that_can_stop_and_cancel_of_the_registry_ends_it() {
+fn job_029_an_import_is_a_task_that_can_stop_and_cancel_of_the_registry_ends_it() {
     let mut t = T::new("job035-import", nothing_found());
     t.click("Import TU Darmstadt templates");
     let task = t.app.busy.info(&super::settings_ui::TEX_JOB).expect("the import is a task");
@@ -307,9 +307,9 @@ mod fake {
     use super::*;
     use crate::pdf::tex::compile_tests::fake::Fake;
 
-    // spec: JOB-035
+    // spec: JOB-029
     #[test]
-    fn job_035_the_test_page_of_a_set_is_a_task_that_names_the_set_and_cannot_stop() {
+    fn job_029_the_test_page_of_a_set_is_a_task_that_names_the_set_and_cannot_stop() {
         let f = Fake::new("job035-page");
         f.lualatex();
         f.put("log.last", "ok\n");

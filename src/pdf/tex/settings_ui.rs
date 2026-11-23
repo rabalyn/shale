@@ -13,10 +13,10 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::time::Duration;
 
-/// Looking for a TeX (TEX-001) as a quiet task (JOB-035): the page does it whenever it is shown.
+/// Looking for a TeX (TEX-001) as a quiet task (JOB-029): the page does it whenever it is shown.
 pub(crate) const TEX_DETECT: Key = Key::quiet("tex-detect");
 /// The install, update and removal of the managed TeX Live, the test compile, the import of a
-/// template set and the test page of a set (JOB-035): one at a time. An install, an update and an
+/// template set and the test page of a set (JOB-029): one at a time. An install, an update and an
 /// import can be stopped (what they did is taken back); the others cannot.
 pub(crate) const TEX_JOB: Key = Key::new("tex-job");
 

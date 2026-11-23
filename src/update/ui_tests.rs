@@ -289,9 +289,9 @@ fn held(mode: UpdateMode, latest: Option<&str>) -> (T, Arc<AtomicBool>) {
     (t, gate)
 }
 
-// spec: JOB-036
+// spec: JOB-030
 #[test]
-fn job_036_the_check_is_a_quiet_task_that_can_stop_and_the_settings_page_shows_it() {
+fn job_030_the_check_is_a_quiet_task_that_can_stop_and_the_settings_page_shows_it() {
     let (mut t, gate) = held(UpdateMode::Notify, Some("9.9.9"));
     t.app.open_settings(SettingsTab::Updates);
     let task = t.app.busy.info(&UPDATE_CHECK).expect("the check is a task");
@@ -312,9 +312,9 @@ fn job_036_the_check_is_a_quiet_task_that_can_stop_and_the_settings_page_shows_i
     assert!(t.app.busy.list().is_empty());
 }
 
-// spec: JOB-036
+// spec: JOB-030
 #[test]
-fn job_036_the_download_is_a_task_that_can_stop_and_the_notice_shows_it_with_cancel() {
+fn job_030_the_download_is_a_task_that_can_stop_and_the_notice_shows_it_with_cancel() {
     let (mut t, gate) = held(UpdateMode::Notify, Some("9.9.9"));
     gate.store(true, std::sync::atomic::Ordering::SeqCst);
     t.settle(|t| t.app.update.found.is_some());
@@ -336,9 +336,9 @@ fn job_036_the_download_is_a_task_that_can_stop_and_the_notice_shows_it_with_can
     assert!(t.app.busy.list().is_empty());
 }
 
-// spec: JOB-036
+// spec: JOB-030
 #[test]
-fn job_036_the_install_is_a_task_that_cannot_stop_and_the_notice_says_what_it_does() {
+fn job_030_the_install_is_a_task_that_cannot_stop_and_the_notice_says_what_it_does() {
     let (mut t, gate) = held(UpdateMode::Notify, Some("9.9.9"));
     gate.store(true, std::sync::atomic::Ordering::SeqCst);
     t.settle(|t| t.app.update.found.is_some());
@@ -354,9 +354,9 @@ fn job_036_the_install_is_a_task_that_cannot_stop_and_the_notice_says_what_it_do
     assert!(t.app.busy.list().is_empty());
 }
 
-// spec: JOB-036
+// spec: JOB-030
 #[test]
-fn job_036_a_step_that_finds_its_task_still_listed_keeps_what_it_had_and_tries_again() {
+fn job_030_a_step_that_finds_its_task_still_listed_keeps_what_it_had_and_tries_again() {
     let (mut t, gate) = held(UpdateMode::Notify, Some("9.9.9"));
     gate.store(true, std::sync::atomic::Ordering::SeqCst);
     t.settle(|t| t.app.update.found.is_some());

@@ -39,7 +39,7 @@ const THIN_RETRY: u64 = 30;
 /// How many versions and deleted notes the list asks for.
 const LIST_LIMIT: usize = 300;
 
-/// The snapshots of the file history as tasks (JOB-031): housekeeping that is over in a moment, so
+/// The snapshots of the file history as tasks (JOB-025): housekeeping that is over in a moment, so
 /// the indicator lists one only after 2 seconds. They cannot be stopped: a snapshot waits for the
 /// tree lock and then commits.
 pub(crate) const HISTORY_SNAPSHOT: Key = Key::quiet("history-snapshot");

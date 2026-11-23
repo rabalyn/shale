@@ -22,7 +22,7 @@ const CHECK_EVERY: Duration = Duration::from_secs(7 * 24 * 3600);
 /// A failed check is tried again after this.
 const CHECK_RETRY: Duration = Duration::from_secs(3600);
 
-/// Looking for git on this computer (SYNC-023) as a quiet task (JOB-034): the page does it whenever it is shown.
+/// Looking for git on this computer (SYNC-023) as a quiet task (JOB-028): the page does it whenever it is shown.
 pub(crate) const GIT_DETECT: Key = Key::quiet("git-detect");
 /// The install, the update and the removal of Shale's own git (SYNC-025, SYNC-027): one at a time.
 /// An install and an update can stop, and what was downloaded is removed (JOB-006); a removal cannot.

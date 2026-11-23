@@ -231,7 +231,7 @@ impl Handle {
         self.progress.lock().map(|p| p.clone()).unwrap_or_default()
     }
 
-    /// The token of the registry's task for this job: Cancel there sets the flag the job looks at (JOB-035).
+    /// The token of the registry's task for this job: Cancel there sets the flag the job looks at (JOB-029).
     pub fn token(&self) -> crate::busy::Cancel {
         self.cancel.clone().into()
     }

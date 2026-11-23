@@ -149,9 +149,9 @@ fn a_failed_install_says_why_and_leaves_nothing() {
     assert!(t.shows("Download and install git"), "the offer is back");
 }
 
-// spec: SYNC-025, JOB-034
+// spec: SYNC-025, JOB-028
 #[test]
-fn job_034_a_running_install_is_a_task_with_progress_and_cancel_and_the_page_shows_it() {
+fn job_028_a_running_install_is_a_task_with_progress_and_cancel_and_the_page_shows_it() {
     let mut t = T::new("progress", "windows", "x86_64", found(None, None));
     let ctx = eframe::egui::Context::default();
     // work that goes on until it is cancelled
@@ -182,9 +182,9 @@ fn job_034_a_running_install_is_a_task_with_progress_and_cancel_and_the_page_sho
     assert!(t.shows("The update is done: x."), "{:?}", t.painted());
 }
 
-// spec: SYNC-025, JOB-034
+// spec: SYNC-025, JOB-028
 #[test]
-fn job_034_cancel_in_the_registry_stops_a_real_download_and_leaves_nothing() {
+fn job_028_cancel_in_the_registry_stops_a_real_download_and_leaves_nothing() {
     let mut t = T::new("cancel-real", "windows", "x86_64", found(None, None));
     t.w.files.hang("/git-for-windows/git/releases/download/v2.99.0.windows.1/MinGit-2.99.0-64-bit.zip");
     t.click("Download and install git");
@@ -200,9 +200,9 @@ fn job_034_cancel_in_the_registry_stops_a_real_download_and_leaves_nothing() {
     assert!(t.app.busy.list().is_empty());
 }
 
-// spec: JOB-034
+// spec: JOB-028
 #[test]
-fn job_034_removing_is_a_task_that_cannot_stop_and_the_looks_are_quiet_tasks() {
+fn job_028_removing_is_a_task_that_cannot_stop_and_the_looks_are_quiet_tasks() {
     let mut t = T::new("remove-task", "windows", "x86_64", found(None, None));
     let ctx = eframe::egui::Context::default();
     let (tx, rx) = std::sync::mpsc::channel::<()>();
@@ -229,9 +229,9 @@ fn job_034_removing_is_a_task_that_cannot_stop_and_the_looks_are_quiet_tasks() {
     assert!(t.app.busy.list().is_empty());
 }
 
-// spec: SYNC-027, JOB-034
+// spec: SYNC-027, JOB-028
 #[test]
-fn job_034_the_look_for_a_new_version_is_a_task_that_can_stop() {
+fn job_028_the_look_for_a_new_version_is_a_task_that_can_stop() {
     let mut t = T::new("check-task", "windows", "x86_64", found(None, None));
     installed(&mut t);
     t.w.files.hang("/repos/git-for-windows/git/releases/latest");

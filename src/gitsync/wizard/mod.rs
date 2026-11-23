@@ -106,11 +106,11 @@ pub enum Msg {
 type Job = busy::Job<Result<Msg, String>>;
 
 /// One call of the wizard (sign in, make a key, create a repository, connect and ask the server) as
-/// a task (JOB-033). It cannot be stopped: a provider call or a connect that is dropped half way
+/// a task (JOB-027). It cannot be stopped: a provider call or a connect that is dropped half way
 /// would leave a token, a key or a repository behind that nobody was told about. Closing the dialog
 /// leaves it running and in the indicator, and its result is dropped.
 pub(crate) const WIZARD_CALL: busy::Key = busy::Key::new("git-wizard-call");
-/// Looking at where the vault is (SYNC-061), as a quiet task (JOB-033): it runs whenever the page is shown for a new vault.
+/// Looking at where the vault is (SYNC-061), as a quiet task (JOB-027): it runs whenever the page is shown for a new vault.
 pub(crate) const VAULT_PLACE: busy::Key = busy::Key::quiet("vault-place");
 /// Moving `.git` out of the vault (SYNC-063): not stopped half way.
 pub(crate) const MOVE_OUT: busy::Key = busy::Key::new("git-move-out");

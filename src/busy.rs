@@ -30,7 +30,7 @@ pub struct Key {
     quiet: bool,
 }
 
-/// How long a quiet task runs before the indicator lists it (JOB-030).
+/// How long a quiet task runs before the indicator lists it (JOB-024).
 pub const QUIET_FOR: Duration = Duration::from_secs(2);
 
 impl Key {
@@ -41,7 +41,7 @@ impl Key {
 
     /// The key of housekeeping that is usually over in a moment (a snapshot of the file history):
     /// the views of the action see the task at once ([`Busy::info`]), but the indicator lists it
-    /// only when it has run for [`QUIET_FOR`], so it does not flicker (JOB-030).
+    /// only when it has run for [`QUIET_FOR`], so it does not flicker (JOB-024).
     pub const fn quiet(kind: &'static str) -> Key {
         Key { kind, quiet: true }
     }
