@@ -26,6 +26,12 @@ const DECODERS: usize = 3;
 const KEPT: usize = 1024;
 /// How long a path that is not shown any more is remembered.
 const IDLE: Duration = Duration::from_secs(120);
+/// How many bytes of decoded pictures (RGBA, 4 bytes a pixel) are kept as textures before the ones
+/// shown longest ago are let go (MEDIA-029): 16 pictures of 2048 × 2048, or about 32 of a
+/// 1920 × 1080 screenshot.
+const PICTURE_BYTES: usize = 256 << 20;
+/// The longest side of a decoded picture; a larger one is scaled down with its proportions.
+const MAX_SIDE: u32 = 2048;
 
 /// What the disk says about a file that is there.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -61,8 +67,10 @@ pub enum Look {
 /// A picture as the frames see it (see [`Looks::picture`]).
 #[derive(Clone)]
 pub enum Pic {
-    /// Being looked up or decoded; the frame shows a placeholder.
-    Loading,
+    /// Being looked up or decoded; the frame shows a placeholder. The size the picture will have
+    /// (its pixels as the texture will be, MEDIA-028) when it is known from the file's header or
+    /// from an earlier decode, else None.
+    Loading(Option<egui::Vec2>),
     Ready(egui::TextureHandle),
     /// Not there, or not a picture that can be read.
     Broken,
@@ -79,6 +87,8 @@ impl Pic {
 
 type Stat = Arc<dyn Fn(&Path) -> Option<Facts> + Send + Sync>;
 type Decode = Arc<dyn Fn(&Path) -> Option<egui::ColorImage> + Send + Sync>;
+/// The pixels a picture will have once decoded, read from its header.
+type Measure = Arc<dyn Fn(&Path) -> Option<[usize; 2]> + Send + Sync>;
 type Task = Box<dyn FnOnce() + Send>;
 
 struct Entry {
@@ -96,16 +106,57 @@ struct Slot {
     version: Option<Option<SystemTime>>,
     loading: bool,
     pic: Pic,
+    /// the size the decoded picture has (from the header or the texture), kept when the texture is let go
+    size: Option<egui::Vec2>,
+    /// a header read of this path is on its way
+    measuring: bool,
+    /// when a frame last asked for this picture: `Inner::tick` and the egui pass
+    used: (u64, u64),
+    /// bytes of the texture held (0 when there is none)
+    bytes: usize,
 }
 
 struct Inner {
     stat: Stat,
     decode: Decode,
+    measure: Measure,
+    /// how many bytes of textures are kept (`PICTURE_BYTES`)
+    cap: usize,
+    /// counts the asks for a picture, to tell which was asked for longest ago
+    tick: u64,
     recheck: Duration,
     facts: HashMap<PathBuf, Entry>,
     pictures: HashMap<PathBuf, Slot>,
     queue: VecDeque<Task>,
     decoders: usize,
+}
+
+impl Slot {
+    /// What a frame is given: the picture, or `Loading` with the size known so far.
+    fn shown(&self) -> Pic {
+        match &self.pic {
+            Pic::Loading(_) => Pic::Loading(self.size),
+            other => other.clone(),
+        }
+    }
+}
+
+impl Inner {
+    /// Lets go of textures, the ones asked for longest ago first, until at most `cap` bytes are
+    /// held. A picture that a frame asked for in pass `pass` or the one before is kept (it is
+    /// drawn now), and so is one that is being decoded again. The size of a picture stays, so the
+    /// placeholder of one that comes back has its size at once.
+    fn evict(&mut self, pass: u64) {
+        let mut held: usize = self.pictures.values().map(|s| s.bytes).sum();
+        while held > self.cap {
+            let oldest = self.pictures.values_mut().filter(|s| s.bytes > 0 && !s.loading && s.used.1 + 1 < pass).min_by_key(|s| s.used.0);
+            let Some(slot) = oldest else { return };
+            held -= slot.bytes;
+            slot.bytes = 0;
+            slot.version = None;
+            slot.pic = Pic::Loading(None);
+        }
+    }
 }
 
 /// The app's look-ups of media files; one per egui context (`Looks::of`), cheap to clone.
@@ -114,16 +165,44 @@ pub struct Looks(Arc<Mutex<Inner>>);
 
 impl Default for Looks {
     fn default() -> Self {
-        Looks(Arc::new(Mutex::new(Inner { stat: Arc::new(Facts::of), decode: Arc::new(decode_file), recheck: RECHECK, facts: HashMap::new(), pictures: HashMap::new(), queue: VecDeque::new(), decoders: 0 })))
+        Looks(Arc::new(Mutex::new(Inner {
+            stat: Arc::new(Facts::of),
+            decode: Arc::new(decode_file),
+            measure: Arc::new(measure_file),
+            cap: PICTURE_BYTES,
+            tick: 0,
+            recheck: RECHECK,
+            facts: HashMap::new(),
+            pictures: HashMap::new(),
+            queue: VecDeque::new(),
+            decoders: 0,
+        })))
     }
 }
 
 /// A picture file as an image for a texture: scaled down to at most 2048 px, None if it can't be read.
 fn decode_file(path: &Path) -> Option<egui::ColorImage> {
     let img = image::open(path).ok()?;
-    let img = if img.width() > 2048 || img.height() > 2048 { img.thumbnail(2048, 2048) } else { img };
+    let img = if img.width() > MAX_SIDE || img.height() > MAX_SIDE { img.thumbnail(MAX_SIDE, MAX_SIDE) } else { img };
     let rgba = img.to_rgba8();
     Some(egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], rgba.as_raw()))
+}
+
+/// The pixels `decode_file` makes of a picture, from the header of the file alone (nothing is
+/// decoded); None when the header cannot be read.
+fn measure_file(path: &Path) -> Option<[usize; 2]> {
+    let (w, h) = image::ImageReader::open(path).ok()?.with_guessed_format().ok()?.into_dimensions().ok()?;
+    Some(capped([w, h]))
+}
+
+/// The pixels of a picture of `[w, h]` after it was scaled down to `MAX_SIDE` (as
+/// `DynamicImage::thumbnail` does: the proportions stay, the sides are rounded, at least 1).
+fn capped([w, h]: [u32; 2]) -> [usize; 2] {
+    if w <= MAX_SIDE && h <= MAX_SIDE {
+        return [w as usize, h as usize];
+    }
+    let k = f64::from(MAX_SIDE) / f64::from(w.max(h));
+    [(f64::from(w) * k).round().max(1.0) as usize, (f64::from(h) * k).round().max(1.0) as usize]
 }
 
 impl Looks {
@@ -192,36 +271,69 @@ impl Looks {
 
     /// The picture at `path` for a frame, at once: `Loading` while the file is looked up and
     /// decoded on workers (a few at a time), then the texture; a file that was changed is decoded
-    /// again, the old picture stays until the new one is there.
+    /// again, the old picture stays until the new one is there. `Loading` carries the size the
+    /// picture will have as soon as it is known: a worker reads it from the file's header before
+    /// the decode (MEDIA-028), and it is kept when the texture is let go. The textures are kept up
+    /// to `PICTURE_BYTES`; the ones asked for longest ago go first, never one a frame asked for in
+    /// this pass or the one before.
     pub fn picture(&self, ctx: &egui::Context, path: &Path) -> Pic {
         let facts = self.facts(ctx, path);
         let mut g = self.lock();
-        let decode = g.decode.clone();
-        let slot = g.pictures.entry(path.to_path_buf()).or_insert(Slot { version: None, loading: false, pic: Pic::Loading });
+        g.tick += 1;
+        let used = (g.tick, ctx.cumulative_pass_nr());
+        let (decode, measure) = (g.decode.clone(), g.measure.clone());
+        let slot = g.pictures.entry(path.to_path_buf()).or_insert(Slot { version: None, loading: false, pic: Pic::Loading(None), size: None, measuring: false, used, bytes: 0 });
+        slot.used = used;
         let version = match facts {
-            Look::Checking => return slot.pic.clone(),
+            Look::Checking => return slot.shown(),
             Look::Known(Some(f)) if f.is_file => f.mtime,
             Look::Known(_) => {
-                *slot = Slot { version: None, loading: slot.loading, pic: Pic::Broken };
+                *slot = Slot { version: None, loading: slot.loading, pic: Pic::Broken, size: None, measuring: slot.measuring, used, bytes: 0 };
                 return Pic::Broken;
             }
         };
         if slot.version == Some(version) || slot.loading {
-            return slot.pic.clone();
+            return slot.shown();
         }
         slot.version = Some(version);
         slot.loading = true;
         if !matches!(slot.pic, Pic::Ready(_)) {
-            slot.pic = Pic::Loading;
+            slot.pic = Pic::Loading(None);
         }
-        let shown = slot.pic.clone();
+        let shown = slot.shown();
+        let measuring = !slot.measuring;
+        slot.measuring = true;
         let (me, path, ctx) = (self.clone(), path.to_path_buf(), ctx.clone());
+        if measuring {
+            let (me, path, ctx) = (me.clone(), path.clone(), ctx.clone());
+            let asked = path.clone();
+            crate::jobs::run(
+                move || measure(&asked),
+                move |found| {
+                    let size = found.ok().flatten().map(|[w, h]| egui::vec2(w as f32, h as f32));
+                    let mut g = me.lock();
+                    let Some(slot) = g.pictures.get_mut(&path) else { return };
+                    slot.measuring = false;
+                    let new = size.is_some() && slot.size != size && !matches!(slot.pic, Pic::Ready(_));
+                    slot.size = size.or(slot.size);
+                    drop(g);
+                    if new {
+                        ctx.request_repaint();
+                    }
+                },
+            );
+        }
         g.queue.push_back(Box::new(move || {
             let made = crate::jobs::catch(|| decode(&path)).ok().flatten().map(|img| ctx.load_texture(path.to_string_lossy(), img, egui::TextureOptions::LINEAR));
-            if let Some(slot) = me.lock().pictures.get_mut(&path) {
+            let mut g = me.lock();
+            if let Some(slot) = g.pictures.get_mut(&path) {
                 slot.loading = false;
+                slot.bytes = made.as_ref().map_or(0, |t| t.size()[0] * t.size()[1] * 4);
+                slot.size = made.as_ref().map_or(slot.size, |t| Some(t.size_vec2()));
                 slot.pic = made.map_or(Pic::Broken, Pic::Ready);
             }
+            g.evict(ctx.cumulative_pass_nr());
+            drop(g);
             ctx.request_repaint();
         }));
         let start = g.decoders < DECODERS;
@@ -255,7 +367,25 @@ impl Looks {
     #[cfg(test)]
     pub fn busy(&self) -> bool {
         let g = self.lock();
-        g.facts.values().any(|e| e.flying) || g.pictures.values().any(|s| s.loading)
+        g.facts.values().any(|e| e.flying) || g.pictures.values().any(|s| s.loading || s.measuring)
+    }
+
+    /// Tests: how many bytes of textures are held.
+    #[cfg(test)]
+    pub fn held_bytes(&self) -> usize {
+        self.lock().pictures.values().map(|s| s.bytes).sum()
+    }
+
+    /// Tests: keep at most `cap` bytes of textures instead of `PICTURE_BYTES`.
+    #[cfg(test)]
+    pub fn use_cap(&self, cap: usize) {
+        self.lock().cap = cap;
+    }
+
+    /// Tests: read the size of a picture with `measure` instead of its header.
+    #[cfg(test)]
+    pub fn use_measure(&self, measure: impl Fn(&Path) -> Option<[usize; 2]> + Send + Sync + 'static) {
+        self.lock().measure = Arc::new(measure);
     }
 
     /// Tests: run `frame` until no check and no decode has been under way for 3 frames in a row
@@ -522,12 +652,12 @@ pub(crate) mod tests {
         });
         let path = Path::new("/nas/a.png");
         for _ in 0..100 {
-            assert!(matches!(looks.picture(&ctx, path), Pic::Loading), "the disk does not answer");
+            assert!(matches!(looks.picture(&ctx, path), Pic::Loading(_)), "the disk does not answer");
         }
         stat_gate.open();
         until("the disk answered", || !matches!(looks.facts(&ctx, path), Look::Checking));
         for _ in 0..100 {
-            assert!(matches!(looks.picture(&ctx, path), Pic::Loading), "the decoder is held");
+            assert!(matches!(looks.picture(&ctx, path), Pic::Loading(_)), "the decoder is held");
         }
         decode_gate.open();
         until("the picture is decoded", || matches!(looks.picture(&ctx, path), Pic::Ready(_)));
@@ -552,7 +682,7 @@ pub(crate) mod tests {
         });
         let broken = |name: &str| {
             let path = PathBuf::from("/nas").join(name);
-            until("a verdict", || !matches!(looks.picture(&ctx, &path), Pic::Loading));
+            until("a verdict", || !matches!(looks.picture(&ctx, &path), Pic::Loading(_)));
             matches!(looks.picture(&ctx, &path), Pic::Broken)
         };
         assert!(broken("bad.png"), "a file that cannot be decoded");
@@ -614,7 +744,7 @@ pub(crate) mod tests {
             Some(pixel())
         });
         let evil = Path::new("/nas/evil.png");
-        until("a verdict", || !matches!(looks.picture(&ctx, evil), Pic::Loading));
+        until("a verdict", || !matches!(looks.picture(&ctx, evil), Pic::Loading(_)));
         assert!(matches!(looks.picture(&ctx, evil), Pic::Broken));
         let fine = Path::new("/nas/fine.png");
         until("the next picture", || matches!(looks.picture(&ctx, fine), Pic::Ready(_)));
@@ -637,5 +767,92 @@ pub(crate) mod tests {
         }
         looks.facts(&ctx, Path::new("/nas/new.png"));
         assert_eq!(looks.lock().facts.len(), 1, "what was not shown for a while is gone, the new path is kept");
+    }
+
+    // spec: MEDIA-028
+    #[test]
+    fn the_size_of_a_picture_comes_from_its_header_and_is_the_size_the_decode_makes() {
+        assert_eq!(capped([80, 40]), [80, 40]);
+        assert_eq!(capped([2048, 2048]), [2048, 2048], "at the limit nothing is scaled");
+        assert_eq!(capped([4096, 1024]), [2048, 512]);
+        assert_eq!(capped([1000, 6000]), [341, 2048]);
+        assert_eq!(capped([100_000, 1]), [2048, 1], "a side is never less than one pixel");
+        for (w, h) in [(7_u32, 5_u32), (3000, 1000), (1000, 2600)] {
+            let mut png = std::io::Cursor::new(Vec::new());
+            image::RgbaImage::from_pixel(w, h, image::Rgba([9, 9, 9, 255])).write_to(&mut png, image::ImageFormat::Png).unwrap();
+            let path = crate::media::testdata::temp_file(&format!("size-{w}x{h}.png"), png.get_ref());
+            let decoded = decode_file(&path).expect("decodes");
+            assert_eq!(measure_file(&path), Some(decoded.size), "{w}x{h}: the header says what the decode makes");
+        }
+        let broken = crate::media::testdata::temp_file("size-broken.png", b"not a picture at all");
+        assert_eq!(measure_file(&broken), None);
+        assert_eq!(measure_file(Path::new("/nas/not-there.png")), None);
+    }
+
+    // spec: MEDIA-028
+    #[test]
+    fn a_picture_that_is_being_decoded_has_its_size_from_the_header_and_a_picture_without_one_has_none() {
+        let (ctx, _) = ctx_counting_repaints();
+        let (looks, gate) = (Looks::default(), Arc::new(Gate::default()));
+        let g = gate.clone();
+        looks.use_stat(|_| facts_of(1));
+        looks.use_measure(|p| (!p.ends_with("odd.png")).then_some([640, 480]));
+        looks.use_decode(move |_| {
+            g.pass();
+            Some(pixel())
+        });
+        let (a, odd) = (Path::new("/nas/a.png"), Path::new("/nas/odd.png"));
+        assert!(matches!(looks.picture(&ctx, a), Pic::Loading(None)), "nothing is known in the first frame");
+        until("the header is read", || matches!(looks.picture(&ctx, a), Pic::Loading(Some(_))));
+        assert!(matches!(looks.picture(&ctx, a), Pic::Loading(Some(s)) if s == egui::vec2(640.0, 480.0)), "while the decoder is held");
+        until("a header that cannot be read", || {
+            drop(looks.picture(&ctx, odd));
+            !looks.lock().pictures[odd].measuring
+        });
+        assert!(matches!(looks.picture(&ctx, odd), Pic::Loading(None)), "no size, the strip stays");
+        gate.open();
+        until("decoded", || matches!(looks.picture(&ctx, a), Pic::Ready(_)));
+        until("the workers are done", || !looks.busy());
+        let Pic::Ready(tex) = looks.picture(&ctx, a) else { panic!("a texture") };
+        assert_eq!(tex.size(), [4, 3], "the texture is what the decode made");
+    }
+
+    /// One more egui pass: what a frame asked for in the passes before is not drawn any more.
+    fn next_pass(ctx: &egui::Context) {
+        ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
+    }
+
+    // spec: MEDIA-029
+    #[test]
+    fn the_textures_kept_have_a_cap_in_bytes_the_oldest_go_first_and_a_picture_in_the_frame_stays() {
+        let (ctx, _) = ctx_counting_repaints();
+        let looks = Looks::default();
+        looks.use_stat(|_| facts_of(1));
+        looks.use_decode(|_| Some(pixel()));
+        // a picture is 4 × 3 pixels of 4 bytes: 48 bytes; the cap holds two
+        looks.use_cap(2 * 48);
+        let paths: Vec<PathBuf> = (0..4).map(|i| PathBuf::from(format!("/nas/{i}.png"))).collect();
+        next_pass(&ctx);
+        // one frame draws four pictures: over the cap, and none of them is let go
+        until("all four are decoded", || paths.iter().map(|p| looks.picture(&ctx, p)).filter(|p| matches!(p, Pic::Ready(_))).count() == 4);
+        until("the workers are done", || !looks.busy());
+        assert_eq!(looks.held_bytes(), 4 * 48, "what a frame draws is never let go");
+        // the order they were asked for in the last frame is the order of use
+        for p in &paths {
+            assert!(matches!(looks.picture(&ctx, p), Pic::Ready(_)));
+        }
+        next_pass(&ctx);
+        next_pass(&ctx);
+        next_pass(&ctx);
+        // a fifth picture arrives in a later frame: the four are not drawn any more, the oldest go until the cap is kept
+        let fifth = Path::new("/nas/4.png");
+        until("the fifth", || matches!(looks.picture(&ctx, fifth), Pic::Ready(_)));
+        until("the cap is kept", || looks.held_bytes() <= 2 * 48);
+        assert_eq!(looks.held_bytes(), 2 * 48, "the least recently asked for went first: two are left");
+        assert!(matches!(looks.picture(&ctx, &paths[3]), Pic::Ready(_)), "the youngest of the old ones stays");
+        assert!(matches!(looks.picture(&ctx, fifth), Pic::Ready(_)), "so does the one that came");
+        // one that was let go comes back: its size is known at once, and it is decoded again
+        assert!(matches!(looks.picture(&ctx, &paths[0]), Pic::Loading(Some(s)) if s == egui::vec2(4.0, 3.0)), "the placeholder has the size it had");
+        until("decoded again", || matches!(looks.picture(&ctx, &paths[0]), Pic::Ready(_)));
     }
 }

@@ -588,6 +588,49 @@ fn a_picture_that_is_decoded_slowly_is_loading_in_a_strip_and_does_not_stop_the_
     assert!(!said(&fx, "Loading"));
 }
 
+/// Where the line "after" is, from the last frame.
+fn after_at(fx: &Fx) -> Pos2 {
+    // the reading view has the line as a text of its own; the editor has one text and the number of the line in its gutter
+    fx.hl.text.iter().find(|(t, _)| t.trim() == "after").or_else(|| fx.hl.text.iter().find(|(t, _)| t == "3")).map(|(_, p)| *p).unwrap_or_else(|| panic!("the line after the picture is on screen: {:?}", fx.hl.text))
+}
+
+// spec: MEDIA-028
+#[test]
+fn a_picture_that_is_still_decoding_has_its_own_size_from_the_header_and_the_page_does_not_jump_when_it_arrives() {
+    for reading in [true, false] {
+        let tag = format!("sized-{reading}");
+        let o = Outside::new(&tag);
+        o.picture("a.png");
+        let path = o.folder.join("a.png");
+        let gate = Arc::new(crate::media::look::tests::Gate::default());
+        let g = gate.clone();
+        let mut fx = Fx::start(&format!("o-{tag}"), "![[@Media/a.png|60]]\n\nafter\n", &[], |app, ctx| {
+            app.cfg.media_libraries = o.library();
+            crate::media::look::Looks::of(ctx).use_decode(move |p| {
+                g.pass();
+                image::open(p).ok().map(|i| egui::ColorImage::from_rgba_unmultiplied([i.width() as usize, i.height() as usize], i.to_rgba8().as_raw()))
+            });
+        });
+        fx.show(reading);
+        // the decoder is held; the header is read
+        let looks = crate::media::look::Looks::of(fx.hl.ctx());
+        let start = std::time::Instant::now();
+        while !matches!(looks.picture(fx.hl.ctx(), &path), crate::media::look::Pic::Loading(Some(_))) {
+            assert!(start.elapsed() < std::time::Duration::from_secs(60), "the header was not read");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(matches!(looks.picture(fx.hl.ctx(), &path), crate::media::look::Pic::Loading(Some(s)) if s == egui::vec2(80.0, 40.0)), "the size of the file, from its header");
+        fx.hl.frames(&mut fx.app, 3);
+        assert_eq!(drawn_now(&mut fx), 0, "nothing is decoded yet");
+        let waiting = after_at(&fx);
+        gate.open();
+        assert_eq!(until_drawn(&mut fx, 1), 1);
+        fx.settle();
+        let arrived = after_at(&fx);
+        assert!((waiting.y - arrived.y).abs() < 0.5, "the line below stood at {waiting:?} while the picture loaded and stands at {arrived:?} after: the layout jumped (reading: {reading})");
+    }
+}
+
 // spec: MEDIA-024, MEDIA-016
 #[test]
 fn a_file_that_is_not_there_says_so_after_the_check_and_is_found_when_it_appears_and_lost_when_it_goes() {

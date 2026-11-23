@@ -586,13 +586,17 @@ pub(crate) fn paint_maths(ui: &Ui, galley: &Galley, pos: Pos2, maths: &[MathAt])
 pub(crate) fn paint_pictures(painter: &egui::Painter, galley: &Galley, pos: Pos2, spans: &[(Range<usize>, LinkSpan, bool)]) {
     for (range, l, _) in spans.iter().filter(|(_, l, _)| l.embed) {
         let Some((pic, max_width)) = inline_picture(&l.target) else { continue };
-        let Some(texture) = pic.texture else { continue };
         let Some(line) = galley.job.format_at_byte(egui::text::ByteIndex(range.start)).line_height else { continue };
         let at = markdown::byte_to_char(&galley.job.text, range.start.min(galley.job.text.len()));
         let Some((x, baseline)) = crate::math::paint::place_in_row(galley, at, |height| height * 0.75) else { continue };
         let size = inline_picture_size(pic.size, line, max_width);
         let bottom = pos.y + baseline + line * PICTURE_DROP;
         let rect = egui::Rect::from_min_size(Pos2::new(pos.x + x, bottom - size.y), size);
+        let Some(texture) = pic.texture else {
+            // not decoded yet: a faint tile where it will be (MEDIA-028)
+            painter.rect_filled(rect, CornerRadius::same(2), theme::palette().bg_hover);
+            continue;
+        };
         painter.image(texture, rect, egui::Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
     }
 }
@@ -774,7 +778,18 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
             (l, ok)
         })
         .collect();
-    let pictures = pictures_in_lines(text, &all_links, vault, |t| vault.look_media(ui.ctx(), t, Some(rel)), |abs| crate::media::texture(ui.ctx(), abs).map(|t| (t.size_vec2(), Some(t.id()))));
+    let pictures = pictures_in_lines(
+        text,
+        &all_links,
+        vault,
+        |t| vault.look_media(ui.ctx(), t, Some(rel)),
+        |abs| match crate::media::picture(ui.ctx(), abs) {
+            crate::media::look::Pic::Ready(t) => Some((t.size_vec2(), Some(t.id()))),
+            // the room is left from the size in the header, the picture comes in it (MEDIA-028)
+            crate::media::look::Pic::Loading(known) => known.map(|size| (size, None)),
+            crate::media::look::Pic::Broken => None,
+        },
+    );
     let _pictures = InlinePictures::set(pictures, ui.available_width());
     let fenced = markdown::fenced_code_lines(text);
     let lines = markdown::lines_with_offsets(text);
@@ -1291,7 +1306,14 @@ fn embed(ui: &mut Ui, vault: &Vault, (target, abs, outside): (&Path, &Path, Opti
                             *out = Some(open());
                         }
                     }
-                    crate::media::look::Pic::Loading => {
+                    // the size from the header: a tile as big as the picture will be, so the page does not jump (MEDIA-028)
+                    crate::media::look::Pic::Loading(Some(natural)) => {
+                        let size = crate::embed_size::fit(natural, width.map_or(w, |asked| asked.min(w)), if width.is_some() { f32::INFINITY } else { 520.0 });
+                        let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+                        ui.painter().rect_filled(rect, CornerRadius::same(4), theme::palette().bg_hover);
+                        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| crate::media::widget::show_loading(ui, &name));
+                    }
+                    crate::media::look::Pic::Loading(None) => {
                         crate::media::widget::show_loading(ui, &name);
                     }
                     crate::media::look::Pic::Broken => {
