@@ -4,6 +4,7 @@
 
 use super::actions::Visibility;
 use super::compose::{Compose, Stage};
+use super::compose_pictures as pictures;
 use super::feed_ui::{inset, short, TabCtx};
 use super::state::SocialState;
 use super::{Network, SocialAccountEntry};
@@ -25,6 +26,8 @@ struct Out {
     /// the question was answered with Cancel: back to the text
     back: bool,
     add_picture: bool,
+    /// "Choose pictures…" was pressed
+    pick: bool,
 }
 
 fn muted(t: impl Into<String>) -> RichText {
@@ -62,16 +65,21 @@ pub fn show(ctx: &egui::Context, tab_rect: Rect, st: &mut SocialState, entry: &S
     };
     let width = (tab_rect.width() - 40.0).clamp(280.0, WIDTH);
     let mut rects: Vec<(String, Rect)> = vec![];
-    egui::Window::new(title).id(egui::Id::unique(("social-compose", tab.id))).collapsible(false).resizable(false).pivot(egui::Align2::CENTER_CENTER).fixed_pos(tab_rect.center()).fixed_size(Vec2::new(width, 0.0)).show(ctx, |ui| {
-        ui.set_width(width);
-        ui.label(muted(format!("Posting as @{} on {}", entry.account.handle, network.label())));
-        ui.add_space(4.0);
-        match c.stage {
-            Stage::Confirm => confirm(ui, &c, entry, &info, &mut rects, &mut out),
-            _ => edit(ui, &mut c, entry, &info, &mut rects, &mut out),
-        }
-    });
+    let shown =
+        egui::Window::new(title).id(egui::Id::unique(("social-compose", tab.id))).collapsible(false).resizable(false).pivot(egui::Align2::CENTER_CENTER).fixed_pos(tab_rect.center()).fixed_size(Vec2::new(width, 0.0)).show(ctx, |ui| {
+            ui.set_width(width);
+            ui.label(muted(format!("Posting as @{} on {}", entry.account.handle, network.label())));
+            ui.add_space(4.0);
+            match c.stage {
+                Stage::Confirm => confirm(ui, &c, entry, &info, &mut rects, &mut out),
+                _ => edit(ui, &mut c, entry, &info, st.intake.picking, &mut rects, &mut out),
+            }
+        });
     st.rects.extend(rects);
+    pictures_in(ctx, st, &mut c, &info, shown.map(|r| r.response.rect));
+    if out.pick {
+        st.pick_pictures(ctx, info.max_pictures.saturating_sub(c.pictures.len()).max(1));
+    }
     if out.add_picture {
         match c.add_picture(tab.vault.as_deref(), &info) {
             Ok(()) => c.error = None,
@@ -85,7 +93,9 @@ pub fn show(ctx: &egui::Context, tab_rect: Rect, st: &mut SocialState, entry: &S
     if out.back {
         c.stage = Stage::Edit;
     }
-    if !out.close {
+    if out.close {
+        c.forget_pasted();
+    } else {
         st.compose = Some(c);
     }
     if out.post {
@@ -93,7 +103,7 @@ pub fn show(ctx: &egui::Context, tab_rect: Rect, st: &mut SocialState, entry: &S
     }
 }
 
-fn edit(ui: &mut Ui, c: &mut Compose, entry: &SocialAccountEntry, info: &super::actions::InstanceInfo, rects: &mut Vec<(String, Rect)>, out: &mut Out) {
+fn edit(ui: &mut Ui, c: &mut Compose, entry: &SocialAccountEntry, info: &super::actions::InstanceInfo, picking: bool, rects: &mut Vec<(String, Rect)>, out: &mut Out) {
     let network = entry.account.network;
     let sending = c.stage == Stage::Sending;
     if let Some(r) = &c.reply {
@@ -172,11 +182,15 @@ fn edit(ui: &mut Ui, c: &mut Compose, entry: &SocialAccountEntry, info: &super::
         });
     }
     if let Some(i) = remove {
-        c.pictures.remove(i);
+        c.remove_picture(i);
     }
     if c.pictures.len() < info.max_pictures {
         ui.horizontal(|ui| {
-            let r = ui.add_enabled(!sending, egui::TextEdit::singleline(&mut c.path).hint_text("Path of a picture (or of one in the vault)").desired_width(ui.available_width() - 110.0));
+            let b =
+                ui.add_enabled(!sending && !picking, egui::Button::new(if picking { "Choosing…" } else { "Choose pictures…" })).on_hover_text("Pick picture files in a dialog. You can also drop pictures on this box or paste one (Ctrl+V).");
+            rects.push(("compose:choose".into(), b.rect));
+            out.pick |= b.clicked();
+            let r = ui.add_enabled(!sending, egui::TextEdit::singleline(&mut c.path).hint_text("or the path of a picture").desired_width(ui.available_width() - 110.0));
             rects.push(("compose:path".into(), r.rect));
             let enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
             let b = ui.add_enabled(!sending && !c.path.trim().is_empty(), egui::Button::new("Add picture"));
@@ -238,4 +252,50 @@ fn confirm(ui: &mut Ui, c: &Compose, entry: &SocialAccountEntry, info: &super::a
         rects.push(("compose:confirm-cancel".into(), cancel.rect));
         out.back |= cancel.clicked();
     });
+}
+
+/// What reaches the box besides typing (SOC-058): the dialog's answer, pictures pasted from the
+/// clipboard, files dropped on the box (with a highlight while they hover over it). `rect` is where
+/// the box is; the app does not import a drop the box took.
+fn pictures_in(ctx: &egui::Context, st: &mut SocialState, c: &mut Compose, info: &super::actions::InstanceInfo, rect: Option<Rect>) {
+    st.intake.box_rect = rect;
+    if let Some(answer) = st.intake.arrived.take() {
+        c.error = match answer {
+            Ok(files) => c.attach_files(&files, info).err(),
+            Err(e) => Some(e),
+        };
+    }
+    let pointer = ctx.input(|i| i.pointer.latest_pos());
+    let over = rect.zip(pointer).is_some_and(|(r, p)| r.contains(p));
+    if c.stage != Stage::Edit {
+        // while the question or the job is open nothing can be added; a drop on the box is not an import either
+        if over && !pictures::dropped_now(ctx).is_empty() {
+            st.intake.took_drop = true;
+        }
+        return;
+    }
+    for img in pictures::take_pasted(ctx, crate::media::clipboard_image) {
+        c.error = c.attach_pasted(&img, info).err();
+    }
+    let Some(r) = rect else { return };
+    let mut dropped = std::mem::take(&mut st.intake.queued);
+    if over {
+        let now = pictures::dropped_now(ctx);
+        if !now.is_empty() {
+            st.intake.took_drop = true;
+            dropped.extend(now);
+        }
+    }
+    if !dropped.is_empty() {
+        c.error = c.attach_files(&dropped, info).err();
+    }
+    let hovering = (over && ctx.input(|i| !i.raw.hovered_files.is_empty())) || st.intake.ext_hover.is_some_and(|p| r.contains(p));
+    if hovering {
+        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("compose-drop")));
+        painter.rect_filled(r, 6.0, theme::palette().accent.gamma_multiply(0.14));
+        painter.rect_stroke(r, 6.0, egui::Stroke::new(2.0, theme::palette().accent), egui::StrokeKind::Inside);
+        painter.text(r.center_top() + Vec2::new(0.0, 28.0), egui::Align2::CENTER_CENTER, "Drop pictures to add them", egui::FontId::proportional(crate::fonts::px(14.0)), theme::palette().text_strong);
+        st.rects.push(("compose:drop-highlight".into(), r));
+        ctx.request_repaint();
+    }
 }

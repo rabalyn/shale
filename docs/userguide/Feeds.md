@@ -66,8 +66,12 @@ your own.
   post it answers if that is not public. Mastodon also has **Content warning** and **who may
   see it** (public, unlisted, followers only, mentioned people only). Bluesky has no content
   warnings for text, so the box has none. Links and @names in a Bluesky post become links.
-- **Pictures**: up to four. Type or paste the path of a picture (a path without a folder at the
-  front starts at your vault) and press **Add picture**, then describe each one in its **alt text**
+- **Pictures**: up to four. Press **Choose pictures…** to pick files in the system's file dialog
+  (on Linux it is the desktop portal's; if none is available Shale says so and you can still type
+  the path), **drop** picture files on the box (it lights up; a file that is no picture is refused
+  with a message), or **paste** a picture you copied (Ctrl+V). You can also type the path of a
+  picture (a path without a folder at the front starts at your vault) and press **Add picture**.
+  Describe each one in its **alt text**
   field. JPEG, PNG, GIF and WebP work. Bluesky takes pictures up to 1 MB, so Shale scales a bigger one down and
   sends it as a JPEG (a too-big GIF is refused); a Mastodon picture over the server's limit is
   refused with its size.

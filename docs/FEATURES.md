@@ -1033,8 +1033,9 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   live counter (Mastodon: the server's limit, 500 by default, addresses count 23; Bluesky: 300
   characters), on Mastodon a content warning and who may see the post (a reply starts with the
   author's @mention and is no more public than the post it answers), up to **4 pictures with a
-  description each** (type the path of a file, or of one in the vault; JPEG, PNG, GIF, WebP;
-  Bluesky takes 1 MB, so bigger pictures are scaled down), and **Send** (Ctrl+Enter), which
+  description each** (**Choose pictures…** opens the system's file dialog, or drop picture files
+  on the box, or paste a picture with Ctrl+V, or type the path of a file or of one in the vault;
+  JPEG, PNG, GIF, WebP; Bluesky takes 1 MB, so bigger pictures are scaled down), and **Send** (Ctrl+Enter), which
   always asks **"Post this?"** with your handle and who may see it before anything is posted.
   Boosts and favourites do not ask. A **quote** uses the network's own quote (Bluesky; Mastodon
   4.5 and later); for an older Mastodon server the post's web address is put into the text and

@@ -37,6 +37,8 @@ pub struct Compose {
     pub pictures: Vec<DraftPicture>,
     /// the path of a picture being typed
     pub path: String,
+    /// pictures pasted from the clipboard: their temporary files (SOC-058)
+    pub pasted: Vec<PathBuf>,
     pub stage: Stage,
     pub error: Option<String>,
     /// the text field takes the keyboard when the box opens
@@ -81,6 +83,7 @@ impl Compose {
             visibility: Visibility::Public,
             pictures: vec![],
             path: String::new(),
+            pasted: vec![],
             stage: Stage::Edit,
             error: None,
             attempt: None,
@@ -140,24 +143,80 @@ impl Compose {
         if typed.is_empty() {
             return Err("Type the path of a picture first.".into());
         }
-        if self.pictures.len() >= info.max_pictures {
-            return Err(format!("A post can have at most {} pictures.", info.max_pictures));
-        }
         let mut path = PathBuf::from(&typed);
         if path.is_relative() {
             path = vault.ok_or("Open a vault first, or type the full path of the picture.")?.join(&path);
         }
+        self.attach(path, &typed, info)?;
+        self.path.clear();
+        Ok(())
+    }
+
+    /// Add one picture file (typed, chosen in the dialog, dropped or pasted; SOC-053, SOC-058): it must
+    /// be readable, a JPEG, PNG, GIF or WebP file, not in the post yet, and the post must have room.
+    /// `shown` is how the message names it.
+    fn attach(&mut self, path: PathBuf, shown: &str, info: &InstanceInfo) -> Result<(), String> {
+        if self.pictures.len() >= info.max_pictures {
+            return Err(format!("A post can have at most {} pictures.", info.max_pictures));
+        }
         let mut head = [0u8; 32];
-        let n = crate::fsutil::open_read(&path).and_then(|mut f| std::io::Read::read(&mut f, &mut head)).map_err(|e| format!("{typed} cannot be read ({e})"))?;
+        let n = crate::fsutil::open_read(&path).and_then(|mut f| std::io::Read::read(&mut f, &mut head)).map_err(|e| format!("{shown} cannot be read ({e})"))?;
         if !matches!(image::guess_format(&head[..n]), Ok(image::ImageFormat::Png | image::ImageFormat::Jpeg | image::ImageFormat::Gif | image::ImageFormat::WebP)) {
-            return Err(format!("{typed} is not a JPEG, PNG, GIF or WebP picture."));
+            return Err(format!("{shown} is not a JPEG, PNG, GIF or WebP picture."));
         }
         if self.pictures.iter().any(|p| p.path == path) {
             return Err("This picture is in the post already.".into());
         }
         self.pictures.push(DraftPicture { path, alt: String::new() });
-        self.path.clear();
         Ok(())
+    }
+
+    /// Add the files a dialog chose or a drop brought (SOC-058): every picture that fits is added, in
+    /// order; the answer names what was refused (not a picture, unreadable, no room left).
+    pub fn attach_files(&mut self, files: &[PathBuf], info: &InstanceInfo) -> Result<(), String> {
+        let mut refused: Vec<String> = vec![];
+        for f in files {
+            let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| f.display().to_string());
+            if let Err(e) = self.attach(f.clone(), &format!("“{name}”"), info) {
+                refused.push(e);
+            }
+        }
+        match refused.len() {
+            0 => Ok(()),
+            _ => Err(refused.join(" ")),
+        }
+    }
+
+    /// Add a picture pasted from the clipboard (SOC-058): saved as a PNG file in a private temporary
+    /// folder, which is removed with the picture (`forget_pasted`).
+    pub fn attach_pasted(&mut self, img: &eframe::egui::ColorImage, info: &InstanceInfo) -> Result<(), String> {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static N: AtomicUsize = AtomicUsize::new(0);
+        if self.pictures.len() >= info.max_pictures {
+            return Err(format!("A post can have at most {} pictures.", info.max_pictures));
+        }
+        let png = crate::media::png_bytes(img).map_err(|e| format!("The pasted picture could not be used ({e})."))?;
+        let dir = crate::fsutil::private_temp_root("shale-compose").map_err(|e| format!("The pasted picture could not be saved ({e})."))?;
+        let path = dir.join(format!("pasted-{}-{}.png", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+        crate::fsutil::create_new(&path, &png).map_err(|e| format!("The pasted picture could not be saved ({e})."))?;
+        self.pasted.push(path.clone());
+        self.pictures.push(DraftPicture { path, alt: String::new() });
+        Ok(())
+    }
+
+    /// Remove the picture at `i`; a pasted one loses its temporary file too.
+    pub fn remove_picture(&mut self, i: usize) {
+        let p = self.pictures.remove(i);
+        if let Some(k) = self.pasted.iter().position(|f| *f == p.path) {
+            let _ = std::fs::remove_file(self.pasted.remove(k));
+        }
+    }
+
+    /// Delete the temporary files of pasted pictures (the box was closed or the post is out).
+    pub fn forget_pasted(&mut self) {
+        for f in self.pasted.drain(..) {
+            let _ = std::fs::remove_file(f);
+        }
     }
 
     /// The post as it is sent.
@@ -286,7 +345,8 @@ impl SocialState {
         match result {
             Ok(post) => {
                 let post = *post;
-                if let Some(c) = self.compose.take_if(|c| c.account == account) {
+                if let Some(mut c) = self.compose.take_if(|c| c.account == account) {
+                    c.forget_pasted();
                     if post.network == Network::Mastodon {
                         self.writes.last_visibility = c.visibility;
                     }

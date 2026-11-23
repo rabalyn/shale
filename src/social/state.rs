@@ -183,6 +183,7 @@ pub(super) enum Msg {
     Reacted { account: String, post: String, kind: Reaction, on: bool, client: Option<Client>, result: Result<Reacted, ActionError> },
     Sent { account: String, feed: String, client: Option<Client>, result: Result<Box<Post>, ActionError> },
     Instance { account: String, client: Option<Client>, result: Result<InstanceInfo, String> },
+    Picked { result: Result<Vec<std::path::PathBuf>, String> },
 }
 
 pub struct SocialState {
@@ -234,6 +235,8 @@ pub struct SocialState {
     pub writes: Writes,
     /// the compose box (SOC-051)
     pub compose: Option<Compose>,
+    /// pictures coming into the compose box: the file dialog, drops (SOC-058)
+    pub intake: super::compose_pictures::Intake,
     pub(super) clients: HashMap<String, Client>,
     pub(super) tx: Sender<Msg>,
     rx: Receiver<Msg>,
@@ -283,6 +286,7 @@ impl SocialState {
             threads: Threads::default(),
             writes: Writes::default(),
             compose: None,
+            intake: Default::default(),
             clients: HashMap::new(),
             tx,
             rx,
@@ -734,6 +738,10 @@ impl SocialState {
                         self.clients.insert(account.clone(), c);
                     }
                     self.sent(&account, &feed, result);
+                }
+                Msg::Picked { result } => {
+                    self.intake.picking = false;
+                    self.intake.arrived = Some(result);
                 }
                 Msg::Instance { account, client, result } => {
                     if let Some(c) = client {

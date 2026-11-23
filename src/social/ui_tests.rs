@@ -143,8 +143,14 @@ impl W {
     }
 
     pub fn frame(&mut self, events: Vec<Event>) {
+        self.frame_raw(events, |_| {});
+    }
+
+    /// A frame whose raw input is changed by `change` (files dropped on or hovering over the window).
+    pub fn frame_raw(&mut self, events: Vec<Event>, change: impl FnOnce(&mut RawInput)) {
         self.t += 0.05;
-        let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1500.0, 900.0))), time: Some(self.t), events, ..Default::default() };
+        let mut raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1500.0, 900.0))), time: Some(self.t), events, ..Default::default() };
+        change(&mut raw);
         let app = &mut self.app;
         let mut out = self.ctx.run_ui(raw, |ui| app.run_frame(ui));
         out.textures_delta.clear();

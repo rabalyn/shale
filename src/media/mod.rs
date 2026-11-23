@@ -164,7 +164,7 @@ pub fn pasted_files(text: &str) -> Option<Vec<PathBuf>> {
 }
 
 /// A picture as PNG bytes (RGBA, from the clipboard).
-fn png_bytes(img: &eframe::egui::ColorImage) -> Result<Vec<u8>, String> {
+pub(crate) fn png_bytes(img: &eframe::egui::ColorImage) -> Result<Vec<u8>, String> {
     let rgba: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
     let buf = image::RgbaImage::from_raw(img.width() as u32, img.height() as u32, rgba).ok_or("the picture has a wrong size")?;
     let mut out = std::io::Cursor::new(Vec::new());

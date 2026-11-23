@@ -18,6 +18,7 @@ pub mod accounts_ui;
 pub mod actions;
 pub mod bluesky;
 pub mod compose;
+pub mod compose_pictures;
 pub mod compose_ui;
 #[cfg(test)]
 mod dataflow_tests;
@@ -29,6 +30,8 @@ pub mod images;
 pub mod markup;
 pub mod mastodon;
 pub mod note;
+#[cfg(test)]
+mod pictures_tests;
 pub mod post_index;
 #[cfg(test)]
 mod post_index_tests;

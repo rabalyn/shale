@@ -37,6 +37,9 @@ fontdb = { version = "0.24", default-features = false, features = ["fs", "memmap
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 # names and paths of links are compared in NFC (NET-014)
 unicode-normalization = { version = "0.1", default-features = false }
+# the native file dialog of the compose box (SOC-058): the xdg-desktop-portal on Linux (no GTK, and no
+# Wayland handle code: the dialog has no parent window), the system dialog on macOS and Windows
+rfd = { version = "0.18", default-features = false, features = ["xdg-portal"] }
 # the length of a post in graphemes, as Bluesky counts it (SOC-052)
 unicode-segmentation = "1"
 
