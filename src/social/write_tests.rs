@@ -42,7 +42,7 @@ fn soc_050_a_favourite_shows_a_spinner_in_its_button_keeps_its_size_and_changes_
     let mut w = W::new("like");
     let (tx, rx) = std::sync::mpsc::channel();
     *w.script.react_gate.lock().unwrap() = Some(rx);
-    w.script.react_answers.lock().unwrap().push(Ok(Reacted { on: true, record: None, count: Some(7) }));
+    w.script.react_answers.lock().unwrap().push(Ok(Reacted { on: true, record: None, count: Some(7), fresh: None }));
     let (like, save) = (w.rect("like:0"), w.rect("save:0"));
     assert!(!home_post(&w, "h0").mine.liked);
     w.click("like:0");
@@ -63,7 +63,7 @@ fn soc_050_a_favourite_shows_a_spinner_in_its_button_keeps_its_size_and_changes_
     assert!(!w.app.social.rects.iter().any(|r| r.0 == "like-spinner:0"));
     assert_eq!((size(w.rect("like:0")), w.rect("save:0")), (size(like), save), "the same size with and without the spinner");
     // pressing it again takes the favourite back
-    w.script.react_answers.lock().unwrap().push(Ok(Reacted { on: false, record: None, count: Some(6) }));
+    w.script.react_answers.lock().unwrap().push(Ok(Reacted { on: false, record: None, count: Some(6), fresh: None }));
     tx.send(()).unwrap();
     w.click("like:0");
     wait_for(&mut w, |w| !home_post(w, "h0").mine.liked);

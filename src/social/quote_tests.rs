@@ -87,7 +87,7 @@ fn soc_060_a_reaction_to_the_quoted_post_shows_a_spinner_in_its_button_which_kee
     let mut w = window("quote-spinner");
     let (tx, rx) = std::sync::mpsc::channel();
     *w.script.react_gate.lock().unwrap() = Some(rx);
-    w.script.react_answers.lock().unwrap().push(Ok(Reacted { on: true, record: None, count: Some(9) }));
+    w.script.react_answers.lock().unwrap().push(Ok(Reacted { on: true, record: None, count: Some(9), fresh: None }));
     let (like, boost, save) = (w.rect("qlike:0"), w.rect("qboost:0"), w.rect("qsave:0"));
     w.click("qlike:0");
     w.frames(2);
@@ -205,4 +205,50 @@ fn soc_059_a_hit_is_shown_from_the_copy_in_memory_when_a_feed_holds_one() {
     assert!(w.app.social.take_focus(1, &home_key).is_some());
     let shown = w.app.social.timelines[&home_key].posts.iter().find(|q| q.id == "fresh1").cloned().expect("put into the list");
     assert_eq!((shown.mine.liked, shown.like_count), (true, 4));
+}
+
+fn unknown_quote(id: &str) -> Box<Post> {
+    let mut q = post(id, "bob", crate::calendar::time::now() - 7200, None);
+    q.mine.unknown = true;
+    Box::new(q)
+}
+
+// spec: SOC-060
+#[test]
+fn soc_060_posts_that_come_in_with_a_quote_of_unknown_state_take_it_from_a_copy_in_memory_and_the_index_gets_it() {
+    let mut w = window("quote-adopt");
+    let acct = home().account;
+    let key = (acct.clone(), "home".to_string());
+    // the feed holds q0 with a state the account made known
+    w.app.social.timelines.get_mut(&key).unwrap().posts[0].quote.as_mut().unwrap().mine.liked = true;
+    w.app.social.timelines.get_mut(&key).unwrap().posts[0].quote.as_mut().unwrap().like_count = 9;
+    // a check brings a new post that quotes q0 (state unknown) and one that quotes a post nobody holds
+    let mut a = post("n1", "cy", crate::calendar::time::now() - 60, None);
+    a.text_markdown = "a pomelo".into();
+    a.quote = Some(unknown_quote("q0"));
+    let mut b = post("n2", "cy", crate::calendar::time::now() - 70, None);
+    b.quote = Some(unknown_quote("elsewhere"));
+    w.app.social.tx.send(super::state::Msg::Check { key: key.clone(), client: None, result: Ok(super::Fresh { posts: vec![a, b], top: None, gap: None }) }).unwrap();
+    w.app.social.poll();
+    let waiting = &w.app.social.timelines[&key].waiting;
+    let q = waiting[0].quote.as_ref().unwrap();
+    assert_eq!((q.mine.unknown, q.mine.liked, q.like_count), (false, true, 9), "taken from the copy in the feed");
+    assert!(waiting[1].quote.as_ref().unwrap().mine.unknown, "nothing known about this one: it stays unknown");
+    let held = w.app.social.index.search_wild("pomelo", 5).remove(0).post;
+    assert!(held.quote.unwrap().mine.liked, "and the index has it");
+}
+
+// spec: SOC-060
+#[test]
+fn soc_060_a_reaction_that_read_the_state_first_fills_the_whole_state_of_the_quote() {
+    let mut w = window("quote-fresh");
+    let key = (home().account, "home".to_string());
+    w.app.social.timelines.get_mut(&key).unwrap().posts[0].quote.as_mut().unwrap().mine.unknown = true;
+    // the account had reposted it before and liked it now: the like is made, the repost is learned
+    let fresh = super::Mine { boosted: true, boost_record: Some("at://x/repost/1".into()), ..Default::default() };
+    w.script.react_answers.lock().unwrap().push(Ok(Reacted { on: true, record: Some("at://x/like/2".into()), count: Some(6), fresh: Some(fresh) }));
+    w.click("qlike:0");
+    wait_for(&mut w, |w| quoted(w).mine.liked);
+    let q = quoted(&w);
+    assert_eq!((q.mine.unknown, q.mine.boosted, q.mine.like_record.as_deref(), q.mine.boost_record.as_deref(), q.like_count), (false, true, Some("at://x/like/2"), Some("at://x/repost/1"), 6));
 }

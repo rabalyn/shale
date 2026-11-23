@@ -345,24 +345,41 @@ impl SocialState {
         Some(k)
     }
 
-    /// The post as a feed or conversation of the account holds it now (SOC-059): the same post
-    /// (and boost) in any list, else the same post in a conversation or quoted by another one.
-    fn live_copy(&self, account: &str, like: &Post) -> Option<Post> {
-        let k = post_key(like);
-        let lists = self.timelines.iter().filter(|((a, _), _)| a == account).flat_map(|(_, t)| t.posts.iter().chain(t.waiting.iter()));
-        if let Some(p) = lists.clone().find(|p| post_key(p) == k) {
-            return Some(p.clone());
-        }
-        let quoted = |p: &Post| p.quote.as_deref().filter(|q| q.id == like.id).cloned();
-        let threads = self.threads.map.iter().filter(|((a, _), _)| a == account).flat_map(|(_, e)| {
+    /// Every post the feeds and conversations of the account hold in memory (not the quoted ones).
+    fn held<'a>(&'a self, account: &'a str) -> impl Iterator<Item = &'a Post> + Clone {
+        let lists = self.timelines.iter().filter(move |((a, _), _)| a == account).flat_map(|(_, t)| t.posts.iter().chain(t.waiting.iter()));
+        let threads = self.threads.map.iter().filter(move |((a, _), _)| a == account).flat_map(|(_, e)| {
             let ready = match &e.status {
                 super::thread::ThreadStatus::Ready(v) => Some(v),
                 _ => None,
             };
             std::iter::once(&e.post).chain(ready.into_iter().flat_map(|v| std::iter::once(&v.post).chain(v.ancestors.iter()).chain(v.replies.iter().map(|r| &r.post))))
         });
-        let mut all = lists.chain(threads);
-        all.clone().find(|p| post_key(p) == k).cloned().or_else(|| all.find_map(quoted)).map(|p| Post { reposted_by: like.reposted_by.clone(), ..p })
+        lists.chain(threads)
+    }
+
+    /// The post as a feed or conversation of the account holds it now (SOC-059): the same post
+    /// (and boost) in any list, else the same post in a conversation or quoted by another one.
+    fn live_copy(&self, account: &str, like: &Post) -> Option<Post> {
+        let k = post_key(like);
+        let mut all = self.held(account);
+        let found = all.clone().find(|p| post_key(p) == k).or_else(|| all.find_map(|p| p.quote.as_deref().filter(|q| q.id == like.id)));
+        found.map(|p| Post { reposted_by: like.reposted_by.clone(), ..p.clone() })
+    }
+
+    /// Posts that came in with quotes whose state is not known (SOC-060) take the state from a
+    /// copy of the quoted post that a feed or conversation holds and knows.
+    pub(super) fn adopt_known<'a>(&self, account: &str, posts: impl Iterator<Item = &'a mut Post>) {
+        let mut want: Vec<&mut Post> = posts.filter(|p| p.quote.as_deref().is_some_and(|q| q.mine.unknown)).collect();
+        if want.is_empty() {
+            return;
+        }
+        let known: HashMap<&str, &Post> = self.held(account).flat_map(|p| std::iter::once(p).chain(p.quote.as_deref())).filter(|p| !p.mine.unknown).map(|p| (p.id.as_str(), p)).collect();
+        for q in want.iter_mut().filter_map(|p| p.quote.as_deref_mut()) {
+            if let Some(k) = known.get(q.id.as_str()) {
+                (q.mine, q.reply_count, q.boost_count, q.like_count) = (k.mine.clone(), k.reply_count, k.boost_count, k.like_count);
+            }
+        }
     }
 
     /// Start the fetches that `open_post_hit` asked for: each post by its id, in a background job.
@@ -657,9 +674,12 @@ impl SocialState {
                     }
                     self.feeds.insert(account, result.map(FeedsState::Ready).unwrap_or_else(FeedsState::Failed));
                 }
-                Msg::Page { key, client, replace, result } => {
+                Msg::Page { key, client, replace, mut result } => {
                     if let Some(c) = client {
                         self.clients.insert(key.0.clone(), c);
+                    }
+                    if let Ok(page) = &mut result {
+                        self.adopt_known(&key.0, page.posts.iter_mut());
                     }
                     if let Ok(page) = &result {
                         self.index.add(&key.0, &key.1, &page.posts);
@@ -692,9 +712,12 @@ impl SocialState {
                         Err(e) => t.error = Some(e),
                     }
                 }
-                Msg::Check { key, client, result } => {
+                Msg::Check { key, client, mut result } => {
                     if let Some(c) = client {
                         self.clients.insert(key.0.clone(), c);
+                    }
+                    if let Ok(fresh) = &mut result {
+                        self.adopt_known(&key.0, fresh.posts.iter_mut());
                     }
                     if let Ok(fresh) = &result {
                         self.index.add(&key.0, &key.1, &fresh.posts);
@@ -717,9 +740,12 @@ impl SocialState {
                         }
                     }
                 }
-                Msg::Gap { key, above, client, result } => {
+                Msg::Gap { key, above, client, mut result } => {
                     if let Some(c) = client {
                         self.clients.insert(key.0.clone(), c);
+                    }
+                    if let Ok(page) = &mut result {
+                        self.adopt_known(&key.0, page.posts.iter_mut());
                     }
                     if let Ok(page) = &result {
                         self.index.add(&key.0, &key.1, &page.posts);
@@ -743,9 +769,12 @@ impl SocialState {
                         Err(e) => self.messages.push(format!("Could not save the post: {e}")),
                     }
                 }
-                Msg::Thread { account, feed, id, client, result } => {
+                Msg::Thread { account, feed, id, client, mut result } => {
                     if let Some(c) = client {
                         self.clients.insert(account.clone(), c);
+                    }
+                    if let Ok(v) = &mut result {
+                        self.adopt_known(&account, v.posts_mut());
                     }
                     // the conversation's posts are posts of the account too (SOC-045, SOC-037)
                     let posts = self.threads.arrived(&account, &id, result);
@@ -776,9 +805,12 @@ impl SocialState {
                         self.writes.info.insert(account, info);
                     }
                 }
-                Msg::Fetched { tab, account, feed, client, result } => {
+                Msg::Fetched { tab, account, feed, client, mut result } => {
                     if let Some(c) = client {
                         self.clients.insert(account.clone(), c);
+                    }
+                    if let Ok(p) = &mut result {
+                        self.adopt_known(&account, std::iter::once(&mut **p));
                     }
                     match result {
                         Ok(post) => {

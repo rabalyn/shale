@@ -399,7 +399,7 @@ fn build_post(v: &Value, record: &Value, embeds: &[&Value]) -> Option<Post> {
         like_count: count(&v["likeCount"]),
         mine: {
             let (like, repost) = (text(&v["viewer"]["like"]), text(&v["viewer"]["repost"]));
-            Mine { liked: !like.is_empty(), boosted: !repost.is_empty(), like_record: Some(like).filter(|l| !l.is_empty()), boost_record: Some(repost).filter(|l| !l.is_empty()) }
+            Mine { liked: !like.is_empty(), boosted: !repost.is_empty(), like_record: Some(like).filter(|l| !l.is_empty()), boost_record: Some(repost).filter(|l| !l.is_empty()), unknown: false }
         },
         reply_root: Some(PostRef { uri: text(&record["reply"]["root"]["uri"]), cid: text(&record["reply"]["root"]["cid"]) }).filter(|r| !r.uri.is_empty()),
         visibility: None,
@@ -440,7 +440,11 @@ fn embed_parts(e: &Value, media: &mut Vec<Media>, quote: &mut Option<Box<Post>>,
             let r = &e["record"];
             if text(&r["$type"]).ends_with("#viewRecord") {
                 let inner: Vec<&Value> = r["embeds"].as_array().into_iter().flatten().collect();
-                *quote = build_post(r, &r["value"], &inner).map(Box::new);
+                *quote = build_post(r, &r["value"], &inner).map(|mut q| {
+                    // a quoted record carries no viewer state (SOC-060)
+                    q.mine.unknown = true;
+                    Box::new(q)
+                });
             }
         }
         "app.bsky.embed.recordWithMedia#view" => {
@@ -547,12 +551,31 @@ pub fn download_blob(did: &str, cid: &str) -> Result<(Vec<u8>, Option<String>), 
 /// that undoes it comes from the post (`Mine`) and is kept from the answer.
 pub fn react(api: &mut Api, post: &Post, kind: Reaction, on: bool) -> Result<Reacted, ActionError> {
     let _step = tracing::info_span!("flow.social_bluesky.react", peer = "server").entered();
-    let (collection, current) = match kind {
-        Reaction::Like => ("app.bsky.feed.like", &post.mine.like_record),
-        Reaction::Boost => ("app.bsky.feed.repost", &post.mine.boost_record),
+    let collection = match kind {
+        Reaction::Like => "app.bsky.feed.like",
+        Reaction::Boost => "app.bsky.feed.repost",
     };
     let did = api.did()?;
+    // a post whose state is not known (a quoted one) is read first: liking what is liked would make a second record
+    let read;
+    let (post, fresh) = if post.mine.unknown {
+        read = states(api, std::slice::from_ref(&post.id))?.into_iter().next().ok_or("could not read the post to see what you did with it")?;
+        (&read, Some(read.mine.clone()))
+    } else {
+        (post, None)
+    };
+    let current = match kind {
+        Reaction::Like => &post.mine.like_record,
+        Reaction::Boost => &post.mine.boost_record,
+    };
     if on {
+        let (already, count) = match kind {
+            Reaction::Like => (post.mine.liked, post.like_count),
+            Reaction::Boost => (post.mine.boosted, post.boost_count),
+        };
+        if already && fresh.is_some() {
+            return Ok(Reacted { on: true, record: current.clone(), count: Some(count), fresh });
+        }
         if post.cid.is_empty() || !post.id.starts_with("at://") {
             return Err("this post cannot be reacted to (its content id is missing)".into());
         }
@@ -562,7 +585,7 @@ pub fn react(api: &mut Api, post: &Post, kind: Reaction, on: bool) -> Result<Rea
         if !uri.starts_with("at://") {
             return Err("the server did not name the new record".into());
         }
-        return Ok(Reacted { on: true, record: Some(uri), count: None });
+        return Ok(Reacted { on: true, record: Some(uri), count: None, fresh });
     }
     // undo: the record is named by its address at://<did>/<collection>/<rkey>
     let uri = current.as_deref().ok_or("Shale does not know which record to remove; reload the feed and try again")?;
@@ -572,7 +595,40 @@ pub fn react(api: &mut Api, post: &Post, kind: Reaction, on: bool) -> Result<Rea
         return Err("the record to remove is not one of this account's".into());
     }
     api.call("POST", "com.atproto.repo.deleteRecord", &[], Some(&json!({"repo": did, "collection": collection, "rkey": rkey})))?;
-    Ok(Reacted { on: false, record: None, count: None })
+    Ok(Reacted { on: false, record: None, count: None, fresh })
+}
+
+/// The posts with these addresses as the server shows them to the signed-in account: counts and
+/// what the account did with them (`app.bsky.feed.getPosts`, at most 25 addresses per request).
+pub fn states(api: &mut Api, uris: &[String]) -> Result<Vec<Post>, String> {
+    let mut out = vec![];
+    for chunk in uris.chunks(25) {
+        let params: Vec<(&str, &str)> = chunk.iter().map(|u| ("uris", u.as_str())).collect();
+        let v = api.get("app.bsky.feed.getPosts", &params)?;
+        out.extend(v["posts"].as_array().into_iter().flatten().filter_map(parse_post_view));
+    }
+    Ok(out)
+}
+
+/// Fill the state of the quoted posts of `posts` (SOC-060): counts and what the account did with
+/// them. A request that fails leaves the rest as it is: the state stays unknown.
+pub fn hydrate<'a>(api: &mut Api, posts: impl Iterator<Item = &'a mut Post>) {
+    let mut posts: Vec<&mut Post> = posts.collect();
+    let mut uris: Vec<String> = posts.iter().filter_map(|p| p.quote.as_deref()).filter(|q| q.mine.unknown).map(|q| q.id.clone()).collect();
+    uris.sort();
+    uris.dedup();
+    let mut known: std::collections::HashMap<String, Post> = std::collections::HashMap::new();
+    for chunk in uris.chunks(25) {
+        match states(api, chunk) {
+            Ok(v) => known.extend(v.into_iter().map(|p| (p.id.clone(), p))),
+            Err(_) => break,
+        }
+    }
+    for q in posts.iter_mut().filter_map(|p| p.quote.as_deref_mut()).filter(|q| q.mine.unknown) {
+        if let Some(k) = known.get(&q.id) {
+            (q.mine, q.reply_count, q.boost_count, q.like_count) = (k.mine.clone(), k.reply_count, k.boost_count, k.like_count);
+        }
+    }
 }
 
 /// The facets of a post's text: links, mentions and hashtags with their UTF-8 byte offsets
@@ -770,7 +826,7 @@ mod tests {
         assert_eq!(parse_post_view(&v).unwrap().mine, Mine::default());
         v["viewer"] = json!({"like": "at://did:plc:ada/app.bsky.feed.like/3k1", "repost": "at://did:plc:ada/app.bsky.feed.repost/3k2"});
         let p = parse_post_view(&v).unwrap();
-        assert_eq!(p.mine, Mine { liked: true, boosted: true, like_record: Some("at://did:plc:ada/app.bsky.feed.like/3k1".into()), boost_record: Some("at://did:plc:ada/app.bsky.feed.repost/3k2".into()) });
+        assert_eq!(p.mine, Mine { liked: true, boosted: true, like_record: Some("at://did:plc:ada/app.bsky.feed.like/3k1".into()), boost_record: Some("at://did:plc:ada/app.bsky.feed.repost/3k2".into()), unknown: false });
         // the first post of the conversation is kept to answer it (SOC-051)
         assert_eq!(p.reply_root, Some(PostRef { uri: "at://x/y/z".into(), cid: "c".into() }));
     }
@@ -788,17 +844,128 @@ mod tests {
         let q = *parse_post_view(&v).unwrap().quote.unwrap();
         assert_eq!((q.id.as_str(), q.cid.as_str(), q.url.as_str(), q.reply_to.as_deref()), ("at://did:plc:bob/app.bsky.feed.post/q1", "cq", "https://bsky.app/profile/bob.test/post/q1", Some("at://did:plc:bob/app.bsky.feed.post/q0")));
         assert_eq!((q.reply_count, q.boost_count, q.like_count), (4, 5, 6));
-        assert_eq!(q.mine, Mine::default(), "a quoted record carries no viewer state: nothing is liked until the account does it");
-        let (base, handle) = writing_server(2, |_, nsid, body| {
-            assert_eq!(nsid, "com.atproto.repo.createRecord");
-            assert_eq!((body["record"]["subject"]["uri"].as_str(), body["record"]["subject"]["cid"].as_str()), (Some("at://did:plc:bob/app.bsky.feed.post/q1"), Some("cq")), "the quote, not the post that quotes");
-            let coll = body["collection"].as_str().unwrap();
-            (200, json!({"uri": format!("at://did:plc:ada/{coll}/3q"), "cid": "n"}).to_string())
+        assert_eq!(q.mine, Mine { unknown: true, ..Mine::default() }, "a quoted record carries no viewer state: that is unknown, not \"not liked\"");
+        // what the server says about the quote when asked: not liked, not reposted
+        let (base, handle) = writing_server(4, |_, nsid, body| match nsid {
+            "app.bsky.feed.getPosts" => {
+                let mut v = post_view("q1", "did:plc:bob", "bob.test", "2024-05-16T10:30:00Z", None, "quoted");
+                v["cid"] = json!("cq");
+                (200, json!({"posts": [v]}).to_string())
+            }
+            _ => {
+                assert_eq!(nsid, "com.atproto.repo.createRecord");
+                assert_eq!((body["record"]["subject"]["uri"].as_str(), body["record"]["subject"]["cid"].as_str()), (Some("at://did:plc:bob/app.bsky.feed.post/q1"), Some("cq")), "the quote, not the post that quotes");
+                let coll = body["collection"].as_str().unwrap();
+                (200, json!({"uri": format!("at://did:plc:ada/{coll}/3q"), "cid": "n"}).to_string())
+            }
         });
         let mut api = Api::new(&base, "ada.test", "app-pw");
-        assert_eq!(react(&mut api, &q, Reaction::Like, true).unwrap().record.as_deref(), Some("at://did:plc:ada/app.bsky.feed.like/3q"));
+        let liked = react(&mut api, &q, Reaction::Like, true).unwrap();
+        assert_eq!((liked.record.as_deref(), liked.fresh.map(|m| (m.unknown, m.liked, m.boosted))), (Some("at://did:plc:ada/app.bsky.feed.like/3q"), Some((false, false, false))), "read first, then the record is made");
         assert_eq!(react(&mut api, &q, Reaction::Boost, true).unwrap().record.as_deref(), Some("at://did:plc:ada/app.bsky.feed.repost/3q"));
-        assert_eq!(handle.join().unwrap().len(), 3);
+        assert_eq!(handle.join().unwrap().len(), 5, "the login, and a read and a record each");
+    }
+
+    // spec: SOC-060
+    #[test]
+    fn a_reaction_to_a_post_with_unknown_state_that_is_already_liked_makes_no_second_record_and_undo_deletes_the_known_one() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let like = "at://did:plc:ada/app.bsky.feed.like/3k1";
+        let (base, handle) = writing_server(3, move |_, nsid, body| match nsid {
+            "app.bsky.feed.getPosts" => {
+                let mut v = post_view("q1", "did:plc:bob", "bob.test", "2024-05-16T10:30:00Z", None, "quoted");
+                v["viewer"] = json!({"like": like});
+                v["likeCount"] = json!(12);
+                (200, json!({"posts": [v]}).to_string())
+            }
+            "com.atproto.repo.deleteRecord" => {
+                assert_eq!((body["collection"].as_str(), body["rkey"].as_str()), (Some("app.bsky.feed.like"), Some("3k1")));
+                (200, "{}".into())
+            }
+            other => panic!("no record is to be made: {other}"),
+        });
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        let mut q = parse_post_view(&post_view("q1", "did:plc:bob", "bob.test", "2024-05-16T10:30:00Z", None, "quoted")).unwrap();
+        q.mine.unknown = true;
+        // a like on what is liked: it is shown as liked, with the record that exists and the count of the server
+        let r = react(&mut api, &q, Reaction::Like, true).unwrap();
+        assert_eq!((r.on, r.record.as_deref(), r.count), (true, Some(like), Some(12)));
+        assert_eq!(r.fresh.map(|m| (m.unknown, m.liked, m.like_record)), Some((false, true, Some(like.to_string()))));
+        // the undo of an unknown state reads the record first and deletes it
+        let r = react(&mut api, &q, Reaction::Like, false).unwrap();
+        assert!(!r.on && r.fresh.is_some_and(|m| m.liked));
+        assert_eq!(handle.join().unwrap().len(), 4, "login, read, read, delete");
+        // when the state cannot be read nothing is made
+        let (base, handle) = writing_server(1, |_, _, _| (500, json!({"error": "Down"}).to_string()));
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        assert!(react(&mut api, &q, Reaction::Like, true).is_err());
+        assert_eq!(handle.join().unwrap().len(), 2);
+    }
+
+    fn quoting(n: usize) -> Post {
+        let mut v = post_view(&format!("p{n}"), "did:plc:ada", "ada.test", "2024-05-17T10:30:00Z", None, "look");
+        v["embed"] = json!({"$type": "app.bsky.embed.record#view", "record": {"$type": "app.bsky.embed.record#viewRecord", "uri": format!("at://did:plc:bob/app.bsky.feed.post/q{n}"), "cid": format!("cq{n}"),
+            "author": {"did": "did:plc:bob", "handle": "bob.test"}, "value": {"text": "quoted", "createdAt": "2024-05-16T10:30:00Z"}}});
+        parse_post_view(&v).unwrap()
+    }
+
+    // spec: SOC-060
+    #[test]
+    fn the_quoted_posts_of_a_page_get_their_state_in_one_request_and_a_missing_one_stays_unknown() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let (base, handle) = mock_http(2, |method, path, headers, _| {
+            let nsid = path.split('?').next().unwrap().trim_start_matches("/xrpc/");
+            if nsid == "com.atproto.server.createSession" {
+                let host = headers.lines().find_map(|l| l.strip_prefix("Host: ")).unwrap_or("").trim().to_string();
+                return (200, json!({"accessJwt": "jwt-1", "refreshJwt": "ref-1", "did": "did:plc:ada", "handle": "ada.test", "didDoc": {"service": [{"id": "#atproto_pds", "serviceEndpoint": format!("http://{host}")}]}}).to_string());
+            }
+            assert_eq!((method, nsid), ("GET", "app.bsky.feed.getPosts"));
+            // two posts quote the same post: the address is asked for once; q3 is gone
+            assert_eq!(path.matches("uris=").count(), 2, "{path}");
+            let mut v = post_view("q1", "did:plc:bob", "bob.test", "2024-05-16T10:30:00Z", None, "quoted");
+            v["viewer"] = json!({"repost": "at://did:plc:ada/app.bsky.feed.repost/3r"});
+            v["repostCount"] = json!(40);
+            (200, json!({"posts": [v]}).to_string())
+        });
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        let mut posts = [quoting(1), quoting(3), Post { quote: quoting(1).quote, ..quoting(5) }, parse_post_view(&post_view("9", "did:plc:ada", "ada.test", "2024-05-17T10:30:00Z", None, "plain")).unwrap()];
+        hydrate(&mut api, posts.iter_mut());
+        let q = posts[0].quote.as_ref().unwrap();
+        assert_eq!((q.mine.unknown, q.mine.boosted, q.mine.liked, q.mine.boost_record.as_deref(), q.boost_count), (false, true, false, Some("at://did:plc:ada/app.bsky.feed.repost/3r"), 40));
+        assert!(posts[2].quote.as_ref().unwrap().mine.boosted, "the same quote in another post");
+        assert!(posts[1].quote.as_ref().unwrap().mine.unknown, "a post the server did not return stays unknown");
+        assert!(!posts[3].mine.unknown);
+        assert_eq!(handle.join().unwrap().len(), 2, "the login and one read");
+    }
+
+    // spec: SOC-060
+    #[test]
+    fn many_quotes_are_read_in_batches_of_25_and_a_failed_read_leaves_the_state_unknown_quietly() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let batches = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
+        let seen = batches.clone();
+        let (base, handle) = writing_server(2, move |_, nsid, _| {
+            assert_eq!(nsid, "app.bsky.feed.getPosts");
+            seen.lock().unwrap().push(());
+            (200, json!({"posts": []}).to_string())
+        });
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        let mut posts: Vec<Post> = (0..30).map(quoting).collect();
+        hydrate(&mut api, posts.iter_mut());
+        assert_eq!(handle.join().unwrap().len(), 3, "the login and two reads: 25 and 5");
+        assert!(posts.iter().all(|p| p.quote.as_ref().unwrap().mine.unknown));
+        // the first read fails: the rest is not tried
+        let (base, handle) = writing_server(1, |_, _, _| (500, json!({"error": "Down"}).to_string()));
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        hydrate(&mut api, posts.iter_mut());
+        assert!(posts.iter().all(|p| p.quote.as_ref().unwrap().mine.unknown));
+        assert_eq!(handle.join().unwrap().len(), 2);
     }
 
     // spec: SOC-050
@@ -829,12 +996,12 @@ mod tests {
         let mut api = Api::new(&base, "ada.test", "app-pw");
         let mut p = parse_post_view(&post_view("1", "did:plc:bob", "bob.test", "2024-05-17T10:30:00Z", None, "hi")).unwrap();
         let liked = react(&mut api, &p, Reaction::Like, true).unwrap();
-        assert_eq!(liked, Reacted { on: true, record: Some("at://did:plc:ada/app.bsky.feed.like/3k9".into()), count: None });
+        assert_eq!(liked, Reacted { on: true, record: Some("at://did:plc:ada/app.bsky.feed.like/3k9".into()), count: None, fresh: None });
         let reposted = react(&mut api, &p, Reaction::Boost, true).unwrap();
         assert_eq!(reposted.record.as_deref(), Some("at://did:plc:ada/app.bsky.feed.repost/3k9"));
         // undo: the record that was made (or that the post view named) is deleted
         p.mine = Mine { liked: true, like_record: Some("at://did:plc:ada/app.bsky.feed.like/3k1".into()), ..Mine::default() };
-        assert_eq!(react(&mut api, &p, Reaction::Like, false).unwrap(), Reacted { on: false, record: None, count: None });
+        assert_eq!(react(&mut api, &p, Reaction::Like, false).unwrap(), Reacted { on: false, record: None, count: None, fresh: None });
         // no record known, or somebody else's record: nothing is sent
         assert!(react(&mut api, &Post { mine: Mine::default(), ..p.clone() }, Reaction::Boost, false).unwrap_err().to_string().contains("which record"));
         let alien = Post { mine: Mine { boosted: true, boost_record: Some("at://did:plc:eve/app.bsky.feed.repost/1".into()), ..Mine::default() }, ..p.clone() };

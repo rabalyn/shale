@@ -284,7 +284,7 @@ pub fn parse_status(s: &Value, server: &str) -> Option<Post> {
         reply_count: count(&s["replies_count"]),
         boost_count: count(&s["reblogs_count"]),
         like_count: count(&s["favourites_count"]),
-        mine: Mine { liked: s["favourited"].as_bool().unwrap_or(false), boosted: s["reblogged"].as_bool().unwrap_or(false), like_record: None, boost_record: None },
+        mine: Mine { liked: s["favourited"].as_bool().unwrap_or(false), boosted: s["reblogged"].as_bool().unwrap_or(false), like_record: None, boost_record: None, unknown: false },
         reply_root: None,
         visibility,
     })
@@ -334,7 +334,7 @@ pub fn react(server: &str, token: &str, id: &str, kind: Reaction, on: bool) -> R
     // a boost answers with the boost, the post inside it
     let status = if kind == Reaction::Boost && v["reblog"].is_object() { &v["reblog"] } else { &v };
     let field = if kind == Reaction::Like { "favourites_count" } else { "reblogs_count" };
-    Ok(Reacted { on, record: None, count: status[field].as_u64().map(|_| count(&status[field])) })
+    Ok(Reacted { on, record: None, count: status[field].as_u64().map(|_| count(&status[field])), fresh: None })
 }
 
 /// What the server allows in a post (`/api/v2/instance`); a server that names nothing gets Mastodon's defaults.
@@ -622,10 +622,10 @@ mod tests {
             }
         });
         let r = |kind, on| react(&base, "tok-1", "100", kind, on).unwrap();
-        assert_eq!(r(Reaction::Like, true), Reacted { on: true, record: None, count: Some(4) });
-        assert_eq!(r(Reaction::Like, false), Reacted { on: false, record: None, count: Some(3) });
+        assert_eq!(r(Reaction::Like, true), Reacted { on: true, record: None, count: Some(4), fresh: None });
+        assert_eq!(r(Reaction::Like, false), Reacted { on: false, record: None, count: Some(3), fresh: None });
         assert_eq!(r(Reaction::Boost, true).count, Some(9));
-        assert_eq!(r(Reaction::Boost, false), Reacted { on: false, record: None, count: Some(8) });
+        assert_eq!(r(Reaction::Boost, false), Reacted { on: false, record: None, count: Some(8), fresh: None });
         // a token without the permission to write is told apart from other refusals
         assert_eq!(react(&base, "tok-1", "101", Reaction::Like, true), Err(ActionError::NeedsWrite));
         assert_eq!(react(&base, "tok-1", "102", Reaction::Like, true), Err(ActionError::Failed("the server answered with status 500: Internal error".into())));

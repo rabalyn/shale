@@ -45,7 +45,7 @@ impl Source for Script {
         }
         let mut q = self.react_answers.lock().unwrap();
         if q.is_empty() {
-            Ok(Reacted { on, record: None, count: None })
+            Ok(Reacted { on, record: None, count: None, fresh: None })
         } else {
             q.remove(0)
         }

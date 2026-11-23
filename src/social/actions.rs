@@ -46,6 +46,9 @@ pub struct Reacted {
     pub record: Option<String>,
     /// the count the server named (Mastodon); None: one more or less than before
     pub count: Option<u32>,
+    /// Bluesky: the state of the post as the server has it, read first because the post's own was
+    /// not known (SOC-060)
+    pub fresh: Option<super::Mine>,
 }
 
 /// Why a write failed.
@@ -421,6 +424,9 @@ impl SocialState {
         match result {
             Ok(r) => {
                 let apply = |p: &mut Post| {
+                    if let Some(m) = &r.fresh {
+                        p.mine = m.clone();
+                    }
                     let (flag, record, n) = match kind {
                         Reaction::Like => (&mut p.mine.liked, &mut p.mine.like_record, &mut p.like_count),
                         Reaction::Boost => (&mut p.mine.boosted, &mut p.mine.boost_record, &mut p.boost_count),

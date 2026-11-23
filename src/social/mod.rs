@@ -253,6 +253,10 @@ pub struct Mine {
     pub like_record: Option<String>,
     /// Bluesky: the `at://` address of the repost record
     pub boost_record: Option<String>,
+    /// the state is not known: a quoted Bluesky record carries none (SOC-060). The flags above
+    /// say "no" then, which is not an answer.
+    #[serde(default)]
+    pub unknown: bool,
 }
 
 /// A post as Bluesky points to it: address and content id.
@@ -670,6 +674,13 @@ pub struct ThreadView {
     pub cut: bool,
 }
 
+impl ThreadView {
+    /// Every post of the view.
+    pub fn posts_mut(&mut self) -> impl Iterator<Item = &mut Post> {
+        self.ancestors.iter_mut().chain(std::iter::once(&mut self.post)).chain(self.replies.iter_mut().map(|r| &mut r.post))
+    }
+}
+
 /// Put a thread view together from a context answer: the ancestors, the opened post, and all
 /// posts below it in any order (`conversation` makes the tree).
 pub fn thread_view_of(post: &Post, ancestors: Vec<Post>, descendants: &[Post]) -> ThreadView {
@@ -732,7 +743,10 @@ impl Client {
     pub fn timeline(&mut self, feed: &Feed, cursor: Option<&str>) -> Result<Page, String> {
         match &mut self.backend {
             Backend::Mastodon { token } => mastodon::timeline(&self.account.server, token.expose(), feed, cursor),
-            Backend::Bluesky(api) => bluesky::timeline(api, feed, cursor),
+            Backend::Bluesky(api) => bluesky::timeline(api, feed, cursor).map(|mut page| {
+                bluesky::hydrate(api, page.posts.iter_mut());
+                page
+            }),
         }
     }
 
@@ -740,7 +754,10 @@ impl Client {
     pub fn newer(&mut self, feed: &Feed, since: &Since) -> Result<Fresh, String> {
         match &mut self.backend {
             Backend::Mastodon { token } => mastodon::newer(&self.account.server, token.expose(), feed, since.top.as_deref(), MAX_NEW),
-            Backend::Bluesky(api) => bluesky::newer(api, feed, &since.known, MAX_NEW),
+            Backend::Bluesky(api) => bluesky::newer(api, feed, &since.known, MAX_NEW).map(|mut fresh| {
+                bluesky::hydrate(api, fresh.posts.iter_mut());
+                fresh
+            }),
         }
     }
 
@@ -748,7 +765,10 @@ impl Client {
     pub fn fetch_post(&mut self, id: &str) -> Result<Post, String> {
         match &mut self.backend {
             Backend::Mastodon { token } => mastodon::fetch_post(&self.account.server, token.expose(), id),
-            Backend::Bluesky(api) => bluesky::fetch_post(api, id),
+            Backend::Bluesky(api) => bluesky::fetch_post(api, id).map(|mut p| {
+                bluesky::hydrate(api, std::iter::once(&mut p));
+                p
+            }),
         }
     }
 
@@ -765,7 +785,10 @@ impl Client {
     pub fn thread_view(&mut self, post: &Post) -> Result<ThreadView, String> {
         match &mut self.backend {
             Backend::Mastodon { token } => mastodon::thread_view(&self.account.server, token.expose(), post),
-            Backend::Bluesky(api) => bluesky::thread_view(api, post),
+            Backend::Bluesky(api) => bluesky::thread_view(api, post).map(|mut v| {
+                bluesky::hydrate(api, v.posts_mut());
+                v
+            }),
         }
     }
 
