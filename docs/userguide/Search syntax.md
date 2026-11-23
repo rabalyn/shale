@@ -71,6 +71,9 @@ is underlined with its reason below the box, nothing is searched and the last li
 | `blocking` | the note is not done and another note that is not done names it in `blocked-by:` |
 | `"AND"` | a quoted word is text: `"AND"`, `"#not a tag"`, `"blocked"` |
 
+You do not have to type this: the **gear** form next to the search box builds the same queries from rows and
+reads them back (see [[Search and pickers]]); a query with more than one level of `AND` and `OR` is shown as text.
+
 `AND`, `OR` and `NOT` are operators **only in upper case**: "salt and pepper" is still the phrase. A
 word with a colon is a property when it starts with a letter and has a value (`12:30`, `http://x` and
 `TODO:` are text). The words `blocked` and `blocking` are fields; quote them to search for the word.

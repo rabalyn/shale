@@ -24,6 +24,29 @@ early, narrow the query". The rules are in [[Search syntax]].
 
 ![[sidebar-search.png]]
 
+## The filter form (the gear button)
+
+Next to the search box, in the sidebar and in the picker, is a **gear** button. It opens a **filter form** under
+the box, for building a query without remembering the syntax: **All of** (every row must match) or **Any of** (one
+of them), and rows you add with **+ Add filter**: **tag is**, **property is** (a name and a value), **due** (overdue,
+or within, before, on, after or on or after a day: a date, `today` or `+7d`), **is blocked**, **is blocking**,
+**in folder**, **links to** and **text contains**. Each row has a **not** switch and a ✕ to remove it. The form writes
+the query into the box as you go and the list follows at once; what you type in the box fills the form. A row
+that is not complete yet (an empty tag, a property without a value) is not in the query and says what it needs.
+
+![[picker-form.png]]
+
+**Advanced** shows the query as text instead. In the sidebar and the picker the text is the box above, and Advanced adds
+the live count of matches ("12 matches"); in a board lane it is a text field of its own with the error underlined. The
+last choice is remembered (**Settings** file, `search.advanced`) and is the same in the sidebar, the picker and the boards.
+
+A query that does not fit the rows (parentheses inside an `OR`, a `NOT` of a group) is not changed: the form says "This
+query is too complex for the form", Advanced stays on and you edit the text. A `f:`, `m:` or `s:` prefix stays where it is.
+The form is reached with the keyboard: **Ctrl+Shift+G** opens and closes it (the key can be changed in **Settings →
+Keybindings**, "List windows" and "Search results"), **Tab** walks through its widgets, and **Esc** still closes the picker.
+
+![[sidebar-form.png]]
+
 ## Choosing the sources: prefixes and buttons
 
 A search looks in **notes, mail and posts**, and a generic word finds a lot in mail and posts. Two

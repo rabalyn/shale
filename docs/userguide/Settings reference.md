@@ -204,11 +204,12 @@ system keyring, never in this file):
 
 | Key | Default | Where |
 |---|---|---|
-| `search` | the group of the five keys below | Settings → Search |
+| `search` | the group of the six keys below | Settings → Search |
 | `search.prefix_notes` | `f` (one letter: `f:banana` looks in notes only) | Settings → Search, "Prefixes", Notes |
 | `search.prefix_mail` | `m` (one letter: `m:banana` looks in mail only) | Settings → Search, "Prefixes", Mail |
 | `search.prefix_posts` | `s` (one letter: `s:banana` looks in posts only) | Settings → Search, "Prefixes", Posts |
 | `search.hit_display` | `follow` (`follow`, `raw` or `rendered`: how the lines of notes that a search found are drawn; `follow` is rendered while the Markdown preview is on or the open note is in the reading view, raw otherwise; any other word reads as `follow`) | Settings → Search, "Hits of notes" |
+| `search.advanced` | `false` (`true` shows the query as text instead of rows in the gear filter form of the search; set by the **Advanced** switch of the form, the same in the sidebar, the picker and the boards; a query that does not fit the rows is shown as text whatever this says) | the **Advanced** switch of the filter form (gear next to the search box) |
 | `search.sources` | `["notes", "mail", "posts"]` (the sources a query without a prefix looks in and lists; an empty or unknown list means all three) | Settings → Search, "Sources", and Shift+click on a source button above the results |
 
 The three letters must differ, and no combination of them may spell a field of the mail or post search (`to`, `in`, …); letters Shale

@@ -201,11 +201,14 @@ pub struct SearchConfig {
     /// How a hit of a note is shown, as a word (`follow`, `raw`, `rendered`); an unknown word
     /// reads as `follow` (NAV-058, CFG-068).
     pub hit_display: String,
+    /// The last choice of the Advanced switch of the filter form: the query as text instead of
+    /// rows (QUERY-026). Set by the switch; a file from before has false.
+    pub advanced: bool,
 }
 
 impl Default for SearchConfig {
     fn default() -> Self {
-        SearchConfig { prefix_notes: "f".into(), prefix_mail: "m".into(), prefix_posts: "s".into(), sources: Selection::ALL.ids(), hit_display: HitDisplay::Follow.id().into() }
+        SearchConfig { prefix_notes: "f".into(), prefix_mail: "m".into(), prefix_posts: "s".into(), sources: Selection::ALL.ids(), hit_display: HitDisplay::Follow.id().into(), advanced: false }
     }
 }
 
@@ -313,6 +316,12 @@ pub struct Counts(pub [usize; 3]);
 impl Counts {
     pub fn get(&self, kind: Kind) -> usize {
         self.0[kind.index()]
+    }
+
+    /// "12 matches", "20+ matches": the hits of the sources that are listed, a plus when a source's were cut at `limit` (QUERY-024).
+    pub fn matches_text(&self, listed: Selection, limit: usize) -> String {
+        let (n, cut) = listed.kinds().fold((0, false), |(n, cut), k| (n + self.get(k), cut || self.get(k) >= limit));
+        crate::search_form::matches_text(n, cut)
     }
 
     /// "Mail 20+": the count of a source whose hits were cut at `limit` has a plus.

@@ -516,6 +516,13 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   the same way as mail here (#490).
   ![The search window of Space f g: notes with the found text marked, mail and posts under them, and the count buttons](userguide/z_media/screenshots/picker-search.png)
   ![The search in the sidebar with the same groups](userguide/z_media/screenshots/sidebar-search.png)
+- **The filter form** (QUERY-021…QUERY-027, #599): a **⚙** button next to the search box of the sidebar and of the picker opens a form that builds the query: **All of** / **Any of**
+  and rows (tag is, property is, due, is blocked, is blocking, in folder, links to, text contains), each with a **not** switch, added with **+ Add filter**. It writes the box's
+  text and the list follows at once; what you type in the box fills the form. **Advanced** shows the text with the live count of matches; a query that is more than one
+  level of AND or OR is "too complex for the form", is left as it is and Advanced stays on. The last Advanced choice is remembered (`search.advanced`). The same
+  widget has sort rows (field, asc or desc, drag to reorder, `dependencies` without a direction) for the lanes of a board. Keyboard: Ctrl+Shift+G opens it, Tab walks it, Esc closes the picker.
+  ![The picker with the filter form open: All of / Any of, a tag row and a property row](userguide/z_media/screenshots/picker-form.png)
+  ![The sidebar search with the same form](userguide/z_media/screenshots/sidebar-form.png)
 - **Hits of notes are shown rendered** (#483): a found line is drawn with the editor's own inline rendering (bold, italic,
   strikethrough, highlight, code, links and wiki links by their shown text, tags in their colour, a task with a painted checkbox,
   a list item with a painted dot, a heading without its `#`), in the picker and the sidebar, and the **found text is marked** in
@@ -1384,6 +1391,7 @@ Text editing keys and vim keys are fixed.
 | Ctrl+Shift+B | File list with the keyboard in it: j / k (or ↓ / ↑) next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
 | ↓ or Enter in the search box | Browse the results (notes, mail and posts): j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K first hit of the next / previous file or group, Enter opens the hit, Esc back to the box |
 | Tab / Shift+Tab | In the search over everything (the sidebar search, in its box and while you browse the results, and the picker of Space f g): list only the next / previous source (Notes, Mail, Posts), then the default sources again. Not while the query starts with a prefix (`f:`, `m:`, `s:`). Both can be changed in Settings → Keybindings ("Search results", "List windows") |
+| Ctrl+Shift+G | In the search over everything (the sidebar search box and the picker of Space f g): show or hide the filter form (the ⚙ button) and put the keyboard in it. Can be changed in Settings → Keybindings ("Search results", "List windows") |
 | Ctrl+Shift+M | Mail view (its keys are listed below) |
 | Alt+← / Alt+→ | Back / forward (macOS: Cmd+[ / Cmd+], because Option+← / → move by word in text) |
 | Alt+B, Alt+I, Alt+S, Alt+H, Alt+C, Alt+Y, Alt+F, Alt+Shift+Y, Alt+Shift+F, Alt+E, Alt+U, Alt+O, Alt+T, Alt+Q, Alt+K, Alt+R, Alt+J, Alt+A, Alt+L, Alt+W, Alt+M, Alt+X | The buttons of the formatting toolbar of a note, each doing what a click on it does (the keyboard stays in the text and nothing is typed): Bold, Italic, Strikethrough, Highlight, Inline code, Highlight colour and Font colour (apply the current colour: the main part of the split button; Alt+Shift+Y and Alt+Shift+F open the palette, the ▾ part, where the digits 1 to 8 pick a swatch and 0 picks none, shown as ⇧Y and ⇧F while Alt is held), Heading level (opens its menu), Bullet list, Numbered list, Task, Quote, Code block, Horizontal rule, Table, Link to a note, Web link, Embed, Clear formatting. A key whose button is not there (reading view) or is greyed out (in a table cell) does nothing |

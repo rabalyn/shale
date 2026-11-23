@@ -921,6 +921,23 @@ mod tests {
         assert_eq!(back.search.selection().kinds().collect::<Vec<_>>(), [Kind::Notes, Kind::Posts]);
     }
 
+    // spec: QUERY-026, CFG-001
+    #[test]
+    fn query_026_the_advanced_choice_of_the_form_defaults_to_the_form_round_trips_and_loads_from_old_files() {
+        assert!(!Config::default().search.advanced, "the form to start with");
+        let (old, _) = crate::vault_state::parse::<Config>(br#"{"search": {"sources": ["mail"]}}"#).unwrap();
+        assert!(!old.search.advanced, "a file from before has the form, and its other keys are kept");
+        assert_eq!(old.search.selection(), crate::search_sources::Selection::only(crate::search_sources::Kind::Mail));
+        let (c, _) = crate::vault_state::parse::<Config>(br#"{"search": {"advanced": true}}"#).unwrap();
+        assert!(c.search.advanced);
+        let mut c = Config::default();
+        c.search.advanced = true;
+        let text = text::to_toml(&c);
+        assert!(text.contains("advanced = true"), "{text}");
+        let (back, _) = Config::parse_text(&text).unwrap();
+        assert!(back.search.advanced);
+    }
+
     // spec: CFG-068, NAV-058
     #[test]
     fn cfg_068_the_hit_display_defaults_to_follow_round_trips_and_loads_from_old_files() {
