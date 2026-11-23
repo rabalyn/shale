@@ -10,6 +10,12 @@ its section from this file.
 
 ## [Unreleased]
 
+## [0.7.6] - 2026-11-23
+
+### Fixed
+
+- For developers: the test that only one vault scan runs at a time waits for the first scan to start before it counts, so it no longer fails on a slower computer (#554).
+
 ## [0.7.5] - 2026-11-23
 
 ### Fixed
@@ -1981,7 +1987,8 @@ First public version (published before releases were tagged).
 - Ctrl+Shift+F always focuses the search box and selects the previous search.
 - File names with `#` work in links.
 
-[Unreleased]: https://github.com/rabalyn/shale/compare/v0.7.5...HEAD
+[Unreleased]: https://github.com/rabalyn/shale/compare/v0.7.6...HEAD
+[0.7.6]: https://github.com/rabalyn/shale/compare/v0.7.5...v0.7.6
 [0.7.5]: https://github.com/rabalyn/shale/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/rabalyn/shale/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/rabalyn/shale/compare/v0.7.2...v0.7.3
