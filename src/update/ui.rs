@@ -125,7 +125,11 @@ pub fn settings_page(ui: &mut Ui, state: &mut UpdateState, cfg: &mut UpdateConfi
     crate::settings::anchor::anchor(ui, "updates.check", |ui| {
         ui.horizontal(|ui| {
             let button = egui::Button::new("Check for updates now");
-            let b = if off || state.force { ui.add_enabled(false, button).on_disabled_hover_text(if off { "Updates are off: Shale makes no request" } else { "A check is about to start" }) } else { busy::ui::button(ui, &state.busy, &[&UPDATE_CHECK], button) };
+            let b = if off || state.force {
+                ui.add_enabled(false, button).on_disabled_hover_text(if off { "Updates are off: Shale makes no request" } else { "A check is about to start" })
+            } else {
+                busy::ui::button(ui, &state.busy, &[&UPDATE_CHECK], button)
+            };
             if b.clicked() {
                 state.check_now();
             }

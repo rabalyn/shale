@@ -472,7 +472,10 @@ pub(crate) fn warnings_ui(ui: &mut Ui, findings: &[Finding], has_dot_git: bool, 
             theme::problem(ui, w);
             if !has_remote {
                 ui.horizontal(|ui| {
-                    if busy::ui::button(ui, busy, &[&MOVE_OUT], egui::Button::new("Move the repository out")).on_hover_text("Copy the repository to a private place on this computer, check the copy, then remove the .git folder of the vault").clicked() {
+                    if busy::ui::button(ui, busy, &[&MOVE_OUT], egui::Button::new("Move the repository out"))
+                        .on_hover_text("Copy the repository to a private place on this computer, check the copy, then remove the .git folder of the vault")
+                        .clicked()
+                    {
                         ask = true;
                     }
                     busy::ui::status(ui, busy, &MOVE_OUT);

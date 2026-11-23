@@ -246,12 +246,15 @@ pub struct MoveOut {
     pub result: Option<(String, bool)>,
 }
 
+/// The job of an Advanced connection: whether a history moved (the outer error: the job died).
+type JoinJob = busy::Job<Result<bool, String>>;
+
 /// Connecting that may move a local-only history into the vault (SYNC-072): while one runs, no
 /// snapshot, thinning or read of the history starts, and Advanced → Connect keeps its job here.
 #[derive(Default)]
 pub struct Joining {
     count: Arc<AtomicUsize>,
-    pub(super) job: Option<(PathBuf, String, busy::Job<Result<bool, String>>)>,
+    pub(super) job: Option<(PathBuf, String, JoinJob)>,
 }
 
 /// Counts a connecting job as running until it is dropped (also when the job panics).
