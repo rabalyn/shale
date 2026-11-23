@@ -50,6 +50,19 @@ struct Playback {
     /// a video: the newest picture from ffmpeg, and the texture it is shown in
     frames: Arc<FrameSlot>,
     frame_tex: Option<egui::TextureHandle>,
+    /// plays again from the start when it ends (a post's GIF, MEDIA-025)
+    looping: bool,
+    /// plays without sound whatever the volume says, until the person unmutes (a post's GIF)
+    silent: bool,
+}
+
+/// How a file outside the vault starts when the person opened it (MEDIA-025).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Start {
+    /// a video: with the sound, once
+    Video,
+    /// a GIF (Mastodon's "gifv"): without sound, again and again
+    Gif,
 }
 
 impl Drop for Playback {
@@ -195,6 +208,7 @@ impl MediaPlayer {
         let mut s = self.lock();
         s.volume = v.clamp(0.0, 1.0);
         s.muted = false;
+        s.unsilence();
         s.volume_changed = true;
         s.apply_state();
     }
@@ -202,6 +216,25 @@ impl MediaPlayer {
     pub fn set_muted(&self, m: bool) {
         let mut s = self.lock();
         s.muted = m;
+        if !m {
+            s.unsilence();
+        }
+        s.apply_state();
+    }
+
+    /// Start `abs`, a file outside the vault that the person opened (a video of a post in the
+    /// feed viewer, MEDIA-025): it plays at once, once or, for a GIF, muted and looped. `owner`
+    /// stands in for a note (`stop_for_note` stops it). Nothing happens when it is the current
+    /// file already, so a pause or the end of the clip stays.
+    pub fn play_outside(&self, ctx: &egui::Context, abs: &Path, owner: &Path, how: Start) {
+        let mut s = self.lock();
+        if s.current.as_ref().is_some_and(|c| c.path == abs) {
+            return;
+        }
+        let p = s.begin(ctx, abs, owner);
+        p.want_play = true;
+        p.looping = how == Start::Gif;
+        p.silent = how == Start::Gif;
         s.apply_state();
     }
 
@@ -319,6 +352,7 @@ impl MediaPlayer {
         };
         if let Some(c) = s.current.as_mut().filter(|c| c.path == abs) {
             view.playing = c.want_play;
+            view.muted |= c.silent;
             if !loading {
                 // the length is known now: a waiting click becomes a jump (or is dropped when
                 // the file has no length)
@@ -334,7 +368,11 @@ impl MediaPlayer {
                         view.message = Some(NO_SOUND_NOTE.into());
                     }
                     view.position = shared.position_secs();
-                    if shared.is_finished() {
+                    if shared.is_finished() && c.looping {
+                        // a GIF: again from the start, still playing
+                        shared.seek(0.0);
+                        view.position = 0.0;
+                    } else if shared.is_finished() {
                         // played to the end: back to the start, paused
                         c.want_play = false;
                         shared.set_playing(false);
@@ -495,6 +533,13 @@ impl State {
         matches!(self.looks.get(abs).map(|l| &l.slot), Some(LookSlot::Ready { external: true, .. }))
     }
 
+    /// The sound of a GIF comes on when the person asks for it.
+    fn unsilence(&mut self) {
+        if let Some(c) = self.current.as_mut() {
+            c.silent = false;
+        }
+    }
+
     fn gain(&self) -> f32 {
         if self.muted {
             0.0
@@ -508,7 +553,7 @@ impl State {
         let gain = self.gain();
         let Some(c) = self.current.as_mut() else { return };
         if let Status::Ready(shared, _) = &*c.status.lock().unwrap_or_else(|e| e.into_inner()) {
-            shared.set_volume(gain);
+            shared.set_volume(if c.silent { 0.0 } else { gain });
             if let Some(at) = c.start_at.take() {
                 shared.seek(at);
             }
@@ -541,7 +586,7 @@ impl State {
                 run_output(&path, &st, &stp, open, video);
                 ctx2.request_repaint();
             });
-            self.current = Some(Playback { path: abs.to_path_buf(), owner: owner.to_path_buf(), status, stop, want_play: false, start_at: None, start_share: None, frames, frame_tex: None });
+            self.current = Some(Playback { path: abs.to_path_buf(), owner: owner.to_path_buf(), status, stop, want_play: false, start_at: None, start_share: None, frames, frame_tex: None, looping: false, silent: false });
         }
         self.current.as_mut().expect("just set")
     }

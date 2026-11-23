@@ -1021,11 +1021,15 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 ![The conversation of a post](userguide/z_media/screenshots/social-thread.png)
 
-- **Pictures open big in a viewer** over the tab (click one): fitted to the window, its description
-  (alt text) below, **◀ ▶** or Left / Right to step through the post's pictures, mouse wheel or
+- **Pictures and videos open big in a viewer** over the tab (click one): fitted to the window, its description
+  (alt text) below, **◀ ▶** or Left / Right to step through the post's pictures and videos, mouse wheel or
   `+` `-` to zoom, **100%** / **Fit** (`0`), drag to pan, Esc or **Close** to leave. The full size file
   comes through the background picture cache (spinner while it loads, a message when it fails);
-  pictures behind a content warning stay closed until Show; video previews still open in the browser.
+  pictures behind a content warning stay closed until Show. **A video or GIF plays in the viewer** (SOC-076): the file
+  is fetched into the same cache (https only, no login, at most 64 MB; a Bluesky video as its real file from the
+  author's server), then plays in the media player's card with play / pause (also **Space**), seek and volume;
+  a GIF plays muted and again and again. Stepping away or closing stops it. Without ffmpeg the viewer shows the
+  video's preview picture and says so, and **Open in browser** stays.
 - **Save to vault** copies the post, and the whole thread when it is a thread by one author,
   into the Import dialog: choose the folder (default `Social`), tags and which pictures to
   bring along. **Open in browser** and **Copy link** are next to it.

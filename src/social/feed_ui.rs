@@ -40,6 +40,8 @@ pub struct TabCtx {
     pub keys: bool,
     /// the open vault: a picture path typed in the compose box may start here (SOC-053)
     pub vault: Option<std::path::PathBuf>,
+    /// the app's media player, which plays the videos of the viewer (SOC-076)
+    pub media: crate::media::MediaPlayer,
 }
 
 /// What a click on a button of a card asks for besides saving and the conversation.
@@ -253,6 +255,7 @@ pub(super) struct Cx<'a> {
     /// the tab drawn, and the viewer a click on a picture opens in it (SOC-044)
     pub tab: u64,
     pub viewer: &'a mut Option<Viewer>,
+    pub media: &'a crate::media::MediaPlayer,
     /// the account drawn for, and the reactions on their way (SOC-050)
     pub account: &'a str,
     pub busy: &'a HashSet<String>,
@@ -332,12 +335,7 @@ fn thumb(ui: &mut Ui, cx: &mut Cx, key: String, m: &super::Media, cell: Vec2, na
     }
     let resp = cx.rec(key, resp);
     let resp = if m.alt.trim().is_empty() { resp } else { resp.on_hover_text(m.alt.trim()) };
-    let clicked = resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked();
-    if clicked && m.kind != MediaKind::Image {
-        // videos open at their web address (SOC-044)
-        open_web(&m.url);
-    }
-    clicked && m.kind == MediaKind::Image
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
 }
 
 fn media_block(ui: &mut Ui, cx: &mut Cx, p: &Post, idx: usize, width: f32) {
@@ -346,14 +344,14 @@ fn media_block(ui: &mut Ui, cx: &mut Cx, p: &Post, idx: usize, width: f32) {
     if visual.len() == 1 {
         let (k, m) = visual[0];
         if thumb(ui, cx, format!("media:{idx}:{k}"), m, Vec2::new(width, 340.0), true) {
-            *cx.viewer = Viewer::open(cx.tab, p, k);
+            *cx.viewer = Viewer::open(cx.tab, p, k, cx.media);
         }
     } else if !visual.is_empty() {
         let cell = Vec2::new((width - 6.0) / 2.0, 170.0);
         egui::Grid::new(("social-media", idx)).spacing([6.0, 6.0]).show(ui, |ui| {
             for (n, (k, m)) in visual.iter().enumerate() {
                 if thumb(ui, cx, format!("media:{idx}:{k}"), m, cell, false) {
-                    *cx.viewer = Viewer::open(cx.tab, p, *k);
+                    *cx.viewer = Viewer::open(cx.tab, p, *k, cx.media);
                 }
                 if n % 2 == 1 {
                     ui.end_row();
@@ -741,10 +739,11 @@ pub(super) fn do_act(ctx: &egui::Context, st: &mut SocialState, entry: &SocialAc
     }
 }
 
-/// The picture viewer, when one is open over this tab (SOC-044).
+/// The viewer of pictures and videos, when one is open over this tab (SOC-044, SOC-076).
 pub(super) fn show_viewer(ctx: &egui::Context, tab_rect: Rect, st: &mut SocialState, tab: &TabCtx) {
-    if let (Some(v), Some(images)) = (st.viewer.as_mut().filter(|v| v.tab == tab.id), st.images.as_ref()) {
-        if viewer::show(ctx, tab_rect, v, images, &mut st.rects, tab.keys) {
+    if let (Some(v), Some(images), Some(clips)) = (st.viewer.as_mut().filter(|v| v.tab == tab.id), st.images.as_ref(), st.clips.as_ref()) {
+        let env = viewer::Env { images, clips, media: &tab.media };
+        if viewer::show(ctx, tab_rect, v, &env, &mut st.rects, tab.keys) {
             st.viewer = None;
         }
     }
@@ -795,6 +794,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
     st.ensure_feeds(&ctx, &entry);
     if st.images.is_none() {
         st.images = Some(ImageCache::new(&ctx, st.cache_dir.clone()));
+        st.clips = Some(super::clips::Clips::new(&ctx, st.cache_dir.clone()));
     }
     // a tab that shows the conversation of a post instead of the feed (SOC-045)
     if let Some(f) = tab.feed.as_ref().filter(|f| f.account == aid && f.thread.is_some()) {
@@ -992,7 +992,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
             card_heights.clear();
         }
         let Some(images) = images.as_ref() else { return asks };
-        let mut cx = Cx { images, revealed, saving, rects, now: crate::calendar::time::now(), tab: tab.id, viewer, account: &aid, busy: &writes.busy, polls };
+        let mut cx = Cx { images, revealed, saving, rects, now: crate::calendar::time::now(), tab: tab.id, viewer, media: &tab.media, account: &aid, busy: &writes.busy, polls };
         let mut area = egui::ScrollArea::vertical().id_salt(("social-scroll", tab.id, &aid, &feed.id)).auto_shrink([false, false]);
         if let Some(off) = applied {
             area = area.vertical_scroll_offset(off);
@@ -1097,7 +1097,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
 
     // spec: SOC-008
@@ -1115,20 +1115,20 @@ mod tests {
     use crate::social::{demo, Account, Network};
     use eframe::egui::{Event as Ev, Modifiers, PointerButton, Pos2, RawInput};
 
-    struct H {
-        ctx: egui::Context,
+    pub(in crate::social) struct H {
+        pub ctx: egui::Context,
         t: f64,
         /// the tab shown (a `Resolve` answer fills in its feed, as the app does)
-        tab: TabCtx,
+        pub tab: TabCtx,
     }
 
     impl H {
-        fn new() -> H {
+        pub fn new() -> H {
             let ctx = egui::Context::default();
             crate::theme::install_fonts(&ctx);
-            H { ctx, t: 0.0, tab: TabCtx { id: 1, feed: None, last: None, keys: true, vault: None } }
+            H { ctx, t: 0.0, tab: TabCtx { id: 1, feed: None, last: None, keys: true, vault: None, media: crate::media::MediaPlayer::default() } }
         }
-        fn frame(&mut self, events: Vec<Ev>, st: &mut SocialState, accounts: &[SocialAccountEntry]) -> Vec<Ask> {
+        pub fn frame(&mut self, events: Vec<Ev>, st: &mut SocialState, accounts: &[SocialAccountEntry]) -> Vec<Ask> {
             self.t += 0.05;
             let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 4000.0))), time: Some(self.t), events, ..Default::default() };
             let mut asks = vec![];
@@ -1148,7 +1148,7 @@ mod tests {
             }
             keep
         }
-        fn click(&mut self, key: &str, st: &mut SocialState, accounts: &[SocialAccountEntry]) -> Vec<Ask> {
+        pub fn click(&mut self, key: &str, st: &mut SocialState, accounts: &[SocialAccountEntry]) -> Vec<Ask> {
             let p = st.rects.iter().rev().find(|r| r.0 == key).unwrap_or_else(|| panic!("no {key}: {:?}", st.rects.iter().map(|r| &r.0).collect::<Vec<_>>())).1.center();
             let b = |pressed| Ev::PointerButton { pos: p, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
             let mut r = self.frame(vec![Ev::PointerMoved(p)], st, accounts);
@@ -1159,7 +1159,7 @@ mod tests {
         }
     }
 
-    fn demo_state() -> (SocialState, Vec<SocialAccountEntry>) {
+    pub(in crate::social) fn demo_state() -> (SocialState, Vec<SocialAccountEntry>) {
         let mut st = SocialState::new(std::env::temp_dir().join(format!("shale-social-test-{}", std::process::id())));
         let accounts = vec![demo::account()];
         st.load_demo(&accounts[0]);
@@ -1234,13 +1234,13 @@ mod tests {
     }
 
     impl H {
-        fn key(&mut self, key: egui::Key, st: &mut SocialState, accounts: &[SocialAccountEntry]) {
+        pub fn key(&mut self, key: egui::Key, st: &mut SocialState, accounts: &[SocialAccountEntry]) {
             let k = |pressed| Ev::Key { key, physical_key: Some(key), pressed, repeat: false, modifiers: Modifiers::NONE };
             self.frame(vec![k(true)], st, accounts);
             self.frame(vec![k(false)], st, accounts);
         }
         /// Frames until a control of the viewer shows (the picture is decoded on a worker).
-        fn wait_for(&mut self, name: &str, st: &mut SocialState, accounts: &[SocialAccountEntry]) {
+        pub fn wait_for(&mut self, name: &str, st: &mut SocialState, accounts: &[SocialAccountEntry]) {
             for _ in 0..300 {
                 self.frame(vec![], st, accounts);
                 if st.rects.iter().any(|r| r.0 == name) {
@@ -1252,11 +1252,11 @@ mod tests {
         }
     }
 
-    fn has(st: &SocialState, name: &str) -> bool {
+    pub(in crate::social) fn has(st: &SocialState, name: &str) -> bool {
         st.rects.iter().any(|r| r.0 == name)
     }
 
-    fn at(st: &SocialState) -> Option<usize> {
+    pub(in crate::social) fn at(st: &SocialState) -> Option<usize> {
         st.viewer.as_ref().map(|v| v.index)
     }
 
@@ -1364,11 +1364,11 @@ mod tests {
 
     // spec: SOC-044
     #[test]
-    fn soc_044_pictures_behind_a_content_warning_cannot_be_opened_and_videos_do_not_open_the_viewer() {
+    fn soc_044_pictures_behind_a_content_warning_cannot_be_opened() {
         let (mut st, accounts) = demo_state();
         for t in st.timelines.values_mut() {
             t.posts[3].content_warning = Some("Sunrises".into());
-            // a video: it keeps its way to the web address (a non-web address is ignored by `open_web`)
+            // a video whose address is not one that can be fetched
             t.posts[1].media = vec![super::super::Media { kind: MediaKind::Video, url: "video:none".into(), preview_url: String::new(), alt: String::new(), file_name_hint: "v.mp4".into(), blob_cid: None }];
         }
         let mut h = H::new();
@@ -1379,8 +1379,10 @@ mod tests {
         h.click("media:3:1", &mut st, &accounts);
         assert_eq!(at(&st), Some(1), "after Show the picture opens");
         h.key(egui::Key::Escape, &mut st, &accounts);
+        // a video preview opens the viewer too (SOC-076)
         h.click("media:1:0", &mut st, &accounts);
-        assert!(st.viewer.is_none(), "a video preview is not opened in the viewer");
+        assert_eq!(at(&st), Some(0));
+        assert!(st.viewer.as_ref().unwrap().items[0].video.is_some());
     }
 
     #[test]

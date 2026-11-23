@@ -266,8 +266,8 @@ Settings → Updates is the table `[updates]` in the settings file. `SHALE_UPDAT
 |---|---|---|
 | `input_log` | off | Settings → Help → Troubleshooting, "Record keyboard input to a file" |
 | `caches` | the values below; each can be "forever" or "no limit" | Settings → Data → How long caches are kept; Data usage… rows |
-| `caches.picture_days` | 30 (social pictures, days) | same |
-| `caches.picture_mb` | 500 (social pictures, MB) | same |
+| `caches.picture_days` | 30 (social pictures and videos, days) | same |
+| `caches.picture_mb` | 500 (social pictures and videos, MB) | same |
 | `caches.post_days` | 365 (social post index, days) | same |
 | `caches.posts_per_account` | 10 000 | same |
 | `caches.mail_backups` | 3 (newest mail index backups kept) | same |

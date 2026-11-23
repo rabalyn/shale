@@ -45,6 +45,11 @@ as the length arrives. Frames are shown at most 1280 × 720 pixels and 30 per se
 
 A video can be resized like a picture, see "Resizing pictures and videos" in [[Editor]].
 
+The videos and GIFs of the posts in your feeds play in the same player, in the viewer that opens when you
+click their preview (see [[Feeds]]). They are fetched into a cache, not into your vault, and only
+the one you opened plays; closing the viewer or stepping to the next item stops it. A GIF plays muted
+and looped.
+
 ## ffmpeg
 
 Videos are decoded by `ffmpeg` and `ffprobe` on your computer. They are optional: install them

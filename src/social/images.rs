@@ -67,9 +67,9 @@ fn fetch(dir: &Path, url: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-/// Whether a file name is one of the cache's own (`<16 hex digits>.<picture type>`).
+/// Whether a file name is one of the cache's own (`<16 hex digits>.<picture or video type>`).
 fn is_cache_file(name: &str) -> bool {
-    name.split_once('.').is_some_and(|(stem, ext)| stem.len() == 16 && stem.bytes().all(|b| b.is_ascii_hexdigit()) && EXTS.contains(&ext))
+    name.split_once('.').is_some_and(|(stem, ext)| stem.len() == 16 && stem.bytes().all(|b| b.is_ascii_hexdigit()) && (EXTS.contains(&ext) || super::clips::EXTS.contains(&ext)))
 }
 
 /// The picture files in the cache folder, oldest fetch first (USE-010).
@@ -174,6 +174,7 @@ mod tests {
     #[test]
     fn only_picture_files_of_the_cache_are_its_own_and_forgetting_fetches_again() {
         assert!(is_cache_file("0123456789abcdef.png"));
+        assert!(is_cache_file("0123456789abcdef.mp4") && is_cache_file("0123456789abcdef.webm"), "videos of posts are in the cache too (SOC-076)");
         assert!(!is_cache_file("0123456789abcdef.txt"));
         assert!(!is_cache_file("short.png"));
         assert!(!is_cache_file("notes.md"));

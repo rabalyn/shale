@@ -17,6 +17,7 @@
 pub mod accounts_ui;
 pub mod actions;
 pub mod bluesky;
+pub mod clips;
 pub mod compose;
 pub mod compose_extras_ui;
 pub mod compose_pictures;
@@ -56,6 +57,8 @@ pub mod thread_ui;
 mod ui_tests;
 pub mod video;
 pub mod viewer;
+#[cfg(test)]
+mod viewer_tests;
 #[cfg(test)]
 mod write_tests;
 
@@ -495,8 +498,13 @@ fn answer_of(r: dav::BytesResponse) -> Result<Value, ApiError> {
 /// Download a media file (no login is sent). At most `MAX_MEDIA_BYTES`. Returns the bytes and
 /// the content type, if the server named one.
 pub fn download(url: &str) -> Result<(Vec<u8>, Option<String>), String> {
+    download_up_to(url, MAX_MEDIA_BYTES)
+}
+
+/// Like `download`, with a smaller or larger limit (tests use a small one).
+pub(crate) fn download_up_to(url: &str, limit: u64) -> Result<(Vec<u8>, Option<String>), String> {
     check_url(url)?;
-    let r = dav::request_bytes("GET", url, &[], "", &no_login(), MAX_MEDIA_BYTES)?;
+    let r = dav::request_bytes("GET", url, &[], "", &no_login(), limit)?;
     if !(200..300).contains(&r.status) {
         return Err(format!("the server answered with status {}", r.status));
     }

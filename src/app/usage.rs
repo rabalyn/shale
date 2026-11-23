@@ -146,6 +146,9 @@ impl ShaleApp {
                 if let Some(i) = &self.social.images {
                     i.forget_all();
                 }
+                if let Some(c) = &self.social.clips {
+                    c.forget_all();
+                }
             }
             (CacheId::TagWords, Kind::Clear) => {
                 // learn again at once (USE-015)

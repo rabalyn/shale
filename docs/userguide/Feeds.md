@@ -34,12 +34,22 @@ social` shows made-up posts.
   click opens the conversation in a new Feeds tab. When the server did not send all replies a note
   says so, with **Open in browser** to read the rest on the server's page.
 - **Pictures big:** click a picture to see it large over the tab, fitted to the window, with its
-  description (alt text) below. **◀ ▶** or the Left / Right keys step through the pictures of the
+  description (alt text) below. **◀ ▶** or the Left / Right keys step through the pictures and videos of the
   post; the mouse wheel, **+** / **−** (also the keys `+` `-`) zoom, **100%** / **Fit** (key `0`)
   switch between the picture's own size and the whole picture, and you can drag a zoomed
   picture. **Esc** or **Close** goes back to the feed. A spinner shows while the picture loads, and a
   message says when it cannot be loaded. Pictures behind a content warning open only after
-  **Show**. A video or GIF preview still opens in the browser.
+  **Show**.
+- **Videos and GIFs play in the viewer:** click the preview of a video or GIF. A spinner shows while the
+  file is downloaded (Shale never sends your login to the media server, takes only https and at most
+  64 MB), then the player appears and starts: **play / pause** (or **Space**), the bar to jump, mute and
+  volume. A GIF plays without sound and again and again; use the speaker to hear it. **◀ ▶** or Left / Right
+  go on to the next picture or video and stop the playing one, **Esc** or **Close** closes the viewer and
+  stops it, and **Open in browser** opens the video's page. The files are kept with the pictures
+  (see [[Data usage and caches]]), so a video seen before plays at once. Videos are played by `ffmpeg`
+  (see [[Sounds and videos]]): without it the viewer shows the video's preview picture and says so, and
+  **Open in browser** is the way to watch it. A failed download shows a message; the other pictures and
+  videos of the post still open.
 - **Several feeds at once:** every Feeds tab has its own feed and scroll position. **New tab**
   next to a feed (or Shift+click, middle-click) opens it in another tab. Open Feeds tabs come
   back at the next start ([[Tabs]]).

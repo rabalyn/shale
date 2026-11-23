@@ -15,7 +15,14 @@ impl ShaleApp {
     /// The Feeds tab on screen: `feed` is what its view says.
     pub fn social_view(&mut self, ui: &mut Ui, feed: Option<FeedRef>) {
         let accounts = self.cfg.social_accounts.clone();
-        let tab = TabCtx { id: self.tabbar.tabs.get(self.tabbar.active).map(|t| t.id).unwrap_or(0), feed, last: self.cfg.social_last.clone(), keys: self.modal.is_none(), vault: self.vault.as_ref().map(|v| v.root.clone()) };
+        let tab = TabCtx {
+            id: self.tabbar.tabs.get(self.tabbar.active).map(|t| t.id).unwrap_or(0),
+            feed,
+            last: self.cfg.social_last.clone(),
+            keys: self.modal.is_none(),
+            vault: self.vault.as_ref().map(|v| v.root.clone()),
+            media: self.media.clone(),
+        };
         let font = self.fonts.area(crate::fonts::Area::Social);
         for a in crate::fonts::with_area(ui, &font, |ui| feed_ui::show(ui, &mut self.social, &accounts, &tab)) {
             match a {

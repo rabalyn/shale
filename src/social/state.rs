@@ -240,6 +240,8 @@ pub struct SocialState {
     /// the posts are made-up ones (screenshots, tests): nothing goes to the network
     pub demo: bool,
     pub images: Option<ImageCache>,
+    /// the videos and GIFs of posts, in the same cache folder (SOC-076)
+    pub clips: Option<super::clips::Clips>,
     pub cache_dir: PathBuf,
     /// finished saves waiting for the Import dialog: the post, thread and media, and the network
     pub saved: Vec<(SavedPost, &'static str)>,
@@ -322,6 +324,7 @@ impl SocialState {
             revealed: HashSet::new(),
             demo: false,
             images: None,
+            clips: None,
             cache_dir,
             saved: vec![],
             messages: vec![],
