@@ -770,6 +770,7 @@ impl ShaleApp {
         // the mail view's check of the index is a task of the window's registry (JOB-015)
         app.mail.busy = app.busy.clone();
         app.sync.managed.busy = app.busy.clone();
+        app.tex.busy = app.busy.clone();
         // the audio attachments play in the app's one player (MAIL-240, MEDIA-007)
         app.mail.media = app.media.clone();
         if persist {

@@ -11,7 +11,7 @@ use super::engine::{self, bin_dir_with, exe_name, managed_bin_dir, managed_root,
 use super::proc::{self, Ending};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -231,20 +231,21 @@ impl Handle {
         self.progress.lock().map(|p| p.clone()).unwrap_or_default()
     }
 
-    /// Tests: whether the job was asked to stop.
-    #[cfg(test)]
     /// The token of the registry's task for this job: Cancel there sets the flag the job looks at (JOB-035).
     pub fn token(&self) -> crate::busy::Cancel {
         self.cancel.clone().into()
     }
 
+    /// Tests: whether the job was asked to stop.
+    #[cfg(test)]
     pub(super) fn cancelled(&self) -> bool {
-        self.cancel.load(Ordering::SeqCst)
+        self.cancel.load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    /// Stop the job: its programs are killed and its partial folder is removed.
+    /// Tests: stop the job, as Cancel of the task does: its programs are killed and its partial folder is removed.
+    #[cfg(test)]
     pub fn cancel(&self) {
-        self.cancel.store(true, Ordering::SeqCst);
+        self.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     pub(super) fn set(&self, f: impl FnOnce(&mut Progress)) {
