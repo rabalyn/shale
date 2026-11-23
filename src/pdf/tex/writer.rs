@@ -7,7 +7,7 @@
 use super::blocks::{self, Block};
 use super::body::{Body, NEW_PAGE};
 use super::inline::{anchor, Files, Look};
-use super::sets::{class_and_preamble, tex_escape, Field, KindManifest, Mapping, SetInfo, SetSettings};
+use super::sets::{class_and_preamble, emoji_font, tex_escape, Field, KindManifest, Mapping, SetInfo, SetSettings, EMOJI_FONT_FILE};
 use crate::markdown;
 use crate::pdf::export::ExportOptions;
 use crate::vault::Vault;
@@ -22,6 +22,26 @@ pub struct Document {
     pub tex: String,
     pub files: Vec<(String, Vec<u8>)>,
     pub warnings: Vec<String>,
+}
+
+/// What `main.tex` says when a run of emoji is in the text (TEX-041).
+const EMOJI_COMMAND: &str = "\\shaleemoji{";
+
+/// The violet bar of a quote and the grey of its text (TEX-042): the built-in export's bar
+/// (105, 65, 198 at an alpha of 180) over white, and the quote colour of paper.
+const QUOTE_BAR: (u8, u8, u8) = (149, 121, 215);
+const QUOTE_INK: (u8, u8, u8) = (85, 85, 85);
+
+impl Document {
+    /// The document of `tex` with the files its embeds needed, and the emoji font (TEX-041) when
+    /// the text has a run of emoji.
+    pub(super) fn new(tex: String, files: Files) -> Self {
+        let mut list = files.list;
+        if tex.contains(EMOJI_COMMAND) {
+            list.push((EMOJI_FONT_FILE.to_string(), emoji_font().to_vec()));
+        }
+        Document { tex, files: list, warnings: files.warnings }
+    }
 }
 
 /// The note and the choices an export is made from.
@@ -152,7 +172,7 @@ fn bold_line(plain: &str, mark: &str) -> String {
 }
 
 /// The helpers every document has: the packages the body needs, the box of a task, the block of code.
-fn helpers(long_tables: bool, columns: bool) -> String {
+fn helpers(long_tables: bool, columns: bool, emoji: bool) -> String {
     let mut t = String::from("\\usepackage{graphicx}\n\\usepackage{xcolor}\n\\usepackage[normalem]{ulem}\n\\usepackage{booktabs}\n\\usepackage{tabularx}\n");
     // math (TEX-029): amsmath for matrices, cases, \\dfrac and \\binom, the symbols and \\mathbb of amssymb
     // unless unicode-math (the template's) has them
@@ -171,13 +191,28 @@ fn helpers(long_tables: bool, columns: bool) -> String {
     // fenced code on a light box (TEX-030): one that breaks across pages where tables may
     let c = super::body::CODE_PAPER;
     t.push_str(&format!("\\usepackage{{tcolorbox}}\n\\definecolor{{shalecodebg}}{{RGB}}{{{},{},{}}}\n", c.r(), c.g(), c.b()));
-    if long_tables {
-        t.push_str("\\tcbuselibrary{breakable}\n");
-    }
+    t.push_str(if long_tables { "\\tcbuselibrary{skins,breakable}\n" } else { "\\tcbuselibrary{skins}\n" });
     t.push_str(&format!(
         "\\newtcolorbox{{shalecode}}{{{}colback=shalecodebg,colframe=shalecodebg,boxrule=0pt,arc=1pt,left=0.6em,right=0.6em,top=0.4em,bottom=0.4em,before skip=\\medskipamount,after skip=\\medskipamount,before upper={{\\ttfamily\\small\\raggedright\\setlength{{\\parindent}}{{0pt}}\\setlength{{\\parskip}}{{0pt}}\\hyphenchar\\font=-1 }}}}\n",
         if long_tables { "breakable," } else { "" }
     ));
+    // a quote (TEX-042): an indent with the violet bar and the grey text of the built-in export
+    t.push_str(&format!(
+        "\\definecolor{{shalequotebar}}{{RGB}}{{{},{},{}}}\\definecolor{{shalequoteink}}{{RGB}}{{{},{},{}}}\n\\newtcolorbox{{shalequote}}{{{}enhanced,blanker,borderline west={{2.5pt}}{{0pt}}{{shalequotebar}},colupper=shalequoteink,left=1em,right=0pt,top=0pt,bottom=0pt,before skip=\\medskipamount,after skip=\\medskipamount}}\n",
+        QUOTE_BAR.0,
+        QUOTE_BAR.1,
+        QUOTE_BAR.2,
+        QUOTE_INK.0,
+        QUOTE_INK.1,
+        QUOTE_INK.2,
+        if long_tables { "breakable," } else { "" }
+    ));
+    // emoji (TEX-041): a run of them is set in the emoji font that travels in the work folder
+    if emoji {
+        t.push_str(&format!(
+            "\\IfPackageLoadedTF{{fontspec}}{{}}{{\\usepackage{{fontspec}}}}\n\\newfontface\\shaleemojiface[Path=./]{{{EMOJI_FONT_FILE}}}\n\\DeclareRobustCommand{{\\shaleemoji}}[1]{{{{\\shaleemojiface #1}}}}\n\\pdfstringdefDisableCommands{{\\renewcommand{{\\shaleemoji}}[1]{{#1}}}}\n"
+        ));
+    }
     t
 }
 
@@ -224,7 +259,8 @@ pub(super) fn drop_title_heading(blocks: &mut Vec<Block>, title: &str) {
 /// contents when there are any, the fields.
 pub(super) fn document(head: String, long_tables: bool, columns: bool, toc_depth: Option<usize>, values: &[(&Field, Option<String>)], main: &str) -> String {
     let mut tex = head;
-    tex.push_str(&helpers(long_tables, columns));
+    let emoji = main.contains(EMOJI_COMMAND) || values.iter().any(|(_, v)| v.as_ref().is_some_and(|v| v.contains(EMOJI_COMMAND)));
+    tex.push_str(&helpers(long_tables, columns, emoji));
     if let Some(depth) = toc_depth {
         tex.push_str(&format!("\\setcounter{{tocdepth}}{{{depth}}}\n"));
     }
@@ -349,7 +385,7 @@ fn write_in_shale(req: &Request) -> Result<Document, String> {
     let tex = document(head, long_tables, family == Family::Poster && kind.columns > 1, toc.then(|| toc_depth(family == Family::Book)), &values, &main);
     drop(body);
     let files = files.into_inner();
-    Ok(Document { tex, files: files.list, warnings: files.warnings })
+    Ok(Document::new(tex, files))
 }
 
 /// Slides: `#` is a section for the navigation and `##` a frame; deeper headings are bold lines

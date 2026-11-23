@@ -202,5 +202,5 @@ fn write_book_in_shale(req: &BookRequest) -> Result<Document, String> {
     let head = class_and_preamble(kind, &req.set.settings, kind.shows_department_logo(req.set, req.opts.department_logo));
     let tex = document(head, true, false, toc.then(|| toc_depth(book)), &values, &main);
     let files = files.into_inner();
-    Ok(Document { tex, files: files.list, warnings: files.warnings })
+    Ok(Document::new(tex, files))
 }

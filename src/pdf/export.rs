@@ -1598,55 +1598,12 @@ impl<'a> Writer<'a> {
     /// places (`media::widget::geometry`), as big in proportion to the text, with the cover or
     /// first frame as the artwork, the name, the empty progress bar and the length.
     fn player_card(&mut self, abs: &Path, asked: Option<f32>, caption: Option<&str>) {
-        use crate::media::widget;
-        let video = crate::media::is_video(abs);
-        let look = if video { crate::media::video::look(abs, crate::media::ffmpeg::locate).look } else { crate::media::cover::look(abs) };
-        let card = widget::card_size(abs, self.opts.column(), asked);
+        let look = media_look(abs);
+        let card = crate::media::widget::card_size(abs, self.opts.column(), asked);
         let size = self.page_size(card);
-        let k = size.x / card.x;
-        let geo = widget::geometry(abs, card.x);
         self.need(size.y + 6.0 + self.caption_room(caption));
-        let (ox, oy) = (self.left, self.y);
-        let at = |r: egui::Rect| [ox + r.left() * k, oy + r.top() * k, r.width() * k, r.height() * k];
-        let name = abs.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-        let ink = Rgba(30, 30, 30, 255);
-        let grey = Rgba(105, 105, 110, 255);
-        let page = self.page;
-        let cover = look.cover.as_ref().and_then(rgba_of).map(|img| (self.doc.add_image(pdf_image(&img)), img.width() as f32, img.height() as f32));
-        let p = self.doc.page(page);
-        p.rect(ox, oy, size.x, size.y, Some(Rgba(246, 246, 248, 255)), Some((Rgba(200, 200, 205, 255), 0.8)));
-        let [ax, ay, aw, ah] = at(geo.art);
-        match cover {
-            Some((idx, iw, ih)) => {
-                p.rect(ax, ay, aw, ah, Some(Rgba(20, 20, 20, 255)), None);
-                let f = (aw / iw).min(ah / ih);
-                p.image(idx, ax + (aw - iw * f) / 2.0, ay + (ah - ih * f) / 2.0, iw * f, ih * f);
-            }
-            None => {
-                p.rect(ax, ay, aw, ah, Some(Rgba(226, 226, 230, 255)), None);
-                let size = 11.0 * k;
-                let shown = crate::caption::fit(&name, aw - 12.0 * k, |t| crate::pdf::write::text_width(FontKind::Sans, size, t));
-                p.text(TextStyle::plain(FontKind::Sans, size, grey), ax + 6.0 * k, ay + ah - 8.0 * k, &shown);
-            }
-        }
-        // the round play button over the artwork
-        let (cx, cy, r) = (ax + aw / 2.0, ay + ah / 2.0, widget::BUTTON_RADIUS * k);
-        p.circle(cx, cy, r, Some(Rgba(50, 50, 55, 255)), None);
-        p.path(&[[cx - 0.35 * r, cy - 0.5 * r], [cx - 0.35 * r, cy + 0.5 * r], [cx + 0.55 * r, cy]], true, Some(Rgba(255, 255, 255, 255)), None);
-        // name, progress bar with its times, volume
-        let x0 = ox + geo.text_x * k;
-        let width = size.x - (geo.text_x + 12.0) * k;
-        let top = oy + geo.top * k;
-        let name_size = 14.0 * k;
-        let shown = crate::caption::fit(&name, width, |t| crate::pdf::write::text_width(FontKind::Sans, name_size, t));
-        p.text(TextStyle::plain(FontKind::Sans, name_size, ink), x0, top + 10.0 * k + name_size, &shown);
-        p.rect(x0, top + 54.0 * k, width, 4.0 * k, Some(Rgba(205, 205, 210, 255)), None);
-        let time = 11.0 * k;
-        let total = look.duration.map(crate::media::player::clock).unwrap_or_else(|| "–:––".into());
-        p.text(TextStyle::plain(FontKind::Sans, time, grey), x0, top + 66.0 * k + time, "0:00");
-        let tw = crate::pdf::write::text_width(FontKind::Sans, time, &total);
-        p.text(TextStyle::plain(FontKind::Sans, time, grey), x0 + width - tw, top + 66.0 * k + time, &total);
-        p.rect(x0, top + 90.0 * k, (width / k * 0.4).clamp(60.0, 120.0) * k, 4.0 * k, Some(Rgba(205, 205, 210, 255)), None);
+        let (ox, oy, page) = (self.left, self.y, self.page);
+        draw_card(&mut self.doc, page, [ox, oy], size, card, abs, &look);
         self.y += size.y;
         self.picture_end(caption);
     }
@@ -1667,6 +1624,76 @@ impl<'a> Writer<'a> {
         }
         self.y += 8.0;
     }
+}
+
+/// The length and the cover (the first frame, with ffmpeg) of a sound or video.
+fn media_look(abs: &Path) -> crate::media::cover::Look {
+    if crate::media::is_video(abs) {
+        crate::media::video::look(abs, crate::media::ffmpeg::locate).look
+    } else {
+        crate::media::cover::look(abs)
+    }
+}
+
+/// The card of a sound or video (MEDIA-001) on `page` of `doc`, `card` big in the editor's points
+/// and drawn `size` big at `origin`: the parts of the editor's card (`media::widget::geometry`),
+/// the cover or first frame as the artwork, the name, the empty progress bar and the length. The
+/// one drawing of the note export (PDF-004) and of the TeX export (TEX-015, `export_player_card`).
+fn draw_card(doc: &mut Doc, page: usize, origin: [f32; 2], size: Vec2, card: Vec2, abs: &Path, look: &crate::media::cover::Look) {
+    use crate::media::widget;
+    let k = size.x / card.x;
+    let geo = widget::geometry(abs, card.x);
+    let [ox, oy] = origin;
+    let at = |r: egui::Rect| [ox + r.left() * k, oy + r.top() * k, r.width() * k, r.height() * k];
+    let name = abs.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let ink = Rgba(30, 30, 30, 255);
+    let grey = Rgba(105, 105, 110, 255);
+    let cover = look.cover.as_ref().and_then(rgba_of).map(|img| (doc.add_image(pdf_image(&img)), img.width() as f32, img.height() as f32));
+    let p = doc.page(page);
+    p.rect(ox, oy, size.x, size.y, Some(Rgba(246, 246, 248, 255)), Some((Rgba(200, 200, 205, 255), 0.8)));
+    let [ax, ay, aw, ah] = at(geo.art);
+    match cover {
+        Some((idx, iw, ih)) => {
+            p.rect(ax, ay, aw, ah, Some(Rgba(20, 20, 20, 255)), None);
+            let f = (aw / iw).min(ah / ih);
+            p.image(idx, ax + (aw - iw * f) / 2.0, ay + (ah - ih * f) / 2.0, iw * f, ih * f);
+        }
+        None => {
+            p.rect(ax, ay, aw, ah, Some(Rgba(226, 226, 230, 255)), None);
+            let size = 11.0 * k;
+            let shown = crate::caption::fit(&name, aw - 12.0 * k, |t| crate::pdf::write::text_width(FontKind::Sans, size, t));
+            p.text(TextStyle::plain(FontKind::Sans, size, grey), ax + 6.0 * k, ay + ah - 8.0 * k, &shown);
+        }
+    }
+    // the round play button over the artwork
+    let (cx, cy, r) = (ax + aw / 2.0, ay + ah / 2.0, widget::BUTTON_RADIUS * k);
+    p.circle(cx, cy, r, Some(Rgba(50, 50, 55, 255)), None);
+    p.path(&[[cx - 0.35 * r, cy - 0.5 * r], [cx - 0.35 * r, cy + 0.5 * r], [cx + 0.55 * r, cy]], true, Some(Rgba(255, 255, 255, 255)), None);
+    // name, progress bar with its times, volume
+    let x0 = ox + geo.text_x * k;
+    let width = size.x - (geo.text_x + 12.0) * k;
+    let top = oy + geo.top * k;
+    let name_size = 14.0 * k;
+    let shown = crate::caption::fit(&name, width, |t| crate::pdf::write::text_width(FontKind::Sans, name_size, t));
+    p.text(TextStyle::plain(FontKind::Sans, name_size, ink), x0, top + 10.0 * k + name_size, &shown);
+    p.rect(x0, top + 54.0 * k, width, 4.0 * k, Some(Rgba(205, 205, 210, 255)), None);
+    let time = 11.0 * k;
+    let total = look.duration.map(crate::media::player::clock).unwrap_or_else(|| "–:––".into());
+    p.text(TextStyle::plain(FontKind::Sans, time, grey), x0, top + 66.0 * k + time, "0:00");
+    let tw = crate::pdf::write::text_width(FontKind::Sans, time, &total);
+    p.text(TextStyle::plain(FontKind::Sans, time, grey), x0 + width - tw, top + 66.0 * k + time, &total);
+    p.rect(x0, top + 90.0 * k, (width / k * 0.4).clamp(60.0, 120.0) * k, 4.0 * k, Some(Rgba(205, 205, 210, 255)), None);
+}
+
+/// The card of a sound or video as a small vector PDF of its own, one page `card` big (the
+/// editor's points; the TeX export scales it, TEX-015): the same drawing as the note export's.
+/// `card` comes from `media::widget::card_size`.
+pub fn export_player_card(abs: &Path, card: Vec2) -> Vec<u8> {
+    let look = media_look(abs);
+    let mut doc = Doc::new("");
+    let page = doc.add_page(card.x, card.y);
+    draw_card(&mut doc, page, [0.0, 0.0], card, card, abs, &look);
+    doc.finish()
 }
 
 /// A frame or cover (as the player shows it) as an image for the PDF.
