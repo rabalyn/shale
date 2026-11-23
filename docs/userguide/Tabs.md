@@ -8,7 +8,9 @@ features:
 - Drag a tab left or right to reorder it; a marker shows where it will land. A click without
   moving just selects the tab; the ✕ or a middle click closes it.
 - Right-click a tab and choose **Pin tab** (or **Unpin tab**): pinned tabs move to the far
-  left, show a small pin and keep their order. Pinned tabs can still be closed.
+  left, show a small pin and keep their order. A pinned tab is never replaced: whatever you open while it is the open tab
+  (an import, a link, a search result, the quick switcher, a file in the tree, back and forward) opens in a
+  new tab, and the pinned tab keeps its note. Pinned tabs can still be closed.
 - Ctrl+PageUp / Ctrl+PageDown switch to the previous / next tab, after the last comes the first (on macOS Cmd+Opt+← / Cmd+Opt+→, because Cmd+Opt+H would hide the other apps).
 - Right-click a tab and choose **Open in split right**, or press Ctrl+\, to open it in a new
   **pane** to the right: the middle area can hold any number of panes side by side, each with its
