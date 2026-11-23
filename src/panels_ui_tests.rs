@@ -923,6 +923,17 @@ fn dev_020_the_help_button_in_settings_opens_the_user_guide_as_the_vault() {
     p.click(Show::Modals, "Open user guide (F1)");
     let copy = root.join(format!("userguide-{}", env!("CARGO_PKG_VERSION")));
     assert!(p.app.modal.is_none(), "Settings closes");
+    // the guide is read in the background (NET-019)
+    // (this harness draws only the dialogs: it takes in the vault itself)
+    crate::ui_test_support::settle_within(std::time::Duration::from_secs(60), || {
+        p.frame(Show::Modals, vec![]);
+        p.app.vault_load_tick(&p.ctx);
+        if p.app.vault_load.is_loading() {
+            vec!["the loading of a vault"]
+        } else {
+            vec![]
+        }
+    });
     assert_eq!(p.app.vault.as_ref().map(|v| v.root.clone()), Some(copy));
 }
 
