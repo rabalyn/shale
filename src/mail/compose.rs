@@ -535,12 +535,12 @@ pub fn att_from_file(name: &str, data: Vec<u8>) -> Att {
         "zip" => "application/zip",
         "json" => "application/json",
         "ics" => "text/calendar",
-        "mp3" => "audio/mpeg",
         "mp4" => "video/mp4",
         "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        _ => "application/octet-stream",
+        // every sound of the one list of media extensions, from the one table (MAIL-241)
+        other => crate::media::audio_mime_for_ext(other).unwrap_or("application/octet-stream"),
     };
     Att { name: name.rsplit('/').next().unwrap_or(name).to_string(), mime: mime.into(), data: Arc::new(data), ..Att::default() }
 }
@@ -761,6 +761,30 @@ mod tests {
         // too much is refused with words
         d.attachments = vec![Att { name: "big".into(), mime: "x/y".into(), data: Arc::new(vec![0; MAX_ATTACHMENTS_TOTAL + 1]), ..Att::default() }];
         assert!(build(&d, &opts()).unwrap_err().0.contains("bigger than"));
+    }
+
+    // spec: MAIL-241
+    #[test]
+    fn mail_241_every_audio_extension_goes_out_with_its_audio_type_from_the_shared_table() {
+        let mut d = draft();
+        for ext in crate::media::AUDIO_EXTS {
+            let a = att_from_file(&format!("/home/x/Voice memo.{}", ext.to_ascii_uppercase()), vec![1, 2, 3]);
+            assert_eq!(Some(a.mime.as_str()), crate::media::audio_mime_for_ext(ext), ".{ext}");
+            assert!(a.mime.starts_with("audio/"), "{ext}: {}", a.mime);
+            // what a receiver does with the type gives the extension back (oga and ogg share a type)
+            assert!(crate::media::ext_for_mime(&a.mime).is_some_and(|e| e == ext || (ext, e) == ("oga", "ogg")), "{ext}: {}", a.mime);
+            d.attachments.push(a);
+        }
+        // …and the message carries that type, which a reader reads back
+        let m = mail::parse(&build(&d, &opts()).unwrap().bytes);
+        assert_eq!(m.attachments.len(), crate::media::AUDIO_EXTS.len());
+        for (a, ext) in m.attachments.iter().zip(crate::media::AUDIO_EXTS) {
+            assert_eq!(Some(a.mime.as_str()), crate::media::audio_mime_for_ext(ext), ".{ext}");
+            assert_eq!(a.data, vec![1, 2, 3]);
+        }
+        // a name that is no sound stays what it was
+        assert_eq!(att_from_file("notes.xyz", vec![]).mime, "application/octet-stream");
+        assert_eq!(att_from_file("clip.mp4", vec![]).mime, "video/mp4");
     }
 
     // spec: MAIL-129
