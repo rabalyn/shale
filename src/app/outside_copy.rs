@@ -1,5 +1,5 @@
-//! "Copy into the vault" in the window (MEDIA-021): the files that the outside links of a note
-//! name are copied to `z_media/…` in a background job (the files may be big and on a slow disk,
+//! "Copy into the vault" in the window (MEDIA-021, MEDIA-031): the files that the outside links of a
+//! note, or the outside pictures of a drawing, name are copied to `z_media/…` in a background job (the files may be big and on a slow disk,
 //! JOB-001), and when the job has ended the note's links point at the copies.
 
 use super::{ShaleApp, View};
@@ -22,15 +22,26 @@ impl ShaleApp {
             self.toast("Files are being copied into the vault already");
             return;
         }
-        let (Some(v), Some(doc)) = (self.vault.as_ref(), self.notes.get(rel)) else { return };
-        if doc.unreadable.is_some() {
-            self.toast(format!("“{}” could not be read, so it is not changed", rel_to_string(rel)));
-            return;
-        }
-        let mut targets = v.outside_targets(&doc.text, rel);
+        let Some(v) = self.vault.as_ref() else { return };
+        let drawing = self.drawings.get(rel);
+        let mut targets = match (self.notes.get(rel), drawing) {
+            (Some(doc), _) => {
+                if doc.unreadable.is_some() {
+                    self.toast(format!("“{}” could not be read, so it is not changed", rel_to_string(rel)));
+                    return;
+                }
+                v.outside_targets(&doc.text, rel)
+            }
+            (None, Some(d)) if d.error.is_some() || d.read_only.is_some() => {
+                self.toast(format!("“{}” could not be read or is read-only, so it is not changed", rel_to_string(rel)));
+                return;
+            }
+            (None, Some(d)) => crate::drawing::pictures::outside_targets(&d.scene, v, rel),
+            (None, None) => return,
+        };
         targets.retain(|t| only.as_ref().is_none_or(|o| o == t));
         if targets.is_empty() {
-            self.toast("This note links no media from outside the vault");
+            self.toast(if drawing.is_some() { "This drawing has no picture from outside the vault" } else { "This note links no media from outside the vault" });
             return;
         }
         let (root, libraries, date) = (v.root.clone(), v.libraries().to_vec(), crate::media::local_date());
@@ -78,7 +89,9 @@ impl ShaleApp {
                 t.editor.pending_relink = Some((rel.to_path_buf(), copied.done.clone()));
                 editing = true;
             }
-            if !editing && self.notes.contains_key(rel) {
+            if self.drawings.contains_key(rel) && !self.notes.contains_key(rel) {
+                self.relink_drawing(rel, &copied.done);
+            } else if !editing && self.notes.contains_key(rel) {
                 self.relink_note(rel, &copied.done);
             } else if !editing {
                 message.push_str(&format!(". “{}” is not open, so its links were left as they are", rel_to_string(rel)));
@@ -101,5 +114,14 @@ impl ShaleApp {
             v.set_note_text(rel, &text);
         }
         self.save_note(rel);
+    }
+
+    /// Point the pictures of the drawing `rel` at the copies and save it: one save, so one step of
+    /// its history (MEDIA-031).
+    fn relink_drawing(&mut self, rel: &Path, done: &[(String, PathBuf)]) {
+        let Some(_tree) = self.hold_sync_tree() else { return };
+        if self.drawings.get_mut(rel).is_some_and(|d| d.relink_pictures(done)) {
+            self.save_drawing(rel);
+        }
     }
 }

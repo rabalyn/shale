@@ -33,7 +33,7 @@ shows the connection ([[Graph and backlinks]]).
 
 - Drawings of the Obsidian Excalidraw plugin (`.excalidraw.md`) open in the drawing editor and
   are saved in the plugin's own format, so Obsidian keeps reading them.
-- Pictures inside drawings show up, also in embedded drawings and in PDF export.
+- Pictures inside drawings show up, also in embedded drawings and in PDF export. A picture of an Obsidian drawing (`.excalidraw.md`) may live outside the vault; **Copy outside media into the vault** in the drawing's ⋯ menu copies it into the media folder and points the drawing at the copy, leaving the rest of the file as it was.
 
 ## Obsidian canvases
 

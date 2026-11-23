@@ -284,6 +284,93 @@ fn toast_with(fx: &Fx, what: &str) -> bool {
     fx.app.toasts.iter().any(|(t, _)| t.contains(what))
 }
 
+/// A plugin drawing (`.excalidraw.md`) with one picture element per entry of `embedded` (lines of
+/// `## Embedded Files`), its drawing data compressed or plain JSON.
+fn plugin_drawing(compressed: bool, embedded: &str) -> String {
+    let ids: Vec<&str> = embedded.lines().filter_map(|l| l.split_once(": ").map(|(id, _)| id)).collect();
+    let elements: Vec<String> = ids.iter().enumerate().map(|(i, id)| format!(r#"{{"id":"e{i}","type":"image","x":{},"y":0,"width":20,"height":10,"fileId":"{id}"}}"#, i * 30)).collect();
+    let scene = crate::drawing::Scene::parse(&format!(r#"{{"type":"excalidraw","version":2,"elements":[{}]}}"#, elements.join(","))).unwrap();
+    let text = crate::drawing::excalidraw_md::new_file(&scene).replace("\n%%\n## Drawing", &format!("\n## Embedded Files\n{embedded}\n%%\n## Drawing"));
+    if compressed {
+        text
+    } else {
+        crate::drawing::excalidraw_md::write(&text.replace("```compressed-json", "```json"), &scene).unwrap()
+    }
+}
+
+/// The window with the drawing `rel` (made by [`plugin_drawing`]) open.
+fn with_drawing(tag: &str, rel: &str, text: &str, libraries: Vec<Library>) -> Fx {
+    let mut fx = window(tag, "just a note\n", libraries);
+    std::fs::write(fx.dir.join(rel), text).unwrap();
+    fx.app.vault.as_mut().unwrap().rescan();
+    fx.app.open(std::path::Path::new(rel), false);
+    fx.hl.frames(&mut fx.app, 3);
+    fx
+}
+
+// spec: MEDIA-031
+#[test]
+fn a_drawing_with_an_outside_picture_is_copied_in_its_entry_points_into_the_vault_and_the_file_stays_valid() {
+    let o = Outside::new("drawing-copy");
+    o.picture("a.png").picture("b.png");
+    let by_address = o.address("b.png");
+    for (compressed, fence) in [(true, "```compressed-json"), (false, "```json")] {
+        let rel = "Sketch.excalidraw.md";
+        let embedded = format!("f1: [[@Media/a.png]]\n\nf2: [[{by_address}]]\n\nf3: [[@Media/gone.png]]\n\nf4: [[inside.png]]\n");
+        let mut fx = with_drawing(&format!("o-drawing-{compressed}"), rel, &plugin_drawing(compressed, &embedded), o.library());
+        image::RgbaImage::from_pixel(4, 4, image::Rgba([0, 0, 255, 255])).save(fx.dir.join("inside.png")).unwrap();
+        fx.app.vault.as_mut().unwrap().rescan();
+        let path = std::path::Path::new(rel);
+        assert!(!fx.app.drawings[path].dirty);
+        // the ⋯ menu of the drawing offers it
+        fx.click_label("⋯");
+        fx.click_label("Copy outside media into the vault");
+        copied(&mut fx);
+        let saved = std::fs::read_to_string(fx.dir.join(rel)).unwrap();
+        let scene = crate::drawing::excalidraw_md::read(&saved).expect("the file is still a valid drawing");
+        assert_eq!(scene.elements.len(), 4, "the drawing is the same");
+        assert!(saved.contains(fence) && (compressed || !saved.contains("compressed-json")), "the format stays: {saved}");
+        let entry = |id: &str| scene.embedded.iter().find(|(k, _)| k == id).map(|(_, t)| t.clone()).unwrap_or_else(|| panic!("{id}: {:?}\n{saved}", scene.embedded));
+        for id in ["f1", "f2"] {
+            assert!(entry(id).starts_with("z_media/") && entry(id).ends_with(".png"), "{id}: {}", entry(id));
+            assert!(fx.dir.join(entry(id)).is_file(), "the copy is in the vault");
+        }
+        assert!(entry("f1").ends_with("_a.png") && entry("f2").ends_with("_b.png"));
+        assert_eq!(entry("f3"), "@Media/gone.png", "a file that is not there is left");
+        assert_eq!(entry("f4"), "inside.png", "a picture of the vault is not touched");
+        assert!(saved.contains("f3: [[@Media/gone.png]]\n\nf4: [[inside.png]]"), "only the targets changed: {saved}");
+        assert!(toast_with(&fx, "Copied 2 files into the vault") && toast_with(&fx, "@Media/gone.png"), "the missing file is reported: {:?}", fx.app.toasts);
+        assert!(!fx.app.drawings[path].dirty, "saved");
+        assert_eq!(fx.app.drawings[path].scene.embedded, scene.embedded, "the open drawing points at the copies");
+        assert_eq!(walk_files(&fx.dir.join("z_media")).len(), 2);
+        assert!(o.folder.join("a.png").is_file(), "the originals stay");
+        // only the file that is not there is left: said, nothing changes
+        fx.app.copy_outside(path, None);
+        copied(&mut fx);
+        assert!(toast_with(&fx, "No file was copied into the vault. Left as they are"), "{:?}", fx.app.toasts);
+        assert_eq!(std::fs::read_to_string(fx.dir.join(rel)).unwrap(), saved);
+    }
+}
+
+// spec: MEDIA-031
+#[test]
+fn the_menu_entry_of_a_drawing_is_off_without_outside_pictures_and_a_drawing_that_cannot_be_read_is_not_changed() {
+    let o = Outside::new("drawing-off");
+    o.picture("a.png");
+    let none = plugin_drawing(true, "f1: [[inside.png]]\n");
+    let mut fx = with_drawing("o-drawing-off", "Sketch.excalidraw.md", &none, o.library());
+    fx.click_label("⋯");
+    fx.hl.frames(&mut fx.app, 2);
+    let at = fx.hl.text.iter().find(|(t, _)| t == "Copy outside media into the vault").map(|(_, p)| *p).expect("the entry is in the menu");
+    fx.hl.click(&mut fx.app, at + egui::vec2(8.0, 6.0), PointerButton::Primary);
+    assert!(fx.app.outside_copy.is_none() && fx.app.toasts.iter().all(|(t, _)| !t.contains("Copying")), "it does nothing when it is off");
+    // a drawing that could not be read is not written
+    let rel = std::path::Path::new("Sketch.excalidraw.md");
+    fx.app.drawings.get_mut(rel).unwrap().error = Some("broken".into());
+    fx.app.copy_outside(rel, None);
+    assert!(toast_with(&fx, "could not be read or is read-only") && fx.app.outside_copy.is_none(), "{:?}", fx.app.toasts);
+}
+
 /// Where the link of a note points after "Copy into the vault": the path in `z_media` and its bytes.
 fn copy_of(fx: &Fx, link: &str, name: &str) -> PathBuf {
     let rel = link.trim_start_matches("![[").split(['|', ']']).next().unwrap().to_string();

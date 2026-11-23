@@ -1067,8 +1067,14 @@ impl Vault {
     /// target once, as written, in the order of the text. A link that a file of the vault answers
     /// to is not one (MEDIA-014).
     pub fn outside_targets(&self, text: &str, rel: &Path) -> Vec<String> {
+        self.outside_among(markdown::find_links(text).iter().map(|l| l.target.as_str()), rel)
+    }
+
+    /// The outside targets among `targets` (the links of `rel`), each once: [`Vault::outside_targets`]
+    /// for a list that is not a text, such as the pictures of a drawing (MEDIA-031).
+    pub fn outside_among<'a>(&self, targets: impl Iterator<Item = &'a str>, rel: &Path) -> Vec<String> {
         let mut seen = HashSet::new();
-        markdown::find_links(text).into_iter().filter(|l| l.is_outside() && self.resolve(&l.target, Some(rel)).is_none() && seen.insert(l.target.clone())).map(|l| l.target).collect()
+        targets.filter(|t| outside::spot(t).is_some() && self.resolve(t, Some(rel)).is_none() && seen.insert(*t)).map(str::to_string).collect()
     }
 
     /// Every outside link of the vault, from the index (no file system access): for the background
