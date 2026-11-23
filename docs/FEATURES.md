@@ -736,7 +736,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - The first sync fetches the mail of the last three years, newest first, several folders at once,
   and can be stopped and resumed. **Sync** and the status bar show the progress; new mail is also
   fetched every 10 minutes (changeable, 0 = off) while Shale runs. A mail deleted on the server
-  stays here, dimmed, with a note.
+  stays here, dimmed, with a note; **Delete local copy…** (the button in the open mail and in the
+  bar of the marked mails, the row menu, or Shift+D) removes Shale's own copy of such mails, after
+  you confirm, several at once. Mail that is still on the server never gets it. The server and the
+  notes you imported from the mail are not touched, and the file goes to the local `.trash`.
 - **Changes in another mail program show up within seconds.** While the mail view is open, the
   folder you have open and each account's Inbox are watched over a read-only connection with IMAP
   IDLE: a flag removed, mail read, new or deleted mail in Thunderbird or on your phone appears here
@@ -777,7 +780,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   change is undone in the list and you are told why. "Delete" is always a move to the Trash
   folder. "Delete forever" removes only the mails you chose (never the ones another program
   marked as deleted). A mail that another program moved or deleted meanwhile is left alone and
-  dimmed. Shale never deletes its own local copy: files of mail that moved or were deleted go to
+  dimmed. Shale never deletes a file of its own local copy: files of mail that moved or were deleted go to
   `.trash/<date>/` inside the mail folder. A server without `MOVE` is handled by a verified copy
   first; a server without `UIDPLUS` cannot delete forever, and for it deleting without `MOVE` is
   refused rather than risked.
@@ -1363,6 +1366,7 @@ only while no text field has the keyboard. Every key can be changed in Settings 
 | u | Mark read or unread |
 | s or f | Set or clear the flag |
 | d or Delete | Delete (Trash: asks first); in Drafts and Outbox discard the draft or the record |
+| Shift+D | Delete the local copy of a mail that was deleted on the server (the dimmed ones; asks first; the server and imported notes are not touched) |
 | m | Move to a folder |
 | c | Write a new mail |
 | r, Shift+R, Shift+F | Reply, reply all, forward |

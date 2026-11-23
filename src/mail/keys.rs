@@ -270,15 +270,18 @@ impl MailView {
                 let read = if m.is_seen() { "Mark unread" } else { "Mark read" };
                 let flag = if m.is_flagged() { "Unflag" } else { "Flag" };
                 let del = if self.in_trash(m) { "Delete forever…" } else { "Delete" };
-                [
+                let mut entries = vec![
                     ("mail:ctx-read", read, Act::Read, KeyAction::MailRead),
                     ("mail:ctx-flag", flag, Act::Flag, KeyAction::MailFlag),
                     ("mail:ctx-move", "Move…", Act::Move, KeyAction::MailMove),
                     ("mail:ctx-delete", del, Act::Delete, KeyAction::MailDelete),
-                ]
-                .into_iter()
-                .map(|(k, l, a, key)| (k.to_string(), l.to_string(), MenuCmd::Act(a), hint(key)))
-                .collect()
+                ];
+                // only for a mail that is gone from the server (MAIL-238); on a marked row, when any marked mail is
+                let any_gone = if self.marked.contains_key(&m.id) { self.marked.values().any(crate::mail::ops::local_deletable) } else { crate::mail::ops::local_deletable(m) };
+                if any_gone {
+                    entries.push(("mail:ctx-delete-local", "Delete local copy…", Act::DeleteLocal, KeyAction::MailDeleteLocal));
+                }
+                entries.into_iter().map(|(k, l, a, key)| (k.to_string(), l.to_string(), MenuCmd::Act(a), hint(key))).collect()
             }
             MenuTarget::Draft(i) => vec![(format!("mail:draft-discard:{i}"), "Discard draft".to_string(), MenuCmd::DiscardDraft, hint(KeyAction::MailDelete))],
         }

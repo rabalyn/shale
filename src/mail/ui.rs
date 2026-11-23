@@ -211,6 +211,11 @@ pub struct ForeverAsk {
     pub msgs: Vec<MessageSummary>,
 }
 
+/// "Delete the local copy?": waits for the person's confirmation (MAIL-238).
+pub struct LocalDeleteAsk {
+    pub msgs: Vec<MessageSummary>,
+}
+
 /// What the window must do for the app, returned by `show`.
 pub enum MailAction {
     OpenAccounts,
@@ -409,6 +414,7 @@ pub struct MailView {
     read_timer: Option<(i64, Instant)>,
     pub mover: Option<MovePicker>,
     pub forever: Option<ForeverAsk>,
+    pub local_delete: Option<LocalDeleteAsk>,
     /// Actions the server refused or that could not be done, until the person dismisses them.
     pub problems: Vec<String>,
     // phase 3: writing and sending (ADR-0010)
@@ -544,6 +550,7 @@ impl MailView {
             read_timer: None,
             mover: None,
             forever: None,
+            local_delete: None,
             problems: vec![],
             smtp_factory: real_smtp_factory(),
             compose: None,
@@ -1915,6 +1922,51 @@ impl MailView {
         let n = ask.msgs.len();
         if self.apply(cfg, ask.msgs, Action::DeleteForever(Confirmed::after_dialog(n))) > 0 {
             self.after_leaving();
+        }
+    }
+
+    /// Shift+D: ask whether to delete the local copy of the mails that are deleted on the server (MAIL-238).
+    pub fn delete_local_selected(&mut self) {
+        let t = self.targets();
+        self.delete_local_on(t);
+    }
+
+    pub fn delete_local_on(&mut self, t: Vec<MessageSummary>) {
+        let (ok, rest): (Vec<_>, Vec<_>) = t.into_iter().partition(ops::local_deletable);
+        if ok.is_empty() {
+            if !rest.is_empty() {
+                self.notices.push("Only the copy of a mail that was deleted on the server can be deleted here; a mail that is still on the server would come back with the next sync.".into());
+            }
+            return;
+        }
+        if !rest.is_empty() {
+            self.notices.push(format!("{} selected mail{} still on the server: only the others are offered.", rest.len(), if rest.len() == 1 { " is" } else { "s are" }));
+        }
+        self.local_delete = Some(LocalDeleteAsk { msgs: ok });
+    }
+
+    /// The confirmed "Delete local copy" (the dialog's button): no server is involved.
+    pub fn confirm_local_delete(&mut self) {
+        let Some(ask) = self.local_delete.take() else { return };
+        let Some(store) = self.ready_store() else { return };
+        let n = ask.msgs.len();
+        match ops::delete_local_copies(&store, &ask.msgs, Confirmed::after_dialog(n), &crate::mail::store::today_string()) {
+            Ok(done) => {
+                self.notices.extend(done.notes);
+                if done.removed > 0 {
+                    self.notices.push(format!("The local copy of {} mail{} was deleted (the files are in the local trash).", done.removed, if done.removed == 1 { "" } else { "s" }));
+                }
+                self.dirty = true;
+                self.refresh();
+                self.marked.clear();
+                if self.open.as_ref().is_some_and(|o| ask.msgs.iter().any(|m| m.id == o.msg.id)) {
+                    self.close_message();
+                }
+            }
+            Err(e) => {
+                self.problems.push(e.clone());
+                self.notices.push(e);
+            }
         }
     }
 

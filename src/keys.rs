@@ -328,6 +328,7 @@ actions! {
     MailRead => "mail.read", "Mark read or unread", MailView, ["U"];
     MailFlag => "mail.flag", "Set or clear the flag", MailView, ["S", "F"];
     MailDelete => "mail.delete", "Delete", MailView, ["D", "Delete"];
+    MailDeleteLocal => "mail.delete_local", "Delete the local copy of mails that are deleted on the server", MailView, ["Shift+D"];
     MailMove => "mail.move", "Move to a folder", MailView, ["M"];
     MailCompose => "mail.compose", "Write a new mail", MailView, ["C"];
     MailReply => "mail.reply", "Reply", MailView, ["R"];
@@ -745,7 +746,7 @@ mod tests {
             assert_eq!(mac.display(d.action), on_mac, "{}", d.id);
         }
         assert_eq!(DEFS.iter().filter(|d| d.scope == Scope::NoteView).count(), 26 + 5);
-        assert_eq!(DEFS.len(), 29 + 36 + 6 + 12 + 6 + 26 + 5 + 2);
+        assert_eq!(DEFS.len(), 29 + 37 + 6 + 12 + 6 + 26 + 5 + 2);
     }
 
     // spec: KEY-014
@@ -1174,7 +1175,7 @@ mod tests {
         assert!(k.is_default(Action::MailFlag));
     }
 
-    // spec: KEY-010
+    // spec: KEY-010, MAIL-238
     #[test]
     fn a_bare_key_does_not_fire_with_shift_or_alt() {
         let mut k = linux();
@@ -1184,7 +1185,7 @@ mod tests {
             (Key::S, Some(Action::MailFlag), Some(Action::MailRetry), None),
             (Key::R, Some(Action::MailReply), Some(Action::MailReplyAll), Some(Action::MailBtnReply)),
             (Key::F, Some(Action::MailFlag), Some(Action::MailForward), Some(Action::MailBtnForward)),
-            (Key::D, Some(Action::MailDelete), None, Some(Action::MailBtnDelete)),
+            (Key::D, Some(Action::MailDelete), Some(Action::MailDeleteLocal), Some(Action::MailBtnDelete)),
         ] {
             assert_eq!(frame(&mut k, sc, vec![key_event(key, Modifiers::NONE)]), bare, "{key:?}");
             assert_eq!(frame(&mut k, sc, vec![key_event(key, Modifiers::SHIFT)]), shift, "Shift+{key:?}");
