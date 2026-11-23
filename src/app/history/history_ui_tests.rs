@@ -12,6 +12,8 @@ use std::time::Instant;
 
 const V1: &str = "# Trip\n\nWe go on Friday.\n\n- tent\n- boat\n\nPack warm.\n\nBye.\n";
 const V2: &str = "# Trip\n\nWe go on Saturday.\n\n- tent\n- boat\n- food\n\nPack warm.\n\nBye.\n";
+/// the properties a note that Shale saved already has: the first version of the note carries them
+const PROPS: &str = "---\ncreated: 2026-11-20T09:00:00+01:00\nmodified: 2026-11-20T09:00:00+01:00\n---\n";
 const V3: &str = "# Trip plan\n\nWe go on Saturday.\n\n- tent\n- boat\n- food\n\nPack warm.\n\nBye now.\n";
 
 struct W {
@@ -27,7 +29,7 @@ impl W {
     /// A window of this size on a vault with the note Trip in three versions, open in one pane.
     fn new(tag: &str, size: Vec2) -> W {
         let mut t = setup(tag, false);
-        write(&t.vault, "Trip.md", V1);
+        write(&t.vault, "Trip.md", &format!("{PROPS}{V1}"));
         t.app.vault.as_mut().unwrap().rescan();
         t.start();
         t.app.open(Path::new("Trip.md"), false);
@@ -232,7 +234,7 @@ fn hist_008_a_click_on_a_row_opens_the_changes_since_that_version_as_track_chang
     assert!(w.has_text("Changes since"), "{:?}", w.hl.text);
     assert_eq!(w.t.app.history.changes.mode, Mode::Changes);
     let Some(Data::Text(t)) = &w.t.app.history.changes.data else { panic!("text data") };
-    assert!(t.old == V1 && t.new == V3, "the oldest version against the note now");
+    assert!(crate::note_props::unstamped(&t.old) == V1 && crate::note_props::unstamped(&t.new) == V3, "the oldest version against the note now");
     // the rendered view: the words, the gutter marks, no Markdown marks
     assert!(w.has_text("Saturday") && w.has_text("Friday") && w.has_text("food"), "{:?}", w.hl.text);
     assert!(t.rows.iter().all(|r| r.spans.iter().all(|s| !s.text.contains('#'))), "headings have no hash marks");
@@ -315,7 +317,7 @@ fn hist_014_the_slider_moves_the_older_end_and_the_to_list_the_newer_one() {
     w.click(Pos2::new(s.max.x - 2.0, s.center().y));
     assert_eq!(w.t.app.history.changes.from, versions[0].commit, "the right end is the newest version");
     let Some(Data::Text(t)) = &w.t.app.history.changes.data else { panic!("text data") };
-    assert_eq!((t.old.as_str(), t.new.as_str()), (V3, V3), "read again for the new end");
+    assert_eq!((crate::note_props::unstamped(&t.old).as_str(), crate::note_props::unstamped(&t.new).as_str()), (V3, V3), "read again for the new end");
     assert!(w.has_text("No changes"), "{:?}", w.hl.text);
     // and to the middle
     let s = w.changes_rect("slider");
@@ -326,7 +328,7 @@ fn hist_014_the_slider_moves_the_older_end_and_the_to_list_the_newer_one() {
     w.t.app.history_compare();
     w.settle();
     let Some(Data::Text(t)) = &w.t.app.history.changes.data else { panic!("text data") };
-    assert_eq!((t.old.as_str(), t.new.as_str()), (V1, V2));
+    assert_eq!((crate::note_props::unstamped(&t.old).as_str(), crate::note_props::unstamped(&t.new).as_str()), (V1, V2));
     assert!(w.has_text("Changes from"), "{:?}", w.hl.text);
 }
 
@@ -337,11 +339,11 @@ fn hist_014_restore_this_version_from_the_changes_puts_it_back_and_one_undo_brin
     let restore = w.changes_rect("restore");
     w.click(restore.center());
     assert!(w.t.app.modal.is_none(), "the view closes");
-    assert_eq!(w.t.app.notes[Path::new("Trip.md")].text, V1);
-    assert_eq!(crate::fsutil::read_to_string(w.t.vault.join("Trip.md")).unwrap(), V1);
+    assert_eq!(crate::note_props::unstamped(&w.t.app.notes[Path::new("Trip.md")].text), V1);
+    assert_eq!(crate::note_props::unstamped(&crate::fsutil::read_to_string(w.t.vault.join("Trip.md")).unwrap()), V1);
     let mut text = w.t.app.notes[Path::new("Trip.md")].text.clone();
     assert!(w.t.app.undo.of(Path::new("Trip.md")).undo(&mut text).is_some());
-    assert_eq!(text, V3, "one undo step");
+    assert_eq!(crate::note_props::unstamped(&text), V3, "one undo step");
 }
 
 // spec: HIST-014
@@ -351,11 +353,11 @@ fn hist_014_copy_text_and_read_only_use_the_actions_of_the_app() {
     w.t.app.ctx = Some(w.hl.ctx().clone());
     let copy = w.changes_rect("copy");
     w.click(copy.center());
-    assert!(w.copied.iter().any(|c| c == V1), "the text of the older version is copied: {:?}", w.copied);
+    assert!(w.copied.iter().any(|c| crate::note_props::unstamped(c) == V1), "the text of the older version is copied: {:?}", w.copied);
     let ro = w.changes_rect("read-only");
     w.click(ro.center());
     let (title, text) = w.t.app.history.changes.alone.clone().expect("the version alone");
-    assert_eq!(text, V1);
+    assert_eq!(crate::note_props::unstamped(&text), V1);
     assert!(title.starts_with("Trip.md as of "), "{title}");
     assert!(w.has_text("Back to the changes"));
     let back = w.changes_rect("back");
@@ -461,7 +463,7 @@ fn sync_045_the_deleted_notes_dialog_lists_a_trashed_note_and_restores_it() {
     assert!(w.has_text("Trip.md") && w.has_text("deleted"), "{:?}", w.hl.text);
     let restore = w.t.app.history.deleted.rects.iter().find(|r| r.0 == "restore-deleted-0").expect("a Restore button").1;
     w.click(restore.center());
-    assert_eq!(crate::fsutil::read_to_string(w.t.vault.join("Trip.md")).unwrap(), V3);
+    assert_eq!(crate::note_props::unstamped(&crate::fsutil::read_to_string(w.t.vault.join("Trip.md")).unwrap()), V3);
 }
 
 // spec: HIST-018

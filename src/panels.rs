@@ -139,9 +139,22 @@ impl ShaleApp {
     pub(crate) fn sorted_files_in(&self, dir: &Path) -> Vec<(PathBuf, String, FileKind)> {
         let Some(v) = &self.vault else { return vec![] };
         let sort = self.cfg.file_sort;
-        let mut entries: Vec<&crate::vault::FileEntry> = v.files.iter().filter(|f| f.rel.parent() == Some(dir)).collect();
-        entries.sort_by(|a, b| sort_order(sort, &a.display_name().to_lowercase(), &b.display_name().to_lowercase(), (a.created, a.modified), (b.created, b.modified)));
-        entries.into_iter().map(|f| (f.rel.clone(), f.display_name(), f.kind)).collect()
+        let entries: Vec<&crate::vault::FileEntry> = v.files.iter().filter(|f| f.rel.parent() == Some(dir)).collect();
+        // a note's times are its `created:` and `modified:` properties, with the fallbacks of VAULT-045 and VAULT-046;
+        // read once per entry, and only for the sorts that use them
+        let by_time = !matches!(sort, crate::config::FileSort::NameAsc | crate::config::FileSort::NameDesc);
+        let times = |f: &crate::vault::FileEntry| {
+            if f.kind != FileKind::Note || !by_time {
+                return (f.created, f.modified);
+            }
+            let text = v.notes.get(&f.rel).map_or("", |n| n.text.as_str());
+            let time = |s: i64| std::time::UNIX_EPOCH + std::time::Duration::from_secs(s.max(0) as u64);
+            // the file times stay as exact as the file system has them, so they are the fallback here
+            (crate::note_props::created(&f.rel, text, None).map(time).or(f.created), crate::note_props::modified(text, None).map(time).or(f.modified))
+        };
+        let mut keyed: Vec<_> = entries.into_iter().map(|f| (f.display_name(), times(f), f)).collect();
+        keyed.sort_by(|a, b| sort_order(sort, &a.0.to_lowercase(), &b.0.to_lowercase(), a.1, b.1));
+        keyed.into_iter().map(|(name, _, f)| (f.rel.clone(), name, f.kind)).collect()
     }
 
     /// The subfolders of a folder in the order the file list shows them.

@@ -171,9 +171,10 @@ pub fn summary(text: &str) -> Option<String> {
         Kind::Word => parts.extend(card.page_chip()),
         Kind::Generic => match card.get("title") {
             Some(t) => parts.push(t.to_string()),
-            None => parts.extend(card.rows().into_iter().take(2).map(|(_, v)| v)),
+            None => parts.extend(card.rows().into_iter().filter(|(k, _)| !matches!(k.as_str(), "created" | "modified" | "priority")).take(2).map(|(_, v)| v)),
         },
     }
+    parts.extend(crate::note_props::priority(text).map(|p| format!("{} priority", p.name())));
     let tags = card.tags();
     if !tags.is_empty() {
         parts.push(tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" "));
@@ -188,6 +189,14 @@ mod tests {
     const MAIL: &str = "---\ntype: email\nsubject: \"Plan\"\nfrom: \"Anna Müller <anna@x.de>\"\nto: \"Bob <bob@x.de>, carol@y.de\"\ndate: 2026-11-12 14:30\nmessage-id: \"<abc@x.de>\"\ntags: [work, mail]\n---\n\n# Plan\n";
     const EVENT: &str = "---\ntype: event\ntitle: Standup\nstart: 2026-11-12 14:30\nend: 2026-11-12 15:00\nlocation: Room 4\ncalendar: Work\nevent-uid: \"u1\"\ntags: [work]\n---\n";
     const WORD: &str = "---\nprint-paper: A4\nprint-margins: 25 25 25 25\nprint-font: serif\nprint-font-size: 11\nsource: a.docx\ntags: [docx]\n---\n";
+
+    // spec: EDIT-060, VAULT-045, VAULT-047
+    #[test]
+    fn the_note_properties_do_not_crowd_a_summary_and_a_priority_is_named() {
+        let text = "---\ncreated: 2026-11-23T14:05:09+01:00\nmodified: 2026-11-23T14:05:09+01:00\nstatus: doing\npriority: high\n---\nbody\n";
+        assert_eq!(summary(text).as_deref(), Some("doing · high priority"));
+        assert_eq!(summary("---\ncreated: 2026-11-23T14:05:09+01:00\npriority: urgent\n---\n"), None, "an unknown priority is ignored");
+    }
 
     // spec: EDIT-060
     #[test]

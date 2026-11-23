@@ -555,7 +555,9 @@ impl ShaleApp {
         let rel = ch.rel.clone();
         let name = rel_to_string(&rel);
         let labels = (format!("{name} ({})", crate::history::labels::day_time(from.time, now)), format!("{name} ({})", to.as_ref().map_or("now".to_string(), |t| crate::history::labels::day_time(t.time, now))));
-        let live = if to.is_none() { self.notes.get(&rel).filter(|d| d.unreadable.is_none()).map(|d| d.text.clone()) } else { None };
+        // the open buffer lacks the `created:` and `modified:` lines a save adds (VAULT-045), so "now" is the buffer as a save would write it
+        let on_disk = self.vault.as_ref().and_then(|v| v.notes.get(&rel)).map(|n| n.text.as_str());
+        let live = if to.is_none() { self.notes.get(&rel).filter(|d| d.unreadable.is_none()).map(|d| crate::note_props::stamp(&d.text, on_disk, now).unwrap_or_else(|| d.text.clone())) } else { None };
         self.history.changes.loading = true;
         self.history.changes.data = None;
         self.history.queries.push_back(Query::Compare(Box::new(Compared { rel, from, to, live, labels })));

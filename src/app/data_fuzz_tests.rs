@@ -57,6 +57,14 @@ fn token(bytes: &[u8]) -> Option<u64> {
     std::str::from_utf8(&bytes[start..start + len]).ok()?.parse().ok()
 }
 
+/// The bytes of a file as the test wrote them: Shale's `created:` and `modified:` (VAULT-045) taken off.
+fn plain(bytes: &[u8]) -> Vec<u8> {
+    match std::str::from_utf8(bytes) {
+        Ok(t) => crate::note_props::unstamped(t).into_bytes(),
+        Err(_) => bytes.to_vec(),
+    }
+}
+
 fn well_formed(bytes: &[u8]) -> bool {
     if bytes.is_empty() {
         return true;
@@ -99,7 +107,7 @@ fn all_files(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
 fn holders(app: &ShaleApp, root: &Path) -> BTreeMap<u64, Vec<Holder>> {
     let mut m: BTreeMap<u64, Vec<Holder>> = BTreeMap::new();
     for (p, bytes) in all_files(root) {
-        if let Some(t) = token(&bytes) {
+        if let Some(t) = token(&plain(&bytes)) {
             m.entry(t).or_default().push(Holder::File(p, Stamp::of_bytes(&bytes)));
         }
     }
@@ -343,7 +351,7 @@ impl Sim {
         }
         let files = all_files(&self.root);
         for (p, bytes) in &files {
-            if !well_formed(bytes) {
+            if !well_formed(&plain(bytes)) {
                 return Err(format!("{} is torn or foreign: {:?}", p.display(), String::from_utf8_lossy(bytes)));
             }
             if p.file_name().is_some_and(|n| n.to_string_lossy().contains(".shale-tmp-")) {

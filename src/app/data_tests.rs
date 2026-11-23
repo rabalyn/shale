@@ -54,14 +54,14 @@ fn data_001_a_note_is_saved_by_the_autosave_only_after_0_8_s_without_an_edit() {
     // the clock is the age of the last edit: well before 0.8 s nothing is written, well after it is
     edited_ago(&mut app, "N.md", "just typed\n", Duration::ZERO);
     app.autosave();
-    assert_eq!(read(&d, "N.md"), "base\n", "an edit that has just been made is not saved yet");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "N.md")), "base\n", "an edit that has just been made is not saved yet");
     edited_ago(&mut app, "N.md", "a moment ago\n", Duration::from_millis(600));
     app.autosave();
-    assert_eq!(read(&d, "N.md"), "base\n", "0.6 s are not enough");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "N.md")), "base\n", "0.6 s are not enough");
     assert!(app.notes[Path::new("N.md")].dirty);
     edited_ago(&mut app, "N.md", "a while ago\n", Duration::from_millis(1000));
     app.autosave();
-    assert_eq!(read(&d, "N.md"), "a while ago\n", "after more than 0.8 s the note is saved");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "N.md")), "a while ago\n", "after more than 0.8 s the note is saved");
     assert!(!app.notes[Path::new("N.md")].dirty);
     let _ = std::fs::remove_dir_all(&d);
 }
@@ -75,16 +75,16 @@ fn data_001_a_note_is_saved_at_once_when_its_tab_closes_and_at_exit() {
     // edited just now: the autosave would not write it
     edited_ago(&mut app, "N.md", "closed with its tab\n", Duration::ZERO);
     app.autosave();
-    assert_eq!(read(&d, "N.md"), "base\n");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "N.md")), "base\n");
     let tab = app.tabbar.tabs.iter().position(|t| t.view == View::Note(PathBuf::from("N.md"))).unwrap();
     app.close_tab(tab);
-    assert_eq!(read(&d, "N.md"), "closed with its tab\n", "closing the tab saves");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "N.md")), "closed with its tab\n", "closing the tab saves");
     // an edit just made to the note that stays open waits for the autosave, until the exit
     edited_ago(&mut app, "M.md", "left open at exit\n", Duration::ZERO);
     app.autosave();
     assert_ne!(read(&d, "M.md"), "left open at exit\n");
     eframe::App::on_exit(&mut app);
-    assert_eq!(read(&d, "M.md"), "left open at exit\n", "the exit saves");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "M.md")), "left open at exit\n", "the exit saves");
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -149,7 +149,7 @@ fn an_open_note_without_edits_follows_the_file() {
     // the next edit is saved over the reloaded text without a conflict
     type_text(&mut app, "N.md", "three\n");
     app.autosave();
-    assert_eq!(read(&d, "N.md"), "three\n");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "N.md")), "three\n");
     assert_eq!(names(&d, "N"), vec!["N.md"]);
     let _ = std::fs::remove_dir_all(&d);
 }
@@ -188,11 +188,11 @@ fn an_edit_over_an_outside_change_becomes_a_conflict_copy() {
     crate::fsutil::write_atomic(&d.join("N.md"), b"their edit\n").unwrap();
     app.autosave();
     // the other program's version stays at the path, mine is next to it, both are intact
-    assert_eq!(read(&d, "N.md"), "their edit\n");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "N.md")), "their edit\n");
     let copies = names(&d, "N (conflict ");
     assert_eq!(copies.len(), 1, "{copies:?}");
     assert!(copies[0].ends_with(").md"));
-    assert_eq!(read(&d, &copies[0]), "my edit\n");
+    assert_eq!(crate::note_props::unstamped(&read(&d, &copies[0])), "my edit\n");
     // the buffer shows the other version, is clean, and the user is told with both names
     let doc = &app.notes[Path::new("N.md")];
     assert_eq!((doc.text.as_str(), doc.dirty), ("their edit\n", false));
@@ -202,7 +202,7 @@ fn an_edit_over_an_outside_change_becomes_a_conflict_copy() {
     // typing on goes to the file again, no second conflict
     type_text(&mut app, "N.md", "more\n");
     app.autosave();
-    assert_eq!(read(&d, "N.md"), "more\n");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "N.md")), "more\n");
     assert_eq!(names(&d, "N (conflict ").len(), 1);
     let _ = std::fs::remove_dir_all(&d);
 }
@@ -222,7 +222,7 @@ fn conflict_copies_never_replace_each_other() {
     let mut texts: Vec<String> = copies.iter().map(|c| read(&d, c)).collect();
     texts.sort();
     assert_eq!(texts, vec!["mine 0\n", "mine 1\n", "mine 2\n", "mine 3\n"]);
-    assert_eq!(read(&d, "N.md"), "theirs 3\n");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "N.md")), "theirs 3\n");
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -234,13 +234,13 @@ fn a_touched_file_with_the_same_content_is_no_conflict() {
     type_text(&mut app, "N.md", "mine\n");
     crate::fsutil::write_atomic(&d.join("N.md"), b"base\n").unwrap(); // a sync tool rewrote it
     app.autosave();
-    assert_eq!(read(&d, "N.md"), "mine\n");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "N.md")), "mine\n");
     assert!(names(&d, "N (conflict ").is_empty());
     // both sides made the same edit: nothing to keep apart either
     type_text(&mut app, "N.md", "same\n");
     crate::fsutil::write_atomic(&d.join("N.md"), b"same\n").unwrap();
     app.autosave();
-    assert_eq!(read(&d, "N.md"), "same\n");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "N.md")), "same\n");
     assert!(names(&d, "N (conflict ").is_empty());
     assert!(!app.notes[Path::new("N.md")].dirty);
     let _ = std::fs::remove_dir_all(&d);
@@ -254,7 +254,7 @@ fn a_deleted_note_with_edits_is_written_again() {
     type_text(&mut app, "N.md", "mine\n");
     std::fs::remove_file(d.join("N.md")).unwrap();
     app.autosave();
-    assert_eq!(read(&d, "N.md"), "mine\n");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "N.md")), "mine\n");
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -274,7 +274,7 @@ fn a_drawing_with_edits_over_an_outside_change_becomes_a_conflict_copy() {
     doc.last_edit = Instant::now() - Duration::from_secs(5);
     crate::fsutil::write_atomic(&d.join("D.excalidraw"), scene(1).as_bytes()).unwrap();
     app.autosave();
-    assert_eq!(read(&d, "D.excalidraw"), scene(1));
+    assert_eq!(crate::note_props::unstamped(&read(&d, "D.excalidraw")), scene(1));
     let copies = names(&d, "D (conflict ");
     assert_eq!(copies.len(), 1, "{copies:?}");
     assert!(copies[0].ends_with(").excalidraw"), "{copies:?}");
@@ -333,7 +333,7 @@ fn a_failed_save_keeps_the_buffer_dirty_marks_the_tab_and_is_shown_once() {
     assert!(doc.save_error.as_deref().unwrap_or("").contains("Could not save"), "{:?}", doc.save_error);
     assert!(app.drawings[Path::new("D.excalidraw")].dirty && app.drawings[Path::new("D.excalidraw")].save_error.is_some());
     assert!(toasted(&app, "Could not save “N.md”") && toasted(&app, "Could not save “D.excalidraw”"), "{:?}", app.toasts);
-    assert_eq!(read(&d, "N.md"), "base\n");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "N.md")), "base\n");
     assert!(names(&d, ".shale-tmp").is_empty(), "no temporary file is left");
 
     // it retries, but does not show the same message again and again
@@ -349,7 +349,7 @@ fn a_failed_save_keeps_the_buffer_dirty_marks_the_tab_and_is_shown_once() {
     app.notes.get_mut(Path::new("N.md")).unwrap().last_edit = Instant::now() - Duration::from_secs(5);
     app.drawings.get_mut(Path::new("D.excalidraw")).unwrap().last_edit = Instant::now() - Duration::from_secs(5);
     app.autosave();
-    assert_eq!(read(&d, "N.md"), "precious\n");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "N.md")), "precious\n");
     let doc = &app.notes[Path::new("N.md")];
     assert!(!doc.dirty && doc.save_error.is_none());
     let doc = &app.drawings[Path::new("D.excalidraw")];
@@ -372,7 +372,7 @@ fn toggling_a_checkbox_that_cannot_be_saved_is_shown() {
     assert!(app.notes[Path::new("T.md")].dirty, "kept in the buffer");
     assert!(app.notes[Path::new("T.md")].text.contains("[x]"));
     assert!(toasted(&app, "Could not save “T.md”") && toasted(&app, "Could not change “U.md”"), "{:?}", app.toasts);
-    assert_eq!(read(&d, "U.md"), "- [ ] two\n");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "U.md")), "- [ ] two\n");
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -383,9 +383,9 @@ fn a_rename_reports_the_notes_it_could_not_update_and_updates_the_others() {
     // B changes on disk after the index was made: it is not touched
     crate::fsutil::write_atomic(&d.join("B.md"), b"see [[Target]] and my new text\n").unwrap();
     app.rename(Path::new("Target.md"), "Goal").unwrap();
-    assert_eq!(read(&d, "A.md"), "see [[Goal]]\n");
-    assert_eq!(read(&d, "C.md"), "see [[Goal]]\n");
-    assert_eq!(read(&d, "B.md"), "see [[Target]] and my new text\n", "the other program's change is kept as it is");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "A.md")), "see [[Goal]]\n");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "C.md")), "see [[Goal]]\n");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "B.md")), "see [[Target]] and my new text\n", "the other program's change is kept as it is");
     let v = app.vault.as_ref().unwrap();
     assert_eq!(v.failed_rewrites.len(), 1);
     assert_eq!(v.failed_rewrites[0].0, PathBuf::from("B.md"));
@@ -405,9 +405,9 @@ fn a_rename_where_a_write_fails_halfway_says_which_notes_were_updated() {
     let r = app.rename(Path::new("Target.md"), "Goal");
     locked(&d.join("sub"), false);
     r.unwrap();
-    assert_eq!(read(&d, "A.md"), "see [[Goal]]\n");
-    assert_eq!(read(&d, "C.md"), "see [[Goal]]\n");
-    assert_eq!(read(&d, "sub/B.md"), "see [[Target]]\n", "the original is untouched");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "A.md")), "see [[Goal]]\n");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "C.md")), "see [[Goal]]\n");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "sub/B.md")), "see [[Target]]\n", "the original is untouched");
     assert!(d.join("Goal.md").exists());
     let v = app.vault.as_ref().unwrap();
     assert_eq!(v.failed_rewrites.iter().map(|f| f.0.clone()).collect::<Vec<_>>(), vec![PathBuf::from("sub/B.md")]);
@@ -438,7 +438,7 @@ fn a_folder_with_unsaved_edits_that_cannot_be_saved_is_not_moved_to_the_trash() 
     assert!(!d.join("x").exists());
     let day = crate::mail::store::today_string();
     assert!(names(&d.join(".trash").join(&day), "x").len() == 1);
-    assert_eq!(read(&d, &format!(".trash/{day}/x/N.md")), "precious\n");
+    assert_eq!(crate::note_props::unstamped(&read(&d, &format!(".trash/{day}/x/N.md"))), "precious\n");
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -456,7 +456,7 @@ fn text_that_cannot_be_saved_at_exit_is_put_in_the_recovery_folder_and_announced
     locked(&d.join("Sub"), true);
     eframe::App::on_exit(&mut app);
     locked(&d.join("Sub"), false);
-    assert_eq!(read(&d, "Sub/N.md"), "base\n", "the note on disk is untouched");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "Sub/N.md")), "base\n", "the note on disk is untouched");
     let day = crate::mail::store::today_string();
     let saved = rec.join(&day).join("Sub/N.md");
     assert_eq!(std::fs::read_to_string(&saved).unwrap(), "precious unsaved words\n");
@@ -490,13 +490,13 @@ fn restore_last_deleted_puts_the_item_back_and_refuses_when_the_place_is_taken()
     // newest first
     app.actions.push(Action::RestoreTrashed);
     app.process_actions();
-    assert_eq!(read(&d, "y/N.md"), "other\n");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "y/N.md")), "other\n");
     assert!(toasted(&app, "Restored"), "{:?}", app.toasts);
     // something else took the place of the next one: it stays in the trash
     crate::fsutil::write_atomic(&d.join("x/N.md"), b"new\n").unwrap();
     app.restore_trashed();
     assert!(toasted(&app, "Could not restore"), "{:?}", app.toasts);
-    assert_eq!(read(&d, "x/N.md"), "new\n");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "x/N.md")), "new\n");
     assert!(app.can_restore_trashed());
     let _ = std::fs::remove_dir_all(&d);
 }
@@ -512,17 +512,17 @@ fn a_rename_updates_links_in_an_open_note_with_unsaved_edits_and_keeps_the_edits
     type_text(&mut app, "Target.md", "t edited\n");
     app.rename(Path::new("Target.md"), "Goal").unwrap();
     let a = &app.notes[Path::new("A.md")];
-    assert_eq!(a.text, "my new first line\nsee [[Goal]]\n", "the edit and the new link are in the buffer");
+    assert_eq!(crate::note_props::unstamped(&a.text), "my new first line\nsee [[Goal]]\n", "the edit and the new link are in the buffer");
     assert!(!a.dirty, "and saved");
-    assert_eq!(read(&d, "A.md"), "my new first line\nsee [[Goal]]\n");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "A.md")), "my new first line\nsee [[Goal]]\n");
     assert_eq!(app.notes[Path::new("Dir/B.md")].text, "---\nrelated: \"[[Goal]]\"\n---\nbody\n");
-    assert_eq!(app.notes[Path::new("Goal.md")].text, "t edited\n", "the renamed note's own edit follows it");
-    assert_eq!(read(&d, "Goal.md"), "t edited\n");
+    assert_eq!(crate::note_props::unstamped(&app.notes[Path::new("Goal.md")].text), "t edited\n", "the renamed note's own edit follows it");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "Goal.md")), "t edited\n");
     // the same for a move
     type_text(&mut app, "A.md", "another edit\nsee [[Goal]] [r](./Goal.md)\n");
     app.move_into(Path::new("Goal.md"), Path::new("Dir")).unwrap();
-    assert_eq!(app.notes[Path::new("A.md")].text, "another edit\nsee [[Goal]] [r](./Dir/Goal.md)\n");
-    assert_eq!(read(&d, "A.md"), "another edit\nsee [[Goal]] [r](./Dir/Goal.md)\n");
+    assert_eq!(crate::note_props::unstamped(&app.notes[Path::new("A.md")].text), "another edit\nsee [[Goal]] [r](./Dir/Goal.md)\n");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "A.md")), "another edit\nsee [[Goal]] [r](./Dir/Goal.md)\n");
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -541,7 +541,7 @@ fn a_rename_never_overwrites_edits_that_could_not_be_saved() {
     r.unwrap();
     let a = &app.notes[Path::new("sub/A.md")];
     assert!(a.dirty && a.text.starts_with("precious edit"), "the edit stays in the buffer: {:?}", a.text);
-    assert_eq!(read(&d, "sub/A.md"), "see [[Target]]\n", "the file is not touched");
+    assert_eq!(crate::note_props::unstamped(&read(&d, "sub/A.md")), "see [[Target]]\n", "the file is not touched");
     assert!(app.vault.as_ref().unwrap().failed_rewrites.iter().any(|f| f.0 == Path::new("sub/A.md")), "and it is reported");
     let _ = std::fs::remove_dir_all(&d);
 }

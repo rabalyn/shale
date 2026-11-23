@@ -100,6 +100,7 @@ mod media;
 mod modal_keys_ui_tests;
 #[cfg(test)]
 mod netshare_env_tests;
+mod note_props;
 #[cfg(test)]
 mod notes_vault_tests;
 mod opener;

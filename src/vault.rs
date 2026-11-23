@@ -1208,6 +1208,10 @@ impl Vault {
                 return Ok(Saved::Conflict { copy, theirs });
             }
         }
+        // a note gets `created:` once and `modified:` when its body changed (VAULT-045, VAULT-046)
+        let disk_text = disk.as_deref().and_then(|b| std::str::from_utf8(b).ok());
+        let stamped = (kind_of(rel) == FileKind::Note && (disk.is_none() || disk_text.is_some())).then(|| crate::note_props::stamp(text, disk_text, crate::calendar::time::now())).flatten();
+        let text = stamped.as_deref().unwrap_or(text);
         if disk.as_deref() != Some(text.as_bytes()) {
             if let Some(p) = abs.parent() {
                 fs::create_dir_all(p)?;
@@ -2117,8 +2121,55 @@ mod tests {
         assert!(matches!(v.save_checked(rel, "mine", base).unwrap(), Saved::Written(_)));
         let changed = v.apply_scan(scan).expect("the vault itself did not change in structure");
         assert!(changed.is_empty(), "the older read is not applied");
-        assert_eq!(v.notes[rel].text, "mine");
+        assert_eq!(crate::note_props::unstamped(&v.notes[rel].text), "mine");
         assert!(v.rescan().is_empty(), "and the index agrees with the disk");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-045, VAULT-046
+    #[test]
+    fn a_save_writes_created_once_and_modified_only_for_a_body_change() {
+        let d = temp_vault("note-props");
+        fs::create_dir_all(&d).unwrap();
+        let mut v = Vault::open(&d).unwrap();
+        let rel = Path::new("N.md");
+        let prop = |key: &str| crate::markdown::front_matter_values(&fs::read_to_string(d.join(rel)).unwrap()).into_iter().find(|(k, _)| k == key).map(|(_, v)| v[0].clone());
+        // the first save
+        let Saved::Written(base) = v.save_checked(rel, "# One\n", Stamp::default()).unwrap() else { panic!("written") };
+        let (created, modified) = (prop("created").unwrap(), prop("modified").unwrap());
+        assert!(created.contains('T') && crate::note_props::parse_timestamp(&created).is_some(), "{created}");
+        assert!(fs::read_to_string(d.join(rel)).unwrap().ends_with("---\n# One\n"));
+        assert_eq!(Stamp::of_bytes(&fs::read(d.join(rel)).unwrap()), base, "the stamp is of what is on disk");
+        assert_eq!(v.notes[rel].text, fs::read_to_string(d.join(rel)).unwrap(), "the index holds what was written");
+        // a second save of the buffer (still without the properties) with a changed body
+        let Saved::Written(base) = v.save_checked(rel, "# One\nmore\n", base).unwrap() else { panic!("written") };
+        assert_eq!(prop("created").unwrap(), created, "created is never changed");
+        assert!(crate::note_props::parse_timestamp(&prop("modified").unwrap()) >= crate::note_props::parse_timestamp(&modified));
+        // a front matter only change leaves modified alone
+        let before = prop("modified").unwrap();
+        let Saved::Written(_) = v.save_checked(rel, "---\npriority: high\n---\n# One\nmore\n", base).unwrap() else { panic!("written") };
+        assert_eq!(prop("modified").unwrap(), before);
+        assert_eq!(prop("priority").unwrap(), "high");
+        assert_eq!(prop("created").unwrap(), created);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-045, VAULT-046
+    #[test]
+    fn only_markdown_notes_get_the_properties() {
+        let d = temp_vault("note-props-skip");
+        fs::create_dir_all(&d).unwrap();
+        let mut v = Vault::open(&d).unwrap();
+        for (name, text) in [("data.txt", "plain"), ("Sketch.excalidraw.md", "{\"elements\":[]}"), ("empty.md", "")] {
+            let rel = Path::new(name);
+            v.save_checked(rel, text, Stamp::default()).unwrap();
+            assert_eq!(fs::read_to_string(d.join(rel)).unwrap(), text, "{name} is written as it is");
+        }
+        // a note whose disk bytes are not text has nothing to compare with: no properties
+        fs::write(d.join("bin.md"), [0xff, 0xfe, b'x']).unwrap();
+        let base = Stamp::of_bytes(&[0xff, 0xfe, b'x']);
+        v.save_checked(Path::new("bin.md"), "text", base).unwrap();
+        assert_eq!(fs::read_to_string(d.join("bin.md")).unwrap(), "text", "no disk text to compare: written as it is");
         let _ = fs::remove_dir_all(&d);
     }
 

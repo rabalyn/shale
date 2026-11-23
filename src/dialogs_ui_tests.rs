@@ -125,6 +125,37 @@ fn dialogs_the_sort_menu_orders_the_rows_and_names_the_choice() {
     assert!(["Alpha.md", "Bravo.md", "Charlie.md"].iter().all(|f| p.dir.join(f).is_file()));
 }
 
+// spec: NAV-003, VAULT-045, VAULT-046
+#[test]
+fn dialogs_the_time_sorts_read_the_created_and_modified_properties_before_the_file_times() {
+    let note = |c: &str, m: &str| format!("---\ncreated: {c}\nmodified: {m}\n---\nbody\n");
+    // the file times say Alpha < Bravo < Charlie; the properties say the opposite for created, and another order for modified
+    let mut p = P::with_files(
+        "sort-props",
+        &[
+            ("Alpha.md", &note("2026-03-01T10:00:00Z", "2026-05-01T10:00:00Z")),
+            ("Bravo.md", &note("2026-02-01T10:00:00Z", "2026-07-01T10:00:00Z")),
+            ("Charlie.md", &note("2026-01-01T10:00:00Z", "2026-06-01T10:00:00Z")),
+            ("261117_Delta.md", "no properties, a date prefix\n"),
+        ],
+    );
+    for (f, s) in [("Alpha.md", 1000), ("Bravo.md", 2000), ("Charlie.md", 3000), ("261117_Delta.md", 4000)] {
+        set_mtime(&p.dir.join(f), s);
+    }
+    p.app.vault.as_mut().unwrap().rescan();
+    p.look(Show::Files);
+    let choose = |p: &mut P, from: &str, to: &str| {
+        p.click(Show::Files, &format!("Sort: {from}"));
+        p.click(Show::Files, to);
+    };
+    choose(&mut p, "File name (A to Z)", "Created (old to new)");
+    // Delta has no created: its prefix is 2026-11-17, and its file time is a minute after 1970; the prefix wins
+    assert_eq!(names(&p), ["Charlie", "Bravo", "Alpha", "261117_Delta"]);
+    choose(&mut p, "Created (old to new)", "Modified (new to old)");
+    // Delta has no modified: its file time (1970) is the oldest
+    assert_eq!(names(&p), ["Bravo", "Charlie", "Alpha", "261117_Delta"]);
+}
+
 // spec: CAL-001
 #[test]
 fn dialogs_calendars_add_a_local_calendar_and_keep_it_with_done() {
