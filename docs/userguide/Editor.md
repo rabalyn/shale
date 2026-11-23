@@ -365,7 +365,7 @@ does (a missing note is created), **Ctrl+Enter** opens it in a new pane to the r
 one (see [[Tabs]]; a web link opens in the browser as with Enter), and **Esc** closes the preview and gives the keyboard back to the
 editor, with the cursor where it was and the text unchanged. Off a link, Shift+K only says so in the
 status bar. The key is one of the definable ones (Settings → Keybindings → Vim-style editing, normal
-mode): you can give it, for example, **Space Space**.
+mode): you can give it, for example, **Space P**.
 
 The preview's size can be changed: drag one of its four edges or four corners (the mouse pointer
 turns into a resize arrow). The preview stays open while you drag, and the editor's cursor stays where

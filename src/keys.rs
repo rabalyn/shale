@@ -1289,7 +1289,7 @@ mod tests {
 
     // spec: KEY-005, EDIT-033
     #[test]
-    fn shift_k_is_the_link_preview_and_space_space_can_replace_it() {
+    fn shift_k_is_the_link_preview_and_a_space_sequence_can_replace_it() {
         let mut k = linux();
         let a = Action::NormalLinkPreview;
         assert_eq!(k.bindings(a), vec![b("Shift+K")], "the default");
