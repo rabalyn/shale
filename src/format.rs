@@ -361,39 +361,61 @@ fn leave_span(text: &str, sel: &Range<usize>, marker: &'static str) -> Option<Ou
     }
     let (before, after) = (&line[..at], &line[at..]);
     let n = marker.len();
-    let closes = if marker.starts_with('*') {
-        let (bold, italic) = open_stars(before);
+    let step = if marker.starts_with('*') {
+        let stack = open_stars(before);
         let run = run_after(line, at, b'*');
-        if n == 2 {
-            bold && run >= 2
-        } else {
-            italic && run % 2 == 1
-        }
+        // the key of a span closes it and every span inside it, innermost first
+        stack.iter().rposition(|k| *k == n).and_then(|i| {
+            let total: usize = stack[i..].iter().sum();
+            // what is left of the run must close spans further out, one after the other
+            let rest = run.checked_sub(total)?;
+            (rest == 0 || (1..=i).any(|j| stack[i - j..i].iter().sum::<usize>() == rest)).then_some(total)
+        })
     } else {
-        after.starts_with(marker) && before.matches(marker).count() % 2 == 1
+        (after.starts_with(marker) && before.matches(marker).count() % 2 == 1).then_some(n)
     };
-    closes.then(|| {
-        let c = start + at + n;
+    step.map(|step| {
+        let c = start + at + step;
         (text.to_string(), c..c)
     })
 }
 
-/// Whether a bold and an italic span are open at the end of `s`, counting its runs of `*`: one star
-/// toggles italic, two bold, three both, longer runs by pairs.
-fn open_stars(s: &str) -> (bool, bool) {
-    let (mut bold, mut italic) = (false, false);
+/// The spans of `*` open at the end of `s`, outermost first: 1 for an italic, 2 for a bold. A run of
+/// stars closes the innermost open spans it covers, else opens; `***` opens an italic around a bold
+/// (CommonMark: `***x***` is `<em><strong>x</strong></em>`).
+fn open_stars(s: &str) -> Vec<usize> {
+    let mut stack: Vec<usize> = Vec::new();
     let mut i = 0;
     while i < s.len() {
         let run = run_after(s, i, b'*');
         if run == 0 {
             i += 1;
-        } else {
-            bold ^= (run / 2) % 2 == 1;
-            italic ^= run % 2 == 1;
-            i += run;
+            continue;
+        }
+        i += run;
+        let mut left = run;
+        while left > 0 {
+            match stack.last() {
+                Some(top) if *top <= left => {
+                    left -= *top;
+                    stack.pop();
+                }
+                _ if left >= 3 && !stack.contains(&1) && !stack.contains(&2) => {
+                    stack.extend([1, 2]);
+                    left -= 3;
+                }
+                _ if left >= 2 => {
+                    stack.push(2);
+                    left -= 2;
+                }
+                _ => {
+                    stack.push(1);
+                    left -= 1;
+                }
+            }
         }
     }
-    (bold, italic)
+    stack
 }
 
 /// What an inline command does to one line.
@@ -1100,9 +1122,9 @@ mod tests {
         assert_eq!(run(Cmd::Italic, "**bold|**"), "**bold*|***", "italic inside bold opens");
         assert_eq!(run(Cmd::Italic, "**bold *it|***"), "**bold *it*|**", "italic leaves italic");
         assert_eq!(run(Cmd::Bold, "**bold *it*|**"), "**bold *it***|", "and bold leaves bold");
-        assert_eq!(run(Cmd::Bold, "**bold *it|***"), "**bold *it**|*", "bold at `***` steps over two stars; the text stays");
-        assert_eq!(run(Cmd::Italic, "***x|***"), "***x*|**", "at three stars italic takes one");
-        assert_eq!(run(Cmd::Bold, "***x|***"), "***x**|*", "and bold two");
+        assert_eq!(run(Cmd::Bold, "**bold *it|***"), "**bold *it***|", "the outer key leaves the inner span too");
+        assert_eq!(run(Cmd::Italic, "***x|***"), "***x***|", "`***` is italic around bold: the italic is the outer span and leaves both");
+        assert_eq!(run(Cmd::Bold, "***x|***"), "***x**|*", "bold is the inner span and leaves alone");
         assert_eq!(run(Cmd::Strike, "**x|**"), "**x~~|~~**", "another style opens a pair inside bold");
         assert_eq!(run(Cmd::Bold, "~~x|~~"), "~~x**|**~~");
         assert_eq!(run(Cmd::Italic, "**|**"), "***|***", "an empty bold pair is no italic one");
