@@ -303,6 +303,7 @@ actions! {
     NormalAlternate => "normal.alternate_view", "Back to the previous view of this tab (again: forward)", EditorNormal, ["Space Tab"];
     NormalFindFile => "normal.find_file", "Find a file by name", MainViews, ["Space F F"];
     NormalSearchAll => "normal.search_all", "Search notes, mail and posts", MainViews, ["Space F G"];
+    NormalToggleTask => "normal.toggle_task", "Check or uncheck the task", MainViews, ["Space Space"];
     NormalLinkPreview => "normal.link_preview", "Preview the link under the cursor (again: into the preview)", EditorNormal, ["Shift+K"];
     TreeNextFile => "files.next_file", "Next file", FileList, ["J", "Down"];
     TreePrevFile => "files.prev_file", "Previous file", FileList, ["K", "Up"];
@@ -772,7 +773,7 @@ mod tests {
             assert_eq!(mac.display(d.action), on_mac, "{}", d.id);
         }
         assert_eq!(DEFS.iter().filter(|d| d.scope == Scope::NoteView).count(), 26 + 5);
-        assert_eq!(DEFS.len(), 32 + 37 + 6 + 12 + 6 + 26 + 5 + 2);
+        assert_eq!(DEFS.len(), 32 + 37 + 6 + 12 + 6 + 26 + 5 + 3);
     }
 
     // spec: KEY-014
@@ -1297,22 +1298,47 @@ mod tests {
         for text in ["K", "Shift+J", "Shift+O"] {
             assert!(k.check(a, &b(text)).unwrap_err().contains("fixed meaning"), "{text}");
         }
-        // Space Space is free: no clash with Space Tab, Space f f, Space f g
-        assert_eq!(k.check(a, &b("Space Space")), Ok(()));
+        // Space P is free: no clash with Space Tab, Space f f, Space f g
+        assert_eq!(k.check(a, &b("Space P")), Ok(()));
         assert_eq!(k.check(Action::NormalAlternate, &b("Space Tab")), Ok(()));
         // the default fires on Shift+K, not on k
         let none = Modifiers::NONE;
         assert_eq!(frame(&mut k, Scope::EditorNormal, vec![key_event(Key::K, Modifiers::SHIFT)]), Some(a));
         assert_eq!(frame(&mut k, Scope::EditorNormal, vec![key_event(Key::K, none)]), None, "plain k stays vim's");
         // rebound: only the new sequence fires, the others still do
-        k.set(a, b("Space Space")).unwrap();
-        assert!(k.check(Action::NormalFindFile, &b("Space Space")).unwrap_err().contains("already used"), "the others cannot take it from the action");
+        k.set(a, b("Space P")).unwrap();
+        assert!(k.check(Action::NormalFindFile, &b("Space P")).unwrap_err().contains("already used"), "the others cannot take it from the action");
         assert_eq!(frame(&mut k, Scope::EditorNormal, vec![key_event(Key::K, Modifiers::SHIFT)]), None);
         assert_eq!(frame(&mut k, Scope::EditorNormal, vec![key_event(Key::Space, none)]), None);
-        assert_eq!(frame(&mut k, Scope::EditorNormal, vec![key_event(Key::Space, none)]), Some(a));
+        assert_eq!(frame(&mut k, Scope::EditorNormal, vec![key_event(Key::P, none)]), Some(a));
         assert_eq!(frame(&mut k, Scope::EditorNormal, vec![key_event(Key::Space, none)]), None);
         assert_eq!(frame(&mut k, Scope::EditorNormal, vec![key_event(Key::Tab, none)]), Some(Action::NormalAlternate));
-        assert_eq!(k.overrides().get("normal.link_preview"), Some(&vec!["Space Space".to_string()]), "stored as a change (KEY-007)");
+        assert_eq!(k.overrides().get("normal.link_preview"), Some(&vec!["Space P".to_string()]), "stored as a change (KEY-007)");
+    }
+
+    // spec: KEY-045, KEY-040
+    #[test]
+    fn key_045_space_space_is_free_in_main_views_and_does_not_clash_with_the_file_list() {
+        let mut k = linux();
+        let a = Action::NormalToggleTask;
+        assert_eq!((a.def().id, a.def().label, a.def().scope), ("normal.toggle_task", "Check or uncheck the task", Scope::MainViews));
+        assert_eq!(k.bindings(a), vec![b("Space Space")], "the default");
+        assert_eq!(k.check(a, &b("Space Space")), Ok(()), "it is accepted in its own scope");
+        // the file list keeps its plain Space (files.toggle_folder); the scopes do not overlap
+        assert_eq!(k.bindings(Action::TreeToggleFolder), vec![b("Space")]);
+        assert!(!Scope::MainViews.overlaps(Scope::FileList));
+        assert_eq!(k.check(Action::TreeToggleFolder, &b("Space")), Ok(()));
+        // it sits beside Space Tab, Space f f and Space f g
+        assert_eq!(k.check(Action::NormalAlternate, &b("Space Tab")), Ok(()));
+        assert!(k.check(Action::NormalFindFile, &b("Space Space")).unwrap_err().contains("already used"));
+        assert!(k.check(Action::NormalAlternate, &b("Space Space")).unwrap_err().contains("already used"));
+        // the sequence fires on its second Space, from either scope that is read in the editor
+        let none = Modifiers::NONE;
+        assert_eq!(frame(&mut k, Scope::MainViews, vec![key_event(Key::Space, none)]), None);
+        assert_eq!(frame(&mut k, Scope::MainViews, vec![key_event(Key::Space, none)]), Some(a));
+        // it can be changed like the others
+        k.set(a, b("Space T")).unwrap();
+        assert_eq!(k.overrides().get("normal.toggle_task"), Some(&vec!["Space T".to_string()]));
     }
 
     // spec: KEY-009, KEY-008

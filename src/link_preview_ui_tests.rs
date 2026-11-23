@@ -315,6 +315,7 @@ fn edit_035_enter_on_a_missing_note_creates_it_like_gt() {
 #[test]
 fn edit_033_the_action_can_be_bound_to_space_space() {
     let mut w = W::new("space", NOTE);
+    w.app.keymap.set(Action::NormalToggleTask, Binding::parse("Space T").unwrap()).expect("the task key moves away");
     w.app.keymap.set(Action::NormalLinkPreview, Binding::parse("Space Space").unwrap()).expect("Space Space is free");
     w.cursor_at("Ideas");
     w.shift_k();

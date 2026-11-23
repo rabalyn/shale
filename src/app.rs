@@ -1503,6 +1503,40 @@ impl ShaleApp {
         }
     }
 
+    /// The key `normal.toggle_task` (KEY-045): tick or untick the task on the cursor's line of the editor
+    /// (vim normal mode), or the task row under the pointer in the reading view and the task list, as a
+    /// click on its checkbox does (TASK-003). Without a task it says so.
+    fn toggle_task_key(&mut self, hovered: Option<(Option<PathBuf>, usize)>) {
+        let Some(tab) = self.tabbar.tabs.get(self.tabbar.active) else { return };
+        let editor = matches!((&tab.view, tab.reading), (View::Note(_), false));
+        let (rel, offset) = match (&tab.view, tab.reading) {
+            (View::Note(rel), false) => {
+                let text = self.notes.get(rel).map(|d| d.text.as_str()).unwrap_or_default();
+                let line = crate::editor_preview::line_of(text, markdown::char_to_byte(text, tab.editor.vim.cursor));
+                (Some(rel.clone()), markdown::find_tasks(text).into_iter().find(|t| t.line == line).map(|t| t.check_offset))
+            }
+            (View::Note(rel), true) => (Some(rel.clone()), hovered.and_then(|(r, o)| r.is_none().then_some(o))),
+            (View::Tasks, _) => hovered.and_then(|(r, o)| r.map(|r| (Some(r), Some(o)))).unwrap_or((None, None)),
+            _ => (None, None),
+        };
+        let (Some(rel), Some(offset)) = (rel, offset) else {
+            if editor {
+                self.tabbar.tabs[self.tabbar.active].editor.vim.message = Some("No task on this line".into());
+            } else {
+                self.toast("No task here: point at one");
+            }
+            return;
+        };
+        // one undo step of its own: the text of the note before and after (EDIT-021)
+        if let Some(before) = self.notes.get(&rel).map(|d| d.text.clone()) {
+            self.undo.of(&rel).checkpoint(&before);
+        }
+        self.toggle_task(&rel, offset);
+        if let Some(after) = self.notes.get(&rel).map(|d| d.text.clone()) {
+            self.undo.of(&rel).checkpoint(&after);
+        }
+    }
+
     /// Toggle a checkbox in any note (open buffer or file on disk).
     pub fn toggle_task(&mut self, rel: &Path, offset: usize) {
         let Some(_tree) = self.hold_sync_tree() else { return };
@@ -2713,12 +2747,15 @@ impl ShaleApp {
         // normal mode (EDIT-015) its own; both start with Space, so one sequence reads both. A half
         // typed one is forgotten when the keys are not read any more
         let normal = self.normal_keys_active(ui.ctx());
+        // the task row under the pointer is only the one the views drew in the last frame
+        let hovered_task = crate::reader::take_hovered_task(ui.ctx());
         if normal || self.main_keys_active(ui.ctx()) {
             let scopes: &[Scope] = if normal { &[Scope::MainViews, Scope::EditorNormal] } else { &[Scope::MainViews] };
             match ui.input_mut(|i| self.keymap.poll_in(i, scopes)) {
                 Some(KeyAction::NormalAlternate) => self.swap_alternate(),
                 Some(KeyAction::NormalFindFile) => self.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::FileNames))),
                 Some(KeyAction::NormalSearchAll) => self.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::Everything))),
+                Some(KeyAction::NormalToggleTask) => self.toggle_task_key(hovered_task),
                 Some(KeyAction::NormalLinkPreview) => self.link_preview_key(ui.ctx()),
                 _ => {}
             }
