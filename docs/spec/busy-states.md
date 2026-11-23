@@ -79,9 +79,9 @@ would leave a mess (JOB-006).
 |---|---|---|---|---|
 | Opening the mail store (`MailStore::open`, MAIL-050; the integrity check, MAIL-006, and a possible index rebuild) | thread, started with the first frame of the window when an account is set up (else when the mail view first opens) | no | a spinner and "Checking the mail index…" in the view ("Opening the local mail copy…" in the instant between) | **IS NOW** (JOB-015) |
 | Rebuilding the mail index (USE-012) | job of the Data usage dialog, which asks the store's writer thread | yes: between two folders (each folder is rebuilt in one transaction, so none is left empty) | a spinner, "Rebuilding the mail index…" and Cancel in the mail view | **IS NOW** (JOB-016) |
-| Mail sync (IMAP, MAIL) | thread per account (`imap_sync::start`) | yes (flag) | progress in the view, "Cancel sync" | planned: a task per account |
+| Mail sync (IMAP, MAIL) | thread per account (`imap_sync::start`) | yes: before connecting, between two folders and between two batches of messages (never inside a file or an index write, MAIL-006/007) | progress in the view, "Cancel sync"; each running account with a spinner, its text and Cancel | **IS NOW** (JOB-021): "Syncing ‹account›…", one task per account |
 | Mail: loading a listing, reading and downloading a message, search, send, sign-in (OAuth), key and GnuPG work | threads of the mail UI (`mail/ui.rs`, `send.rs`, `oauth.rs`) | sign-in: flag and timeout; the others: no | per-view lines ("Loading the list from the server…", "Reading the message…", "Searching…") | not tasks (they belong to their view); send and sign-in planned |
-| Mail watch (IDLE, `mail/watch.rs`) | a thread of its own for the session | yes | nothing | not a task: it runs for the whole session |
+| Mail watch (IDLE, `mail/watch.rs`) | a thread of its own for the session | yes | nothing | not a task (JOB-021): it waits for the whole session; only a sync that runs is a task |
 
 ## Calendar and feeds
 

@@ -449,6 +449,8 @@ impl MailView {
                 first.chars().take(90).collect()
             };
             ui.label(RichText::new(format!("Sync problem: {short}")).size(crate::fonts::px(12.0)).color(theme::palette().link_missing)).on_hover_text(errs.join("\n"));
+        } else if self.syncs.values().any(|r| r.finished.as_ref().is_some_and(|s| s.cancelled)) {
+            ui.label(muted(format!("Sync stopped · {added} new so far; the next sync goes on from there")).size(crate::fonts::px(12.0)));
         } else if self.syncs.values().any(|r| r.finished.is_some()) {
             ui.label(muted(format!("Synced · {added} new")).size(crate::fonts::px(12.0)));
         }
@@ -558,6 +560,8 @@ impl MailView {
         egui::ScrollArea::vertical().id_salt("mail-folders").auto_shrink([false, false]).show(ui, |ui| {
             for a in &cfg.mail_accounts {
                 let title = if a.name.is_empty() { a.host.clone() } else { a.name.clone() };
+                // a syncing account says so, with its own Cancel (JOB-021)
+                crate::busy::ui::status(ui, &self.busy, &MAIL_SYNC.with(&a.id));
                 let folders = self.account_folders(&a.id);
                 egui::CollapsingHeader::new(RichText::new(title).color(theme::palette().text_strong)).id_salt(("mail-account", a.id.clone())).default_open(true).show(ui, |ui| {
                     if folders.is_empty() {
