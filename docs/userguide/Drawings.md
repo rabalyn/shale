@@ -16,9 +16,6 @@ Hand-drawn style sketches, saved as standard `.excalidraw` files. The drawing on
   order of shapes.
 - Double-click a shape to label it. Arrows snap to shapes and follow them when shapes move.
   Hold Shift to keep lines at 45 degree steps.
-- Select several shapes (Shift+click, or drag a frame around them) and drag a corner of the box
-  around them: every shape, line, arrow, scribble and text in it scales from the opposite corner.
-  Undo takes the whole resize back in one step. A single line or arrow is changed by its ends.
 - "Auto arrange" untangles a diagram; "Spread out" and "Pull together" change the spacing.
 - Insert a new drawing from the note menu, or embed one with `![[Name.excalidraw]]`.
 
