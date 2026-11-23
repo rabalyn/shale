@@ -95,7 +95,7 @@ when an **older** item arrives later, and a **thread overview** with keys.
    they do nothing at the ends or in a note without a thread, and not while a modal dialog is open
    (KEY-038). None is an Alt key and none is a key the system reserves (KEY-019); the clash check of
    KEY-001 must pass (a test checks it). Being Global they work in the views of the "Main views" scope
-   (KEY-040) as well.
+   of rabalyn/shale#580 as well.
 7. **Posts come after #560.** The thread view of a post in the Feeds tab (#560 on `dev/socials`) is
    what shows the conversation a reply belongs to and gives the importer the root and the parent id.
    The social part of #575 (SOC-070…SOC-072) is built after #560 has landed; the mail side and the
