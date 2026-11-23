@@ -33,6 +33,16 @@ pub struct Opts<'a> {
 /// A one-line text field of the form; a quote is never typed (the language has no way to say it).
 fn edit(ui: &mut Ui, value: &mut String, hint: &str, width: f32) -> bool {
     let r = ui.add(egui::TextEdit::singleline(value).hint_text(hint).desired_width(width));
+    finish(r, value)
+}
+
+/// The last field of a row: it takes the rest of the row, at least `min` wide.
+fn edit_rest(ui: &mut Ui, value: &mut String, hint: &str, min: f32) -> bool {
+    let width = (ui.available_width() - 8.0).max(min);
+    edit(ui, value, hint, width)
+}
+
+fn finish(r: egui::Response, value: &mut String) -> bool {
     if r.changed() && value.contains('"') {
         value.retain(|c| c != '"');
     }
@@ -42,8 +52,8 @@ fn edit(ui: &mut Ui, value: &mut String, hint: &str, width: f32) -> bool {
 /// The value fields of one row; true when one changed.
 fn fields(ui: &mut Ui, what: &mut What, i: usize) -> bool {
     match what {
-        What::Tag(v) => edit(ui, v, "tag", 130.0),
-        What::Prop { key, value } => edit(ui, key, "name", 70.0) | edit(ui, value, "value", 90.0),
+        What::Tag(v) => edit_rest(ui, v, "tag", 100.0),
+        What::Prop { key, value } => edit(ui, key, "name", 90.0) | edit_rest(ui, value, "value", 90.0),
         What::Due { cmp, day } => {
             let before = *cmp;
             egui::ComboBox::from_id_salt(("due-cmp", i)).selected_text(cmp.label()).width(80.0).show_ui(ui, |ui| {
@@ -53,14 +63,14 @@ fn fields(ui: &mut Ui, what: &mut What, i: usize) -> bool {
             });
             let mut changed = *cmp != before;
             if *cmp != DueCmp::Overdue {
-                changed |= edit(ui, day, "2026-12-01, today, +7d", 130.0);
+                changed |= edit_rest(ui, day, "2026-12-01, today, +7d", 130.0);
             }
             changed
         }
         What::Blocked | What::Blocking => false,
-        What::Folder(v) => edit(ui, v, "Folder/", 110.0),
-        What::Links(v) => edit(ui, v, "Note", 110.0),
-        What::Text(v) => edit(ui, v, "text, * and ? are wildcards", 150.0),
+        What::Folder(v) => edit_rest(ui, v, "Folder/", 110.0),
+        What::Links(v) => edit_rest(ui, v, "Note", 110.0),
+        What::Text(v) => edit_rest(ui, v, "text, * and ? are wildcards", 150.0),
     }
 }
 
@@ -70,18 +80,18 @@ fn filter_rows(ui: &mut Ui, st: &mut State) -> bool {
     let mut remove = None;
     for (i, row) in st.rows.iter_mut().enumerate() {
         ui.push_id(("filter-row", i), |ui| {
-            ui.horizontal_wrapped(|ui| {
-                // (the remove button first: in a narrow sidebar the row wraps, and it must not stand alone)
+            // (not wrapped: the last field takes the rest of the line)
+            ui.horizontal(|ui| {
                 if ui.small_button("✕").on_hover_text("Remove this filter").clicked() {
                     remove = Some(i);
                 }
                 ui.label(RichText::new(row.what.label()).color(theme::palette().muted));
                 edited |= ui.checkbox(&mut row.not, "not").changed();
                 edited |= fields(ui, &mut row.what, i);
-                if let Err(why) = row.term() {
-                    ui.label(RichText::new(why).color(theme::palette().muted).size(11.5));
-                }
             });
+            if let Err(why) = row.term() {
+                ui.label(RichText::new(why).color(theme::palette().muted).size(11.5));
+            }
         });
     }
     if let Some(i) = remove {
