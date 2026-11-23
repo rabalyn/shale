@@ -337,6 +337,32 @@ impl PostIndex {
         tx.commit()
     }
 
+    /// Change the post with this id of an account where the index holds it, also where another
+    /// post quotes it (a reaction was made, SOC-059). The search text stays as it is.
+    pub fn update_post(&mut self, account: &str, id: &str, f: impl Fn(&mut Post)) {
+        if let Err(e) = self.try_update_post(account, id, f) {
+            eprintln!("post index: {e}");
+        }
+    }
+
+    fn try_update_post(&mut self, account: &str, id: &str, f: impl Fn(&mut Post)) -> rusqlite::Result<()> {
+        let needle = format!("\"id\":{}", serde_json::to_string(id).unwrap_or_default());
+        let tx = self.conn.transaction()?;
+        let rows: Vec<(i64, String)> = {
+            let mut st = tx.prepare_cached("SELECT id, json FROM posts WHERE account = ?1 AND instr(json, ?2) > 0")?;
+            let rows = st.query_map(params![account, needle], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            rows.filter_map(Result::ok).collect()
+        };
+        for (row, json) in rows {
+            let Ok(mut p) = serde_json::from_str::<Post>(&json) else { continue };
+            if super::actions::patch(&mut p, id, &f) {
+                let json = serde_json::to_string(&p).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+                tx.prepare_cached("UPDATE posts SET json = ?1 WHERE id = ?2")?.execute(params![json, row])?;
+            }
+        }
+        tx.commit()
+    }
+
     /// Forget every post of a removed account (SOC-033).
     pub fn remove_account(&mut self, account: &str) {
         let r = (|| -> rusqlite::Result<()> {
@@ -360,6 +386,12 @@ impl PostIndex {
     /// Whether the post (a `state::post_key`) of the account is indexed.
     pub fn contains(&self, account: &str, key: &str) -> bool {
         self.conn.query_row("SELECT 1 FROM posts WHERE account = ?1 AND key = ?2", [account, key], |_| Ok(())).is_ok()
+    }
+
+    /// The post as the index holds it now (a hit shown earlier may be older: reactions came since).
+    pub fn get(&self, account: &str, key: &str) -> Option<Post> {
+        let json: String = self.conn.query_row("SELECT json FROM posts WHERE account = ?1 AND key = ?2", [account, key], |r| r.get(0)).ok()?;
+        serde_json::from_str(&json).ok()
     }
 
     /// How many posts are indexed (all accounts, or one).

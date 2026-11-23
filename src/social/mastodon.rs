@@ -553,6 +553,40 @@ mod tests {
         assert!(parse_status(&boost, "https://m.test").unwrap().mine.liked);
     }
 
+    // spec: SOC-060
+    #[test]
+    fn a_quoted_status_keeps_its_id_state_counts_and_address_and_can_be_reacted_to_by_them() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let mut inner = status("200", "2", "bob", "2024-05-16T10:00:00Z", Some("150"), "<p>quoted</p>");
+        inner["favourited"] = json!(true);
+        let mut outer = status("100", "1", "ada", "2024-05-17T10:00:00Z", None, "<p>look</p>");
+        outer["quote"] = json!({"state": "accepted", "quoted_status": inner});
+        let q = *parse_status(&outer, "https://m.test").unwrap().quote.unwrap();
+        assert_eq!((q.id.as_str(), q.url.as_str(), q.reply_to.as_deref(), q.mine.liked, q.mine.boosted), ("200", "https://m.test/@bob/200", Some("150"), true, false));
+        assert_eq!((q.reply_count, q.boost_count, q.like_count), (1, 2, 3), "the counts for the buttons");
+        // every button has what it needs: the id of the quote goes to the server, not the id of the card
+        let (base, handle) = mock_http(2, |method, path, _, _| {
+            assert_eq!(method, "POST");
+            let mut s = status("200", "2", "bob", "2024-05-16T10:00:00Z", None, "<p>quoted</p>");
+            match path {
+                "/api/v1/statuses/200/unfavourite" => {
+                    s["favourites_count"] = json!(2);
+                    (200, s.to_string())
+                }
+                "/api/v1/statuses/200/reblog" => {
+                    s["reblogs_count"] = json!(3);
+                    (200, s.to_string())
+                }
+                _ => (404, "{}".into()),
+            }
+        });
+        assert_eq!(react(&base, "tok-1", &q.id, Reaction::Like, false).unwrap().count, Some(2));
+        assert_eq!(react(&base, "tok-1", &q.id, Reaction::Boost, true).unwrap().count, Some(3));
+        assert_eq!(handle.join().unwrap().len(), 2);
+    }
+
     // spec: SOC-050, SOC-056
     #[test]
     fn favourite_and_boost_post_to_the_status_and_read_the_counts_the_server_names() {

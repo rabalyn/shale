@@ -59,6 +59,10 @@ your own.
   it; press it again to take it back. A spinner shows inside the button while the server answers
   (the button keeps its size and nothing moves), the count changes when it went well, and a
   message tells you when it did not.
+- **A quoted post** inside a card has its own small row of buttons (Reply, Boost, Favourite / Like,
+  Quote, Show thread, Save to vault, Open in browser, Copy link). They act on the quoted post, not on
+  the card around it. (A quoted Bluesky post does not tell Shale whether you liked it before, so its
+  Like button starts unfilled.)
 - **The compose box** opens over the tab. It shows how long the post is against the limit of your
   server ("123 / 500"; Mastodon's limit comes from the server, an address counts 23; Bluesky
   allows 300 characters). **Send** or **Ctrl+Enter** is disabled while the post is empty or too

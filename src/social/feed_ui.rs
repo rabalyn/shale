@@ -406,13 +406,95 @@ pub(super) struct CardOut {
     pub thread: Option<bool>,
     /// a reaction, reply or quote button was pressed (SOC-050, SOC-051)
     pub act: Option<CardAct>,
+    /// the click was on a button of the quoted post inside the card (SOC-060): `save`, `thread`
+    /// and `act` are then about the quote, see [`CardOut::target`]
+    pub on_quote: bool,
     pub rect: Rect,
+}
+
+impl CardOut {
+    /// The post the click was about: the card's post, or the post it quotes.
+    pub(super) fn target<'a>(&self, p: &'a Post) -> &'a Post {
+        match (&p.quote, self.on_quote) {
+            (Some(q), true) => q,
+            _ => p,
+        }
+    }
 }
 
 /// A click that opens something: Some(true) for Shift+click and middle click (a new tab, as for
 /// links in notes), Some(false) for a plain click.
 fn opens(ui: &Ui, r: &egui::Response) -> Option<bool> {
     (r.clicked() || r.middle_clicked()).then(|| r.middle_clicked() || ui.input(|i| i.modifiers.shift))
+}
+
+/// A Boost / Repost or Favourite / Like button of a post, with a spinner inside while the
+/// reaction is on its way (SOC-042). `key` is "" for the card's own post and "q" for the one it
+/// quotes. True when pressed.
+fn reaction_button(ui: &mut Ui, cx: &mut Cx, p: &Post, kind: Reaction, key: &str, idx: usize) -> bool {
+    let mastodon = p.network == Network::Mastodon;
+    let (label, on) = match kind {
+        Reaction::Boost => (if mastodon { "Boost" } else { "Repost" }, p.mine.boosted),
+        Reaction::Like => (if mastodon { "Favourite" } else { "Like" }, p.mine.liked),
+    };
+    let busy = cx.busy.contains(&busy_key(cx.account, &p.id, kind));
+    let (b, spinner) = spinner_button(ui, label, on.then_some(theme::palette().accent.gamma_multiply(0.55)), true, busy);
+    let name = if kind == Reaction::Like { "like" } else { "boost" };
+    if let Some(at) = spinner {
+        cx.rects.push((format!("{key}{name}-spinner:{idx}"), at));
+    }
+    let hint = if on { format!("Undo your {}", kind.verb(p.network)) } else { format!("{label} this post") };
+    cx.rec(format!("{key}{name}:{idx}"), b).on_hover_text(hint).clicked()
+}
+
+/// What a click on a button of the quoted post asked for.
+#[derive(Default)]
+struct QuoteHit {
+    act: Option<CardAct>,
+    save: bool,
+    thread: Option<bool>,
+}
+
+/// The buttons of a quoted post (SOC-060), small and in one wrapping row: they act on the quoted
+/// post itself. None when nothing was pressed.
+fn quote_actions(ui: &mut Ui, cx: &mut Cx, q: &Post, idx: usize, show_thread: bool) -> Option<QuoteHit> {
+    let mut hit = QuoteHit::default();
+    ui.add_space(2.0);
+    ui.horizontal_wrapped(|ui| {
+        ui.style_mut().override_text_style = Some(egui::TextStyle::Small);
+        ui.spacing_mut().button_padding = egui::vec2(5.0, 1.0);
+        ui.spacing_mut().item_spacing = egui::vec2(4.0, 3.0);
+        if cx.rec(format!("qreply:{idx}"), ui.button("Reply")).on_hover_text("Write a reply to the quoted post").clicked() {
+            hit.act = Some(CardAct::Reply);
+        }
+        for kind in [Reaction::Boost, Reaction::Like] {
+            if reaction_button(ui, cx, q, kind, "q", idx) {
+                hit.act = Some(CardAct::React(kind));
+            }
+        }
+        if cx.rec(format!("qquote:{idx}"), ui.button("Quote")).on_hover_text("Write a post that quotes the quoted post").clicked() {
+            hit.act = Some(CardAct::Quote);
+        }
+        if show_thread && (q.reply_count > 0 || q.reply_to.is_some()) {
+            let b = cx.rec(format!("qthread:{idx}"), ui.button("Show thread")).on_hover_text("Read the conversation of the quoted post (Shift+click: in a new tab)");
+            hit.thread = opens(ui, &b);
+        }
+        let busy = cx.saving.contains(&post_key(q));
+        let (b, spinner) = spinner_button(ui, "Save to vault", None, true, busy);
+        if let Some(at) = spinner {
+            cx.rects.push((format!("qsave-spinner:{idx}"), at));
+        }
+        hit.save = cx.rec(format!("qsave:{idx}"), b).on_hover_text("Copy the quoted post into your vault").clicked();
+        if cx.rec(format!("qopen:{idx}"), ui.button("Open in browser")).clicked() {
+            open_web(&q.url);
+        }
+        if cx.rec(format!("qcopy:{idx}"), ui.button("Copy link")).clicked() {
+            ui.ctx().copy_text(q.url.clone());
+        }
+        let (a, b) = if q.network == Network::Mastodon { ("boosts", "favourites") } else { ("reposts", "likes") };
+        ui.label(RichText::new(format!("· {} {a} · {} {b} · {} replies", q.boost_count, q.like_count, q.reply_count)).size(crate::fonts::px(11.0)).color(theme::palette().faint));
+    });
+    (hit.act.is_some() || hit.save || hit.thread.is_some()).then_some(hit)
 }
 
 /// One post. Returns what was clicked, and where the card is.
@@ -422,6 +504,7 @@ pub(super) fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, look: Look) -> CardO
     let mut save = false;
     let mut thread = None;
     let mut act = None;
+    let mut on_quote = false;
     let inner = width - 24.0;
     let pal = theme::palette();
     let frame = egui::Frame::new().fill(if highlight { pal.bg_active } else { pal.bg_secondary }).corner_radius(8).inner_margin(12);
@@ -496,6 +579,10 @@ pub(super) fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, look: Look) -> CardO
                     if !q.media.is_empty() {
                         ui.label(RichText::new(format!("{} attachment{}", q.media.len(), if q.media.len() == 1 { "" } else { "s" })).size(crate::fonts::px(12.0)).color(theme::palette().faint));
                     }
+                    if let Some(h) = quote_actions(ui, cx, q, idx, show_thread) {
+                        on_quote = true;
+                        (act, save, thread) = (h.act.or(act), h.save || save, h.thread.or(thread));
+                    }
                 });
                 ui.add_space(4.0);
             }
@@ -515,20 +602,11 @@ pub(super) fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, look: Look) -> CardO
         }
         // reply, boost, like, quote (SOC-050, SOC-051): one size whatever the state, so nothing moves
         ui.horizontal(|ui| {
-            let mastodon = p.network == Network::Mastodon;
-            let on_fill = theme::palette().accent.gamma_multiply(0.55);
             if cx.rec(format!("reply:{idx}"), ui.button("Reply")).on_hover_text("Write a reply to this post").clicked() {
                 act = Some(CardAct::Reply);
             }
-            for (kind, label, on) in [(Reaction::Boost, if mastodon { "Boost" } else { "Repost" }, p.mine.boosted), (Reaction::Like, if mastodon { "Favourite" } else { "Like" }, p.mine.liked)] {
-                let busy = cx.busy.contains(&busy_key(cx.account, &p.id, kind));
-                let (b, spinner) = spinner_button(ui, label, on.then_some(on_fill), true, busy);
-                let name = if kind == Reaction::Like { "like" } else { "boost" };
-                if let Some(at) = spinner {
-                    cx.rects.push((format!("{name}-spinner:{idx}"), at));
-                }
-                let hint = if on { format!("Undo your {}", kind.verb(p.network)) } else { format!("{label} this post") };
-                if cx.rec(format!("{name}:{idx}"), b).on_hover_text(hint).clicked() {
+            for kind in [Reaction::Boost, Reaction::Like] {
+                if reaction_button(ui, cx, p, kind, "", idx) {
                     act = Some(CardAct::React(kind));
                 }
             }
@@ -572,7 +650,7 @@ pub(super) fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, look: Look) -> CardO
             });
         });
     });
-    CardOut { save, thread, act, rect: card.response.rect }
+    CardOut { save, thread, act, on_quote, rect: card.response.rect }
 }
 
 /// A post of a list: drawn, or, when it is far from the view (`near`: the part of the list that
@@ -587,7 +665,7 @@ pub(super) fn list_card(ui: &mut Ui, cx: &mut Cx, heights: &mut HashMap<(String,
     if let Some(h) = kept {
         // (`add_space` adds no spacing after itself; a drawn card is followed by `gap`)
         ui.add_space(h);
-        return CardOut { save: false, thread: None, act: None, rect: Rect::from_min_size(at + Vec2::new(indent, 0.0), Vec2::new(width, (h - gap).max(0.0))) };
+        return CardOut { save: false, thread: None, act: None, on_quote: false, rect: Rect::from_min_size(at + Vec2::new(indent, 0.0), Vec2::new(width, (h - gap).max(0.0))) };
     }
     let out = if indent > 0.0 {
         ui.horizontal_top(|ui| {
@@ -897,13 +975,13 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
                     let k = post_key(p);
                     let card = list_card(ui, &mut cx, card_heights, p, Look { idx: i, width, highlight: false, show_thread: true }, 0.0, (near_from, near_to));
                     if card.save {
-                        save_post = Some(p.clone());
+                        save_post = Some(card.target(p).clone());
                     }
                     if let Some(new_tab) = card.thread {
-                        open_thread = Some((p.clone(), new_tab));
+                        open_thread = Some((card.target(p).clone(), new_tab));
                     }
                     if let Some(a) = card.act {
-                        acted = Some((p.clone(), a));
+                        acted = Some((card.target(p).clone(), a));
                     }
                     let rect = card.rect;
                     if gaps.contains(&k) {

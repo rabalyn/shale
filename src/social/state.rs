@@ -319,7 +319,9 @@ impl SocialState {
     /// Show a search hit: the next time the tab shows the feed it is scrolled to the post, which
     /// is put into the list from the index when the feed no longer has it (SOC-035).
     pub fn show_hit(&mut self, tab: u64, hit: &super::post_index::PostHit) {
-        self.focus = Some(Focus { tab, account: hit.account.clone(), post: hit.post.clone() });
+        // the row of the search may be older than the index: take the post as the index has it now (SOC-059)
+        let post = self.index.get(&hit.account, &hit.key).unwrap_or_else(|| hit.post.clone());
+        self.focus = Some(Focus { tab, account: hit.account.clone(), post });
     }
 
     /// The post a tab is to be scrolled to, once its feed has loaded: it is in the list by now.
@@ -337,8 +339,30 @@ impl SocialState {
             self.show_waiting(key);
         }
         let f = self.focus.take()?;
-        self.timelines.get_mut(key)?.insert_found(f.post);
+        // the copy in memory is the newer one: it has the reactions made since the post was indexed
+        let post = self.live_copy(&f.account, &f.post).unwrap_or(f.post);
+        self.timelines.get_mut(key)?.insert_found(post);
         Some(k)
+    }
+
+    /// The post as a feed or conversation of the account holds it now (SOC-059): the same post
+    /// (and boost) in any list, else the same post in a conversation or quoted by another one.
+    fn live_copy(&self, account: &str, like: &Post) -> Option<Post> {
+        let k = post_key(like);
+        let lists = self.timelines.iter().filter(|((a, _), _)| a == account).flat_map(|(_, t)| t.posts.iter().chain(t.waiting.iter()));
+        if let Some(p) = lists.clone().find(|p| post_key(p) == k) {
+            return Some(p.clone());
+        }
+        let quoted = |p: &Post| p.quote.as_deref().filter(|q| q.id == like.id).cloned();
+        let threads = self.threads.map.iter().filter(|((a, _), _)| a == account).flat_map(|(_, e)| {
+            let ready = match &e.status {
+                super::thread::ThreadStatus::Ready(v) => Some(v),
+                _ => None,
+            };
+            std::iter::once(&e.post).chain(ready.into_iter().flat_map(|v| std::iter::once(&v.post).chain(v.ancestors.iter()).chain(v.replies.iter().map(|r| &r.post))))
+        });
+        let mut all = lists.chain(threads);
+        all.clone().find(|p| post_key(p) == k).cloned().or_else(|| all.find_map(quoted)).map(|p| Post { reposted_by: like.reposted_by.clone(), ..p })
     }
 
     /// Start the fetches that `open_post_hit` asked for: each post by its id, in a background job.

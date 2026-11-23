@@ -109,13 +109,13 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, entry: &SocialAccountEntry, tab: 
                     let look = Look { idx: i, width: width - indent, highlight: item.highlight, show_thread: !item.highlight };
                     let card = list_card(ui, &mut cx, heights, &item.post, look, indent, (near_from, near_to));
                     if card.save {
-                        save_post = Some(item.post.clone());
+                        save_post = Some(card.target(&item.post).clone());
                     }
                     if let Some(new_tab) = card.thread {
-                        open_thread = Some((item.post.clone(), new_tab));
+                        open_thread = Some((card.target(&item.post).clone(), new_tab));
                     }
                     if let Some(a) = card.act {
-                        acted = Some((item.post.clone(), a));
+                        acted = Some((card.target(&item.post).clone(), a));
                     }
                     if item.highlight {
                         cx.rects.push(("highlight".into(), card.rect));

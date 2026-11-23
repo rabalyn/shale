@@ -775,6 +775,32 @@ mod tests {
         assert_eq!(p.reply_root, Some(PostRef { uri: "at://x/y/z".into(), cid: "c".into() }));
     }
 
+    // spec: SOC-060
+    #[test]
+    fn a_quoted_record_keeps_its_uri_cid_counts_and_address_and_can_be_liked_and_reposted_by_them() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let mut v = post_view("1", "did:plc:ada", "ada.test", "2024-05-17T10:30:00Z", None, "look");
+        v["embed"] = json!({"$type": "app.bsky.embed.record#view", "record": {"$type": "app.bsky.embed.record#viewRecord", "uri": "at://did:plc:bob/app.bsky.feed.post/q1", "cid": "cq",
+            "author": {"did": "did:plc:bob", "handle": "bob.test"}, "value": {"text": "quoted", "createdAt": "2024-05-16T10:30:00Z", "reply": {"parent": {"uri": "at://did:plc:bob/app.bsky.feed.post/q0", "cid": "c0"}, "root": {"uri": "at://did:plc:bob/app.bsky.feed.post/q0", "cid": "c0"}}},
+            "replyCount": 4, "repostCount": 5, "likeCount": 6}});
+        let q = *parse_post_view(&v).unwrap().quote.unwrap();
+        assert_eq!((q.id.as_str(), q.cid.as_str(), q.url.as_str(), q.reply_to.as_deref()), ("at://did:plc:bob/app.bsky.feed.post/q1", "cq", "https://bsky.app/profile/bob.test/post/q1", Some("at://did:plc:bob/app.bsky.feed.post/q0")));
+        assert_eq!((q.reply_count, q.boost_count, q.like_count), (4, 5, 6));
+        assert_eq!(q.mine, Mine::default(), "a quoted record carries no viewer state: nothing is liked until the account does it");
+        let (base, handle) = writing_server(2, |_, nsid, body| {
+            assert_eq!(nsid, "com.atproto.repo.createRecord");
+            assert_eq!((body["record"]["subject"]["uri"].as_str(), body["record"]["subject"]["cid"].as_str()), (Some("at://did:plc:bob/app.bsky.feed.post/q1"), Some("cq")), "the quote, not the post that quotes");
+            let coll = body["collection"].as_str().unwrap();
+            (200, json!({"uri": format!("at://did:plc:ada/{coll}/3q"), "cid": "n"}).to_string())
+        });
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        assert_eq!(react(&mut api, &q, Reaction::Like, true).unwrap().record.as_deref(), Some("at://did:plc:ada/app.bsky.feed.like/3q"));
+        assert_eq!(react(&mut api, &q, Reaction::Boost, true).unwrap().record.as_deref(), Some("at://did:plc:ada/app.bsky.feed.repost/3q"));
+        assert_eq!(handle.join().unwrap().len(), 3);
+    }
+
     // spec: SOC-050
     #[test]
     fn like_and_repost_are_records_that_are_created_and_deleted_against_a_mock_server() {

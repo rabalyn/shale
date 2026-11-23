@@ -35,6 +35,8 @@ mod pictures_tests;
 pub mod post_index;
 #[cfg(test)]
 mod post_index_tests;
+#[cfg(test)]
+mod quote_tests;
 pub mod state;
 pub mod thread;
 #[cfg(test)]

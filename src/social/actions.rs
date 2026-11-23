@@ -358,6 +358,20 @@ pub fn busy_key(account: &str, post: &str, kind: Reaction) -> String {
     format!("{}|{account}|{post}", if kind == Reaction::Like { "like" } else { "boost" })
 }
 
+/// Apply `f` to the post when it is the one with `id`, and to the post it quotes when that is.
+/// True when something was changed.
+pub(super) fn patch(p: &mut Post, id: &str, f: &impl Fn(&mut Post)) -> bool {
+    let mut hit = false;
+    if p.id == id {
+        f(p);
+        hit = true;
+    }
+    if let Some(q) = p.quote.as_mut() {
+        hit |= patch(q, id, f);
+    }
+    hit
+}
+
 impl SocialState {
     /// Like / boost the post, or undo it when it is already so (SOC-050). Nothing changes on
     /// screen before the server has answered. Does nothing while the same reaction is on its way.
@@ -405,15 +419,20 @@ impl SocialState {
     pub(super) fn reacted(&mut self, account: &str, post: &str, kind: Reaction, on: bool, result: Result<Reacted, ActionError>) {
         self.writes.busy.remove(&busy_key(account, post, kind));
         match result {
-            Ok(r) => self.update_post(account, post, |p| {
-                let (flag, record, n) = match kind {
-                    Reaction::Like => (&mut p.mine.liked, &mut p.mine.like_record, &mut p.like_count),
-                    Reaction::Boost => (&mut p.mine.boosted, &mut p.mine.boost_record, &mut p.boost_count),
+            Ok(r) => {
+                let apply = |p: &mut Post| {
+                    let (flag, record, n) = match kind {
+                        Reaction::Like => (&mut p.mine.liked, &mut p.mine.like_record, &mut p.like_count),
+                        Reaction::Boost => (&mut p.mine.boosted, &mut p.mine.boost_record, &mut p.boost_count),
+                    };
+                    *n = r.count.unwrap_or(if r.on { n.saturating_add(1) } else { n.saturating_sub(1) });
+                    *flag = r.on;
+                    *record = r.record.clone();
                 };
-                *n = r.count.unwrap_or(if r.on { n.saturating_add(1) } else { n.saturating_sub(1) });
-                *flag = r.on;
-                *record = r.record.clone();
-            }),
+                self.update_post(account, post, apply);
+                // a hit reopened from the search shows the new state too (SOC-059)
+                self.index.update_post(account, post, apply);
+            }
             Err(ActionError::NeedsWrite) => self.need_write(account),
             Err(ActionError::Failed(m)) => {
                 let network = if account.starts_with("bluesky:") { Network::Bluesky } else { Network::Mastodon };
@@ -424,12 +443,11 @@ impl SocialState {
     }
 
     /// Change a post of an account everywhere it is held: the lists of its feeds, the posts
-    /// waiting, and the conversations. (The search index keeps what it was.)
+    /// waiting, and the conversations, also where it is quoted. (The search index is changed
+    /// by `PostIndex::update_post`.)
     pub fn update_post(&mut self, account: &str, id: &str, f: impl Fn(&mut Post)) {
         let each = |p: &mut Post| {
-            if p.id == id {
-                f(p);
-            }
+            patch(p, id, &f);
         };
         for ((a, _), t) in self.timelines.iter_mut() {
             if a == account {

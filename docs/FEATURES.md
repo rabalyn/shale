@@ -1029,7 +1029,10 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   **Favourite** / **Like** and **Quote** buttons (also in the conversation view), and the toolbar
   has **New post**. Boost and Favourite / Like toggle (a second press takes it back), show whether
   you did it (a filled button), and change the counts only when the server said yes; a spinner
-  inside the button shows while it runs and nothing moves. The compose box has the text with a
+  inside the button shows while it runs and nothing moves. A quoted post inside a card has the same
+  buttons in a small row (Reply, Boost, Favourite, Quote, Show thread, Save, Open, Copy link) that act on the quoted post
+  itself (#588). A like or boost is also written into the post search index, so a post opened from the search shows
+  the state you left it in. The compose box has the text with a
   live counter (Mastodon: the server's limit, 500 by default, addresses count 23; Bluesky: 300
   characters), on Mastodon a content warning and who may see the post (a reply starts with the
   author's @mention and is no more public than the post it answers), up to **4 pictures with a
