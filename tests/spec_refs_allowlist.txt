@@ -35,7 +35,7 @@ DOCX-006: docx_export/export_tests.rs::a_marked_paragraph_gets_its_jc_in_the_ord
 DRAW-012: drawing/ui_tests.rs::a_canvas_is_shown_read_only
 DRAW-015: drawing/ui_tests.rs::a_canvas_is_shown_read_only
 EDIT-001: markdown.rs::fuzzy
-EDIT-015: keys.rs::shift_k_is_the_link_preview_and_space_space_can_replace_it
+EDIT-015: keys.rs::shift_k_is_the_link_preview_and_a_space_sequence_can_replace_it
 EDIT-016: config.rs::old_config_files_still_load
 EDIT-017: config.rs::old_config_files_still_load
 EDIT-018: config.rs::old_config_files_still_load

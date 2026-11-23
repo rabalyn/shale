@@ -608,7 +608,7 @@ impl ShaleApp {
                             return;
                         };
                         ui.push_id((rel, t.line), |ui| {
-                            ui.horizontal(|ui| {
+                            let row = ui.horizontal(|ui| {
                                 ui.add_space(t.indent as f32 * 8.0);
                                 let mut d = t.done;
                                 if ui.checkbox(&mut d, "").on_hover_text("Tick off (saved to the note)").clicked() {
@@ -629,6 +629,9 @@ impl ShaleApp {
                                     ui.label(muted(v.file(rel).map(|f| f.display_name()).unwrap_or_default()).size(12.0));
                                 }
                             });
+                            if ui.rect_contains_pointer(row.response.rect) {
+                                crate::reader::note_hovered_task(ui.ctx(), Some(rel.clone()), t.check_offset);
+                            }
                         });
                     });
                     if shown == 0 {

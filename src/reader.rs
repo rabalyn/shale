@@ -17,6 +17,24 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+/// The task row the pointer is over, as `(note, offset of the check)`; a note of `None` is the one the
+/// reader shows. Set while a task row is drawn, taken by the key `normal.toggle_task` (KEY-045).
+type HoveredTask = (Option<PathBuf>, usize);
+
+fn hovered_task_id() -> egui::Id {
+    egui::Id::unique("hovered-task")
+}
+
+/// Say that the pointer is over the task whose check is at `offset` (of `rel`, or of the shown note).
+pub fn note_hovered_task(ctx: &egui::Context, rel: Option<PathBuf>, offset: usize) {
+    ctx.data_mut(|d| d.insert_temp::<HoveredTask>(hovered_task_id(), (rel, offset)));
+}
+
+/// The task row the pointer was over when the views were drawn last, once.
+pub fn take_hovered_task(ctx: &egui::Context) -> Option<HoveredTask> {
+    ctx.data_mut(|d| d.remove_temp::<HoveredTask>(hovered_task_id()))
+}
+
 pub enum ReaderAction {
     OpenLink {
         target: String,
@@ -988,7 +1006,7 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
                 ui.add_space(base * 0.2);
             } else if let Some((check, done, rest, _)) = markdown::parse_task_line(line) {
                 let rest_off = line.len() - rest.len();
-                ui.horizontal_top(|ui| {
+                let row = ui.horizontal_top(|ui| {
                     ui.add_space(indent);
                     let t = line.trim_start();
                     let digits = t.bytes().take_while(|c| c.is_ascii_digit()).count();
@@ -1002,6 +1020,9 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
                     let (job, spans, maths) = inline_job(rest, &shift(&line_links, rest_off), base, theme::palette().text, done);
                     inline_block(ui, job, &spans, &maths, &hint, &mut out);
                 });
+                if ui.rect_contains_pointer(row.response.rect) {
+                    note_hovered_task(ui.ctx(), None, off + check);
+                }
             } else if let Some((marker, rest_off)) = list_marker(line) {
                 ui.horizontal_top(|ui| {
                     ui.add_space(indent + 4.0);

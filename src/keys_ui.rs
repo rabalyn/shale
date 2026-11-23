@@ -1084,6 +1084,94 @@ mod tests {
         assert!(w.app.keymap.set(Action::MailMark, Binding::parse("Space s").unwrap()).unwrap_err().contains("already used by “Search notes, mail and posts”"));
     }
 
+    fn set_note(w: &mut W, text: &str) {
+        w.app.notes.get_mut(Path::new("A.md")).unwrap().text = text.to_string();
+        settle(w);
+    }
+
+    fn space_space(w: &mut W) {
+        typed(w, Key::Space, " ");
+        typed(w, Key::Space, " ");
+        settle(w);
+    }
+
+    fn toasted(w: &W, text: &str) -> bool {
+        w.app.toasts.iter().any(|t| t.0.contains(text))
+    }
+
+    // spec: KEY-045, TASK-003
+    #[test]
+    fn key_045_space_space_ticks_the_task_on_the_cursor_line_and_undoes() {
+        let mut w = vim_note("toggle-task");
+        set_note(&mut w, "# A\n- [ ] one\n- [x] two\nplain\n");
+        typed(&mut w, Key::G, "g");
+        typed(&mut w, Key::G, "g");
+        typed(&mut w, Key::J, "j");
+        space_space(&mut w);
+        assert_eq!(note_text(&w), "# A\n- [x] one\n- [x] two\nplain\n", "ticked");
+        assert!(w.app.notes[Path::new("A.md")].dirty || std::fs::read_to_string(w.dir.join("A.md")).unwrap().contains("[x] one"), "saved with the note");
+        space_space(&mut w);
+        assert_eq!(note_text(&w), "# A\n- [ ] one\n- [x] two\nplain\n", "unticked again");
+        // the next line: a task that is done is unticked
+        typed(&mut w, Key::J, "j");
+        space_space(&mut w);
+        assert_eq!(note_text(&w), "# A\n- [ ] one\n- [ ] two\nplain\n");
+        // u undoes the last toggle as one step
+        typed(&mut w, Key::U, "u");
+        settle(&mut w);
+        assert_eq!(note_text(&w), "# A\n- [ ] one\n- [x] two\nplain\n", "undone");
+    }
+
+    // spec: KEY-045
+    #[test]
+    fn key_045_space_space_without_a_task_or_while_typing_changes_nothing() {
+        let mut w = vim_note("toggle-task-none");
+        set_note(&mut w, "# A\n- [ ] one\nplain\n");
+        typed(&mut w, Key::G, "g");
+        typed(&mut w, Key::G, "g");
+        // line 0 is a heading: nothing changes and the status bar says so
+        space_space(&mut w);
+        assert_eq!(note_text(&w), "# A\n- [ ] one\nplain\n");
+        assert_eq!(w.app.tabbar.tabs[0].editor.vim.message.as_deref(), Some("No task on this line"));
+        // insert mode: Space types a space, the task stays
+        typed(&mut w, Key::J, "j");
+        typed(&mut w, Key::I, "i");
+        typed(&mut w, Key::Space, " ");
+        typed(&mut w, Key::Space, " ");
+        settle(&mut w);
+        assert!(note_text(&w).contains("- [ ] one"), "not ticked: {:?}", note_text(&w));
+        assert!(note_text(&w).contains("  "), "the spaces were typed: {:?}", note_text(&w));
+    }
+
+    // spec: KEY-045, TASK-003
+    #[test]
+    fn key_045_space_space_in_the_reading_view_and_the_task_list_takes_the_task_under_the_pointer() {
+        let mut w = W::new("toggle-task-views");
+        set_note(&mut w, "# A\n\n- [ ] buy milk\n\nplain\n");
+        w.app.toggle_reading_view();
+        settle(&mut w);
+        let row = |w: &W, name: &str| w.text_pos.iter().find(|t| t.0.contains(name)).map(|t| t.1 + Vec2::new(4.0, 6.0)).unwrap_or_else(|| panic!("no {name}: {:?}", w.texts));
+        // the pointer is not on a task: nothing
+        w.frame(vec![Event::PointerMoved(row(&w, "plain"))]);
+        space_space(&mut w);
+        assert_eq!(note_text(&w), "# A\n\n- [ ] buy milk\n\nplain\n");
+        assert!(toasted(&w, "No task here"));
+        // on the task row
+        w.frame(vec![Event::PointerMoved(row(&w, "buy milk"))]);
+        w.frame(vec![]);
+        space_space(&mut w);
+        assert_eq!(note_text(&w), "# A\n\n- [x] buy milk\n\nplain\n");
+        space_space(&mut w);
+        assert_eq!(note_text(&w), "# A\n\n- [ ] buy milk\n\nplain\n", "again unticks");
+        // the task list: the task row under the pointer, in the buffer of its note
+        w.app.show_view(View::Tasks, false);
+        settle(&mut w);
+        w.frame(vec![Event::PointerMoved(row(&w, "buy milk"))]);
+        w.frame(vec![]);
+        space_space(&mut w);
+        assert_eq!(note_text(&w), "# A\n\n- [x] buy milk\n\nplain\n");
+    }
+
     fn kind(w: &W) -> &'static str {
         match w.app.tabbar.tabs[w.app.tabbar.active].view {
             View::Note(_) => "note",
