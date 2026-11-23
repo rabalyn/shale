@@ -52,7 +52,20 @@ impl Key {
 #[derive(Clone, Debug, Default)]
 pub struct Cancel(Arc<AtomicBool>);
 
+impl From<Arc<AtomicBool>> for Cancel {
+    /// A flag that code of its own already looks at (the handle of an install, the flag of the
+    /// update) becomes the token of a task, so that Cancel in a view or in the indicator sets it.
+    fn from(flag: Arc<AtomicBool>) -> Cancel {
+        Cancel(flag)
+    }
+}
+
 impl Cancel {
+    /// The flag, for code that takes an `&AtomicBool` (the download, the processes).
+    pub fn flag(&self) -> &AtomicBool {
+        &self.0
+    }
+
     pub fn cancel(&self) {
         self.0.store(true, Ordering::SeqCst);
     }
@@ -165,10 +178,16 @@ impl Task {
     /// Make the task one that Cancel can stop, and hand out the token its work looks at.
     pub fn cancellable(&mut self) -> Cancel {
         let cancel = self.cancel.get_or_insert_with(Cancel::default).clone();
-        if let Some(e) = self.busy.tasks().list.iter_mut().find(|e| e.id == self.id) {
-            e.cancel = Some(cancel.clone());
-        }
+        self.cancellable_with(cancel.clone());
         cancel
+    }
+
+    /// The same with a token that the work already has (see `From<Arc<AtomicBool>>`).
+    pub fn cancellable_with(&mut self, cancel: Cancel) {
+        self.cancel = Some(cancel.clone());
+        if let Some(e) = self.busy.tasks().list.iter_mut().find(|e| e.id == self.id) {
+            e.cancel = Some(cancel);
+        }
     }
 
     /// Run `f` on a new thread under this task: the task ends before the job's result can be

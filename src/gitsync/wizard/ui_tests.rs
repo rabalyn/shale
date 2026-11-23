@@ -212,6 +212,7 @@ fn sync_048_without_git_the_first_step_sends_the_person_to_the_install_and_goes_
     t.app.sync.forget_git_version();
     let data = t.root.join("data");
     t.app.sync.managed = crate::gitsync::install_ui::ManagedState::for_test(data, Some(OsString::from(t.root.join("no-bin"))), Sources::real(), Platform::new("linux", "x86_64"));
+    t.app.sync.managed.busy = t.app.busy.clone();
     t.app.sync.managed.set_detection(Detection { system_git: None, system_lfs: None, managed: None, git_in_use: None, lfs_in_use: None }, GitChoice::Auto);
     t.open_wizard();
     let text = t.painted().join("\n");
