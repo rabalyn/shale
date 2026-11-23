@@ -203,14 +203,16 @@ const OUTSIDE_CHOICES: [(&str, &str, Choice, &str); 2] =
 /// "Continues [[note]]" of a mail or post that answers a note of the vault (IMP-068, SOC-071): the tick box, the
 /// choice when several notes qualify and, when the mail is older than a note of its thread, the
 /// question "Keep the thread in date order?" (IMP-071), asked on one item per thread of the batch
-/// (`ask`: how many notes it changes, IMP-074). Another item of the same import is named by its
-/// title and "(in this import)". True when the choice that decides the folder changed (IMP-069).
-fn continues_line(ui: &mut Ui, i: usize, c: &mut import::Continues, titles: &[String], ask: Option<usize>, rec: &mut impl FnMut(String, egui::Response) -> egui::Response) -> bool {
+/// (`ask`: how many notes it changes, IMP-074). An earlier item of the same import (`in_import`: the
+/// title of the nearest one that is ticked) is named by its title and "(in this import)", as text
+/// and no choice; the line is hidden when there is nothing left to continue. True when the choice
+/// that decides the folder changed (IMP-069).
+fn continues_line(ui: &mut Ui, i: usize, c: &mut import::Continues, in_import: Option<String>, ask: Option<usize>, rec: &mut impl FnMut(String, egui::Response) -> egui::Response) -> bool {
+    if c.candidates.is_empty() && in_import.is_none() {
+        return false;
+    }
     let name = |p: &std::path::Path| p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let label = |p: &std::path::Path| match crate::thread::item_of(p) {
-        Some(k) => format!("{} (in this import)", titles.get(k).map(String::as_str).unwrap_or_default()),
-        None => format!("[[{}]]", name(p)),
-    };
+    let label = |p: &std::path::Path| format!("[[{}]]", name(p));
     let (was_on, was) = (c.on, c.chosen);
     ui.horizontal_wrapped(|ui| {
         rec(format!("continues:{i}"), ui.checkbox(&mut c.on, egui::RichText::new("Continues").size(12.5)))
@@ -223,8 +225,10 @@ fn continues_line(ui: &mut Ui, i: usize, c: &mut import::Continues, titles: &[St
                 }
             });
         } else if let Some(a) = c.anchor() {
-            let colour = if crate::thread::item_of(a).is_some() { theme::palette().text } else { theme::palette().link };
-            ui.label(egui::RichText::new(label(a)).size(12.5).color(colour)).on_hover_text(a.to_string_lossy());
+            ui.label(egui::RichText::new(label(a)).size(12.5).color(theme::palette().link)).on_hover_text(a.to_string_lossy());
+        }
+        if let Some(t) = &in_import {
+            ui.label(egui::RichText::new(format!("{t} (in this import)")).size(12.5));
         }
     });
     if let (true, Some(n)) = (c.on, ask) {
@@ -255,7 +259,7 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
         crate::theme::prose(ui, muted("Nothing to import yet. Drop e-mails, calendar events, pictures or other files on the window, or add a file below."));
     }
     let outside: Vec<bool> = d.items.iter().map(|it| it.outside_media(&d.root)).collect();
-    let titles: Vec<String> = d.items.iter().map(|it| it.title.clone()).collect();
+    let titles: Vec<Option<String>> = d.items.iter().map(|it| it.include.then(|| it.title.clone())).collect();
     let questions = import::older_questions(&d.items);
     let mut refollow = false;
     for (i, it) in d.items.iter_mut().enumerate() {
@@ -322,7 +326,8 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
             }
             let mut follow = false;
             if let Some(c) = &mut it.continues {
-                follow = continues_line(ui, i, c, &titles, questions.get(&c.group).filter(|(first, _)| *first == i).map(|(_, n)| *n), &mut rec);
+                let nearest = c.batch.iter().find_map(|k| titles[*k].clone());
+                follow = continues_line(ui, i, c, nearest, questions.get(&c.group).filter(|(first, _)| *first == i).map(|(_, n)| *n), &mut rec);
             }
             if follow {
                 refollow = true;

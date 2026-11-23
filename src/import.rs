@@ -126,13 +126,16 @@ pub struct Item {
 }
 
 /// An e-mail or post that continues notes of the vault: found by the reply headers, offered in the Import
-/// dialog as "Continues [[note]]" (IMP-068, ADR-0032).
+/// dialog as "Continues [[note]]" (IMP-068, ADR-0032), or an earlier item of the same import.
 #[derive(Clone, Debug)]
 pub struct Continues {
     /// the notes it may continue, the nearest first
     pub candidates: Vec<thread::Candidate>,
     /// where the mail goes in the chain of each candidate's thread (same order)
     pub plans: Vec<thread::Plan>,
+    /// the earlier items of the same import it continues, the nearest first (IMP-074); shown as
+    /// text, not a choice: the chain of the batch does not depend on it
+    pub batch: Vec<usize>,
     /// the candidate that is chosen
     pub chosen: usize,
     /// the tick box: link the new note into the chain
@@ -278,16 +281,23 @@ pub fn find_continues(vault: &Vault, items: &mut [Item]) {
         if items[*k].continues.is_some() {
             continue;
         }
-        let earlier = |c: &thread::Candidate| match thread::item_of(&c.rel) {
-            None => true,
-            Some(j) => idents.iter().find(|(x, _)| *x == j).is_some_and(|(_, o)| j != *k && (c.date_key.as_str(), o.id.as_str()) < (ident.date_key.as_str(), ident.id.as_str())),
-        };
-        let candidates: Vec<thread::Candidate> = with_items.matches(ident).into_iter().filter(earlier).collect();
-        if candidates.is_empty() {
+        let (mut candidates, mut batch) = (Vec::new(), Vec::new());
+        for c in with_items.matches(ident) {
+            match thread::item_of(&c.rel) {
+                None => candidates.push(c),
+                Some(j) => {
+                    let earlier = idents.iter().find(|(x, _)| *x == j).is_some_and(|(_, o)| j != *k && (c.date_key.as_str(), o.id.as_str()) < (ident.date_key.as_str(), ident.id.as_str()));
+                    if earlier {
+                        batch.push(j);
+                    }
+                }
+            }
+        }
+        if candidates.is_empty() && batch.is_empty() {
             continue;
         }
         let plans = candidates.iter().map(|c| index.plan(ident, &c.rel)).collect();
-        items[*k].continues = Some(Continues { candidates, plans, chosen: 0, on: true, update: true, group });
+        items[*k].continues = Some(Continues { candidates, plans, batch, chosen: 0, on: true, update: true, group });
     }
 }
 
@@ -296,7 +306,7 @@ pub fn find_continues(vault: &Vault, items: &mut [Item]) {
 /// of its own: the items of a thread follow the note of the vault they continue, or, with none, the
 /// folder together (IMP-074).
 pub fn continued_folder(items: &[Item]) -> Option<String> {
-    items.iter().filter(|i| i.include).filter_map(|i| i.continues.as_ref().filter(|c| c.on)).filter_map(|c| c.anchor()).find(|a| thread::item_of(a).is_none()).map(|a| rel_to_string(a.parent().unwrap_or(Path::new(""))))
+    items.iter().filter(|i| i.include).filter_map(|i| i.continues.as_ref().filter(|c| c.on)).find_map(|c| c.anchor()).map(|a| rel_to_string(a.parent().unwrap_or(Path::new(""))))
 }
 
 impl Item {

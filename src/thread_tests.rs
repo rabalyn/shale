@@ -538,10 +538,9 @@ fn imp_074_a_batch_of_replies_dropped_at_once_is_chained_in_date_order_with_link
     // the root continues nothing; the replies continue an item of the import, not a note
     assert!(items[1].continues.is_none());
     let cb = items[2].continues.as_ref().unwrap();
-    assert_eq!(thread::item_of(cb.anchor().unwrap()), Some(1), "Second continues the item First");
+    assert_eq!((cb.batch.as_slice(), cb.candidates.len()), (&[1][..], 0), "Second continues the item First");
     let cc = items[0].continues.as_ref().unwrap();
-    assert_eq!(thread::item_of(cc.anchor().unwrap()), Some(2), "Third replies to Second: nearest first");
-    assert!(cc.candidates.iter().all(|k| thread::item_of(&k.rel).is_some()) && cc.candidates.len() == 2);
+    assert_eq!((cc.batch.as_slice(), cc.candidates.len()), (&[2, 1][..], 0), "Third replies to Second: nearest first");
     // the Thread view lists them in the same order
     let rows = Index::build(&v).thread_of(a).unwrap();
     assert_eq!(rows.iter().map(|r| &r.rel).collect::<Vec<_>>(), vec![a, b, c]);

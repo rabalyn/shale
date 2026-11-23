@@ -1230,4 +1230,12 @@ fn imp_074_an_item_that_continues_another_item_of_the_import_says_so_and_the_que
     q.app.open_import(items, vec![], None);
     assert!(q.shows(Show::Modals, "Root (in this import)"));
     assert!(!q.shows(Show::Modals, "Keep the thread in date order?"));
+    // in-batch continues is text, no choice
+    assert!(!keys(&q, "continues-pick:1") && keys(&q, "continues:1"));
+    // Include off on the first item: the second stops naming it and its line goes away
+    click_control(&mut q, "include:0");
+    assert!(!q.shows(Show::Modals, "Root (in this import)"), "an excluded item is not named");
+    assert!(!keys(&q, "continues:1"), "nothing left to continue: no line");
+    click_control(&mut q, "include:0");
+    assert!(q.shows(Show::Modals, "Root (in this import)") && keys(&q, "continues:1"));
 }
