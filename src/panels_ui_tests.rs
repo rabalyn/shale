@@ -828,6 +828,91 @@ fn perf_001_the_task_view_of_a_big_vault_draws_only_the_rows_in_view() {
     assert!((10..200).contains(&drawn), "{drawn} of 3300 rows drawn");
 }
 
+/// 400 notes in a folder of their own and 400 in the vault's top folder, in a short window.
+fn big_file_list(tag: &str) -> P {
+    let notes: Vec<(String, String)> = (0..400).flat_map(|n| [(format!("Note {n:03}.md"), "x\n".to_string()), (format!("Box/Item {n:03}.md"), "x\n".to_string())]).collect();
+    let files: Vec<(&str, &str)> = notes.iter().map(|(p, t)| (p.as_str(), t.as_str())).collect();
+    let mut p = P::with_files(tag, &files);
+    p.size = Vec2::new(900.0, 600.0);
+    p.app.tree.expanded.insert(PathBuf::from("Box"));
+    p
+}
+
+/// How many rows of the file list were given a place for the pointer to hit in the last frame.
+fn tree_rows_with_a_place(p: &mut P) -> usize {
+    p.app.drag.tree_targets.clear();
+    p.frame(Show::Files, vec![]);
+    p.app.drag.tree_targets.iter().filter(|(r, _, _)| r.height() > 0.0).count()
+}
+
+// spec: PERF-011
+#[test]
+fn perf_011_the_file_list_of_a_big_vault_draws_only_the_rows_in_view() {
+    let mut p = big_file_list("treemany");
+    assert!(p.shows(Show::Files, "Item 000") && p.shows(Show::Files, "Item 005"), "the first rows");
+    assert!(!p.shows(Show::Files, "Item 399") && !p.shows(Show::Files, "Note 399"), "not the last rows, 801 rows down");
+    let drawn = p.painted.iter().filter(|(t, _)| t.starts_with("Item ") || t.starts_with("Note ")).count();
+    assert!((10..80).contains(&drawn), "{drawn} of 800 rows drawn");
+    assert!(p.app.tree_rows().len() >= 800, "all rows are there for the keys and the scroll bar");
+}
+
+// spec: PERF-011
+#[test]
+fn perf_011_the_rows_are_made_once_per_state_of_the_list() {
+    let mut p = big_file_list("treeonce");
+    p.look(Show::Files);
+    let made = p.app.tree.rows.builds;
+    assert_eq!(made, 1, "once for the first frames");
+    p.look(Show::Files);
+    assert_eq!(p.app.tree.rows.builds, made, "not again for the next frames");
+    // a folder closes
+    p.app.tree.expanded.clear();
+    p.look(Show::Files);
+    assert_eq!(p.app.tree.rows.builds, made + 1, "again when a folder is opened or closed");
+    // the sort setting
+    p.app.cfg.file_sort = crate::config::FileSort::NameDesc;
+    p.look(Show::Files);
+    assert_eq!(p.app.tree.rows.builds, made + 2, "again for another sort setting");
+    let first = p.app.tree_rows().iter().find(|r| !r.is_folder()).map(|r| r.name.clone());
+    assert_eq!(first.as_deref(), Some("Note 399"), "in the new order");
+    // a new note on disk
+    std::fs::write(p.dir.join("Zeta.md"), "x\n").unwrap();
+    p.app.vault.as_mut().unwrap().rescan();
+    p.look(Show::Files);
+    assert_eq!(p.app.tree.rows.builds, made + 3, "again when the vault changed");
+    assert_eq!(p.app.tree_rows().iter().find(|r| !r.is_folder()).map(|r| r.name.as_str()), Some("Zeta"));
+}
+
+// spec: PERF-011
+#[test]
+fn perf_011_the_keys_move_the_selection_and_scroll_to_a_row_that_was_not_drawn() {
+    let mut p = big_file_list("treekeys");
+    p.look(Show::Files);
+    assert!(!p.shows(Show::Files, "Note 399"));
+    p.app.tree.sel = Some(PathBuf::from("Box/Item 000.md"));
+    p.key(Show::Files, Key::J);
+    assert_eq!(p.app.tree.sel.as_deref(), Some(Path::new("Box/Item 001.md")), "j goes to the next file");
+    // the selection far below the view (the open note after Ctrl+H): it is scrolled to
+    p.app.tree.sel = Some(PathBuf::from("Note 399.md"));
+    p.app.tree.scroll = true;
+    assert!(p.shows(Show::Files, "Note 399"), "the row far below is drawn after the scroll");
+    assert!(!p.app.tree.scroll, "the scroll is done");
+    assert!(!p.shows(Show::Files, "Item 000"), "the top rows are out of the drawn rows now");
+    p.key(Show::Files, Key::K);
+    assert_eq!(p.app.tree.sel.as_deref(), Some(Path::new("Note 398.md")), "k goes to the previous file");
+}
+
+// spec: PERF-011
+#[test]
+fn perf_011_a_row_in_view_still_opens_and_is_a_drop_target_and_the_others_are_not() {
+    let mut p = big_file_list("treerows");
+    let r = p.row("Item 002");
+    p.click_rect(Show::Files, r, PointerButton::Primary);
+    assert_eq!(opened(&p.actions()), ["Box/Item 002.md"]);
+    let places = tree_rows_with_a_place(&mut p);
+    assert!((10..80).contains(&places), "{places} rows with a place of their own");
+}
+
 // spec: TASK-005
 #[test]
 fn panel_task_list_says_so_when_there_are_none() {
