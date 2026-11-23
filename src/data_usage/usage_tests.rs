@@ -170,7 +170,7 @@ fn the_mail_index_is_rebuilt_through_the_open_store() {
     assert_eq!(store.reader().unwrap().count_messages().unwrap(), 1, "the file was indexed at the start");
     let before = stats(CacheId::MailIndex, &p).unwrap();
     assert!(before.bytes > 0 && before.entries == 1, "{before:?}");
-    assert_eq!(clear(CacheId::MailIndex, &p, Some(&store)).map(|f| f.entries), Ok(1));
+    assert_eq!(clear(CacheId::MailIndex, &p, Some((&store, &crate::busy::Cancel::default()))).map(|f| f.entries), Ok(1));
     drop(store);
     let _ = fs::remove_dir_all(&d);
 }

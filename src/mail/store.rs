@@ -19,6 +19,7 @@
 //! Nothing here deletes a message file. A message that moved or was deleted by the person goes
 //! to `.trash/<date>/` ([`MailStore::archive_file`]).
 
+use crate::busy::Cancel;
 use crate::fsutil;
 use crate::mail;
 use crate::mail::db::{self, FolderRow, IndexFields, MailError, MessageSummary, NewMessage, Op, Result, STATE_FULL, STATE_HEADER, STATE_TOO_LARGE};
@@ -163,11 +164,31 @@ fn cut_text(s: &str, max: usize) -> String {
 // ---------------------------------------------------------------- the store
 
 enum Cmd {
-    Batch { ops: Vec<Op>, crash_after: Option<usize>, reply: Sender<Result<()>> },
-    Folder { account: String, display: String, name: String, delimiter: Option<String>, special_use: Option<String>, sync_enabled: bool, reply: Sender<Result<FolderRow>> },
-    Backup { date: String, reply: Sender<Result<Option<PathBuf>>> },
-    Rebuild { reply: Sender<Result<usize>> },
+    Batch {
+        ops: Vec<Op>,
+        crash_after: Option<usize>,
+        reply: Sender<Result<()>>,
+    },
+    Folder {
+        account: String,
+        display: String,
+        name: String,
+        delimiter: Option<String>,
+        special_use: Option<String>,
+        sync_enabled: bool,
+        reply: Sender<Result<FolderRow>>,
+    },
+    Backup {
+        date: String,
+        reply: Sender<Result<Option<PathBuf>>>,
+    },
+    Rebuild {
+        cancel: Cancel,
+        reply: Sender<Result<Option<usize>>>,
+    },
     Stop,
+    #[cfg(test)]
+    Gate(std::sync::mpsc::Receiver<()>),
 }
 
 /// The mail store: files, the index and its one writer thread. Share it with `Arc`.
@@ -236,9 +257,20 @@ impl MailStore {
     /// messages go and come back from the files as in MAIL-006; the folders keep their rows,
     /// so their ids and the server's folder roles stay, and the next sync brings the flags back.
     /// Refused while the index holds actions not yet sent to the server (MAIL-107). Returns how
-    /// many messages the index has afterwards.
-    pub fn rebuild_index(&self) -> Result<usize> {
-        self.ask(|reply| Cmd::Rebuild { reply })
+    /// many messages the index has afterwards, or `None` when `cancel` stopped it (USE-012).
+    /// It works folder by folder, each in one transaction, and looks at the token only between
+    /// two folders: after a stop every folder is either built again or as it was, never empty.
+    pub fn rebuild_index(&self, cancel: &Cancel) -> Result<Option<usize>> {
+        self.ask(|reply| Cmd::Rebuild { cancel: cancel.clone(), reply })
+    }
+
+    /// Test aid: stop the writer until the returned sender sends (or is dropped), so a command
+    /// sent now stays queued.
+    #[cfg(test)]
+    pub fn hold_writer(&self) -> Sender<()> {
+        let (go, wait) = channel();
+        self.tx.send(Cmd::Gate(wait)).expect("the writer runs");
+        go
     }
 
     /// The full path of a message file given its relative path from the index.
@@ -542,9 +574,13 @@ fn writer_loop(mut conn: Connection, root: PathBuf, rx: std::sync::mpsc::Receive
                 let r = crate::jobs::catch(|| make_backup(&conn, &root, &date, keep)).unwrap_or_else(|e| Err(MailError(e)));
                 let _ = reply.send(r);
             }
-            Cmd::Rebuild { reply } => {
-                let r = crate::jobs::catch(|| rebuild_in_place(&mut conn, &root)).unwrap_or_else(|e| Err(MailError(e)));
+            Cmd::Rebuild { cancel, reply } => {
+                let r = crate::jobs::catch(|| rebuild_in_place(&mut conn, &root, &|| cancel.is_cancelled())).unwrap_or_else(|e| Err(MailError(e)));
                 let _ = reply.send(r);
+            }
+            #[cfg(test)]
+            Cmd::Gate(wait) => {
+                let _ = wait.recv();
             }
         }
     }
@@ -588,29 +624,86 @@ fn date_in_name(s: &str) -> Option<i64> {
     Some(crate::calendar::time::days_from_civil(y, m, dd) * 86_400)
 }
 
-/// See [`MailStore::rebuild_index`].
-fn rebuild_in_place(conn: &mut Connection, root: &Path) -> Result<usize> {
+/// See [`MailStore::rebuild_index`]. Folder by folder: each folder that has files on disk gets its
+/// rows deleted and indexed again from its files in one transaction, so a folder is whole either
+/// way; `stop` is asked before each folder. Rows of folders without files go in a last step that
+/// a stop skips.
+fn rebuild_in_place(conn: &mut Connection, root: &Path, stop: &dyn Fn() -> bool) -> Result<Option<usize>> {
     let waiting: i64 = conn.query_row("SELECT COUNT(*) FROM pending_ops", [], |r| r.get(0))?;
     if waiting > 0 {
         return Err(MailError(format!("{waiting} change(s) still wait for the server; the index holds them, so it is not rebuilt until they are sent")));
     }
-    let roles: Vec<(i64, Option<String>, Option<String>)> = {
-        let mut st = conn.prepare("SELECT id, delimiter, special_use FROM folders")?;
-        let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut done: HashSet<i64> = HashSet::new();
+    for (account, apath) in sorted_dir(root) {
+        if !apath.is_dir() || !valid_account_id(&account) {
+            continue;
+        }
+        for (fdir, fpath) in sorted_dir(&apath) {
+            if !fpath.is_dir() {
+                continue;
+            }
+            if stop() {
+                return Ok(None);
+            }
+            let Some(name) = fsutil::read_to_string(fpath.join("name.txt")).ok().or_else(|| folder_name_from_dir(&fdir)) else { continue };
+            if let Some(id) = rebuild_folder(conn, root, &account, &fdir, &fpath, &name)? {
+                done.insert(id);
+            }
+        }
+    }
+    if stop() {
+        return Ok(None);
+    }
+    // folders without a file: their rows have nothing to be built from
+    let tx = conn.transaction()?;
+    let ids: Vec<i64> = {
+        let mut st = tx.prepare("SELECT id FROM folders")?;
+        let v = st.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<Vec<i64>>>()?;
         v
     };
-    let tx = conn.transaction()?;
-    tx.execute_batch("DELETE FROM mail_fts; DELETE FROM messages; UPDATE folders SET uidvalidity = NULL, uidnext = NULL, highestmodseq = NULL, last_sync = NULL;")?;
-    tx.commit()?;
-    reconcile(conn, root)?;
-    // a folder found again from its files lost the role the server gave it (Trash, Sent …)
-    let tx = conn.transaction()?;
-    for (id, delimiter, special_use) in roles {
-        tx.execute("UPDATE folders SET delimiter = ?2, special_use = ?3 WHERE id = ?1", rusqlite::params![id, delimiter, special_use])?;
+    for id in ids.into_iter().filter(|id| !done.contains(id)) {
+        clear_folder_rows(&tx, id)?;
     }
     tx.commit()?;
+    mark_missing_files(conn, root)?;
     let n: i64 = conn.query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0))?;
-    Ok(n as usize)
+    Ok(Some(n as usize))
+}
+
+/// Delete the rows of a folder and forget what the server told about it.
+fn clear_folder_rows(tx: &rusqlite::Transaction<'_>, id: i64) -> Result<()> {
+    tx.execute("DELETE FROM mail_fts WHERE rowid IN (SELECT id FROM messages WHERE folder = ?1)", [id])?;
+    tx.execute("DELETE FROM messages WHERE folder = ?1", [id])?;
+    tx.execute("UPDATE folders SET uidvalidity = NULL, uidnext = NULL, highestmodseq = NULL, last_sync = NULL WHERE id = ?1", [id])?;
+    Ok(())
+}
+
+/// One folder of the rebuild, in one transaction: its rows go and come back from its files, with the
+/// UIDVALIDITY of the newest number on disk. The folder keeps its row, role and sync switch. A folder
+/// that has no row and no file stays unknown (None); else the folder's id.
+fn rebuild_folder(conn: &mut Connection, root: &Path, account: &str, fdir: &str, fpath: &Path, name: &str) -> Result<Option<i64>> {
+    let tx = conn.transaction()?;
+    let mut folder: Option<FolderRow> = db::folder_by_name(&tx, account, name)?;
+    if let Some(f) = &folder {
+        clear_folder_rows(&tx, f.id)?;
+    }
+    for (uvdir, uvpath) in sorted_dir(fpath) {
+        let Ok(uv) = uvdir.parse::<u32>() else { continue };
+        for (file, _) in sorted_dir(&uvpath) {
+            let Some(uid) = file.strip_suffix(".eml").and_then(|u| u.parse::<u32>().ok()) else { continue };
+            if folder.is_none() {
+                folder = Some(db::upsert_folder(&tx, account, account, name, None, None, true)?);
+            }
+            let f = folder.as_ref().ok_or("no folder")?;
+            let Some(m) = message_from_file(root, &format!("{account}/{fdir}/{uv}/{file}"), uv, uid, f.id) else { continue };
+            db::apply_in(&tx, &[Op::message(m)])?;
+        }
+    }
+    if let Some(f) = &folder {
+        adopt_uidvalidity(&tx, f, fpath)?;
+    }
+    tx.commit()?;
+    Ok(folder.map(|f| f.id))
 }
 
 /// The backups in `root`, newest first (the date is in the name).
@@ -712,6 +805,18 @@ fn sorted_dir(path: &Path) -> Vec<(String, PathBuf)> {
     v
 }
 
+/// The index row of one message file (`rel`, relative to `root`); None when the file cannot be read.
+fn message_from_file(root: &Path, rel: &str, uv: u32, uid: u32, folder: i64) -> Option<NewMessage> {
+    let raw = fsutil::read(root.join(rel)).ok()?;
+    let (mut fields, parsed) = index_fields(&raw, None);
+    // a decrypted copy next to it gives the search text (MAIL-183)
+    if let Some(sib) = decrypted_rel(rel).and_then(|r| fsutil::read(root.join(r)).ok()) {
+        let (d, _) = index_fields(&sib, None);
+        (fields.body, fields.attachments, fields.has_attachments) = (d.body, d.attachments, d.has_attachments);
+    }
+    Some(NewMessage { folder, uidvalidity: uv, uid, path: rel.to_string(), state: STATE_FULL, flags: String::new(), size: raw.len() as u64, parsed, fields })
+}
+
 /// Index every `<account>/<folder>/<uidvalidity>/<uid>.eml` that has no row.
 fn index_unknown_files(conn: &mut Connection, root: &Path) -> Result<usize> {
     let mut total = 0;
@@ -730,7 +835,7 @@ fn index_unknown_files(conn: &mut Connection, root: &Path) -> Result<usize> {
                 let Ok(uv) = uvdir.parse::<u32>() else { continue };
                 // the uids this folder already has under this UIDVALIDITY: one query, not one per file
                 let mut known: Option<std::collections::HashSet<u32>> = None;
-                for (file, path) in sorted_dir(&uvpath) {
+                for (file, _) in sorted_dir(&uvpath) {
                     let Some(uid) = file.strip_suffix(".eml").and_then(|u| u.parse::<u32>().ok()) else { continue };
                     if folder.is_none() {
                         folder = Some(db::upsert_folder(conn, &account, &account, &name, None, None, true)?);
@@ -743,14 +848,8 @@ fn index_unknown_files(conn: &mut Connection, root: &Path) -> Result<usize> {
                     if known.as_ref().is_some_and(|k| k.contains(&uid)) {
                         continue;
                     }
-                    let Ok(raw) = fsutil::read(&path) else { continue };
-                    let (mut fields, parsed) = index_fields(&raw, None);
-                    // a decrypted copy next to it gives the search text (MAIL-183)
-                    if let Some(sib) = decrypted_rel(&format!("{account}/{fdir}/{uv}/{file}")).and_then(|r| fsutil::read(root.join(r)).ok()) {
-                        let (d, _) = index_fields(&sib, None);
-                        (fields.body, fields.attachments, fields.has_attachments) = (d.body, d.attachments, d.has_attachments);
-                    }
-                    batch.push(Op::message(NewMessage { folder: f.id, uidvalidity: uv, uid, path: format!("{account}/{fdir}/{uv}/{file}"), state: STATE_FULL, flags: String::new(), size: raw.len() as u64, parsed, fields }));
+                    let Some(m) = message_from_file(root, &format!("{account}/{fdir}/{uv}/{file}"), uv, uid, f.id) else { continue };
+                    batch.push(Op::message(m));
                     total += 1;
                     if batch.len() >= RECONCILE_BATCH {
                         db::apply_batch(conn, &std::mem::take(&mut batch), None)?;
@@ -760,7 +859,9 @@ fn index_unknown_files(conn: &mut Connection, root: &Path) -> Result<usize> {
             if let Some(f) = folder {
                 // the rows of this folder must be in before its number decides which of them are old
                 db::apply_batch(conn, &std::mem::take(&mut batch), None)?;
-                adopt_uidvalidity(conn, &f, &fpath)?;
+                let tx = conn.transaction()?;
+                adopt_uidvalidity(&tx, &f, &fpath)?;
+                tx.commit()?;
             }
         }
     }
@@ -770,7 +871,7 @@ fn index_unknown_files(conn: &mut Connection, root: &Path) -> Result<usize> {
 
 /// A folder rebuilt from files has no UIDVALIDITY yet: it is the newest one on disk, so a sync
 /// that finds the same number carries on instead of fetching everything again.
-fn adopt_uidvalidity(conn: &mut Connection, f: &FolderRow, fpath: &Path) -> Result<()> {
+fn adopt_uidvalidity(conn: &rusqlite::Transaction<'_>, f: &FolderRow, fpath: &Path) -> Result<()> {
     let current = db::folder_by_id(conn, f.id)?.ok_or("folder vanished")?;
     if let Some(uv) = current.uidvalidity {
         // files of another number that turned up now are local copies, too (MAIL-204)
@@ -779,7 +880,7 @@ fn adopt_uidvalidity(conn: &mut Connection, f: &FolderRow, fpath: &Path) -> Resu
     }
     let newest = sorted_dir(fpath).iter().filter_map(|(n, _)| n.parse::<u32>().ok()).filter(|n| *n != db::LOCAL_UIDVALIDITY).max();
     if let Some(uv) = newest {
-        db::apply_batch(conn, &[Op::FolderState { folder: f.id, uidvalidity: Some(uv), uidnext: None, highestmodseq: None, last_sync: 0 }], None)?;
+        db::apply_in(conn, &[Op::FolderState { folder: f.id, uidvalidity: Some(uv), uidnext: None, highestmodseq: None, last_sync: 0 }])?;
     }
     Ok(())
 }
@@ -1377,7 +1478,7 @@ mod tests {
         put(&store, &inbox, 2, &sample("two", "a@x.de", "second"));
         put(&store, &trash, 1, &sample("three", "a@x.de", "third"));
         let files_before: Vec<_> = crate::data_usage::scan::vault(&root).1;
-        assert_eq!(store.rebuild_index().unwrap(), 3, "every message file is indexed again");
+        assert_eq!(store.rebuild_index(&Cancel::default()).unwrap(), Some(3), "every message file is indexed again");
         let r = store.reader().unwrap();
         let folders = r.folders(Some("acct1")).unwrap();
         let t = folders.iter().find(|f| f.name == "Trash").unwrap();
@@ -1405,9 +1506,59 @@ mod tests {
             last_error: None,
         };
         store.commit(vec![Op::PendingAdd(Box::new(pending))]).unwrap();
-        let e = store.rebuild_index().unwrap_err();
+        let e = store.rebuild_index(&Cancel::default()).unwrap_err();
         assert!(e.0.contains("wait for the server"), "{e}");
         assert_eq!(count(&store), 3, "a refused rebuild changes nothing");
+        drop(store);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: USE-012, JOB-016
+    #[test]
+    fn a_rebuild_that_is_cancelled_stops_between_folders_and_leaves_every_folder_whole_or_as_before() {
+        let root = temp_root("rebuild-cancel");
+        let store = MailStore::open(&root).unwrap();
+        let inbox = store.ensure_folder("acct1", "A", "INBOX", Some("/"), None, true).unwrap();
+        let trash = store.ensure_folder("acct1", "A", "Trash", Some("/"), Some("\\Trash"), false).unwrap();
+        put(&store, &inbox, 1, &sample("one", "a@x.de", "first"));
+        put(&store, &inbox, 2, &sample("two", "a@x.de", "second"));
+        put(&store, &trash, 1, &sample("three", "a@x.de", "third"));
+        // stopped before the rows go: nothing changed
+        let asked = Cancel::default();
+        asked.cancel();
+        assert_eq!(store.rebuild_index(&asked).unwrap(), None);
+        assert_eq!(count(&store), 3, "a rebuild stopped at the start changes nothing");
+        drop(store);
+        // stopped after the first folder was read again: it is rebuilt (its flags are gone until the next
+        // sync), the other keeps its rows as they were; no folder is ever empty
+        let mut conn = db::open_writer(&root.join("index.sqlite")).unwrap();
+        let asks = std::cell::Cell::new(0);
+        let stop = || {
+            asks.set(asks.get() + 1);
+            asks.get() > 1
+        };
+        assert_eq!(rebuild_in_place(&mut conn, &root, &stop).unwrap(), None, "stopped");
+        let rows: Vec<(String, i64, String)> = conn
+            .prepare("SELECT f.name, m.uid, m.flags FROM messages m JOIN folders f ON f.id = m.folder ORDER BY f.name, m.uid")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        let seen = "\\Seen".to_string();
+        assert_eq!(rows, [("INBOX".to_string(), 1, String::new()), ("INBOX".to_string(), 2, String::new()), ("Trash".to_string(), 1, seen)], "the first folder is built again, the second is as before");
+        let roles: Vec<(String, Option<String>)> = conn.prepare("SELECT name, special_use FROM folders ORDER BY name").unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().collect::<rusqlite::Result<_>>().unwrap();
+        assert_eq!(roles, [("INBOX".to_string(), None), ("Trash".to_string(), Some("\\Trash".to_string()))], "the folders keep their roles");
+        drop(conn);
+        db::quick_check(&root.join("index.sqlite")).expect("the index passes the integrity check (MAIL-006)");
+        // a rebuild after the stop completes (a folder without files has no rows to build)
+        let store = MailStore::open(&root).unwrap();
+        store.ensure_folder("acct1", "A", "Empty", Some("/"), None, true).unwrap();
+        assert_eq!(count(&store), 3);
+        assert_eq!(store.rebuild_index(&Cancel::default()).unwrap(), Some(3));
+        assert_eq!(store.reader().unwrap().message(trash.id, 1).unwrap().unwrap().flags, "", "now every folder is rebuilt");
+        assert_eq!(store.reader().unwrap().folders(Some("acct1")).unwrap().len(), 3, "a folder without files keeps its row");
+        db::quick_check(&root.join("index.sqlite")).unwrap();
         drop(store);
         let _ = std::fs::remove_dir_all(&root);
     }

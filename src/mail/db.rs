@@ -432,6 +432,14 @@ pub fn apply_batch(c: &mut Connection, ops: &[Op], crash_after: Option<usize>) -
     Ok(())
 }
 
+/// Apply operations inside a transaction of the caller.
+pub fn apply_in(tx: &rusqlite::Transaction<'_>, ops: &[Op]) -> Result<()> {
+    for op in ops {
+        apply_op(tx, op)?;
+    }
+    Ok(())
+}
+
 fn apply_op(tx: &rusqlite::Transaction<'_>, op: &Op) -> Result<()> {
     match op {
         Op::Message(m) => insert_message(tx, m)?,

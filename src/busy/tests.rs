@@ -295,6 +295,29 @@ fn job_015_the_store_opens_at_start_when_there_is_an_account_though_the_mail_vie
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// spec: JOB-016
+#[test]
+fn job_016_the_mail_view_shows_the_rebuild_of_the_index_with_a_spinner_and_cancel_while_its_task_runs() {
+    use crate::mail::ui::{StoreState, MAIL_REBUILD};
+    let (mut app, mut h, dir) = window("mail-rebuild");
+    app.show_view(crate::app::View::Mail, false);
+    let store = std::sync::Arc::new(crate::mail::store::MailStore::open(&dir.join("mail-test")).unwrap());
+    app.mail.store = StoreState::Rebuilding(store);
+    let mut task = app.busy.begin(MAIL_REBUILD, "Rebuilding the mail index…").expect("the registry of the window is the mail view's");
+    let cancel = task.cancellable();
+    h.frames(&mut app, 3);
+    assert!(painted_at(&h, "Rebuilding the mail index…").is_some(), "the view says what runs");
+    assert!(painted_at(&h, "Rebuilding the mail index from the message files…").is_none());
+    let button = h.find_label(&mut app, "Cancel");
+    h.click(&mut app, button.center(), PointerButton::Primary);
+    assert!(cancel.is_cancelled(), "Cancel in the view reaches the job");
+    drop(task);
+    h.frames(&mut app, 3);
+    assert!(painted_at(&h, "Rebuilding the mail index…").is_none());
+    assert!(painted_at(&h, "Rebuilding the mail index from the message files…").is_some(), "no task: the plain line");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 fn window(tag: &str) -> (ShaleApp, Headless, std::path::PathBuf) {
     let dir = std::env::temp_dir().join(format!("shale-busy-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
