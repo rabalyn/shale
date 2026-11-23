@@ -167,6 +167,7 @@ mod thread;
 mod thread_tests;
 #[cfg(test)]
 mod thread_ui_tests;
+mod tree_rows;
 #[cfg(test)]
 mod ui_test_support;
 mod undo;

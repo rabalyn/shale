@@ -565,6 +565,12 @@ impl Vault {
         Ok(v)
     }
 
+    /// Which state of which vault the file list shows: (`uid`, scans merged, `generation`). The
+    /// files, folders and their times only change when a scan is merged (PERF-011).
+    pub(crate) fn tree_state(&self) -> (u64, u64, u64) {
+        (self.uid, self.rescan_epoch, self.generation)
+    }
+
     pub fn abs(&self, rel: &Path) -> PathBuf {
         self.root.join(rel)
     }

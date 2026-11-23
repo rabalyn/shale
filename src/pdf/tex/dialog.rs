@@ -53,7 +53,7 @@ pub struct Failure {
     pub set_dir: PathBuf,
 }
 
-/// The PDF export through LaTeX, as a task of the busy registry (JOB-017).
+/// The PDF export through LaTeX, as a task of the busy registry (JOB-018).
 pub const TEX_EXPORT: Key = Key::new("tex-export");
 
 /// A running export of the dialog, a task of the registry. Dropping it (the dialog closed, or
@@ -233,7 +233,7 @@ impl TexExport {
         matches!(self.status, TexStatus::Ready(_)) && self.current_kind().is_some() && self.job.is_none() && !busy.is_running(&TEX_EXPORT)
     }
 
-    /// Compile a document against the chosen set as a task of the registry (TEX-004, JOB-017).
+    /// Compile a document against the chosen set as a task of the registry (TEX-004, JOB-018).
     /// False: a LaTeX export already runs, and nothing starts.
     pub fn start(&mut self, busy: &Busy, engine: Engine, document: Document, notify: impl FnOnce() + Send + 'static) -> bool {
         let Some(set) = self.current_set().cloned() else { return true };

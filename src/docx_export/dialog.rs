@@ -7,7 +7,7 @@ use crate::theme;
 use eframe::egui::{self, Rect, Ui};
 use std::path::PathBuf;
 
-/// The export of a note to Word, as a task of the busy registry (JOB-018).
+/// The export of a note to Word, as a task of the busy registry (JOB-019).
 pub const DOCX_EXPORT: Key = Key::new("docx-export");
 
 /// A running export. Dropping it (the dialog closed, or Cancel) stops pandoc.
@@ -67,7 +67,7 @@ impl DocxDialog {
         self.pandoc.is_some() && self.job.is_none() && !self.busy.is_running(&DOCX_EXPORT)
     }
 
-    /// Run the export as a task of the registry (JOB-018); `notify` is called when it has ended (to
+    /// Run the export as a task of the registry (JOB-019); `notify` is called when it has ended (to
     /// repaint the window). False: a Word export already runs, and nothing starts.
     pub fn start(&mut self, job: Job, notify: impl FnOnce() + Send + 'static) -> bool {
         let Some(mut task) = self.busy.begin(DOCX_EXPORT, format!("Exporting “{}” to Word…", self.name)) else { return false };

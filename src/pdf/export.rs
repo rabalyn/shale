@@ -706,7 +706,7 @@ pub(super) struct Writer<'a> {
     pub(super) jumps: Vec<(usize, [f32; 4], String)>,
     /// the pictures drawn inside lines by file: their image of the document and size in pixels (PDF-030); none for one that cannot be read
     inline_images: HashMap<PathBuf, Option<(usize, Vec2)>>,
-    /// a note's export as a task: asked between two pictures, the layout ends early (JOB-016)
+    /// a note's export as a task: asked between two pictures, the layout ends early (JOB-017)
     cancel: Option<Cancel>,
 }
 
@@ -1696,7 +1696,7 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
 pub const CANCELLED: &str = "The export was cancelled";
 
 /// [`export_note`] as a task: `cancel` is looked at before each picture, and a note that was stopped
-/// is an error, never a half-made PDF (JOB-016).
+/// is an error, never a half-made PDF (JOB-017).
 pub fn export_note_until(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions, cancel: Option<&Cancel>) -> Result<Vec<u8>, String> {
     let _flow = tracing::info_span!("flow.pdf_export", peer = "export").entered();
     // the paper always has Shale's colours, whatever the theme of the window (CFG-061, PDF-007)

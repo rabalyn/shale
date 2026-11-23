@@ -9,7 +9,7 @@ use eframe::egui::{self, Rect, Ui};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// The conversion of the Word files with pandoc, as a task of the busy registry (JOB-019).
+/// The conversion of the Word files with pandoc, as a task of the busy registry (JOB-020).
 pub const IMPORT_CONVERT: Key = Key::new("import-convert");
 
 /// The result of pandoc for the item at this place of the list.
@@ -30,7 +30,7 @@ pub struct ImportDialog {
     /// leave the quoted mails out of the text of e-mails (IMP-066)
     pub leave_out_quoted: bool,
     /// pandoc runs for the Word files that are going on in a job, a task of the registry (IMP-035,
-    /// JOB-019); letting go of the dialog stops it (JOB-010)
+    /// JOB-020); letting go of the dialog stops it (JOB-010)
     pub converting: Option<busy::Job<Vec<Converted>>>,
     busy: Busy,
     /// a note to add links to the new notes to (where it was dropped / the open note)
@@ -95,7 +95,7 @@ impl ImportDialog {
         self
     }
 
-    /// Start pandoc, in a task of the registry (JOB-019), on the Word files that have not been
+    /// Start pandoc, in a task of the registry (JOB-020), on the Word files that have not been
     /// converted yet (IMP-035). `Ok(false)` when there is nothing to do; an error when a conversion
     /// of another dialog still runs (JOB-005) and nothing starts.
     pub fn start_conversion(&mut self, root: PathBuf) -> Result<bool, String> {
@@ -768,7 +768,7 @@ mod tests {
         assert!(!d.rects.iter().any(|r| r.0 == "keep-docx"));
     }
 
-    // spec: IMP-035, JOB-019
+    // spec: IMP-035, JOB-020
     #[test]
     fn the_result_of_the_conversion_job_is_taken_and_a_crash_fails_the_files_waiting_for_it() {
         let ready = |d: &ImportDialog| -> Vec<Option<bool>> { d.items.iter().map(|i| if let Source::Docx { ready, .. } = &i.source { ready.as_ref().map(|r| r.is_ok()) } else { None }).collect() };
@@ -797,7 +797,7 @@ mod tests {
         assert!(matches!(&d.items[0].source, Source::Docx { ready: Some(Err(e)), .. } if e.contains("boom")), "{:?}", d.items[0].source);
     }
 
-    // spec: JOB-010, JOB-019
+    // spec: JOB-010, JOB-020
     #[cfg(unix)]
     #[test]
     fn the_conversion_is_a_task_with_its_text_and_closing_the_dialog_stops_it_and_takes_it_off_the_list() {

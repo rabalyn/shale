@@ -1643,7 +1643,7 @@ mod dialog_tests {
         assert_eq!(found.pandoc.as_deref(), Some(Path::new("/opt/pandoc/bin/pandoc")));
     }
 
-    // spec: DOCX-002, JOB-010, JOB-018
+    // spec: DOCX-002, JOB-010, JOB-019
     #[cfg(unix)]
     #[test]
     fn the_export_runs_as_a_task_the_dialog_shows_it_and_cancel_and_closing_stop_it() {

@@ -1217,7 +1217,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   the mail index, its daily backups, damaged copies of the mail index, the learned tag words, the
   undo histories of the notes of the open vault and the keyboard debug log. Each row shows its size, entries, oldest entry and last cleanup, and
   has a **Clear** button. The mail index is **rebuilt** from the message files instead (it asks
-  first; not while mail syncs or a change waits for the server), and damaged copies are only
+  first; not while mail syncs or a change waits for the server; it is a background task with Cancel, JOB-016), and damaged copies are only
   deleted after you confirm; Clear on the undo histories asks first too (every `u` history of the
   vault goes, damaged copies included) and empties the histories of the open notes.
 - How long each cache is kept is a setting (on its row, and in Settings under "How long caches
@@ -1411,7 +1411,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 ## Busy states: spinner, what is happening, Cancel
 
-Whatever runs longer than a moment says what it does, cannot be started twice and shows in one place (JOB-003 to JOB-019, #397, #385, #524).
+Whatever runs longer than a moment says what it does, cannot be started twice and shows in one place (JOB-003 to JOB-020, #397, #385, #524).
 
 - **A spinner and what happens.** A running action shows a spinner and a short phrase that names it
   ("Syncing with git…", "Checking file names and links…", "Exporting “Handbook” to PDF…"). Where the work can stop, **Cancel**
@@ -1427,7 +1427,7 @@ Whatever runs longer than a moment says what it does, cannot be started twice an
 - **Vault dropdown** (VAULT-030, VAULT-032 to VAULT-034, VAULT-038, VAULT-039, #583): the vault label at the bottom left of the window (name and ▾) opens a list of the known vaults, the open one marked, then **Open…** and **Create…**. A click or Enter opens a vault; arrows, Enter and Esc work. A right-click on a vault offers **Rename** (an empty name is refused). Open… and Create… use the app's own folder picker (a path field, the folders below, Up); Create takes an empty folder (hidden files do not count; a new path is made), can start with sample notes, and offers to open a folder with content instead. A vault whose folder is missing is greyed out in the list and on the start screen with **Locate…** (pick the new folder, the name stays) and **Forget**, and Shale never makes that folder again by itself. A folder inside a known vault, or around one, is allowed and warned about once. A right-click on a vault also offers **Close** (VAULT-035, VAULT-044, #584): the vault is forgotten (its notes stay) and a question asks whether to remove `.shale/` and `.trash/` too (both off by default; there is no system trash, they are deleted for good; notes and `.git` are never touched). **Close current vault** is the last line of the list and the quick switcher has a "Switch vault" command that shows the list. Closing or switching saves all buffers, waits for a running sync without freezing the window (30 s at most, with Cancel), drops everything of the old vault (VAULT-036, VAULT-037) and keeps mail, calendar and the global settings.
 - **Opening a vault** (NET-019, #513): a vault is read on a background thread. While it loads, the start screen shows a spinner, "Opening ‹folder›…" and **Cancel** (a vault on a slow network share or an online-only folder no longer freezes the window); the main window appears when the vault has arrived. This covers the last vault at start, `--vault`, a folder a second start hands over, the user guide and Open or Create in the start dialog.
 - **Moved so far:** the git sync and the Git LFS setup, the check of the vault's names (Cancel stops it) the PDF export of a
-  folder, of a note and of a drawing (Cancel stops it before the next picture and writes no half file, JOB-016), the export through LaTeX (JOB-017), the export to Word with its new spinner (JOB-018) and the conversion of Word files of the Import dialog (JOB-019); closing such a dialog stops its work (JOB-010). Also the check of the mail index (JOB-015: it starts with the window when a mail account is set up, so the mail view finds the index ready, and the view shows "Checking the mail index…" with a spinner when it is opened earlier). The other long actions follow; the list of all of them, with what each shows today, is
+  folder, of a note and of a drawing (Cancel stops it before the next picture and writes no half file, JOB-017), the export through LaTeX (JOB-018), the export to Word with its new spinner (JOB-019) and the conversion of Word files of the Import dialog (JOB-020); closing such a dialog stops its work (JOB-010). Also the check of the mail index (JOB-015: it starts with the window when a mail account is set up, so the mail view finds the index ready, and the view shows "Checking the mail index…" with a spinner when it is opened earlier). The rebuild of the mail index is a task too, with Cancel between two folders (JOB-016). The other long actions follow; the list of all of them, with what each shows today, is
   [docs/spec/busy-states.md](spec/busy-states.md).
 
 ## Keyboard

@@ -3,7 +3,7 @@
 **IS NOW** = true of the code today · **SHOULD BE** = agreed target.
 Format: [ADR-0001](../decisions/0001-spec-driven-development.md). Issue: #397.
 
-The rules are JOB-003 to JOB-019 in [engineering.md](engineering.md#background-jobs-job): every action that
+The rules are JOB-003 to JOB-020 in [engineering.md](engineering.md#background-jobs-job): every action that
 loads or runs longer than a moment is a task of the busy registry (`busy::Busy`), shows a spinner and
 what happens, cannot be started twice, offers Cancel where the work can stop (or Close for a dialog
 whose work goes on), and shows in the indicator at the top right of the editor pane while it runs.
@@ -49,18 +49,18 @@ would leave a mess (JOB-006).
 
 | Action | Runs today | Stop | Shows today | Registry |
 |---|---|---|---|---|
-| PDF export of a note or drawing (built-in, PDF-001) | thread (`pdf/note_export.rs`) | yes, before each picture; nothing is written when it stops | spinner and "Exporting to PDF… Cancel stops it.", Export off | **IS NOW** (JOB-016): "Exporting “Notes” to PDF…" |
+| PDF export of a note or drawing (built-in, PDF-001) | thread (`pdf/note_export.rs`) | yes, before each picture; nothing is written when it stops | spinner and "Exporting to PDF… Cancel stops it.", Export off | **IS NOW** (JOB-017): "Exporting “Notes” to PDF…" |
 | PDF export of a folder, a book (BOOK-010) | thread | yes, between notes | spinner and "Laying out the book: 3 of 12 notes" with Cancel | **IS NOW** (JOB-013): "Exporting “Handbook” to PDF…" |
-| PDF export through LaTeX (TEX-016) | thread (compile) | yes (flag ends the process) | spinner "Compiling with LuaLaTeX… Cancel stops it." | **IS NOW** (JOB-017): "Exporting “Notes” to PDF with LaTeX…"; the dialog keeps Cancel (JOB-010) |
-| Export to Word (DOCX-002) | thread (pandoc) | yes (flag ends the process) | spinner and "Exporting to Word… Cancel stops it." | **IS NOW** (JOB-018): "Exporting “Notes” to Word…"; the dialog keeps Cancel (JOB-010) |
+| PDF export through LaTeX (TEX-016) | thread (compile) | yes (flag ends the process) | spinner "Compiling with LuaLaTeX… Cancel stops it." | **IS NOW** (JOB-018): "Exporting “Notes” to PDF with LaTeX…"; the dialog keeps Cancel (JOB-010) |
+| Export to Word (DOCX-002) | thread (pandoc) | yes (flag ends the process) | spinner and "Exporting to Word… Cancel stops it." | **IS NOW** (JOB-019): "Exporting “Notes” to Word…"; the dialog keeps Cancel (JOB-010) |
 | `shale --export-pdf` (BOOK-011) | the main thread, no window | no | the terminal | out of scope (no window) |
 
 ## Import
 
 | Action | Runs today | Stop | Shows today | Registry |
 |---|---|---|---|---|
-| Import dialog: converting Word files with pandoc (IMP-035) | thread | yes (flag) | spinner and "Converting the Word files with pandoc… Cancel stops it.", Import off | **IS NOW** (JOB-019); the dialog keeps Cancel (JOB-010) |
-| Import of mails, events, files into notes (`import_action`) | UI thread | no | nothing (usually quick) | not moved: it needs the vault and the sync tree held, and writes one history snapshot (IMP-070…IMP-074, JOB-019); planned as a thread only when it proves slow |
+| Import dialog: converting Word files with pandoc (IMP-035) | thread | yes (flag) | spinner and "Converting the Word files with pandoc… Cancel stops it.", Import off | **IS NOW** (JOB-020); the dialog keeps Cancel (JOB-010) |
+| Import of mails, events, files into notes (`import_action`) | UI thread | no | nothing (usually quick) | not moved: it needs the vault and the sync tree held, and writes one history snapshot (IMP-070…IMP-074, JOB-020); planned as a thread only when it proves slow |
 | Mail import from the mail view (MAIL-070) | thread (`app/mail.rs`) | no | nothing until the dialog opens | planned: "Reading the mails…" |
 | Import of saved web pages from the spool of the browser extension (CLIP-009, CLIP-067, #427) | none yet | no (a half-written clip is worse than a late one; the rest waits in the spool) | not built | planned with the clipper: a task "Importing saved web pages…" on a worker thread (SHOULD BE, CLIP-067) |
 | Pandoc probe, TeX probe (settings) | thread | no | "Looking for TeX on this computer…" | planned: listed only after 2 s |
@@ -78,7 +78,7 @@ would leave a mess (JOB-006).
 | Action | Runs today | Stop | Shows today | Registry |
 |---|---|---|---|---|
 | Opening the mail store (`MailStore::open`, MAIL-050; the integrity check, MAIL-006, and a possible index rebuild) | thread, started with the first frame of the window when an account is set up (else when the mail view first opens) | no | a spinner and "Checking the mail index…" in the view ("Opening the local mail copy…" in the instant between) | **IS NOW** (JOB-015) |
-| Rebuilding the mail index (USE-012) | the store's writer thread | no | "Rebuilding the mail index from the message files…" | planned: a task |
+| Rebuilding the mail index (USE-012) | job of the Data usage dialog, which asks the store's writer thread | yes: between two folders (each folder is rebuilt in one transaction, so none is left empty) | a spinner, "Rebuilding the mail index…" and Cancel in the mail view | **IS NOW** (JOB-016) |
 | Mail sync (IMAP, MAIL) | thread per account (`imap_sync::start`) | yes (flag) | progress in the view, "Cancel sync" | planned: a task per account |
 | Mail: loading a listing, reading and downloading a message, search, send, sign-in (OAuth), key and GnuPG work | threads of the mail UI (`mail/ui.rs`, `send.rs`, `oauth.rs`) | sign-in: flag and timeout; the others: no | per-view lines ("Loading the list from the server…", "Reading the message…", "Searching…") | not tasks (they belong to their view); send and sign-in planned |
 | Mail watch (IDLE, `mail/watch.rs`) | a thread of its own for the session | yes | nothing | not a task: it runs for the whole session |

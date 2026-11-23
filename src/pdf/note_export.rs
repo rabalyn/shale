@@ -1,5 +1,5 @@
 //! The PDF export of one note or drawing with the built-in writer (PDF-001), off the window's
-//! thread and a task of the busy registry (JOB-016): the layout of a long note with many pictures
+//! thread and a task of the busy registry (JOB-017): the layout of a long note with many pictures
 //! took the window's time, so it runs as a job that looks at Cancel before each picture. It shares
 //! the key of the export of a folder ([`PDF_EXPORT`]): one built-in PDF export at a time. Nothing is
 //! written by the job: the window saves the bytes it hands over, so a stopped export leaves no file.
@@ -105,7 +105,7 @@ mod tests {
         }
     }
 
-    // spec: PDF-001, JOB-016
+    // spec: PDF-001, JOB-017
     #[test]
     fn a_cancel_before_a_picture_ends_the_layout_with_an_error_and_no_pdf_and_without_it_the_pdf_is_made() {
         let dir = temp_vault("cancel");
@@ -124,7 +124,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // spec: PDF-001, JOB-016, JOB-005
+    // spec: PDF-001, JOB-017, JOB-005
     #[test]
     fn the_export_is_a_task_that_ends_with_its_job_and_a_second_one_is_refused() {
         let dir = temp_vault("task");

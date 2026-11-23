@@ -18,6 +18,10 @@ and you cannot start it twice by accident.
 - **The mail index is checked as Shale starts** when you have a mail account, even if you have not
   opened the mail view: "Checking the mail index…" shows in the indicator. Open the view meanwhile
   and it shows the same text with a spinner until the check is done.
+- **The mail index can be rebuilt** (Settings, Data usage, Mail index, **Rebuild**): "Rebuilding the mail
+  index…" shows in the indicator and, with a spinner and **Cancel**, in the mail view. Cancel stops
+  between two folders: every folder is either built again or as it was, so no mail seems to be
+  missing; rebuild again to go on with the rest.
 - **The buttons that would start the same thing again are off** while it runs. Point at one and it
   says what is still running. A key or the timer cannot start it a second time either.
 - **Exports and the Word import** are listed too: the PDF export of a note or drawing (the window no longer waits

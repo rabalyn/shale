@@ -583,7 +583,7 @@ mod fake {
         assert!(t.dir.join("exports/Plan.pdf").is_file());
     }
 
-    // spec: TEX-016, TEX-004, JOB-010, JOB-017
+    // spec: TEX-016, TEX-004, JOB-010, JOB-018
     #[test]
     fn export_shows_that_it_is_working_and_cancel_stops_the_compile_and_closes_the_dialog() {
         let mut t = T::new("dlg-cancel", usable());
@@ -600,7 +600,7 @@ mod fake {
         click(&mut t, "export");
         until(&mut t, "LuaLaTeX has started", |_| marker.with_extension("started").exists());
         assert!(dialog(&t).tex.as_ref().unwrap().working() && t.shows("Compiling with LuaLaTeX"), "{:?}", t.painted());
-        // the compile is a task of the registry with its text and Cancel, and Export is off beside it (JOB-017, JOB-005)
+        // the compile is a task of the registry with its text and Cancel, and Export is off beside it (JOB-018, JOB-005)
         let listed = t.app.busy.info(&crate::pdf::tex::dialog::TEX_EXPORT);
         assert!(listed.as_ref().is_some_and(|i| i.cancellable && i.label == "Exporting “Plan” to PDF with LaTeX…"), "{listed:?}");
         assert!(!dialog(&t).tex.as_ref().unwrap().can_export(&t.app.busy));
@@ -664,7 +664,7 @@ fn a_template_the_vault_does_not_have_is_said_in_the_dialog_with_what_is_used_in
     assert!(tex.template_warning.is_none() && !has(&t, "template-warning"));
 }
 
-// spec: TEX-016, JOB-017
+// spec: TEX-016, JOB-018
 #[test]
 fn a_job_that_crashed_is_an_error_in_the_dialog_and_a_dropped_job_asks_the_compile_to_stop() {
     use super::dialog::{ExportJob, TexExport, TEX_EXPORT};

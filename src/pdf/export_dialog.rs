@@ -34,7 +34,7 @@ pub struct ExportDialog {
     pub tex: Option<Box<TexExport>>,
     /// A folder as one PDF (BOOK-010): its reading order and the job; none for a note or drawing.
     pub book: Option<Box<BookExport>>,
-    /// The export of a note or drawing with the built-in writer, while it runs (JOB-016).
+    /// The export of a note or drawing with the built-in writer, while it runs (JOB-017).
     pub note: Option<NoteExport>,
     busy: Busy,
     /// screen rect of every control (used by the UI tests)
@@ -493,7 +493,7 @@ mod tests {
         assert!(!d.rects.iter().any(|r| r.0 == "toc-break"));
     }
 
-    // spec: JOB-005, JOB-010, JOB-016
+    // spec: JOB-005, JOB-010, JOB-017
     #[test]
     fn export_is_off_while_a_built_in_export_runs_in_this_dialog_or_another_and_the_dialog_says_it_works() {
         use crate::pdf::note_export::{NoteExport, What, Work};

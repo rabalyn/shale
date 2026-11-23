@@ -2315,7 +2315,7 @@ impl ShaleApp {
         self.notes.get(rel).map(|n| n.text.clone()).or_else(|| self.vault.as_ref().and_then(|v| v.notes.get(rel)).map(|n| n.text.clone())).unwrap_or_default()
     }
 
-    /// Lay the PDF of the dialog's note or drawing out as a task (PDF-001, JOB-016): the window stays
+    /// Lay the PDF of the dialog's note or drawing out as a task (PDF-001, JOB-017): the window stays
     /// free, the export can be stopped before the next picture, and nothing is written until it is done.
     pub fn start_note_export(&mut self, d: &mut crate::pdf::export_dialog::ExportDialog, ctx: &egui::Context) -> Result<(), String> {
         use crate::pdf::note_export::{NoteExport, What, Work};
@@ -4041,7 +4041,7 @@ mod export_tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
-    // spec: PDF-001, JOB-010, JOB-016
+    // spec: PDF-001, JOB-010, JOB-017
     #[test]
     fn the_export_of_a_note_is_a_task_with_its_text_and_cancel_stops_it_and_writes_no_file() {
         let (mut app, d) = test_app("note-task");
