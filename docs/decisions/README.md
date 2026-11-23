@@ -41,6 +41,7 @@ way it is. They are append-only. *What* Shale does today is in the living specs 
 | [0031](0031-performance-gates-on-the-workstation.md) | Performance gates only on the owner's workstation (a flagged time regression is confirmed by an interleaved re-run); statistics only on GitHub, nothing on Forgejo | Accepted |
 | [0032](0032-thread-links-of-imported-items.md) | Thread links of imported mails and posts: `previous` / `next` wikilinks, a `thread-id`, reply-header matching, a thread view in the right sidebar | Accepted |
 | [0033](0033-views-on-either-side.md) | Files, Search and Tags on either side of the window: move or copy, one shared state, the same stored layout | Accepted |
+| [0034](0034-kanban-boards.md) | Kanban boards as notes, one query language with a validator and budget, a background search worker, note properties (created, modified, priority), dependencies, board PDF | Accepted |
 | [0035](0035-windowed-editor.md) | A windowed editor for very long notes: stitched block layouts first, a window over the text only if that is not enough | Proposed |
 
 Format: Context, Decision, Consequences (and Alternatives if any). Statuses: *Proposed* →
