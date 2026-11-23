@@ -39,6 +39,7 @@ way it is. They are append-only. *What* Shale does today is in the living specs 
 | [0029](0029-sync-wizard-and-git-credentials.md) | The sync wizard, git credentials through GIT_ASKPASS and detection of shared folders | Accepted |
 | [0030](0030-media-outside-the-vault.md) | Media outside the vault: library links and file links | Accepted |
 | [0031](0031-performance-gates-on-the-workstation.md) | Performance gates only on the owner's workstation (a flagged time regression is confirmed by an interleaved re-run); statistics only on GitHub, nothing on Forgejo | Accepted |
+| [0032](0032-thread-links-of-imported-items.md) | Thread links of imported mails and posts: `previous` / `next` wikilinks, a `thread-id`, reply-header matching, a thread view in the right sidebar | Accepted |
 
 Format: Context, Decision, Consequences (and Alternatives if any). Statuses: *Proposed* →
 *Accepted* → (*Superseded by NNNN*). An accepted ADR is not edited; a new one supersedes it.
