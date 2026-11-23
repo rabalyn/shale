@@ -74,6 +74,8 @@ struct Out {
     first: Option<Fmt>,
     last: Option<Fmt>,
     marks: Vec<MathMark>,
+    /// a code block in it is drawn plain until the worker has highlighted it (EDIT-121)
+    pending: bool,
 }
 
 struct Entry {
@@ -92,6 +94,8 @@ struct Cut {
 pub(crate) struct FormatCache {
     fonts: Option<EditorFonts>,
     blocks: HashMap<u64, Entry>,
+    /// `syntax::generation` when the blocks were last looked at (EDIT-121)
+    syntax_gen: u64,
     min_block: usize,
     /// how many blocks were formatted (not found in the cache), for the tests
     #[cfg(test)]
@@ -103,6 +107,7 @@ impl Default for FormatCache {
         FormatCache {
             fonts: None,
             blocks: HashMap::new(),
+            syntax_gen: 0,
             min_block: MIN_BLOCK,
             #[cfg(test)]
             formatted: 0,
@@ -122,6 +127,12 @@ impl FormatCache {
         if self.fonts.as_ref() != Some(fonts) {
             self.blocks.clear();
             self.fonts = Some(fonts.clone());
+        }
+        // a block that was drawn with plain code is formatted again once the worker has finished a block (EDIT-121)
+        let syntax_gen = syntax::generation();
+        if syntax_gen != self.syntax_gen {
+            self.blocks.retain(|_, e| !e.out.pending);
+            self.syntax_gen = syntax_gen;
         }
         let cuts = cuts(text, links, self.min_block);
         let end_of = |n: usize| cuts.get(n + 1).map_or(text.len(), |c| c.byte);
@@ -300,9 +311,12 @@ fn format_chunk(text: &str, input: &Input, defined: &HashSet<String>, fonts: &Ed
     let raw_lines = input.raw.clone();
     let mut fmts = vec![Fmt::default(); text.len()];
     let fenced = markdown::fenced_code_lines(text);
+    let mut pending = false;
     for block in syntax::fenced_blocks(text) {
         let body = &text[block.body.clone()];
-        for (r, kind) in syntax::highlight(&block.lang, body).iter() {
+        let shown = syntax::highlight_shown(&block.lang, body);
+        pending |= shown.pending;
+        for (r, kind) in shown.spans.iter() {
             set(&mut fmts, block.body.start + r.start..block.body.start + r.end, |f| f.syn_kind = Some(*kind));
         }
     }
@@ -584,7 +598,7 @@ fn format_chunk(text: &str, input: &Input, defined: &HashSet<String>, fonts: &Ed
             cur = f;
         }
     }
-    Out { sections, first, last, marks }
+    Out { sections, first, last, marks, pending }
 }
 #[cfg(test)]
 mod tests {
@@ -731,6 +745,51 @@ mod tests {
         assert_eq!(dim(lines[close].0), crate::theme::palette().faint, "the closing line");
         assert_ne!(dim(lines[4].0), crate::theme::palette().faint);
         check(&mut cache, &text, Some(0..0));
+    }
+
+    /// The height of a job laid out in a window.
+    fn height_of(job: &LayoutJob) -> (f32, usize) {
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx);
+        let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(900.0, 700.0))), ..Default::default() };
+        let mut out = (0.0, 0);
+        let mut done = ctx.run_ui(raw, |ui| {
+            let g = ui.painter().layout_job(job.clone());
+            out = (g.size().y, g.rows.len());
+        });
+        done.textures_delta.clear();
+        out
+    }
+
+    // spec: EDIT-121
+    #[test]
+    fn edit_121_a_long_code_block_is_plain_at_first_and_coloured_when_the_worker_is_done_with_the_same_height() {
+        let code: String = (0..syntax::ASYNC_LINES + 10).map(|i| format!("const fmt119_{i}: number = {i};\n")).collect();
+        let text = format!("intro\n\n```ts\n{code}```\n\nafter\n");
+        let keyword = crate::theme::palette().syntax(syntax::Kind::Keyword);
+        let coloured = |job: &LayoutJob| job.sections.iter().any(|s| s.format.color == keyword);
+        let mut cache = FormatCache::default();
+        let (plain, _) = cache.highlight(&text, &[], &fonts(), &[], Some(0..0));
+        assert!(!coloured(&plain), "plain monospace at first");
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let done = loop {
+            let (job, _) = cache.highlight(&text, &[], &fonts(), &[], Some(0..0));
+            if coloured(&job) || std::time::Instant::now() > end {
+                break job;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+        assert!(coloured(&done), "coloured after the worker: the cache of the block was invalidated");
+        assert_eq!(done.text, plain.text);
+        assert_eq!(height_of(&done), height_of(&plain), "colour does not change the layout");
+        // once coloured it is kept: nothing is formatted again
+        let before = cache.formatted;
+        cache.highlight(&text, &[], &fonts(), &[], Some(0..0));
+        assert_eq!(cache.formatted, before);
+        // a short block is coloured at once
+        let short = "```ts\nconst a = 1;\n```\n";
+        let (job, _) = FormatCache::default().highlight(short, &[], &fonts(), &[], Some(0..0));
+        assert!(coloured(&job));
     }
 
     // spec: EDIT-109

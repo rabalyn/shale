@@ -26,7 +26,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   (```` ```js ````, ```` ```rust ````, `python`, `ts`, `toml`, `sh`, `json`, `yaml`, `c++`, … about 140 languages, with the usual aliases) in the
   editor and the reading view; a block without a language or with an unknown one stays plain.
   Inline code colours its strings, numbers and called names. The PDF export draws code the same way,
-  on the same dark code background (PDF-007).
+  on the same dark code background (PDF-007). A long block (20 lines or more) is plain for a moment and then coloured,
+  highlighted on a background thread so typing and scrolling do not stall; exports are coloured at once.
 - Line numbers are shown left of the text (Settings → Editor, on by default); a wrapped
   line keeps one number.
 - **Folding.** Headings (up to the next heading of the same or a higher level), quotes, list items and whole lists can be
