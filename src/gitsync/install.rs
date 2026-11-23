@@ -47,7 +47,7 @@ impl Handle {
     }
 
     /// Stop the job: its download is stopped and its partial folder is removed.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub fn cancel(&self) {
         self.cancel.store(true, Ordering::SeqCst);
     }
