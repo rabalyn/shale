@@ -54,6 +54,7 @@ fn check_rich(kind_id: &str, lang: Language) {
     has("Rich sample note", "the title");
     has("First section", "a heading");
     has("A subsection", "a heading of the next level");
+    has("A deep heading", "a heading of the deepest level");
     has("Käse, Größe und Ärger", "the umlauts");
     has("& % $ # _ { } ~ ^ \\ end", "the TeX specials as text");
     has("Alpha", "a table cell");
@@ -86,10 +87,13 @@ macro_rules! kind_tests {
 }
 
 kind_tests! {
+    // spec: TEX-008, TEX-010, TEX-019, TEX-030, TEX-031, TEX-032
     tex_env_rich_note_as_pub_en: "pub", En;
     tex_env_rich_note_as_pub_de: "pub", De;
     tex_env_rich_note_as_report_en: "report", En;
+    // spec: TEX-010
     tex_env_rich_note_as_report_de: "report", De;
+    // spec: TEX-010
     tex_env_rich_note_as_exercise_en: "exercise", En;
     tex_env_rich_note_as_exercise_de: "exercise", De;
     tex_env_rich_note_as_thesis_en: "thesis", En;
@@ -97,16 +101,22 @@ kind_tests! {
     tex_env_rich_note_as_phd_en: "phd", En;
     tex_env_rich_note_as_phd_de: "phd", De;
     tex_env_rich_note_as_beamer_en: "beamer", En;
+    // spec: TEX-012
     tex_env_rich_note_as_beamer_de: "beamer", De;
+    // spec: TEX-013
     tex_env_rich_note_as_letter_en: "letter", En;
     tex_env_rich_note_as_letter_de: "letter", De;
+    // spec: TEX-014
     tex_env_rich_note_as_poster_en: "poster", En;
     tex_env_rich_note_as_poster_de: "poster", De;
     tex_env_rich_note_as_sciposter_en: "sciposter", En;
+    // spec: TEX-014
     tex_env_rich_note_as_sciposter_de: "sciposter", De;
+    // spec: TEX-014
     tex_env_rich_note_as_leaflet_en: "leaflet", En;
     tex_env_rich_note_as_leaflet_de: "leaflet", De;
     tex_env_rich_note_as_announcement_en: "announcement", En;
+    // spec: TEX-014
     tex_env_rich_note_as_announcement_de: "announcement", De;
 }
 
@@ -143,7 +153,7 @@ fn tex_env_a_note_exported_with_a_department_logo_shows_it_in_every_kind_that_ha
     assert!(failed.is_empty(), "{} of {} kinds failed:\n{}", failed.len(), set.kinds.len(), failed.join("\n=====\n"));
 }
 
-// spec: TEX-012, TEX-027
+// spec: TEX-012, TEX-027, TEX-019
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_slides_have_a_page_for_the_title_and_one_for_every_frame() {
@@ -162,7 +172,7 @@ fn tex_env_slides_have_a_page_for_the_title_and_one_for_every_frame() {
     }
 }
 
-// spec: TEX-013, TEX-027, DEV-028
+// spec: TEX-013, TEX-027, DEV-028, TEX-019
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_a_letter_has_its_recipient_subject_and_text() {
@@ -183,7 +193,7 @@ fn tex_env_a_letter_has_its_recipient_subject_and_text() {
     crate::dataflow::verify_flow(&forest, "tex_export", &crate::dataflow::doc("tex-export.md"));
 }
 
-// spec: TEX-009, TEX-011, TEX-027
+// spec: TEX-009, TEX-011, TEX-027, TEX-019
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_a_thesis_has_chapters_its_fields_and_a_table_of_contents() {
@@ -233,7 +243,7 @@ fn tex_env_underline_scripts_footnotes_breaks_in_cells_and_math_compile_in_every
     }
 }
 
-// spec: TEX-030, TEX-027
+// spec: TEX-030, TEX-027, TEX-019
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_long_code_breaks_across_pages_on_its_box_in_articles_and_books() {
