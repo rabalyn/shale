@@ -976,7 +976,7 @@ fn put_thread_mail(id: &str, date: &str, subject: &str, reply: Option<&str>, ref
     doveadm(&["save", "-u", USER, "-m", "ScratchThread"], Some(raw.as_bytes())).unwrap_or_else(|e| panic!("could not put {subject:?}: {e}"));
 }
 
-// spec: IMP-068, IMP-070, IMP-071
+// spec: IMP-068, IMP-070, IMP-071, IMP-074
 #[test]
 #[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
 fn mail_env_a_reply_thread_from_the_server_is_imported_into_a_chain_in_date_order() {
@@ -1030,6 +1030,20 @@ fn mail_env_a_reply_thread_from_the_server_is_imported_into_a_chain_in_date_orde
     // the overview's order is the dates
     let rows = crate::thread::Index::build(&vault).thread_of(&two).unwrap();
     assert_eq!(rows.iter().map(|r| &r.rel).collect::<Vec<_>>(), vec![&root, &one, &two]);
+
+    // IMP-074: the same three mails dropped at once, newest first, give the same chain
+    let batch_dir = dir.join("vault-batch");
+    std::fs::create_dir_all(&batch_dir).unwrap();
+    let mut batch_vault = crate::vault::Vault::open(&batch_dir).unwrap();
+    let mut items: Vec<import::Item> = ["Re: Re: Thread root", "Re: Thread root", "Thread root"].iter().map(|s| import::eml_item(store.read_raw(all.iter().find(|m| m.subject == *s).unwrap()).unwrap(), None)).collect();
+    import::find_continues(&batch_vault, &mut items);
+    let done = import::import(&mut batch_vault, &items, &options);
+    assert!(done.errors.is_empty() && done.touched.is_empty(), "{done:?}");
+    let [bt, bo, br] = [&done.notes[0], &done.notes[1], &done.notes[2]];
+    let read = |p: &Path| std::fs::read_to_string(batch_vault.abs(p)).unwrap();
+    assert!(read(br).contains(&link("next", bo)) && !read(br).contains("previous:"), "{}", read(br));
+    assert!(read(bo).contains(&link("previous", br)) && read(bo).contains(&link("next", bt)), "{}", read(bo));
+    assert!(read(bt).contains(&link("previous", bo)) && !read(bt).contains("next:"), "{}", read(bt));
 
     let _ = doveadm(&["mailbox", "delete", "-u", USER, "ScratchThread"], None);
     let _ = std::fs::remove_dir_all(dir);

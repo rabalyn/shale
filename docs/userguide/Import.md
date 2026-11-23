@@ -55,6 +55,12 @@ Turn mails, events and files into notes. Back to [[Start here]].
   **A saved post works the same way:** when the post answers a post you saved before (or you saved
   an answer to it earlier), the Import dialog shows **Continues** for it, in the same network only,
   with the same tick box, `previous` / `next` links in time order and the question for an older post.
+  **A whole thread dropped at once is chained too:** the mails (or posts) of the drop are put in date order
+  together with the notes already in the vault, so each new note gets `previous` / `next` links to the others,
+  whatever the order of the drop. An item that answers another item of the same drop shows **Continues:
+  <its title> (in this import)**. The question for older mails is asked once per thread, on the first item
+  that needs it, and the answer counts for the whole thread; **Leave the chain** then writes the thread
+  without links. Notes already in the vault change only their `previous` / `next` line.
 - Drop onto a folder in the file list to import into it, or onto a note to also add links to the
   new notes there.
 - A picture, PDF, sound or video from outside the vault has a choice in the dialog: **Copy into the

@@ -198,7 +198,7 @@ fn imp_071_an_older_mail_is_inserted_with_update_and_changes_only_its_two_neighb
     let found = items(&v, eml("b@h", D17, "Middle", Some("a@h"), &["a@h"]));
     let c0 = found[0].continues.as_ref().unwrap();
     let plan = c0.plan().unwrap();
-    assert!(plan.is_older() && plan.changes() == 2, "the dialog asks and names 2 notes: {plan:?}");
+    assert!(plan.is_older() && import::older_questions(&found)[&c0.group].1 == 2, "the dialog asks and names 2 notes: {plan:?}");
     assert!(c0.update, "Update is the start answer");
     let (b, done) = import_mail(&mut v, eml("b@h", D17, "Middle", Some("a@h"), &["a@h"]), "Mail");
     let name = |p: &Path| p.file_stem().unwrap().to_string_lossy().into_owned();
@@ -246,7 +246,7 @@ fn imp_071_the_oldest_mail_of_all_changes_one_neighbour() {
     let c = found[0].continues.as_ref().unwrap();
     assert_eq!(c.candidates[0].rel, b, "it is found because the note names it");
     let plan = c.plan().unwrap();
-    assert!(plan.previous.is_none() && plan.next.as_ref() == Some(&b) && plan.changes() == 1);
+    assert!(plan.previous.is_none() && plan.next.as_ref() == Some(&b) && import::older_questions(&found)[&c.group].1 == 1);
     let (a, done) = import_mail(&mut v, eml("a@h", D16, "Plan", None, &[]), "Mail");
     assert_eq!(done.touched, vec![b.clone()]);
     assert!(prop(&text(&v, &a), "previous").is_none() && prop(&text(&v, &a), "next").is_some());
@@ -465,7 +465,7 @@ fn soc_072_posts_are_chained_by_time_an_older_post_asks_and_only_the_two_neighbo
     let mut items = post_items(vec![saved_post("11", 17, Some("10"), Some("10"))]);
     import::find_continues(&v, &mut items);
     let plan = items[0].continues.as_ref().unwrap().plan().unwrap();
-    assert!(plan.is_older() && plan.changes() == 2, "{plan:?}");
+    assert!(plan.is_older() && import::older_questions(&items)[&items[0].continues.as_ref().unwrap().group].1 == 2, "{plan:?}");
     let done = import::import(&mut v, &items, &options("Posts"));
     assert!(done.errors.is_empty(), "{:?}", done.errors);
     let b = done.notes[0].clone();
@@ -503,4 +503,134 @@ fn nav_070_the_thread_view_lists_the_posts_of_a_conversation_and_steps_through_t
     assert_eq!(thread::step(&rows, &a, 1), Some(b.clone()));
     assert_eq!(thread::step(&rows, &b, 1), Some(c.clone()));
     assert_eq!(thread::step(&rows, &c, 1), None);
+}
+
+/// The mails dropped at once, in the order given; the notes come back in that order too.
+fn import_batch(v: &mut Vault, raws: Vec<Vec<u8>>, folder: &str, tweak: impl FnOnce(&mut Vec<Item>)) -> (Vec<Item>, Imported) {
+    let mut items: Vec<Item> = raws.into_iter().map(|r| import::eml_item(r, None)).collect();
+    import::find_continues(v, &mut items);
+    tweak(&mut items);
+    let done = import::import(v, &items, &options(folder));
+    assert!(done.errors.is_empty(), "{:?}", done.errors);
+    (items, done)
+}
+
+/// `previous` and `next` of a note as the stems of the notes they link to.
+fn links(v: &Vault, rel: &Path) -> (Option<String>, Option<String>) {
+    let t = text(v, rel);
+    let stem = |k: &str| prop(&t, k).map(|s| s.trim_matches('"').trim_start_matches("[[").trim_end_matches("]]").to_string());
+    (stem("previous"), stem("next"))
+}
+
+// spec: IMP-074
+#[test]
+fn imp_074_a_batch_of_replies_dropped_at_once_is_chained_in_date_order_with_links_both_ways() {
+    let mut v = vault("batch-chain");
+    // dropped newest first: the order of the drop does not matter, the date does
+    let raws = vec![eml("c@h", D18, "Third", Some("b@h"), &["a@h", "b@h"]), eml("a@h", D16, "First", None, &[]), eml("b@h", D17, "Second", Some("a@h"), &["a@h"])];
+    let (items, done) = import_batch(&mut v, raws, "Mail", |_| {});
+    let [c, a, b] = [&done.notes[0], &done.notes[1], &done.notes[2]];
+    let s = |p: &Path| Some(stem(p));
+    assert_eq!(links(&v, a), (None, s(b)), "the root has no previous");
+    assert_eq!(links(&v, b), (s(a), s(c)));
+    assert_eq!(links(&v, c), (s(b), None), "the newest has no next");
+    assert!(done.touched.is_empty(), "no note of the vault was there");
+    // the root continues nothing; the replies continue an item of the import, not a note
+    assert!(items[1].continues.is_none());
+    let cb = items[2].continues.as_ref().unwrap();
+    assert_eq!((cb.batch.as_slice(), cb.candidates.len()), (&[1][..], 0), "Second continues the item First");
+    let cc = items[0].continues.as_ref().unwrap();
+    assert_eq!((cc.batch.as_slice(), cc.candidates.len()), (&[2, 1][..], 0), "Third replies to Second: nearest first");
+    // the Thread view lists them in the same order
+    let rows = Index::build(&v).thread_of(a).unwrap();
+    assert_eq!(rows.iter().map(|r| &r.rel).collect::<Vec<_>>(), vec![a, b, c]);
+    // no question: nothing of the vault changes
+    assert!(import::older_questions(&items).is_empty());
+    // nothing of the import is a folder to follow
+    assert_eq!(import::continued_folder(&items), None);
+}
+
+// spec: IMP-074
+#[test]
+fn imp_074_a_batch_with_a_note_of_the_vault_in_the_middle_is_one_chain_and_asks_once() {
+    let mut v = vault("batch-mixed");
+    let (a, _) = import_mail(&mut v, eml("a@h", D16, "Plan", None, &[]), "Mail");
+    let (d, _) = import_mail(&mut v, eml("d@h", D19, "Last", Some("a@h"), &["a@h"]), "Mail");
+    let raws = || vec![eml("b@h", D17, "Between", Some("a@h"), &["a@h"]), eml("c@h", D18, "Then", Some("b@h"), &["a@h", "b@h"])];
+    // the question once for the thread, naming the two notes of the vault that change
+    let mut found: Vec<Item> = raws().into_iter().map(|r| import::eml_item(r, None)).collect();
+    import::find_continues(&v, &mut found);
+    let q = import::older_questions(&found);
+    assert_eq!(q.len(), 1, "once per thread, not once per item: {q:?}");
+    assert_eq!(q.values().next().copied(), Some((0, 2)), "asked on the first item; a and d change");
+    assert!(found.iter().all(|i| i.continues.as_ref().is_some_and(|c| c.on && c.plan().is_some())));
+    // the folder is the one of the note of the vault
+    assert_eq!(import::continued_folder(&found).as_deref(), Some("Mail"));
+    // Update
+    let before = (text(&v, &a), text(&v, &d));
+    let (_, done) = import_batch(&mut v, raws(), "Mail", |_| {});
+    let (b, c) = (&done.notes[0], &done.notes[1]);
+    let s = |p: &Path| Some(stem(p));
+    assert_eq!((links(&v, &a), links(&v, b)), ((None, s(b)), (s(&a), s(c))));
+    assert_eq!((links(&v, c), links(&v, &d)), ((s(b), s(&d)), (s(c), None)));
+    assert_eq!(done.touched.len(), 2);
+    assert!(done.touched.contains(&a) && done.touched.contains(&d));
+    // only the one line of each neighbour changed
+    let strip = |t: &str, key: &str| t.lines().filter(|l| !l.starts_with(&format!("{key}:"))).collect::<Vec<_>>().join("\n");
+    assert_eq!(strip(&text(&v, &a), "next"), strip(&before.0, "next"));
+    assert_eq!(strip(&text(&v, &d), "previous"), strip(&before.1, "previous"));
+    // Leave the chain, answered on the one item that asks: no link for the whole batch, nothing touched
+    let mut w = vault("batch-mixed-leave");
+    let (a2, _) = import_mail(&mut w, eml("a@h", D16, "Plan", None, &[]), "Mail");
+    let (d2, _) = import_mail(&mut w, eml("d@h", D19, "Last", Some("a@h"), &["a@h"]), "Mail");
+    let before = (text(&w, &a2), text(&w, &d2));
+    let (_, done) = import_batch(&mut w, raws(), "Mail", |items| items[0].continues.as_mut().unwrap().update = false);
+    assert!(done.touched.is_empty() && (text(&w, &a2), text(&w, &d2)) == before);
+    assert!(done.notes.iter().all(|n| links(&w, n) == (None, None)), "{:?}", done.notes);
+}
+
+// spec: IMP-074
+#[test]
+fn imp_074_two_threads_in_one_batch_stay_separate() {
+    let mut v = vault("batch-two");
+    let raws = vec![eml("a@h", D16, "Alpha", None, &[]), eml("x@h", D16, "Xray", None, &[]), eml("b@h", D17, "Alpha two", Some("a@h"), &["a@h"]), eml("y@h", D17, "Xray two", Some("x@h"), &["x@h"]), eml("lone@h", D18, "Alone", None, &[])];
+    let (items, done) = import_batch(&mut v, raws, "Mail", |_| {});
+    let n = &done.notes;
+    let s = |p: &Path| Some(stem(p));
+    assert_eq!((links(&v, &n[0]), links(&v, &n[2])), ((None, s(&n[2])), (s(&n[0]), None)));
+    assert_eq!((links(&v, &n[1]), links(&v, &n[3])), ((None, s(&n[3])), (s(&n[1]), None)));
+    assert_eq!(links(&v, &n[4]), (None, None), "a mail of no thread is chained to nothing");
+    assert!(items[4].continues.is_none());
+    let (g1, g2) = (items[2].continues.as_ref().unwrap().group, items[3].continues.as_ref().unwrap().group);
+    assert_ne!(g1, g2, "two threads");
+}
+
+// spec: IMP-074
+#[test]
+fn imp_074_a_ticked_off_item_is_left_out_of_the_chain_and_the_rest_still_links() {
+    let mut v = vault("batch-off");
+    let raws = vec![eml("a@h", D16, "First", None, &[]), eml("b@h", D17, "Second", Some("a@h"), &["a@h"]), eml("c@h", D18, "Third", Some("b@h"), &["a@h", "b@h"])];
+    let (_, done) = import_batch(&mut v, raws, "Mail", |items| items[1].continues.as_mut().unwrap().on = false);
+    let (a, b, c) = (&done.notes[0], &done.notes[1], &done.notes[2]);
+    let s = |p: &Path| Some(stem(p));
+    assert_eq!(links(&v, b), (None, None), "unticked: its ids only");
+    assert_eq!((links(&v, a), links(&v, c)), ((None, s(c)), (s(a), None)));
+}
+
+// spec: IMP-074, SOC-072
+#[test]
+fn imp_074_the_posts_of_one_conversation_dropped_at_once_are_chained_per_network() {
+    let mut v = vault("batch-posts");
+    let mut other = saved_post("10", 16, None, None);
+    other.thread[0].network = Network::Bluesky;
+    let mut items = post_items(vec![saved_post("12", 18, Some("11"), Some("10")), saved_post("10", 16, None, None), saved_post("11", 17, Some("10"), Some("10"))]);
+    items.push(import::social_item(other, "Bluesky", false));
+    import::find_continues(&v, &mut items);
+    let done = import::import(&mut v, &items, &options("Posts"));
+    assert!(done.errors.is_empty(), "{:?}", done.errors);
+    let [c, a, b, x] = [&done.notes[0], &done.notes[1], &done.notes[2], &done.notes[3]];
+    let s = |p: &Path| Some(stem(p));
+    assert_eq!((links(&v, a), links(&v, b), links(&v, c)), ((None, s(b)), (s(a), s(c)), (s(b), None)));
+    assert_eq!(links(&v, x), (None, None), "the same id on another network is another thread");
+    assert!(items[3].continues.is_none(), "it matches no post of the other network");
 }
