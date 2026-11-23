@@ -533,6 +533,7 @@ mod tests {
     }
     use super::*;
 
+    // spec: SOC-003
     // spec: SEC-003
     #[test]
     fn social_secrets_have_their_own_keyring_entries() {

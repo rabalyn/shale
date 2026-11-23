@@ -1,4 +1,4 @@
-//! A pretend Mastodon and Bluesky server for the sign-in tests: plain HTTP on 127.0.0.1 (the
+//! A pretend Mastodon and Bluesky server for the sign-in tests (SOC-001, SOC-002): plain HTTP on 127.0.0.1 (the
 //! only place where Shale accepts `http://`), and a pretend browser for the Mastodon sign-in
 //! page. The server checks what a real one checks: the app registration, the client ID and
 //! secret, a code that works once, the bearer token, the app password.
