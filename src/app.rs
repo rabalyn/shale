@@ -172,6 +172,9 @@ mod docx_export;
 mod drops;
 #[cfg(all(test, target_os = "linux"))]
 mod drops_tests;
+mod git_ask;
+#[cfg(test)]
+mod git_ask_tests;
 #[cfg(test)]
 mod handover_tests;
 mod history;
@@ -1024,6 +1027,7 @@ impl ShaleApp {
             self.toast("Empty vault opened. Create a note with Ctrl+N.");
         }
         self.sync_vault_opened();
+        self.ask_about_existing_repo(known);
         self.save_config();
     }
 
@@ -2625,7 +2629,7 @@ impl ShaleApp {
     /// own keys (Enter, Tab, text, Esc, the key capture of the Keybindings tab) are no keymap
     /// action and are not affected.
     pub(crate) fn shortcuts_blocked(&self) -> bool {
-        self.modal.is_some()
+        self.modal.is_some() || self.repo_ask_shown()
     }
 
     fn shortcuts(&mut self, ui: &Ui) {

@@ -217,6 +217,8 @@ pub fn connect(git: &Git, vault: &Path, url: &str) -> Result<(), String> {
     } else {
         git.ok(vault, args!["remote", "add", REMOTE, url])?;
     }
+    // a repository Shale made or was told to use: opening the vault does not ask about it (SYNC-076)
+    known::mark_known(vault).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -663,6 +665,7 @@ pub mod detect;
 pub mod history;
 pub mod install;
 pub mod install_ui;
+pub mod known;
 pub mod lfs;
 pub mod managed;
 pub mod movein;
@@ -702,6 +705,8 @@ mod detect_tests;
 mod install_tests;
 #[cfg(all(test, unix))]
 mod install_ui_tests;
+#[cfg(test)]
+mod known_tests;
 #[cfg(test)]
 mod managed_tests;
 #[cfg(test)]

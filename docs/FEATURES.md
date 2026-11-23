@@ -1236,6 +1236,10 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 - Every commit ends with the lines `Shale-Reason:` (`sync`, `merge`, or why a version was kept, see File history) and
   `Shale-Device:` (the name of the computer), after the optional suffix. The sync pushes the version commits of File
   history as they are: no squash, no rewrite.
+- **A folder with its own `.git`** (SYNC-076). When one is opened or added as a vault, Shale asks whether to use git sync
+  with it and syncs nothing before the answer. **Use git sync** keeps `sync.enabled` on, **Don't sync** turns it off in
+  the vault's `.shale/settings.json`; Esc asks again the next time. A `.git` Shale made itself, the user guide and the
+  demo vault do not ask. The answer is remembered in a file inside `.git`, which is never committed.
 - **Media in Git LFS.** Audio and video files are large, so they do not belong in the git history.
   With `git-lfs` installed, a repository Shale creates (Connect on a folder that is no repository
   yet) stores media with Git LFS from the start, and for an existing repository Settings → Sync
