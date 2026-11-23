@@ -255,7 +255,7 @@ fn run_one(seed: u64, steps: usize) -> Vec<String> {
             }
             // the send job runs
             8 | 9 => {
-                let r = send_due(&ob, &e.store, &acct, &conn, now);
+                let r = send_due(&ob, &e.store, &acct, &conn, now, &std::sync::atomic::AtomicBool::new(false));
                 op = format!("send_due: sent {} failed {} unsure {}", r.sent.len(), r.failed.len(), r.unsure.len());
             }
             // the person's buttons on an outbox entry

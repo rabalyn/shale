@@ -27,6 +27,12 @@ and you cannot start it twice by accident.
   between two folders or two batches of messages, never in the middle of a message, so nothing is half
   saved; the view says "Sync stopped" and the next sync goes on with what is missing. The other accounts
   keep syncing. Waiting for new mail (IDLE) is not a task.
+- **Sending mail is a task per account**: "Sending mail from ‹account›…" shows in the indicator and, with a
+  spinner and **Cancel**, in the mail view above the account's name while its mails go out. A mail that is
+  already on its way is never torn down (it could be half sent), so Cancel lets it finish, says "Stopping…"
+  meanwhile, and keeps the mails after it waiting in the Outbox; nothing is sent again by itself until you
+  queue, retry or send one again. A mail the server refuses stays in the Outbox as failed with the server's
+  words, and the view says "A mail was not sent: …".
 - **The buttons that would start the same thing again are off** while it runs. Point at one and it
   says what is still running. A key or the timer cannot start it a second time either.
 - **Exports and the Word import** are listed too: the PDF export of a note or drawing (the window no longer waits
