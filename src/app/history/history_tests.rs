@@ -588,3 +588,31 @@ fn nothing_of_the_history_starts_while_a_connection_moves_the_local_history_into
     t.settle();
     assert_eq!(t.versions("Note.md").len(), 2, "the snapshot is made after it");
 }
+
+// spec: SYNC-041, VAULT-043
+#[test]
+fn a_rename_and_the_notes_whose_links_it_rewrote_are_one_snapshot_also_for_a_move() {
+    let mut t = setup("rename-links", false);
+    write(&t.vault, "A.md", "see [[Note]]\n");
+    write(&t.vault, "sub/B.md", "---\nrelated: \"[[Note]]\"\n---\n");
+    write(&t.vault, "Dir/x.md", "x\n");
+    t.app.vault.as_mut().unwrap().rescan();
+    t.start();
+    let before = t.messages().len();
+    t.app.rename(Path::new("Note.md"), "Renamed").unwrap();
+    t.settle();
+    let msgs = t.messages();
+    assert_eq!(msgs.len(), before + 1, "one snapshot for the rename and both rewritten notes");
+    assert_eq!(msgs[0].reason, Some(Reason::Rename));
+    let mut paths = msgs[0].paths.clone();
+    paths.sort();
+    assert_eq!(paths, ["A.md", "Note.md", "Renamed.md", "sub/B.md"]);
+    assert_eq!(t.repo().run_for_test(&["show", "HEAD:A.md"]), "see [[Renamed]]\n");
+    // a move too
+    t.app.move_into(Path::new("Renamed.md"), Path::new("Dir")).unwrap();
+    t.settle();
+    let msgs = t.messages();
+    assert_eq!(msgs.len(), before + 2, "one more snapshot, for the move");
+    assert_eq!(msgs[0].reason, Some(Reason::Rename));
+    assert_eq!(t.repo().run_for_test(&["show", "HEAD:A.md"]), "see [[Renamed]]\n");
+}
