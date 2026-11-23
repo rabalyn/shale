@@ -19,6 +19,7 @@
 //! Nothing here deletes a message file. A message that moved or was deleted by the person goes
 //! to `.trash/<date>/` ([`MailStore::archive_file`]).
 
+use crate::busy::Cancel;
 use crate::fsutil;
 use crate::mail;
 use crate::mail::db::{self, FolderRow, IndexFields, MailError, MessageSummary, NewMessage, Op, Result, STATE_FULL, STATE_HEADER, STATE_TOO_LARGE};
@@ -163,11 +164,31 @@ fn cut_text(s: &str, max: usize) -> String {
 // ---------------------------------------------------------------- the store
 
 enum Cmd {
-    Batch { ops: Vec<Op>, crash_after: Option<usize>, reply: Sender<Result<()>> },
-    Folder { account: String, display: String, name: String, delimiter: Option<String>, special_use: Option<String>, sync_enabled: bool, reply: Sender<Result<FolderRow>> },
-    Backup { date: String, reply: Sender<Result<Option<PathBuf>>> },
-    Rebuild { reply: Sender<Result<usize>> },
+    Batch {
+        ops: Vec<Op>,
+        crash_after: Option<usize>,
+        reply: Sender<Result<()>>,
+    },
+    Folder {
+        account: String,
+        display: String,
+        name: String,
+        delimiter: Option<String>,
+        special_use: Option<String>,
+        sync_enabled: bool,
+        reply: Sender<Result<FolderRow>>,
+    },
+    Backup {
+        date: String,
+        reply: Sender<Result<Option<PathBuf>>>,
+    },
+    Rebuild {
+        cancel: Cancel,
+        reply: Sender<Result<Option<usize>>>,
+    },
     Stop,
+    #[cfg(test)]
+    Gate(std::sync::mpsc::Receiver<()>),
 }
 
 /// The mail store: files, the index and its one writer thread. Share it with `Arc`.
@@ -236,9 +257,21 @@ impl MailStore {
     /// messages go and come back from the files as in MAIL-006; the folders keep their rows,
     /// so their ids and the server's folder roles stay, and the next sync brings the flags back.
     /// Refused while the index holds actions not yet sent to the server (MAIL-107). Returns how
-    /// many messages the index has afterwards.
-    pub fn rebuild_index(&self) -> Result<usize> {
-        self.ask(|reply| Cmd::Rebuild { reply })
+    /// many messages the index has afterwards, or `None` when `cancel` stopped it (USE-012):
+    /// it looks at the token only before the rows go and before each folder is read, so what
+    /// the index holds is always whole transactions; the files not read yet are indexed when
+    /// the store opens next (MAIL-007), or by another rebuild.
+    pub fn rebuild_index(&self, cancel: &Cancel) -> Result<Option<usize>> {
+        self.ask(|reply| Cmd::Rebuild { cancel: cancel.clone(), reply })
+    }
+
+    /// Test aid: stop the writer until the returned sender sends (or is dropped), so a command
+    /// sent now stays queued.
+    #[cfg(test)]
+    pub fn hold_writer(&self) -> Sender<()> {
+        let (go, wait) = channel();
+        self.tx.send(Cmd::Gate(wait)).expect("the writer runs");
+        go
     }
 
     /// The full path of a message file given its relative path from the index.
@@ -542,9 +575,13 @@ fn writer_loop(mut conn: Connection, root: PathBuf, rx: std::sync::mpsc::Receive
                 let r = crate::jobs::catch(|| make_backup(&conn, &root, &date, keep)).unwrap_or_else(|e| Err(MailError(e)));
                 let _ = reply.send(r);
             }
-            Cmd::Rebuild { reply } => {
-                let r = crate::jobs::catch(|| rebuild_in_place(&mut conn, &root)).unwrap_or_else(|e| Err(MailError(e)));
+            Cmd::Rebuild { cancel, reply } => {
+                let r = crate::jobs::catch(|| rebuild_in_place(&mut conn, &root, &|| cancel.is_cancelled())).unwrap_or_else(|e| Err(MailError(e)));
                 let _ = reply.send(r);
+            }
+            #[cfg(test)]
+            Cmd::Gate(wait) => {
+                let _ = wait.recv();
             }
         }
     }
@@ -589,10 +626,13 @@ fn date_in_name(s: &str) -> Option<i64> {
 }
 
 /// See [`MailStore::rebuild_index`].
-fn rebuild_in_place(conn: &mut Connection, root: &Path) -> Result<usize> {
+fn rebuild_in_place(conn: &mut Connection, root: &Path, stop: &dyn Fn() -> bool) -> Result<Option<usize>> {
     let waiting: i64 = conn.query_row("SELECT COUNT(*) FROM pending_ops", [], |r| r.get(0))?;
     if waiting > 0 {
         return Err(MailError(format!("{waiting} change(s) still wait for the server; the index holds them, so it is not rebuilt until they are sent")));
+    }
+    if stop() {
+        return Ok(None);
     }
     let roles: Vec<(i64, Option<String>, Option<String>)> = {
         let mut st = conn.prepare("SELECT id, delimiter, special_use FROM folders")?;
@@ -602,7 +642,10 @@ fn rebuild_in_place(conn: &mut Connection, root: &Path) -> Result<usize> {
     let tx = conn.transaction()?;
     tx.execute_batch("DELETE FROM mail_fts; DELETE FROM messages; UPDATE folders SET uidvalidity = NULL, uidnext = NULL, highestmodseq = NULL, last_sync = NULL;")?;
     tx.commit()?;
-    reconcile(conn, root)?;
+    let (_, stopped) = index_unknown_files(conn, root, stop)?;
+    if !stopped {
+        mark_missing_files(conn, root)?;
+    }
     // a folder found again from its files lost the role the server gave it (Trash, Sent …)
     let tx = conn.transaction()?;
     for (id, delimiter, special_use) in roles {
@@ -610,7 +653,7 @@ fn rebuild_in_place(conn: &mut Connection, root: &Path) -> Result<usize> {
     }
     tx.commit()?;
     let n: i64 = conn.query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0))?;
-    Ok(n as usize)
+    Ok((!stopped).then_some(n as usize))
 }
 
 /// The backups in `root`, newest first (the date is in the name).
@@ -701,7 +744,7 @@ fn restore_backup(root: &Path, idx: &Path) -> Option<PathBuf> {
 /// Make the index match the files: files without a row are indexed, rows whose file is gone are
 /// marked `missing_file` (and unmarked when the file is back). Returns (indexed, missing).
 pub fn reconcile(conn: &mut Connection, root: &Path) -> Result<(usize, usize)> {
-    let indexed = index_unknown_files(conn, root)?;
+    let (indexed, _) = index_unknown_files(conn, root, &|| false)?;
     let missing = mark_missing_files(conn, root)?;
     Ok((indexed, missing))
 }
@@ -712,8 +755,9 @@ fn sorted_dir(path: &Path) -> Vec<(String, PathBuf)> {
     v
 }
 
-/// Index every `<account>/<folder>/<uidvalidity>/<uid>.eml` that has no row.
-fn index_unknown_files(conn: &mut Connection, root: &Path) -> Result<usize> {
+/// Index every `<account>/<folder>/<uidvalidity>/<uid>.eml` that has no row. `stop` is asked before each
+/// folder; when it says yes the walk ends there (what was indexed stays) and the second value is true.
+fn index_unknown_files(conn: &mut Connection, root: &Path, stop: &dyn Fn() -> bool) -> Result<(usize, bool)> {
     let mut total = 0;
     let mut batch: Vec<Op> = Vec::new();
     for (account, apath) in sorted_dir(root) {
@@ -723,6 +767,10 @@ fn index_unknown_files(conn: &mut Connection, root: &Path) -> Result<usize> {
         for (fdir, fpath) in sorted_dir(&apath) {
             if !fpath.is_dir() {
                 continue;
+            }
+            if stop() {
+                // the batch is empty here: a folder's rows are written before the next folder starts
+                return Ok((total, true));
             }
             let Some(name) = fsutil::read_to_string(fpath.join("name.txt")).ok().or_else(|| folder_name_from_dir(&fdir)) else { continue };
             let mut folder: Option<FolderRow> = None;
@@ -765,7 +813,7 @@ fn index_unknown_files(conn: &mut Connection, root: &Path) -> Result<usize> {
         }
     }
     db::apply_batch(conn, &batch, None)?;
-    Ok(total)
+    Ok((total, false))
 }
 
 /// A folder rebuilt from files has no UIDVALIDITY yet: it is the newest one on disk, so a sync
@@ -1377,7 +1425,7 @@ mod tests {
         put(&store, &inbox, 2, &sample("two", "a@x.de", "second"));
         put(&store, &trash, 1, &sample("three", "a@x.de", "third"));
         let files_before: Vec<_> = crate::data_usage::scan::vault(&root).1;
-        assert_eq!(store.rebuild_index().unwrap(), 3, "every message file is indexed again");
+        assert_eq!(store.rebuild_index(&Cancel::default()).unwrap(), Some(3), "every message file is indexed again");
         let r = store.reader().unwrap();
         let folders = r.folders(Some("acct1")).unwrap();
         let t = folders.iter().find(|f| f.name == "Trash").unwrap();
@@ -1405,9 +1453,49 @@ mod tests {
             last_error: None,
         };
         store.commit(vec![Op::PendingAdd(Box::new(pending))]).unwrap();
-        let e = store.rebuild_index().unwrap_err();
+        let e = store.rebuild_index(&Cancel::default()).unwrap_err();
         assert!(e.0.contains("wait for the server"), "{e}");
         assert_eq!(count(&store), 3, "a refused rebuild changes nothing");
+        drop(store);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: USE-012, JOB-016
+    #[test]
+    fn a_rebuild_that_is_cancelled_stops_between_folders_leaves_a_valid_index_and_the_next_start_finishes_it() {
+        let root = temp_root("rebuild-cancel");
+        let store = MailStore::open(&root).unwrap();
+        let inbox = store.ensure_folder("acct1", "A", "INBOX", Some("/"), None, true).unwrap();
+        let trash = store.ensure_folder("acct1", "A", "Trash", Some("/"), Some("\\Trash"), false).unwrap();
+        put(&store, &inbox, 1, &sample("one", "a@x.de", "first"));
+        put(&store, &inbox, 2, &sample("two", "a@x.de", "second"));
+        put(&store, &trash, 1, &sample("three", "a@x.de", "third"));
+        // stopped before the rows go: nothing changed
+        let asked = Cancel::default();
+        asked.cancel();
+        assert_eq!(store.rebuild_index(&asked).unwrap(), None);
+        assert_eq!(count(&store), 3, "a rebuild stopped at the start changes nothing");
+        drop(store);
+        // stopped after the first folder was read again: its rows are back, the other's are not yet
+        let mut conn = db::open_writer(&root.join("index.sqlite")).unwrap();
+        let asks = std::cell::Cell::new(0);
+        let stop = || {
+            asks.set(asks.get() + 1);
+            asks.get() > 2
+        };
+        assert_eq!(rebuild_in_place(&mut conn, &root, &stop).unwrap(), None, "stopped");
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 2, "the folder read before the stop is whole");
+        let roles: Vec<(String, Option<String>)> = conn.prepare("SELECT name, special_use FROM folders ORDER BY name").unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().collect::<rusqlite::Result<_>>().unwrap();
+        assert_eq!(roles, [("INBOX".to_string(), None), ("Trash".to_string(), Some("\\Trash".to_string()))], "the folders keep their roles");
+        drop(conn);
+        db::quick_check(&root.join("index.sqlite")).expect("the index passes the integrity check (MAIL-006)");
+        // the next start indexes the rest (MAIL-007); a rebuild after the stop completes
+        let store = MailStore::open(&root).unwrap();
+        assert_eq!(store.opened.indexed_files, 1);
+        assert_eq!(count(&store), 3);
+        assert_eq!(store.rebuild_index(&Cancel::default()).unwrap(), Some(3));
+        db::quick_check(&root.join("index.sqlite")).unwrap();
         drop(store);
         let _ = std::fs::remove_dir_all(&root);
     }

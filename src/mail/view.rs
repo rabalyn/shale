@@ -128,7 +128,9 @@ impl MailView {
             }
             StoreState::Rebuilding(_) => {
                 ui.scope_builder(UiBuilder::new().max_rect(body.shrink(20.0)), |ui| {
-                    ui.label(muted("Rebuilding the mail index from the message files…"));
+                    if !crate::busy::ui::status(ui, &self.busy, &MAIL_REBUILD) {
+                        ui.label(muted("Rebuilding the mail index from the message files…"));
+                    }
                 });
             }
             StoreState::Ready(_) if cfg.mail_accounts.is_empty() => {

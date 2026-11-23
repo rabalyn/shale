@@ -15,6 +15,7 @@ pub mod dialog;
 pub mod files;
 pub mod scan;
 
+use crate::busy::Cancel;
 use crate::config::CacheRetention;
 use crate::mail::store::MailStore;
 use serde::{Deserialize, Serialize};
@@ -189,7 +190,7 @@ pub fn stats(id: CacheId, places: &Places) -> Result<CacheStats, String> {
 
 /// Empty a cache (USE-010…USE-017). The mail index needs its open store (it is rebuilt by
 /// the store's writer); the window resets what it holds in memory when the result arrives.
-pub fn clear(id: CacheId, places: &Places, mail: Option<&MailStore>) -> Result<Freed, String> {
+pub fn clear(id: CacheId, places: &Places, mail: Option<(&MailStore, &Cancel)>) -> Result<Freed, String> {
     let _flow = tracing::info_span!("flow.data_usage_clear", peer = "app").entered();
     let _step = tracing::info_span!("flow.data_usage_clear.remove_files", peer = "disk").entered();
     match id {
@@ -199,9 +200,9 @@ pub fn clear(id: CacheId, places: &Places, mail: Option<&MailStore>) -> Result<F
             None => Ok(Freed::default()),
         },
         CacheId::MailIndex => {
-            let store = mail.ok_or("the mail store is not open")?;
+            let (store, cancel) = mail.ok_or("the mail store is not open")?;
             let before = stats(id, places)?.bytes;
-            let n = store.rebuild_index().map_err(|e| e.0)?;
+            let n = store.rebuild_index(cancel).map_err(|e| e.0)?.ok_or(REBUILD_CANCELLED)?;
             let after = stats(id, places)?.bytes;
             Ok(Freed { bytes: before.saturating_sub(after), entries: n as u64 })
         }
@@ -218,6 +219,9 @@ pub fn clear(id: CacheId, places: &Places, mail: Option<&MailStore>) -> Result<F
         CacheId::DebugLog => empty_log(&places.debug_log),
     }
 }
+
+/// What a rebuild of the mail index that Cancel stopped reports (USE-012).
+pub const REBUILD_CANCELLED: &str = "the rebuild was stopped; the message files not read yet are indexed the next time the mail store opens, or by another rebuild";
 
 /// Empty the debug log in place: a recording that is on goes on appending to it (USE-016).
 fn empty_log(path: &std::path::Path) -> Result<Freed, String> {
@@ -285,6 +289,14 @@ pub fn seed_demo(p: &Places) -> std::io::Result<()> {
 pub enum Kind {
     Clear,
     Prune,
+}
+
+/// What the rebuild of the mail index needs besides the store (USE-012, JOB-016): the token that
+/// Cancel sets, and the task of the window's registry that is listed while the job runs.
+pub struct Rebuild {
+    pub store: Arc<MailStore>,
+    pub cancel: Cancel,
+    pub task: crate::busy::Task,
 }
 
 /// A clear or prune that ended; the window applies what it means for what it holds in memory.
@@ -397,7 +409,7 @@ impl DataUsage {
     }
 
     /// Start a clear or prune of one cache in the background; false if one already runs.
-    pub fn start(&mut self, id: CacheId, kind: Kind, retention: &CacheRetention, mail: Option<Arc<MailStore>>, notify: impl FnOnce() + Send + 'static) -> bool {
+    pub fn start(&mut self, id: CacheId, kind: Kind, retention: &CacheRetention, mail: Option<Rebuild>, notify: impl FnOnce() + Send + 'static) -> bool {
         if self.running(id) {
             return false;
         }
@@ -405,9 +417,13 @@ impl DataUsage {
         let r = retention.clone();
         let now = crate::calendar::time::now();
         let rx = crate::jobs::spawn(
-            move || match kind {
-                Kind::Clear => clear(id, &places, mail.as_deref()),
-                Kind::Prune => prune(id, &places, &r, now),
+            move || {
+                // the registry's task (JOB-016) is listed until the job has ended, before its result can be taken in
+                let held = mail.map(|Rebuild { store, cancel, task }| (store, cancel, task));
+                match kind {
+                    Kind::Clear => clear(id, &places, held.as_ref().map(|(store, cancel, _)| (&**store, cancel))),
+                    Kind::Prune => prune(id, &places, &r, now),
+                }
             },
             notify,
         );
@@ -491,6 +507,7 @@ impl DataUsage {
 pub fn finished_text(f: &Finished) -> String {
     let name = f.id.name();
     match (&f.result, f.kind, f.id) {
+        (Err(e), Kind::Clear, CacheId::MailIndex) if e == REBUILD_CANCELLED => format!("Mail index: {e}."),
         (Err(e), Kind::Clear, _) => format!("{name}: could not {}: {e}", f.id.clear_label().to_lowercase()),
         (Err(e), Kind::Prune, _) => format!("{name}: the cleanup failed: {e}"),
         (Ok(fr), Kind::Clear, CacheId::MailIndex) => format!("Mail index rebuilt from the message files: {} message(s).", fr.entries),
