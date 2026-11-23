@@ -877,6 +877,9 @@ impl MailView {
     }
 
     fn reading_pane(&mut self, ui: &mut Ui, cfg: &Config, actions: &mut Vec<MailAction>, rects: &mut Vec<(String, Rect)>) {
+        if self.local_view.is_some() || self.open.is_none() {
+            self.release_att_audio();
+        }
         match &self.local_view {
             Some(LocalView::Outbox(_)) => {
                 let mut out = LocalOut::default();
@@ -910,6 +913,8 @@ impl MailView {
         let mut answer: Option<Kind> = None;
         let mut strip = StripOut::default();
         let sel_att = self.att_sel;
+        // the audio attachments are played from private temp copies; nothing plays by itself (MAIL-240)
+        let audio = self.att_audio_files();
         let scroll = std::mem::take(&mut self.read_scroll);
         let read = egui::ScrollArea::vertical().id_salt("mail-read").auto_shrink([false, false]).show(ui, |ui| {
             if scroll != 0.0 {
@@ -1061,6 +1066,11 @@ impl MailView {
                                     save_att = Some(i);
                                 }
                             });
+                            // a sound gets the player of the notes (MEDIA-001), under its row (MAIL-240)
+                            if let Some(Some(file)) = audio.get(i) {
+                                let card = crate::media::widget::show(ui, &self.media, file, file, None);
+                                rec(rects, format!("mail:att-player:{i}"), &card);
+                            }
                         }
                         ui.separator();
                     }

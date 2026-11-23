@@ -514,9 +514,7 @@ impl ShaleApp {
             if ctx.input(|i| i.pointer.any_released()) {
                 egui::DragAndDrop::clear_payload(&ctx);
                 if !over_calendar {
-                    let file = format!("{}.ics", if drag.event.summary.trim().is_empty() { "event".to_string() } else { drag.event.summary.replace(['/', '\\'], "-") });
-                    let item = import::event_item(drag.event.clone(), drag.calendar.clone(), Some((file, crate::calendar::ics::to_ics("", std::slice::from_ref(&drag.event)).into_bytes())));
-                    self.open_import(vec![item], vec![], zone.map(|z| (z.folder, z.note)));
+                    self.import_calendar_event(drag, zone.map(|z| (z.folder, z.note)));
                 }
             } else if over_calendar {
                 self.paint_hint_text(&ctx, p, &format!("Event: {}\ndrag it onto a note, a folder or the editor to import it", drag.event.summary));
@@ -535,6 +533,14 @@ impl ShaleApp {
             }
             ctx.request_repaint();
         }
+    }
+
+    /// Open the Import dialog for a calendar event: the one path of the drop of an event and of
+    /// the Import button and menu entry of the calendar (IMP-002, CAL-034).
+    pub(crate) fn import_calendar_event(&mut self, drag: &crate::calendar::ui::CalDrag, zone: Option<(PathBuf, Option<PathBuf>)>) {
+        let file = format!("{}.ics", if drag.event.summary.trim().is_empty() { "event".to_string() } else { drag.event.summary.replace(['/', '\\'], "-") });
+        let item = import::event_item(drag.event.clone(), drag.calendar.clone(), Some((file, crate::calendar::ics::to_ics("", std::slice::from_ref(&drag.event)).into_bytes())));
+        self.open_import(vec![item], vec![], zone);
     }
 
     fn paint_drop_hint(&self, ctx: &egui::Context, p: Pos2, zone: Option<&DropZone>, what: &str) {

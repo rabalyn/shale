@@ -1,6 +1,7 @@
 ---
 folder-note: true
 title: Shale user guide
+logo: z_media/shale-logo.png
 subtitle: Notes, links, drawings, mail, calendar and feeds in one native app
 ---
 Welcome. You are reading this guide **in Shale**: it is a vault, a plain folder of markdown

@@ -63,6 +63,43 @@ echo "This one is older than three years and must not be synced." | put $A INBOX
   head -c 4500000 /dev/urandom | base64
   printf -- '\r\n--SEEDB--\r\n'
 } | put $A INBOX cur S 5 "Subject: Big attachment" "Carol <carol@example.org>" 'Content-Type: multipart/mixed; boundary="SEEDB"'
+# a small WAV attachment (1644 bytes: 0.2 s of a 440 Hz tone, 8 kHz, 8 bit mono), the reading pane offers the player for it (MAIL-242)
+{
+  printf -- '--SEEDW\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nA voice memo is attached.\r\n'
+  printf -- '--SEEDW\r\nContent-Type: audio/wav; name="voice.wav"\r\nContent-Disposition: attachment; filename="voice.wav"\r\nContent-Transfer-Encoding: base64\r\n\r\n'
+  cat <<'WAVDATA'
+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
+WAVDATA
+  printf -- '\r\n--SEEDW--\r\n'
+} | put $A INBOX cur S 4 "Subject: Voice memo" "Carol <carol@example.org>" 'Content-Type: multipart/mixed; boundary="SEEDW"'
 # HTML only, no text part
 printf '<html><body><h1>Spring news</h1><p>Hello <b>reader</b>, <a href="https://example.org/offer">see the offer</a>.</p><img src="https://tracker.example.org/pixel.gif"></body></html>\r\n' \
   | put $A INBOX new "" 2 "Subject: HTML only newsletter" "News <news@example.org>" "Content-Type: text/html; charset=utf-8"

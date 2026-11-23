@@ -312,10 +312,10 @@ Text editing keys and vim keys are fixed.
 | Alt+, / Alt+. | Show or hide the left / right sidebar |
 | Hold Alt | A small badge with its key appears at the corner of each of these buttons that has an Alt key (it follows a key you changed). On macOS, where Option+letter types characters, these actions, and the Alt keys of the open mail, have no key until you give them one in Settings → Keybindings (scope Note view, Mail view and Everywhere) |
 | Ctrl+6 | Alternate view, in every view (also mail and drawings, where Space is taken): swap with the view this tab showed just before; again: back |
-| Space Tab | Vim-style editing, normal mode: back to the view this tab showed just before (note, calendar, Feeds, …); again: forward to this one |
+| Space Tab | Vim-style editing, normal mode (not in the mail view, where Ctrl+6 does it): back to the view this tab showed just before (note, calendar, Feeds, …); again: forward to this one |
 | Space … | A started key sequence (e.g. `Space f`) shows in the status bar and is dropped after 1.5 s without a key |
-| Space f f | Vim-style editing, normal mode: find a file by name (↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens it in this tab, Esc closes) |
-| Space f g | Vim-style editing, normal mode: search the text of notes, mail and posts (`*` and `?` are wildcards; `f:` `m:` `s:` at the start look in notes, mail or posts only; results grouped with counts; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the hit where it belongs, Esc closes) |
+| Space f f | In every main view (editor in normal mode, reading view, mail, calendar, Feeds, tasks, graph; not while a text field has the keyboard or a dialog is open; scope "Main views" in Settings → Keybindings): find a file by name (↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens it in this tab, Esc closes) |
+| Space f g | In every main view (as Space f f): search the text of notes, mail and posts (`*` and `?` are wildcards; `f:` `m:` `s:` at the start look in notes, mail or posts only; results grouped with counts; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the hit where it belongs, Esc closes) |
 | ↓ or Ctrl+J, ↑ or Ctrl+K, Enter, Esc | In a picker window (Space f f, Space f g), the quick switcher (Ctrl+O) and the font list: next line, previous line, open, close. The hint between the search field and the list shows the keys as they are bound now; all four can be changed in Settings → Keybindings ("List windows") |
 | Shift+K | Vim-style editing, normal mode: preview the link under the cursor (a note as in the reading view, a web page's title and text; press it again to move the keyboard into the preview: j / k or ↓ / ↑ scroll, Enter opens the link like `gt`, Ctrl+Enter opens it in a new pane on the right, Esc closes). Definable, e.g. as Space Space |
 | Ctrl+, | Settings |
@@ -339,7 +339,7 @@ view. Letters work only while no text field has the keyboard. Every key can be c
 | j / ↓, k / ↑ | Next / previous: folder in the folder pane, message in the list, scroll in the message pane |
 | Enter | Folder pane: go to the list; list: open the message (Drafts: open the draft; Outbox: show the mail) |
 | Ctrl+J / Ctrl+K | Next / previous folder, from any pane |
-| Space | Mark the message for a selection (list) |
+| x | Mark the message for a selection (list); Space is the leader of Space f f / Space f g in the mail view too |
 | / | Search mail (Esc leaves the field, ↓ or Enter go into the results) |
 | t | Search all folders or only this one |
 | i | Import to vault |
@@ -369,7 +369,7 @@ previous hit; i a I A o O start typing and Esc stops; x deletes a character; `dd
 v / V select (the motions extend the selection), then d cuts and y copies to the clipboard; p pastes it;
 `u` undoes and Ctrl+R redoes (an insert session is one step, per note; the history is kept in the vault for 30 days); `gt` follows the link under the cursor like a click; **Shift+K** shows a preview of it (the note, or the title and text of a web page loaded in the background; Shift+K again moves the keyboard into it, Enter opens the link, Ctrl+Enter opens it in a new pane on the right, Esc closes it). The
 status bar shows the mode. **Space Tab** goes back to the view this tab showed just before
-(a note, the calendar, Feeds, …) and again to come back; **Space f f** finds a file by name and **Space f g** searches notes, mail and posts.
+(a note, the calendar, Feeds, …) and again to come back; **Space f f** finds a file by name and **Space f g** searches notes, mail and posts (these two work in every view, also without vim-style editing).
 
 In a drawing: V/1 select, H hand, R/2 rectangle, D/3 diamond, O/4 ellipse, A/5 arrow, L/6 line,
 P/7 pen, T/8 text, E/0 eraser. Ctrl+Z/Ctrl+Shift+Z undo/redo, Ctrl+D duplicate, Delete removes.

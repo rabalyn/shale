@@ -8,12 +8,8 @@ impl ShaleApp {
     pub fn open_user_guide(&mut self) {
         match crate::userguide::prepare(&self.guide, env!("CARGO_PKG_VERSION")) {
             Ok(dir) => {
-                self.open_vault(&dir);
                 // the guide opens on its start note (tabs the person left in an older visit stay)
-                let start = std::path::Path::new("Start here.md");
-                if self.vault.as_ref().is_some_and(|v| v.file(start).is_some()) {
-                    self.open(start, false);
-                }
+                self.open_vault_in_background(&dir, super::vault_load::After::Note("Start here.md".into()));
             }
             Err(e) => self.toast(e),
         }

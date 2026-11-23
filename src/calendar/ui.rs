@@ -66,6 +66,8 @@ pub enum CalAction {
     DeleteOne(Occ),
     /// open the event's link (checked before it is opened)
     OpenUrl(String),
+    /// import this event, or this one date of a repeating event, as a note (CAL-034)
+    Import(Occ),
 }
 
 /// Round a time up to the next full or half hour (local clock); a time already on one stays.
@@ -90,7 +92,7 @@ pub struct CalDrag {
 }
 
 impl CalDrag {
-    fn new(store: &CalendarStore, o: &Occ) -> Option<Self> {
+    pub(crate) fn new(store: &CalendarStore, o: &Occ) -> Option<Self> {
         let mut event = store.event(o)?.clone();
         if event.rrule.is_some() && event.recurrence_id.is_none() {
             // one date of a repeating event
@@ -134,6 +136,8 @@ pub struct CalendarView {
     scroll_done: bool,
     popup_rect: Option<Rect>,
     frame: u64,
+    /// "Import" chosen in the right-click menu of an event (CAL-034), handed out by `show`
+    import_asked: Option<Occ>,
 }
 
 fn parse_hex(c: &str) -> Color32 {
@@ -262,7 +266,7 @@ fn button_w(ui: &Ui, text: &str, small: bool) -> f32 {
 impl CalendarView {
     pub fn new(size: Size) -> Self {
         let today = t::today();
-        CalendarView { mode: Mode::Month, size, anchor: today, selected: today, popup: None, rects: vec![], scroll_done: false, popup_rect: None, frame: 0 }
+        CalendarView { mode: Mode::Month, size, anchor: today, selected: today, popup: None, rects: vec![], scroll_done: false, popup_rect: None, frame: 0, import_asked: None }
     }
 
     fn rec(&mut self, key: impl Into<String>, r: Rect) {
@@ -454,6 +458,9 @@ impl CalendarView {
         if let Some(a) = self.popup_ui(ui, store) {
             action = Some(a);
         }
+        if let Some(o) = self.import_asked.take() {
+            action = Some(CalAction::Import(o));
+        }
         action
     }
 
@@ -486,6 +493,7 @@ impl CalendarView {
         p.text(rect.left_center() + Vec2::new(if o.all_day { 4.0 } else { 6.0 }, 0.0), Align2::LEFT_CENTER, label, crate::fonts::font(size), if o.all_day { Color32::WHITE } else { theme::palette().text });
         let resp = ui.interact(rect, ui.scope_id().with((&key, o.start)), Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::PointingHand);
         self.rec(key, rect);
+        self.event_menu(&resp, o);
         if resp.clicked() {
             *clicked = Some((o.clone(), resp.interact_pointer_pos().unwrap_or(rect.center())));
         }
@@ -791,8 +799,25 @@ impl CalendarView {
             }
         }
         self.rec(key, r);
+        self.event_menu(&resp, o);
         if resp.clicked() {
             *clicked = Some((o.clone(), resp.interact_pointer_pos().unwrap_or(r.center())));
+        }
+    }
+
+    /// The right-click menu of an event: Import (CAL-034).
+    fn event_menu(&mut self, resp: &egui::Response, o: &Occ) {
+        let mut item = None;
+        resp.context_menu(|ui| {
+            let b = ui.button("Import").on_hover_text("Import the event as a note");
+            item = Some(b.rect);
+            if b.clicked() {
+                self.import_asked = Some(o.clone());
+                ui.close();
+            }
+        });
+        if let Some(r) = item {
+            self.rec("menu-import", r);
         }
     }
 
@@ -915,6 +940,12 @@ impl CalendarView {
                     if b.clicked() {
                         close = true;
                     }
+                    let b = ui.button("Import").on_hover_text("Import the event as a note");
+                    rects.push(("popup-import".into(), b.rect));
+                    if b.clicked() {
+                        action = Some(CalAction::Import(occ.clone()));
+                        close = true;
+                    }
                     if !series {
                         let b = ui.button("Edit").on_hover_text("Change the event or move it to another calendar");
                         rects.push(("popup-edit".into(), b.rect));
@@ -1012,6 +1043,7 @@ mod tests {
                     CalAction::EditOne(o) => format!("edit-one:{}:{}", store.event(&o).map(|e| e.summary.clone()).unwrap_or_default(), o.start),
                     CalAction::DeleteOne(o) => format!("delete-one:{}:{}", store.event(&o).map(|e| e.uid.clone()).unwrap_or_default(), o.start),
                     CalAction::Delete(o) => format!("delete:{}", store.event(&o).map(|e| e.uid.clone()).unwrap_or_default()),
+                    CalAction::Import(o) => format!("import:{}:{}", store.event(&o).map(|e| e.summary.clone()).unwrap_or_default(), o.start),
                 });
             }
         }
@@ -1024,6 +1056,13 @@ mod tests {
         }
         fn click_at(&mut self, v: &mut CalendarView, store: &CalendarStore, large: bool, p: Pos2) {
             let b = |pressed| Event::PointerButton { pos: p, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+            self.frame(v, store, large, vec![Event::PointerMoved(p)]);
+            self.frame(v, store, large, vec![b(true)]);
+            self.frame(v, store, large, vec![b(false)]);
+            self.frame(v, store, large, vec![]);
+        }
+        fn right_click_at(&mut self, v: &mut CalendarView, store: &CalendarStore, large: bool, p: Pos2) {
+            let b = |pressed| Event::PointerButton { pos: p, button: PointerButton::Secondary, pressed, modifiers: Modifiers::NONE };
             self.frame(v, store, large, vec![Event::PointerMoved(p)]);
             self.frame(v, store, large, vec![b(true)]);
             self.frame(v, store, large, vec![b(false)]);
@@ -1118,6 +1157,53 @@ mod tests {
         h.click(&mut v, &store, false, "agenda:Retro");
         h.click_at(&mut v, &store, false, Pos2::new(1150.0, 880.0));
         assert!(v.popup.is_none(), "click outside");
+    }
+
+    // spec: CAL-034
+    #[test]
+    fn cal_034_the_popup_of_a_clicked_event_has_an_import_button() {
+        let (store, _) = store_with_samples("import-popup");
+        let mut v = CalendarView::new(Size::Small);
+        let mut h = H { ctx: egui::Context::default(), t: 0.0, actions: vec![] };
+        h.frame(&mut v, &store, false, vec![]);
+        h.frame(&mut v, &store, false, vec![]);
+        h.click(&mut v, &store, false, "agenda:Design review");
+        assert!(v.popup.is_some());
+        h.click(&mut v, &store, false, "popup-import");
+        assert_eq!(h.actions.len(), 1, "{:?}", h.actions);
+        assert!(h.actions[0].starts_with("import:Design review:"), "{:?}", h.actions);
+        assert!(v.popup.is_none(), "the popup closes");
+    }
+
+    // spec: CAL-034
+    #[test]
+    fn cal_034_the_right_click_menu_of_an_event_has_an_import_entry_in_every_view() {
+        let (store, _) = store_with_samples("import-menu");
+        let mut v = CalendarView::new(Size::Small);
+        let mut h = H { ctx: egui::Context::default(), t: 0.0, actions: vec![] };
+        h.frame(&mut v, &store, false, vec![]);
+        h.frame(&mut v, &store, false, vec![]);
+        // the list under the small grid
+        let p = H::rect(&v, "agenda:Design review").center();
+        h.right_click_at(&mut v, &store, false, p);
+        assert!(v.popup.is_none(), "a right click opens the menu, not the popup");
+        h.click(&mut v, &store, false, "menu-import");
+        assert_eq!(h.actions.len(), 1, "{:?}", h.actions);
+        assert!(h.actions[0].starts_with("import:Design review:"), "{:?}", h.actions);
+        // a chip of the month grid and a block of the week grid
+        let today = t::today();
+        for mode in [Mode::Month, Mode::Week, Mode::Day] {
+            let mut v = CalendarView::new(Size::Large);
+            v.mode = mode;
+            h.actions.clear();
+            h.frame(&mut v, &store, true, vec![]);
+            h.frame(&mut v, &store, true, vec![]);
+            let r = H::rect(&v, &format!("event:Design review:{today}"));
+            h.right_click_at(&mut v, &store, true, r.center());
+            h.click(&mut v, &store, true, "menu-import");
+            assert_eq!(h.actions.len(), 1, "{mode:?}: {:?}", h.actions);
+            assert!(h.actions[0].starts_with("import:Design review:"), "{:?}", h.actions);
+        }
     }
 
     #[test]

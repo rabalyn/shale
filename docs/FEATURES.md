@@ -255,7 +255,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 - **A folder as one PDF, a book** (BOOK, #306): **Export to PDF…** in the menu of a folder in the file list,
   or of the vault (right-click the empty space under the tree), writes the notes of the folder and its
-  subfolders as one PDF: a title page (the folder note's `title`, `subtitle`, `author`, `date`), one
+  subfolders as one PDF: a title page (the folder note's `title`, `subtitle`, `author`, `date`, and a `logo:` picture above the title, BOOK-019), one
   contents page (parts, chapters and the first level of headings, with numbers, a dotted leader and the
   page, each a link), every note on a new page (a box), numbered headings that continue the chapter's number,
   a small grey running header with the chapter's title, links between the chapters that go to the page
@@ -265,7 +265,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   links, then the rest by name with numbers by value. The dialog has a folded **Reading order** to check the
   tree; the export is a background job with Cancel.
   `shale --export-pdf <folder> <file.pdf>` does it without a window, and `scripts/userguide-pdf.sh` makes the PDF of this
-  user guide (BOOK-001 to BOOK-012), which every release has as `shale-userguide-<version>.pdf`.
+  user guide (BOOK-001 to BOOK-012, BOOK-019), which every release has as `shale-userguide-<version>.pdf`.
 - **A folder through a LaTeX template** (#309): the folder's export dialog has the engine choice of a note's.
   With **LaTeX template** and a kind of the article or book family (publication, report, exercise, thesis,
   PhD; slides, letters and posters are greyed) the book is one LaTeX document: in a thesis the subfolders are
@@ -491,7 +491,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   after a restart too). The status bar shows NORMAL, INSERT, VISUAL or V-LINE.
 - In normal mode (and in a calendar, Feeds, … tab) **Space Tab** goes back to the note or sub-app
   this tab showed just before, and again to come back, like vim's alternate file. Space is the
-  leader key of its own list in the Keybindings tab; **Space f f** opens a window to find a file by its
+  leader key of its own list in the Keybindings tab; **Space f f** (and Space f g) work in every main view, not only in normal mode: the editor in normal mode, the reading view, mail, calendar, Feeds, tasks, graph; not while a text field has the keyboard, under a dialog or in a drawing (scope "Main views" of the Keybindings tab; in the mail view the mark of a message is **x**, Space is the leader); **Space f f** opens a window to find a file by its
   name (it never creates a note, unlike Ctrl+O); **Space f g** searches the text of notes, mail
   and posts in one list grouped by source (`*` and `?` are wildcards); the vim keys themselves cannot be rebound.
 - **Choose the sources of the search** (the sidebar search, Ctrl+Shift+F, and `Space f g`): a prefix at the start of
@@ -716,7 +716,10 @@ In a narrow sidebar the header wraps: the month name on its own line, the button
 - **No HTML, no tracking.** The message text comes from the plain text part, or from the HTML
   turned into text. Nothing is rendered, no pictures are fetched, no scripts run. An attachment
   is opened from a private temporary copy through your default program (never a program or
-  script), or saved into the vault's media folder.
+  script), or saved into the vault's media folder. A sound (every format of the media list, also a
+  `.wav` sent as a plain file) gets the player of the notes under its line in the reading pane,
+  playing from a private temporary copy and never by itself; sounds you attach go out with their
+  `audio/*` type.
 - **The local copy is not encrypted** (like Thunderbird's). Use full-disk encryption.
 
 ![Mail accounts](userguide/z_media/screenshots/mail-accounts.png)
@@ -766,7 +769,7 @@ In a narrow sidebar the header wraps: the month name on its own line, the button
   "meeting") and `*` / `?` work as in Space f g. Choose all folders or only the open one.
 - **Import to vault** (button, or `i`) hands the mail to the same Import dialog as a dragged
   `.eml` file: attachments, people and tags work the same, a mail that was imported before is
-  recognised, and nothing is written until you press Import. Mark several mails (Space or
+  recognised, and nothing is written until you press Import. Mark several mails (x or
   Ctrl+click) to import them together.
 - **Keyboard first.** One of the three panes has the keyboard and is framed in the accent
   colour; Ctrl+H / Ctrl+L (Cmd+Shift+H / Cmd+Shift+L on macOS; the keys that go between the file list and the editor) move it between
@@ -970,6 +973,8 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 - On Wayland, Shale reads what Thunderbird hands over. When that is only a link to the message,
   Shale finds the message in Thunderbird's local copy (for IMAP accounts this needs "Keep
   messages for this account on this computer").
+
+- A calendar event becomes a note without dragging: the **Import** button of its details popup (left click) and the **Import** entry of its right-click menu open the same Import dialog as a drop, for a repeating event with the clicked date (CAL-034).
 
 ![Dragging an event onto a folder](userguide/z_media/screenshots/drag-event.png)
 
@@ -1315,6 +1320,7 @@ Whatever runs longer than a moment says what it does, cannot be started twice an
   Point at it, or click it to keep it open (a second click closes it): it lists every task with how long it has run and **Cancel**
   where the work can stop. It disappears when nothing runs.
   ![The indicator with two tasks listed](userguide/z_media/screenshots/busy-indicator.png)
+- **Opening a vault** (NET-019, #513): a vault is read on a background thread. While it loads, the start screen shows a spinner, "Opening ‹folder›…" and **Cancel** (a vault on a slow network share or an online-only folder no longer freezes the window); the main window appears when the vault has arrived. This covers the last vault at start, `--vault`, a folder a second start hands over, the user guide and Open or Create in the start dialog.
 - **Moved so far:** the git sync and the Git LFS setup, the check of the vault's names (Cancel stops it) and the PDF export of a
   folder (Cancel stops it), and the check of the mail index (JOB-015: it starts with the window when a mail account is set up, so the mail view finds the index ready, and the view shows "Checking the mail index…" with a spinner when it is opened earlier). The other long actions follow; the list of all of them, with what each shows today, is
   [docs/spec/busy-states.md](spec/busy-states.md).
@@ -1355,10 +1361,10 @@ Text editing keys and vim keys are fixed.
 | Alt+, / Alt+. | Show or hide the left / right sidebar |
 | Hold Alt | A small badge with its key appears at the corner of each of these buttons that has an Alt key (it follows a key you changed). On macOS, where Option+letter types characters, these actions, and the Alt keys of the open mail, have no key until you give them one in Settings → Keybindings (scope Note view, Mail view and Everywhere) |
 | Ctrl+6 | Alternate view, in every view (also mail and drawings, where Space is taken): swap with the view this tab showed just before; again: back |
-| Space Tab | Vim-style editing, normal mode: back to the view this tab showed just before (note, calendar, Feeds, …); again: forward to this one |
+| Space Tab | Vim-style editing, normal mode (not in the mail view, where Ctrl+6 does it): back to the view this tab showed just before (note, calendar, Feeds, …); again: forward to this one |
 | Space … | A started key sequence (e.g. `Space f`) shows in the status bar and is dropped after 1.5 s without a key |
-| Space f f | Vim-style editing, normal mode: find a file by name (↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens it in this tab, Esc closes) |
-| Space f g | Vim-style editing, normal mode: search the text of notes, mail and posts (`*` and `?` are wildcards; `f:` `m:` `s:` at the start look in notes, mail or posts only; results grouped with counts; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the hit where it belongs, Esc closes) |
+| Space f f | In every main view (editor in normal mode, reading view, mail, calendar, Feeds, tasks, graph; not while a text field has the keyboard or a dialog is open; scope "Main views" in Settings → Keybindings): find a file by name (↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens it in this tab, Esc closes) |
+| Space f g | In every main view (as Space f f): search the text of notes, mail and posts (`*` and `?` are wildcards; `f:` `m:` `s:` at the start look in notes, mail or posts only; results grouped with counts; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the hit where it belongs, Esc closes) |
 | ↓ or Ctrl+J, ↑ or Ctrl+K, Enter, Esc | In a picker window (Space f f, Space f g), the quick switcher (Ctrl+O) and the font list: next line, previous line, open, close. The hint between the search field and the list shows the keys as they are bound now; all four can be changed in Settings → Keybindings ("List windows") |
 | Shift+K | Vim-style editing, normal mode: preview the link under the cursor (a note as in the reading view, a web page's title and text; press it again to move the keyboard into the preview: j / k or ↓ / ↑ scroll, Enter opens the link like `gt`, Ctrl+Enter opens it in a new pane on the right, Esc closes). Definable, e.g. as Space Space |
 | Alt+↑ / Alt+↓ | Move the current line |
@@ -1380,7 +1386,7 @@ only while no text field has the keyboard. Every key can be changed in Settings 
 | j / ↓, k / ↑ | Next / previous: folder in the folder pane, message in the list, scroll in the message pane |
 | Enter | Folder pane: go to the list; list: open the message (Drafts: open the draft; Outbox: show the mail) |
 | Ctrl+J / Ctrl+K | Next / previous folder, from any pane |
-| Space | Mark the message for a selection (list) |
+| x | Mark the message for a selection (list); Space is the leader of Space f f / Space f g in the mail view too |
 | / | Search mail (Esc leaves the field, ↓ or Enter go into the results) |
 | t | Search all folders or only this one |
 | i | Import to vault |

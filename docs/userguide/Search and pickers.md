@@ -62,9 +62,13 @@ the first hit of the next / previous group. Enter (or a click) opens the hit whe
 the note at the found text, the mail in the mail view, the post in a Feeds tab. Esc goes back to
 the box. The list follows your typing a moment after you stop, and shows notes you edit meanwhile.
 
-# The pickers (vim normal mode)
+# The pickers (Space keys)
 
-With vim-style editing on ([[Editor]]), the Space key starts these:
+The Space key starts these in every main view: the editor (in vim normal mode, [[Editor]]), the reading
+view, mail, the calendar, Feeds, tasks and the graph. They do nothing while a text field has the keyboard
+(a search box, a mail you write, a note in insert mode), under a dialog, or in a drawing (Space pans). In
+the mail view the single keys (j, k, f, d, …) keep working; only the mark moved from Space to **x**. Both can
+be changed in Settings → Keybindings ("Main views").
 
 - **Space f f**: "Find a file" by its **name**. The letters you type must appear in order,
   ignoring case; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the file in this tab, Esc closes.

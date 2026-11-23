@@ -294,38 +294,55 @@ impl ShaleApp {
                 ui.add_space(28.0);
                 egui::Frame::new().fill(theme::palette().bg_secondary).corner_radius(CornerRadius::same(10)).inner_margin(20).show(ui, |ui| {
                     ui.set_width(520.0);
+                    // a vault is being read on a worker thread (NET-019): the progress and Cancel, and
+                    // after Cancel or a failure the box is usable again
+                    if let Some(name) = self.vault_load.name() {
+                        ui.horizontal(|ui| {
+                            ui.add(egui::Spinner::new().size(16.0));
+                            ui.label(egui::RichText::new(format!("Opening {name}…")).size(16.0).color(theme::palette().text));
+                            if ui.button("Cancel").clicked() {
+                                self.vault_load.cancel();
+                            }
+                        });
+                        ui.add_space(8.0);
+                    } else if let Some(e) = &self.vault_load.error {
+                        ui.colored_label(theme::palette().warn, e.as_str());
+                        ui.add_space(8.0);
+                    }
                     ui.label(egui::RichText::new("Open a folder as vault").size(16.0).color(theme::palette().text));
                     ui.label(muted("Any folder works, including an existing markdown vault. Type its path:"));
                     ui.add_space(6.0);
-                    ui.add(egui::TextEdit::singleline(&mut self.welcome_path).desired_width(f32::INFINITY));
+                    ui.add_enabled(!self.vault_load.is_loading(), egui::TextEdit::singleline(&mut self.welcome_path).desired_width(f32::INFINITY));
                     ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        let path = PathBuf::from(shellexpand(&self.welcome_path));
-                        if ui.button("Open folder").clicked() {
-                            if path.is_dir() {
-                                self.actions.push(Action::OpenVault(path.clone()));
-                            } else {
-                                self.toast("That folder doesn't exist yet. Use “Create vault”.");
+                    ui.add_enabled_ui(!self.vault_load.is_loading(), |ui| {
+                        ui.horizontal(|ui| {
+                            let path = PathBuf::from(shellexpand(&self.welcome_path));
+                            if ui.button("Open folder").clicked() {
+                                if path.is_dir() {
+                                    self.actions.push(Action::OpenVault(path.clone()));
+                                } else {
+                                    self.toast("That folder doesn't exist yet. Use “Create vault”.");
+                                }
                             }
-                        }
-                        if ui.button("Create vault with sample notes").clicked() {
-                            match std::fs::create_dir_all(&path).and_then(|()| crate::vault::write_sample_vault(&path)) {
-                                Ok(()) => self.actions.push(Action::OpenVault(path.clone())),
-                                Err(e) => self.toast(format!("Could not create the vault: {e}")),
+                            if ui.button("Create vault with sample notes").clicked() {
+                                match std::fs::create_dir_all(&path).and_then(|()| crate::vault::write_sample_vault(&path)) {
+                                    Ok(()) => self.actions.push(Action::OpenVault(path.clone())),
+                                    Err(e) => self.toast(format!("Could not create the vault: {e}")),
+                                }
                             }
-                        }
-                        if ui.button("Create empty vault").clicked() {
-                            match std::fs::create_dir_all(&path) {
-                                Ok(()) => self.actions.push(Action::OpenVault(path.clone())),
-                                Err(e) => self.toast(format!("Could not create the vault: {e}")),
+                            if ui.button("Create empty vault").clicked() {
+                                match std::fs::create_dir_all(&path) {
+                                    Ok(()) => self.actions.push(Action::OpenVault(path.clone())),
+                                    Err(e) => self.toast(format!("Could not create the vault: {e}")),
+                                }
                             }
-                        }
+                        })
                     });
                     if !self.cfg.recent.is_empty() {
                         ui.add_space(12.0);
                         ui.label(muted("Recent vaults"));
                         for r in self.cfg.recent.clone() {
-                            if ui.link(r.to_string_lossy()).clicked() {
+                            if ui.add_enabled(!self.vault_load.is_loading(), egui::Link::new(r.to_string_lossy())).clicked() {
                                 self.actions.push(Action::OpenVault(r));
                             }
                         }
