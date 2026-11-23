@@ -872,6 +872,50 @@ fn alt_b_bolds_the_selection_with_the_keyboard_in_the_text_and_types_nothing() {
     assert_eq!(fx.text(), "- one **two** three\n".replacen("**two**", "two", 1), "Alt+Z takes the markers off again");
 }
 
+// spec: EDIT-119
+#[test]
+fn the_style_key_and_the_button_leave_the_span_again_and_take_an_empty_pair_off() {
+    let mut fx = Fx::new("toggle", "\n");
+    // typing, Alt+B, bold text, Alt+B, normal text
+    fx.select(0, 0);
+    fx.hl.frame(&mut fx.app, vec![Event::Text("a ".into())]);
+    fx.alt_key(Key::B, "b");
+    fx.hl.frame(&mut fx.app, vec![Event::Text("bold".into())]);
+    fx.hl.frames(&mut fx.app, 2);
+    fx.alt_key(Key::B, "b");
+    fx.hl.frame(&mut fx.app, vec![Event::Text(" c".into())]);
+    fx.hl.frames(&mut fx.app, 2);
+    assert_eq!(fx.text(), "a **bold** c\n");
+    // nested: Alt+I inside bold, Alt+I leaves italic, Alt+B leaves bold
+    fx.alt_key(Key::B, "b");
+    fx.hl.frame(&mut fx.app, vec![Event::Text("x".into())]);
+    fx.alt_key(Key::I, "i");
+    fx.hl.frame(&mut fx.app, vec![Event::Text("y".into())]);
+    fx.alt_key(Key::I, "i");
+    fx.alt_key(Key::B, "b");
+    fx.hl.frame(&mut fx.app, vec![Event::Text("z".into())]);
+    fx.hl.frames(&mut fx.app, 2);
+    assert_eq!(fx.text(), "a **bold** c**x*y***z\n");
+}
+
+// spec: EDIT-119
+#[test]
+fn the_toolbar_button_behaves_like_the_key_and_an_empty_pair_goes_with_the_second_press() {
+    let mut fx = Fx::new("toggle-button", "ab\n");
+    fx.select(2, 2);
+    fx.click("Bold: **text**");
+    assert_eq!(fx.text(), "ab****\n");
+    fx.click("Bold: **text**");
+    assert_eq!(fx.text(), "ab\n", "the empty pair is taken off");
+    fx.click("Bold: **text**");
+    fx.hl.frame(&mut fx.app, vec![Event::Text("x".into())]);
+    fx.hl.frames(&mut fx.app, 2);
+    fx.click("Bold: **text**");
+    fx.hl.frame(&mut fx.app, vec![Event::Text("y".into())]);
+    fx.hl.frames(&mut fx.app, 2);
+    assert_eq!(fx.text(), "ab**x**y\n", "the second click leaves the bold text");
+}
+
 // spec: KEY-015, KEY-016
 #[test]
 fn on_macos_the_alt_keys_do_nothing_and_show_no_badge_until_one_is_bound() {

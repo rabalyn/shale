@@ -70,7 +70,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   Normal text to H6), bullet and numbered lists, tasks, quotes, code blocks, rules, page breaks, alignment (left, centre, right), tables, `[[note]]`
   and `[text](url)` links, embeds (it opens the `[!` file picker) and "Clear formatting". With a
   selection a button wraps it (or takes the markers off again); with none it puts the markers in and the
-  cursor between them; a line button works on every line the selection touches. Each click is one undo
+  cursor between them, and the same key again just before the closing marker steps out behind it (an empty
+  pair is taken off); a line button works on every line the selection touches. Each click is one undo
   step and the keyboard stays in the note, also with the Markdown preview and with vim-style editing.
   Every button of the toolbar, the view header (edit / reading view, preview, ⋯ menu), the tab bar (New tab)
   and the ribbon has an Alt key (Alt+B bold, Alt+V reading view, Alt+1 … Alt+0 ribbon items, Alt+, and Alt+.

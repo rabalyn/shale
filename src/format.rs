@@ -43,11 +43,11 @@ pub type Out = (String, Range<usize>);
 pub fn apply(cmd: Cmd, text: &str, sel: Range<usize>) -> Option<Out> {
     let sel = clamp(text, sel);
     match cmd {
-        Cmd::Bold => inline(text, sel, &Style::Wrap { open: "**", close: "**" }),
-        Cmd::Italic => inline(text, sel, &Style::Wrap { open: "*", close: "*" }),
-        Cmd::Strike => inline(text, sel, &Style::Wrap { open: "~~", close: "~~" }),
-        Cmd::Highlight => inline(text, sel, &Style::Wrap { open: "==", close: "==" }),
-        Cmd::Code => inline(text, sel, &Style::Wrap { open: "`", close: "`" }),
+        Cmd::Bold => leave_span(text, &sel, "**").or_else(|| inline(text, sel, &Style::Wrap { open: "**", close: "**" })),
+        Cmd::Italic => leave_span(text, &sel, "*").or_else(|| inline(text, sel, &Style::Wrap { open: "*", close: "*" })),
+        Cmd::Strike => leave_span(text, &sel, "~~").or_else(|| inline(text, sel, &Style::Wrap { open: "~~", close: "~~" })),
+        Cmd::Highlight => leave_span(text, &sel, "==").or_else(|| inline(text, sel, &Style::Wrap { open: "==", close: "==" })),
+        Cmd::Code => leave_span(text, &sel, "`").or_else(|| inline(text, sel, &Style::Wrap { open: "`", close: "`" })),
         Cmd::WikiLink => inline(text, sel, &Style::Wrap { open: "[[", close: "]]" }),
         Cmd::WebLink => web_link(text, sel),
         Cmd::HighlightColour(c) => inline(text, sel, &Style::Colour(Kind::Mark, c)),
@@ -343,6 +343,80 @@ fn quote(ts: &[Target]) -> Vec<String> {
 }
 
 // ---------------------------------------------------------------- inline
+
+/// The style key pressed again at the end of its span (EDIT-119): with the cursor (no selection) just
+/// before the closing marker of a span the same style opened earlier on the line, the cursor moves
+/// behind the marker and the text stays. `None` otherwise (also on an empty pair, which the command
+/// takes off, EDIT-027).
+fn leave_span(text: &str, sel: &Range<usize>, marker: &'static str) -> Option<Out> {
+    if !sel.is_empty() {
+        return None;
+    }
+    let (start, end) = line_bounds(text, sel.start);
+    let line = &text[start..end];
+    // a cursor between the `\r` and the `\n` is at the end of the line
+    let at = (sel.start - start).min(line.len());
+    if (Style::Wrap { open: marker, close: marker }).wrapped(line, &(at..at)).is_some() {
+        return None;
+    }
+    let (before, after) = (&line[..at], &line[at..]);
+    let n = marker.len();
+    let step = if marker.starts_with('*') {
+        let stack = open_stars(before);
+        let run = run_after(line, at, b'*');
+        // the key of a span closes it and every span inside it, innermost first
+        stack.iter().rposition(|k| *k == n).and_then(|i| {
+            let total: usize = stack[i..].iter().sum();
+            // what is left of the run must close spans further out, one after the other
+            let rest = run.checked_sub(total)?;
+            (rest == 0 || (1..=i).any(|j| stack[i - j..i].iter().sum::<usize>() == rest)).then_some(total)
+        })
+    } else {
+        (after.starts_with(marker) && before.matches(marker).count() % 2 == 1).then_some(n)
+    };
+    step.map(|step| {
+        let c = start + at + step;
+        (text.to_string(), c..c)
+    })
+}
+
+/// The spans of `*` open at the end of `s`, outermost first: 1 for an italic, 2 for a bold. A run of
+/// stars closes the innermost open spans it covers, else opens; `***` opens an italic around a bold
+/// (CommonMark: `***x***` is `<em><strong>x</strong></em>`).
+fn open_stars(s: &str) -> Vec<usize> {
+    let mut stack: Vec<usize> = Vec::new();
+    let mut i = 0;
+    while i < s.len() {
+        let run = run_after(s, i, b'*');
+        if run == 0 {
+            i += 1;
+            continue;
+        }
+        i += run;
+        let mut left = run;
+        while left > 0 {
+            match stack.last() {
+                Some(top) if *top <= left => {
+                    left -= *top;
+                    stack.pop();
+                }
+                _ if left >= 3 && !stack.contains(&1) && !stack.contains(&2) => {
+                    stack.extend([1, 2]);
+                    left -= 3;
+                }
+                _ if left >= 2 => {
+                    stack.push(2);
+                    left -= 2;
+                }
+                _ => {
+                    stack.push(1);
+                    left -= 1;
+                }
+            }
+        }
+    }
+    stack
+}
 
 /// What an inline command does to one line.
 enum Style {
@@ -1028,6 +1102,41 @@ mod tests {
         assert_eq!(run(Cmd::Code, "|"), "`|`");
         assert_eq!(run(Cmd::Bold, "a **|** b"), "a | b", "an empty pair is taken off");
         assert_eq!(run(Cmd::WikiLink, "|"), "[[|]]");
+    }
+
+    // spec: EDIT-119
+    #[test]
+    fn a_style_key_at_the_end_of_its_span_leaves_it_for_every_inline_style() {
+        for (cmd, m) in [(Cmd::Bold, "**"), (Cmd::Italic, "*"), (Cmd::Strike, "~~"), (Cmd::Highlight, "=="), (Cmd::Code, "`")] {
+            assert_eq!(run(cmd, &format!("a {m}word|{m} b")), format!("a {m}word{m}| b"), "{m}: the cursor goes behind the closing marker");
+            assert_eq!(run(cmd, &format!("a {m}|{m} b")), "a | b", "{m}: an empty pair is taken off");
+            assert_eq!(run(cmd, &format!("{m}x{m} y| z")), format!("{m}x{m} y{m}|{m} z"), "{m}: after a finished span a new pair opens");
+            assert_eq!(run(cmd, &format!("{m}wo|rd{m}")), format!("{m}wo{m}|{m}rd{m}"), "{m}: inside the span, not at its end, nothing is left");
+            assert_eq!(run(cmd, &format!("a| {m}word{m}")), format!("a{m}|{m} {m}word{m}"), "{m}: before the opening marker of a later span a pair opens");
+        }
+    }
+
+    // spec: EDIT-119
+    #[test]
+    fn style_keys_nest_and_only_the_same_style_leaves() {
+        assert_eq!(run(Cmd::Italic, "**bold|**"), "**bold*|***", "italic inside bold opens");
+        assert_eq!(run(Cmd::Italic, "**bold *it|***"), "**bold *it*|**", "italic leaves italic");
+        assert_eq!(run(Cmd::Bold, "**bold *it*|**"), "**bold *it***|", "and bold leaves bold");
+        assert_eq!(run(Cmd::Bold, "**bold *it|***"), "**bold *it***|", "the outer key leaves the inner span too");
+        assert_eq!(run(Cmd::Italic, "***x|***"), "***x***|", "`***` is italic around bold: the italic is the outer span and leaves both");
+        assert_eq!(run(Cmd::Bold, "***x|***"), "***x**|*", "bold is the inner span and leaves alone");
+        assert_eq!(run(Cmd::Strike, "**x|**"), "**x~~|~~**", "another style opens a pair inside bold");
+        assert_eq!(run(Cmd::Bold, "~~x|~~"), "~~x**|**~~");
+        assert_eq!(run(Cmd::Italic, "**|**"), "***|***", "an empty bold pair is no italic one");
+    }
+
+    // spec: EDIT-119
+    #[test]
+    fn leaving_a_span_keeps_a_selection_wrapping_and_looks_at_one_line() {
+        assert_eq!(run(Cmd::Bold, "**⟦word⟧**"), "⟦word⟧", "with a selection the markers come off as before");
+        assert_eq!(run(Cmd::Bold, "⟦word⟧"), "**⟦word⟧**");
+        // the line before is not looked at: a marker pair does not span lines
+        assert_eq!(run(Cmd::Bold, "**a\nb|**"), "**a\nb**|****");
     }
 
     // spec: EDIT-027
