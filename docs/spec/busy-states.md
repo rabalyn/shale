@@ -3,13 +3,13 @@
 **IS NOW** = true of the code today · **SHOULD BE** = agreed target.
 Format: [ADR-0001](../decisions/0001-spec-driven-development.md). Issue: #397.
 
-The rules are JOB-003 to JOB-014 in [engineering.md](engineering.md#background-jobs-job): every action that
+The rules are JOB-003 to JOB-015 and JOB-030 to JOB-036 in [engineering.md](engineering.md#background-jobs-job): every action that
 loads or runs longer than a moment is a task of the busy registry (`busy::Busy`), shows a spinner and
 what happens, cannot be started twice, offers Cancel where the work can stop (or Close for a dialog
 whose work goes on), and shows in the indicator at the top right of the editor pane while it runs.
 This page lists every such action as of 2026-11-22: where it runs today, whether the work can stop,
 what the window shows today, and where it stands on the registry. Rows marked *planned* are the
-work of the follow-up issues of #397 (JOB-009, JOB-010).
+work of the follow-up issues of #397 (JOB-009, JOB-010); #526 moved the git, TeX and update rows.
 
 "Thread" means `jobs::spawn` / `jobs::run` (JOB-001, JOB-002): a worker thread whose result always
 arrives. "UI thread" means the window itself waits, the worst case this page is about. "Stop" is
@@ -40,10 +40,10 @@ would leave a mess (JOB-006).
 |---|---|---|---|---|
 | Git sync (`gitsync::sync`, every interval and "Sync now", SYNC-002) | thread | unsafe (between commit and push) | spinner and the text, "Sync now" off | **IS NOW** (JOB-011): "Syncing with git…" |
 | Store media with Git LFS (SYNC-017) | thread | unsafe | spinner and the text, button off | **IS NOW** (JOB-011): "Setting up Git LFS…" |
-| LFS download of a file or of the vault (SYNC-020) | thread, one at a time, a queue behind it | no | the player's busy card | planned: "Downloading LFS files…" |
-| File history: snapshot and queries (HIST) | thread (`app/history.rs`) | no (a snapshot waits for the tree lock) | the panel's own state | planned: listed only after 2 s |
-| Turn-on wizard: detect, test sync, create a repository (SYNC-047…) | thread (`gitsync/wizard`) | detection and provider calls: a flag; the test sync: no | spinner and text on the wizard page, Next off | planned, with the dialog's Close or Cancel (JOB-010) |
-| Managed git: detect, install, check for a newer one, remove (SYNC-023…) | thread (`gitsync/install_ui.rs`) | install and download: yes (flag) | spinner with "Looking for git…", "Removing Shale's git…", a progress line, Cancel | planned: install and download are listed; Close for the dialog |
+| LFS download of a file or of the vault (SYNC-020) | thread, one at a time, a queue behind it | no (`git lfs pull` writes the files itself) | the player's busy card; spinner and text in Settings → Sync | **IS NOW** (JOB-032): "Downloading ‹file› from Git LFS…" |
+| File history: snapshot, thinning and queries (HIST) | thread (`app/history.rs`) | no (a snapshot waits for the tree lock) | the panel's "Reading the history…" with a spinner | **IS NOW** (JOB-031): quiet tasks, listed in the indicator after 2 s (JOB-030) |
+| Turn-on wizard: detect, test sync, provider calls, move out, Advanced connect (SYNC-047…) | thread (`gitsync/wizard`) | no: a provider call or a connection stopped half way leaves a token, key, repository or history behind | spinner and text on the wizard page and in Settings → Sync, Next off | **IS NOW** (JOB-033): the dialog's Cancel closes it, the call goes on and stays in the indicator (JOB-010) |
+| Managed git: detect, install, check for a newer one, remove (SYNC-023…) | thread (`gitsync/install_ui.rs`) | install, update and the check: yes (flag, what was downloaded is removed); removal: no | spinner, text, a progress bar and Cancel | **IS NOW** (JOB-034) |
 
 ## Export
 
@@ -63,15 +63,15 @@ would leave a mess (JOB-006).
 | Import of mails, events, files into notes (`import_action`) | UI thread | no | nothing (usually quick) | planned: a thread when it is more than a few files |
 | Mail import from the mail view (MAIL-070) | thread (`app/mail.rs`) | no | nothing until the dialog opens | planned: "Reading the mails…" |
 | Import of saved web pages from the spool of the browser extension (CLIP-009, CLIP-067, #427) | none yet | no (a half-written clip is worse than a late one; the rest waits in the spool) | not built | planned with the clipper: a task "Importing saved web pages…" on a worker thread (SHOULD BE, CLIP-067) |
-| Pandoc probe, TeX probe (settings) | thread | no | "Looking for TeX on this computer…" | planned: listed only after 2 s |
+| Pandoc probe (settings); TeX probe | thread | no | "Looking for TeX on this computer…" | TeX probe: **IS NOW** (JOB-035, quiet); pandoc probe: planned, listed only after 2 s |
 
 ## TeX, updates
 
 | Action | Runs today | Stop | Shows today | Registry |
 |---|---|---|---|---|
-| TeX install (managed TeX Live, CTAN packages, TEX) | thread (`pdf/tex/install`) | yes (handle) | spinner, progress line and Cancel in Settings and the setup dialog | planned: listed; Close keeps it running |
-| TeX test page and template set import (`tex/settings_ui.rs`, `sets_ui.rs`) | thread | yes (handle) | spinner, "Compiling the test document…" | planned |
-| Update check, download, install (UPD, `update/mod.rs`) | thread, one `cancel` flag for all three | yes | spinner next to "Check for updates now"; the banner shows progress | planned: "Checking for updates…", "Downloading Shale 0.8.0…", "Installing…" |
+| TeX install, update, removal (managed TeX Live, CTAN packages, TEX) | thread (`pdf/tex/install`) | install and update: yes (handle); removal: no | spinner, progress bar and Cancel in Settings and the setup dialog | **IS NOW** (JOB-035) |
+| TeX test compile, test page of a set and template set import (`tex/settings_ui.rs`, `sets_ui.rs`) | thread | import: yes (handle); the two compiles: no (the compile does not look at the flag) | spinner and text, progress and Cancel for the import | **IS NOW** (JOB-035) |
+| Update check, download, install (UPD, `update/mod.rs`) | thread, one `cancel` flag for all three | check and download: yes; install: no (a few file operations that undo themselves on an error) | spinner next to "Check for updates now"; the notice shows the text with a spinner and Cancel | **IS NOW** (JOB-036): "Checking for updates…", "Downloading Shale ‹version›…", "Installing Shale ‹version›…" |
 
 ## Mail
 

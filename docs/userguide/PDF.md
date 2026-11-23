@@ -247,7 +247,7 @@ Settings → LaTeX.
 
 1. **TeX.** If a usable TeX is found, the step says "Found: … ✓" and you go on. If not, it says so in a
    sentence and offers **Install (about 100 MB download, 330 MB on disk)**; only that button downloads
-   anything. A bar shows the progress, **Cancel install** stops it and removes what was downloaded. On
+   anything. A bar shows the progress, **Cancel** stops it and removes what was downloaded. On
    Linux and macOS the installer needs `perl`; a computer without it is told so in words before anything is
    downloaded.
 2. **Templates.** **TU Darmstadt (tested version)** is the recommended choice (the version Shale was
@@ -329,7 +329,7 @@ the TeX and checks it:
   330 MB on disk**), where it comes from and the folder it goes to
   (`<data folder>/shale/texlive`, on Linux `~/.local/share/shale/texlive`), and only
   **Download and install** starts it; **Not now** changes nothing. A bar shows the progress with the
-  package being installed, and **Cancel install** stops it and removes what was downloaded so far.
+  package being installed, and **Cancel** stops it and removes what was downloaded so far.
   The folder is built under another name and renamed when it is complete, so a half-finished install is never
   used. It takes a few minutes. On Linux and macOS the installer needs `perl`; if there is none, the
   page says "install perl first" (for example `sudo apt install perl`) before downloading anything.
@@ -382,7 +382,7 @@ when there is one), and has these buttons:
   announcement). It downloads the version Shale was tested with (4.06, a fixed commit whose
   checksum is checked: a different file is refused), makes the class files with docstrip using your
   TeX, and puts the finished set into the vault in one step. A progress bar shows where it is, and
-  **Cancel import** stops it; a cancelled or failed import leaves the vault as it was.
+  **Cancel** stops it; a cancelled or failed import leaves the vault as it was.
 - **Newest TU Darmstadt templates from CTAN** does the same with whatever version CTAN has today. It
   is not pinned and has no checksum, and the kinds were tested with 4.06 only; the page says so.
   CTAN hands the download to one of its mirrors; when that mirror is down or sends a broken file,
