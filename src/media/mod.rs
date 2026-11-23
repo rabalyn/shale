@@ -22,6 +22,7 @@ pub mod testdata;
 #[cfg(test)]
 mod ui_tests;
 pub mod video;
+mod wavfix;
 pub mod widget;
 
 pub use player::MediaPlayer;
