@@ -5,10 +5,11 @@
 
 use crate::app::{Modal, Options, ShaleApp, View};
 use crate::config::{MailAccount, MailSecurity};
-use crate::mail::db::{STATE_FULL, STATE_HEADER, STATE_TOO_LARGE};
+use crate::mail::db::{MessageSummary, STATE_FULL, STATE_HEADER, STATE_TOO_LARGE};
 use crate::mail::imap_client::{Client, ConnectSettings, ImapError, Limits, PlainAuth};
 use crate::mail::imap_fake_tests::{server_cert, FakeServer};
 use crate::mail::imap_sync::{Connector, ConnectorFactory, SyncOptions, NO_PASSWORD};
+use crate::mail::ops;
 use crate::mail::ui::{Body, ListingState, Pane, TestState};
 use crate::secrets::{self, MailSecret};
 use eframe::egui::{self, Color32, Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect, Shape, Vec2};
@@ -735,6 +736,211 @@ fn a_mail_deleted_on_the_server_is_dimmed_and_says_so() {
     assert!(w.shows("deleted on the server"));
     assert!(w.shows("Pizza at noon"), "its text is still readable");
     assert!(w.app.mail.open.as_ref().unwrap().msg.gone_on_server);
+}
+
+/// Delete the mails with these subjects on the pretend server, and sync.
+fn delete_on_server(w: &mut W, subjects: &[&str]) {
+    {
+        let mut s = w.server.state();
+        for subject in subjects {
+            let uid = s.folder_mut("INBOX").msgs.iter().find(|m| String::from_utf8_lossy(&m.raw).contains(subject)).unwrap().uid;
+            s.delete_message("INBOX", uid);
+        }
+    }
+    w.sync_and_wait();
+    w.until("the list shows them", |a| a.mail.total == 3);
+    w.frame(vec![]);
+}
+
+fn shift_d(w: &mut W) {
+    w.press(Key::D, Modifiers::SHIFT);
+}
+
+// spec: MAIL-238, MAIL-061
+#[test]
+fn mail_238_delete_local_copy_asks_first_works_on_several_marked_mails_and_touches_neither_server_nor_vault() {
+    let mut w = W::new("localdel", true);
+    w.sync_and_wait();
+    w.until("the Inbox is open", |a| a.mail.total == 3);
+    // import one mail to the vault, then it is deleted on the server: the note must stay
+    w.open_mail("Invoice 2026");
+    w.click("mail:import");
+    w.until("the dialog opens", |a| matches!(a.modal, Some(Modal::Import(_))));
+    w.settle();
+    w.click("import");
+    w.settle();
+    w.app.show_view(View::Mail, false);
+    w.settle();
+    let vault_before = w.vault_files();
+    assert!(vault_before.iter().any(|f| f.ends_with("Invoice 2026.md")), "{vault_before:?}");
+    let store = w.app.mail.ready_store().unwrap();
+    let paths: Vec<_> = ["Invoice 2026", "Lunch plans"]
+        .iter()
+        .map(|s| {
+            let i = w.row_of(s);
+            store.abs_path(&w.app.mail.row(i).unwrap().path)
+        })
+        .collect();
+    delete_on_server(&mut w, &["Invoice 2026", "Lunch plans"]);
+    let server_before = w.server_uids("INBOX");
+
+    // a mail that is still on the server: no dialog, a note, nothing deleted
+    let other = w.subjects().into_iter().find(|s| s != "Invoice 2026" && s != "Lunch plans").unwrap();
+    w.open_mail(&other);
+    w.frame(vec![]);
+    assert!(!w.has("mail:delete-local"), "no button on a mail that is on the server");
+    shift_d(&mut w);
+    assert!(w.app.mail.local_delete.is_none());
+    assert!(w.app.toasts.iter().any(|(n, _)| n.contains("deleted on the server can be deleted")), "{:?}", w.app.toasts);
+    assert_eq!(w.app.mail.total, 3);
+
+    // the mail that is gone: the button, the dialog with the count, Esc / Enter / Cancel do nothing
+    w.open_mail("Lunch plans");
+    w.frame(vec![]);
+    assert!(w.has("mail:delete-local"));
+    w.click("mail:delete-local");
+    w.frame(vec![]);
+    assert!(w.app.mail.local_delete.is_some());
+    assert!(w.shows("Delete the local copy of 1 message?"), "the dialog names the count");
+    w.press(Key::Enter, Modifiers::NONE);
+    assert!(w.app.mail.local_delete.is_some() && w.app.mail.total == 3, "Enter does not confirm");
+    w.press(Key::Escape, Modifiers::NONE);
+    assert!(w.app.mail.local_delete.is_none() && w.app.mail.total == 3);
+    shift_d(&mut w);
+    assert!(w.app.mail.local_delete.is_some(), "the key asks the same question");
+    w.click("mail:local-delete-cancel");
+    assert!(w.app.mail.local_delete.is_none() && w.app.mail.total == 3);
+    assert!(paths.iter().all(|p| p.is_file()));
+
+    // three marked mails, one of them still on the server: only the two gone ones are offered
+    w.press(Key::Escape, Modifiers::NONE);
+    w.app.mail.pane = Pane::List;
+    let others = w.subjects();
+    for subject in others.iter().map(|s| s.as_str()) {
+        let i = w.row_of(subject);
+        w.app.mail.cursor = Some(i);
+        w.press(Key::Space, Modifiers::NONE);
+    }
+    w.frame(vec![]);
+    assert!(w.has("mail:marked-delete-local"), "the marked bar offers it");
+    w.click("mail:marked-delete-local");
+    w.frame(vec![]);
+    assert!(w.app.toasts.iter().any(|(n, _)| n.contains("1 selected mail is still on the server")), "{:?}", w.app.toasts);
+    assert!(w.shows("Delete the local copy of 2 messages?"), "several at once, the count is named");
+    w.click("mail:local-delete-confirm");
+    w.settle();
+    assert!(w.app.mail.local_delete.is_none());
+    assert_eq!(w.app.mail.total, 1, "both rows are gone from the list, the one on the server stays");
+    assert!(w.app.mail.marked.is_empty());
+    assert!(paths.iter().all(|p| !p.exists()), "the files are no longer in the folder of the mail");
+    let trash = store.abs_path(".trash");
+    let mut trashed = vec![];
+    for e in walk_files(&trash) {
+        trashed.push(e);
+    }
+    assert_eq!(trashed.iter().filter(|p| p.extension().is_some_and(|x| x == "eml")).count(), 2, "the files went to the local trash: {trashed:?}");
+    assert_eq!(w.vault_files(), vault_before, "the imported note and its original stay");
+    assert_eq!(w.server_uids("INBOX"), server_before, "the server was not asked to change anything");
+    // a later sync does not bring them back
+    w.sync_and_wait();
+    w.settle();
+    assert_eq!(w.app.mail.total, 1);
+}
+
+fn walk_files(dir: &Path) -> Vec<PathBuf> {
+    let mut out = vec![];
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                out.extend(walk_files(&p));
+            } else {
+                out.push(p);
+            }
+        }
+    }
+    out
+}
+
+// spec: MAIL-238, MAIL-072
+#[test]
+fn mail_238_the_row_menu_offers_delete_local_copy_only_for_a_mail_that_is_gone_from_the_server() {
+    let mut w = W::new("localdelmenu", true);
+    w.sync_and_wait();
+    w.until("the Inbox is open", |a| a.mail.total == 3);
+    delete_on_server(&mut w, &["Lunch plans"]);
+    let right_click = |w: &mut W, subject: &str| {
+        let i = w.row_of(subject);
+        let p = w.rect(&format!("mail:row:{i}")).center();
+        let b = |pressed| Event::PointerButton { pos: p, button: PointerButton::Secondary, pressed, modifiers: Modifiers::NONE };
+        w.frame(vec![Event::PointerMoved(p)]);
+        w.frame(vec![b(true)]);
+        w.frame(vec![b(false)]);
+        w.frame(vec![]);
+    };
+    right_click(&mut w, "Invoice 2026");
+    assert!(w.has("mail:ctx-delete"), "the menu is open");
+    assert!(!w.has("mail:ctx-delete-local"), "not for a mail on the server");
+    w.press(Key::Escape, Modifiers::NONE);
+    assert!(!w.has("mail:ctx-delete"));
+    right_click(&mut w, "Lunch plans");
+    assert!(w.has("mail:ctx-delete-local"));
+    w.click("mail:ctx-delete-local");
+    w.frame(vec![]);
+    assert!(w.shows("Delete the local copy of 1 message?"));
+    w.click("mail:local-delete-confirm");
+    w.settle();
+    assert_eq!(w.app.mail.total, 2);
+    assert!(!w.subjects().contains(&"Lunch plans".to_string()));
+}
+
+// spec: MAIL-238
+#[test]
+fn mail_238_the_store_refuses_a_mail_on_the_server_a_wrong_count_and_a_mail_with_a_waiting_action() {
+    let mut w = W::new("localdelstore", true);
+    w.sync_and_wait();
+    w.until("the Inbox is open", |a| a.mail.total == 3);
+    let store = w.app.mail.ready_store().unwrap();
+    let i = w.row_of("Lunch plans");
+    let live = w.app.mail.row(i).unwrap().clone();
+    // still on the server: left out with a note, nothing removed
+    let out = ops::delete_local_copies(&store, std::slice::from_ref(&live), ops::Confirmed::after_dialog(1), "2026-11-23").unwrap();
+    assert_eq!(out.removed, 0);
+    assert!(out.notes[0].contains("still on the server"), "{:?}", out.notes);
+    assert!(store.abs_path(&live.path).is_file());
+    // a count that is not the one asked about
+    assert!(ops::delete_local_copies(&store, std::slice::from_ref(&live), ops::Confirmed::after_dialog(2), "2026-11-23").is_err());
+    // gone from the server but with a change waiting: left out too
+    delete_on_server(&mut w, &["Lunch plans"]);
+    let i = w.row_of("Lunch plans");
+    let mut gone = w.app.mail.row(i).unwrap().clone();
+    assert!(ops::local_deletable(&gone));
+    store
+        .commit(vec![crate::mail::db::Op::PendingAdd(Box::new(crate::mail::db::PendingRow {
+            id: 0,
+            account: gone.account.clone(),
+            kind: "flags".into(),
+            folder: gone.folder_id,
+            uidvalidity: gone.uidvalidity,
+            uid: gone.uid,
+            target: None,
+            flags_add: "\\Seen".into(),
+            flags_remove: String::new(),
+            prev_flags: String::new(),
+            created: NOW,
+            attempts: 0,
+            last_error: None,
+        }))])
+        .unwrap();
+    gone = store.reader().unwrap().message_by_id(gone.id).unwrap().unwrap();
+    assert!(!ops::local_deletable(&gone));
+    let out = ops::delete_local_copies(&store, std::slice::from_ref(&gone), ops::Confirmed::after_dialog(1), "2026-11-23").unwrap();
+    assert_eq!(out.removed, 0);
+    assert!(out.notes[0].contains("waiting"), "{:?}", out.notes);
+    // a mail that is not in the index any more: a note
+    let ghost = MessageSummary { id: 9_999_999, ..gone };
+    let out = ops::delete_local_copies(&store, &[ghost], ops::Confirmed::after_dialog(1), "2026-11-23").unwrap();
+    assert!(out.notes[0].contains("not in the local copy"));
 }
 
 // spec: MAIL-058
