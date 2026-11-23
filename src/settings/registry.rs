@@ -119,6 +119,7 @@ pub const ENTRIES: &[Entry] = &[
     e("import.libraries", Import, "Library folders", &["media_libraries"], "media videos @name folder computer"),
     e("import.header_list", Import, "Header list in the note body", &["import_header_list"], "e-mails events posts properties"),
     e("import.skip_signatures", Import, "Skip signatures", &["import_skip_signatures"], "e-mails signature smime pgp logo picture attachments"),
+    e("import.leave_out_quoted", Import, "Leave out quoted mails", &["import_leave_out_quoted"], "e-mails thread reply quote history wrote original message"),
     e("import.docx", Import, "Import Word files as notes", &["docx_import"], "docx pandoc attachment"),
     e("import.pandoc", Import, "pandoc program", &["pandoc_path"], "docx word check again"),
     e("data.usage", Data, "Data usage", &[], "disk space caches what Shale keeps"),

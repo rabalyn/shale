@@ -219,7 +219,8 @@ cannot use are shown with the reason in Settings → Search, and read as `f`, `m
 | `outside_files` | `"Ask"` (`"Copy"`, `"Link"`) | Settings → Import, "Files from outside the vault": what a `[!` pick, a paste or an import does with a picture, PDF, sound or video that is not in the vault: ask, copy it into `z_media/` or link it where it is; the start value of the Copy / Link choice in the Import dialog (Ask starts at Copy); other files are always copied; global config; see [[Sounds and videos]] |
 | `docx_import` | off | Settings → Import, "Import Word files as notes (needs pandoc)"; global config |
 | `import_header_list` | off | Settings → Import, "Header list in the note body" (e-mails, events and saved posts); the start value of the box of the same name in the Import dialog |
-| `import_skip_signatures` | on | Settings → Import, "Skip signatures": the start value of the box of the same name in the Import dialog; the signature files of signed mail and the pictures of signature blocks start unticked |
+| `import_skip_signatures` | on | Settings → Import, "Skip signatures": the start value of the box of the same name in the Import dialog; the signature files of signed mail and the pictures of signature blocks start unticked, and the signature text of the mail and of the mails it quotes is cut |
+| `import_leave_out_quoted` | off | Settings → Import, "Leave out quoted mails": the start value of the box of the same name in the Import dialog; an imported e-mail keeps only the text its sender wrote, not the earlier mails it quotes |
 | `pandoc_path` | empty (search `PATH`, then `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, and on Windows `%LOCALAPPDATA%\Pandoc` and `%ProgramFiles%\Pandoc`) | Settings → Import, "pandoc program" (the Word export looks for pandoc the same way) |
 
 To set it up: install pandoc (Linux `sudo pacman -S pandoc-cli` or `sudo apt install pandoc`, macOS `brew install pandoc`,

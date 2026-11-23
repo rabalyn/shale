@@ -715,6 +715,18 @@ fn cfg_074_the_import_tab_has_the_skip_signatures_setting() {
     assert!(p.app.cfg.import_skip_signatures);
 }
 
+// spec: CFG-076
+#[test]
+fn cfg_076_the_import_tab_has_the_leave_out_quoted_setting() {
+    let mut p = P::new("settings-leave-out-quoted", &[]);
+    assert!(!p.app.cfg.import_leave_out_quoted, "off by default");
+    p.app.open_settings(SettingsTab::Import);
+    p.click(Show::Modals, "Leave out quoted mails");
+    assert!(p.app.cfg.import_leave_out_quoted);
+    p.click(Show::Modals, "Leave out quoted mails");
+    assert!(!p.app.cfg.import_leave_out_quoted);
+}
+
 // spec: CFG-021
 #[test]
 fn set_002_settings_open_on_a_short_page() {

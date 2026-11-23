@@ -24,6 +24,9 @@ pub(crate) mod docx_tests;
 /// Thunderbird lookups): only Wayland delivers those kinds (IMP-011); `wl_drop.rs` is their one source.
 #[cfg(target_os = "linux")]
 mod from_programs;
+pub mod mail_segments;
+#[cfg(test)]
+mod mail_segments_tests;
 pub mod mail_text;
 #[cfg(test)]
 mod mail_text_tests;
@@ -531,6 +534,8 @@ pub struct Options {
     pub people_dir: String,
     /// also write the properties of an e-mail / event / post as a list in the note's text (IMP-052)
     pub header_list: bool,
+    /// what is cut out of the text of an e-mail: signatures, quoted mails (IMP-065, IMP-066)
+    pub cut: mail_segments::TextCut,
 }
 
 fn link_line(rel: &Path) -> String {
@@ -551,8 +556,9 @@ fn attachment_line(rel: &Path) -> String {
 pub const PICTURE_WIDTH: u32 = 200;
 
 /// The note for an e-mail (attachment links already made). The properties are the one record of
-/// the header (IMP-050, IMP-051); `header_list` also writes them as a list below the title (IMP-052).
-pub fn email_note(mail: &Mail, tags: &[String], attachments: &[PathBuf], original: Option<&Path>, people: &[String], header_list: bool) -> String {
+/// the header (IMP-050, IMP-051); `header_list` also writes them as a list below the title (IMP-052);
+/// `cut` takes signatures and quoted mails out of the text (IMP-065, IMP-066).
+pub fn email_note(mail: &Mail, tags: &[String], attachments: &[PathBuf], original: Option<&Path>, people: &[String], header_list: bool, cut: mail_segments::TextCut) -> String {
     let subject = if mail.subject.trim().is_empty() { "(no subject)" } else { mail.subject.trim() };
     let date = mail.date.map(|d| local_stamp(d, false)).unwrap_or_default();
     let mut s = front(
@@ -598,7 +604,7 @@ pub fn email_note(mail: &Mail, tags: &[String], attachments: &[PathBuf], origina
         s.push('\n');
     }
     s.push_str("## Message\n\n");
-    s.push_str(&mail_text::tidy(&mail.text));
+    s.push_str(&mail_text::tidy(&mail_segments::cut(&mail.text, cut)));
     s.push('\n');
     s
 }
@@ -783,7 +789,7 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
                     } else {
                         None
                     };
-                    email_note(mail, &o.tags, &atts, orig.as_deref(), &people, o.header_list)
+                    email_note(mail, &o.tags, &atts, orig.as_deref(), &people, o.header_list, o.cut)
                 }
                 Source::Event { event, calendar, original } => {
                     let orig = match (o.keep_original, original) {
@@ -871,7 +877,7 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].title, "2026-11-13 Neubau Hörsaal B – Pläne Stand 3");
         assert_eq!(items[0].att_on, vec![false, true, true], "the tiny inline logo is left out");
-        let o = Options { folder: PathBuf::from("Projekte/Neubau B"), tags: parse_tags("neubau-b, plaene"), keep_original: true, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false };
+        let o = Options { folder: PathBuf::from("Projekte/Neubau B"), tags: parse_tags("neubau-b, plaene"), keep_original: true, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false, cut: Default::default() };
         let Imported { notes: made, errors: errs, .. } = import(&mut v, &items, &o);
         assert!(errs.is_empty(), "{errs:?}");
         assert_eq!(made, vec![PathBuf::from("Projekte/Neubau B/2026-11-13 Neubau Hörsaal B – Pläne Stand 3.md")]);
@@ -937,7 +943,7 @@ mod tests {
         std::fs::write(&txt, b"plan").unwrap();
         let (more, _) = items_from_paths(std::slice::from_ref(&txt));
         items.extend(more);
-        let o = Options { folder: PathBuf::from("Projekte"), tags: vec!["status".into()], keep_original: true, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false };
+        let o = Options { folder: PathBuf::from("Projekte"), tags: vec!["status".into()], keep_original: true, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false, cut: Default::default() };
         let Imported { notes: made, errors: errs, .. } = import(&mut v, &items, &o);
         assert!(errs.is_empty(), "{errs:?}");
         assert_eq!(made.len(), 2);
@@ -1021,7 +1027,7 @@ mod tests {
     fn a_header_with_quotes_and_backslashes_is_read_back_as_written() {
         for from in [r#""Nils Mundhenke" <nils@example.org>"#, r#"A \ B "C" <a@x>"#, "it's <a@x>"] {
             let mail = Mail { subject: "Plan".into(), from: from.into(), ..Default::default() };
-            let note = email_note(&mail, &[], &[], None, &[], false);
+            let note = email_note(&mail, &[], &[], None, &[], false, Default::default());
             let got = crate::markdown::front_matter_values(&note);
             assert_eq!(got.iter().find(|(k, _)| k == "from").map(|(_, v)| v.clone()), Some(vec![from.to_string()]), "{note}");
         }
@@ -1036,15 +1042,15 @@ mod tests {
         let mail = Mail { subject: "Plan".into(), from: "A <a@x>".into(), to: "B <b@x>".into(), date_raw: "Thu, 13 Nov 2026 10:22:33 +0100".into(), text: "Hallo  \r\n\r\n\r\n\r\nWelt\n-- \nAnna\n".into(), ..Default::default() };
         let atts = [PathBuf::from("z_media/2026/11/261113_foto.jpg"), PathBuf::from("z_media/2026/11/261113_plan.pdf")];
         let orig = PathBuf::from("z_media/2026/11/261113_Plan.eml");
-        let note = email_note(&mail, &[], &atts, Some(&orig), &[], false);
+        let note = email_note(&mail, &[], &atts, Some(&orig), &[], false, Default::default());
         assert!(note.contains("date: \"Thu, 13 Nov 2026 10:22:33 +0100\"\n"), "an unreadable date is kept as written: {note}");
         assert!(note.ends_with("\n---\n\n# Plan\n\n## Attachments\n\n- ![[z_media/2026/11/261113_foto.jpg|200]]\n- [[z_media/2026/11/261113_plan.pdf]]\n\n## Message\n\nHallo\n\nWelt\n\n-- \nAnna\n"), "{note}");
         assert!(!note.contains("**"), "{note}");
-        let listed = email_note(&mail, &[], &atts, Some(&orig), &["[[A]]".into()], true);
+        let listed = email_note(&mail, &[], &atts, Some(&orig), &["[[A]]".into()], true, Default::default());
         assert!(listed.contains("\n# Plan\n\n- **From:** A <a@x>\n- **To:** B <b@x>\n- **Date:** Thu, 13 Nov 2026 10:22:33 +0100\n- **People:** [[A]]\n\n## Attachments\n\n"), "{listed}");
         assert!(listed.contains("- Original message: [[z_media/2026/11/261113_Plan.eml]]\n\n## Message"), "{listed}");
         // without attachments there is no section
-        let bare = email_note(&mail, &[], &[], None, &[], false);
+        let bare = email_note(&mail, &[], &[], None, &[], false, Default::default());
         assert!(bare.contains("# Plan\n\n## Message\n\nHallo"), "{bare}");
     }
 
@@ -1067,7 +1073,7 @@ mod tests {
         broken.failed_media.push(crate::social::note::FailedMedia { url: "https://x.test/a.jpg".into(), error: "gone".into(), post: 0, item: 0 });
         let w = social_item(broken, "Mastodon", false).warning().unwrap();
         assert!(w.contains("offline") && w.contains("1 picture or video could not be downloaded"), "{w}");
-        let o = Options { folder: PathBuf::from("Social"), tags: parse_tags("social, reading"), keep_original: false, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false };
+        let o = Options { folder: PathBuf::from("Social"), tags: parse_tags("social, reading"), keep_original: false, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false, cut: Default::default() };
         let Imported { notes: made, errors: errs, .. } = import(&mut v, &items, &o);
         assert!(errs.is_empty(), "{errs:?}");
         assert_eq!(made.len(), 2);
@@ -1102,7 +1108,7 @@ mod tests {
         assert!(!again[0].include && !again[1].include);
         assert!(again[2].already.is_none() && again[2].include);
         // spec: IMP-052 (the option writes the list into a post note too)
-        let listed = Options { folder: PathBuf::from("Listed"), tags: vec![], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into(), header_list: true };
+        let listed = Options { folder: PathBuf::from("Listed"), tags: vec![], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into(), header_list: true, cut: Default::default() };
         let Imported { notes: m_l, errors: errs, .. } = import(&mut v, &[social_item(demo::saved(&posts[4]), "Mastodon", false)], &listed);
         assert!(errs.is_empty(), "{errs:?}");
         let t_l = std::fs::read_to_string(v.abs(&m_l[0])).unwrap();
@@ -1130,7 +1136,7 @@ mod tests {
         // the lift box is ticked for the one with headings but no #, and for it only
         let lifts: Vec<bool> = items.iter().take(3).map(|i| matches!(i.source, Source::Markdown { lift: true, .. })).collect();
         assert_eq!(lifts, vec![true, false, false]);
-        let o = Options { folder: PathBuf::from("In"), tags: vec!["ignored".into()], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false };
+        let o = Options { folder: PathBuf::from("In"), tags: vec!["ignored".into()], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false, cut: Default::default() };
         let Imported { notes: made, errors, .. } = import(&mut v, &items[..3], &o);
         assert!(errors.is_empty(), "{errors:?}");
         let read = |i: usize| std::fs::read_to_string(v.abs(&made[i])).unwrap();
@@ -1167,7 +1173,7 @@ mod tests {
         // a renamed title keeps the extension; a file of the vault is linked where it is
         items[0].title = "A cat".into();
         items[1].title = "anim.gif".into();
-        let o = Options { folder: PathBuf::from("Projekte"), tags: vec!["x".into()], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false };
+        let o = Options { folder: PathBuf::from("Projekte"), tags: vec!["x".into()], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false, cut: Default::default() };
         items.truncate(5);
         let Imported { notes, files, errors, .. } = import(&mut v, &items, &o);
         assert!(errors.is_empty() && notes.is_empty(), "no note for media: {errors:?} {notes:?}");
@@ -1218,7 +1224,7 @@ mod tests {
             media_item(media::Kind::Pdf, "Plan: v2?.pdf".into(), MediaData::Bytes(b"%PDF".to_vec())),
         ];
         items.extend(items_from_paths(std::slice::from_ref(&file)).0);
-        let o = Options { folder: PathBuf::from("In"), tags: vec![], keep_original: true, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false };
+        let o = Options { folder: PathBuf::from("In"), tags: vec![], keep_original: true, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false, cut: Default::default() };
         let Imported { notes, files, errors, .. } = import(&mut v, &items, &o);
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(notes.len(), 4, "{notes:?}");
@@ -1255,7 +1261,7 @@ mod tests {
         std::fs::write(v.root.join("in.mp4"), b"v").unwrap();
         v.set_libraries(&[crate::media::outside::Library { name: "Lib".into(), path: src.join("Lib") }]);
         let abs = crate::fsutil::plain_path(src.canonicalize().unwrap());
-        let o = Options { folder: PathBuf::new(), tags: vec![], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false };
+        let o = Options { folder: PathBuf::new(), tags: vec![], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false, cut: Default::default() };
         let item = |kind, name: &str, path: PathBuf, how| {
             let mut it = media_item(kind, name.into(), MediaData::Path(path));
             if let Source::Media { how: h, .. } = &mut it.source {

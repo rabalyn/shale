@@ -157,6 +157,11 @@ impl ShaleApp {
                 .on_hover_text("A signed e-mail has a signature file (smime.p7s, signature.asc), and a signature block has logos and social icons. Ticked: the Import dialog starts with them unticked, and you can tick each one. The Import dialog starts with this choice")
                 .changed()
         });
+        changed |= anchor(ui, "import.leave_out_quoted", |ui| {
+            ui.checkbox(&mut self.cfg.import_leave_out_quoted, "Leave out quoted mails")
+                .on_hover_text("Ticked: an imported e-mail keeps only what its sender wrote, not the earlier mails it quotes (the lines starting with >, the reply header such as \"On … wrote:\" and the mails quoted below Outlook's \"Original Message\" line). The Import dialog starts with this choice")
+                .changed()
+        });
         self.word.poll();
         if self.word.result.is_none() && !self.word.running() {
             self.word.start(self.cfg.pandoc_path.clone());

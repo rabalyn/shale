@@ -933,6 +933,15 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   mail (`smime.p7s`, `signature.asc`) and the pictures of a signature block (logos, social icons,
   `image001.png`) start unticked and say why; the box **Skip signatures** (Import dialog, start value
   in Settings → Import) lets them start ticked (IMP-059, IMP-060, IMP-061, CFG-074).
+- The text of an imported mail is read as **segments**: the sender's own text and each mail it quotes
+  (`>` runs, "On … wrote:", "Am … schrieb …:", `-----Original Message-----`, Outlook's From / Sent / To /
+  Subject block, `blockquote` and `gmail_quote` of HTML mails), and each segment has its own signature
+  (`-- ` at any quote depth, the HTML markers of Thunderbird, Gmail, Outlook and Apple Mail, a closing
+  greeting with a short block of contact lines, a disclaimer). **Skip signatures** also removes the own
+  signature and the signatures inside the quoted mails and keeps the quoted text; **Leave out quoted
+  mails** (off at first, Settings → Import sets the start value) drops the quoted mails. What is not
+  clearly a signature stays (IMP-063 to IMP-066, CFG-076). The editor folds a signature inside a quote
+  too (EDIT-083).
 - Drop onto a folder in the file list to import into that folder, or onto a note to also add
   links to the new notes there.
 - After an import of two or more items a window, **Import summary**, says what was made: the new
