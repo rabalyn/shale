@@ -567,7 +567,7 @@ mod tests {
         CalendarSource { id: id.into(), name: id.into(), color: "#000000".into(), enabled: true, sync_minutes: 15, kind: SourceKind::Caldav { url: url.into(), username: user.into(), password: pw.into() } }
     }
 
-    // spec: SEC-003, MAIL-021
+    // spec: SEC-003, MAIL-021, SEC-016
     #[test]
     // its own host: other tests (the calendar dialog) save "ada" at dav.example.com at the same time
     fn passwords_go_to_the_keyring_and_come_back() {
@@ -607,7 +607,7 @@ mod tests {
         let _ = for_file(&[]);
     }
 
-    // spec: MAIL-021
+    // spec: MAIL-021, SEC-016
     #[test]
     fn mail_secrets_have_their_own_entries() {
         let _serial = serial();
@@ -664,7 +664,7 @@ mod tests {
         assert_eq!(backend::lookup(CALDAV, "https://dav.example.com:443", "ada-old2").as_ref().map(|s| s.expose()), Some("old-file-pw2"));
     }
 
-    // spec: SEC-011
+    // spec: SEC-011, SEC-021, SEC-003
     #[test]
     fn without_any_keyring_the_password_stays_in_the_owner_only_file_as_documented() {
         let _serial = serial();

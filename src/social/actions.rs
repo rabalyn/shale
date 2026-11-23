@@ -624,4 +624,32 @@ pub(crate) mod tests {
         drop(t);
         assert!(!path.exists());
     }
+
+    // spec: SEC-026
+    #[test]
+    fn a_video_copy_is_private_has_the_bytes_of_the_file_and_is_gone_when_dropped() {
+        let src = file("copy-src.mp4", b"\0\0\0\x18ftypmp42video-bytes");
+        let t = TempFile::copy_of(&src, "mp4").unwrap();
+        let path = t.0.clone();
+        assert_ne!(path, src, "a copy of its own, not the file the person named");
+        assert_eq!(crate::fsutil::read(&path).unwrap(), crate::fsutil::read(&src).unwrap());
+        #[cfg(unix)]
+        assert_eq!(std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(path.parent().unwrap()).unwrap().permissions()) & 0o777, 0o700);
+        assert!(path.to_string_lossy().ends_with(".mp4") && !path.to_string_lossy().contains(['"', ';', ',']));
+        drop(t);
+        assert!(!path.exists());
+        assert!(src.exists(), "the person's own file stays");
+    }
+
+    // spec: SEC-026
+    #[test]
+    fn a_picture_over_64_mb_is_refused_without_reading_it() {
+        let big = file("over-64mb.png", &png(4, 4, false));
+        std::fs::OpenOptions::new().write(true).open(&big).unwrap().set_len(64_000_001).unwrap();
+        for network in [Network::Mastodon, Network::Bluesky] {
+            let e = prepare(&big, network, u64::MAX).unwrap_err();
+            assert!(e.contains("over-64mb.png is too big (64 MB)"), "{e}");
+        }
+        let _ = std::fs::remove_file(&big);
+    }
 }

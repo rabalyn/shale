@@ -470,6 +470,23 @@ mod tests {
         }
     }
 
+    // spec: SEC-019
+    #[test]
+    fn sec_019_a_release_build_hardens_the_process_at_start_and_a_failure_only_tells_stderr() {
+        let source = include_str!("main.rs");
+        let code = source.split("\nmod tests {").next().expect("the program part");
+        let main = &code[code.find("fn main() -> eframe::Result {").expect("main")..];
+        let call = "if let Err(e) = secret::harden_process(cfg!(not(debug_assertions))) {";
+        let at = main.find(call).expect("main hardens the process, in a release build only");
+        let body = &main[at + call.len()..];
+        let body = &body[..body.find("\n    }").expect("the end of the failure branch")];
+        assert!(body.contains("eprintln!(\"shale: could not make the process undumpable: {e}\")"), "{body}");
+        assert!(!body.contains("exit") && !body.contains("return") && !body.contains("panic") && !body.contains('?'), "a failure never stops the program: {body}");
+        // before anything reads or holds a secret: the git askpass helper and the window come after it
+        assert!(at < main.find("askpass_requested(").expect("askpass"), "hardened before the askpass helper runs");
+        assert!(at < main.find("eframe::run_native").expect("the window"), "hardened before the window opens");
+    }
+
     // spec: UPD-019
     #[test]
     fn upd_019_restarted_is_a_flag_that_changes_nothing_else() {
