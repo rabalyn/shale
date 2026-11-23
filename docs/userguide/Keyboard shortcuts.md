@@ -94,4 +94,8 @@ only while no text field has the keyboard. Every key can be changed in Settings 
 | Shift+U | Show or hide the sent mails that are only on this computer (j / k, Enter = Upload again, d = Dismiss, Esc) |
 | Esc | Step back: close the message, clear the search, clear the marks, dismiss a message |
 
+## Under a dialog
+
+While a dialog is open (Settings, an import, a confirmation, a wizard, …), Shale's shortcuts and the editor's keys do nothing. Esc closes the dialog, and its own keys work: Enter, Tab, typing in its fields and, in Settings → Keybindings, the key capture. Shortcuts of your system (screenshots, switching windows) are not affected.
+
 #userguide #keys
