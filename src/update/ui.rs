@@ -91,7 +91,7 @@ fn result_text(state: &UpdateState, cfg: &UpdateConfig) -> Option<String> {
 /// Settings → Updates (UPD-020); returns whether a setting changed.
 pub fn settings_page(ui: &mut Ui, state: &mut UpdateState, cfg: &mut UpdateConfig) -> bool {
     let mut changed = false;
-    theme::hint(ui, "Shale can look for a new release on GitHub (github.com/rabalyn/shale), check its download against the release's SHA-256 file, and install it. A checksum shows the file arrived whole; it does not prove who made it.");
+    theme::hint(ui, "Shale can look for a new release on GitHub (github.com/rabalyn/shale), check its download against the release's SHA-256 file, and install it. A checksum shows the file arrived whole; Shale installs it only when the release also has a signature of the owner of the release key built into Shale.");
     theme::section(ui, "When an update is found");
     crate::settings::anchor::anchor(ui, "updates.mode", |ui| {
         for m in [UpdateMode::Ask, UpdateMode::Off, UpdateMode::Notify, UpdateMode::Download, UpdateMode::Install] {
@@ -208,7 +208,7 @@ impl ShaleApp {
                     });
                     theme::hint(ui, m.about());
                 }
-                theme::hint(ui, "A checksum shows a download arrived whole; it does not prove who made it.");
+                theme::hint(ui, "Shale installs a download only when its checksum fits and the owner of its release key signed it.");
             });
             match chosen {
                 Some(m) => {
