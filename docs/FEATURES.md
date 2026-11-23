@@ -710,7 +710,10 @@ In a narrow sidebar the header wraps: the month name on its own line, the button
 - **No HTML, no tracking.** The message text comes from the plain text part, or from the HTML
   turned into text. Nothing is rendered, no pictures are fetched, no scripts run. An attachment
   is opened from a private temporary copy through your default program (never a program or
-  script), or saved into the vault's media folder.
+  script), or saved into the vault's media folder. A sound (every format of the media list, also a
+  `.wav` sent as a plain file) gets the player of the notes under its line in the reading pane,
+  playing from a private temporary copy and never by itself; sounds you attach go out with their
+  `audio/*` type.
 - **The local copy is not encrypted** (like Thunderbird's). Use full-disk encryption.
 
 ![Mail accounts](userguide/z_media/screenshots/mail-accounts.png)

@@ -150,6 +150,16 @@ pub fn open_temp_copy(name: &str, data: &[u8]) -> Result<(), String> {
     launch(checked.as_ref())
 }
 
+/// Removes a temp copy made by `save_temp_copy` with its folder. Nothing outside Shale's temp folder is touched.
+pub fn discard_temp_copy(path: &Path) {
+    let (Some(dir), Ok(root)) = (path.parent(), temp_root().and_then(|r| std::fs::canonicalize(r).map_err(|e| e.to_string()))) else { return };
+    if let Ok(dir) = std::fs::canonicalize(dir) {
+        if dir.parent() == Some(root.as_path()) {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+}
+
 /// The address to open, or why it is refused. Control characters (which could smuggle in a
 /// second line or option) and unknown schemes are refused.
 pub fn check_url(url: &str) -> Result<String, String> {
@@ -355,7 +365,10 @@ fn safe_name(name: &str) -> String {
     }
 }
 
-fn save_temp_copy(name: &str, data: &[u8]) -> Result<PathBuf, String> {
+/// A private temp copy of `data` (a folder of its own in Shale's owner-only temp folder, SEC-006), not
+/// opened: the mail reading pane plays an audio attachment from it (MAIL-240). Remove it with
+/// `discard_temp_copy`.
+pub fn save_temp_copy(name: &str, data: &[u8]) -> Result<PathBuf, String> {
     let root = temp_root()?;
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     let dir = root.join(format!("{}-{nanos:x}", std::process::id()));

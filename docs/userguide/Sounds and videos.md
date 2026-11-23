@@ -28,6 +28,9 @@ Embed a sound like a picture, with `![[file.mp3]]`. Here is one:
 - **One at a time.** Starting a player pauses the one that was playing. A sound keeps playing
   while you scroll or switch between the editor, the preview and the reading view, and stops when
   the note's tab is closed or another vault is opened.
+- **In a mail.** A sound attached to a mail has this player too, in the reading pane of the Mail view
+  ([[Mail]]), for every format above. It plays from a private temporary copy, which is removed when you
+  open another message.
 - **Never by itself.** Nothing ever starts playing until you press the button or Space.
 - **No sound output.** On a computer without a sound device the player says "No sound output" and
   a sound file does not play. A video still plays its pictures, without sound, and says "No sound

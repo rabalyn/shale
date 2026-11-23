@@ -469,6 +469,46 @@ pub struct MailView {
     pub att_sel: usize,
     pub(crate) att_open: bool,
     pub(crate) att_save: bool,
+    /// The app's one player (MEDIA-007), which plays the audio attachments of the open message (MAIL-240); the app hands over its own.
+    pub media: crate::media::MediaPlayer,
+    /// The private temp copies of the audio attachments of the open message, which the player plays from (MAIL-240).
+    pub(crate) att_audio: Option<AttAudio>,
+}
+
+/// The audio attachments of one open message as private temp files (SEC-006): the player reads files, a mail's
+/// attachment is in memory. The files are removed when another message opens or the view goes (MAIL-240).
+pub(crate) struct AttAudio {
+    /// The message and the parsed mail the files were made from.
+    pub(crate) msg: i64,
+    pub(crate) mail: Arc<Loaded>,
+    /// Per attachment of the mail: the file of an audio attachment, None for any other.
+    pub(crate) files: Vec<Option<PathBuf>>,
+}
+
+impl AttAudio {
+    /// The temp copies of the audio attachments of `l`; one that cannot be written has no player (the Open button stays).
+    pub(crate) fn make(msg: i64, l: &Arc<Loaded>) -> AttAudio {
+        let files = l
+            .mail
+            .attachments
+            .iter()
+            .map(|a| {
+                let ext = crate::media::attachment_audio_ext(&a.name, &a.mime)?;
+                // the player knows a sound by its extension: a name without a sound's one gets it
+                let name = if a.name.rsplit_once('.').is_some_and(|(_, e)| e.eq_ignore_ascii_case(ext)) { a.name.clone() } else { format!("{}.{ext}", if a.name.trim().is_empty() { "attachment" } else { a.name.as_str() }) };
+                crate::opener::save_temp_copy(&name, &a.data).ok()
+            })
+            .collect();
+        AttAudio { msg, mail: l.clone(), files }
+    }
+}
+
+impl Drop for AttAudio {
+    fn drop(&mut self) {
+        for f in self.files.iter().flatten() {
+            crate::opener::discard_temp_copy(f);
+        }
+    }
 }
 
 /// What the folder pane lists.
@@ -585,6 +625,8 @@ impl MailView {
             att_sel: 0,
             att_open: false,
             att_save: false,
+            media: crate::media::MediaPlayer::default(),
+            att_audio: None,
         }
     }
 
@@ -1516,6 +1558,34 @@ impl MailView {
     pub fn close_message(&mut self) {
         self.cancel_crypto();
         self.open = None;
+        self.release_att_audio();
+    }
+
+    /// The temp files of the audio attachments of the open message, made when it is first shown (MAIL-240): a
+    /// message that has changed (another one, or the same one read again with GnuPG's answer) gets new ones.
+    pub(crate) fn att_audio_files(&mut self) -> Vec<Option<PathBuf>> {
+        let ready = match self.open.as_ref() {
+            Some(OpenMail { msg, body: Body::Ready(l) }) => Some((msg.id, l.clone())),
+            _ => None,
+        };
+        let same = matches!((&self.att_audio, &ready), (Some(a), Some((id, l))) if a.msg == *id && Arc::ptr_eq(&a.mail, l));
+        if !same {
+            self.release_att_audio();
+            if let Some((id, l)) = ready.filter(|(_, l)| l.mail.attachments.iter().any(|a| crate::media::attachment_audio_ext(&a.name, &a.mime).is_some())) {
+                self.att_audio = Some(AttAudio::make(id, &l));
+            }
+        }
+        self.att_audio.as_ref().map(|a| a.files.clone()).unwrap_or_default()
+    }
+
+    /// Stops a sound of the open message that plays and removes the temp files (MAIL-240).
+    pub(crate) fn release_att_audio(&mut self) {
+        if let Some(a) = self.att_audio.take() {
+            // each attachment's player is owned by its own file
+            for f in a.files.iter().flatten() {
+                self.media.stop_for_note(f);
+            }
+        }
     }
 
     /// Ask GnuPG about the open message in a job (MAIL-171, MAIL-173, MAIL-182): signatures, and decryption when the

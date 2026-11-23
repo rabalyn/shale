@@ -130,7 +130,7 @@ fn is_unseen(line: &str) -> bool {
     !line.contains("\\Seen")
 }
 
-// spec: MAIL-091, MAIL-092, DEV-026
+// spec: MAIL-091, MAIL-092, MAIL-242, DEV-026
 #[test]
 #[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
 fn mail_env_password_account_syncs_end_to_end_and_changes_nothing_on_the_server() {
@@ -170,7 +170,7 @@ fn mail_env_password_account_syncs_end_to_end_and_changes_nothing_on_the_server(
 
     // the 3-year window: "Ancient history" (1200 days) and "Nested old" are not fetched, "Two years ago" is
     let inbox = subjects(&store, &rows, "INBOX");
-    assert_eq!(inbox, ["Big attachment", "Grüße aus Köln", "HTML only newsletter", "Invoice 2026", "Lunch plans", "Meeting notes", "Two years ago"], "INBOX");
+    assert_eq!(inbox, ["Big attachment", "Grüße aus Köln", "HTML only newsletter", "Invoice 2026", "Lunch plans", "Meeting notes", "Two years ago", "Voice memo"], "INBOX");
     assert_eq!(subjects(&store, &rows, "Work"), ["Work item"]);
     assert_eq!(subjects(&store, &rows, "Work/Projects"), ["Project plan"], "a nested folder, with the old mail left out");
     assert_eq!(subjects(&store, &rows, "Sent"), ["Re: Invoice 2026"]);
@@ -182,7 +182,7 @@ fn mail_env_password_account_syncs_end_to_end_and_changes_nothing_on_the_server(
     // when the count differs, say which folders hold the messages (#417: a suite of another checkout had added mail)
     let total = store.reader().unwrap().count_messages().unwrap();
     let per_folder: Vec<String> = rows.iter().map(|r| (r.name.clone(), messages(&store, &rows, &r.name).len())).filter(|(_, n)| *n > 0).map(|(name, n)| format!("{name}: {n}")).collect();
-    assert_eq!(total, 10, "10 messages are expected; the folders hold {per_folder:?}");
+    assert_eq!(total, 11, "11 messages are expected; the folders hold {per_folder:?}");
 
     // a large mail with an attachment, fully downloaded
     let inbox_msgs = messages(&store, &rows, "INBOX");
@@ -195,6 +195,10 @@ fn mail_env_password_account_syncs_end_to_end_and_changes_nothing_on_the_server(
     let html = inbox_msgs.iter().find(|m| m.subject == "HTML only newsletter").unwrap();
     let text = store.read_mail(html).unwrap().text;
     assert!(text.contains("Spring news") && text.contains("reader") && !text.contains("<h1>") && !text.contains("<body"), "{text}");
+    // a WAV attachment arrives as it was sent (MAIL-242)
+    let voice = inbox_msgs.iter().find(|m| m.subject == "Voice memo").unwrap();
+    let wav = &store.read_mail(voice).unwrap().attachments;
+    assert_eq!((wav.len(), wav[0].name.as_str(), wav[0].mime.as_str(), wav[0].data.len()), (1, "voice.wav", "audio/wav", 1644));
     // headers and a body in ISO-8859-1
     let latin = inbox_msgs.iter().find(|m| m.subject.starts_with("Gr")).unwrap();
     assert!(latin.from.contains("Jürgen Müller"), "{}", latin.from);
@@ -556,6 +560,21 @@ fn mail_env_a_mail_deleted_on_the_server_shows_as_gone_and_its_local_copy_is_del
         assert_eq!(server_view(m), before[i], "{m} was changed");
     }
     let _ = std::fs::remove_dir_all(dir);
+}
+
+// spec: MAIL-242
+#[test]
+#[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
+fn mail_env_the_reading_pane_offers_the_player_for_the_wav_attachment_of_a_mail_from_the_server() {
+    let _turn = turn();
+    let account = MailAccount { id: "alice".into(), name: "Alice".into(), host: "localhost".into(), port: IMAPS_PORT, user: USER.into(), ..MailAccount::default() };
+    let factory: crate::mail::imap_sync::ConnectorFactory = Arc::new(|_, _| Ok(Arc::new(EnvConnector { auth: Arc::new(PasswordAuth { user: USER.into(), password: "shale-test-pw".into() }) }) as Arc<dyn Connector>));
+    let r = crate::mail::ui_tests::reading_pane_of_env_mail(factory, account, "shale-test-pw", "Voice memo");
+    assert_eq!(r.mime, "audio/wav");
+    assert!(r.data.len() == 1644 && r.data.starts_with(b"RIFF") && r.data[8..12] == *b"WAVE", "the attachment is the WAV the seed wrote");
+    assert!(r.player, "the reading pane offers the player for it");
+    assert!(!r.playing, "and nothing plays by itself");
+    assert_eq!(r.copy.as_deref(), Some(r.data.as_slice()), "the player reads a private copy of the attachment");
 }
 
 // ------------------------------------------------------------ phase 3: sending (MAIL-160)

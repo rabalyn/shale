@@ -49,6 +49,12 @@ panes has the keyboard and is framed; Ctrl+H / Ctrl+L (macOS: Cmd+Shift+H / Cmd+
 or `f` flag, `d` delete, Shift+D delete the local copy of a mail deleted on the server, `m` move, `i` import to the vault ([[Import]]). All mail keys are in
 [[Keyboard shortcuts]] and can be changed in Settings → Keybindings.
 
+**Sounds in a mail.** An attached sound (mp3, ogg, oga, opus, m4a, aac, wav or flac, also a `.wav` that the
+sender's program called a plain file) gets the same player as in your notes ([[Sounds and videos]]) under its
+line in the message, next to **Open** and **Save to vault**. It plays from a private temporary copy that is
+removed when you open another message; nothing is fetched from the internet and nothing starts by itself. A
+mail you send with a sound attached tells the receiver that it is a sound (`audio/wav`, `audio/mpeg`, …).
+
 After a restart a Mail tab comes back on the folder and the message you had open (the first folder if
 that folder or account is gone), without asking for anything. See [[Tabs]].
 

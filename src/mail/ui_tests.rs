@@ -611,6 +611,129 @@ fn sync_fills_the_folders_the_list_and_the_reading_pane_and_attachments_are_save
     assert!(verbs.iter().all(|v| !v.starts_with("SELECT") && !v.starts_with("STORE") && !v.starts_with("EXPUNGE") && !v.starts_with("COPY")), "{verbs:?}");
 }
 
+/// A mail with one attachment of `data` called `name`, written with the content type `mime`.
+fn with_sound(subject: &str, name: &str, mime: &str, data: &[u8]) -> Vec<u8> {
+    let b64 = crate::mail::imap_client::base64_encode(data);
+    format!("From: Carol <carol@x.de>\r\nTo: ada@example.com\r\nSubject: {subject}\r\nDate: 12 Nov 2026 09:00:00 +0100\r\nMessage-ID: <{}@fake>\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b1\"\r\n\r\n--b1\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nListen to this.\r\n--b1\r\nContent-Type: {mime}; name=\"{name}\"\r\nContent-Disposition: attachment; filename=\"{name}\"\r\nContent-Transfer-Encoding: base64\r\n\r\n{b64}\r\n--b1--\r\n", subject.replace(' ', "-")).into_bytes()
+}
+
+/// The first bytes of a sound of the test files (a mail of the pretend server may be 20,000 bytes).
+fn sound_bytes(ext: &str) -> Vec<u8> {
+    let mut v = std::fs::read(crate::media::testdata::fixture(&format!("tone.{ext}"))).unwrap();
+    v.truncate(6000);
+    v
+}
+
+// spec: MAIL-240
+#[test]
+fn mail_240_the_reading_pane_offers_the_player_for_every_audio_type_and_nothing_plays_by_itself() {
+    let mut w = W::new("audio", true);
+    let mut cases: Vec<(String, String, String, Vec<u8>, bool)> =
+        crate::media::AUDIO_EXTS.iter().map(|ext| (format!("Sound {ext}"), format!("voice.{ext}"), crate::media::audio_mime_for_ext(ext).unwrap().to_string(), sound_bytes(ext), true)).collect();
+    // a .wav the sender called application/octet-stream, a sound with no extension in its name, one that is no sound
+    cases.push(("Octet wav".into(), "memo.WAV".into(), "application/octet-stream".into(), sound_bytes("wav"), true));
+    cases.push(("Nameless sound".into(), "voice".into(), "audio/x-wav".into(), sound_bytes("wav"), true));
+    cases.push(("Unknown sound".into(), "voice".into(), "audio/x-unknown".into(), vec![1, 2, 3], false));
+    cases.push(("Plain text".into(), "notes.txt".into(), "text/plain".into(), b"hello".to_vec(), false));
+    {
+        let mut s = w.server.state();
+        for (subject, name, mime, data, _) in &cases {
+            s.add_message("INBOX", with_sound(subject, name, mime, data), NOW - 86_400);
+        }
+    }
+    w.app.media.use_silent_output();
+    w.sync_and_wait();
+    let mut last: Option<PathBuf> = None;
+    for (subject, name, _, data, player) in &cases {
+        w.open_mail(subject);
+        w.frame(vec![]);
+        w.frame(vec![]);
+        assert!(w.shows(name) && w.shows("Open") && w.has("mail:att-open:0") && w.has("mail:att-save:0"), "{subject}: the row of the attachment stays");
+        assert_eq!(w.has("mail:att-player:0"), *player, "{subject}: the player");
+        // the earlier message's copy is gone
+        if let Some(old) = last.take() {
+            assert!(!old.exists(), "the temp copy of the message before is removed: {old:?}");
+        }
+        if *player {
+            let file = w.app.mail.att_audio.as_ref().and_then(|a| a.files[0].clone()).unwrap_or_else(|| panic!("{subject}: no temp copy"));
+            assert_eq!(std::fs::read(&file).unwrap(), *data, "{subject}: the copy is the attachment");
+            assert!(crate::media::is_audio(&file), "{subject}: the player knows it by its extension: {file:?}");
+            last = Some(file);
+        } else {
+            assert!(w.app.mail.att_audio.is_none(), "{subject}: nothing is copied");
+        }
+        assert!(w.app.media.current().is_none(), "{subject}: nothing plays by itself");
+    }
+    // the message with the PDF of the seed has no player either
+    w.open_mail("Report attached");
+    w.frame(vec![]);
+    assert!(w.shows("report.pdf") && !w.has("mail:att-player:0"));
+}
+
+/// What the reading pane of a mail from a real server shows for its first attachment (MAIL-242).
+pub(super) struct EnvReading {
+    /// the attachment as the sync stored it
+    pub mime: String,
+    pub data: Vec<u8>,
+    /// the reading pane offers the player, and nothing plays by itself
+    pub player: bool,
+    pub playing: bool,
+    /// the private temp copy the player reads
+    pub copy: Option<Vec<u8>>,
+}
+
+/// The app's mail view on an account of the container environment (`factory` connects to it): sync, open the mail
+/// `subject` and look at its reading pane (MAIL-242).
+pub(super) fn reading_pane_of_env_mail(factory: ConnectorFactory, account: MailAccount, password: &str, subject: &str) -> EnvReading {
+    let mut w = W::new("env-audio", false);
+    w.app.cfg.mail_accounts = vec![account.clone()];
+    assert!(secrets::set_mail_secret(&account.id, MailSecret::Password, password));
+    w.account = account;
+    w.app.mail.factory = factory;
+    w.app.mail.opts = SyncOptions::default();
+    w.app.media.use_silent_output();
+    w.sync_and_wait();
+    assert!(w.app.mail.syncs[&w.account.id].errors.is_empty(), "{:?}", w.app.mail.syncs[&w.account.id].errors);
+    w.open_mail(subject);
+    w.frame(vec![]);
+    w.frame(vec![]);
+    let Some(Body::Ready(l)) = w.app.mail.open.as_ref().map(|o| &o.body) else { panic!("the mail is not read") };
+    let att = l.mail.attachments[0].clone();
+    EnvReading {
+        mime: att.mime,
+        data: att.data.to_vec(),
+        player: w.has("mail:att-player:0"),
+        playing: w.app.media.current().is_some(),
+        copy: w.app.mail.att_audio.as_ref().and_then(|a| a.files[0].clone()).map(|f| std::fs::read(f).unwrap()),
+    }
+}
+
+// spec: MAIL-240
+#[test]
+fn mail_240_the_player_plays_from_the_temp_copy_when_asked_and_leaving_the_message_stops_it_and_removes_the_copy() {
+    let mut w = W::new("audio-play", true);
+    w.server.state().add_message("INBOX", with_sound("Voice memo", "memo.wav", "audio/wav", &sound_bytes("wav")), NOW - 86_400);
+    w.app.media.use_silent_output();
+    w.sync_and_wait();
+    w.open_mail("Voice memo");
+    w.frame(vec![]);
+    w.frame(vec![]);
+    let file = w.app.mail.att_audio.as_ref().and_then(|a| a.files[0].clone()).expect("the temp copy");
+    assert!(w.app.media.current().is_none());
+    // the round button of the card starts it
+    let card = w.rect("mail:att-player:0");
+    let art = crate::media::widget::geometry(&file, card.width()).art.center();
+    w.click_at(card.min + art.to_vec2(), Modifiers::NONE);
+    w.until("the sound is loaded", |a| a.media.current().is_some());
+    assert_eq!(w.app.media.current(), Some(file.clone()));
+    // another message: the sound stops and the copy is removed
+    w.open_mail("Invoice 2026");
+    w.frame(vec![]);
+    assert!(w.app.media.current().is_none(), "the sound stopped");
+    assert!(!file.exists(), "the copy is removed");
+    assert!(w.app.mail.att_audio.is_none());
+}
+
 // spec: MAIL-053
 #[test]
 fn html_mail_is_shown_as_plain_text_and_never_loads_anything() {
