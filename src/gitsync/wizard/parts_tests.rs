@@ -257,7 +257,7 @@ fn sync_053_without_a_keyring_no_token_is_kept_anywhere_and_the_words_recommend_
     });
     let s = forgejo(&base);
     crate::secrets::pretend_no_keyring(true);
-    let r = super::sign_in(&s, "", &Secret::new("tok"));
+    let r = super::sign_in(&s, "", &Secret::new("tok"), &crate::busy::Cancel::default());
     crate::secrets::pretend_no_keyring(false);
     let e = r.err().expect("no keyring, no sign-in");
     assert!(e.contains("no keyring") && e.contains("SSH key") && e.contains("never writes a token to a file"), "{e}");
@@ -265,18 +265,18 @@ fn sync_053_without_a_keyring_no_token_is_kept_anywhere_and_the_words_recommend_
     assert!(crate::secrets::git_token(&key, "ada").is_none());
     let _ = seen.join();
     // an empty token, and a user name for a server without an API
-    assert!(super::sign_in(&s, "", &Secret::default()).is_err());
+    assert!(super::sign_in(&s, "", &Secret::default(), &crate::busy::Cancel::default()).is_err());
     let other = server(Kind::Other, "git.example.org", "https");
-    assert!(super::sign_in(&other, "", &Secret::new("t")).err().is_some_and(|e| e.contains("user name")));
-    assert!(super::sign_in(&other, "a b", &Secret::new("t")).is_err());
-    assert!(super::sign_in(&other, "ada@x", &Secret::new("t")).is_err());
+    assert!(super::sign_in(&other, "", &Secret::new("t"), &crate::busy::Cancel::default()).err().is_some_and(|e| e.contains("user name")));
+    assert!(super::sign_in(&other, "a b", &Secret::new("t"), &crate::busy::Cancel::default()).is_err());
+    assert!(super::sign_in(&other, "ada@x", &Secret::new("t"), &crate::busy::Cancel::default()).is_err());
 }
 
 // spec: SYNC-053
 #[test]
 fn sync_053_a_server_without_an_api_keeps_the_token_for_the_user_the_person_named() {
     let other = server(Kind::Other, "git.example.org", "https");
-    let signed = super::sign_in(&other, " ada ", &Secret::new("tok-other")).unwrap();
+    let signed = super::sign_in(&other, " ada ", &Secret::new("tok-other"), &crate::busy::Cancel::default()).unwrap();
     assert_eq!((signed.login.as_str(), signed.repos.len()), ("ada", 0));
     assert_eq!(crate::secrets::git_token("https://git.example.org", "ada").map(|s| s.expose().to_string()).as_deref(), Some("tok-other"));
 }

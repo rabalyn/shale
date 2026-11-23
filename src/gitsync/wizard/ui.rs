@@ -89,6 +89,10 @@ impl ShaleApp {
             keep &= self.wizard_do(ctx, a);
         }
         if !keep {
+            // closing the dialog stops its call at the next safe point; the result is dropped (JOB-010)
+            if let Some(job) = self.sync.setup.wizard.as_ref().and_then(|w| w.job.as_ref()) {
+                job.cancel();
+            }
             self.sync.setup.wizard = None;
         }
         keep
@@ -147,19 +151,25 @@ impl ShaleApp {
                 if let Some(server) = w.server.clone() {
                     let (user, token) = (w.user.clone(), w.token.clone());
                     w.message = None;
-                    self.wizard_job(&mut w, "Signing in to the server…", ctx, move || super::sign_in(&server, &user, &token).map(Msg::SignedIn));
+                    self.wizard_job(&mut w, "Signing in to the server…", ctx, move |c| super::sign_in(&server, &user, &token, c).map(Msg::SignedIn));
                 }
             }
             Ask::MakeKey => {
                 if let (Some(server), Some(home)) = (w.server.clone(), self.sync.setup.home()) {
                     let git = self.sync.git.clone();
-                    self.wizard_job(&mut w, "Making an SSH key…", ctx, move || ssh::generate(&git, &home, &server.host, &gitsync::host_name()).map(Msg::Key));
+                    self.wizard_job(&mut w, "Making an SSH key…", ctx, move |c| {
+                        super::stop_point(c)?;
+                        ssh::generate(&git, &home, &server.host, &gitsync::host_name()).map(Msg::Key)
+                    });
                 }
             }
             Ask::CreateRepo => {
                 if let (Some(server), true) = (w.server.clone(), w.signed_in) {
                     let (token, name) = (crate::secrets::git_token(&gitsync::credentials::server_key(&server.base()).unwrap_or_default(), &w.user).unwrap_or_else(|| w.token.clone()), w.new_name.trim().to_string());
-                    self.wizard_job(&mut w, "Creating the repository…", ctx, move || api::create(&server, &token, &name, "Notes, kept by Shale").map(Msg::Created).map_err(|e| e.message()));
+                    self.wizard_job(&mut w, "Creating the repository…", ctx, move |c| {
+                        super::stop_point(c)?;
+                        api::create(&server, &token, &name, "Notes, kept by Shale").map(Msg::Created).map_err(|e| e.message())
+                    });
                 }
             }
             Ask::RepoNext => self.wizard_repo_next(&mut w, ctx),
@@ -173,9 +183,9 @@ impl ShaleApp {
     }
 
     /// Start a job of the wizard.
-    fn wizard_job(&mut self, w: &mut Wizard, label: &'static str, ctx: &egui::Context, f: impl FnOnce() -> Result<Msg, String> + Send + 'static) {
+    fn wizard_job(&mut self, w: &mut Wizard, label: &'static str, ctx: &egui::Context, f: impl FnOnce(&busy::Cancel) -> Result<Msg, String> + Send + 'static) {
         let ctx = ctx.clone();
-        w.job = self.busy.spawn(WIZARD_CALL, label, f, move || ctx.request_repaint());
+        w.job = self.busy.spawn_cancellable(WIZARD_CALL, label, f, move || ctx.request_repaint());
     }
 
     /// "Next" of the server step: read the address.
@@ -259,9 +269,9 @@ impl ShaleApp {
         // a local-only history moves into the new `.git` (SYNC-072): saved notes first, no snapshot beside it
         self.flush_all();
         let (tree, history_root, guard) = (self.sync.tree.clone(), self.usage.places.history.clone(), self.sync.setup.joining.begin());
-        self.wizard_job(w, "Asking the server what the repository holds…", ctx, move || {
+        self.wizard_job(w, "Asking the server what the repository holds…", ctx, move |c| {
             let _guard = guard;
-            super::connect_and_inspect(&git, &root, &url, key.as_deref(), &history_root, &tree).map(|(r, n, m)| Msg::Inspected(r, n, m))
+            super::connect_and_inspect(&git, &root, &url, key.as_deref(), &history_root, &tree, c).map(|(r, n, m)| Msg::Inspected(r, n, m))
         });
     }
 
@@ -507,7 +517,9 @@ fn message(ui: &mut Ui, w: &Wizard) {
 
 /// The call that runs: a spinner and what it does (JOB-004).
 fn spinner_line(ui: &mut Ui, busy: &Busy) {
-    busy::ui::status(ui, busy, &WIZARD_CALL);
+    if busy::ui::status(ui, busy, &WIZARD_CALL) {
+        theme::hint(ui, "Cancel (or closing this window) stops it at the next safe point.");
+    }
 }
 
 /// The content of the step; returns what was clicked, and whether the git settings changed.

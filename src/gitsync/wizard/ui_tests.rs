@@ -709,7 +709,7 @@ fn sync_073_a_failed_move_connects_nothing_and_says_why() {
 
 // spec: JOB-033
 #[test]
-fn job_033_a_call_of_the_wizard_is_a_task_with_its_text_that_cannot_stop_and_the_page_shows_it() {
+fn job_033_a_call_of_the_wizard_is_a_task_with_its_text_that_stops_at_a_safe_point_and_the_page_shows_it() {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     let mut t = T::new("job033-call");
@@ -734,7 +734,7 @@ fn job_033_a_call_of_the_wizard_is_a_task_with_its_text_that_cannot_stop_and_the
     t.wizard().token = crate::secret::Secret::new("tok-job-033");
     t.click("Check the token");
     let task = t.app.busy.info(&super::WIZARD_CALL).expect("the call is a task");
-    assert_eq!((task.label.as_str(), task.cancellable), ("Signing in to the server…", false));
+    assert_eq!((task.label.as_str(), task.cancellable), ("Signing in to the server…", true));
     assert!(t.shows("Signing in to the server…"), "the step shows the text of the task: {:?}", t.painted());
     assert_eq!(t.app.busy.list().len(), 1, "and the indicator lists it");
     gate.store(true, Ordering::SeqCst);
@@ -835,4 +835,48 @@ fn job_033_advanced_connect_is_a_task_with_its_text_and_its_button_is_off_while_
         std::thread::sleep(Duration::from_millis(10));
     }
     assert!(t.app.busy.list().is_empty());
+}
+
+// spec: JOB-033, JOB-010
+#[test]
+fn job_010_closing_the_wizard_stops_its_call_at_the_next_safe_point_and_keeps_nothing() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    let mut t = T::new("job010-close");
+    let gate = Arc::new(AtomicBool::new(false));
+    let g = gate.clone();
+    let (base, seen) = crate::calendar::dav::tests::mock_http(2, move |_, p, _, _| {
+        while !g.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        match p {
+            "/api/v1/user" => (200, r#"{"login":"ada"}"#.into()),
+            _ => (200, "[]".into()),
+        }
+    });
+    t.open_wizard();
+    t.click("Sync with a server");
+    t.click("Next");
+    type_address(&mut t, &base);
+    t.wizard().kind = Kind::Forgejo;
+    t.click("Next");
+    t.wizard().token = crate::secret::Secret::new("tok-job-010");
+    t.click("Check the token");
+    let task = t.app.busy.info(&super::WIZARD_CALL).expect("the call runs");
+    assert!(t.shows("stops it at the next safe point"), "the step says when Cancel takes effect: {:?}", t.painted());
+    // Esc closes the dialog: the call is asked to stop, but it ends at its next safe point
+    let esc = |pressed| egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::NONE };
+    t.hl.frame(&mut t.app, vec![esc(true)]);
+    t.hl.frame(&mut t.app, vec![esc(false)]);
+    assert!(t.app.sync.setup.wizard.is_none(), "the dialog is closed");
+    assert!(t.app.busy.info(&super::WIZARD_CALL).is_some_and(|i| i.id == task.id && i.cancelling), "the task stays listed, stopping");
+    gate.store(true, Ordering::SeqCst);
+    let start = Instant::now();
+    while t.app.busy.is_running(&super::WIZARD_CALL) {
+        assert!(start.elapsed() < Duration::from_secs(30));
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let host = base.trim_start_matches("http://").to_string();
+    assert!(crate::secrets::git_token(&format!("http://{host}"), "ada").is_none(), "no token was kept");
+    let _ = seen.join();
 }

@@ -202,6 +202,18 @@ impl ManagedState {
         self.detecting = self.busy.spawn(GIT_DETECT, "Looking for git…", move || managed::detect(choice, data.as_deref(), path.as_deref()), move || ctx.request_repaint());
     }
 
+    /// The dialog that started the work was closed (JOB-010): ask the install, the update and the
+    /// look for a newer git to stop. They end at the next safe point (a removal finishes first),
+    /// and what was downloaded is removed.
+    pub(crate) fn stop_jobs(&self) {
+        if let Some(t) = &self.task {
+            t.job.cancel();
+        }
+        if let Some((job, _)) = &self.checking {
+            job.cancel();
+        }
+    }
+
     /// Take what the jobs have finished; call it every frame.
     pub fn poll(&mut self, ctx: &Context) {
         if let Some(job) = &self.detecting {
@@ -426,6 +438,7 @@ fn managed_section(ui: &mut Ui, st: &mut ManagedState, cfg: &mut GitConfig, ctx:
         }
         // what happens, and Cancel for an install and an update: what was downloaded is removed
         busy::ui::status(ui, &st.busy, &GIT_MANAGED);
+        theme::hint(ui, "Closing this window stops it at the next safe point; a removal finishes first.");
         return;
     }
     let Some(d) = st.detection.clone() else { return };

@@ -345,9 +345,18 @@ impl Setup {
 
 // ---------------------------------------------------------------- jobs
 
+/// A safe point of a job of the wizard: the dialog was closed, so the job ends here (JOB-010).
+pub(crate) fn stop_point(cancel: &busy::Cancel) -> Result<(), String> {
+    if cancel.is_cancelled() {
+        Err("cancelled".into())
+    } else {
+        Ok(())
+    }
+}
+
 /// Sign in with a token (SYNC-052, SYNC-053): ask the provider who the token belongs to and for the
 /// person's repositories where it has an API, then keep the token in the keyring.
-pub fn sign_in(server: &Server, user_hint: &str, token: &Secret) -> Result<SignedIn, String> {
+pub fn sign_in(server: &Server, user_hint: &str, token: &Secret, cancel: &busy::Cancel) -> Result<SignedIn, String> {
     if token.is_empty() {
         return Err("Paste the token first".into());
     }
@@ -366,6 +375,8 @@ pub fn sign_in(server: &Server, user_hint: &str, token: &Secret) -> Result<Signe
         }
         (user.to_string(), vec![])
     };
+    // the safe point: nothing is kept yet, so a closed dialog leaves nothing behind (JOB-010)
+    stop_point(cancel)?;
     let key = credentials::server_key(&server.base()).ok_or("That server address cannot hold a token")?;
     if !crate::secrets::git_token_store(&key, &login, token.expose()) {
         return Err("Shale could not keep the token: this computer has no keyring, or it refused. Use an SSH key instead; Shale never writes a token to a file.".into());
@@ -376,8 +387,11 @@ pub fn sign_in(server: &Server, user_hint: &str, token: &Secret) -> Result<Signe
 /// Make the vault a repository whose `origin` is `url` (a local-only history moves into its `.git`
 /// first, SYNC-072), set the SSH command for a key, and ask the server what its repository holds
 /// (SYNC-057). The last value: a history moved.
-pub fn connect_and_inspect(git: &Git, vault: &Path, url: &str, ssh_key: Option<&Path>, history_root: &Path, tree: &TreeLock) -> Result<(Remote, bool, bool), String> {
+pub fn connect_and_inspect(git: &Git, vault: &Path, url: &str, ssh_key: Option<&Path>, history_root: &Path, tree: &TreeLock, cancel: &busy::Cancel) -> Result<(Remote, bool, bool), String> {
+    stop_point(cancel)?;
     let moved = connect_moving(git, vault, url, history_root, tree)?;
+    // the safe point after the connection: the repository is set up, only the question to the server is left
+    stop_point(cancel)?;
     if let Some(cmd) = ssh::ssh_command(ssh_key, false) {
         // the key is part of the repository's configuration (a path, nothing secret)
         if ssh_key.is_some() {

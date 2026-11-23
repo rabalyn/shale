@@ -925,6 +925,11 @@ impl ShaleApp {
                 if done || asks.close {
                     keep = false;
                 }
+                // closing Settings stops what it started (JOB-010): an install, an update, an import, a check
+                if done || resp.should_close() {
+                    self.sync.managed.stop_jobs();
+                    self.tex.stop_jobs();
+                }
                 open_calendars |= asks.calendars;
                 open_usage |= asks.usage;
                 open_history |= asks.history_deleted;

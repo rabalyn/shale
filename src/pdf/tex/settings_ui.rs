@@ -146,6 +146,15 @@ impl TexState {
         }
     }
 
+    /// The dialog that started the work was closed (JOB-010): ask the install, the update and the
+    /// import to stop; they end at the next safe point and take back what they did. A removal and
+    /// the compiles finish first.
+    pub(crate) fn stop_jobs(&self) {
+        if let Some(t) = &self.task {
+            t.job.cancel();
+        }
+    }
+
     /// Look for a TeX again, in a job.
     pub fn check_again(&mut self, ctx: &Context) {
         if self.detecting.is_some() {
@@ -375,6 +384,7 @@ fn managed_section(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig, ctx: &Contex
                 ui.add(egui::ProgressBar::new(p.fraction()).text(p.text()).desired_width(420.0));
             }
             busy::ui::status(ui, &st.busy, &TEX_JOB);
+            crate::theme::hint(ui, "Closing this window stops it at the next safe point; a removal finishes first.");
         }
         return;
     }

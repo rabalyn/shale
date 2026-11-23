@@ -178,7 +178,7 @@ fn the_engine_choice_is_a_setting_changed_by_a_click() {
     assert_eq!(t.app.cfg.tex.engine, TexChoice::Auto);
 }
 
-// spec: TEX-002, TEX-023
+// spec: TEX-002, TEX-023, JOB-035
 #[test]
 fn install_asks_first_with_the_sizes_and_downloads_nothing_until_the_person_agrees() {
     let mut t = T::new("consent", nothing_found());
@@ -195,7 +195,7 @@ fn install_asks_first_with_the_sizes_and_downloads_nothing_until_the_person_agre
     assert!(!t.data().join("shale").exists(), "nothing was made on disk");
 }
 
-// spec: TEX-002, TEX-023
+// spec: TEX-002, TEX-023, JOB-035
 #[test]
 fn agreeing_starts_the_install_job_and_its_failure_is_reported_with_nothing_left() {
     let mut t = T::new("agree", nothing_found());
@@ -211,7 +211,7 @@ fn agreeing_starts_the_install_job_and_its_failure_is_reported_with_nothing_left
     assert!(!super::engine::partial_root(&t.data()).exists() && !super::engine::managed_root(&t.data()).exists());
 }
 
-// spec: TEX-002, TEX-023
+// spec: TEX-002, TEX-023, JOB-035
 #[test]
 fn the_progress_of_a_running_install_is_shown_and_cancel_asks_the_job_to_stop() {
     let mut t = T::new("progress", nothing_found());
