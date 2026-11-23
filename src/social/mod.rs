@@ -652,6 +652,10 @@ pub fn self_thread(root: Post, ancestors: Vec<Post>, descendants: Vec<Post>) -> 
 /// Most replies of other people that are kept with a saved post.
 pub const MAX_REPLIES: usize = 300;
 
+/// What fetching the conversation of a post gives: its self-thread, the replies of other people and
+/// the id of the post that starts the conversation (SOC-070).
+pub type ThreadFetch = (Vec<Post>, Vec<Reply>, Option<String>);
+
 /// A reply of somebody else (or a reply of the author to somebody else), shown below the thread.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Reply {
@@ -818,7 +822,9 @@ impl Client {
 
     /// The whole self-thread of a post (see `self_thread`), in reading order, including the post, and the
     /// replies of other people below it (see `conversation`).
-    pub fn thread_with_replies(&mut self, post: &Post) -> Result<(Vec<Post>, Vec<Reply>), String> {
+    /// The self-thread, the replies of other people and the id of the post that starts the whole
+    /// conversation when `post` is a reply (SOC-070).
+    pub fn thread_with_replies(&mut self, post: &Post) -> Result<ThreadFetch, String> {
         match &mut self.backend {
             Backend::Mastodon { token, .. } => mastodon::thread_full(&self.account.server, token.expose(), post),
             Backend::Bluesky(api) => bluesky::thread_full(api, post),

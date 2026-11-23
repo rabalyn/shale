@@ -298,11 +298,13 @@ fn parse_feed_item(item: &Value) -> Option<Post> {
 // ---------------------------------------------------------------- threads
 
 /// The self-thread and the replies of other people.
-pub fn thread_full(api: &mut Api, post: &Post) -> Result<(Vec<Post>, Vec<Reply>), String> {
+pub fn thread_full(api: &mut Api, post: &Post) -> Result<ThreadFetch, String> {
     let v = api.get("app.bsky.feed.getPostThread", &[("uri", &post.id), ("depth", "10"), ("parentHeight", "80")])?;
     let t = thread_from_response(post, &v);
     let r = replies_from_response(&t, &v);
-    Ok((t, r))
+    // the reply reference of the opened post names the root of the conversation
+    let root = parse_post_view(&v["thread"]["post"]).and_then(|p| p.reply_root).map(|r| r.uri);
+    Ok((t, r, root))
 }
 
 /// The conversation around a post: the ancestors, and all replies as a tree (SOC-045).
