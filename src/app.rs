@@ -195,6 +195,9 @@ mod thread_ui;
 mod tree_ui_tests;
 mod usage;
 mod userguide;
+pub mod vault_close;
+#[cfg(test)]
+mod vault_close_tests;
 pub mod vault_load;
 #[cfg(test)]
 mod vault_load_tests;
@@ -369,6 +372,13 @@ pub enum Action {
     RestoreTrashed,
     NewFolder(PathBuf),
     OpenVault(PathBuf),
+    /// close the vault in this folder: forget it, and remove the Shale files `remove` names (VAULT-035, VAULT-036)
+    CloseVault {
+        path: PathBuf,
+        remove: vault_close::Remove,
+    },
+    /// show the list of the vaults (the quick switcher's "Switch vault", VAULT-044)
+    OpenVaultMenu,
     /// Look at the vault folder again (e.g. after a file was copied in).
     Rescan,
     /// show a message (the app's toast)
@@ -946,6 +956,10 @@ impl ShaleApp {
     /// Save what is open before another vault takes its place; false (with a toast) when an edit
     /// could not be saved, because closing the buffers would lose it (DATA-009).
     pub(crate) fn prepare_vault_switch(&mut self) -> bool {
+        // a running sync ends first: it changes the files of this vault (SYNC-013, VAULT-037)
+        if !self.wait_for_sync(vault_close::SYNC_WAIT) {
+            return false;
+        }
         self.flush_all();
         self.history_flush_now();
         if let Some(bad) = self.notes.iter().find(|(_, d)| d.dirty).map(|(k, _)| k).or_else(|| self.drawings.iter().find(|(_, d)| d.dirty).map(|(k, _)| k)) {
@@ -986,16 +1000,10 @@ impl ShaleApp {
                 self.toast(e);
             }
         }
+        // nothing of the vault being left stays (VAULT-037)
+        self.drop_vault_state();
         self.load_vault_data(&v.root);
-        self.media.stop();
         self.vault = Some(v);
-        self.tabbar.tabs.clear();
-        self.panes.reset();
-        self.notes.clear();
-        self.drawings.clear();
-        self.tabbar.active = 0;
-        // the folders are looked at again the next time the list is shown
-        self.presence.clear();
         if known {
             // a folder that is new to the list and lies in or around another vault: warned once (VAULT-039)
             let nesting = if self.cfg.vaults.contains(path) { None } else { self.cfg.vaults.nested_with(path, None) };
@@ -2600,6 +2608,8 @@ impl ShaleApp {
                 Action::RestoreTrashed => self.restore_trashed(),
                 Action::NewFolder(parent) => self.modal = Some(Modal::NewFolder { parent, name: String::new() }),
                 Action::OpenVault(p) => self.open_vault_in_background(&p, vault_load::After::Nothing),
+                Action::CloseVault { path, remove } => self.close_vault(&path, remove),
+                Action::OpenVaultMenu => self.open_vault_menu(),
                 Action::Export(rel) => self.open_export_dialog(&rel),
                 Action::ExportDocx(rel) => self.open_docx_export_dialog(&rel),
                 Action::ExportFolder(dir) => self.open_export_folder_dialog(&dir),

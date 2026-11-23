@@ -188,6 +188,20 @@ impl Histories {
         self.by_note.clear();
     }
 
+    /// The vault is closed (VAULT-036): the histories are written, then none is loaded and nothing
+    /// is read or written until the next [`Histories::open_vault`].
+    pub fn close(&mut self) {
+        self.flush_all();
+        self.root = PathBuf::new();
+        self.by_note.clear();
+    }
+
+    /// How many histories are loaded (tests).
+    #[cfg(test)]
+    pub(crate) fn loaded(&self) -> usize {
+        self.by_note.len()
+    }
+
     /// Follow the *keep for* setting of the undo histories (USE-020): the loaded histories lose
     /// the steps older than that at once, and what is read and written from now on follows it.
     pub fn set_keep_days(&mut self, days: Option<u32>) {

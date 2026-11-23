@@ -92,6 +92,26 @@ impl SyncState {
         self.lfs_job.is_some()
     }
 
+    /// Everything of the vault being left (VAULT-037): its jobs, the last result, the remote and
+    /// the question about its repository. The git, the managed git, the lock of the files and the
+    /// controls' places belong to the window and stay.
+    pub(crate) fn drop_vault(&mut self) {
+        self.job = None;
+        self.lfs_job = None;
+        self.pull = None;
+        self.pulls.clear();
+        self.last_start = None;
+        self.last = None;
+        self.last_report = None;
+        self.lfs = lfs::Status::default();
+        self.setup.forget_vault();
+        self.url.clear();
+        self.remote = None;
+        self.outside_media = None;
+        self.repo_ask = None;
+        self.tree_told = false;
+    }
+
     /// The git changed (SYNC-024): `git --version` is looked up again.
     pub(crate) fn forget_git_version(&mut self) {
         self.git_version = None;
@@ -239,6 +259,52 @@ impl ShaleApp {
             self.toast("The sync is still changing files in the vault, so nothing was saved yet. Your edits are kept and are saved when it is done".to_string());
         }
         g
+    }
+
+    /// Wait up to `limit` for a running sync to end and take in its result (VAULT-036, VAULT-037),
+    /// so the vault is not left while the sync changes its files. False (with a toast): it still
+    /// runs after `limit`, and the vault stays open.
+    pub(crate) fn wait_for_sync(&mut self, limit: Duration) -> bool {
+        let started = Instant::now();
+        loop {
+            let Some((root, job)) = &self.sync.job else { return true };
+            let result = match job.try_recv() {
+                Ok(r) => Some(r.unwrap_or_else(|_| Err("the sync stopped with an internal error".into()))),
+                Err(TryRecvError::Disconnected) => Some(Err("the sync stopped unexpectedly".into())),
+                Err(TryRecvError::Empty) => None,
+            };
+            match result {
+                Some(r) => {
+                    let root = root.clone();
+                    self.sync.job = None;
+                    self.after_sync(&root, r);
+                    return true;
+                }
+                None if started.elapsed() >= limit => {
+                    self.toast("The sync is still running, so the vault is not left yet. Try again when it is done".to_string());
+                    return false;
+                }
+                None => std::thread::sleep(Duration::from_millis(20)),
+            }
+        }
+    }
+
+    /// A sync that only waits `run` and then reports `ok` (a panic when not), for the tests of the
+    /// waits for a sync.
+    #[cfg(test)]
+    pub(crate) fn sync_test_job(&mut self, run: Duration, ok: bool) {
+        let Some(root) = self.vault.as_ref().map(|v| v.root.clone()) else { return };
+        let job = self.busy.spawn(
+            GIT_SYNC,
+            "Syncing with git…",
+            move || {
+                std::thread::sleep(run);
+                assert!(ok, "the sync of the test dies");
+                Ok(Report::default())
+            },
+            || {},
+        );
+        self.sync.job = job.map(|j| (root, j));
     }
 
     /// Every frame: collect a finished sync, start one when it is due (SYNC-002).
