@@ -281,6 +281,7 @@ impl W {
             Key::M => Some("m"),
             Key::T => Some("t"),
             Key::A => Some("a"),
+            Key::X => Some("x"),
             _ => None,
         };
         let mut ev = vec![Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers }];
@@ -819,7 +820,7 @@ fn mail_238_delete_local_copy_asks_first_works_on_several_marked_mails_and_touch
     for subject in others.iter().map(|s| s.as_str()) {
         let i = w.row_of(subject);
         w.app.mail.cursor = Some(i);
-        w.press(Key::Space, Modifiers::NONE);
+        w.press(Key::X, Modifiers::NONE);
     }
     w.frame(vec![]);
     assert!(w.has("mail:marked-delete-local"), "the marked bar offers it");
@@ -1120,9 +1121,9 @@ fn search_waits_for_a_pause_runs_in_a_job_and_the_keys_work_without_the_mouse() 
     assert_eq!(w.app.mail.cursor, Some(1));
     w.press(Key::ArrowUp, Modifiers::NONE);
     assert_eq!(w.app.mail.cursor, Some(0));
-    w.press(Key::Space, Modifiers::NONE);
+    w.press(Key::X, Modifiers::NONE);
     assert_eq!(w.app.mail.marked.len(), 1, "Space marks");
-    w.press(Key::Space, Modifiers::NONE);
+    w.press(Key::X, Modifiers::NONE);
     assert!(w.app.mail.marked.is_empty(), "and unmarks");
     let inbox = w.folder_id("INBOX");
     assert_eq!(w.app.mail.folder, Some(inbox));
@@ -1192,9 +1193,9 @@ fn import_hands_the_stored_mail_to_the_import_dialog_and_writes_nothing_until_im
     w.open_folder("INBOX");
     w.frame(vec![]);
     w.press(Key::J, Modifiers::NONE);
-    w.press(Key::Space, Modifiers::NONE);
+    w.press(Key::X, Modifiers::NONE);
     w.press(Key::J, Modifiers::NONE);
-    w.press(Key::Space, Modifiers::NONE);
+    w.press(Key::X, Modifiers::NONE);
     assert_eq!(w.app.mail.marked.len(), 2);
     w.frame(vec![]);
     w.click("mail:import-marked");
@@ -1576,9 +1577,9 @@ fn keys_mark_read_flag_delete_and_move_work_on_the_cursor_and_on_the_marked_mail
     // Space marks two mails, d moves both to Trash (never STORE \Deleted + EXPUNGE)
     w.frame(vec![Event::PointerMoved(Pos2::new(5.0, 5.0))]);
     w.app.mail.cursor = Some(0);
-    w.press(Key::Space, Modifiers::NONE);
+    w.press(Key::X, Modifiers::NONE);
     w.press(Key::J, Modifiers::NONE);
-    w.press(Key::Space, Modifiers::NONE);
+    w.press(Key::X, Modifiers::NONE);
     assert_eq!(w.app.mail.marked.len(), 2);
     w.press(Key::D, Modifiers::NONE);
     assert!(w.app.mail.marked.is_empty(), "the marks are used up");
@@ -1654,7 +1655,7 @@ fn the_reading_pane_buttons_the_marked_bar_and_the_row_menu_do_the_same_things()
     w.frame(vec![]);
     w.app.mail.cursor = Some(0);
     w.app.mail.pane = Pane::List; // the clicks into the reading pane gave it the keyboard
-    w.press(Key::Space, Modifiers::NONE);
+    w.press(Key::X, Modifiers::NONE);
     w.frame(vec![]);
     w.click("mail:marked-flag");
     w.settle_ops();
@@ -3132,7 +3133,7 @@ fn j_and_k_act_in_the_pane_that_has_the_keyboard_only() {
     w.app.mail.cursor = Some(0);
     w.press(Key::D, Modifiers::NONE);
     w.press(Key::U, Modifiers::NONE);
-    w.press(Key::Space, Modifiers::NONE);
+    w.press(Key::X, Modifiers::NONE);
     w.frame(vec![]);
     assert!(w.pending_is_empty() && w.app.mail.marked.is_empty() && w.app.mail.problems.is_empty());
     assert_eq!(w.server_uids("INBOX").len(), 4);
@@ -3388,7 +3389,7 @@ fn the_menu_of_a_row_opens_by_key_and_is_driven_by_the_arrows_enter_and_esc() {
     let (mut w, _smtp) = compose_world("menukey", 30);
     w.press(Key::J, Modifiers::NONE);
     assert_eq!(w.app.mail.cursor, Some(0));
-    w.press(Key::Space, Modifiers::NONE);
+    w.press(Key::X, Modifiers::NONE);
     assert_eq!(w.app.mail.marked.len(), 1);
     // Shift+F10 opens the menu at the row, the first entry is marked
     w.press(Key::F10, Modifiers::SHIFT);
@@ -3630,15 +3631,15 @@ fn key_hints_on_menu_entries_and_tooltips_follow_the_registry() {
     w.hover("mail:outbox:edit");
     assert!(w.shows("(e)"), "Edit shows e");
     w.unhover();
-    w.app.keymap.set(KeyAction::MailRetry, Binding::parse("X").unwrap()).unwrap();
+    w.app.keymap.set(KeyAction::MailRetry, Binding::parse("Y").unwrap()).unwrap();
     w.frame(vec![]);
-    assert!(w.shows_exactly("x") && !w.shows_exactly("Shift+S"), "the rebound key is painted");
+    assert!(w.shows_exactly("y") && !w.shows_exactly("Shift+S"), "the rebound key is painted");
     w.hover("mail:outbox:retry");
-    assert!(w.shows("Send the mail again (x)") && !w.shows("Shift+S"), "the rebound key");
+    assert!(w.shows("Send the mail again (y)") && !w.shows("Shift+S"), "the rebound key");
     w.unhover();
     w.app.keymap.clear(KeyAction::MailRetry);
     w.frame(vec![]);
-    assert!(!w.shows_exactly("x") && !w.shows_exactly("Shift+S") && w.shows_exactly("Retry"), "unbound: no key on the button");
+    assert!(!w.shows_exactly("y") && !w.shows_exactly("Shift+S") && w.shows_exactly("Retry"), "unbound: no key on the button");
     w.hover("mail:outbox:retry");
     assert!(w.shows_exactly("Send the mail again"), "no key, no hint: {:?}", w.texts);
 }
