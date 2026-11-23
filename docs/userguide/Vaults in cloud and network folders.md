@@ -40,8 +40,8 @@ computer and removes `.git` from the vault, after checking the copy.
   this computer only (it is then stored outside the vault).
 - **Both computers open on the same note at the same moment.** It works (see above) but you get a
   conflict copy. Close the note on one computer, or wait for the sync app to finish.
-- **A big vault on a slow network drive.** Shale reads the whole folder at start, and the window can
-  pause while it does. It checks the folder again every 3 seconds in the background (less often when a
+- **A big vault on a slow network drive.** Shale reads the whole folder when it opens the vault. The start screen
+  shows "Opening …" with a spinner and a Cancel button meanwhile, so the window does not freeze. It checks the folder again every 3 seconds in the background (less often when a
   check took long), so the window stays responsive. A vault of a few thousand notes is fine on
   a local disk or a fast share; put a large vault on the local disk and sync it with an app.
 - **Files that only exist online** (OneDrive Files On-Demand, iCloud, Dropbox Smart Sync): Shale
