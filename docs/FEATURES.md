@@ -499,11 +499,19 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   count (**Notes 12 · Mail 20+ · Posts 4**, a switched-off source is counted, in grey) lists only that source on a
   click (again: back), or goes in and out of the default selection on Shift+click. Tab / Shift+Tab step through the
   sources. The default selection is saved; the letters are in Settings → Search.
-- **Search syntax** (user guide: *Search syntax*): the sources read the same text differently. **Notes** look for the whole
-  query as one piece of text inside a line, ignoring case, with `*` (any characters) and `?` (one character) as wildcards.
+- **Query language** (#597, user guide: *Search syntax*): the search over everything reads what you type as one language:
+  `AND`, `OR`, `NOT` (upper case only; `-x` is NOT), parentheses, two terms side by side are AND. Terms are text (a run of
+  plain words is one phrase), `#tag`, `status:doing` (any front-matter property), `path:Folder/`, `due:<+7d` / `due:overdue` /
+  `due:2026-12-01`, `links:[[Note]]`, `blocked` and `blocking` (from `blocked-by: [[A]], [[B]]`). Fields select notes and
+  text finds the lines inside them. A query that is not valid (an open parenthesis, `due:soon`, `priority:urgent`, too long)
+  is underlined with its reason, nothing runs and the last list stays. Mail and posts take only text and their own fields
+  (`from:`, …): for the others the search says "Mail: `status:` not supported" under the source buttons. A search has a
+  work budget: when it is used up the list is partial and says "Stopped early, narrow the query".
+- **Search syntax** (user guide: *Search syntax*): the sources read the same text differently. **Notes** look for a run of
+  plain words as one piece of text inside a line, ignoring case, with `*` (any characters) and `?` (one character) as wildcards.
   **Mail and posts** (full-text index) need all the words in any order, ignoring case and accents; every word matches the start of a word
   (`meet` finds "meeting", #491), `"phrases"` stay exact, a wildcard only cuts the word (`mee?ing` is `mee*`) and a word that starts with one is dropped; `AND`, `OR`, `NOT`
-  and `-` are plain text. Fields limit a word in mail (`from:` `to:` `cc:` `subject:` `body:`) and posts (`from:` `text:`
+  and `-` are operators of the query language and mail and posts take only words side by side. Fields limit a word in mail (`from:` `to:` `cc:` `subject:` `body:`) and posts (`from:` `text:`
   `body:` `in:` `context:` `link:` `date:`) and are plain text in notes. The mail view's own search reads the text
   the same way as mail here (#490).
   ![The search window of Space f g: notes with the found text marked, mail and posts under them, and the count buttons](userguide/z_media/screenshots/picker-search.png)

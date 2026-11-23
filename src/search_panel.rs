@@ -18,6 +18,8 @@ pub struct SearchBox {
     pub query: String,
     /// the hits of `query` (NAV-024: made again when the typing has settled or the vault changed)
     results: Results,
+    /// the check of the text, made again only when the text changes (QUERY-013)
+    check: search_all::query::Cache,
     /// the selected hit while the list is browsed with the keyboard (an index into the hits)
     pub sel: Option<usize>,
     /// scroll the selected hit into view on the next frame
@@ -89,7 +91,11 @@ impl ShaleApp {
         let browsing = self.search.sel.is_some();
         let step = if box_focused || browsing { ui.input_mut(|i| (self.keymap.take(i, KeyAction::HitSourcePrev), self.keymap.take(i, KeyAction::HitSourceNext))) } else { (false, false) };
         let tabbed = step.0 || step.1;
-        let r = ui.add(egui::TextEdit::singleline(&mut self.search.query).id(id).hint_text("Search notes, mail and posts…").desired_width(f32::INFINITY).lock_focus(true));
+        // (the text box underlines what is wrong with the query, QUERY-008)
+        let r = {
+            let mut layouter = search_sources::error_layouter(&mut self.search.check, self.cfg.search.prefixes(), None);
+            ui.add(egui::TextEdit::singleline(&mut self.search.query).id(id).hint_text("Search notes, mail and posts…").desired_width(f32::INFINITY).lock_focus(true).layouter(&mut layouter))
+        };
         if tabbed && !box_focused {
             if let Some(grabbed) = ui.ctx().memory(|m| m.focused()) {
                 ui.ctx().memory_mut(|m| m.surrender_focus(grabbed));
@@ -117,10 +123,10 @@ impl ShaleApp {
             self.search.filter.step(step.1, &available);
         }
         let query = &self.search.query;
-        let sidebar = |filter: search_sources::Filter| Query::sidebar(query).with_sources(prefixes, filter.shown(self.cfg.search.selection()));
-        let ask = sidebar(self.search.filter);
+        let checked = self.search.check.get(query, prefixes);
+        let ask = Query::sidebar(query).with_sources(prefixes, self.search.filter.shown(self.cfg.search.selection())).with_checked(checked);
         let worker = &mut self.search_worker;
-        let by = Ask { slot: Slot::SIDEBAR, text: query, stamp: data.stamp(), debounced: typed, now: enter_from_box, listed: ask.listed(), blank: ask.is_blank() };
+        let by = Ask { slot: Slot::SIDEBAR, text: query, stamp: data.stamp(), debounced: typed, now: enter_from_box, listed: ask.listed(), blank: ask.is_blank(), invalid: checked.error().is_some() };
         let refreshed = self.search.results.refresh(worker, &by, |w| Start::Queued(w.submit(Slot::SIDEBAR, Request::new(&data, &ask))));
         if matches!(refreshed, Refreshed::Waits | Refreshed::Relisted) {
             ui.ctx().request_repaint_after(search_all::DEBOUNCE);
@@ -129,6 +135,8 @@ impl ShaleApp {
         let before = self.search.filter;
         let bar = Bar { counts: self.search.results.counts(), limit: search_all::SIDEBAR_GROUP_LIMIT, mail_open: data.mail.is_some(), listed: ask.listed(), prefixed, searching: self.search.results.is_pending() };
         let save = search_sources::bar(ui, &bar, &mut self.search.filter, &mut self.cfg.search);
+        let skipped: Vec<String> = self.search.results.skipped(ask.listed()).map(search_all::Skipped::message).collect();
+        search_sources::notices(ui, checked.error(), &skipped, self.search.results.stopped_early());
         if save || self.search.filter != before {
             // the list of the new sources, in the next frame
             ui.ctx().request_repaint();
@@ -508,6 +516,54 @@ mod tests {
         app.search.query.clear();
         frame(&mut app, vec![]);
         assert!(listed(&app).is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: QUERY-008, QUERY-013
+    #[test]
+    fn the_sidebar_shows_a_syntax_error_and_keeps_the_last_valid_list() {
+        let (mut app, d) = browse_app("invalid");
+        let ctx = egui::Context::default();
+        let mut t = 0.0;
+        let mut frame = |app: &mut ShaleApp, events: Vec<Event>| {
+            t += 0.05;
+            let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), time: Some(t), events, ..Default::default() };
+            let mut out = ctx.run_ui(raw, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| app.search_panel(ui));
+            });
+            out.textures_delta.clear();
+        };
+        frame(&mut app, vec![]);
+        app.search.query = "apple".into();
+        pause();
+        frame(&mut app, vec![]);
+        wait(&mut frame, &mut app);
+        let before = listed(&app);
+        assert_eq!(before.len(), 4);
+        app.search.query = "apple AND (".into();
+        pause();
+        frame(&mut app, vec![]);
+        assert!(!app.search.results.is_pending() && !app.search_worker.busy(), "nothing is asked of the worker");
+        assert_eq!(listed(&app), before, "the last valid list stays");
+        let prefixes = app.cfg.search.prefixes();
+        assert!(app.search.check.get("apple AND (", prefixes).error().is_some(), "the error is kept with the text");
+        let parses = app.search.check.parses;
+        for _ in 0..3 {
+            frame(&mut app, vec![]);
+        }
+        assert_eq!(app.search.check.parses, parses, "QUERY-013: frames do not parse again");
+        // a text that is valid again is searched
+        app.search.query = "apple NOT second".into();
+        pause();
+        frame(&mut app, vec![]);
+        wait(&mut frame, &mut app);
+        assert_eq!(listed(&app).len(), 2, "A has a line with 'second', so the note is out: {:?}", listed(&app));
+        // a field selects notes: the one with the apple on its first line only (its name has the word, too)
+        app.search.query = "path:B apple".into();
+        pause();
+        frame(&mut app, vec![]);
+        wait(&mut frame, &mut app);
+        assert_eq!(listed(&app), [("Notes", "Ünïcode ÄPFEL apple".to_string())]);
         let _ = std::fs::remove_dir_all(&d);
     }
 

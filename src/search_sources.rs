@@ -8,9 +8,11 @@
 //! - [`SearchConfig`]: the letters and the default selection, which are (global settings);
 //! - [`bar`]: the row of count buttons in the header of both views.
 
+use crate::search_all::query::{Cache, QueryError};
 use crate::search_all::{MAIL, NOTES, POSTS};
 use eframe::egui::{self, RichText, Ui};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// A source of the search.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -341,6 +343,49 @@ impl Bar<'_> {
     }
 }
 
+/// What the search says when its list is partial (QUERY-010).
+pub const STOPPED_EARLY: &str = "Stopped early, narrow the query";
+
+/// The layout of the text box of a search: the text as it is, with the bytes of what is wrong
+/// with the query underlined (QUERY-008). The check comes from `cache`, so the text is parsed when
+/// it changes and not in every frame (QUERY-013). `size`: the font of the box, or its text style.
+pub fn error_layouter<'a>(cache: &'a mut Cache, prefixes: Prefixes, size: Option<f32>) -> impl FnMut(&Ui, &dyn egui::TextBuffer, f32) -> Arc<egui::Galley> + 'a {
+    move |ui, buf, wrap_width| {
+        let text = buf.as_str();
+        let span = cache.get(text, prefixes).error().map(|e| e.span.clone()).filter(|r| r.start < r.end && text.is_char_boundary(r.start) && text.is_char_boundary(r.end));
+        let font_id = size.map_or_else(|| egui::TextStyle::Body.resolve(ui.style()), egui::FontId::proportional);
+        let plain = egui::TextFormat { font_id: font_id.clone(), color: ui.visuals().text_color(), ..Default::default() };
+        let mut job = egui::text::LayoutJob::default();
+        job.wrap.max_width = wrap_width;
+        match span {
+            Some(r) => {
+                let bad = egui::TextFormat { underline: egui::Stroke::new(1.5, crate::theme::palette().link_missing), ..plain.clone() };
+                for (part, format) in [(&text[..r.start], plain.clone()), (&text[r.clone()], bad), (&text[r.end..], plain)] {
+                    if !part.is_empty() {
+                        job.append(part, 0.0, format);
+                    }
+                }
+            }
+            None => job.append(text, 0.0, plain),
+        }
+        ui.ctx().fonts_mut(|f| f.layout_job(job))
+    }
+}
+
+/// What the search says under its box besides the list: why the query is refused (QUERY-008),
+/// the sources it was not asked of (QUERY-006) and that it ended early (QUERY-010).
+pub fn notices(ui: &mut Ui, error: Option<&QueryError>, skipped: &[String], stopped_early: bool) {
+    if let Some(e) = error {
+        crate::theme::problem(ui, e.reason.clone());
+    }
+    for s in skipped {
+        crate::theme::hint(ui, s.clone());
+    }
+    if stopped_early {
+        crate::theme::hint(ui, STOPPED_EARLY);
+    }
+}
+
 /// The row of count buttons (NAV-052, NAV-053): "Notes 12 · Mail 20+ · Posts 4", the listed ones
 /// lit and the others grey, counted all the same. A click solos a source (again: back), Shift+click
 /// switches it in or out of the default selection of `cfg`. True when `cfg` changed (save it).
@@ -384,6 +429,50 @@ mod tests {
 
     fn p() -> Prefixes {
         Prefixes::default()
+    }
+
+    // spec: QUERY-008, QUERY-013
+    #[test]
+    fn the_text_box_underlines_the_error_of_the_query_and_parses_once_per_text() {
+        let ctx = egui::Context::default();
+        let mut cache = Cache::default();
+        let sections = |text: &str, cache: &mut Cache| {
+            let mut out = Vec::new();
+            let mut run = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let mut layout = error_layouter(cache, p(), Some(14.0));
+                let galley = layout(ui, &text.to_string(), 300.0);
+                out = galley.job.sections.iter().map(|s| (s.byte_range.start.0..s.byte_range.end.0, s.format.underline.width > 0.0)).collect::<Vec<_>>();
+            });
+            run.textures_delta.clear();
+            out
+        };
+        assert_eq!(sections("a AND", &mut cache), [(0..2, false), (2..5, true)], "the operator that has no term after it");
+        assert_eq!(sections("a AND", &mut cache).len(), 2);
+        assert_eq!(cache.parses, 1, "the same text is not parsed again");
+        assert_eq!(sections("a AND b", &mut cache), [(0..7, false)], "a valid query is not underlined");
+        assert_eq!(sections("x (y", &mut cache), [(0..2, false), (2..3, true), (3..4, false)], "the paren that is not closed");
+        assert_eq!(cache.parses, 3);
+        assert_eq!(sections("", &mut cache).iter().filter(|s| s.1).count(), 0);
+    }
+
+    // spec: QUERY-006, QUERY-008, QUERY-010
+    #[test]
+    fn the_notices_say_why_the_query_is_refused_what_was_skipped_and_that_the_search_stopped() {
+        let ctx = egui::Context::default();
+        let texts = |error: Option<&QueryError>, skipped: &[String], stopped: bool| {
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| notices(ui, error, skipped, stopped));
+            out.textures_delta.clear();
+            out.shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Text(t) => Some(t.galley.text().to_string()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert!(texts(None, &[], false).is_empty(), "nothing to say");
+        let error = QueryError { span: 0..1, reason: "this ( is not closed".into() };
+        assert_eq!(texts(Some(&error), &["Mail: `status:` not supported".into()], true), ["this ( is not closed", "Mail: `status:` not supported", STOPPED_EARLY]);
     }
 
     // spec: NAV-050
