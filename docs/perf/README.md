@@ -580,8 +580,34 @@ now, so a comparison across the change says `changed`.
 **Status after phase 2** (see "Before/after"): weak spots 1, 2, 3, 4, 5 (editor cache, #372), 6, 9, 10
 and 12 are fixed; 7 (the vault open waits for the index), 8 (search not on a worker thread), 11
 (`quick_check`, the owner decides) and 14 (PDF compression level) are partly fixed; 13 found no
-growth. Open: a keystroke in a very large note (30 ms, #375), the file list with every folder open
-(17 ms), and the small-graph regression of #382 (issue below).
+growth. Open: a keystroke in a very large note (30 ms, #375) and the small-graph regression of #382
+(issue below). The file list with every folder open is fixed by phase 3.
+
+**Phase 3, the file list (#398, PERF-011).** Measured again on the `bench-release` build (frame
+pointers) of the commit before the fix: `ui.frame.sidebar.large` (5000 notes, every folder open)
+took **30 to 38 ms** and 61,842 allocations a frame (63 to 71 ms on a busy computer; the 17.4 ms
+above were from before the window changed: #573, #583). Where it went, from the flamegraph (shares of
+the measured loop; the rest is the drawing of the visible rows, about 14 %, and egui):
+
+| Share | Where |
+|---|---|
+| 92 % | `ShaleApp::file_explorer` -> `ShaleApp::tree` (`src/panels.rs:212`), once per open folder |
+| 67 % | `ShaleApp::sorted_files_in` (`src/panels.rs:139`): `v.files.iter().filter(\|f\| f.rel.parent() == Some(dir))` walks **every file of the vault for every open folder** (folders x 5000 files, 54 % in the closure, 26 % in `Path::parent`, 23 % in `Components::parse_next_component_back`, 17 % in `Rev<Components>::eq_by`), then sorts and lower-cases the display name twice per comparison (2.4 %) and allocates a `PathBuf` and a `String` per file |
+| 14 % | `tree_row` (`src/panels.rs`): a galley, the guides and the arrow of every one of the 5000+ rows, though only 30 are in view, plus `allocate_exact_size` / `allocate_response` (13 %) and the tessellation of what was painted (4.5 %) |
+
+So the cost was `O(folders x files)` for the filter and `O(rows)` for the drawing, both every frame.
+The fix: `tree_rows::TreeRows` (`src/tree_rows.rs`) makes the flat list of rows once per state (vault
+`uid`, scans merged, `generation`, the sort setting, the open folders) with one pass over the vault
+and one lower-casing per name; the list draws only the rows in view and a 150 point margin
+(`ShaleApp::tree`, all rows are 26 points high, so two spaces stand for the others); a keyboard
+selection out of the drawn rows is scrolled to with `scroll_to_rect`. After: **0.2 to 0.4 ms and
+1,321 allocations a frame** (a frame of the file list costs the rows in view, not the vault).
+
+| `ui.frame.sidebar.large` | before | after |
+|---|---|---|
+| time | 30.1 / 31.6 / 37.9 ms | 0.43 / 0.41 / 0.21 ms |
+| allocations | 61,842 | 1,321 |
+| peak | 1.6 MiB | 0.65 MiB |
 
 ### How to use this list
 
