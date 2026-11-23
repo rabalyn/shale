@@ -1004,6 +1004,9 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   the viewer, links, content warnings, Save to vault, Open in browser and Copy link. **← Back** (or
   the tab's Back) returns to the feed at the same place; another post's reply count opens that
   conversation as the next step. Replies the server leaves out are noted, with Open in browser.
+
+![The conversation of a post](userguide/z_media/screenshots/social-thread.png)
+
 - **Pictures open big in a viewer** over the tab (click one): fitted to the window, its description
   (alt text) below, **◀ ▶** or Left / Right to step through the post's pictures, mouse wheel or
   `+` `-` to zoom, **100%** / **Fit** (`0`), drag to pan, Esc or **Close** to leave. The full size file

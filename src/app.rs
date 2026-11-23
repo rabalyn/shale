@@ -768,12 +768,18 @@ impl ShaleApp {
                     app.open_data_usage();
                 }
                 Some("graph") => app.show_view(View::Graph, false),
-                // the feed view with made-up posts (no network); "social-import": and the dialog for saving some of them
-                Some(v @ ("social" | "social-import")) => {
+                // the feed view with made-up posts (no network); "social-import": and the dialog for saving some of them; "social-thread": the conversation of a post
+                Some(v @ ("social" | "social-import" | "social-thread")) => {
                     let demo = crate::social::demo::account();
                     app.cfg.social_accounts = vec![demo.clone()];
                     app.social.load_demo(&demo);
                     app.show_view(View::Social(None), false);
+                    if v == "social-thread" {
+                        // the conversation of the first reply to the demo thread (SOC-045)
+                        let post = crate::social::demo::replies().remove(0).post;
+                        app.social.threads.open(&demo.account.id, &post);
+                        app.show_view(View::Social(Some(crate::social::FeedRef { thread: Some(post.id), ..crate::social::FeedRef::new(demo.account.id.clone(), "home") })), false);
+                    }
                     if v == "social-import" {
                         let posts = crate::social::demo::posts();
                         let items = [3, 4].iter().map(|i| crate::import::social_item(crate::social::demo::saved(&posts[*i]), "Mastodon", false)).collect();

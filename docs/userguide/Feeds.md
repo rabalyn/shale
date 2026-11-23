@@ -47,6 +47,8 @@ social` shows made-up posts.
   each open feed looks for newer posts and offers "12 new posts, show" (or press `.`). The list
   never moves until you click. **Check now** looks right away.
 
+![[social-thread.png]]
+
 # Search the posts you loaded
 
 Every post a feed brings in is kept in a local search index. The sidebar search (Ctrl+Shift+F)

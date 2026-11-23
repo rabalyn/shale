@@ -564,6 +564,36 @@ pub(super) fn list_card(ui: &mut Ui, cx: &mut Cx, heights: &mut HashMap<(String,
     out
 }
 
+/// Keep the view still (SOC-028): when the posts above the anchor's post changed in height, the
+/// scroll offset is put back so that it stays where it was; when the user scrolled, the anchor
+/// moves with the view. `content_top` is where the list's content started this frame, `applied`
+/// the offset that was set for this frame.
+pub(super) fn keep_still<R>(ctx: &egui::Context, anchor: &mut Anchor, post_rects: &[(String, Rect)], out: &egui::containers::scroll_area::ScrollAreaOutput<R>, content_top: f32, applied: Option<f32>) {
+    let top = out.inner_rect.min.y;
+    let offset_used = top - content_top;
+    // what the user scrolled during this frame (it applies to the next one)
+    let user = out.state.clamped_offset().y - offset_used;
+    if let Some((_, r)) = post_rects.iter().find(|(k, _)| *k == anchor.key) {
+        let dy_now = r.min.y - top;
+        if applied.is_none() && (dy_now - anchor.dy).abs() > 0.5 {
+            // posts above it changed in height: put the view back (in a second pass of this frame
+            // when egui allows it, else in the next frame)
+            anchor.apply = Some(offset_used + dy_now - anchor.dy);
+            ctx.request_discard("keeping the view still");
+            ctx.request_repaint();
+        }
+    }
+    if anchor.apply.is_none() {
+        match post_rects.iter().find(|(_, r)| r.max.y > top + 0.5) {
+            Some((k, r)) => {
+                anchor.key = k.clone();
+                anchor.dy = r.min.y - top - user;
+            }
+            None => anchor.key.clear(),
+        }
+    }
+}
+
 /// The picture viewer, when one is open over this tab (SOC-044).
 pub(super) fn show_viewer(ctx: &egui::Context, tab_rect: Rect, st: &mut SocialState, tab: &TabCtx) {
     if let (Some(v), Some(images)) = (st.viewer.as_mut().filter(|v| v.tab == tab.id), st.images.as_ref()) {
@@ -860,30 +890,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
         // posts that arrived during the frame cannot exist (poll runs elsewhere); put the list back
         t.posts = posts;
     }
-    // ---- keep the view still
-    let top = out.inner_rect.min.y;
-    let offset_used = top - content_top;
-    // what the user scrolled during this frame (it applies to the next one)
-    let user = out.state.clamped_offset().y - offset_used;
-    if let Some((_, r)) = post_rects.iter().find(|(k, _)| *k == anchor.key) {
-        let dy_now = r.min.y - top;
-        if applied.is_none() && (dy_now - anchor.dy).abs() > 0.5 {
-            // posts above it changed in height: put the view back (in a second pass of this frame
-            // when egui allows it, else in the next frame)
-            anchor.apply = Some(offset_used + dy_now - anchor.dy);
-            ctx.request_discard("keeping the view still");
-            ctx.request_repaint();
-        }
-    }
-    if anchor.apply.is_none() {
-        match post_rects.iter().find(|(_, r)| r.max.y > top + 0.5) {
-            Some((k, r)) => {
-                anchor.key = k.clone();
-                anchor.dy = r.min.y - top - user;
-            }
-            None => anchor.key.clear(),
-        }
-    }
+    keep_still(&ctx, &mut anchor, &post_rects, &out, content_top, applied);
     st.anchors.insert(tab.id, anchor);
     st.post_rects = post_rects;
     st.list_rect = out.inner_rect;

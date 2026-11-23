@@ -3,7 +3,7 @@
 //! with the same card as the feed (`feed_ui::post_card`). It is shown instead of the feed when the
 //! tab's `FeedRef` names a post; the tab's history makes Back return to the feed.
 
-use super::feed_ui::{column, column_width, inset, list_card, open_web, show_viewer, spinner_button, Ask, Cx, Look, TabCtx};
+use super::feed_ui::{column, column_width, inset, keep_still, list_card, open_web, show_viewer, spinner_button, Anchor, Ask, Cx, Look, TabCtx};
 use super::images::ImageCache;
 use super::state::{post_key, SocialState};
 use super::thread::ThreadStatus;
@@ -17,9 +17,6 @@ pub const INDENT: f32 = 18.0;
 pub const MAX_LEVELS: usize = 6;
 /// The narrowest card a deep reply is left with.
 const MIN_CARD: f32 = 220.0;
-/// How many frames the view is moved to the opened post when the conversation arrives (the
-/// posts above it settle their heights in the first frames).
-const SETTLE_FRAMES: u8 = 3;
 
 /// One card of the view.
 struct Item {
@@ -53,7 +50,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, entry: &SocialAccountEntry, tab: 
     let snapshot = st.threads.map.get(&key).map(|t| {
         let view = if let ThreadStatus::Ready(v) = &t.status { Some(v.clone()) } else { None };
         let error = if let ThreadStatus::Failed(e) = &t.status { Some(e.clone()) } else { None };
-        (t.post.clone(), view, error, t.scrolled)
+        (t.post.clone(), view, error)
     });
     // ---- the bar above the conversation
     ui.add_space(8.0);
@@ -73,7 +70,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, entry: &SocialAccountEntry, tab: 
         asks.push(Ask::Back);
     }
     ui.add_space(6.0);
-    let Some((root, view, error, scrolled)) = snapshot else {
+    let Some((root, view, error)) = snapshot else {
         column(ui, width, |ui| {
             ui.label(RichText::new("This conversation is not available any more. Go back and open it again.").color(theme::palette().muted));
         });
@@ -84,7 +81,11 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, entry: &SocialAccountEntry, tab: 
     let mut open_thread: Option<(Post, bool)> = None;
     let mut retry = false;
     let mut post_rects: Vec<(String, Rect)> = vec![];
-    let mut root_rect = None;
+    // the opened post is held at the top of the view while posts above it change in height (a
+    // picture arrives, the ancestors come in); when the user scrolls, the anchor moves with the view
+    let mut anchor = st.threads.anchors.remove(&tab.id).filter(|a| a.scope == key).unwrap_or_else(|| Anchor { scope: key.clone(), key: post_key(&root), ..Default::default() });
+    let applied = anchor.apply.take();
+    let mut content_top = 0.0;
     let out = {
         let SocialState { images, revealed, saving, rects, viewer, threads, .. } = st;
         let Some(images) = images.as_ref() else { return asks };
@@ -93,7 +94,12 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, entry: &SocialAccountEntry, tab: 
         if heights.len() > 50_000 {
             heights.clear();
         }
-        egui::ScrollArea::vertical().id_salt(("social-thread", tab.id, &aid, &id)).auto_shrink([false, false]).show(ui, |ui| {
+        let mut area = egui::ScrollArea::vertical().id_salt(("social-thread", tab.id, &aid, &id)).auto_shrink([false, false]);
+        if let Some(off) = applied {
+            area = area.vertical_scroll_offset(off);
+        }
+        area.show(ui, |ui| {
+            content_top = ui.cursor().min.y;
             column(ui, width, |ui| {
                 ui.spacing_mut().item_spacing.y = 10.0;
                 let (near_from, near_to) = (ui.clip_rect().min.y - super::feed_ui::FAR, ui.clip_rect().max.y + super::feed_ui::FAR);
@@ -108,11 +114,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, entry: &SocialAccountEntry, tab: 
                         open_thread = Some((item.post.clone(), new_tab));
                     }
                     if item.highlight {
-                        root_rect = Some(card.rect);
                         cx.rects.push(("highlight".into(), card.rect));
-                        if view.is_some() && scrolled < SETTLE_FRAMES && i > 0 {
-                            ui.scroll_to_rect(card.rect, Some(egui::Align::TOP));
-                        }
                     }
                     post_rects.push((post_key(&item.post), card.rect));
                 }
@@ -151,9 +153,8 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, entry: &SocialAccountEntry, tab: 
     };
     st.post_rects = post_rects;
     st.list_rect = out.inner_rect;
-    if let (Some(_), Some(t)) = (root_rect.filter(|_| view.is_some()), st.threads.map.get_mut(&key)) {
-        t.scrolled = t.scrolled.saturating_add(1);
-    }
+    keep_still(&ctx, &mut anchor, &st.post_rects, &out, content_top, applied);
+    st.threads.anchors.insert(tab.id, anchor);
     if retry {
         st.threads.retry(&aid, &id);
     }

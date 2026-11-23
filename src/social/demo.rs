@@ -148,16 +148,22 @@ impl super::state::Source for DemoSource {
         posts().into_iter().chain(thread()).chain(new_posts()).find(|p| p.id == id).ok_or_else(|| "no such post".to_string())
     }
     fn thread(&self, post: &Post) -> Result<ThreadView, String> {
-        let all = thread();
-        match all.iter().position(|p| p.id == post.id) {
-            // the posts of the demo thread, and the replies of other people to it
-            Some(at) => {
-                let mut below: Vec<Post> = all[at + 1..].to_vec();
-                below.extend(replies().into_iter().map(|r| r.post));
-                Ok(super::thread_view_of(post, all[..at].to_vec(), &below))
-            }
-            None => Ok(super::thread_view_of(post, vec![], &[])),
+        // the demo thread and the replies to it are one conversation
+        let everything: Vec<Post> = thread().into_iter().chain(replies().into_iter().map(|r| r.post)).collect();
+        let mut ancestors = vec![];
+        let mut up = post.reply_to.clone();
+        while let Some(p) = up.and_then(|id| everything.iter().find(|p| p.id == id)) {
+            ancestors.push(p.clone());
+            up = p.reply_to.clone();
         }
+        ancestors.reverse();
+        let mut below: Vec<Post> = vec![];
+        let mut ids = vec![post.id.clone()];
+        while let Some(next) = everything.iter().find(|p| p.reply_to.as_ref().is_some_and(|r| ids.contains(r)) && !ids.contains(&p.id)) {
+            ids.push(next.id.clone());
+            below.push(next.clone());
+        }
+        Ok(super::thread_view_of(post, ancestors, &below))
     }
     fn newer(&self, _feed: &Feed, since: &Since) -> Result<Fresh, String> {
         Ok(Fresh { posts: new_posts().into_iter().filter(|p| !since.known.contains(&super::state::post_key(p))).collect(), ..Default::default() })

@@ -18,9 +18,6 @@ pub struct ThreadEntry {
     /// the post that was opened, as the feed showed it (drawn while the rest comes)
     pub post: Post,
     pub status: ThreadStatus,
-    /// how many frames the view was moved to the opened post since the conversation arrived (the
-    /// ancestors above it push it down)
-    pub scrolled: u8,
 }
 
 /// The conversations opened in this run, by (account, post id). A step back and forth in a tab's
@@ -31,6 +28,9 @@ pub struct Threads {
     /// how high each post was drawn at a width (as `SocialState::card_heights`; separate because
     /// the opened post is drawn with a frame)
     pub heights: HashMap<(String, u32), (f32, bool)>,
+    /// where each tab's conversation is held still while posts above the opened post change in
+    /// height (SOC-046); a new conversation starts with the opened post at the top
+    pub anchors: HashMap<u64, super::feed_ui::Anchor>,
 }
 
 impl Threads {
@@ -40,7 +40,9 @@ impl Threads {
         if matches!(self.map.get(&key), Some(ThreadEntry { status: ThreadStatus::Loading | ThreadStatus::Wanted, .. })) {
             return;
         }
-        self.map.insert(key, ThreadEntry { post: Post { reposted_by: None, ..post.clone() }, status: ThreadStatus::Wanted, scrolled: 0 });
+        // a conversation opened again starts with the opened post at the top
+        self.anchors.retain(|_, a| a.scope != key);
+        self.map.insert(key, ThreadEntry { post: Post { reposted_by: None, ..post.clone() }, status: ThreadStatus::Wanted });
     }
 
     /// Ask again after an error.

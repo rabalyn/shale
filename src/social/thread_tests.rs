@@ -305,3 +305,39 @@ fn soc_047_replies_are_cards_like_the_feed_with_pictures_the_viewer_content_warn
     w.click("save:1");
     wait_for(&mut w, |w| matches!(w.app.modal, Some(crate::app::Modal::Import(_))));
 }
+
+// spec: SOC-046
+#[test]
+fn soc_046_the_opened_post_stays_put_when_the_height_of_a_post_above_it_changes_later_until_the_user_scrolls() {
+    let mut w = window("thread-still");
+    // the first post above it has a content warning: its height changes when it is opened (as a picture's does when it arrives)
+    let mut view = w.script.threads.lock().unwrap()["h0"][0].clone().unwrap();
+    view.ancestors[0].content_warning = Some("long".into());
+    view.ancestors[0].text_markdown = "a long text. ".repeat(80);
+    let up1 = post_key(&view.ancestors[0]);
+    w.script.threads.lock().unwrap().insert("h0".into(), vec![Ok(view)]);
+    w.click("replies:0");
+    wait_for(&mut w, ready);
+    w.frames(6);
+    let y0 = rect_of(&w, "h0").min.y;
+    assert!((y0 - w.app.social.list_rect.min.y).abs() < 8.0, "the opened post is at the top");
+    for open in [true, false, true] {
+        if open {
+            w.app.social.revealed.insert(up1.clone());
+        } else {
+            w.app.social.revealed.clear();
+        }
+        for i in 0..5 {
+            w.frames(1);
+            assert!((rect_of(&w, "h0").min.y - y0).abs() < 1.0, "open={open} frame {i}: {} vs {y0}", rect_of(&w, "h0").min.y);
+        }
+    }
+    // once the user scrolls, the view holds the post at the top of the window instead
+    w.scroll(300.0);
+    let top = w.app.social.post_rects.iter().find(|(_, r)| r.max.y > w.app.social.list_rect.min.y + 1.0).unwrap().clone();
+    assert!(rect_of(&w, "h0").min.y < y0 - 100.0);
+    w.app.social.revealed.clear();
+    w.frames(5);
+    let again = w.app.social.post_rects.iter().find(|(k, _)| *k == top.0).unwrap().1;
+    assert!((again.min.y - top.1.min.y).abs() < 1.0, "{} vs {}", again.min.y, top.1.min.y);
+}
