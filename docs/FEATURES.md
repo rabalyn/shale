@@ -1038,8 +1038,14 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   author's @mention and is no more public than the post it answers), up to **4 pictures with a
   description each** (**Choose pictures…** opens the system's file dialog, or drop picture files
   on the box, or paste a picture with Ctrl+V, or type the path of a file or of one in the vault;
-  JPEG, PNG, GIF, WebP; Bluesky takes 1 MB, so bigger pictures are scaled down), and **Send** (Ctrl+Enter), which
-  always asks **"Post this?"** with your handle and who may see it before anything is posted.
+  JPEG, PNG, GIF, WebP; Bluesky takes 1 MB, so bigger pictures are scaled down) or **one video** (MP4, QuickTime, WebM, MPEG; up to
+  what the server allows and 100 MB; on Bluesky it goes through the video service), a **language** for the post (starts with the
+  setting Post language), on Mastodon a **poll** (options, duration, several choices, hidden totals; not together with
+  pictures or a video) and **Schedule…** to let the server send the post later (local date and time, at least 5 minutes ahead;
+  **Scheduled posts…** lists them and cancels one), and **Send** (Ctrl+Enter), which
+  always asks **"Post this?"** with your handle, who may see it and the time of a scheduled post before anything is posted.
+  Mastodon **polls on cards** show their options with bars and percentages (after you voted, when the poll is closed and on your
+  own posts) or a Vote button with a spinner (#589).
   Boosts and favourites do not ask. A **quote** uses the network's own quote (Bluesky; Mastodon
   4.5 and later); for an older Mastodon server the post's web address is put into the text and
   the box says so. Bluesky links, mentions and hashtags become clickable. When it is sent the box
@@ -1050,6 +1056,8 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   sign-in.
 
 ![The compose box](userguide/z_media/screenshots/social-compose.png)
+
+![A poll on a card](userguide/z_media/screenshots/social-poll.png)
 
 - Try it without an account: `shale --screenshot out.png --view social` shows made-up posts.
 
