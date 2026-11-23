@@ -651,6 +651,19 @@ fn imp_052_the_dialog_starts_with_the_setting_and_a_ticked_box_writes_the_list()
     assert!(listed.contains("\n- **From:** ") && listed.contains("\n- **Date:** 2026-11-13 "), "{listed}");
 }
 
+// spec: IMP-066, CFG-076
+#[test]
+fn imp_066_the_dialog_starts_with_the_leave_out_quoted_setting() {
+    let mut w = W::new("leave-out-quoted");
+    let items = vec![crate::import::email_item(crate::mail::parse(&crate::mail::tests::sample_eml()), ("m.eml".into(), vec![]))];
+    w.app.open_import(items.clone(), vec![], None);
+    assert!(!w.dialog().leave_out_quoted, "off by default");
+    w.app.modal = None;
+    w.app.cfg.import_leave_out_quoted = true;
+    w.app.open_import(items, vec![], None);
+    assert!(w.dialog().leave_out_quoted);
+}
+
 // spec: IMP-061, CFG-074
 #[test]
 fn imp_061_the_dialog_starts_with_the_skip_signatures_setting() {

@@ -84,7 +84,7 @@ fn try_round_trip(tag: &str, file: &Path) -> Option<Result<Trip, String>> {
     let pandoc = real_pandoc()?;
     let mut vault = temp_vault(tag);
     let item = docx::docx_item(file.to_path_buf(), Some(pandoc.clone()));
-    let options = Options { folder: PathBuf::from("In"), tags: vec![], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false };
+    let options = Options { folder: PathBuf::from("In"), tags: vec![], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false, cut: Default::default() };
     let note = match docx::import_item(&mut vault, &item, &options) {
         Ok(note) => note,
         Err(e) => return Some(Err(format!("import: {e}"))),

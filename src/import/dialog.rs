@@ -25,6 +25,8 @@ pub struct ImportDialog {
     pub header_list: bool,
     /// leave out the crypto signature parts and the signature pictures of e-mails (IMP-061)
     pub skip_signatures: bool,
+    /// leave the quoted mails out of the text of e-mails (IMP-066)
+    pub leave_out_quoted: bool,
     /// pandoc runs for the Word files that are going on in a job (IMP-035)
     pub converting: Option<Receiver<Result<Vec<Converted>, String>>>,
     /// set when the dialog is let go: a pandoc run that is still going stops
@@ -66,6 +68,7 @@ impl ImportDialog {
             keep_docx: true,
             header_list: false,
             skip_signatures: true,
+            leave_out_quoted: false,
             converting: None,
             cancel: Arc::new(AtomicBool::new(false)),
             link_into,
@@ -372,10 +375,14 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
     }
     if d.items.iter().any(|i| matches!(i.source, Source::Email { .. }))
         && rec("skip-signatures".into(), ui.checkbox(&mut d.skip_signatures, "Skip signatures"))
-            .on_hover_text("Leave out the signature parts of signed mail (smime.p7s, signature.asc) and the pictures of signature blocks (logos, social icons); you can still tick each one below. Settings → Import sets the start value")
+            .on_hover_text("Leave out the signature text of the message and of the mails it quotes (the quoted text stays), the signature parts of signed mail (smime.p7s, signature.asc) and the pictures of signature blocks (logos, social icons); you can still tick each attachment below. Only what is clearly a signature goes. Settings → Import sets the start value")
             .changed()
     {
         import::apply_skip_signatures(&mut d.items, d.skip_signatures);
+    }
+    if d.items.iter().any(|i| matches!(i.source, Source::Email { .. })) {
+        rec("leave-out-quoted".into(), ui.checkbox(&mut d.leave_out_quoted, "Leave out quoted mails"))
+            .on_hover_text("Keep only what the sender wrote in each message and drop the earlier mails it quotes (the reply header lines too). A thread is often imported mail by mail. Settings → Import sets the start value");
     }
     if d.items.iter().any(|i| matches!(i.source, Source::Email { .. } | Source::Event { .. } | Source::Social { .. })) {
         rec("header-list".into(), ui.checkbox(&mut d.header_list, "Header list in the note body"))
@@ -620,6 +627,21 @@ mod tests {
         let mut d = ImportDialog::new(vec![import::markdown_item("Top.md".into(), "# A\n".into())], vec![], String::new(), String::new(), None, false);
         h.frame(vec![], &mut d, &[], &[]);
         assert!(!d.rects.iter().any(|r| r.0 == "skip-signatures"), "no signatures in a Markdown note");
+    }
+
+    // spec: IMP-066
+    #[test]
+    fn the_leave_out_quoted_box_is_off_and_only_there_for_messages() {
+        let mail = crate::mail::parse(&crate::mail::tests::sample_eml());
+        let mut d = ImportDialog::new(vec![import::email_item(mail, ("m.eml".into(), vec![]))], vec![], String::new(), String::new(), None, false);
+        let mut h = H { ctx: egui::Context::default(), t: 0.0 };
+        h.frame(vec![], &mut d, &[], &[]);
+        assert!(!d.leave_out_quoted, "off at first");
+        h.click("leave-out-quoted", &mut d, &[], &[]);
+        assert!(d.leave_out_quoted);
+        let mut d = ImportDialog::new(vec![import::markdown_item("Top.md".into(), "# A\n".into())], vec![], String::new(), String::new(), None, false);
+        h.frame(vec![], &mut d, &[], &[]);
+        assert!(!d.rects.iter().any(|r| r.0 == "leave-out-quoted"), "no quotes in a Markdown note");
     }
 
     // spec: IMP-034
