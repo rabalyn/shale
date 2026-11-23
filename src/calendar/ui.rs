@@ -214,6 +214,51 @@ struct ChipSpec<'a> {
     show_time: bool,
 }
 
+/// A button of the header's right group.
+#[derive(Clone, Copy)]
+enum HeaderTool {
+    Spinner,
+    New,
+    Large,
+    Settings,
+}
+
+impl HeaderTool {
+    /// The room it takes, a little more than it will.
+    fn width(self, ui: &Ui) -> f32 {
+        match self {
+            HeaderTool::Spinner => ui.spacing().interact_size.y + 2.0,
+            HeaderTool::New => button_w(ui, "＋", true),
+            HeaderTool::Large => button_w(ui, "⤢", true),
+            HeaderTool::Settings => button_w(ui, "⚙", true),
+        }
+    }
+}
+
+/// The right group of the header, left to right: the spinner while loading, new event (when there is a calendar), the big tab (not in it), settings.
+fn header_tools(store: &CalendarStore, large: bool) -> Vec<HeaderTool> {
+    let mut v = vec![];
+    if store.is_loading() {
+        v.push(HeaderTool::Spinner);
+    }
+    if !store.sources.is_empty() {
+        v.push(HeaderTool::New);
+    }
+    if !large {
+        v.push(HeaderTool::Large);
+    }
+    v.push(HeaderTool::Settings);
+    v
+}
+
+/// The width a button with this text takes (a little more than it will).
+fn button_w(ui: &Ui, text: &str, small: bool) -> f32 {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let w = ui.painter().layout_no_wrap(text.to_string(), font, Color32::WHITE).size().x;
+    let pad = ui.spacing().button_padding.x * if small { 1.0 } else { 2.0 };
+    w + pad * 2.0 + 2.0
+}
+
 impl CalendarView {
     pub fn new(size: Size) -> Self {
         let today = t::today();
@@ -227,6 +272,57 @@ impl CalendarView {
     fn week_start(&self, day: i64, monday: bool) -> i64 {
         let off = if monday { t::weekday(day) as i64 } else { (t::weekday(day) as i64 + 1) % 7 };
         day - off
+    }
+
+    fn header_nav(&mut self, ui: &mut Ui) {
+        let b = ui.button("‹").on_hover_text("Previous");
+        self.rec("prev", b.rect);
+        if b.clicked() {
+            self.step(-1);
+        }
+        let b = ui.button("Today");
+        self.rec("today", b.rect);
+        if b.clicked() {
+            self.anchor = t::today();
+            self.selected = self.anchor;
+        }
+        let b = ui.button("›").on_hover_text("Next");
+        self.rec("next", b.rect);
+        if b.clicked() {
+            self.step(1);
+        }
+    }
+
+    fn header_tool(&mut self, ui: &mut Ui, tool: HeaderTool) -> Option<CalAction> {
+        let mut action = None;
+        match tool {
+            HeaderTool::Spinner => {
+                ui.spinner();
+            }
+            HeaderTool::New => {
+                let b = ui.small_button("＋").on_hover_text("New event (or double-click a day or time)");
+                self.rec("new", b.rect);
+                if b.clicked() {
+                    let day = if self.mode == Mode::Month { self.selected } else { self.anchor };
+                    action = Some(CalAction::NewEventAt(new_event_start(day)));
+                }
+            }
+            HeaderTool::Large => {
+                let b = ui.small_button("⤢").on_hover_text("Open the calendar in a big tab");
+                self.rec("large", b.rect);
+                if b.clicked() {
+                    action = Some(CalAction::OpenLarge);
+                }
+            }
+            HeaderTool::Settings => {
+                let b = ui.small_button("⚙").on_hover_text("Calendar settings");
+                self.rec("settings", b.rect);
+                if b.clicked() {
+                    action = Some(CalAction::Settings);
+                }
+            }
+        }
+        action
     }
 
     /// Draw the whole panel. `large`: shown as a big tab (more room) instead of the sidebar.
@@ -254,52 +350,55 @@ impl CalendarView {
             }
             Mode::Day => t::long_date(self.anchor),
         };
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 3.0;
-            let b = ui.button("‹").on_hover_text("Previous");
-            self.rec("prev", b.rect);
-            if b.clicked() {
-                self.step(-1);
-            }
-            let b = ui.button("Today");
-            self.rec("today", b.rect);
-            if b.clicked() {
-                self.anchor = t::today();
-                self.selected = self.anchor;
-            }
-            let b = ui.button("›").on_hover_text("Next");
-            self.rec("next", b.rect);
-            if b.clicked() {
-                self.step(1);
-            }
-            ui.label(egui::RichText::new(&title).size(crate::fonts::px(if large { 18.0 } else { 14.0 })).color(theme::palette().text_strong));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let b = ui.small_button("⚙").on_hover_text("Calendar settings");
-                self.rec("settings", b.rect);
-                if b.clicked() {
-                    action = Some(CalAction::Settings);
-                }
-                if !large {
-                    let b = ui.small_button("⤢").on_hover_text("Open the calendar in a big tab");
-                    self.rec("large", b.rect);
-                    if b.clicked() {
-                        action = Some(CalAction::OpenLarge);
+        let title_size = crate::fonts::px(if large { 18.0 } else { 14.0 });
+        let title_text = egui::RichText::new(&title).size(title_size).color(theme::palette().text_strong);
+        let tools = header_tools(store, large);
+        let avail = ui.available_width();
+        let title_w = ui.painter().layout_no_wrap(title.clone(), egui::FontId::proportional(title_size), Color32::WHITE).size().x;
+        let nav_w = ["‹", "Today", "›"].iter().map(|t| button_w(ui, t, false)).sum::<f32>();
+        let tools_w = tools.iter().map(|t| t.width(ui)).sum::<f32>();
+        let gap = 3.0;
+        if nav_w + title_w + tools_w + 6.0 * gap <= avail {
+            // everything on one line
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                self.header_nav(ui);
+                let r = ui.label(title_text).rect;
+                self.rec("title", r);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    for t in tools.iter().rev() {
+                        action = self.header_tool(ui, *t).or(action.take());
                     }
-                }
-                if !store.sources.is_empty() {
-                    let b = ui.small_button("＋").on_hover_text("New event (or double-click a day or time)");
-                    self.rec("new", b.rect);
-                    if b.clicked() {
-                        let day = if self.mode == Mode::Month { self.selected } else { self.anchor };
-                        action = Some(CalAction::NewEventAt(new_event_start(day)));
-                    }
-                }
-                if store.is_loading() {
-                    ui.spinner();
-                }
+                });
             });
-        });
-        ui.horizontal(|ui| {
+        } else {
+            // the buttons do not fit next to the title (LAY-019): the title on a line of its own, the buttons below it
+            let r = ui.label(title_text).rect;
+            self.rec("title", r);
+            if nav_w + tools_w + 5.0 * gap <= avail {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = gap;
+                    self.header_nav(ui);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        for t in tools.iter().rev() {
+                            action = self.header_tool(ui, *t).or(action.take());
+                        }
+                    });
+                });
+            } else {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = gap;
+                    self.header_nav(ui);
+                });
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = gap;
+                    for t in tools.iter() {
+                        action = self.header_tool(ui, *t).or(action.take());
+                    }
+                });
+            }
+        }
+        ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             for (m, label) in [(Mode::Month, "Month"), (Mode::Week, "Week"), (Mode::Day, "Day")] {
                 let b = ui.selectable_label(self.mode == m, label);
@@ -1198,5 +1297,58 @@ mod tests {
         assert_eq!(when_text(&o), "Fri, 20 Nov 2026 – Sun, 22 Nov 2026 (3 days)");
         assert_eq!(rrule_text("FREQ=WEEKLY;BYDAY=MO,WE;COUNT=6"), "weekly on Mon, Wed, 6 times");
         assert_eq!(rrule_text("FREQ=MONTHLY;INTERVAL=2"), "every 2 months");
+    }
+
+    /// Lay the header out in a pane `w` points wide; the rects of its parts by key.
+    fn header_at(w: f32, large: bool) -> Vec<(String, Rect)> {
+        let (store, _) = store_with_samples(&format!("hdr{}", w as i32));
+        let mut v = CalendarView::new(Size::Small);
+        let ctx = egui::Context::default();
+        for k in 0..3 {
+            let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(w, 600.0))), time: Some(k as f64 * 0.05), ..Default::default() };
+            let mut out = ctx.run_ui(raw, |ui| {
+                egui::CentralPanel::default().frame(egui::Frame::new()).show(ui, |ui| {
+                    v.show(ui, &store, true, large);
+                });
+            });
+            out.textures_delta.clear();
+        }
+        v.rects.into_iter().filter(|(k, _)| ["title", "prev", "today", "next", "settings", "large", "new"].contains(&k.as_str()) || k.starts_with("mode:") || k.starts_with("size:")).collect()
+    }
+
+    // spec: LAY-019
+    #[test]
+    fn lay_019_the_calendar_header_wraps_and_never_overlaps_at_any_width() {
+        for w in [120.0, 150.0, 185.0, 200.0, 230.0, 260.0, 330.0, 560.0, 1200.0] {
+            for large in [false, true] {
+                let parts = header_at(w, large);
+                assert!(parts.len() >= 10, "at {w}: {parts:?}");
+                for (k, r) in &parts {
+                    assert!(r.min.x >= -0.5 && r.max.x <= w + 0.5, "{k} leaves the pane at width {w}: {r:?}");
+                }
+                for (i, (ka, a)) in parts.iter().enumerate() {
+                    for (kb, b) in &parts[i + 1..] {
+                        assert!(!a.shrink(0.5).intersects(b.shrink(0.5)), "{ka} {a:?} overlaps {kb} {b:?} at width {w}");
+                    }
+                }
+            }
+        }
+    }
+
+    // spec: LAY-019
+    #[test]
+    fn lay_019_the_header_is_one_line_when_wide_and_the_buttons_go_below_the_title_when_narrow() {
+        let get = |parts: &[(String, Rect)], k: &str| parts.iter().find(|(n, _)| n == k).map(|p| p.1).unwrap();
+        let wide = header_at(1200.0, false);
+        let (title, prev, settings) = (get(&wide, "title"), get(&wide, "prev"), get(&wide, "settings"));
+        assert!((title.center().y - prev.center().y).abs() < 6.0 && (settings.center().y - prev.center().y).abs() < 6.0, "one line when wide");
+        assert!(title.min.x > prev.max.x && settings.min.x > title.max.x);
+        for w in [150.0, 185.0, 230.0] {
+            let narrow = header_at(w, false);
+            let title = get(&narrow, "title");
+            for k in ["prev", "today", "next", "settings", "large", "new"] {
+                assert!(get(&narrow, k).min.y >= title.max.y - 0.5, "{k} is below the title at width {w}");
+            }
+        }
     }
 }

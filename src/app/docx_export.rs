@@ -16,11 +16,11 @@ impl ShaleApp {
         let Some(f) = v.file(rel).filter(|f| f.kind == FileKind::Note) else { return };
         let name = f.display_name();
         let text = self.note_text(rel);
-        let toc = crate::pdf::export::ExportOptions { numbered_headings: self.cfg.numbered_headings, ..crate::pdf::export::ExportOptions::for_note() }.with_note_properties(&text).toc;
+        let opts = crate::pdf::export::ExportOptions { numbered_headings: self.cfg.numbered_headings, ..crate::pdf::export::ExportOptions::for_note() }.with_note_properties(&text);
         let original = crate::docx_export::original_of(v, rel, &text);
         let path = v.root.join("exports").join(format!("{name}.docx"));
         let pandoc = crate::import::docx::locate(&self.cfg.pandoc_path);
-        self.modal = Some(Modal::ExportDocx(Box::new(DocxDialog::new(rel.to_path_buf(), name, path, pandoc, original, toc))));
+        self.modal = Some(Modal::ExportDocx(Box::new(DocxDialog::new(rel.to_path_buf(), name, path, pandoc, original, opts.toc, opts.toc_break))));
     }
 
     /// Run the export of the dialog as a job (DOCX-002). The text is the note as the window has it.
@@ -32,7 +32,7 @@ impl ShaleApp {
         let pandoc = d.pandoc.clone().ok_or(crate::import::docx::MISSING)?;
         let v = self.vault.as_ref().ok_or("No vault is open")?;
         let original = d.original.as_deref().filter(|_| d.use_original);
-        let job = crate::docx_export::Job::new(pandoc, v, &d.rel, &self.note_text(&d.rel), original, d.toc);
+        let job = crate::docx_export::Job::new(pandoc, v, &d.rel, &self.note_text(&d.rel), original, d.toc, d.toc_break);
         let ctx = ctx.clone();
         d.start(job, move || ctx.request_repaint());
         Ok(())

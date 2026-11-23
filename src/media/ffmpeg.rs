@@ -92,6 +92,23 @@ const PROBE_ENTRIES: &str = "stream=codec_type,width,height,avg_frame_rate,r_fra
 /// refuses the whole list: those versions give the rotation as the stream tag `rotate` (#299).
 const PROBE_ENTRIES_OLD: &str = "stream=codec_type,width,height,avg_frame_rate,r_frame_rate:stream_tags=rotate:format=duration";
 
+/// `ffprobe` asked whether a file has a sound and how long it is, as JSON (MEDIA-026).
+pub fn audio_probe_args(file: &Path) -> Vec<OsString> {
+    let mut a = os(&["-v", "error", "-show_entries", "stream=codec_type:format=duration", "-of", "json", "-i"]);
+    a.push(file.into());
+    a
+}
+
+/// Read what `ffprobe` printed (see `audio_probe_args`): the length when it says, an error when
+/// the file has no sound.
+pub fn parse_audio_probe(json: &str) -> Result<Option<f64>, String> {
+    let v: serde_json::Value = serde_json::from_str(json).map_err(|_| "ffprobe did not understand the file".to_string())?;
+    if !v["streams"].as_array().is_some_and(|s| s.iter().any(|s| s["codec_type"].as_str() == Some("audio"))) {
+        return Err("There is no sound in this file.".into());
+    }
+    Ok(v["format"]["duration"].as_str().and_then(|d| d.parse::<f64>().ok()).filter(|d| d.is_finite() && *d > 0.0))
+}
+
 fn probe_args_with(file: &Path, entries: &str) -> Vec<OsString> {
     let mut a = os(&["-v", "error", "-show_entries", entries, "-of", "json", "-i"]);
     a.push(file.into());
@@ -188,6 +205,12 @@ impl Tools {
         }
         .map_err(|e| if e.contains("could not be started") { e } else { "The file is damaged or not a video that ffmpeg can read.".to_string() })?;
         parse_probe(&String::from_utf8_lossy(&out))
+    }
+
+    /// The length of a sound file that ffmpeg can read (None when it does not say); an error when
+    /// ffprobe cannot read the file or it has no sound (MEDIA-026).
+    pub fn audio_length(&self, file: &Path) -> Result<Option<f64>, String> {
+        parse_audio_probe(&String::from_utf8_lossy(&Self::capture(&self.ffprobe, &audio_probe_args(file))?))
     }
 
     /// The first frame of the file, at the size the player will show.
@@ -311,6 +334,32 @@ mod tests {
         // a missing file is still named as unreadable, not as a refused entry list
         assert_eq!(tools.probe(Path::new("/does/not/exist.mp4")).unwrap_err(), "The file is damaged or not a video that ffmpeg can read.");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: MEDIA-026
+    #[test]
+    fn media_026_the_sound_probe_gives_the_length_and_refuses_a_file_without_sound() {
+        let a = strs(&audio_probe_args(Path::new("x y.wav")));
+        assert_eq!(a[a.len() - 2..], ["-i", "x y.wav"], "the file is one argument after -i");
+        assert_eq!(parse_audio_probe(r#"{"streams":[{"codec_type":"audio"}],"format":{"duration":"24.8"}}"#), Ok(Some(24.8)));
+        assert_eq!(parse_audio_probe(r#"{"streams":[{"codec_type":"audio"}],"format":{}}"#), Ok(None), "no length is not an error");
+        assert_eq!(parse_audio_probe(r#"{"streams":[{"codec_type":"audio"}],"format":{"duration":"0.0"}}"#), Ok(None));
+        assert!(parse_audio_probe(r#"{"streams":[{"codec_type":"video"}],"format":{"duration":"3"}}"#).unwrap_err().contains("no sound"));
+        assert!(parse_audio_probe("{}").is_err());
+        assert!(parse_audio_probe("nonsense").unwrap_err().contains("did not understand"));
+    }
+
+    // spec: MEDIA-026
+    #[test]
+    fn media_026_the_length_of_a_sound_file_comes_from_ffprobe_and_a_file_without_sound_is_refused() {
+        let Some(tools) = locate() else {
+            println!("skipping: ffmpeg and ffprobe are not installed");
+            return;
+        };
+        let d = tools.audio_length(&crate::media::testdata::fixture("tone.opus")).unwrap().expect("a length");
+        assert!((0.9..1.2).contains(&d), "{d}");
+        assert!(tools.audio_length(&crate::media::testdata::fixture("clip-silent.mp4")).is_err(), "a video without sound");
+        assert!(tools.audio_length(Path::new("/does/not/exist.wav")).is_err());
     }
 
     // spec: MEDIA-009

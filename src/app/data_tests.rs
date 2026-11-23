@@ -500,3 +500,48 @@ fn restore_last_deleted_puts_the_item_back_and_refuses_when_the_place_is_taken()
     assert!(app.can_restore_trashed());
     let _ = std::fs::remove_dir_all(&d);
 }
+
+// spec: VAULT-013, VAULT-042
+#[test]
+fn a_rename_updates_links_in_an_open_note_with_unsaved_edits_and_keeps_the_edits() {
+    let (mut app, d) = app_in("rename-dirty", &[("Target.md", b"t\n"), ("A.md", b"see [[Target]]\n"), ("Dir/B.md", b"---\nrelated: \"[[Target]]\"\n---\nbody\n")]);
+    app.open(Path::new("A.md"), false);
+    app.open(Path::new("Dir/B.md"), true);
+    app.open(Path::new("Target.md"), true);
+    type_text(&mut app, "A.md", "my new first line\nsee [[Target]]\n");
+    type_text(&mut app, "Target.md", "t edited\n");
+    app.rename(Path::new("Target.md"), "Goal").unwrap();
+    let a = &app.notes[Path::new("A.md")];
+    assert_eq!(a.text, "my new first line\nsee [[Goal]]\n", "the edit and the new link are in the buffer");
+    assert!(!a.dirty, "and saved");
+    assert_eq!(read(&d, "A.md"), "my new first line\nsee [[Goal]]\n");
+    assert_eq!(app.notes[Path::new("Dir/B.md")].text, "---\nrelated: \"[[Goal]]\"\n---\nbody\n");
+    assert_eq!(app.notes[Path::new("Goal.md")].text, "t edited\n", "the renamed note's own edit follows it");
+    assert_eq!(read(&d, "Goal.md"), "t edited\n");
+    // the same for a move
+    type_text(&mut app, "A.md", "another edit\nsee [[Goal]] [r](./Goal.md)\n");
+    app.move_into(Path::new("Goal.md"), Path::new("Dir")).unwrap();
+    assert_eq!(app.notes[Path::new("A.md")].text, "another edit\nsee [[Goal]] [r](./Dir/Goal.md)\n");
+    assert_eq!(read(&d, "A.md"), "another edit\nsee [[Goal]] [r](./Dir/Goal.md)\n");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+// spec: VAULT-013, VAULT-042
+#[test]
+fn a_rename_never_overwrites_edits_that_could_not_be_saved() {
+    let (mut app, d) = app_in("rename-dirty-fail", &[("Target.md", b"t\n"), ("sub/A.md", b"see [[Target]]\n")]);
+    if locks_do_not_hold(&d) {
+        return;
+    }
+    app.open(Path::new("sub/A.md"), false);
+    type_text(&mut app, "sub/A.md", "precious edit\nsee [[Target]]\n");
+    locked(&d.join("sub"), true);
+    let r = app.rename(Path::new("Target.md"), "Goal");
+    locked(&d.join("sub"), false);
+    r.unwrap();
+    let a = &app.notes[Path::new("sub/A.md")];
+    assert!(a.dirty && a.text.starts_with("precious edit"), "the edit stays in the buffer: {:?}", a.text);
+    assert_eq!(read(&d, "sub/A.md"), "see [[Target]]\n", "the file is not touched");
+    assert!(app.vault.as_ref().unwrap().failed_rewrites.iter().any(|f| f.0 == Path::new("sub/A.md")), "and it is reported");
+    let _ = std::fs::remove_dir_all(&d);
+}

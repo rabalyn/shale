@@ -61,7 +61,7 @@ change within a second.
 |---|---|---|
 | `ctrl_to_follow` | off (a plain click follows a link) | Settings → Editor → Links |
 | `new_notes_next_to_current` | off (new notes go to the vault root) | Settings → Editor → Links |
-| `update_links_on_rename` | on | Settings → Editor → Links |
+| `update_links_on_rename` | on (links, embeds and property links in other notes follow a rename or move) | Settings → Editor → Links |
 | `auto_convert_canvas` | off (asks) | Settings → Editor → Drawings; or the tick in the canvas question |
 | `file_sort` | `NameAsc` (file name A to Z); also `NameDesc`, `ModifiedDesc`, `ModifiedAsc`, `CreatedDesc`, `CreatedAsc` | the sort icon above the file list |
 
@@ -278,7 +278,7 @@ Settings → Updates is the table `[updates]` in the settings file. `SHALE_UPDAT
 Some behaviour is decided by a note's own properties (front matter) instead of a setting; they are not stored in any settings file.
 `numbered-headings` (`true` or `false`) overrides the setting `numbered_headings` for the note ([[Notes and links]]). The PDF export reads
 `print-paper`, `print-margins`, `print-font`, `print-font-size`, `print-line-spacing`, `print-paragraph-spacing`, `print-align`,
-`print-heading-color`, `print-heading-weight`, `print-heading-sizes`, `print-break-before`, `print-title` and `print-toc` (any of them also switches on the plain paper look of the PDF); each has its values, default and effect in the table of
+`print-heading-color`, `print-heading-weight`, `print-heading-sizes`, `print-break-before`, `print-title`, `print-toc` and `print-toc-page-break` (any of them also switches on the plain paper look of the PDF); each has its values, default and effect in the table of
 [[PDF#Print properties of a note]]. Every one is optional, and a value that cannot be read is ignored.
 
 # Vault settings (`<vault>/.shale/settings.json`)

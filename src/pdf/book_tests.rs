@@ -353,6 +353,29 @@ fn the_contents_list_parts_chapters_and_first_level_headings_with_links_to_their
     clean(&d);
 }
 
+// spec: BOOK-018
+#[test]
+fn the_introduction_follows_the_contents_on_a_new_page_unless_asked_otherwise() {
+    let (v, d) = handbook("tocbreak");
+    let page_of = |bytes: &[u8], word: &str| page_streams(bytes).iter().position(|p| p.contains(&hex(word))).unwrap_or_else(|| panic!("{word} is on no page"));
+    let with = export_book(&v, Path::new("Handbook"), &opts(), None).unwrap();
+    assert_eq!(page_of(&with, "Contents"), 1);
+    assert_eq!(page_of(&with, "Welcome"), 2, "the introduction starts the page after the contents");
+    // off: the introduction follows the contents on the same page, and the first chapter still starts its own
+    let off = ExportOptions { toc_break: false, ..opts() };
+    let without = export_book(&v, Path::new("Handbook"), &off, None).unwrap();
+    assert_eq!(page_of(&without, "Welcome"), 1, "below the contents");
+    assert_eq!(page_of(&without, "things"), page_of(&with, "things") - 1, "the chapters start pages as before, one page earlier");
+    // the top folder note says it
+    let text = HANDBOOK[0].1.replace("---\ntitle", "---\nprint-toc-page-break: false\ntitle");
+    let said = ExportOptions::for_note().with_toc_break_property(&text);
+    assert!(!said.toc_break);
+    // without contents there is nothing to break after
+    let none = export_book(&v, Path::new("Handbook"), &ExportOptions { toc: false, ..opts() }, None).unwrap();
+    assert_eq!(page_of(&none, "Welcome"), 1);
+    clean(&d);
+}
+
 // spec: BOOK-008
 #[test]
 fn a_page_of_a_chapter_has_its_title_at_the_top_but_not_its_first_page() {

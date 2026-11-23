@@ -144,7 +144,12 @@ The `env-tests` job runs this suite together with the CalDAV one when the runner
   published as 18025). `mail-env.sh revoke` restarts it together with the provider.
 - `dovecot/dovecot.conf` (Dovecot 2.4): TLS required, `PLAIN` for the password user from
   `dovecot/users`, `XOAUTH2` and `OAUTHBEARER` through an `oauth2` passdb that asks the provider's
-  userinfo endpoint with the token on every sign-in.
+  userinfo endpoint with the token on every sign-in. The `imap-login` and `submission-login`
+  services set `chroot =` (empty): the image runs Dovecot as the unprivileged user `vmail` and relies
+  on file capabilities for the login processes to chroot. When the container inherits NoNewPrivs
+  (the parent process has it, as in sandboxed dev tools), the kernel ignores file capabilities and
+  the chroot fails (`chroot(/run/dovecot/login) failed: Operation not permitted`, every connection
+  closed, #592). Nothing else in the stack needs a capability.
 - `setup-certs.sh`: a CA and a server certificate for `localhost` / `127.0.0.1` into `certs/` (git-ignored).
 
 ## Limits

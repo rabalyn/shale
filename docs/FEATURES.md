@@ -119,6 +119,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 - Type `[[` to get matching notes; ↑/↓ or Ctrl+J/Ctrl+K move through the list, Enter, Tab or a
   click picks an entry, and the last entry creates a new note. Esc closes the list.
+- Type `#` and a letter (or a word in the `tags:` property at the top of a note) to get the vault's
+  tags that match, best match first: `#prj` finds `projects/shale`, nested tags included; ↑/↓ or
+  Ctrl+J/Ctrl+K choose, Enter, Tab or a click picks, Esc closes. Nothing opens in code, in a link, in
+  a URL or on a heading (EDIT-120).
 - Type `[!` to pick a file: `/` starts at the vault, `~/` at your home folder, and Tab completes
   like a shell; ↑/↓ or Ctrl+J/Ctrl+K choose, Enter or a click picks. A file from outside the vault is
   copied to `z_media/<year>/<month>/`, or (a picture, PDF, sound or video) linked where it is, or
@@ -130,8 +134,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   or a small question asks which (the same setting). Other text pastes as usual.
 
 - **Sound players.** `![[song.mp3]]` shows a small player instead of a link, in the editor, the
-  markdown preview and the reading view (mp3, ogg, oga, flac, m4a, aac and wav play; opus files
-  are recognised but cannot be played yet). It shows the cover from the file's tags (or a tile
+  markdown preview and the reading view (mp3, ogg, oga, flac, m4a, aac and wav play, also the A-law and µ-law WAV files of phone systems
+  and answering machines such as FRITZ!Box call recordings; what Shale cannot decode itself, opus and
+  ADPCM WAV among it, plays through ffmpeg when that is installed, and otherwise the player says what
+  the file holds instead of calling it damaged). It shows the cover from the file's tags (or a tile
   with the file name), a round play/pause button over it (in the reading view Space too, once a click gave the player
   the keyboard; in the editor a click on the player leaves the keyboard and the cursor with the text), a progress bar (click to jump, drag to choose and seek on release) with the time,
   and a mute button and volume slider. Only one file plays at a time; it keeps playing while
@@ -199,7 +205,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   out, and the PDF has bookmarks for its `#`–`######` headings; the title is printed once: when the note's first
   heading is a `#` that says the same as the title, the separate title is left out, PDF-008; a note's
   properties set how it is printed, see below), insert a
-  new drawing, rename the note (links in other notes are updated), or move it to the trash. The
+  new drawing, rename the note (links in other notes are updated: wikilinks, embeds of notes and files, Markdown links and links in properties, also when a file or folder is moved or renamed from the title line; one history step), or move it to the trash. The
   trash keeps the original folder (`.trash/<date>/<path>`) and nothing in it is replaced or
   emptied; right-click the empty space of the file list and choose "Restore last deleted" to put
   the last item you trashed back.
@@ -223,6 +229,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
     each; anything else is ignored); they replace the usual proportions
   - `print-title`: `true` or `false`, the note's name as a title
   - `print-toc`: `true` or `false`, the contents page
+  - `print-toc-page-break` (#578, PDF-031): `true` (the default) or `false`; with `true` the text after the contents starts a new page
+    (the dialogs of the PDF, LaTeX, Word and folder-book exports have the box "Page break after the table of contents")
   - `print-break-before`: a heading level 1 to 6; every heading up to that level starts a new page
     (`1`: every `#`; the dialog has a box "Start each # heading on a new page" for it)
   - **Paper look** (#367): a note with any of these keys is printed plainly: list marks and quotes in the text
@@ -434,7 +442,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   action already uses asks “Overwrite it?” (Yes takes it from that action and leaves it without a key, No
   changes nothing; Enter answers No), and a binding can be a sequence of keys. While you record, a note
   under the keys says which action they would clash with.
-- Ctrl+PageUp / Ctrl+PageDown (macOS: Cmd+Opt+← / Cmd+Opt+→) switch to the previous / next tab, also from the file list and from
+- Ctrl+PageUp / Ctrl+PageDown and Ctrl+Shift+Tab / Ctrl+Tab (macOS: Cmd+Opt+← / Cmd+Opt+→) switch to the previous / next tab of the focused pane, also from the file list and from
   mail, calendar and Feeds; after the last tab comes the first.
 - In the search results j / k go from hit to hit and Ctrl+J / Ctrl+K from file to file (in the mail and posts groups from group to group).
 - **Markdown preview** (Settings → Editor, or the eye icon in the top right of the editor;
@@ -680,6 +688,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   on a CalDAV calendar changes its address, user name or password (empty password = keep the saved
   one); a new user name or password also goes to the other calendars of the same server and user.
 
+In a narrow sidebar the header wraps: the month name on its own line, the buttons below it, never over it (LAY-019).
+
 ![Calendar in the sidebar](userguide/z_media/screenshots/calendar-sidebar.png)
 
 ## Mail
@@ -730,7 +740,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - The first sync fetches the mail of the last three years, newest first, several folders at once,
   and can be stopped and resumed. **Sync** and the status bar show the progress; new mail is also
   fetched every 10 minutes (changeable, 0 = off) while Shale runs. A mail deleted on the server
-  stays here, dimmed, with a note.
+  stays here, dimmed, with a note; **Delete local copy…** (the button in the open mail and in the
+  bar of the marked mails, the row menu, or Shift+D) removes Shale's own copy of such mails, after
+  you confirm, several at once. Mail that is still on the server never gets it. The server and the
+  notes you imported from the mail are not touched, and the file goes to the local `.trash`.
 - **Changes in another mail program show up within seconds.** While the mail view is open, the
   folder you have open and each account's Inbox are watched over a read-only connection with IMAP
   IDLE: a flag removed, mail read, new or deleted mail in Thunderbird or on your phone appears here
@@ -771,7 +784,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   change is undone in the list and you are told why. "Delete" is always a move to the Trash
   folder. "Delete forever" removes only the mails you chose (never the ones another program
   marked as deleted). A mail that another program moved or deleted meanwhile is left alone and
-  dimmed. Shale never deletes its own local copy: files of mail that moved or were deleted go to
+  dimmed. Shale never deletes a file of its own local copy: files of mail that moved or were deleted go to
   `.trash/<date>/` inside the mail folder. A server without `MOVE` is handled by a verified copy
   first; a server without `UIDPLUS` cannot delete forever, and for it deleting without `MOVE` is
   refused rather than risked.
@@ -907,7 +920,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 - **Export to Word** (DOCX-001 to DOCX-010, rabalyn/shale#487): a note's ⋯ menu and its context menu in the file list have **Export to Word…**,
   the reverse of the Word import, by the same `pandoc` (the Word import setting need not be on). The dialog saves to `<vault>/exports/<name>.docx`
   and has the boxes **Use the original Word file as the template** (for a note imported with its original kept, its `source:` property),
-  **Table of contents** and **Open the file afterwards**; the export is a background job that Cancel stops, and nothing is written when it
+  **Table of contents**, **Page break after the table of contents** (on; DOCX-013) and **Open the file afterwards**; the export is a background job that Cancel stops, and nothing is written when it
   fails. Shale cleans the note's text (front matter off, embeds by their vault path), pandoc reads it with commonmark and a Lua filter of
   Shale's (highlights, text and background colours, underline, sub- and superscript, strike-through, line breaks, links to notes as their words,
   pictures as wide as in the editor with their captions as alternative text, page breaks, alignment wrappers, the import's title block as Word's
@@ -1308,7 +1321,7 @@ Text editing keys and vim keys are fixed.
 | Ctrl+W | Close tab |
 | Ctrl+Shift+F | Search notes, mail and posts |
 | Ctrl+H / Ctrl+L | Keyboard one place left / right: through the split panes in screen order, left of the first pane into the left sidebar, from there into the first pane (macOS: Cmd+Shift+H / Cmd+Shift+L, because Cmd+H hides the app) |
-| Ctrl+PageUp / Ctrl+PageDown | Previous / next tab (from the last tab on to the first), wherever the keyboard is (macOS: Cmd+Opt+← / Cmd+Opt+→) |
+| Ctrl+PageUp / Ctrl+PageDown, Ctrl+Shift+Tab / Ctrl+Tab | Previous / next tab of the focused pane in the order of the tab bar (from the last tab on to the first), wherever the keyboard is (macOS: Cmd+Opt+← / Cmd+Opt+→ only, Cmd+Tab is the system's) |
 | Ctrl+\ | Split right: open this tab in a new pane to the right (panes sit side by side, each with its own tabs) |
 | F6 / Shift+F6 | Focus the next / previous pane |
 | Ctrl+Shift+W | Close the pane with all its tabs (macOS: Cmd+Shift+W) |
@@ -1358,6 +1371,7 @@ only while no text field has the keyboard. Every key can be changed in Settings 
 | u | Mark read or unread |
 | s or f | Set or clear the flag |
 | d or Delete | Delete (Trash: asks first); in Drafts and Outbox discard the draft or the record |
+| Shift+D | Delete the local copy of a mail that was deleted on the server (the dimmed ones; asks first; the server and imported notes are not touched) |
 | m | Move to a folder |
 | c | Write a new mail |
 | r, Shift+R, Shift+F | Reply, reply all, forward |

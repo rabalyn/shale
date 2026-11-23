@@ -262,7 +262,11 @@ pub fn show(ui: &mut Ui, d: &mut KeyDialog, keys: &mut Keymap) -> bool {
                     }
                     _ => {
                         let text = keys.display(def.action);
-                        ui.label(if keys.is_default(def.action) { RichText::new(text) } else { RichText::new(format!("{text}  (changed)")).color(theme::palette().accent) });
+                        // several keys wrap, so that the buttons stay inside the dialog (KEY-039)
+                        ui.scope(|ui| {
+                            ui.set_max_width(140.0);
+                            ui.add(egui::Label::new(if keys.is_default(def.action) { RichText::new(text) } else { RichText::new(format!("{text}  (changed)")).color(theme::palette().accent) }).wrap());
+                        });
                     }
                 }
                 let buttons = ui.horizontal(|ui| {

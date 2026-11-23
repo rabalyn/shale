@@ -30,7 +30,7 @@ Text editing keys and vim keys are fixed.
 | Ctrl+W | Close tab |
 | Ctrl+Shift+F | Search notes, mail and posts |
 | Ctrl+H / Ctrl+L | Keyboard one place left / right: through the split panes in screen order, left of the first pane into the left sidebar, from there into the first pane (macOS: Cmd+Shift+H / Cmd+Shift+L, because Cmd+H hides the app) |
-| Ctrl+PageUp / Ctrl+PageDown | Previous / next tab (from the last tab on to the first), wherever the keyboard is (macOS: Cmd+Opt+← / Cmd+Opt+→) |
+| Ctrl+PageUp / Ctrl+PageDown, Ctrl+Shift+Tab / Ctrl+Tab | Previous / next tab of the focused pane in the order of the tab bar (from the last tab on to the first), wherever the keyboard is (macOS: Cmd+Opt+← / Cmd+Opt+→ only, Cmd+Tab is the system's) |
 | Ctrl+\ | Split right: open this tab in a new pane to the right (panes sit side by side, each with its own tabs) |
 | F6 / Shift+F6 | Focus the next / previous pane |
 | Ctrl+Shift+W | Close the pane with all its tabs (macOS: Cmd+Shift+W) |
@@ -79,6 +79,7 @@ only while no text field has the keyboard. Every key can be changed in Settings 
 | u | Mark read or unread |
 | s or f | Set or clear the flag |
 | d or Delete | Delete (Trash: asks first); in Drafts and Outbox discard the draft or the record |
+| Shift+D | Delete the local copy of a mail that was deleted on the server (the dimmed ones; asks first; the server and imported notes are not touched) |
 | m | Move to a folder |
 | c | Write a new mail |
 | r, Shift+R, Shift+F | Reply, reply all, forward |
