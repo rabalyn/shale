@@ -10,6 +10,12 @@ its section from this file.
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-11-23
+
+### Fixed
+
+- For developers: the tests that bind a Unix socket do so through a short path, so they pass where the temp folder has a long name (macOS) (#551); the thinning test uses a fixed date, so it passes at any hour (#552), and a paste test builds its expected Windows link the way Shale writes it (#545).
+
 ## [0.7.4] - 2026-11-22
 
 ### Added
@@ -1975,7 +1981,8 @@ First public version (published before releases were tagged).
 - Ctrl+Shift+F always focuses the search box and selects the previous search.
 - File names with `#` work in links.
 
-[Unreleased]: https://github.com/rabalyn/shale/compare/v0.7.4...HEAD
+[Unreleased]: https://github.com/rabalyn/shale/compare/v0.7.5...HEAD
+[0.7.5]: https://github.com/rabalyn/shale/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/rabalyn/shale/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/rabalyn/shale/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/rabalyn/shale/compare/v0.7.1...v0.7.2
