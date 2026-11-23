@@ -53,6 +53,9 @@ fn fill(app: &mut ShaleApp) {
     app.rescan.due_now();
     app.rescan_tick(&ctx);
     assert!(app.rescan.in_flight(), "a scan of the old vault runs");
+    app.tag_learner.forget();
+    app.tag_learner.tick(app.vault.as_ref(), &app.busy);
+    assert!(app.busy.is_running(&crate::import::tagwords::TAG_LEARNING) && app.busy.is_running(&super::rescan::VAULT_RESCAN), "the work of the old vault is listed");
 }
 
 /// Nothing of the old vault is left: what a window that has just been built shows, too.
@@ -73,6 +76,8 @@ fn assert_nothing_of_the_old_vault(app: &mut ShaleApp) {
     assert!(app.graphs.global.show_missing, "the graph is as new");
     assert!(app.usage.places.vault.is_none(), "the data usage does not look at the old vault");
     assert!(!app.rescan.in_flight(), "the scan of the old vault is dropped");
+    // the tasks of that work go with it (JOB-017): a new vault starts its own
+    assert!(!app.busy.is_running(&super::rescan::VAULT_RESCAN) && !app.busy.is_running(&crate::import::tagwords::TAG_LEARNING), "no task of the old vault is listed");
 }
 
 // spec: VAULT-037
@@ -106,7 +111,7 @@ fn vault_037_switching_to_another_vault_shows_nothing_of_the_first() {
     let _ = std::fs::remove_dir_all(&b);
 }
 
-// spec: VAULT-037
+// spec: VAULT-037, JOB-017
 #[test]
 fn vault_037_dropping_the_state_of_a_vault_is_one_function() {
     let b = base("drop");

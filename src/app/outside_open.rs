@@ -3,12 +3,18 @@
 //! (MEDIA-024); a toast says why when nothing was opened.
 
 use super::ShaleApp;
+use crate::busy::{Job, Key};
 use crate::media::outside::{self, Library, Outside, Spot};
-use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, TryRecvError};
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::TryRecvError;
 
-/// An outside file that is being opened: the result of the job, in words when it failed.
-pub type Opening = Receiver<Result<Result<(), String>, String>>;
+/// The task of opening one outside file (MEDIA-017, JOB-018). Several run side by side, one per
+/// file; a second click on the same file while it opens does nothing (JOB-005).
+const OUTSIDE_OPEN: &str = "outside-open";
+
+/// An outside file that is being opened: the job, whose result says in words why it failed. It
+/// cannot be stopped (the system's program is started or it is not), so it has no Cancel.
+pub type Opening = Job<Result<(), String>>;
 
 /// Look the file of an outside link up and open it: what the job of a click does.
 fn open(spot: &Spot, libraries: &[Library]) -> Result<(), String> {
@@ -18,33 +24,53 @@ fn open(spot: &Spot, libraries: &[Library]) -> Result<(), String> {
     }
 }
 
+/// The name of a file to show.
+fn file_name(p: &Path) -> String {
+    p.file_name().map_or_else(|| p.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned())
+}
+
 impl ShaleApp {
     /// Open the file of the library link or file link `spot` with the system's program (MEDIA-017).
     pub(super) fn open_outside(&mut self, spot: Spot) {
         let Some(v) = self.vault.as_ref() else { return };
         let libraries = v.libraries().to_vec();
-        self.open_in_background(move || open(&spot, &libraries));
+        let name = match &spot {
+            Spot::Library { name, rest } => format!("@{name}/{rest}"),
+            Spot::File(p) => p.to_string_lossy().into_owned(),
+        };
+        let shown = match &spot {
+            Spot::Library { rest, .. } => rest.rsplit('/').next().unwrap_or(rest).to_string(),
+            Spot::File(p) => file_name(p),
+        };
+        self.open_in_background(&name, &shown, move || open(&spot, &libraries));
     }
 
     /// Open the outside media file `abs` with the system's program (a video that cannot play here, MEDIA-010).
     pub(super) fn open_outside_file(&mut self, abs: PathBuf) {
-        self.open_in_background(move || crate::opener::open_outside_media(&abs));
+        let (address, shown) = (abs.to_string_lossy().into_owned(), file_name(&abs));
+        self.open_in_background(&address, &shown, move || crate::opener::open_outside_media(&abs));
     }
 
-    fn open_in_background(&mut self, f: impl FnOnce() -> Result<(), String> + Send + 'static) {
+    /// Run `f` as the task "Opening `shown`…"; `address` tells which file it is.
+    fn open_in_background(&mut self, address: &str, shown: &str, f: impl FnOnce() -> Result<(), String> + Send + 'static) {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        address.hash(&mut h);
         let ctx = self.ctx.clone();
-        let job = crate::jobs::spawn(f, move || {
+        let notify = move || {
             if let Some(c) = ctx {
                 c.request_repaint();
             }
-        });
-        self.outside_opens.push(job);
+        };
+        if let Some(job) = self.busy.spawn(Key::numbered(OUTSIDE_OPEN, h.finish()), format!("Opening {shown}…"), f, notify) {
+            self.outside_opens.push(job);
+        }
     }
 
     /// Every frame: say what went wrong with the files that were to be opened.
     pub(crate) fn outside_open_tick(&mut self) {
         let mut done = Vec::new();
-        self.outside_opens.retain(|job| match job.try_recv() {
+        self.outside_opens.retain(|job: &Opening| match job.try_recv() {
             Ok(result) => {
                 done.push(result.and_then(|r| r));
                 false

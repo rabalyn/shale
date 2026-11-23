@@ -18,6 +18,15 @@ and you cannot start it twice by accident.
 - **The mail index is checked as Shale starts** when you have a mail account, even if you have not
   opened the mail view: "Checking the mail index…" shows in the indicator. Open the view meanwhile
   and it shows the same text with a spinner until the check is done.
+- **Things that happen on their own are listed only when they take long.** Reading the vault folder for
+  changes made by other programs ("Reading the vault folder…", on a slow network share), learning which
+  words belong to your tags ("Learning the words of the tags…", **Cancel** stops it) and counting what Shale
+  keeps on this computer show in the indicator after 2 seconds, not before: a quick one is nothing to look at.
+- **Files you drop on the window** ("Reading the dropped files…"), **media copied into the vault** ("Copying
+  media into the vault…", **Cancel** stops it before the next file; the links that were copied stay changed,
+  the others stay as they were), a **file opened with another program** ("Opening ‹name›…", one task per
+  file), the **Clear** and cleanup of a cache in [[Data usage and caches]] ("Clearing the social pictures…")
+  and the look for pandoc and for TeX in Settings all show what they do the same way.
 - **The buttons that would start the same thing again are off** while it runs. Point at one and it
   says what is still running. A key or the timer cannot start it a second time either.
 - **Cancel** stands next to the spinner where the work can be stopped, for example the check of file names
@@ -36,4 +45,5 @@ row of the tabs. With several panes it is at the right of the rightmost one.
 - It is gone when nothing runs.
 
 [[Git sync]] has the git side, [[PDF]] the export, [[Vault settings]] the check of file names.
-Not every long action is on the indicator yet; they are moved one by one.
+Not every long action is on the indicator yet; they are moved one by one. The search over all notes still
+runs in the window itself.

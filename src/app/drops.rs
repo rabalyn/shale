@@ -19,7 +19,19 @@ pub struct DropZone {
 
 /// A running import of dropped things: where its items arrive, and the folder zone it was dropped on
 /// (the folder, and the note inside it if any).
-pub(crate) type PendingDrop = (std::sync::mpsc::Receiver<Result<(Vec<crate::import::Item>, Vec<String>), String>>, Option<(PathBuf, Option<PathBuf>)>);
+pub(crate) struct PendingDrop {
+    rx: DropRead,
+    zone: Option<(PathBuf, Option<PathBuf>)>,
+    // held while the items are read: the read is listed with the other busy tasks (JOB-018)
+    _task: Option<crate::busy::Task>,
+}
+
+/// Where the items of a read arrive: the items and what to tell about them, or why the read failed.
+pub(crate) type DropRead = std::sync::mpsc::Receiver<Result<(Vec<crate::import::Item>, Vec<String>), String>>;
+
+/// The task of one read of dropped things or of stored mails for the Import dialog; several run
+/// side by side, each with its own number.
+const IMPORT_READ: &str = "import-read";
 
 /// The drag-and-drop state of the window: where things can be dropped this frame, what is dragged
 /// over the window, and the drops being read in the background.
@@ -46,6 +58,8 @@ pub(crate) struct DragState {
     pub(crate) pending_drops: Vec<PendingDrop>,
     /// a drop from another program is being read
     pub(crate) drop_busy: bool,
+    /// how many reads were started (the number of the next one's task)
+    reads: u64,
 }
 
 impl DragState {
@@ -59,6 +73,13 @@ impl DragState {
     /// Calendar areas: an event dropped back on them is not imported.
     pub fn add_calendar_area(&mut self, rect: Rect) {
         self.calendar_areas.push(rect);
+    }
+
+    /// Start reading `rx` for the Import dialog as a task with `label`; `zone` is where it was dropped.
+    pub(crate) fn read_started(&mut self, busy: &crate::busy::Busy, label: &str, rx: DropRead, zone: Option<(PathBuf, Option<PathBuf>)>) {
+        self.reads += 1;
+        let task = busy.begin(crate::busy::Key::numbered(IMPORT_READ, self.reads), label);
+        self.pending_drops.push(PendingDrop { rx, zone, _task: task });
     }
 
     pub(crate) fn zone_at(&self, p: Pos2) -> Option<DropZone> {
@@ -183,7 +204,7 @@ impl ShaleApp {
 
     /// Let the tag learner work a step; what it reports is shown as toasts.
     pub fn learn_tags_tick(&mut self) {
-        for m in self.tag_learner.tick(self.vault.as_ref()) {
+        for m in self.tag_learner.tick(self.vault.as_ref(), &self.busy) {
             self.toast(m);
         }
     }
@@ -459,7 +480,7 @@ impl ShaleApp {
                             },
                             move || c.request_repaint(),
                         );
-                        self.drag.pending_drops.push((rx, zone));
+                        self.drag.read_started(&self.busy, "Reading the dropped files…", rx, zone);
                     }
                 }
             }
@@ -470,10 +491,10 @@ impl ShaleApp {
         }
         // finished drops
         let mut done = Vec::new();
-        self.drag.pending_drops.retain(|(rx, zone)| match rx.try_recv() {
+        self.drag.pending_drops.retain(|p| match p.rx.try_recv() {
             Ok(r) => {
                 // a crash while reading the drop ends as a message in the import dialog
-                done.push((r.unwrap_or_else(|e| (vec![], vec![format!("Reading the drop failed: {e}")])), zone.clone()));
+                done.push((r.unwrap_or_else(|e| (vec![], vec![format!("Reading the drop failed: {e}")])), p.zone.clone()));
                 false
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => true,

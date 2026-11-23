@@ -22,14 +22,14 @@ would leave a mess (JOB-006).
 |---|---|---|---|---|
 | Open a vault (`ShaleApp::open_vault_in_background`, `Vault::open`: read and index every note, NET-019) | thread (`app/vault_load.rs`); headless paths (screenshots, tests) read on the calling thread | yes: the result is ignored when it ends | the start screen: spinner, "Opening ‹folder›…" and Cancel | **IS NOW** (NET-019): task `vault-open` |
 | A close or switch of the vault that waits for a running sync (VAULT-036, VAULT-037) | none: a pending action that `vault_leave_tick` carries on each frame once the sync has ended (30 s at most, counted over frames) | yes: Cancel drops it and keeps the vault open | "Waiting for the sync to finish…" with Cancel in the indicator | **IS NOW**: task `vault-leave-wait` |
-| Rescan of the vault folder (every 3 s or longer, NET-013) | thread (`app/rescan.rs`) | no (the next scan is skipped while one runs) | nothing | planned: listed only when a scan takes longer than 2 s ("Reading the vault folder…", a slow network share) |
+| Rescan of the vault folder (every 3 s or longer, NET-013) | thread (`app/rescan.rs`) | no (the next scan is skipped while one runs) | nothing | **IS NOW** (JOB-017): task `vault-rescan`, "Reading the vault folder…", listed only when a scan takes longer than 2 s (a slow network share); no Cancel |
 | Vault check (names and outside links, VAULT-028, MEDIA-022) | thread | yes, between two folders | spinner and "Checking file names and links…" with Cancel, button off | **IS NOW** (JOB-012) |
-| Search in all notes (sidebar, NAV-024) | UI thread, debounced; once per query and vault state (PERF-004) | no | nothing | planned if it is slow in a big vault: the list is made on a thread with "Searching…" |
-| Reading dropped files, looking a mail up in Thunderbird's folders (`app/drops.rs`) | thread | no | the busy flag of the drop zone | planned: "Reading the dropped files…" |
-| Copy the outside media of a note into the vault (MEDIA-021) | thread (`app/outside_copy.rs`) | no | a toast when done | planned: "Copying media into the vault…" |
-| Open an outside media file with the system's program (MEDIA-017) | thread (`app/outside_open.rs`) | no | a busy card in the player | planned: "Opening …" |
-| Tag learning (`import/tagwords.rs`) | thread | no | nothing | planned: listed only after 2 s |
-| Data usage: counting, Clear, Prune (USE) | thread (`data_usage`) | no | "counting…" in the dialog, a spinner at the cache | planned: "Clearing the link previews…" |
+| Search in all notes (sidebar, NAV-024) | UI thread, debounced; once per query and vault state (PERF-004) | no | nothing | planned, not done in #525: the list is to be made on a thread with "Searching…", a newer query dropping the older result; it needs the text of every note (and the mail and post indexes) on the worker, which the vault does not share today (a snapshot per change, or shared texts): a change of its own |
+| Reading dropped files, looking a mail up in Thunderbird's folders (`app/drops.rs`) | thread | no | the hint at the bottom of the window | **IS NOW** (JOB-018): one task per read, "Reading the dropped files…"; no Cancel |
+| Copy the outside media of a note into the vault (MEDIA-021) | thread (`app/outside_copy.rs`) | yes, between two files (the copied ones keep their new links) | a toast when done | **IS NOW** (JOB-018): task `outside-copy`, "Copying media into the vault…", with Cancel |
+| Open an outside media file with the system's program (MEDIA-017) | thread (`app/outside_open.rs`) | no | a busy card in the player | **IS NOW** (JOB-018): one task per file, "Opening ‹name›…"; no Cancel |
+| Tag learning (`import/tagwords.rs`) | thread | yes, between two notes (nothing is written) | nothing | **IS NOW** (JOB-017, JOB-018): task `tag-learning`, "Learning the words of the tags…", listed after 2 s, with Cancel |
+| Data usage: counting, Clear, Prune (USE) | thread (`data_usage`) | no | the task's spinner and text at the cache, "counting…" in the dialog | **IS NOW** (JOB-018): one task per cache ("Clearing the social pictures…", "Cleaning up …"); the two counts and a prune are listed after 2 s; no Cancel |
 | Link preview download (`link_preview.rs`) | thread, one at a time | no (a timeout ends it) | spinner in the preview card | not a task: it belongs to its card |
 | PDF page rendering of the reader (`pdf/view.rs`) | thread | no | spinner in the page | not a task: it belongs to its page |
 | Picture and video loading (`media/widget.rs`) | thread / player | no | spinner in the widget | not a task: it belongs to its widget |
@@ -61,9 +61,9 @@ would leave a mess (JOB-006).
 |---|---|---|---|---|
 | Import dialog: converting Word files with pandoc (IMP) | thread | yes (flag) | "Converting the Word files with pandoc…", Import off | planned: a task; Close lets a started import finish |
 | Import of mails, events, files into notes (`import_action`) | UI thread | no | nothing (usually quick) | planned: a thread when it is more than a few files |
-| Mail import from the mail view (MAIL-070) | thread (`app/mail.rs`) | no | nothing until the dialog opens | planned: "Reading the mails…" |
+| Mail import from the mail view (MAIL-070) | thread (`app/mail.rs`) | no | nothing until the dialog opens | **IS NOW** (JOB-018): "Reading the mails…" (the same read as a drop) |
 | Import of saved web pages from the spool of the browser extension (CLIP-009, CLIP-067, #427) | none yet | no (a half-written clip is worse than a late one; the rest waits in the spool) | not built | planned with the clipper: a task "Importing saved web pages…" on a worker thread (SHOULD BE, CLIP-067) |
-| Pandoc probe, TeX probe (settings) | thread | no | "Looking for TeX on this computer…" | planned: listed only after 2 s |
+| Pandoc probe, TeX probe (settings) | thread | no | the task's spinner and text | **IS NOW** (JOB-018): tasks `pandoc-probe` ("Looking for pandoc…") and `tex-probe` ("Looking for TeX on this computer…"); no Cancel |
 
 ## TeX, updates
 

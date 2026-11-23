@@ -62,7 +62,12 @@ pub fn summary(tasks: &[TaskInfo]) -> String {
 /// number of tasks. Hovering it, or a click that pins it open, lists the tasks with how long they
 /// run and Cancel where the work can stop. Nothing is drawn while nothing runs (JOB-007).
 pub fn indicator(ctx: &egui::Context, busy: &Busy, top_right: Pos2) {
-    let tasks = busy.list();
+    let now = std::time::Instant::now();
+    let tasks = busy.list_at(now);
+    // a task that waits to be listed (JOB-017) brings the indicator when its time has come
+    if let Some(wait) = busy.next_listing(now) {
+        ctx.request_repaint_after(wait);
+    }
     if tasks.is_empty() {
         return;
     }

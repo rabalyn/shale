@@ -370,3 +370,52 @@ fn job_007_the_summary_is_the_text_of_one_task_or_the_number_of_several_and_time
     assert_eq!(ui::summary(&[info("a"), info("b"), info("c")]), "3 tasks running");
     assert_eq!((ui::elapsed(Duration::from_secs(5)), ui::elapsed(Duration::from_secs(59)), ui::elapsed(Duration::from_secs(125))), ("5 s".into(), "59 s".into(), "2 min".into()));
 }
+
+// spec: JOB-017
+#[test]
+fn job_017_a_task_that_waits_to_be_listed_is_running_at_once_and_listed_after_its_time() {
+    let busy = Busy::default();
+    let after = Duration::from_secs(2);
+    let task = busy.begin_listed_after(SYNC, "Reading the vault folder…", after).expect("begins");
+    let started = busy.info(&SYNC).expect("running at once").started;
+    assert!(busy.is_running(&SYNC) && busy.begin(SYNC, "again").is_none(), "the key is taken from the start, a second one is refused (JOB-005)");
+    // the clock is given: nothing sleeps
+    assert!(busy.list_at(started).is_empty(), "not listed at the start");
+    assert!(busy.list_at(started + Duration::from_millis(1999)).is_empty(), "not listed just before its time");
+    let listed = busy.list_at(started + after);
+    assert_eq!(listed.iter().map(|t| t.label.as_str()).collect::<Vec<_>>(), ["Reading the vault folder…"], "listed when its time has come");
+    assert_eq!(busy.next_listing(started), Some(after), "the indicator wakes when the time has come");
+    assert_eq!(busy.next_listing(started + after), None, "nothing waits any more");
+    // an ordinary task has no wait
+    let other = busy.begin(OTHER, "Working…").expect("begins");
+    assert_eq!(busy.list_at(started + Duration::from_millis(1)).len(), 1, "an ordinary task is listed from its start");
+    drop((task, other));
+    assert!(busy.list_at(started + after).is_empty() && busy.next_listing(started).is_none(), "a task that ended leaves nothing");
+}
+
+// spec: JOB-017
+#[test]
+fn job_017_runs_of_one_action_with_their_own_number_go_side_by_side_and_the_same_number_is_refused() {
+    let busy = Busy::default();
+    let one = busy.begin(Key::numbered("test-open", 1), "Opening a.mp4…").expect("begins");
+    let two = busy.begin(Key::numbered("test-open", 2), "Opening b.mp4…").expect("another file runs next to it");
+    assert!(busy.begin(Key::numbered("test-open", 1), "Opening a.mp4…").is_none(), "the same file twice is refused");
+    assert_eq!(busy.list().len(), 2);
+    drop(one);
+    assert!(busy.begin(Key::numbered("test-open", 1), "Opening a.mp4…").is_some(), "free again when it ended");
+    drop(two);
+}
+
+// spec: JOB-017
+#[test]
+fn job_017_the_indicator_draws_nothing_for_a_task_that_waits_and_asks_to_be_drawn_again_for_its_time() {
+    let ctx = egui::Context::default();
+    let busy = Busy::default();
+    let _task = busy.begin_listed_after(SYNC, "Learning the words of the tags…", Duration::from_secs(3600)).expect("begins");
+    let mut out = ctx.run_ui(RawInput::default(), |ui| ui::indicator(ui.ctx(), &busy, Pos2::new(600.0, 10.0)));
+    out.textures_delta.clear();
+    let drawn = out.shapes.iter().any(|s| matches!(&s.shape, egui::epaint::Shape::Text(_)));
+    assert!(!drawn, "nothing is drawn while the task waits");
+    let delay = out.viewport_output.values().map(|v| v.repaint_delay).min().expect("a viewport");
+    assert!(delay <= Duration::from_secs(3600), "the window comes back when the time has come: {delay:?}");
+}

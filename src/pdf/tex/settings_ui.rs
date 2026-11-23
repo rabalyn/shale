@@ -13,6 +13,13 @@ use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
+/// The task of the look for TeX (TEX-001, JOB-018). It cannot be stopped: it runs a few programs
+/// with `--version`.
+pub const TEX_PROBE: crate::busy::Key = crate::busy::Key::new("tex-probe");
+
+/// What the look for TeX says it does.
+pub const TEX_PROBE_TEXT: &str = "Looking for TeX on this computer…";
+
 /// What the person is told after a job.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Notice {
@@ -60,7 +67,9 @@ pub struct TexState {
     /// What detection found, until something changes it.
     pub detection: Option<Detection>,
     /// The look for TeX that runs (a job), if any.
-    pub(super) detecting: Option<Receiver<Result<Detection, String>>>,
+    pub(super) detecting: Option<(Receiver<Result<Detection, String>>, crate::busy::Task)>,
+    /// the registry that lists the look for TeX (the window's, set by `ShaleApp`)
+    pub busy: crate::busy::Busy,
     pub task: Option<Task>,
     /// The person pressed Install and has not agreed yet.
     pub consent: bool,
@@ -88,12 +97,12 @@ impl TexState {
             let fake = std::env::var_os("SHALE_FAKE_DATA_DIR").map(PathBuf::from);
             (Some(fake.unwrap_or_else(|| std::env::temp_dir().join(format!("shale-texdata-{tag}-{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst))))), None)
         };
-        TexState { data, path_var, detection: None, detecting: None, task: None, consent: false, confirm_remove: false, notice: None, sets: Default::default(), setup: Default::default(), setup_requested: false }
+        TexState { data, path_var, detection: None, detecting: None, busy: Default::default(), task: None, consent: false, confirm_remove: false, notice: None, sets: Default::default(), setup: Default::default(), setup_requested: false }
     }
 
     /// Take what the jobs have finished; call it every frame.
     pub fn poll(&mut self, ctx: &Context) {
-        if let Some(rx) = &self.detecting {
+        if let Some((rx, _)) = &self.detecting {
             if let Ok(r) = rx.try_recv() {
                 self.detecting = None;
                 match r {
@@ -138,7 +147,8 @@ impl TexState {
         self.detection = None;
         let (data, path) = (self.data.clone(), self.path_var.clone());
         let ctx = ctx.clone();
-        self.detecting = Some(crate::jobs::spawn(move || engine::detect(data.as_deref(), path.as_deref()), move || ctx.request_repaint()));
+        let Some(task) = self.busy.begin(TEX_PROBE, TEX_PROBE_TEXT) else { return };
+        self.detecting = Some((crate::jobs::spawn(move || engine::detect(data.as_deref(), path.as_deref()), move || ctx.request_repaint()), task));
     }
 
     /// Start a job of the page; its answer is a notice.
@@ -227,10 +237,7 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &mut TexConfig) -> bool {
     theme::section(ui, "Which TeX is used");
     match (&st.detection, st.detecting.is_some()) {
         (_, true) | (None, _) => {
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label("Looking for a TeX…");
-            });
+            crate::busy::ui::status(ui, &st.busy, &TEX_PROBE);
         }
         (Some(d), false) => match d.selected(cfg.engine) {
             Ok(e) => {
@@ -265,7 +272,8 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &mut TexConfig) -> bool {
     });
     crate::settings::anchor::anchor(ui, "tex.test", |ui| {
         ui.horizontal(|ui| {
-            if ui.add_enabled(st.detecting.is_none() && st.task.is_none(), egui::Button::new("Check again")).on_hover_text("Look for a TeX again").clicked() {
+            let again = ui.add_enabled_ui(st.task.is_none(), |ui| crate::busy::ui::button(ui, &st.busy, &[&TEX_PROBE], egui::Button::new("Check again"))).inner;
+            if again.on_hover_text("Look for a TeX again").clicked() {
                 st.check_again(&ctx);
             }
             let engine = st.detection.as_ref().and_then(|d| d.selected(cfg.engine).ok()).cloned();

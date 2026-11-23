@@ -291,11 +291,25 @@ pub fn learn(docs: &[(BTreeSet<String>, Vec<String>)]) -> TagWords {
     out
 }
 
-/// Learn from the vault's notes (tags from `#tags` and the properties).
-pub fn learn_from_vault(notes: &[(String, Vec<String>)]) -> TagWords {
-    let docs: Vec<(BTreeSet<String>, Vec<String>)> = notes.iter().map(|(text, tags)| (words(text), tags.clone())).collect();
-    learn(&docs)
+/// Learn from the vault's notes (tags from `#tags` and the properties). `None`: `cancel` was
+/// asked for, checked between two notes, and nothing was learned.
+pub fn learn_from_vault(notes: &[(String, Vec<String>)], cancel: &crate::busy::Cancel) -> Option<TagWords> {
+    let mut docs: Vec<(BTreeSet<String>, Vec<String>)> = Vec::with_capacity(notes.len());
+    for (text, tags) in notes {
+        if cancel.is_cancelled() {
+            return None;
+        }
+        docs.push((words(text), tags.clone()));
+    }
+    Some(learn(&docs))
 }
+
+/// The task of learning the words of the tags (TAG-003, JOB-018).
+pub const TAG_LEARNING: crate::busy::Key = crate::busy::Key::new("tag-learning");
+
+/// Learning is listed in the busy indicator only when it takes this long: it runs on its own
+/// every two minutes after a change, and a small vault is done in a moment.
+pub const LISTED_AFTER: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Tags whose typical words are in the text: (tag, the words that matched), best first.
 pub fn suggest(tw: &TagWords, text: &str, skip: &[String]) -> Vec<(String, Vec<String>)> {
@@ -336,13 +350,20 @@ pub fn save(vault_root: &std::path::Path, tw: &TagWords) -> std::io::Result<()> 
 pub struct TagLearner {
     /// words typical for each tag (learned from the vault)
     pub words: Option<TagWords>,
-    job: Option<std::sync::mpsc::Receiver<Result<TagWords, String>>>,
+    job: Option<Learning>,
     /// the vault the words belong to
     root: Option<std::path::PathBuf>,
     /// the vault generation the last job started for
     pub(crate) generation: u64,
     /// when the last job started
     at: Option<std::time::Instant>,
+}
+
+/// The running job: its result, and the task that keeps it listed (and ends with it, also when the
+/// vault changes and the learner is dropped, VAULT-037).
+struct Learning {
+    rx: std::sync::mpsc::Receiver<Result<Option<TagWords>, String>>,
+    _task: crate::busy::Task,
 }
 
 impl TagLearner {
@@ -378,15 +399,17 @@ impl TagLearner {
 
     /// Learn the words again now and then (in the background), and keep them in the vault.
     /// Returns what went wrong, for the person to see.
-    pub fn tick(&mut self, vault: Option<&crate::vault::Vault>) -> Vec<String> {
+    pub fn tick(&mut self, vault: Option<&crate::vault::Vault>, busy: &crate::busy::Busy) -> Vec<String> {
         let mut problems = Vec::new();
-        if let Some(rx) = &self.job {
-            match rx.try_recv() {
+        if let Some(l) = &self.job {
+            match l.rx.try_recv() {
                 Ok(Err(e)) => {
                     self.job = None;
                     problems.push(format!("Learning tag words failed: {e}"));
                 }
-                Ok(Ok(tw)) => {
+                // cancelled: nothing is written, and the words are learned again after the next change of the vault
+                Ok(Ok(None)) => self.job = None,
+                Ok(Ok(Some(tw))) => {
                     let saved = vault.map(|v| save(&v.root, &tw));
                     if let Some(Err(e)) = saved {
                         problems.push(format!("Could not save the tag words: {e}"));
@@ -407,10 +430,13 @@ impl TagLearner {
             self.at = None;
         }
         if self.due(v) {
-            self.generation = v.generation;
-            self.at = Some(std::time::Instant::now());
-            let notes: Vec<(String, Vec<String>)> = v.notes.values().map(|n| (n.text.clone(), n.tags.clone())).collect();
-            self.job = Some(crate::jobs::spawn(move || learn_from_vault(&notes), || {}));
+            if let Some(mut task) = busy.begin_listed_after(TAG_LEARNING, "Learning the words of the tags…", LISTED_AFTER) {
+                let cancel = task.cancellable();
+                self.generation = v.generation;
+                self.at = Some(std::time::Instant::now());
+                let notes: Vec<(String, Vec<String>)> = v.notes.values().map(|n| (n.text.clone(), n.tags.clone())).collect();
+                self.job = Some(Learning { rx: crate::jobs::spawn(move || learn_from_vault(&notes, &cancel), || {}), _task: task });
+            }
         }
         problems
     }
@@ -457,5 +483,76 @@ mod tests {
         save(&d, &tw).unwrap();
         assert_eq!(load(&d), Some(tw));
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    use crate::busy::{Busy, Cancel};
+    use std::time::Duration;
+
+    fn vault_with_notes(tag: &str) -> (crate::vault::Vault, std::path::PathBuf) {
+        let d = std::env::temp_dir().join(format!("shale-tagwords-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        for (name, text) in [("A.md", "Beamer Projektor Leinwand #av"), ("B.md", "Projektor Leinwand Kabel #av")] {
+            std::fs::write(d.join(name), text).unwrap();
+        }
+        (crate::vault::Vault::open(&d).unwrap(), d)
+    }
+
+    // spec: TAG-003, JOB-018
+    #[test]
+    fn tag_003_learning_is_a_task_that_is_listed_after_two_seconds_and_ends_with_the_job() {
+        let (v, d) = vault_with_notes("task");
+        let busy = Busy::default();
+        let mut learner = TagLearner::new();
+        learner.tick(Some(&v), &busy);
+        let info = busy.info(&TAG_LEARNING).expect("learning is a task from its start");
+        assert_eq!((info.label.as_str(), info.cancellable), ("Learning the words of the tags…", true));
+        // the clock is given: it is quick, so it is not shown at first, and shown when it has taken long
+        assert!(busy.list_at(info.started + Duration::from_millis(1999)).is_empty());
+        assert_eq!(busy.list_at(info.started + LISTED_AFTER).iter().map(|t| t.label.as_str()).collect::<Vec<_>>(), ["Learning the words of the tags…"]);
+        // one at a time
+        assert!(busy.begin(TAG_LEARNING, "again").is_none());
+        let start = std::time::Instant::now();
+        while busy.is_running(&TAG_LEARNING) {
+            assert!(start.elapsed() < Duration::from_secs(20), "learning ends");
+            assert!(learner.tick(Some(&v), &busy).is_empty());
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(file_in(&d).exists(), "the words are written when the task has ended");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: TAG-003, JOB-006, JOB-018
+    #[test]
+    fn tag_003_a_cancelled_learning_writes_nothing_and_ends_its_task() {
+        let (v, d) = vault_with_notes("cancel");
+        let busy = Busy::default();
+        let mut learner = TagLearner::new();
+        // a learner that has seen this vault and is not due: the job below is the one that runs
+        learner.root = Some(v.root.clone());
+        learner.generation = v.generation;
+        learner.at = Some(std::time::Instant::now());
+        let mut task = busy.begin_listed_after(TAG_LEARNING, "Learning the words of the tags…", LISTED_AFTER).unwrap();
+        let cancel = task.cancellable();
+        let (tx, rx) = std::sync::mpsc::channel();
+        learner.job = Some(Learning { rx, _task: task });
+        assert!(busy.cancel(busy.info(&TAG_LEARNING).unwrap().id), "Cancel reaches the job");
+        assert!(cancel.is_cancelled());
+        // the job ends early, with nothing
+        tx.send(Ok(None)).unwrap();
+        assert!(learner.tick(Some(&v), &busy).is_empty(), "no message for a Cancel the person asked for");
+        assert!(learner.words.is_none() && !learner.running() && !busy.is_running(&TAG_LEARNING));
+        assert!(!file_in(&d).exists(), "nothing is written");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: TAG-003, JOB-006, JOB-018
+    #[test]
+    fn tag_003_learning_looks_at_the_cancel_token_between_two_notes() {
+        let notes = vec![("Projektor Leinwand".to_string(), vec!["av".to_string()]), ("Projektor Leinwand Kabel".to_string(), vec!["av".to_string()])];
+        assert!(learn_from_vault(&notes, &Cancel::default()).is_some_and(|t| t.notes == 2));
+        let stop = Cancel::default();
+        stop.cancel();
+        assert_eq!(learn_from_vault(&notes, &stop), None, "a cancelled learning has learned nothing");
     }
 }

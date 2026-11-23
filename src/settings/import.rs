@@ -4,6 +4,7 @@
 
 use super::anchor::anchor;
 use crate::app::{muted, ShaleApp};
+use crate::busy::{Busy, Key, Task};
 use crate::import::docx;
 use crate::theme;
 use eframe::egui::{self, Ui};
@@ -27,17 +28,25 @@ pub enum Probe {
     Missing,
 }
 
+/// The task of the look for pandoc (IMP-036, JOB-018). It cannot be stopped: it runs
+/// `pandoc --version`.
+pub const PANDOC_PROBE: Key = Key::new("pandoc-probe");
+
 /// The state of the page: the last result and the look that is running.
 #[derive(Default)]
 pub struct WordProbe {
     pub result: Option<Probe>,
-    job: Option<Receiver<Result<Probe, String>>>,
+    job: Option<(Receiver<Result<Probe, String>>, Task)>,
+    /// the registry that lists the look (the window's, set by `ShaleApp`)
+    pub busy: Busy,
 }
 
 impl WordProbe {
     /// Look for pandoc (the program `chosen` in the settings, empty: the search) in a job.
     pub fn start(&mut self, chosen: String) {
-        self.job = Some(crate::jobs::spawn(
+        self.job = None;
+        let Some(task) = self.busy.begin(PANDOC_PROBE, "Looking for pandoc…") else { return };
+        let rx = crate::jobs::spawn(
             move || match docx::locate(&chosen) {
                 None => Probe::Missing,
                 Some(path) => match docx::version(&path) {
@@ -46,12 +55,13 @@ impl WordProbe {
                 },
             },
             || {},
-        ));
+        );
+        self.job = Some((rx, task));
     }
 
     /// Take the result of the job when it has ended.
     pub fn poll(&mut self) {
-        let Some(rx) = &self.job else { return };
+        let Some((rx, _)) = &self.job else { return };
         match rx.try_recv() {
             Ok(r) => {
                 self.result = Some(r.unwrap_or_else(|e| Probe::Broken { path: PathBuf::new(), error: e }));
@@ -174,7 +184,7 @@ impl ShaleApp {
         });
         match (&self.word.result, self.word.running()) {
             (_, true) => {
-                ui.label(muted("Looking for pandoc…"));
+                crate::busy::ui::status(ui, &self.word.busy, &PANDOC_PROBE);
                 ui.ctx().request_repaint_after(Duration::from_millis(100));
             }
             (Some(Probe::Found { path, version }), false) => {
@@ -205,9 +215,32 @@ impl ShaleApp {
                 }
             });
         });
-        if ui.add_enabled(!self.word.running(), egui::Button::new("Check again")).on_hover_text("Look for pandoc again, for example after installing it").clicked() {
+        if crate::busy::ui::button(ui, &self.word.busy, &[&PANDOC_PROBE], egui::Button::new("Check again")).on_hover_text("Look for pandoc again, for example after installing it").clicked() {
             self.word.start(self.cfg.pandoc_path.clone());
         }
         changed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // spec: IMP-036, JOB-018
+    #[test]
+    fn the_look_for_pandoc_is_a_task_that_ends_when_its_result_is_in_and_never_runs_twice() {
+        let busy = Busy::default();
+        let mut probe = WordProbe { busy: busy.clone(), ..WordProbe::default() };
+        probe.start("/nonexistent/folder/pandoc".to_string());
+        let info = busy.info(&PANDOC_PROBE).expect("the look is a task");
+        assert_eq!((info.label.as_str(), info.cancellable), ("Looking for pandoc…", false));
+        assert!(probe.running() && busy.begin(PANDOC_PROBE, "again").is_none(), "one look at a time");
+        let start = std::time::Instant::now();
+        while probe.running() {
+            assert!(start.elapsed() < Duration::from_secs(20), "the look ends");
+            probe.poll();
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(probe.result.is_some() && !busy.is_running(&PANDOC_PROBE), "the task is gone when the result is in");
     }
 }
