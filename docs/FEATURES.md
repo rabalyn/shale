@@ -967,10 +967,13 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   tick box and, with several matches, a choice (IMP-068); the folder of the import follows the matched
   note unless a folder was dropped on or typed (IMP-069). Ticked, the new note gets `previous` / `next`
   links in date order and the last note of the thread its `next`: one line of one other note (IMP-070). An
-  older mail asks "Keep the thread in date order?" with **Update** or **Leave the chain**; an import never
+  older mail asks "Keep the thread in date order?" with **Update** or **Leave the chain**; one mail never
   rewrites more than two other notes, open notes are saved first (IMP-071). The new note and the neighbour
   lines are one history snapshot (IMP-072); a rename keeps the chain because `previous` and `next` are
   links, and old notes with only a `message-id` still match as the parent (IMP-073).
+  A whole thread dropped at once is chained in date order together with the notes of the vault (IMP-074): an item
+  that continues another item shows "Continues: <title> (in this import)", the question for older mails is asked
+  once per thread, and notes of the vault change only their `previous` / `next` line.
 - **A saved post continues its conversation the same way** (ADR-0032, #575). A post note has `in-reply-to`
   and `thread-id` (the root of the conversation as the network gives it, else the post replied to, else the
   post's own id) besides `post-id` and `network` (SOC-070). The Import dialog offers "Continues [[note]]" for

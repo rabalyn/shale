@@ -202,38 +202,41 @@ const OUTSIDE_CHOICES: [(&str, &str, Choice, &str); 2] =
 
 /// "Continues [[note]]" of a mail or post that answers a note of the vault (IMP-068, SOC-071): the tick box, the
 /// choice when several notes qualify and, when the mail is older than a note of its thread, the
-/// question "Keep the thread in date order?" (IMP-071). True when the choice that decides the
-/// folder changed (IMP-069).
-fn continues_line(ui: &mut Ui, i: usize, c: &mut import::Continues, rec: &mut impl FnMut(String, egui::Response) -> egui::Response) -> bool {
+/// question "Keep the thread in date order?" (IMP-071), asked on one item per thread of the batch
+/// (`ask`: how many notes it changes, IMP-074). Another item of the same import is named by its
+/// title and "(in this import)". True when the choice that decides the folder changed (IMP-069).
+fn continues_line(ui: &mut Ui, i: usize, c: &mut import::Continues, titles: &[String], ask: Option<usize>, rec: &mut impl FnMut(String, egui::Response) -> egui::Response) -> bool {
     let name = |p: &std::path::Path| p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let label = |p: &std::path::Path| match crate::thread::item_of(p) {
+        Some(k) => format!("{} (in this import)", titles.get(k).map(String::as_str).unwrap_or_default()),
+        None => format!("[[{}]]", name(p)),
+    };
     let (was_on, was) = (c.on, c.chosen);
     ui.horizontal_wrapped(|ui| {
         rec(format!("continues:{i}"), ui.checkbox(&mut c.on, egui::RichText::new("Continues").size(12.5)))
             .on_hover_text("Found by the reply headers of the mail or the reply ids of the post (never the subject or the text). Ticked: the new note is linked into the thread (previous and next) and goes in the folder of that note. Unticked: it gets its ids only and no other note is touched");
         if c.candidates.len() > 1 {
-            let label = c.anchor().map(name).unwrap_or_default();
-            egui::ComboBox::from_id_salt(format!("continues-pick:{i}")).selected_text(format!("[[{label}]]")).show_ui(ui, |ui| {
+            let shown = c.anchor().map(label).unwrap_or_default();
+            egui::ComboBox::from_id_salt(format!("continues-pick:{i}")).selected_text(shown).show_ui(ui, |ui| {
                 for (k, cand) in c.candidates.iter().enumerate() {
-                    rec(format!("continues-pick:{i}:{k}"), ui.selectable_value(&mut c.chosen, k, format!("[[{}]]  {}", name(&cand.rel), cand.date_key))).on_hover_text(cand.rel.to_string_lossy());
+                    rec(format!("continues-pick:{i}:{k}"), ui.selectable_value(&mut c.chosen, k, format!("{}  {}", label(&cand.rel), cand.date_key))).on_hover_text(cand.rel.to_string_lossy());
                 }
             });
         } else if let Some(a) = c.anchor() {
-            ui.label(egui::RichText::new(format!("[[{}]]", name(a))).size(12.5).color(theme::palette().link)).on_hover_text(a.to_string_lossy());
+            let colour = if crate::thread::item_of(a).is_some() { theme::palette().text } else { theme::palette().link };
+            ui.label(egui::RichText::new(label(a)).size(12.5).color(colour)).on_hover_text(a.to_string_lossy());
         }
     });
-    if c.on {
-        if let Some(plan) = c.plan().filter(|p| p.is_older()) {
-            let n = plan.changes();
-            ui.horizontal_wrapped(|ui| {
-                ui.label(egui::RichText::new(format!("Keep the thread in date order? This changes the previous and next of {n} note{}.", if n == 1 { "" } else { "s" })).size(12.0).color(theme::palette().muted));
-                if rec(format!("continues-update:{i}"), ui.selectable_label(c.update, "Update")).on_hover_text("Insert it at its place: it gets both links and its neighbours get a new next / previous line").clicked() {
-                    c.update = true;
-                }
-                if rec(format!("continues-leave:{i}"), ui.selectable_label(!c.update, "Leave the chain")).on_hover_text("Write it without previous and next; no other note is touched").clicked() {
-                    c.update = false;
-                }
-            });
-        }
+    if let (true, Some(n)) = (c.on, ask) {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(egui::RichText::new(format!("Keep the thread in date order? This changes the previous and next of {n} note{}.", if n == 1 { "" } else { "s" })).size(12.0).color(theme::palette().muted));
+            if rec(format!("continues-update:{i}"), ui.selectable_label(c.update, "Update")).on_hover_text("Insert it at its place: it gets both links and its neighbours get a new next / previous line").clicked() {
+                c.update = true;
+            }
+            if rec(format!("continues-leave:{i}"), ui.selectable_label(!c.update, "Leave the chain")).on_hover_text("Write it without previous and next; no other note is touched").clicked() {
+                c.update = false;
+            }
+        });
     }
     c.on != was_on || c.chosen != was
 }
@@ -252,6 +255,8 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
         crate::theme::prose(ui, muted("Nothing to import yet. Drop e-mails, calendar events, pictures or other files on the window, or add a file below."));
     }
     let outside: Vec<bool> = d.items.iter().map(|it| it.outside_media(&d.root)).collect();
+    let titles: Vec<String> = d.items.iter().map(|it| it.title.clone()).collect();
+    let questions = import::older_questions(&d.items);
     let mut refollow = false;
     for (i, it) in d.items.iter_mut().enumerate() {
         let outside_media = outside[i];
@@ -317,7 +322,7 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
             }
             let mut follow = false;
             if let Some(c) = &mut it.continues {
-                follow = continues_line(ui, i, c, &mut rec);
+                follow = continues_line(ui, i, c, &titles, questions.get(&c.group).filter(|(first, _)| *first == i).map(|(_, n)| *n), &mut rec);
             }
             if follow {
                 refollow = true;

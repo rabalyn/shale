@@ -106,6 +106,64 @@ impl Ident {
     }
 }
 
+/// The stand-in path of item `i` of an import batch where a note's path is expected (IMP-074): it
+/// starts with a NUL, which no file name does.
+pub fn item_path(i: usize) -> PathBuf {
+    PathBuf::from(format!("\0import-item/{i}"))
+}
+
+/// The number of the batch item a stand-in path ([`item_path`]) names; `None` for a path of the vault.
+pub fn item_of(p: &Path) -> Option<usize> {
+    p.to_str()?.strip_prefix("\0import-item/")?.parse().ok()
+}
+
+/// A place in the plan of a batch: a note of the vault or an item that is being imported.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Node {
+    Note(PathBuf),
+    Item(usize),
+}
+
+/// An item of a batch that takes part in the chain: its number, its ids and the note of the vault
+/// it continues (an old note without a `thread-id` takes part by that).
+#[derive(Clone, Debug)]
+pub struct Entry {
+    pub item: usize,
+    pub ident: Ident,
+    pub anchor: Option<PathBuf>,
+}
+
+/// One thread of a batch: the items of it, and the links of its chain that involve a new note.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GroupPlan {
+    pub items: Vec<usize>,
+    /// `(a, b)`: `a` comes right before `b`; at least one of them is an item
+    pub links: Vec<(Node, Node)>,
+    /// an item comes before a note of the vault: the chain changes in the middle (IMP-071)
+    pub older: bool,
+}
+
+fn related(a: &Ident, b: &Ident) -> bool {
+    let names = |x: &Ident, y: &Ident| !x.id.is_empty() && (y.in_reply_to == x.id || y.references.contains(&x.id));
+    a.network == b.network && ((!a.thread_id().is_empty() && a.thread_id() == b.thread_id()) || names(a, b) || names(b, a))
+}
+
+/// The thread of each item of a batch, as the smallest item number of the thread: items are of one
+/// thread when they share the root, or one names the other's id. Only ids, never a subject. The
+/// result is in the order of `items` (pairs of the item's number and its ids).
+pub fn components(items: &[(usize, Ident)]) -> Vec<usize> {
+    let mut group: Vec<usize> = (0..items.len()).collect();
+    for i in 0..items.len() {
+        for j in 0..i {
+            if related(&items[i].1, &items[j].1) {
+                let (from, to) = (group[i].max(group[j]), group[i].min(group[j]));
+                group.iter_mut().filter(|g| **g == from).for_each(|g| *g = to);
+            }
+        }
+    }
+    group.into_iter().map(|g| items[g].0).collect()
+}
+
 /// A note that continues the item: found by the reply headers (IMP-068).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Candidate {
@@ -127,11 +185,6 @@ impl Plan {
     pub fn is_older(&self) -> bool {
         self.next.is_some()
     }
-
-    /// How many other notes the plan rewrites: the neighbours.
-    pub fn changes(&self) -> usize {
-        usize::from(self.previous.is_some()) + usize::from(self.next.is_some())
-    }
 }
 
 /// The notes of a vault that carry thread data, built once per import and once per change of the
@@ -145,6 +198,25 @@ impl Index {
     pub fn build(vault: &Vault) -> Index {
         let mut notes: Vec<(PathBuf, Meta)> = vault.notes.iter().filter(|(p, _)| !vault.is_shadow_copy(p)).filter_map(|(p, n)| n.thread.as_ref().map(|m| (p.clone(), (**m).clone()))).collect();
         notes.sort_by(|a, b| a.0.cmp(&b.0));
+        Index { notes }
+    }
+
+    /// This index with the items of a batch added as notes at their stand-in paths ([`item_path`]),
+    /// so that an item is matched against the other items like against the notes (IMP-074).
+    pub fn with_items(&self, items: &[(usize, Ident)]) -> Index {
+        let mut notes = self.notes.clone();
+        for (i, it) in items {
+            let meta = Meta {
+                ids: Some(it.id.clone()).filter(|id| !id.is_empty()).into_iter().collect(),
+                in_reply_to: it.in_reply_to.clone(),
+                references: it.references.clone(),
+                thread_id: it.thread_id(),
+                network: it.network.clone(),
+                date_key: it.date_key.clone(),
+                who: String::new(),
+            };
+            notes.push((item_path(*i), meta));
+        }
         Index { notes }
     }
 
@@ -203,6 +275,41 @@ impl Index {
         members.retain(|(_, m)| item.id.is_empty() || !m.ids.contains(&item.id));
         let at = members.partition_point(|(_, m)| (m.date_key.as_str(), m.id()) < (item.date_key.as_str(), item.id.as_str()));
         Plan { previous: at.checked_sub(1).map(|i| members[i].0.clone()), next: members.get(at).map(|(p, _)| (*p).clone()) }
+    }
+
+    /// The chain of a whole batch (IMP-074): the items of one thread and the notes of the vault of
+    /// that thread (and the notes the items continue) in one date order, ties by id text. The
+    /// links are the neighbours in that order that involve a new note; two notes of the vault that
+    /// are neighbours stay as they are. A copy of a message of the batch in the vault is no
+    /// neighbour. Threads without a link are left out.
+    pub fn plan_batch(&self, entries: &[Entry]) -> Vec<GroupPlan> {
+        let pairs: Vec<(usize, Ident)> = entries.iter().map(|e| (e.item, e.ident.clone())).collect();
+        let comp = components(&pairs);
+        let mut ids = comp.clone();
+        ids.sort_unstable();
+        ids.dedup();
+        let mut plans = Vec::new();
+        for g in ids {
+            let members: Vec<&Entry> = entries.iter().zip(&comp).filter(|(_, c)| **c == g).map(|(e, _)| e).collect();
+            let mut seq: Vec<(&str, &str, Node)> = Vec::new();
+            for (rel, m) in &self.notes {
+                let same_thread = !m.thread_id.is_empty() && members.iter().any(|e| e.ident.network == m.network && e.ident.thread_id() == m.thread_id);
+                let anchor = members.iter().any(|e| e.anchor.as_deref() == Some(rel.as_path()));
+                let copy = members.iter().any(|e| !e.ident.id.is_empty() && m.ids.contains(&e.ident.id));
+                if (same_thread || anchor) && !copy {
+                    seq.push((m.date_key.as_str(), m.id(), Node::Note(rel.clone())));
+                }
+            }
+            seq.extend(members.iter().map(|e| (e.ident.date_key.as_str(), e.ident.id.as_str(), Node::Item(e.item))));
+            seq.sort();
+            let links: Vec<(Node, Node)> = seq.windows(2).filter(|w| matches!(w[0].2, Node::Item(_)) || matches!(w[1].2, Node::Item(_))).map(|w| (w[0].2.clone(), w[1].2.clone())).collect();
+            if links.is_empty() {
+                continue;
+            }
+            let older = links.iter().any(|(a, b)| matches!((a, b), (Node::Item(_), Node::Note(_))));
+            plans.push(GroupPlan { items: members.iter().map(|e| e.item).collect(), links, older });
+        }
+        plans
     }
 
     /// The thread of the note `rel` for the overview (NAV-070): its notes oldest first, ties by id.
