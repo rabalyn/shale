@@ -356,7 +356,9 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   moving still just selects the tab, and the ✕ or a middle click closes it.
 - Right-click a tab and choose **Pin tab** (or **Unpin tab**): pinned tabs move to the far left,
   show a small pin and keep their order. Drag reorders pinned tabs among themselves and the
-  others among themselves, never across the border. A pinned tab can still be closed.
+  others among themselves, never across the border. A pinned tab can still be closed. A pinned tab is
+  never replaced: opening a note any way (an import, a link, a search result, the quick switcher, the
+  file tree, back and forward) opens it in a new tab instead.
 - The order of all open tabs (notes, drawings and Feeds tabs) and which of them are pinned come
   back at the next start.
 

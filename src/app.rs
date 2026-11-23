@@ -1047,6 +1047,9 @@ impl ShaleApp {
         self.show_view(view, new_tab);
     }
 
+    /// Show `view`: the one way every note, drawing and view is opened (NAV-062). A tab that is
+    /// pinned is never replaced: the view opens in a new tab instead, so an import, a followed link,
+    /// a search result, the quick switcher, the file tree or the history never take its place.
     pub fn show_view(&mut self, view: View, new_tab: bool) {
         if self.tabbar.tabs.is_empty() || new_tab {
             self.tabbar.new_tab(view);
@@ -1065,6 +1068,10 @@ impl ShaleApp {
             return;
         }
         let tab = &mut self.tabbar.tabs[self.tabbar.active];
+        if tab.pinned && tab.view != view {
+            self.tabbar.new_tab(view);
+            return;
+        }
         if tab.view != view {
             let old = std::mem::replace(&mut tab.view, view);
             if old != View::Empty {
@@ -2415,6 +2422,14 @@ impl ShaleApp {
     }
 
     pub fn go_back(&mut self) {
+        // a pinned tab is never navigated away from (NAV-062): the earlier view opens beside it
+        if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active).filter(|t| t.pinned) {
+            if let Some(prev) = t.back.last().cloned() {
+                self.tabbar.new_tab(prev);
+                self.remember_open_files();
+            }
+            return;
+        }
         if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active) {
             if let Some(prev) = t.back.pop() {
                 let cur = std::mem::replace(&mut t.view, prev);
@@ -2425,6 +2440,13 @@ impl ShaleApp {
     }
 
     pub fn go_forward(&mut self) {
+        if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active).filter(|t| t.pinned) {
+            if let Some(next) = t.fwd.last().cloned() {
+                self.tabbar.new_tab(next);
+                self.remember_open_files();
+            }
+            return;
+        }
         if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active) {
             if let Some(next) = t.fwd.pop() {
                 let cur = std::mem::replace(&mut t.view, next);
