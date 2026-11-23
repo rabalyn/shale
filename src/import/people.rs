@@ -146,7 +146,7 @@ pub fn addresses(vault: &Vault, dir: &str) -> Vec<(String, String)> {
         return vec![];
     }
     let prefix = format!("{}/", dir.to_lowercase());
-    let mut notes: Vec<(&PathBuf, &crate::vault::NoteIndex)> = vault.notes.iter().filter(|(p, _)| rel_to_string(p).to_lowercase().starts_with(&prefix)).collect();
+    let mut notes: Vec<(&PathBuf, &std::sync::Arc<crate::vault::NoteIndex>)> = vault.notes.iter().filter(|(p, _)| rel_to_string(p).to_lowercase().starts_with(&prefix)).collect();
     notes.sort_by(|a, b| a.0.cmp(b.0));
     let mut out = vec![];
     for (p, n) in notes {
@@ -166,7 +166,7 @@ impl Contacts {
             return c;
         }
         let prefix = format!("{}/", dir.to_lowercase());
-        let mut notes: Vec<(&PathBuf, &crate::vault::NoteIndex)> = vault.notes.iter().filter(|(p, _)| rel_to_string(p).to_lowercase().starts_with(&prefix)).collect();
+        let mut notes: Vec<(&PathBuf, &std::sync::Arc<crate::vault::NoteIndex>)> = vault.notes.iter().filter(|(p, _)| rel_to_string(p).to_lowercase().starts_with(&prefix)).collect();
         notes.sort_by(|a, b| a.0.cmp(b.0));
         for (p, n) in notes {
             let stem = p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();

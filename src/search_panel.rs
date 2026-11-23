@@ -5,7 +5,7 @@
 
 use crate::app::{muted, Action, ShaleApp};
 use crate::keys::{Action as KeyAction, Scope};
-use crate::search_all::{self, Ctx, Query, Refreshed, Results};
+use crate::search_all::{self, Ask, Ctx, Query, Refreshed, Request, Results, Slot, Start};
 use crate::search_render::Look;
 use crate::search_sources::{self, Bar};
 use crate::theme;
@@ -24,6 +24,8 @@ pub struct SearchBox {
     pub(crate) scroll: bool,
     /// focus the search box (and select its text) in the next frame
     pub focus: bool,
+    /// Enter was pressed in the box while the list was on its way: select its first hit when it is in
+    enter_wanted: bool,
     /// the solo of the count buttons (NAV-052); the default selection is in the settings
     pub filter: search_sources::Filter,
 }
@@ -95,6 +97,9 @@ impl ShaleApp {
         } else if r.changed() || r.has_focus() {
             self.search.sel = None;
         }
+        if r.changed() {
+            self.search.enter_wanted = false;
+        }
         let enter_from_box = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
         if self.search.query.is_empty() && !r.has_focus() && self.search.sel.is_none() {
             r.request_focus();
@@ -114,13 +119,15 @@ impl ShaleApp {
         let query = &self.search.query;
         let sidebar = |filter: search_sources::Filter| Query::sidebar(query).with_sources(prefixes, filter.shown(self.cfg.search.selection()));
         let ask = sidebar(self.search.filter);
-        let refreshed = self.search.results.refresh(query, data.stamp(), typed, enter_from_box, ask.listed(), || search_all::search(&data, &ask));
+        let worker = &mut self.search_worker;
+        let by = Ask { slot: Slot::SIDEBAR, text: query, stamp: data.stamp(), debounced: typed, now: enter_from_box, listed: ask.listed(), blank: ask.is_blank() };
+        let refreshed = self.search.results.refresh(worker, &by, |w| Start::Queued(w.submit(Slot::SIDEBAR, Request::new(&data, &ask))));
         if matches!(refreshed, Refreshed::Waits | Refreshed::Relisted) {
             ui.ctx().request_repaint_after(search_all::DEBOUNCE);
         }
         let relisted = refreshed == Refreshed::Relisted;
         let before = self.search.filter;
-        let bar = Bar { counts: self.search.results.counts(), limit: search_all::SIDEBAR_GROUP_LIMIT, mail_open: data.mail.is_some(), listed: ask.listed(), prefixed };
+        let bar = Bar { counts: self.search.results.counts(), limit: search_all::SIDEBAR_GROUP_LIMIT, mail_open: data.mail.is_some(), listed: ask.listed(), prefixed, searching: self.search.results.is_pending() };
         let save = search_sources::bar(ui, &bar, &mut self.search.filter, &mut self.cfg.search);
         if save || self.search.filter != before {
             // the list of the new sources, in the next frame
@@ -132,7 +139,12 @@ impl ShaleApp {
             self.search.sel = Some(0);
             self.search.scroll = true;
         }
-        let entering = (down_from_box || enter_from_box) && !hits.is_empty();
+        // Enter in the box browses the list of what is typed: when it is still on its way from the
+        // worker, the first hit is selected when it arrives
+        self.search.enter_wanted |= enter_from_box;
+        let enter_ready = self.search.enter_wanted && !self.search.results.is_pending();
+        self.search.enter_wanted &= !enter_ready;
+        let entering = (down_from_box || enter_ready) && !hits.is_empty();
         if entering {
             self.search.sel = Some(0);
             self.search.scroll = true;
@@ -282,6 +294,15 @@ mod tests {
     fn pause() {
         std::thread::sleep(search_all::DEBOUNCE + std::time::Duration::from_millis(30));
     }
+    /// Frames until the worker has answered (QUERY-014): the list of the sidebar comes from another thread.
+    fn wait(frame: &mut dyn FnMut(&mut ShaleApp, Vec<Event>), app: &mut ShaleApp) {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while app.search.results.is_pending() {
+            assert!(std::time::Instant::now() < end, "the worker never answered");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            frame(app, vec![]);
+        }
+    }
     const CTRL: Modifiers = Modifiers { alt: false, ctrl: true, shift: false, mac_cmd: false, command: true };
 
     /// A vault where "apple" is found: twice in A, by name only in "apple notes", once in B.
@@ -314,6 +335,7 @@ mod tests {
         frame(&mut app, vec![Event::Text("apple".into())]);
         pause();
         frame(&mut app, vec![]);
+        wait(&mut frame, &mut app);
         assert_eq!(app.search.query, "apple");
         assert_eq!(app.search.sel, None, "typing in the box is not browsing");
         // ↓ goes into the list: stops are A:0, A:2, "apple notes" (name only), B:0
@@ -373,8 +395,10 @@ mod tests {
         let id = egui::Id::unique("search-input");
         frame(&mut app, vec![]);
         frame(&mut app, vec![Event::Text("äpfel".into())]);
+        wait(&mut frame, &mut app);
         frame(&mut app, vec![key(Key::Enter, Modifiers::NONE)]);
-        assert_eq!(app.search.sel, Some(0), "Enter in the box selects the first hit");
+        wait(&mut frame, &mut app);
+        assert_eq!(app.search.sel, Some(0), "Enter in the box selects the first hit, when the list of what is typed is in");
         assert!(app.actions.is_empty(), "…and does not open it yet");
         frame(&mut app, vec![key(Key::Escape, Modifiers::NONE)]);
         frame(&mut app, vec![]);
@@ -436,7 +460,7 @@ mod tests {
         app.search.listed().iter().map(|h| (h.group, h.title.clone())).collect()
     }
 
-    // spec: NAV-023, NAV-024, PERF-004
+    // spec: NAV-023, NAV-024, PERF-004, QUERY-014
     #[test]
     fn the_sidebar_search_takes_wildcards_waits_for_the_typing_and_follows_the_vault() {
         let (mut app, d) = browse_app("engine");
@@ -457,6 +481,9 @@ mod tests {
         assert!(listed(&app).is_empty(), "the list is not made while the typing may go on");
         pause();
         frame(&mut app, vec![]);
+        assert!(app.search.results.is_pending(), "the list is on its way from the worker (QUERY-018)");
+        assert!(listed(&app).is_empty(), "and the old one stays until it arrives");
+        wait(&mut frame, &mut app);
         let titles: Vec<String> = listed(&app).into_iter().map(|h| h.1).collect();
         assert_eq!(titles, ["first apple", "second Apple here", "apple notes", "Ünïcode ÄPFEL apple"], "a wildcard finds the lines, in the sidebar too, and the name");
         // no re-search for the same query and state: the list is the same object
@@ -467,6 +494,7 @@ mod tests {
         app.vault.as_mut().unwrap().set_note_text(Path::new("B.md"), "# B\nanother apple\n");
         pause();
         frame(&mut app, vec![]);
+        wait(&mut frame, &mut app);
         assert_eq!(listed(&app).iter().filter(|h| h.1 == "another apple").count(), 1, "{:?}", listed(&app));
         // up to 20 lines of one note, where the picker has three
         std::fs::write(d.join("Many.md"), "pear\n".repeat(25)).unwrap();
@@ -474,11 +502,62 @@ mod tests {
         app.search.query = "pear".into();
         pause();
         frame(&mut app, vec![]);
+        wait(&mut frame, &mut app);
         assert_eq!(listed(&app).len(), 20, "{:?}", listed(&app));
         // an emptied box empties the list at once
         app.search.query.clear();
         frame(&mut app, vec![]);
         assert!(listed(&app).is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: QUERY-018
+    #[test]
+    fn the_search_box_keeps_drawing_with_the_last_list_while_a_search_runs() {
+        fn hold(_: &mut search_all::worker::Conns, _: &search_all::Request, cancel: &std::sync::atomic::AtomicBool) -> Option<search_all::Found> {
+            let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while !cancel.load(std::sync::atomic::Ordering::Relaxed) && std::time::Instant::now() < end {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            None
+        }
+        let (mut app, d) = browse_app("keeps-drawing");
+        let ctx = egui::Context::default();
+        let mut t = 0.0;
+        let mut frame = |app: &mut ShaleApp, events: Vec<Event>| {
+            t += 0.05;
+            let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), time: Some(t), events, ..Default::default() };
+            let mut out = ctx.run_ui(raw, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| app.search_panel(ui));
+            });
+            out.textures_delta.clear();
+        };
+        frame(&mut app, vec![]);
+        frame(&mut app, vec![Event::Text("apple".into())]);
+        pause();
+        frame(&mut app, vec![]);
+        wait(&mut frame, &mut app);
+        assert_eq!(listed(&app).len(), 4);
+        // the next query never ends: the window goes on, with the last list and a spinner
+        app.search_worker = search_all::SearchWorker::with_runner(hold);
+        pause();
+        app.search.query = "apple pie".into();
+        frame(&mut app, vec![]);
+        assert!(app.search.results.is_pending() && app.search_worker.busy());
+        let began = std::time::Instant::now();
+        for _ in 0..20 {
+            frame(&mut app, vec![]);
+        }
+        assert!(began.elapsed() < std::time::Duration::from_secs(5), "typing and drawing are not blocked");
+        assert!(app.search.results.is_pending(), "still searching");
+        assert_eq!(listed(&app).len(), 4, "the last valid list stays");
+        // a newer query gives the old one up
+        pause();
+        app.search.query = "apple".into();
+        frame(&mut app, vec![]);
+        frame(&mut app, vec![]);
+        assert!(app.search.results.is_pending());
+        drop(app);
         let _ = std::fs::remove_dir_all(&d);
     }
 }

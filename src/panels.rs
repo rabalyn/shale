@@ -657,7 +657,7 @@ impl ShaleApp {
                 let rendered = self.search_rendered();
                 if let Some(v) = &self.vault {
                     let data = crate::search_all::Ctx { vault: v, mail: self.mail.index(), posts: &self.social.index };
-                    let out = crate::picker::show(&ctx, p, &data, &self.keymap, &mut self.cfg.search, rendered);
+                    let out = crate::picker::show(&ctx, p, &data, &mut self.search_worker, &self.keymap, &mut self.cfg.search, rendered);
                     if out.save {
                         self.save_config();
                     }

@@ -11,6 +11,10 @@
 //! (`db::fts_query_wild`).
 //! Everything is bounded (NAV-024): at most [`Query::limit`] hits per group, and a note search
 //! stops scanning when its group is full.
+//!
+//! The search runs on a worker thread of the window, not on the thread that draws (QUERY-014):
+//! the views ask [`SearchWorker`] with a [`Request`] (a [`Snapshot`] of the notes and the places
+//! of the mail and post indexes) and [`Results`] takes the list when it arrives.
 
 use crate::app::Action;
 use crate::markdown;
@@ -21,7 +25,14 @@ use crate::vault::Vault;
 use rusqlite::Connection;
 use std::ops::Range;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+
+mod snapshot;
+pub mod worker;
+
+pub use snapshot::Snapshot;
+pub use worker::{Request, SearchWorker, Slot};
 
 /// How many hits one group of the picker lists at most.
 pub const GROUP_LIMIT: usize = 20;
@@ -65,6 +76,11 @@ impl<'a> Query<'a> {
     /// The same with the letters of the prefixes and the sources to list.
     pub fn with_sources(self, prefixes: Prefixes, shown: Selection) -> Query<'a> {
         Query { prefixes, shown, ..self }
+    }
+
+    /// Is there nothing to search for (no text apart from the prefix)? The list is empty then.
+    pub fn is_blank(&self) -> bool {
+        self.prefixes.parse(self.text).text.trim().is_empty()
     }
 
     /// The sources this query lists: those of its prefix, else `shown` (NAV-050).
@@ -149,20 +165,31 @@ pub fn wildcard_find(line: &str, pat: &str) -> Option<Range<usize>> {
     })
 }
 
-/// The lines of notes that match, in the order of the vault's files (at most `q.note_lines` per
-/// note): a line is one hit; a note whose name matches but no line is one hit for the note.
+/// [`scan_notes`] of the notes of a vault as they are now, without a way to stop it.
+#[cfg(any(test, feature = "bench"))]
 pub fn note_hits(vault: &Vault, query: &Query) -> Vec<Hit> {
+    scan_notes(&Snapshot::of(vault), query, &AtomicBool::new(false))
+}
+
+/// The lines of notes that match, in the order of the vault's files (at most `q.note_lines` per
+/// note): a line is one hit; a note whose name matches but no line is one hit for the note. The
+/// scan stops at the next line once `cancel` is set (QUERY-017); what it found so far is returned.
+pub fn scan_notes(notes: &Snapshot, query: &Query, cancel: &AtomicBool) -> Vec<Hit> {
     let q = query.text.trim().to_lowercase();
     // a pattern of wildcards alone would match every line
     if !q.chars().any(|c| c != '*' && c != '?') {
         return vec![];
     }
     let mut out = Vec::new();
-    for f in vault.files.iter().filter(|f| !vault.is_shadow_copy(&f.rel)) {
+    for s in &notes.notes {
+        let f = &s.file;
         let name = f.display_name();
         let before = out.len();
-        if let Some(n) = vault.notes.get(&f.rel) {
+        if let Some(n) = &s.note {
             for (i, line) in n.text.lines().enumerate() {
+                if cancel.load(Ordering::Relaxed) {
+                    return out;
+                }
                 if let Some(found) = wildcard_find(line, &q) {
                     let shown: String = line.trim().chars().take(crate::search_render::MAX_SHOWN_CHARS).collect();
                     // the found text in the shown one: it starts after the white space that is cut off
@@ -232,29 +259,45 @@ pub struct Found {
 }
 
 /// Search every source for the text of the query, without its prefix: notes, then mail (while the
-/// mail store is open), then posts. Which of them are listed is [`Query::listed`]'s to say.
-pub fn search(ctx: &Ctx, query: &Query) -> Found {
+/// mail store is open), then posts. Which of them are listed is [`Query::listed`]'s to say. None
+/// when `cancel` was set: the search was given up and its hits are not to be used (QUERY-017).
+pub fn search_in(notes: &Snapshot, mail: Option<&Connection>, posts: Option<&PostIndex>, query: &Query, cancel: &AtomicBool) -> Option<Found> {
     let text = query.prefixes.parse(query.text).text;
     if text.trim().is_empty() {
-        return Found::default();
+        return Some(Found::default());
     }
     let query = &Query { text, ..*query };
     let _flow = tracing::info_span!("flow.vault_search", peer = "search_view").entered();
-    let mut hits = tracing::info_span!("flow.vault_search.search_notes", peer = "vault").in_scope(|| note_hits(ctx.vault, query));
+    let mut hits = tracing::info_span!("flow.vault_search.search_notes", peer = "vault").in_scope(|| scan_notes(notes, query, cancel));
     let mut counts = Counts::default();
     counts.0[0] = hits.len();
-    if let Some(db) = ctx.mail {
+    if let Some(db) = mail {
+        if cancel.load(Ordering::Relaxed) {
+            return None;
+        }
         let mail = tracing::info_span!("flow.vault_search.search_mail", peer = "mail_index").in_scope(|| mail_hits(db, query));
         counts.0[1] = mail.len();
         hits.extend(mail);
     }
-    let posts = tracing::info_span!("flow.vault_search.search_posts", peer = "post_index").in_scope(|| post_hits(ctx.posts, query));
-    counts.0[2] = posts.len();
-    hits.extend(posts);
-    Found { hits, counts: Some(counts) }
+    if let Some(index) = posts {
+        if cancel.load(Ordering::Relaxed) {
+            return None;
+        }
+        let posts = tracing::info_span!("flow.vault_search.search_posts", peer = "post_index").in_scope(|| post_hits(index, query));
+        counts.0[2] = posts.len();
+        hits.extend(posts);
+    }
+    (!cancel.load(Ordering::Relaxed)).then_some(Found { hits, counts: Some(counts) })
 }
 
-/// The hits of the sources the query lists: notes, then mail, then posts.
+/// [`search_in`] of what a [`Ctx`] reads, here and now (tests).
+#[cfg(test)]
+pub fn search(ctx: &Ctx, query: &Query) -> Found {
+    search_in(&Snapshot::of(ctx.vault), ctx.mail, Some(ctx.posts), query, &AtomicBool::new(false)).expect("nothing cancels it")
+}
+
+/// The hits of the sources the query lists: notes, then mail, then posts (tests).
+#[cfg(test)]
 pub fn all_hits(ctx: &Ctx, query: &Query) -> Vec<Hit> {
     let listed = query.listed();
     search(ctx, query).hits.into_iter().filter(|h| is_listed(h, listed)).collect()
@@ -307,19 +350,21 @@ pub fn prev_block(hits: &[Hit], sel: usize) -> usize {
 pub enum Refreshed {
     /// the list is for the query and the data: nothing to do
     Unchanged,
-    /// a new list was made
+    /// a new list was made (it came from the worker, or the text is empty)
     Made,
     /// the sources to list changed (a button, a key): the same hits, other ones listed
     Relisted,
-    /// the list is for an older query or state and a new one is not due yet: ask for a repaint
-    /// (the sources may have changed as well, and the old hits are listed as they say)
+    /// the list is for an older query or state: a new one is asked for, or not due yet, or on its
+    /// way from the worker; ask for a repaint (the sources may have changed as well, and the old
+    /// hits are listed as they say)
     Waits,
 }
 
 /// The list one view shows: made for a query and a state of the data, kept while neither
-/// changes, and made again at most every [`DEBOUNCE`] while typing (NAV-024). Both views of the
-/// search hold one. It keeps the hits of the sources that are not listed, so that a button or a
-/// key lists them without a new search (NAV-052).
+/// changes, and asked for again at most every [`DEBOUNCE`] while typing (NAV-024). The worker
+/// makes it (QUERY-014): the old list stays until the new one arrives (QUERY-018). Both views of
+/// the search hold one. It keeps the hits of the sources that are not listed, so that a button or
+/// a key lists them without a new search (NAV-052).
 #[derive(Default)]
 pub struct Results {
     hits: Vec<Hit>,
@@ -328,24 +373,77 @@ pub struct Results {
     listed: Option<Selection>,
     made_for: Option<(String, (u64, u64))>,
     made_at: Option<Instant>,
+    /// the query on the worker whose list has not arrived
+    pending: Option<Pending>,
+}
+
+/// A query that is on the worker.
+struct Pending {
+    id: u64,
+    text: String,
+    stamp: (u64, u64),
+}
+
+/// What a view asks of its [`Results`] in one frame.
+pub struct Ask<'a> {
+    /// the queue of the worker the query goes to: one per view
+    pub slot: Slot,
+    pub text: &'a str,
+    /// the state of the data, [`Ctx::stamp`]
+    pub stamp: (u64, u64),
+    /// wait for the typing to settle before the query is asked
+    pub debounced: bool,
+    /// ask now, whatever the last query was (Enter)
+    pub now: bool,
+    /// only the hits of these sources are listed
+    pub listed: Selection,
+    /// there is nothing to search for: the list is empty at once, without the worker
+    pub blank: bool,
+}
+
+/// How a list is made when it is due.
+pub enum Start {
+    /// the query was given to the worker (its number): the list comes later
+    Queued(u64),
+    /// the list is made here and now (the names of files, which are found at once)
+    Done(Found),
 }
 
 impl Results {
-    /// Make the list with `make` when it is not the one for `text` and `stamp` (the state of the
-    /// data, [`Ctx::stamp`]) and either `debounced` is off, or the last list was made long enough
-    /// ago, or `now` asks for it. Only the hits of the sources in `listed` are listed.
-    pub fn refresh(&mut self, text: &str, stamp: (u64, u64), debounced: bool, now: bool, listed: Selection, make: impl FnOnce() -> Found) -> Refreshed {
-        let current = self.made_for.as_ref().is_some_and(|(t, s)| t == text && *s == stamp);
-        if !current && (now || !debounced || self.made_at.is_none_or(|t| t.elapsed() >= DEBOUNCE)) {
-            let found = make();
-            self.counts = found.counts;
-            (self.hits, self.unlisted) = found.hits.into_iter().partition(|h| is_listed(h, listed));
-            self.listed = Some(listed);
-            self.made_for = Some((text.to_string(), stamp));
+    /// Make the list when it is not the one for the text and the state of the data, not on its
+    /// way and either the query is not debounced, or the last query was asked long enough ago, or
+    /// `now` asks for it: `start` gives the query to the worker ([`Start::Queued`]) or makes the
+    /// list ([`Start::Done`]). A list that came back from the worker is taken. Only the hits of
+    /// the sources in `ask.listed` are listed.
+    pub fn refresh(&mut self, worker: &mut SearchWorker, ask: &Ask, start: impl FnOnce(&mut SearchWorker) -> Start) -> Refreshed {
+        let listed = ask.listed;
+        let mut delivered = false;
+        if let Some(found) = self.pending.as_ref().and_then(|p| worker.take(ask.slot, p.id)) {
+            let p = self.pending.take().expect("a pending query was taken");
+            self.keep(found, p.text, p.stamp, listed);
+            delivered = true;
+        }
+        let current = self.made_for.as_ref().is_some_and(|(t, s)| t == ask.text && *s == ask.stamp);
+        let queued = self.pending.as_ref().is_some_and(|p| p.text == ask.text && p.stamp == ask.stamp);
+        if !current && ask.blank {
+            // (what is on its way is not wanted any more)
+            worker.cancel(ask.slot);
+            self.pending = None;
             self.made_at = Some(Instant::now());
+            self.keep(Found::default(), ask.text.to_string(), ask.stamp, listed);
             return Refreshed::Made;
         }
-        // (while a new list waits for the typing to settle, the old one is listed as asked)
+        if !current && !queued && (ask.now || !ask.debounced || self.made_at.is_none_or(|t| t.elapsed() >= DEBOUNCE)) {
+            self.made_at = Some(Instant::now());
+            match start(worker) {
+                Start::Queued(id) => self.pending = Some(Pending { id, text: ask.text.to_string(), stamp: ask.stamp }),
+                Start::Done(found) => {
+                    self.keep(found, ask.text.to_string(), ask.stamp, listed);
+                    delivered = true;
+                }
+            }
+        }
+        // (while a new list is on its way, the old one is listed as asked)
         let relisted = self.listed.is_some_and(|l| l != listed);
         if relisted {
             let mut all = std::mem::take(&mut self.hits);
@@ -354,11 +452,26 @@ impl Results {
             (self.hits, self.unlisted) = all.into_iter().partition(|h| is_listed(h, listed));
             self.listed = Some(listed);
         }
+        let current = self.made_for.as_ref().is_some_and(|(t, s)| t == ask.text && *s == ask.stamp);
         match (current, relisted) {
             (false, _) => Refreshed::Waits,
             (true, true) => Refreshed::Relisted,
+            (true, false) if delivered => Refreshed::Made,
             (true, false) => Refreshed::Unchanged,
         }
+    }
+
+    /// Make `found` the list for `text` and `stamp`.
+    fn keep(&mut self, found: Found, text: String, stamp: (u64, u64), listed: Selection) {
+        self.counts = found.counts;
+        (self.hits, self.unlisted) = found.hits.into_iter().partition(|h| is_listed(h, listed));
+        self.listed = Some(listed);
+        self.made_for = Some((text, stamp));
+    }
+
+    /// Is a query on the worker whose list has not arrived (the view shows a spinner)?
+    pub fn is_pending(&self) -> bool {
+        self.pending.is_some()
     }
 
     pub fn hits(&self) -> &[Hit] {
@@ -558,24 +671,35 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// What a view asks in one frame, for a test.
+    fn ask(text: &str, stamp: (u64, u64), debounced: bool, now: bool, listed: Selection) -> Ask<'_> {
+        Ask { slot: Slot::PICKER, text, stamp, debounced, now, listed, blank: false }
+    }
+
+    /// A list that is made on the spot (the names of files).
+    fn here(f: impl FnOnce() -> Found) -> impl FnOnce(&mut SearchWorker) -> Start {
+        move |_| Start::Done(f())
+    }
+
     // spec: NAV-052
     #[test]
     fn another_selection_lists_the_kept_hits_without_a_new_search() {
         let mut r = Results::default();
+        let mut w = SearchWorker::default();
         let hits = || Found { hits: vec![hit(NOTES, "a"), hit(NOTES, "b"), hit(MAIL, ""), hit(POSTS, "")], counts: Some(Counts([2, 1, 1])) };
         let groups = |r: &Results| r.hits().iter().map(|h| h.group).collect::<Vec<_>>();
-        assert_eq!(r.refresh("x", (1, 1), false, false, Selection::only(Kind::Mail), hits), Refreshed::Made);
+        assert_eq!(r.refresh(&mut w, &ask("x", (1, 1), false, false, Selection::only(Kind::Mail)), here(hits)), Refreshed::Made);
         assert_eq!(groups(&r), [MAIL]);
         assert_eq!(r.counts(), Some(&Counts([2, 1, 1])), "the others are counted");
-        assert_eq!(r.refresh("x", (1, 1), false, false, Selection::ALL, || panic!("no new search")), Refreshed::Relisted);
+        assert_eq!(r.refresh(&mut w, &ask("x", (1, 1), false, false, Selection::ALL), |_| panic!("no new search")), Refreshed::Relisted);
         assert_eq!(groups(&r), [NOTES, NOTES, MAIL, POSTS], "back in the order of the sources");
         let two = Selection::only(Kind::Posts).toggled(Kind::Notes).unwrap();
-        assert_eq!(r.refresh("x", (1, 1), false, false, two, || panic!("no new search")), Refreshed::Relisted);
+        assert_eq!(r.refresh(&mut w, &ask("x", (1, 1), false, false, two), |_| panic!("no new search")), Refreshed::Relisted);
         assert_eq!(groups(&r), [NOTES, NOTES, POSTS]);
-        assert_eq!(r.refresh("x", (1, 1), false, false, two, || panic!("no new search")), Refreshed::Unchanged);
+        assert_eq!(r.refresh(&mut w, &ask("x", (1, 1), false, false, two), |_| panic!("no new search")), Refreshed::Unchanged);
         // a list without sources is always listed
         let mut names = Results::default();
-        names.refresh("", (1, 1), false, false, Selection::only(Kind::Posts), || Found { hits: vec![hit("", "")], counts: None });
+        names.refresh(&mut w, &ask("", (1, 1), false, false, Selection::only(Kind::Posts)), here(|| Found { hits: vec![hit("", "")], counts: None }));
         assert_eq!(names.hits().len(), 1);
     }
 
@@ -651,19 +775,20 @@ mod tests {
     #[test]
     fn a_list_is_made_again_for_another_query_or_state_and_not_more_often_than_the_debounce() {
         let mut r = Results::default();
-        let make = || found(vec![hit(NOTES, "a")]);
+        let mut w = SearchWorker::default();
+        let make = || here(|| found(vec![hit(NOTES, "a")]));
         let all = Selection::ALL;
-        assert_eq!(r.refresh("", (1, 1), false, false, all, make), Refreshed::Made);
+        assert_eq!(r.refresh(&mut w, &ask("", (1, 1), false, false, all), make()), Refreshed::Made);
         assert!(r.is_made());
-        assert_eq!(r.refresh("", (1, 1), false, false, all, || panic!("the same query and state")), Refreshed::Unchanged);
-        assert_eq!(r.refresh("a", (1, 1), true, false, all, make), Refreshed::Waits, "right after the last list");
+        assert_eq!(r.refresh(&mut w, &ask("", (1, 1), false, false, all), |_| panic!("the same query and state")), Refreshed::Unchanged);
+        assert_eq!(r.refresh(&mut w, &ask("a", (1, 1), true, false, all), make()), Refreshed::Waits, "right after the last list");
         assert!(r.hits().len() == 1);
-        assert_eq!(r.refresh("a", (1, 1), true, true, all, Found::default), Refreshed::Made, "Enter asks for the list now");
+        assert_eq!(r.refresh(&mut w, &ask("a", (1, 1), true, true, all), here(Found::default)), Refreshed::Made, "Enter asks for the list now");
         assert!(r.hits().is_empty());
-        assert_eq!(r.refresh("a", (1, 2), true, false, all, make), Refreshed::Waits, "another state of the data waits like another query");
+        assert_eq!(r.refresh(&mut w, &ask("a", (1, 2), true, false, all), make()), Refreshed::Waits, "another state of the data waits like another query");
         std::thread::sleep(DEBOUNCE + Duration::from_millis(20));
-        assert_eq!(r.refresh("a", (1, 2), true, false, all, make), Refreshed::Made);
-        assert_eq!(r.refresh("b", (1, 2), false, false, all, make), Refreshed::Made, "not debounced: at once");
+        assert_eq!(r.refresh(&mut w, &ask("a", (1, 2), true, false, all), make()), Refreshed::Made);
+        assert_eq!(r.refresh(&mut w, &ask("b", (1, 2), false, false, all), make()), Refreshed::Made, "not debounced: at once");
         assert_eq!(r.take(0).group, NOTES);
     }
 }

@@ -770,6 +770,13 @@ mod tests {
         for _ in 0..3 {
             w.frame(vec![]);
         }
+        // a search on the worker (QUERY-014) is waited for
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while w.app.search_worker.busy() {
+            assert!(std::time::Instant::now() < end, "the search worker never answered");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            w.frame(vec![]);
+        }
     }
 
     /// Vim-style editing on, the open note's editor has the keyboard (normal mode).

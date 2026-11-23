@@ -60,7 +60,7 @@ formula is shown raw, and a hit shows at most 120 characters of its line.
 groups, Ctrl+J / Ctrl+K to the first hit of the next / previous note, and in mail and posts to
 the first hit of the next / previous group. Enter (or a click) opens the hit where it belongs:
 the note at the found text, the mail in the mail view, the post in a Feeds tab. Esc goes back to
-the box. The list follows your typing a moment after you stop, and shows notes you edit meanwhile.
+the box. The list follows your typing a moment after you stop, and shows notes you edit meanwhile. The search runs in the background: while a new list is being made the last one stays, with a small spinner next to the source buttons, and typing is never held up.
 
 # The pickers (Space keys)
 
