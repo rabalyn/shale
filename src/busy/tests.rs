@@ -394,6 +394,59 @@ fn job_007_the_summary_is_the_text_of_one_task_or_the_number_of_several_and_time
     assert_eq!((ui::elapsed(Duration::from_secs(5)), ui::elapsed(Duration::from_secs(59)), ui::elapsed(Duration::from_secs(125))), ("5 s".into(), "59 s".into(), "2 min".into()));
 }
 
+// spec: JOB-021
+#[test]
+fn job_021_a_key_with_a_subject_is_its_own_key() {
+    let busy = Busy::default();
+    let a = busy.begin(SYNC.with("a"), "Syncing A…").expect("first");
+    assert!(busy.begin(SYNC.with("a"), "again").is_none(), "the same subject: refused");
+    let b = busy.begin(SYNC.with("b"), "Syncing B…").expect("another subject runs beside it");
+    let plain = busy.begin(SYNC, "plain").expect("the plain key is not a subject's key");
+    assert_eq!(busy.list().len(), 3);
+    assert!(busy.is_running(&SYNC.with("a")) && busy.info(&SYNC.with("b")).is_some_and(|t| t.label == "Syncing B…"));
+    drop(a);
+    assert!(busy.info(&SYNC.with("a")).is_none() && busy.info(&SYNC.with("b")).is_some(), "ending one leaves the other");
+    drop((b, plain));
+}
+
+// spec: JOB-021
+#[test]
+fn job_021_the_mail_view_lists_each_running_sync_with_its_own_cancel_and_says_a_stopped_one_stopped() {
+    use crate::mail::ui::{StoreState, SyncRun, MAIL_SYNC};
+    use std::sync::atomic::AtomicBool;
+    let (mut app, mut h, dir) = window("mail-sync");
+    app.show_view(crate::app::View::Mail, false);
+    let store = std::sync::Arc::new(crate::mail::store::MailStore::open(&dir.join("mail-test")).unwrap());
+    app.mail.store = StoreState::Ready(store);
+    app.cfg.mail_accounts = vec![crate::config::MailAccount { id: "a".into(), name: "Work".into(), ..Default::default() }, crate::config::MailAccount { id: "b".into(), name: "Home".into(), ..Default::default() }];
+    let mut keep = vec![];
+    let mut tokens = vec![];
+    for (id, name) in [("a", "Work"), ("b", "Home")] {
+        let mut task = app.busy.begin(MAIL_SYNC.with(id), format!("Syncing {name}…")).unwrap();
+        let cancel = task.cancellable();
+        let (tx, rx) = channel();
+        app.mail.syncs.insert(id.into(), SyncRun { rx, cancel: cancel.flag(), folder: String::new(), done: 0, total: 0, added: 0, errors: vec![], finished: None });
+        keep.push((task, tx));
+        tokens.push(cancel);
+    }
+    h.frames(&mut app, 3);
+    assert!(painted_at(&h, "Syncing Work…").is_some() && painted_at(&h, "Syncing Home…").is_some(), "every running account is shown: {:?}", h.text);
+    let first = h.text.iter().filter(|(t, _)| t == "Cancel").map(|(_, p)| *p).min_by(|a, b| a.y.total_cmp(&b.y)).expect("a Cancel next to the first account");
+    h.click(&mut app, first, PointerButton::Primary);
+    assert!(tokens[0].is_cancelled() && !tokens[1].is_cancelled(), "the Cancel of one account stops that one");
+    // a stopped sync is said plainly
+    drop(keep);
+    app.mail.syncs.clear();
+    let (tx, rx) = channel();
+    drop(tx);
+    let summary = crate::mail::imap_sync::SyncSummary { cancelled: true, ..Default::default() };
+    app.mail.syncs.insert("a".into(), SyncRun { rx, cancel: std::sync::Arc::new(AtomicBool::new(true)), folder: String::new(), done: 0, total: 0, added: 0, errors: vec![], finished: Some(summary) });
+    h.frames(&mut app, 3);
+    assert!(painted_at(&h, "Syncing Work…").is_none());
+    assert!(h.text.iter().any(|(t, _)| t.starts_with("Sync stopped")), "{:?}", h.text);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // spec: JOB-022
 #[test]
 fn job_022_a_task_that_waits_to_be_listed_is_running_at_once_and_listed_after_its_time() {
@@ -420,12 +473,12 @@ fn job_022_a_task_that_waits_to_be_listed_is_running_at_once_and_listed_after_it
 #[test]
 fn job_022_runs_of_one_action_with_their_own_number_go_side_by_side_and_the_same_number_is_refused() {
     let busy = Busy::default();
-    let one = busy.begin(Key::numbered("test-open", 1), "Opening a.mp4…").expect("begins");
-    let two = busy.begin(Key::numbered("test-open", 2), "Opening b.mp4…").expect("another file runs next to it");
-    assert!(busy.begin(Key::numbered("test-open", 1), "Opening a.mp4…").is_none(), "the same file twice is refused");
+    let one = busy.begin(Key::new("test-open").with("1"), "Opening a.mp4…").expect("begins");
+    let two = busy.begin(Key::new("test-open").with("2"), "Opening b.mp4…").expect("another file runs next to it");
+    assert!(busy.begin(Key::new("test-open").with("1"), "Opening a.mp4…").is_none(), "the same file twice is refused");
     assert_eq!(busy.list().len(), 2);
     drop(one);
-    assert!(busy.begin(Key::numbered("test-open", 1), "Opening a.mp4…").is_some(), "free again when it ended");
+    assert!(busy.begin(Key::new("test-open").with("1"), "Opening a.mp4…").is_some(), "free again when it ended");
     drop(two);
 }
 

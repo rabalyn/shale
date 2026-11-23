@@ -81,7 +81,7 @@ impl CacheId {
     pub fn key(self) -> crate::busy::Key {
         match self {
             CacheId::MailIndex => crate::mail::ui::MAIL_REBUILD,
-            _ => crate::busy::Key::numbered("data-usage-clear", self as u64),
+            _ => crate::busy::Key::new("data-usage-clear").with(&(self as u64).to_string()),
         }
     }
 
@@ -369,9 +369,13 @@ struct ClearJob {
 }
 
 /// The task of counting the files that Shale keeps (USE-005).
-const COUNT_FILES: Key = Key::numbered("data-usage-count", 0);
+fn count_files() -> Key {
+    Key::new("data-usage-count").with("files")
+}
 /// The task of measuring the caches (USE-005).
-const COUNT_CACHES: Key = Key::numbered("data-usage-count", 1);
+fn count_caches() -> Key {
+    Key::new("data-usage-count").with("caches")
+}
 /// The counting and the scheduled prune are listed in the busy indicator only when they take this
 /// long: they happen on their own and are usually over in a moment (JOB-023).
 pub const LISTED_AFTER: Duration = Duration::from_secs(2);
@@ -425,14 +429,14 @@ impl DataUsage {
         self.saved = None;
         // the count that is superseded ends its task before the new one begins
         self.saved_job = None;
-        self.saved_job = self.busy.begin_listed_after(COUNT_FILES, "Counting what Shale keeps on this computer…", LISTED_AFTER).map(|task| (crate::jobs::spawn(move || scan::saved(&places), notify.clone()), task));
+        self.saved_job = self.busy.begin_listed_after(count_files(), "Counting what Shale keeps on this computer…", LISTED_AFTER).map(|task| (crate::jobs::spawn(move || scan::saved(&places), notify.clone()), task));
         self.refresh_stats(notify);
     }
 
     fn refresh_stats(&mut self, notify: impl Fn() + Send + 'static) {
         let places = self.places.clone();
         self.stats_job = None;
-        self.stats_job = self.busy.begin_listed_after(COUNT_CACHES, "Measuring the caches…", LISTED_AFTER).map(|task| (crate::jobs::spawn(move || CacheId::ALL.iter().map(|id| (*id, stats(*id, &places))).collect(), notify), task));
+        self.stats_job = self.busy.begin_listed_after(count_caches(), "Measuring the caches…", LISTED_AFTER).map(|task| (crate::jobs::spawn(move || CacheId::ALL.iter().map(|id| (*id, stats(*id, &places))).collect(), notify), task));
     }
 
     /// Whether a clear or prune of this cache runs (its button is disabled, USE-007).

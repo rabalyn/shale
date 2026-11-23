@@ -78,7 +78,7 @@ impl DragState {
     /// Start reading `rx` for the Import dialog as a task with `label`; `zone` is where it was dropped.
     pub(crate) fn read_started(&mut self, busy: &crate::busy::Busy, label: &str, rx: DropRead, zone: Option<(PathBuf, Option<PathBuf>)>) {
         self.reads += 1;
-        let task = busy.begin(crate::busy::Key::numbered(IMPORT_READ, self.reads), label);
+        let task = busy.begin(crate::busy::Key::new(IMPORT_READ).with(&self.reads.to_string()), label);
         self.pending_drops.push(PendingDrop { rx, zone, _task: task });
     }
 

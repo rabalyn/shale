@@ -12,6 +12,7 @@
 //! finds the action idle.
 
 use crate::jobs;
+use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, TryRecvError};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -25,19 +26,18 @@ mod tests;
 
 /// What a task is: the action that runs. Two running tasks never share a key.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Key(&'static str, u64);
+pub struct Key(Cow<'static, str>);
 
 impl Key {
     /// The key of an action, as a constant of the module that owns the action.
     pub const fn new(kind: &'static str) -> Key {
-        Key(kind, 0)
+        Key(Cow::Borrowed(kind))
     }
 
-    /// The key of one of several runs of an action that go side by side (the opening of two
-    /// different files, the clear of two different caches): `n` says which. The same `n` is the
-    /// same run, so JOB-005 still refuses it twice.
-    pub const fn numbered(kind: &'static str, n: u64) -> Key {
-        Key(kind, n)
+    /// The key of this action for one subject (an account, a calendar): tasks of the same action
+    /// with different subjects run side by side, two with the same subject never do.
+    pub fn with(&self, subject: &str) -> Key {
+        Key(Cow::Owned(format!("{}\u{1f}{subject}", self.0)))
     }
 }
 

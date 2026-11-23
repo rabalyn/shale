@@ -22,6 +22,11 @@ and you cannot start it twice by accident.
   index…" shows in the indicator and, with a spinner and **Cancel**, in the mail view. Cancel stops
   between two folders: every folder is either built again or as it was, so no mail seems to be
   missing; rebuild again to go on with the rest.
+- **Each mail account's sync is a task of its own**: "Syncing ‹account›…" shows in the indicator and, with
+  a spinner and **Cancel**, in the mail view for every account that is syncing. Cancel stops that account
+  between two folders or two batches of messages, never in the middle of a message, so nothing is half
+  saved; the view says "Sync stopped" and the next sync goes on with what is missing. The other accounts
+  keep syncing. Waiting for new mail (IDLE) is not a task.
 - **Things that happen on their own are listed only when they take long.** Reading the vault folder for
   changes made by other programs ("Reading the vault folder…", on a slow network share), learning which
   words belong to your tags ("Learning the words of the tags…", **Cancel** stops it) and counting what Shale

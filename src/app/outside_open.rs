@@ -62,7 +62,7 @@ impl ShaleApp {
                 c.request_repaint();
             }
         };
-        if let Some(job) = self.busy.spawn(Key::numbered(OUTSIDE_OPEN, h.finish()), format!("Opening {shown}…"), f, notify) {
+        if let Some(job) = self.busy.spawn(Key::new(OUTSIDE_OPEN).with(&h.finish().to_string()), format!("Opening {shown}…"), f, notify) {
             self.outside_opens.push(job);
         }
     }
