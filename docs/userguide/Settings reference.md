@@ -128,9 +128,11 @@ size of the two editor areas when you updated.
 
 | Key | Default | Where |
 |---|---|---|
-| `version` | the format version of the file (1) | written by Shale |
+| `version` | the format version of the file (3) | written by Shale |
 | `vault` | none | the vault opened last; Settings → Vault → Vault folder |
-| `recent` | empty | the recent vaults of the start screen |
+| `vaults` | empty | the known vaults, the one opened last first: a `[[vaults]]` table each, with `name` and `path`; the start screen lists them. Shale adds a vault when it has opened it. An empty `name` becomes the folder's name. Replaces the old `recent` list, which is turned into `vaults` at the first start |
+| `vaults.name` | the folder's name | what the vault is called in the list and in the window title; only on this computer, never in the vault |
+| `vaults.path` | none | the folder of the vault, with symbolic links resolved |
 | `show_left` | on | the left sidebar toggle of the ribbon |
 | `show_right` | on | the right sidebar toggle of the ribbon |
 | `sidebars` | empty (default icons and layout) | dragging icons, see [[Window layout]] |

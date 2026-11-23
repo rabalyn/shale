@@ -338,12 +338,13 @@ impl ShaleApp {
                             }
                         })
                     });
-                    if !self.cfg.recent.is_empty() {
+                    if !self.cfg.vaults.entries().is_empty() {
                         ui.add_space(12.0);
                         ui.label(muted("Recent vaults"));
-                        for r in self.cfg.recent.clone() {
-                            if ui.add_enabled(!self.vault_load.is_loading(), egui::Link::new(r.to_string_lossy())).clicked() {
-                                self.actions.push(Action::OpenVault(r));
+                        for e in self.cfg.vaults.entries().to_vec() {
+                            let shown = self.cfg.vaults.label(&e);
+                            if ui.add_enabled(!self.vault_load.is_loading(), egui::Link::new(shown)).on_hover_text(e.path.to_string_lossy()).clicked() {
+                                self.actions.push(Action::OpenVault(e.path));
                             }
                         }
                     }

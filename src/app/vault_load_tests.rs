@@ -132,7 +132,7 @@ fn net_019_nothing_that_depends_on_the_vault_starts_before_it_has_arrived() {
     w.hl.frames(&mut w.app, 10);
     assert!(w.app.vault.is_none() && w.app.tabbar.tabs.is_empty() && w.app.notes.is_empty(), "no tab and no note before the vault is there");
     assert!(!w.app.rescan.in_flight(), "no rescan of a vault that is not there");
-    assert!(w.app.cfg.recent.is_empty() && w.app.cfg.vault.is_none(), "the vault is not remembered before it is open");
+    assert!(w.app.cfg.vaults.entries().is_empty() && w.app.cfg.vault.is_none(), "the vault is not remembered before it is open");
     assert!(w.app.sync.remote.is_none() && w.app.sync.last_start.is_none());
     w.release();
     w.settle();
@@ -292,4 +292,64 @@ fn net_019_a_scripted_run_waits_for_the_vault() {
     assert_eq!(w.app.script.steps.len(), steps, "no step was fed while the vault loads");
     w.release();
     w.settle();
+}
+
+// spec: VAULT-040, VAULT-006
+#[test]
+fn vault_040_a_folder_from_the_command_line_is_added_after_it_has_loaded() {
+    let w = W::new("cli-adds");
+    let ctx = eframe::egui::Context::default();
+    let mut app = ShaleApp::build_with(Options { screenshot: None, vault: Some(w.dir("one")), view: None, keys: None }, false, Some(&ctx));
+    assert!(app.vault_load.is_loading() && app.cfg.vaults.entries().is_empty(), "not listed while it loads");
+    Headless::new().settle(&mut app);
+    let listed: Vec<_> = app.cfg.vaults.entries().iter().map(|e| (e.name.clone(), e.path.clone())).collect();
+    assert_eq!(listed, [("one".to_string(), crate::known_vaults::canonical(&w.dir("one")))]);
+}
+
+// spec: VAULT-040
+#[test]
+fn vault_040_a_folder_from_the_command_line_that_fails_to_load_is_not_added() {
+    let w = W::new("cli-fails");
+    let file = w.dir("not-a-folder");
+    std::fs::write(&file, "x").unwrap();
+    let ctx = eframe::egui::Context::default();
+    let mut app = ShaleApp::build_with(Options { screenshot: None, vault: Some(file), view: None, keys: None }, false, Some(&ctx));
+    Headless::new().settle(&mut app);
+    assert!(app.vault.is_none() && app.vault_load.error.is_some(), "the load failed");
+    assert!(app.cfg.vaults.entries().is_empty() && app.cfg.vault.is_none());
+}
+
+// spec: VAULT-040
+#[test]
+fn vault_040_a_folder_handed_over_by_a_second_start_is_added_after_it_has_loaded_and_not_when_it_fails() {
+    let mut w = W::new("handover-adds");
+    w.app.open_vault(&w.dir("one"));
+    w.app.vault_load.with_opener(|_| Err("the share is gone".into()));
+    w.app.open_handed_over(&w.dir("two"));
+    w.settle();
+    assert_eq!(w.app.cfg.vaults.entries().len(), 1, "a failed load adds nothing");
+    w.app.vault_load.with_opener(|p| Vault::open(p).map_err(|e| e.to_string()));
+    w.hold();
+    w.app.open_handed_over(&w.dir("two"));
+    assert_eq!(w.app.cfg.vaults.entries().len(), 1, "nothing is added while it loads");
+    w.release();
+    w.settle();
+    let paths: Vec<_> = w.app.cfg.vaults.entries().iter().map(|e| e.path.clone()).collect();
+    assert_eq!(paths, [crate::known_vaults::canonical(&w.dir("two")), crate::known_vaults::canonical(&w.dir("one"))]);
+}
+
+// spec: VAULT-031
+#[test]
+fn vault_031_the_window_title_is_the_name_of_the_open_vault() {
+    let mut w = W::new("title");
+    let titles =
+        |out: &eframe::egui::FullOutput| -> Vec<String> { out.viewport_output.values().flat_map(|v| v.commands.iter()).filter_map(|c| if let eframe::egui::ViewportCommand::Title(t) = c { Some(t.clone()) } else { None }).collect() };
+    w.app.open_vault(&w.dir("one"));
+    let out = w.hl.frame(&mut w.app, vec![]);
+    assert_eq!(titles(&out), ["one – Shale"]);
+    assert!(titles(&w.hl.frame(&mut w.app, vec![])).is_empty(), "the title is sent when it changes");
+    std::fs::create_dir_all(w.dir("sub").join("one")).unwrap();
+    w.app.cfg.vaults.add(&w.dir("sub").join("one"));
+    let out = w.hl.frame(&mut w.app, vec![]);
+    assert_eq!(titles(&out), [format!("one ({}) – Shale", crate::known_vaults::canonical(&w.base).display())], "two vaults with one name: the parent folder follows");
 }

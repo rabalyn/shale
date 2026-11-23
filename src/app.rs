@@ -474,6 +474,8 @@ pub struct ShaleApp {
     shot: screenshot::ScreenshotRun,
     /// the `cursor_blink` setting that the visuals of egui follow (true at the start; screenshots start steady)
     blink_applied: bool,
+    /// the title the window has been given (VAULT-031)
+    title_applied: String,
     /// the frames drawn so far (paces screenshots and scripted input)
     frames: u32,
     /// the last failure to save the global settings (shown once)
@@ -702,6 +704,7 @@ impl ShaleApp {
             shot: screenshot::ScreenshotRun::new(screenshot),
             frames: 0,
             blink_applied: true,
+            title_applied: "Shale".into(),
             cfg_error: None,
             sf: crate::settings_file::SettingsFile::new(),
             fonts: crate::fonts::FontState::new(),
@@ -3014,6 +3017,14 @@ impl eframe::App for ShaleApp {
 }
 
 impl ShaleApp {
+    /// The title of the window: the open vault's name, then Shale (VAULT-031).
+    fn window_title(&self) -> String {
+        match &self.vault {
+            Some(v) => format!("{} – Shale", self.cfg.vaults.label_of(&v.root)),
+            None => "Shale".into(),
+        }
+    }
+
     /// One frame of the window (the body of `eframe::App::ui`; tests call it directly).
     pub(crate) fn run_frame(&mut self, ui: &mut Ui) {
         self.drag.drop_zones.clear();
@@ -3024,6 +3035,11 @@ impl ShaleApp {
             self.blink_applied = self.cfg.cursor_blink;
             let blink = self.cfg.cursor_blink && !self.shot.active();
             ui.ctx().all_styles_mut(|s| s.visuals.text_cursor.blink = blink);
+        }
+        let title = self.window_title();
+        if self.title_applied != title {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.title_applied = title;
         }
         self.keyboard_guard(ui.ctx());
         self.shortcuts(ui);

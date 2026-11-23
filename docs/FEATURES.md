@@ -1087,7 +1087,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   and is not committed by git sync. In a vault in a cloud-synced or network folder, `state.json` and the undo
   histories are kept outside the vault, in Shale's data folder, so two computers do not overwrite each other's
   tabs, and leftover `.shale-tmp-*` files and `state.sync-conflict-*` copies are removed. Settings of the program itself (appearance, calendars,
-  recent vaults) stay in `~/.config/shale/config.toml`.
+  known vaults) stay in `~/.config/shale/config.toml`.
 - The files carry a format version and are upgraded on load. A settings file that can't be read
   is kept as `….broken-<date>` and you are told; a file from a newer Shale is used but not
   changed.
@@ -1309,6 +1309,7 @@ Whatever runs longer than a moment says what it does, cannot be started twice an
   Point at it, or click it to keep it open (a second click closes it): it lists every task with how long it has run and **Cancel**
   where the work can stop. It disappears when nothing runs.
   ![The indicator with two tasks listed](userguide/z_media/screenshots/busy-indicator.png)
+- **Known vaults** (VAULT-029, VAULT-031, VAULT-040, CFG-075, #582): the global `config.toml` keeps a list of the vaults Shale has opened, each with a name (by default the folder's name, local to the computer) and its canonical path, so a folder is never listed twice and the list has no length cap. It replaces the recent list and is converted from it at the first start. A vault is added when it has loaded (also one from `--vault` or a second start, never one that failed to load). The start screen lists the names; the window title shows the name of the open vault, with the parent folder after it when two known vaults have the same name.
 - **Opening a vault** (NET-019, #513): a vault is read on a background thread. While it loads, the start screen shows a spinner, "Opening ‹folder›…" and **Cancel** (a vault on a slow network share or an online-only folder no longer freezes the window); the main window appears when the vault has arrived. This covers the last vault at start, `--vault`, a folder a second start hands over, the user guide and Open or Create in the start dialog.
 - **Moved so far:** the git sync and the Git LFS setup, the check of the vault's names (Cancel stops it) and the PDF export of a
   folder (Cancel stops it), and the check of the mail index (JOB-015: it starts with the window when a mail account is set up, so the mail view finds the index ready, and the view shows "Checking the mail index…" with a spinner when it is opened earlier). The other long actions follow; the list of all of them, with what each shows today, is

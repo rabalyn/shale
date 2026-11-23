@@ -10,13 +10,19 @@ Shale keeps settings in two places:
 |---|---|---|
 | `<vault>/.shale/settings.json` | people folder, git sync | yes (git sync commits it, [[Git sync]]) |
 | `<vault>/.shale/state.json` | open tabs with their cursor, scroll and view and which are pinned, the folded blocks of your notes, the toolbar's colours, last import folder, recent tags, the last LaTeX export choices | yes, but it is only session state |
-| `~/.config/shale/config.toml` | the program itself: appearance, calendars, mail and Feeds accounts, keybindings, recent vaults | no, this computer only |
+| `~/.config/shale/config.toml` | the program itself: appearance, calendars, mail and Feeds accounts, keybindings, the list of known vaults with their names | no, this computer only |
 
 - The files carry a format version and are upgraded on load. A file that cannot be read is
   kept as `….broken-<date>` and you are told; a file from a newer Shale is used but not
   changed.
 - On the first start after an upgrade from an old version, the people folder, open notes,
   import folder and recent tags move from the old global settings into the vault you open.
+- The vaults Shale knows are listed in `config.toml` with a name each (by default the name of the
+  folder) and a path with symbolic links resolved, so a folder is never listed twice. The start
+  screen lists them and the window title shows the name of the open vault; when two vaults have
+  the same name, the folder they are in follows the name. A vault is added when it has opened
+  (also one given with `--vault` or passed on by a second start). The list replaces the old
+  "recent" list, which is converted at the first start.
 - Learned tag words are in `.shale/tag-words.json` ([[Tags and people]]).
 
 # Names that work on every system

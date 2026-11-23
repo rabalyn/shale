@@ -83,7 +83,7 @@ fn a_typed_folder_is_created_with_sample_notes_and_opened() {
     assert!(vault.join("Welcome.md").is_file(), "the sample notes were written");
     assert_eq!(w.app.vault.as_ref().map(|v| v.root.clone()), Some(vault.clone()), "the vault is open");
     assert!(w.painted("Open a folder as vault").is_none(), "the start dialog is gone");
-    assert_eq!(w.app.cfg.recent.first(), Some(&vault), "and it is the first of the recent vaults");
+    assert_eq!(w.app.cfg.vaults.entries().first().map(|e| e.path.clone()), Some(vault.clone()), "and it is the first of the known vaults");
 }
 
 // spec: VAULT-021
@@ -140,14 +140,30 @@ fn recent_vaults_are_listed_and_one_click_opens_them() {
     for d in [&a, &b] {
         std::fs::create_dir_all(d).unwrap();
     }
-    w.app.cfg.recent = vec![a.clone(), b.clone()];
+    w.app.cfg.vaults.add(&b);
+    w.app.cfg.vaults.add(&a);
     w.settle();
     assert!(w.painted("Recent vaults").is_some());
-    assert!(w.painted(&a.to_string_lossy()).is_some() && w.painted(&b.to_string_lossy()).is_some());
-    w.click_text(&b.to_string_lossy());
+    assert!(w.painted("alpha").is_some() && w.painted("beta").is_some(), "the names are listed, not the paths");
+    assert!(w.painted(&a.to_string_lossy()).is_none());
+    w.click_text("beta");
     w.settle();
-    assert_eq!(w.app.vault.as_ref().map(|v| v.root.clone()), Some(b.clone()));
-    assert_eq!(w.app.cfg.recent.first(), Some(&b), "the opened one moves to the top");
-    assert_eq!(w.app.cfg.recent.iter().filter(|p| **p == b).count(), 1, "without a duplicate");
-    assert!(w.app.cfg.recent.contains(&a));
+    let root = w.app.vault.as_ref().map(|v| v.root.clone());
+    assert_eq!(root, Some(b.clone()));
+    let paths: Vec<_> = w.app.cfg.vaults.entries().iter().map(|e| e.path.clone()).collect();
+    assert_eq!(paths, [crate::known_vaults::canonical(&b), crate::known_vaults::canonical(&a)], "the opened one moves to the top, without a duplicate");
+}
+
+// spec: VAULT-031
+#[test]
+fn vault_031_the_start_dialog_shows_the_parent_folder_of_vaults_with_the_same_name() {
+    let mut w = W::new();
+    let (a, b) = (w.dir.join("x").join("notes"), w.dir.join("y").join("notes"));
+    for d in [&a, &b] {
+        std::fs::create_dir_all(d).unwrap();
+        w.app.cfg.vaults.add(d);
+    }
+    w.settle();
+    let parent = |p: &PathBuf| crate::known_vaults::canonical(p).parent().unwrap().to_string_lossy().into_owned();
+    assert!(w.painted(&format!("notes ({})", parent(&a))).is_some() && w.painted(&format!("notes ({})", parent(&b))).is_some());
 }
