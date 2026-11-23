@@ -229,7 +229,7 @@ pub fn request_with(method: &str, url: &str, headers: &[&str], body: &str, acct:
 /// Like [`request_with`]; `follow` = false never follows a redirect (the OAuth2 token endpoint:
 /// its form holds secrets and must go only where it was addressed).
 pub fn request_opts(method: &str, url: &str, headers: &[&str], body: &str, acct: &Account, follow: bool) -> Result<Response, String> {
-    let mut r = request_bytes_opts(method, url, headers, body, acct, MAX_BYTES, follow)?;
+    let mut r = request_bytes_opts(method, url, headers, body, acct, MAX_BYTES, How { follow, upload: None })?;
     let text = String::from_utf8_lossy(&r.body).into_owned();
     r.body.zeroize();
     Ok(Response { status: r.status, body: text, url: r.url, etag: r.etag })
@@ -252,10 +252,44 @@ pub struct BytesResponse {
 /// accepted when the answer finally comes from the same server (curl itself drops it on a
 /// redirect to another server).
 pub fn request_bytes(method: &str, url: &str, headers: &[&str], body: &str, acct: &Account, max_bytes: u64) -> Result<BytesResponse, String> {
-    request_bytes_opts(method, url, headers, body, acct, max_bytes, true)
+    request_bytes_opts(method, url, headers, body, acct, max_bytes, How { follow: true, upload: None })
 }
 
-fn request_bytes_opts(method: &str, url: &str, headers: &[&str], body: &str, acct: &Account, max_bytes: u64, follow: bool) -> Result<BytesResponse, String> {
+/// A file that curl sends as the body of a request (read by curl itself, so the bytes never pass
+/// through a text field).
+#[derive(Clone, Copy, Debug)]
+pub enum Upload<'a> {
+    /// the whole body is the file (`data-binary @file`); the caller sets `Content-Type`
+    Raw { path: &'a std::path::Path },
+    /// a `multipart/form-data` body: the file as `field`, and these text fields
+    Form { field: &'a str, path: &'a std::path::Path, mime: &'a str, fields: &'a [(&'a str, &'a str)] },
+}
+
+/// How a request is sent besides its method, address and headers.
+#[derive(Clone, Copy)]
+struct How<'a> {
+    /// follow redirects
+    follow: bool,
+    upload: Option<Upload<'a>>,
+}
+
+/// Like [`request_bytes`] with a file as the body (SOC-053). The path must be one Shale made (no
+/// `"`, `;`, `,` or backslash in it). Uploads may take longer than other requests.
+pub fn request_upload(method: &str, url: &str, headers: &[&str], upload: Upload, acct: &Account, max_bytes: u64) -> Result<BytesResponse, String> {
+    let plain = |s: &str| !s.chars().any(|c| c.is_control() || matches!(c, '"' | ';' | ',' | '\\'));
+    let (path, mime) = match upload {
+        Upload::Raw { path } => (path, ""),
+        Upload::Form { path, mime, .. } => (path, mime),
+    };
+    let p = path.to_str().ok_or("the file name is not text")?;
+    if !plain(p) || !plain(mime) {
+        return Err("the file cannot be sent (its name or type has special characters)".into());
+    }
+    request_bytes_opts(method, url, headers, "", acct, max_bytes, How { follow: true, upload: Some(upload) })
+}
+
+fn request_bytes_opts(method: &str, url: &str, headers: &[&str], body: &str, acct: &Account, max_bytes: u64, how: How) -> Result<BytesResponse, String> {
+    let How { follow, upload } = how;
     let origin = check_url(url)?;
     if !method.chars().all(|c| c.is_ascii_uppercase()) || method.is_empty() {
         return Err(format!("bad request method {method:?}"));
@@ -283,6 +317,24 @@ fn request_bytes_opts(method: &str, url: &str, headers: &[&str], body: &str, acc
         quote_into(&mut cfg, &[body]);
         cfg.push('\n');
     }
+    match upload {
+        Some(Upload::Raw { path }) => {
+            cfg.push_str("data-binary = ");
+            quote_into(&mut cfg, &["@", &path.to_string_lossy()]);
+            cfg.push('\n');
+        }
+        Some(Upload::Form { field, path, mime, fields }) => {
+            cfg.push_str("form = ");
+            quote_into(&mut cfg, &[field, "=@", &path.to_string_lossy(), ";type=", mime]);
+            cfg.push('\n');
+            for (k, v) in fields {
+                cfg.push_str("form-string = ");
+                quote_into(&mut cfg, &[k, "=", v]);
+                cfg.push('\n');
+            }
+        }
+        None => {}
+    }
     for h in headers {
         cfg.push_str("header = ");
         quote_into(&mut cfg, &[h]);
@@ -291,7 +343,7 @@ fn request_bytes_opts(method: &str, url: &str, headers: &[&str], body: &str, acc
     let with_auth = headers.iter().any(|h| h.trim_start().to_ascii_lowercase().starts_with("authorization:"));
     // a local http server may redirect to http; the final address is checked below
     let protos = if origin.scheme == "http" { "=http,https" } else { "=https" };
-    let max_time = if max_bytes > 10_000_000 { "300" } else { "30" };
+    let max_time = if max_bytes > 10_000_000 || upload.is_some() { "300" } else { "30" };
     let mut curl = crate::program::command("curl");
     // -q must come first: don't read ~/.curlrc (it could turn off certificate checks or trace the password to a file)
     curl.args(["-q", "-sS", "-i"]).args(if follow { &["-L", "--max-redirs", "5"][..] } else { &[][..] }).args(["--proto", protos, "--proto-redir", protos]).args([
@@ -1079,6 +1131,43 @@ pub(crate) mod tests {
             let (s, body) = handler(m, p, h, b);
             (s, String::new(), body)
         })
+    }
+
+    // spec: SOC-053, SEC-026
+    #[test]
+    fn an_upload_names_its_file_to_curl_through_its_input_never_the_command_line_and_odd_names_are_refused() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("shale-upload-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("pic.bin");
+        std::fs::write(&file, "FILEBYTES").unwrap();
+        let nobody = Account { url: String::new(), username: String::new(), password: Default::default() };
+        let (base, handle) = mock_http(2, |_, path, headers, body| {
+            let low = headers.to_ascii_lowercase();
+            assert!(low.contains("authorization: bearer tok-secret"), "{headers}");
+            if path == "/raw" {
+                assert!(low.contains("content-type: image/png") && body == "FILEBYTES", "{headers} {body}");
+            } else {
+                assert!(low.contains("multipart/form-data") && body.contains("name=\"file\"; filename=\"pic.bin\"") && body.contains("FILEBYTES") && body.contains("name=\"description\"") && body.contains("a \"quoted\" text"), "{body}");
+            }
+            (200, "{}".into())
+        });
+        let hs = ["Authorization: Bearer tok-secret", "Content-Type: image/png"];
+        let r = request_upload("POST", &format!("{base}/raw"), &hs, Upload::Raw { path: &file }, &nobody, 1000).unwrap();
+        assert_eq!(r.status, 200);
+        let form = Upload::Form { field: "file", path: &file, mime: "image/png", fields: &[("description", "a \"quoted\" text")] };
+        assert_eq!(request_upload("POST", &format!("{base}/form"), &hs[..1], form, &nobody, 1000).unwrap().status, 200);
+        handle.join().unwrap();
+        // a name or type that could change the meaning of curl's input is refused before curl runs
+        for bad in ["a\"b.png", "a;b.png", "a,b.png", "a\nb.png"] {
+            let p = dir.join(bad);
+            assert!(request_upload("POST", &format!("{base}/raw"), &hs, Upload::Raw { path: &p }, &nobody, 1000).unwrap_err().contains("special characters"), "{bad}");
+        }
+        let odd_mime = Upload::Form { field: "file", path: &file, mime: "image/png;filename=x", fields: &[] };
+        assert!(request_upload("POST", &format!("{base}/form"), &hs, odd_mime, &nobody, 1000).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Like `mock_http`, the handler also returns extra response header lines.

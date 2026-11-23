@@ -27,7 +27,7 @@ const KEPT: usize = 1024;
 /// How long a path that is not shown any more is remembered.
 const IDLE: Duration = Duration::from_secs(120);
 /// How many bytes of decoded pictures (RGBA, 4 bytes a pixel) are kept as textures before the ones
-/// shown longest ago are let go (MEDIA-029): 16 pictures of 2048 × 2048, or about 32 of a
+/// shown longest ago are let go (MEDIA-030): 16 pictures of 2048 × 2048, or about 32 of a
 /// 1920 × 1080 screenshot.
 const PICTURE_BYTES: usize = 256 << 20;
 /// The longest side of a decoded picture; a larger one is scaled down with its proportions.
@@ -68,7 +68,7 @@ pub enum Look {
 #[derive(Clone)]
 pub enum Pic {
     /// Being looked up or decoded; the frame shows a placeholder. The size the picture will have
-    /// (its pixels as the texture will be, MEDIA-028) when it is known from the file's header or
+    /// (its pixels as the texture will be, MEDIA-029) when it is known from the file's header or
     /// from an earlier decode, else None.
     Loading(Option<egui::Vec2>),
     Ready(egui::TextureHandle),
@@ -273,7 +273,7 @@ impl Looks {
     /// decoded on workers (a few at a time), then the texture; a file that was changed is decoded
     /// again, the old picture stays until the new one is there. `Loading` carries the size the
     /// picture will have as soon as it is known: a worker reads it from the file's header before
-    /// the decode (MEDIA-028), and it is kept when the texture is let go. The textures are kept up
+    /// the decode (MEDIA-029), and it is kept when the texture is let go. The textures are kept up
     /// to `PICTURE_BYTES`; the ones asked for longest ago go first, never one a frame asked for in
     /// this pass or the one before.
     pub fn picture(&self, ctx: &egui::Context, path: &Path) -> Pic {
@@ -769,7 +769,7 @@ pub(crate) mod tests {
         assert_eq!(looks.lock().facts.len(), 1, "what was not shown for a while is gone, the new path is kept");
     }
 
-    // spec: MEDIA-028
+    // spec: MEDIA-029
     #[test]
     fn the_size_of_a_picture_comes_from_its_header_and_is_the_size_the_decode_makes() {
         assert_eq!(capped([80, 40]), [80, 40]);
@@ -789,7 +789,7 @@ pub(crate) mod tests {
         assert_eq!(measure_file(Path::new("/nas/not-there.png")), None);
     }
 
-    // spec: MEDIA-028
+    // spec: MEDIA-029
     #[test]
     fn a_picture_that_is_being_decoded_has_its_size_from_the_header_and_a_picture_without_one_has_none() {
         let (ctx, _) = ctx_counting_repaints();
@@ -822,7 +822,7 @@ pub(crate) mod tests {
         ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
     }
 
-    // spec: MEDIA-029
+    // spec: MEDIA-030
     #[test]
     fn the_textures_kept_have_a_cap_in_bytes_the_oldest_go_first_and_a_picture_in_the_frame_stays() {
         let (ctx, _) = ctx_counting_repaints();

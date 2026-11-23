@@ -28,6 +28,12 @@ pub struct VaultCache {
 }
 
 impl VaultCache {
+    /// Something is kept (tests).
+    #[cfg(test)]
+    pub(crate) fn holds_anything(&self) -> bool {
+        self.backlinks.is_some() || self.unlinked.is_some() || self.tasks.is_some()
+    }
+
     /// The notes and drawings that link to `rel` ([`Vault::backlinks`]).
     pub fn backlinks(&mut self, v: &Vault, rel: &Path) -> Arc<Mentions> {
         match &self.backlinks {

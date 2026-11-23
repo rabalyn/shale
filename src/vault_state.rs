@@ -716,7 +716,7 @@ mod tests {
     }
 
     fn feed_tab(account: &str, feed: &str) -> SavedTab {
-        SavedTab { feed: Some(crate::social::FeedRef { account: account.into(), feed: feed.into() }), ..SavedTab::default() }
+        SavedTab { feed: Some(crate::social::FeedRef::new(account, feed)), ..SavedTab::default() }
     }
 
     // spec: CFG-006

@@ -71,7 +71,7 @@ impl Drop for FakeServer {
 }
 
 fn query_value(query: &str, key: &str) -> String {
-    query.split('&').filter_map(|p| p.split_once('=')).find(|(k, _)| *k == key).map(|(_, v)| v.replace("%3A", ":").replace("%2F", "/")).unwrap_or_default()
+    query.split('&').filter_map(|p| p.split_once('=')).find(|(k, _)| *k == key).map(|(_, v)| v.replace("%3A", ":").replace("%2F", "/").replace("%20", " ")).unwrap_or_default()
 }
 
 fn respond(s: &mut TcpStream, status: u16, ctype: &str, body: &str) {
@@ -109,7 +109,7 @@ fn serve(mut s: TcpStream, st: &Arc<Mutex<ServerState>>) {
     let field = |k: &str| body[k].as_str().unwrap_or("").to_string();
     match (method, path) {
         ("POST", "/api/v1/apps") => {
-            if field("redirect_uris") != "urn:ietf:wg:oauth:2.0:oob" || field("scopes") != "read" {
+            if field("redirect_uris") != "urn:ietf:wg:oauth:2.0:oob" || field("scopes") != "read write" {
                 return respond(&mut s, 422, "application/json", r#"{"error":"Validation failed"}"#);
             }
             g.counter += 1;
@@ -120,7 +120,7 @@ fn serve(mut s: TcpStream, st: &Arc<Mutex<ServerState>>) {
         // the page where the person logs in, allows the app and is shown the code
         ("GET", "/oauth/authorize") => {
             let known = g.apps.iter().any(|a| a.0 == query_value(query, "client_id"));
-            if !known || query_value(query, "response_type") != "code" || query_value(query, "scope") != "read" || query_value(query, "redirect_uri") != "urn:ietf:wg:oauth:2.0:oob" {
+            if !known || query_value(query, "response_type") != "code" || query_value(query, "scope") != "read write" || query_value(query, "redirect_uri") != "urn:ietf:wg:oauth:2.0:oob" {
                 return respond(&mut s, 400, "text/html", "<p>Error</p>");
             }
             g.counter += 1;
@@ -139,7 +139,7 @@ fn serve(mut s: TcpStream, st: &Arc<Mutex<ServerState>>) {
             g.counter += 1;
             let token = format!("tok-{}", g.counter);
             g.tokens.insert(token.clone());
-            respond(&mut s, 200, "application/json", &json!({"access_token": token, "token_type": "Bearer", "scope": "read"}).to_string());
+            respond(&mut s, 200, "application/json", &json!({"access_token": token, "token_type": "Bearer", "scope": "read write"}).to_string());
         }
         ("GET", "/api/v1/accounts/verify_credentials") => {
             if g.tokens.contains(&bearer) {
@@ -219,7 +219,7 @@ impl BrowserLog {
 }
 
 /// The pretend browser for a pretend server on `port`: checks the sign-in address (the app
-/// registered there, read-only scope, the out-of-band redirect, a code answer) and acts as the person.
+/// registered there, read and write scope, the out-of-band redirect, a code answer) and acts as the person.
 pub fn pretend_browser(port: u16, person: Person) -> (crate::opener::BrowserGuard, BrowserLog) {
     let log = BrowserLog::default();
     let l = log.clone();

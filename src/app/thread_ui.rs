@@ -22,8 +22,14 @@ pub struct ThreadState {
 }
 
 impl ThreadState {
+    /// The index of a vault is kept (tests).
+    #[cfg(test)]
+    pub(crate) fn has_index(&self) -> bool {
+        self.cache.is_some()
+    }
+
     /// The index of `vault`, made again only when the vault changed (PERF-001).
-    fn index(&mut self, vault: &Vault) -> &Index {
+    pub(crate) fn index(&mut self, vault: &Vault) -> &Index {
         let stale = self.cache.as_ref().is_none_or(|(uid, generation, _)| *uid != vault.uid || *generation != vault.generation);
         if stale {
             self.cache = Some((vault.uid, vault.generation, Index::build(vault)));

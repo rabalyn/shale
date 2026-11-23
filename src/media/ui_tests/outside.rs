@@ -594,7 +594,7 @@ fn after_at(fx: &Fx) -> Pos2 {
     fx.hl.text.iter().find(|(t, _)| t.trim() == "after").or_else(|| fx.hl.text.iter().find(|(t, _)| t == "3")).map(|(_, p)| *p).unwrap_or_else(|| panic!("the line after the picture is on screen: {:?}", fx.hl.text))
 }
 
-// spec: MEDIA-028
+// spec: MEDIA-029
 #[test]
 fn a_picture_that_is_still_decoding_has_its_own_size_from_the_header_and_the_page_does_not_jump_when_it_arrives() {
     for reading in [true, false] {

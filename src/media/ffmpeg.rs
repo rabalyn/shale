@@ -92,6 +92,10 @@ const PROBE_ENTRIES: &str = "stream=codec_type,width,height,avg_frame_rate,r_fra
 /// refuses the whole list: those versions give the rotation as the stream tag `rotate` (#299).
 const PROBE_ENTRIES_OLD: &str = "stream=codec_type,width,height,avg_frame_rate,r_frame_rate:stream_tags=rotate:format=duration";
 
+/// Only the file itself may be read: a file of a post comes from a stranger (SEC-028), and a
+/// clip that names other files or addresses inside itself is not followed.
+const LOCAL_ONLY: [&str; 2] = ["-protocol_whitelist", "file"];
+
 /// `ffprobe` asked whether a file has a sound and how long it is, as JSON (MEDIA-026).
 pub fn audio_probe_args(file: &Path) -> Vec<OsString> {
     let mut a = os(&["-v", "error", "-show_entries", "stream=codec_type:format=duration", "-of", "json", "-i"]);
@@ -110,7 +114,9 @@ pub fn parse_audio_probe(json: &str) -> Result<Option<f64>, String> {
 }
 
 fn probe_args_with(file: &Path, entries: &str) -> Vec<OsString> {
-    let mut a = os(&["-v", "error", "-show_entries", entries, "-of", "json", "-i"]);
+    let mut a = os(&["-v", "error", "-show_entries", entries, "-of", "json"]);
+    a.extend(os(&LOCAL_ONLY));
+    a.push("-i".into());
     a.push(file.into());
     a
 }
@@ -118,7 +124,9 @@ fn probe_args_with(file: &Path, entries: &str) -> Vec<OsString> {
 /// The first picture of the file as a PNG on stdout, scaled to `w` x `h`.
 pub fn thumbnail_args(file: &Path, w: u32, h: u32) -> Vec<OsString> {
     let mut a = base();
-    a.extend(os(&["-ss", "0", "-i"]));
+    a.extend(os(&["-ss", "0"]));
+    a.extend(os(&LOCAL_ONLY));
+    a.push("-i".into());
     a.push(file.into());
     a.extend(os(&["-an", "-sn", "-dn", "-frames:v", "1", "-vf"]));
     a.push(format!("scale={w}:{h}").into());
@@ -131,6 +139,7 @@ pub fn video_args(file: &Path, start: f64, w: u32, h: u32, fps: f64) -> Vec<OsSt
     let mut a = base();
     a.push("-ss".into());
     a.push(format!("{:.3}", start.max(0.0)).into());
+    a.extend(os(&LOCAL_ONLY));
     a.push("-i".into());
     a.push(file.into());
     a.extend(os(&["-an", "-sn", "-dn", "-vf"]));
@@ -144,6 +153,7 @@ pub fn audio_args(file: &Path, start: f64, rate: u32, channels: usize) -> Vec<Os
     let mut a = base();
     a.push("-ss".into());
     a.push(format!("{:.3}", start.max(0.0)).into());
+    a.extend(os(&LOCAL_ONLY));
     a.push("-i".into());
     a.push(file.into());
     a.extend(os(&["-vn", "-sn", "-dn", "-ac"]));
@@ -362,7 +372,7 @@ mod tests {
         assert!(tools.audio_length(Path::new("/does/not/exist.wav")).is_err());
     }
 
-    // spec: MEDIA-009
+    // spec: MEDIA-009, SEC-028
     #[test]
     fn the_arguments_are_a_list_with_the_file_after_dash_i_and_never_a_shell_line() {
         let odd = Path::new("/vault/my video; rm -rf $HOME `x`.mp4");
@@ -370,6 +380,7 @@ mod tests {
             let a = strs(&args);
             let at = a.iter().position(|s| s == "-i").expect("-i");
             assert_eq!(a[at + 1], odd.to_string_lossy(), "the name is one argument, as it is");
+            assert!(a[..at].windows(2).any(|w| w == ["-protocol_whitelist", "file"]), "only the file itself is read: {a:?}");
             assert_eq!(a.iter().filter(|s| s.contains("rm -rf")).count(), 1, "and only there");
         }
         let v = strs(&video_args(odd, 12.5, 640, 360, 29.97));

@@ -146,15 +146,17 @@ impl SocialDialog {
                     return;
                 }
                 self.job = Some(spawn(ctx, move || {
-                    let token = match (&app, use_token) {
+                    // the permissions the server gave are kept with the account (not a secret); a pasted token says nothing
+                    let (token, scopes) = match (&app, use_token) {
                         (Some(app), false) => mastodon::exchange_code(&server, app, &code)?,
-                        _ => secret,
+                        _ => (secret, None),
                     };
                     let who = mastodon::verify(&server, token.expose())?;
                     if let Some(old) = editing {
-                        return resigned(old, &who.handle, &token);
+                        return resigned(old, &who.handle, &token, scopes);
                     }
-                    Ok(Done::Added(SocialAccountEntry::new(Account::new(Network::Mastodon, &server, &who.handle, &who.display_name), &token)))
+                    let account = Account { scopes, ..Account::new(Network::Mastodon, &server, &who.handle, &who.display_name) };
+                    Ok(Done::Added(SocialAccountEntry::new(account, &token)))
                 }));
             }
             Network::Bluesky => {
@@ -168,7 +170,7 @@ impl SocialDialog {
                     let server = clean_server(&server).map_err(|e| format!("This server address can't be used: {e}"))?;
                     let session = bluesky::create_session(&server, &handle, secret.expose())?;
                     if let Some(old) = editing {
-                        return resigned(old, &session.handle, &secret);
+                        return resigned(old, &session.handle, &secret, None);
                     }
                     Ok(Done::Added(SocialAccountEntry::new(Account::new(Network::Bluesky, &server, &session.handle, &session.handle), &secret)))
                 }));
@@ -208,11 +210,11 @@ impl SocialDialog {
 /// The sign-in of Edit worked: it must be the account's own handle (nothing is stored for another
 /// one); then the secret goes to the keyring (or the entry) under the account's own name, and
 /// the entry is the account as it was.
-fn resigned(old: Account, signed_in_as: &str, secret: &crate::secret::Secret) -> JobResult {
+fn resigned(old: Account, signed_in_as: &str, secret: &crate::secret::Secret, scopes: Option<String>) -> JobResult {
     if !signed_in_as.trim().trim_start_matches('@').eq_ignore_ascii_case(&old.handle) {
         return Err(format!("This sign-in is for @{}, not for @{}. Nothing was changed.", signed_in_as.trim_start_matches('@'), old.handle));
     }
-    Ok(Done::Resigned(SocialAccountEntry::new(old, secret)))
+    Ok(Done::Resigned(SocialAccountEntry::new(Account { scopes, ..old }, secret)))
 }
 
 impl Default for SocialDialog {
@@ -312,7 +314,7 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
                     ui.label(muted("Step 1"));
                     ui.horizontal(|ui| {
                         if rec("open-browser".into(), ui.add_enabled(!busy, egui::Button::new("Open sign-in page in browser")))
-                            .on_hover_text("Shale asks the server for a read-only sign-in; you log in and allow it on the server's own page")
+                            .on_hover_text("Shale asks the server for a sign-in that can read and write (to like, boost and post); you log in and allow it on the server's own page")
                             .clicked()
                         {
                             d.open_sign_in(ui.ctx());
@@ -478,7 +480,7 @@ mod tests {
         std::process::Command::new("curl").arg("--version").output().is_ok()
     }
 
-    // spec: SOC-001, SOC-004, SOC-010
+    // spec: SOC-001, SOC-004, SOC-010, SOC-056
     #[test]
     fn a_mastodon_sign_in_opens_the_browser_takes_the_code_and_adds_the_account() {
         if !has_curl() {
@@ -501,6 +503,8 @@ mod tests {
         let Some(DialogAction::Added(e)) = added else { panic!("no account was added: {:?}", d.error) };
         assert_eq!((e.account.network, e.account.handle.as_str(), e.account.display_name.as_str(), e.account.server.as_str()), (Network::Mastodon, "ada@127.0.0.1", "Ada L.", server.address().as_str()));
         assert!(e.secret.is_empty() && server.state.lock().unwrap().tokens.iter().any(|t| t == e.secret().expose()), "the access token the server made is in the keyring, not in the entry");
+        // spec: SOC-056: the permissions the server gave are kept with the account (and can write)
+        assert_eq!((e.account.scopes.as_deref(), e.account.may_write()), (Some("read write"), Some(true)));
         crate::secrets::social_clear(&e.account.server, &e.account.handle);
         assert_eq!(server.state.lock().unwrap().requests, ["POST /api/v1/apps", "GET /oauth/authorize", "POST /oauth/token", "GET /api/v1/accounts/verify_credentials"]);
         assert!(d.code.is_empty() && d.server.is_empty() && d.app.is_none(), "the dialog is ready for the next account");

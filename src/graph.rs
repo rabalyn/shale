@@ -16,6 +16,9 @@ pub struct GraphView {
     edges: Vec<(usize, usize)>,
     pos: Vec<Vec2>,
     vel: Vec<Vec2>,
+    /// the forces of the step and the quadtree's buffers, kept so a step allocates nothing once they have grown (PERF-003)
+    force: Vec<Vec2>,
+    scratch: crate::graph_tree::Scratch,
     degree: Vec<usize>,
     pub offset: Vec2,
     pub zoom: f32,
@@ -51,6 +54,8 @@ impl GraphView {
             edges: vec![],
             pos: vec![],
             vel: vec![],
+            force: vec![],
+            scratch: Default::default(),
             degree: vec![],
             offset: Vec2::ZERO,
             zoom: if local { 0.8 } else { 1.0 },
@@ -131,7 +136,8 @@ impl GraphView {
             return;
         }
         // every note pushes every other away: pair by pair for a small graph, by quadtree for a big one
-        let mut force = crate::graph_tree::forces(&self.pos);
+        let mut force = std::mem::take(&mut self.force);
+        crate::graph_tree::forces_into(&self.pos, &mut force, &mut self.scratch);
         for (a, b) in &self.edges {
             let d = self.pos[*b] - self.pos[*a];
             let len = d.length().max(0.01);
@@ -153,6 +159,7 @@ impl GraphView {
             total += v.length();
         }
         self.energy = total / n as f32;
+        self.force = force;
     }
 
     /// Up to three steps of the physics while it is moving, but not more once `budget` is used up
@@ -389,6 +396,32 @@ mod tests {
         g.energy = 0.0;
         assert_eq!(g.relax(Duration::from_secs(60)), 0, "nothing while it rests");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: PERF-003
+    #[cfg(feature = "bench")]
+    #[test]
+    fn perf_003_a_step_allocates_nothing_once_its_buffers_have_grown() {
+        // 40 notes are worked out pair by pair, 700 by quadtree
+        for n in [40, 700] {
+            let (v, dir) = vault(n);
+            let mut g = GraphView::new(false);
+            g.rebuild(&v);
+            for _ in 0..30 {
+                g.step(); // the buffers grow here
+            }
+            // the counter is the process's (other tests run beside this one): the quietest try counts
+            let quietest = (0..300)
+                .map(|_| {
+                    let before = crate::bench::alloc::snapshot().allocs;
+                    g.step();
+                    crate::bench::alloc::snapshot().allocs - before
+                })
+                .min()
+                .unwrap();
+            assert_eq!(quietest, 0, "a step of a graph of {n} notes allocates");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
     }
 
     // spec: PERF-003

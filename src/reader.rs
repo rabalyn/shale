@@ -593,7 +593,7 @@ pub(crate) fn paint_pictures(painter: &egui::Painter, galley: &Galley, pos: Pos2
         let bottom = pos.y + baseline + line * PICTURE_DROP;
         let rect = egui::Rect::from_min_size(Pos2::new(pos.x + x, bottom - size.y), size);
         let Some(texture) = pic.texture else {
-            // not decoded yet: a faint tile where it will be (MEDIA-028)
+            // not decoded yet: a faint tile where it will be (MEDIA-029)
             painter.rect_filled(rect, CornerRadius::same(2), theme::palette().bg_hover);
             continue;
         };
@@ -785,7 +785,7 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
         |t| vault.look_media(ui.ctx(), t, Some(rel)),
         |abs| match crate::media::picture(ui.ctx(), abs) {
             crate::media::look::Pic::Ready(t) => Some((t.size_vec2(), Some(t.id()))),
-            // the room is left from the size in the header, the picture comes in it (MEDIA-028)
+            // the room is left from the size in the header, the picture comes in it (MEDIA-029)
             crate::media::look::Pic::Loading(known) => known.map(|size| (size, None)),
             crate::media::look::Pic::Broken => None,
         },
@@ -1306,7 +1306,7 @@ fn embed(ui: &mut Ui, vault: &Vault, (target, abs, outside): (&Path, &Path, Opti
                             *out = Some(open());
                         }
                     }
-                    // the size from the header: a tile as big as the picture will be, so the page does not jump (MEDIA-028)
+                    // the size from the header: a tile as big as the picture will be, so the page does not jump (MEDIA-029)
                     crate::media::look::Pic::Loading(Some(natural)) => {
                         let size = crate::embed_size::fit(natural, width.map_or(w, |asked| asked.min(w)), if width.is_some() { f32::INFINITY } else { 520.0 });
                         let (rect, _) = ui.allocate_exact_size(size, Sense::hover());

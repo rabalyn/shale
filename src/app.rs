@@ -195,6 +195,9 @@ mod thread_ui;
 mod tree_ui_tests;
 mod usage;
 mod userguide;
+pub mod vault_close;
+#[cfg(test)]
+mod vault_close_tests;
 pub mod vault_load;
 #[cfg(test)]
 mod vault_load_tests;
@@ -369,6 +372,13 @@ pub enum Action {
     RestoreTrashed,
     NewFolder(PathBuf),
     OpenVault(PathBuf),
+    /// close the vault in this folder: forget it, and remove the Shale files `remove` names (VAULT-035, VAULT-036)
+    CloseVault {
+        path: PathBuf,
+        remove: vault_close::Remove,
+    },
+    /// show the list of the vaults (the quick switcher's "Switch vault", VAULT-044)
+    OpenVaultMenu,
     /// Look at the vault folder again (e.g. after a file was copied in).
     Rescan,
     /// show a message (the app's toast)
@@ -481,6 +491,8 @@ pub struct ShaleApp {
     pub guide: crate::userguide::Places,
     /// paths that a second start of Shale hands over (DATA-015); none in tests and screenshots
     pub handover: Option<crate::instance::Handover>,
+    /// a close or switch of the vault that waits for the running sync (VAULT-036, VAULT-037)
+    pub(crate) pending_leave: Option<vault_close::PendingLeave>,
     pub modal: Option<Modal>,
     /// The key registry with the user's changes (KEY-001…009).
     pub keymap: crate::keys::Keymap,
@@ -747,6 +759,7 @@ impl ShaleApp {
             word: Default::default(),
             guide: if persist { crate::userguide::Places::system() } else { crate::userguide::Places::none() },
             handover: None,
+            pending_leave: None,
         };
         // the mail view's check of the index is a task of the window's registry (JOB-015)
         app.mail.busy = app.busy.clone();
@@ -837,12 +850,24 @@ impl ShaleApp {
                 self.open_data_usage();
             }
             Some("graph") => self.show_view(View::Graph, false),
-            // the feed view with made-up posts (no network); "social-import": and the dialog for saving some of them
-            Some(v @ ("social" | "social-import")) => {
+            // the feed view with made-up posts (no network); "social-import": and the dialog for saving some of them; "social-thread": the conversation of a post
+            Some(v @ ("social" | "social-import" | "social-thread" | "social-notifications")) => {
                 let demo = crate::social::demo::account();
                 self.cfg.social_accounts = vec![demo.clone()];
                 self.social.load_demo(&demo);
                 self.show_view(View::Social(None), false);
+                if v == "social-thread" {
+                    // the conversation of the first reply to the demo thread (SOC-045)
+                    let post = crate::social::demo::replies().remove(0).post;
+                    self.social.threads.open(&demo.account.id, &post);
+                    self.show_view(View::Social(Some(crate::social::FeedRef { thread: Some(post.id), ..crate::social::FeedRef::new(demo.account.id.clone(), "home") })), false);
+                }
+                if v == "social-notifications" {
+                    // the Notifications feed of the demo account, loaded already (SOC-078)
+                    let key = (demo.account.id.clone(), crate::social::notifications::NOTIFICATIONS.to_string());
+                    self.social.timelines.insert(key.clone(), crate::social::state::Timeline { posts: crate::social::demo::notifications(), loaded: true, ..Default::default() });
+                    self.show_view(View::Social(Some(crate::social::FeedRef::new(key.0, key.1))), false);
+                }
                 if v == "social-import" {
                     let posts = crate::social::demo::posts();
                     let items = [3, 4].iter().map(|i| crate::import::social_item(crate::social::demo::saved(&posts[*i]), "Mastodon", false)).collect();
@@ -986,16 +1011,10 @@ impl ShaleApp {
                 self.toast(e);
             }
         }
+        // nothing of the vault being left stays (VAULT-037)
+        self.drop_vault_state();
         self.load_vault_data(&v.root);
-        self.media.stop();
         self.vault = Some(v);
-        self.tabbar.tabs.clear();
-        self.panes.reset();
-        self.notes.clear();
-        self.drawings.clear();
-        self.tabbar.active = 0;
-        // the folders are looked at again the next time the list is shown
-        self.presence.clear();
         if known {
             // a folder that is new to the list and lies in or around another vault: warned once (VAULT-039)
             let nesting = if self.cfg.vaults.contains(path) { None } else { self.cfg.vaults.nested_with(path, None) };
@@ -2600,6 +2619,8 @@ impl ShaleApp {
                 Action::RestoreTrashed => self.restore_trashed(),
                 Action::NewFolder(parent) => self.modal = Some(Modal::NewFolder { parent, name: String::new() }),
                 Action::OpenVault(p) => self.open_vault_in_background(&p, vault_load::After::Nothing),
+                Action::CloseVault { path, remove } => self.close_vault(&path, remove),
+                Action::OpenVaultMenu => self.open_vault_menu(),
                 Action::Export(rel) => self.open_export_dialog(&rel),
                 Action::ExportDocx(rel) => self.open_docx_export_dialog(&rel),
                 Action::ExportFolder(dir) => self.open_export_folder_dialog(&dir),
@@ -3148,6 +3169,7 @@ impl ShaleApp {
         self.update_tick(&ctx);
         self.take_handover(&ctx);
         self.sync_tick(&ctx);
+        self.vault_leave_tick();
         self.history_tick(&ctx);
         self.mail_tick(&ctx);
         if self.calendar.poll() {

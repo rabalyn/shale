@@ -599,7 +599,7 @@ enum Art {
     /// an outside file that cannot be shown: what is wrong, in a strip in its place (MEDIA-016)
     Notice(String),
     /// a file that is still looked up or decoded on a worker: a quiet strip with its name (MEDIA-024);
-    /// `true` when the box has the size the picture will have (MEDIA-028): a faint tile with the name in it
+    /// `true` when the box has the size the picture will have (MEDIA-029): a faint tile with the name in it
     Loading(String, bool),
 }
 
@@ -1770,7 +1770,7 @@ impl NoteEditor {
                             let size = crate::embed_size::picture(tex.size_vec2(), asked, max_w);
                             images.push((l.range.clone(), size.y + 6.0 + caption_h, Art::Tex(tex), size));
                         }
-                        // a size read from the header gives the placeholder the picture's own size, else the strip of the other placeholders (MEDIA-024, MEDIA-028)
+                        // a size read from the header gives the placeholder the picture's own size, else the strip of the other placeholders (MEDIA-024, MEDIA-029)
                         crate::media::look::Pic::Loading(known) => {
                             let size = known.map_or_else(|| crate::embed_size::not_downloaded(max_w), |natural| crate::embed_size::picture(natural, asked, max_w));
                             images.push((l.range.clone(), size.y + 6.0 + caption_h, Art::Loading(file_name_of(&abs), known.is_some()), size));
