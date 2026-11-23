@@ -22,6 +22,7 @@ impl ShaleApp {
             ("the update check", self.update.busy()),
             ("the copy of outside files", self.outside_copy.is_some()),
             ("the opening of outside files", !self.outside_opens.is_empty()),
+            ("the search", self.search_worker.busy()),
         ];
         jobs.into_iter().filter(|(_, busy)| *busy).map(|(name, _)| name).collect()
     }
@@ -74,6 +75,44 @@ mod tests {
         release.store(true, Ordering::SeqCst);
         hl.settle(&mut app);
         assert!(!app.rescan.in_flight());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: QUERY-020
+    #[test]
+    fn query_020_settle_waits_for_the_search_worker_and_a_test_sees_the_result() {
+        static RELEASE: AtomicBool = AtomicBool::new(false);
+        fn held(_: &mut crate::search_all::worker::Conns, _: &crate::search_all::Request, _: &AtomicBool) -> Option<crate::search_all::Found> {
+            while !RELEASE.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Some(crate::search_all::Found::default())
+        }
+        let (mut app, d) = test_app("settle-search");
+        let mut hl = Headless::new();
+        hl.settle(&mut app);
+        // a search that is held back is named
+        app.search_worker = crate::search_all::SearchWorker::with_runner(held);
+        app.side.left = crate::app::LeftPanel::Search;
+        app.search.query = "markdown".into();
+        std::thread::sleep(crate::search_all::DEBOUNCE + Duration::from_millis(30));
+        let stuck = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            settle_within(Duration::from_millis(300), || {
+                hl.frame(&mut app, vec![]);
+                app.busy_jobs()
+            })
+        }));
+        let message = *stuck.expect_err("a search that is held back does not settle").downcast::<String>().unwrap();
+        assert!(message.contains("still running") && message.contains("the search"), "{message}");
+        RELEASE.store(true, Ordering::SeqCst);
+        hl.settle(&mut app);
+        assert!(app.busy_jobs().is_empty());
+        // the real worker: after settle the list of the search is there
+        app.search_worker = Default::default();
+        app.search.query = "vault".into();
+        std::thread::sleep(crate::search_all::DEBOUNCE + Duration::from_millis(30));
+        hl.settle(&mut app);
+        assert!(!app.search.listed().is_empty(), "the result of the search is in the list");
         let _ = std::fs::remove_dir_all(&d);
     }
 

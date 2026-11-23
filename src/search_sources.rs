@@ -330,6 +330,8 @@ pub struct Bar<'a> {
     pub listed: Selection,
     /// the query has a prefix: it decides, the buttons wait
     pub prefixed: bool,
+    /// a query is on the worker: the list is the last valid one, a spinner says so (QUERY-018)
+    pub searching: bool,
 }
 
 impl Bar<'_> {
@@ -368,6 +370,9 @@ pub fn bar(ui: &mut Ui, bar: &Bar, filter: &mut Filter, cfg: &mut SearchConfig) 
                     filter.click(kind);
                 }
             }
+        }
+        if bar.searching {
+            ui.add(egui::Spinner::new().size(12.0)).on_hover_text("Searching…");
         }
     });
     changed

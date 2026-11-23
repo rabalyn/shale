@@ -11,8 +11,9 @@
 
 use super::{feed_ui::segments, Post};
 use crate::mail::db::fts_query_wild;
-use rusqlite::{params, Connection};
-use std::path::Path;
+use rusqlite::{params, Connection, OpenFlags};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The most posts kept per account by default; the oldest go first.
 pub const KEEP_POSTS: usize = 10_000;
@@ -50,8 +51,19 @@ pub struct PostHit {
     pub post: Post,
 }
 
+/// Where an index lives, so that another thread can open its own read-only connection to it
+/// (QUERY-016).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Home {
+    /// the database file
+    File(PathBuf),
+    /// the URI of a named in-memory database that its connections share (tests, screenshots)
+    Memory(String),
+}
+
 pub struct PostIndex {
     conn: Connection,
+    home: Home,
     /// posts per account (None: no limit)
     pub keep_posts: Option<usize>,
     /// days by the date of the post (None: forever)
@@ -251,9 +263,33 @@ fn compact(c: &Connection) {
 impl PostIndex {
     /// An index that lives in memory only (tests, screenshots).
     pub fn in_memory() -> PostIndex {
-        let conn = Connection::open_in_memory().expect("an in-memory database opens");
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        // a name of its own, shared by the connections of this index only: the search worker reads it too
+        let uri = format!("file:shale-post-index-{}-{}?mode=memory&cache=shared", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed));
+        let conn = Connection::open_with_flags(&uri, OpenFlags::default() | OpenFlags::SQLITE_OPEN_SHARED_CACHE).expect("an in-memory database opens");
         setup(&conn).expect("the layout is valid");
-        PostIndex { conn, keep_posts: Some(KEEP_POSTS), keep_days: Some(KEEP_DAYS) }
+        PostIndex { conn, home: Home::Memory(uri), keep_posts: Some(KEEP_POSTS), keep_days: Some(KEEP_DAYS) }
+    }
+
+    /// Where this index lives (for [`PostIndex::open_reader`]).
+    pub fn home(&self) -> &Home {
+        &self.home
+    }
+
+    /// A read-only connection to the index at `home`, for a thread that only searches (QUERY-016).
+    /// None when the index is not there (any more) or cannot be read.
+    pub fn open_reader(home: &Home) -> Option<PostIndex> {
+        let conn = match home {
+            Home::File(path) => Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX).ok()?,
+            Home::Memory(uri) => {
+                let c = Connection::open_with_flags(uri, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI | OpenFlags::SQLITE_OPEN_SHARED_CACHE | OpenFlags::SQLITE_OPEN_NO_MUTEX).ok()?;
+                // (a shared cache locks tables: the reader does not wait for a writer's transaction)
+                c.pragma_update(None, "read_uncommitted", true).ok()?;
+                c
+            }
+        };
+        conn.busy_timeout(std::time::Duration::from_secs(5)).ok()?;
+        Some(PostIndex { conn, home: home.clone(), keep_posts: None, keep_days: None })
     }
 
     /// The index in a file. A file that cannot be used is removed and made again; None when even
@@ -282,7 +318,7 @@ impl PostIndex {
             try_open()
         });
         match conn {
-            Ok(conn) => Some(PostIndex { conn, keep_posts: Some(KEEP_POSTS), keep_days: Some(KEEP_DAYS) }),
+            Ok(conn) => Some(PostIndex { conn, home: Home::File(path.to_path_buf()), keep_posts: Some(KEEP_POSTS), keep_days: Some(KEEP_DAYS) }),
             Err(e) => {
                 eprintln!("could not open the post index {}: {e}", path.display());
                 None

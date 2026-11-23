@@ -7,7 +7,7 @@ use crate::app::Action;
 use crate::dialog::Dialog;
 use crate::keys::{Action as KeyAction, Keymap};
 use crate::markdown;
-use crate::search_all::{self, Ctx, Found, Query, Refreshed, Results};
+use crate::search_all::{self, Ask, Ctx, Query, Refreshed, Request, Results, SearchWorker, Slot, Start};
 use crate::search_render::Look;
 use crate::search_sources::{self, Bar, Filter, SearchConfig, Selection};
 use crate::theme;
@@ -73,35 +73,40 @@ impl Source {
         matches!(self, Source::Everything)
     }
 
-    /// The hits for what is typed, best first; the search of everything lists every source (a
-    /// picker asks [`Source::found`], with the sources it is set to).
+    /// The hits for what is typed, best first: the file names fuzzy-matched. The search of
+    /// everything is not asked here but of the worker ([`Source::start`]).
+    fn file_names(ctx: &Ctx, query: &str) -> Vec<Hit> {
+        let mut found: Vec<(i32, Hit)> = ctx
+            .vault
+            .files
+            .iter()
+            .filter_map(|f| {
+                let name = f.display_name();
+                let score = markdown::fuzzy_score(query.trim(), &name)?;
+                let detail = f.rel.parent().map(rel_to_string).unwrap_or_default();
+                Some((score, Hit::new("", name, detail, Action::Open { rel: f.rel.clone(), new_tab: false })))
+            })
+            .collect();
+        found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.title.cmp(&b.1.title)));
+        found.into_iter().take(MAX_HITS).map(|(_, h)| h).collect()
+    }
+
+    /// The hits for what is typed, here and now (tests): the search of everything lists every
+    /// source.
+    #[cfg(test)]
     pub fn hits(self, ctx: &Ctx, query: &str) -> Vec<Hit> {
         match self {
-            Source::FileNames => {
-                let mut found: Vec<(i32, Hit)> = ctx
-                    .vault
-                    .files
-                    .iter()
-                    .filter_map(|f| {
-                        let name = f.display_name();
-                        let score = markdown::fuzzy_score(query.trim(), &name)?;
-                        let detail = f.rel.parent().map(rel_to_string).unwrap_or_default();
-                        Some((score, Hit::new("", name, detail, Action::Open { rel: f.rel.clone(), new_tab: false })))
-                    })
-                    .collect();
-                found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.title.cmp(&b.1.title)));
-                found.into_iter().take(MAX_HITS).map(|(_, h)| h).collect()
-            }
+            Source::FileNames => Source::file_names(ctx, query),
             Source::Everything => search_all::all_hits(ctx, &Query::picker(query)),
         }
     }
 
-    /// What is found for `query`: for the search of everything every source, counted, for the file
-    /// names their hits.
-    fn found(self, ctx: &Ctx, query: &Query) -> Found {
+    /// Make the list for `query`: the names of files are found now, the search of everything is
+    /// given to the worker (QUERY-014), which counts every source.
+    fn start(self, ctx: &Ctx, query: &Query, worker: &mut SearchWorker) -> Start {
         match self {
-            Source::FileNames => Found { hits: self.hits(ctx, query.text), counts: None },
-            Source::Everything => search_all::search(ctx, query),
+            Source::FileNames => Start::Done(search_all::Found { hits: Source::file_names(ctx, query.text), counts: None }),
+            Source::Everything => Start::Queued(worker.submit(Slot::PICKER, Request::new(ctx, query))),
         }
     }
 }
@@ -125,12 +130,14 @@ impl Picker {
     /// Make the list for the query when it is not the one the list is for and either the source
     /// is not debounced, or the last list was made long enough ago, or `now` is asked for.
     /// True while the list is for an older query.
-    fn refresh(&mut self, ctx: &Ctx, now: bool, cfg: &SearchConfig) -> bool {
+    fn refresh(&mut self, ctx: &Ctx, worker: &mut SearchWorker, now: bool, cfg: &SearchConfig) -> bool {
         let source = self.source;
         // the text, with the letters of the prefixes and the sources to list
         let query = Query::picker(&self.query).with_sources(cfg.prefixes(), self.filter.shown(cfg.selection()));
         let listed = if source == Source::Everything { query.listed() } else { Selection::ALL };
-        let done = self.results.refresh(query.text, ctx.stamp(), source.debounced(), now, listed, || source.found(ctx, &query));
+        let blank = source == Source::Everything && query.is_blank();
+        let ask = Ask { slot: Slot::PICKER, text: query.text, stamp: ctx.stamp(), debounced: source.debounced(), now, listed, blank };
+        let done = self.results.refresh(worker, &ask, |w| source.start(ctx, &query, w));
         if matches!(done, Refreshed::Made | Refreshed::Relisted) {
             self.sel = 0;
         }
@@ -217,6 +224,7 @@ pub struct Outcome {
 /// What the header of the window passes to its list: the keys it took this frame.
 struct Frame<'a> {
     p: &'a mut Picker,
+    worker: &'a mut SearchWorker,
     keys: ListKeys,
     save: bool,
 }
@@ -225,9 +233,9 @@ struct Frame<'a> {
 /// stay in view), the list scrolls below them. The list is made in the header, so that the
 /// counts of its buttons are those of the list below. `rendered`: the lines of notes are drawn
 /// rendered, not raw (NAV-056, NAV-058).
-pub fn show(ctx: &Context, p: &mut Picker, data: &Ctx, keymap: &Keymap, cfg: &mut SearchConfig, rendered: bool) -> Outcome {
+pub fn show(ctx: &Context, p: &mut Picker, data: &Ctx, worker: &mut SearchWorker, keymap: &Keymap, cfg: &mut SearchConfig, rendered: bool) -> Outcome {
     let mut out = Outcome { pick: None, close: false, save: false };
-    let mut frame = Frame { p, keys: ListKeys { down: false, up: false, enter: false, esc: false }, save: false };
+    let mut frame = Frame { p, worker, keys: ListKeys { down: false, up: false, enter: false, esc: false }, save: false };
     let title = frame.p.source.title();
     let resp = Dialog::new("picker", title).width(520.0).show_with_header(
         ctx,
@@ -245,7 +253,7 @@ pub fn show(ctx: &Context, p: &mut Picker, data: &Ctx, keymap: &Keymap, cfg: &mu
                 f.p.filter.step(source_keys.next, &available);
             }
             // Enter means the list of what is typed, not of what was typed before
-            if f.p.refresh(data, f.keys.enter, cfg) {
+            if f.p.refresh(data, f.worker, f.keys.enter, cfg) {
                 ui.ctx().request_repaint_after(search_all::DEBOUNCE);
             }
             let mut hint = ListKeys::hint(keymap);
@@ -258,14 +266,14 @@ pub fn show(ctx: &Context, p: &mut Picker, data: &Ctx, keymap: &Keymap, cfg: &mu
             theme::prose(ui, RichText::new(hint).color(theme::palette().muted).size(11.5));
             if everything {
                 let listed = Query::picker(&f.p.query).with_sources(cfg.prefixes(), f.p.filter.shown(cfg.selection())).listed();
-                let bar = Bar { counts: f.p.results.counts(), limit: search_all::GROUP_LIMIT, mail_open: data.mail.is_some(), listed, prefixed };
+                let bar = Bar { counts: f.p.results.counts(), limit: search_all::GROUP_LIMIT, mail_open: data.mail.is_some(), listed, prefixed, searching: f.p.results.is_pending() };
                 let before = f.p.filter;
                 if search_sources::bar(ui, &bar, &mut f.p.filter, cfg) {
                     f.save = true;
                 }
                 if f.save || f.p.filter != before {
                     // the list of the new sources, in this frame
-                    f.p.refresh(data, false, cfg);
+                    f.p.refresh(data, f.worker, false, cfg);
                 }
             }
         },
@@ -343,7 +351,17 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // spec: NAV-024
+    /// Refresh until the worker has answered (the picker is asked every frame in the window).
+    fn wait_for_list(p: &mut Picker, ctx: &Ctx, w: &mut SearchWorker, cfg: &SearchConfig) {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while p.results.is_pending() {
+            p.refresh(ctx, w, false, cfg);
+            assert!(std::time::Instant::now() < end, "the worker never answered");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+
+    // spec: NAV-024, QUERY-014, QUERY-018
     #[test]
     fn the_list_of_the_everything_source_waits_for_the_typing_to_settle() {
         let dir = std::env::temp_dir().join(format!("shale-picker-debounce-{}", std::process::id()));
@@ -354,28 +372,75 @@ mod tests {
         let posts = PostIndex::in_memory();
         let ctx = Ctx { vault: &v, mail: None, posts: &posts };
         let cfg = SearchConfig::default();
+        let mut w = SearchWorker::default();
         let mut p = Picker::new(Source::Everything);
-        assert!(!p.refresh(&ctx, false, &cfg), "nothing typed, nothing waits");
+        assert!(!p.refresh(&ctx, &mut w, false, &cfg), "nothing typed, nothing waits");
+        assert!(!p.results.is_pending(), "and nothing is asked of the worker");
         std::thread::sleep(search_all::DEBOUNCE + std::time::Duration::from_millis(20));
         p.query = "b".into();
-        assert!(!p.refresh(&ctx, false, &cfg), "a key after a pause is answered at once");
+        assert!(p.refresh(&ctx, &mut w, false, &cfg), "a key after a pause is asked at once, the list comes from the worker");
+        assert!(p.results.is_pending(), "a spinner shows meanwhile");
+        wait_for_list(&mut p, &ctx, &mut w, &cfg);
         assert_eq!(p.listed().len(), 2);
         p.query = "ba".into();
-        assert!(p.refresh(&ctx, false, &cfg), "the next key right after it waits");
+        assert!(p.refresh(&ctx, &mut w, false, &cfg), "the next key right after it waits");
+        assert!(!p.results.is_pending(), "and asks nothing yet");
         assert_eq!(p.listed().len(), 2, "the old list stays meanwhile");
-        assert!(!p.refresh(&ctx, true, &cfg), "Enter makes the list of what is typed");
+        p.refresh(&ctx, &mut w, true, &cfg);
+        assert!(p.results.is_pending(), "Enter asks for the list of what is typed");
+        wait_for_list(&mut p, &ctx, &mut w, &cfg);
         assert_eq!(p.listed().len(), 1);
         p.query = "ban".into();
-        assert!(p.refresh(&ctx, false, &cfg));
+        assert!(p.refresh(&ctx, &mut w, false, &cfg));
+        assert!(!p.results.is_pending());
         std::thread::sleep(search_all::DEBOUNCE + std::time::Duration::from_millis(20));
-        assert!(!p.refresh(&ctx, false, &cfg), "later the list is made");
+        p.refresh(&ctx, &mut w, false, &cfg);
+        wait_for_list(&mut p, &ctx, &mut w, &cfg);
+        assert!(!p.refresh(&ctx, &mut w, false, &cfg), "later the list is made");
         assert_eq!(p.listed()[0].title, "banana");
-        // file names are never held back
+        // file names are never held back, and never go to the worker
         let mut f = Picker::new(Source::FileNames);
         f.query = "a".into();
-        f.refresh(&ctx, false, &cfg);
+        f.refresh(&ctx, &mut w, false, &cfg);
         f.query = "".into();
-        assert!(!f.refresh(&ctx, false, &cfg));
+        assert!(!f.refresh(&ctx, &mut w, false, &cfg));
+        assert!(!f.results.is_pending());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: QUERY-014, QUERY-018
+    #[test]
+    fn emptying_the_box_empties_the_list_at_once_and_drops_the_query_on_its_way() {
+        let dir = std::env::temp_dir().join(format!("shale-picker-empty-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("A.md"), "banana\n").unwrap();
+        let v = Vault::open(&dir).unwrap();
+        let posts = PostIndex::in_memory();
+        let ctx = Ctx { vault: &v, mail: None, posts: &posts };
+        let cfg = SearchConfig::default();
+        let mut w = SearchWorker::default();
+        let mut p = Picker::new(Source::Everything);
+        p.query = "banana".into();
+        p.refresh(&ctx, &mut w, false, &cfg);
+        wait_for_list(&mut p, &ctx, &mut w, &cfg);
+        assert_eq!(p.listed().len(), 1);
+        std::thread::sleep(search_all::DEBOUNCE + std::time::Duration::from_millis(20));
+        p.query = "ban".into();
+        p.refresh(&ctx, &mut w, false, &cfg);
+        assert!(p.results.is_pending());
+        p.query = "f:".into();
+        assert!(!p.refresh(&ctx, &mut w, false, &cfg), "a prefix alone is nothing to search for: the empty list is made without the worker");
+        assert!(!p.results.is_pending() && p.listed().is_empty() && p.results.is_made());
+        // (the answer of the query that was on its way is dropped, not listed)
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while w.busy() {
+            w.begin_frame(&egui::Context::default());
+            assert!(std::time::Instant::now() < end);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        p.refresh(&ctx, &mut w, false, &cfg);
+        assert!(p.listed().is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

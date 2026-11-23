@@ -438,6 +438,8 @@ pub struct ShaleApp {
     pub tree: FileTree,
     /// the search box of the left sidebar and the selected result
     pub search: SearchBox,
+    /// the thread that searches for the picker and the sidebar (QUERY-014)
+    pub search_worker: crate::search_all::SearchWorker,
     pub tasks: TasksFilter,
     /// the graph of the whole vault and the local one in the side panel
     pub graphs: Graphs,
@@ -694,6 +696,7 @@ impl ShaleApp {
             side: crate::sidebar_ui::SideState::new(crate::sidebar::Layout::from_config(&cfg)),
             tree: FileTree::default(),
             search: SearchBox::default(),
+            search_worker: Default::default(),
             tasks: TasksFilter::default(),
             graphs: Graphs::new(),
             calendar: {
@@ -3157,6 +3160,7 @@ impl ShaleApp {
             self.title_applied = title;
         }
         self.keyboard_guard(ui.ctx());
+        self.search_worker.begin_frame(ui.ctx());
         self.shortcuts(ui);
         self.autosave();
         self.state_tick();
