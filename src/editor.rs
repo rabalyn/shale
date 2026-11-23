@@ -1840,6 +1840,7 @@ impl NoteEditor {
                 scope: markdown::defined_footnotes_in_scope(),
                 raw: preview.clone(),
                 ranges,
+                syntax_gen: crate::syntax::generation(),
             };
             let laid = layout_cache.get(key, settled.is_some(), |key, formats| {
                 // The cached links belong to the text from the start of the frame; if the text box

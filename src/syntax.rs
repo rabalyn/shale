@@ -6,9 +6,10 @@
 
 use crate::jobs;
 use std::collections::hash_map::DefaultHasher;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use syntect::parsing::{ParseState, Scope, ScopeStack, SyntaxReference, SyntaxSet};
 
@@ -207,24 +208,191 @@ fn push_span(out: &mut Spans, r: Range<usize>, kind: Option<Kind>) {
     }
 }
 
-/// The spans of `code` in the language `word`, and whether they came from the cache.
-fn lookup(word: &str, code: &str) -> (Arc<Spans>, bool) {
+/// The cache of highlighted blocks: by grammar name and text.
+fn cache() -> &'static Mutex<HashMap<u64, Arc<Spans>>> {
     static CACHE: OnceLock<Mutex<HashMap<u64, Arc<Spans>>>> = OnceLock::new();
-    let Some(syntax) = syntax_for(word) else { return (Arc::new(Vec::new()), true) };
+    CACHE.get_or_init(Default::default)
+}
+
+/// The key of a block in the cache.
+fn key_of(syntax: &SyntaxReference, code: &str) -> u64 {
     let mut h = DefaultHasher::new();
     (syntax.name.as_str(), code).hash(&mut h);
-    let key = h.finish();
-    let cache = CACHE.get_or_init(Default::default);
-    if let Some(hit) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
-        return (hit.clone(), true);
-    }
-    let spans = Arc::new(run_syntect(syntax, code));
-    let mut map = cache.lock().unwrap_or_else(|e| e.into_inner());
+    h.finish()
+}
+
+/// Keep the spans of a block in the cache (it starts over when it is full).
+fn store(key: u64, spans: &Arc<Spans>) {
+    let mut map = cache().lock().unwrap_or_else(|e| e.into_inner());
     if map.len() >= CACHE_MAX {
         map.clear();
     }
     map.insert(key, spans.clone());
+}
+
+/// The spans of `code` in the language `word`, and whether they came from the cache.
+fn lookup(word: &str, code: &str) -> (Arc<Spans>, bool) {
+    let Some(syntax) = syntax_for(word) else { return (Arc::new(Vec::new()), true) };
+    let key = key_of(syntax, code);
+    if let Some(hit) = cache().lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+        return (hit.clone(), true);
+    }
+    let spans = Arc::new(run_syntect(syntax, code));
+    store(key, &spans);
     (spans, false)
+}
+
+/// A block of this many lines or more is highlighted on a worker thread when it is drawn
+/// ([`highlight_shown`], EDIT-121): about 0.23 ms a line on a warm grammar, so a block of 20 lines
+/// is about 5 ms, which fits in a frame, and a longer one does not (dense lines cost several times that).
+pub const ASYNC_LINES: usize = 20;
+/// Blocks waiting for the worker; when more come (the text is being edited), the oldest are dropped.
+const QUEUE_MAX: usize = 8;
+
+/// The blocks waiting for the worker, and whether it is running.
+#[derive(Default)]
+struct Queue {
+    waiting: VecDeque<(u64, &'static SyntaxReference, String)>,
+    running: bool,
+}
+
+impl Queue {
+    /// Add a block, unless it waits already; the oldest are dropped when there are more than [`QUEUE_MAX`].
+    fn push(&mut self, key: u64, syntax: &'static SyntaxReference, code: &str) {
+        if self.waiting.iter().any(|j| j.0 == key) {
+            return;
+        }
+        self.waiting.push_back((key, syntax, code.to_string()));
+        while self.waiting.len() > QUEUE_MAX {
+            self.waiting.pop_front();
+        }
+    }
+}
+
+fn queue() -> &'static Mutex<Queue> {
+    static QUEUE: OnceLock<Mutex<Queue>> = OnceLock::new();
+    QUEUE.get_or_init(Default::default)
+}
+
+/// Counts the blocks the worker finished: whatever was drawn plain before is to be drawn again.
+static GENERATION: AtomicU64 = AtomicU64::new(0);
+/// Highlight everything on the calling thread (screenshots show the end state).
+static ALL_SYNC: AtomicBool = AtomicBool::new(false);
+/// Asks the window to repaint when the worker has a result.
+static REPAINT: OnceLock<Box<dyn Fn() + Send + Sync>> = OnceLock::new();
+
+/// How many blocks the worker has finished so far. A layout made while this was another number
+/// may show plain code that is coloured now (EDIT-121).
+pub fn generation() -> u64 {
+    GENERATION.load(Ordering::Acquire)
+}
+
+/// What to do when the worker has a result: repaint the window. Set once at start.
+pub fn set_repaint(f: impl Fn() + Send + Sync + 'static) {
+    let _ = REPAINT.set(Box::new(f));
+}
+
+/// Highlight every block on the calling thread, as the exports do: for screenshot runs, whose
+/// picture must show the end state (DEV-007).
+pub fn set_all_sync() {
+    ALL_SYNC.store(true, Ordering::Release);
+}
+
+/// The worker: takes the newest waiting block (the one most likely still on the screen), highlights
+/// it, keeps the result in the cache and asks for a repaint; ends when nothing waits.
+fn work() {
+    loop {
+        let (key, syntax, code) = {
+            let mut q = queue().lock().unwrap_or_else(|e| e.into_inner());
+            match q.waiting.pop_back() {
+                Some(job) => job,
+                None => {
+                    q.running = false;
+                    return;
+                }
+            }
+        };
+        store(key, &Arc::new(run_syntect(syntax, &code)));
+        GENERATION.fetch_add(1, Ordering::AcqRel);
+        if let Some(f) = REPAINT.get() {
+            f();
+        }
+    }
+}
+
+/// Put a block in the queue, unless it is in it already; start the worker when it is not running.
+fn enqueue(key: u64, syntax: &'static SyntaxReference, code: &str) {
+    let mut q = queue().lock().unwrap_or_else(|e| e.into_inner());
+    q.push(key, syntax, code);
+    if !q.running {
+        q.running = true;
+        // a panic of the grammar must not leave the worker marked as running
+        jobs::run(work, |r| {
+            if r.is_err() {
+                let mut q = queue().lock().unwrap_or_else(|e| e.into_inner());
+                q.running = false;
+                q.waiting.clear();
+            }
+        });
+    }
+}
+
+/// The spans of an edited block that its last coloured version still gives (EDIT-121): lines that
+/// are the same at the start and at the end of both texts keep their spans (those at the end moved
+/// by the change of length), the lines between are plain. Also how many lines were kept; `None`
+/// when no line was.
+pub fn carry_over(old: &str, old_spans: &Spans, new: &str) -> Option<(Spans, usize)> {
+    let (a, b): (Vec<&str>, Vec<&str>) = (old.split_inclusive('\n').collect(), new.split_inclusive('\n').collect());
+    let prefix = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+    let suffix = a[prefix..].iter().rev().zip(b[prefix..].iter().rev()).take_while(|(x, y)| x == y).count();
+    if prefix + suffix == 0 {
+        return None;
+    }
+    let pre_end: usize = a[..prefix].iter().map(|l| l.len()).sum();
+    let tail: usize = a[a.len() - suffix..].iter().map(|l| l.len()).sum();
+    let (old_tail, new_tail) = (old.len() - tail, new.len() - tail);
+    let mut out: Spans = Vec::new();
+    for (r, kind) in old_spans {
+        if r.start < pre_end {
+            push_span(&mut out, r.start..r.end.min(pre_end), Some(*kind));
+        }
+        if r.end > old_tail {
+            let (start, end) = (r.start.max(old_tail), r.end);
+            push_span(&mut out, start - old_tail + new_tail..end - old_tail + new_tail, Some(*kind));
+        }
+    }
+    Some((out, prefix + suffix))
+}
+
+/// A block as it is drawn on the screen: its spans, and whether they are still to come.
+pub struct Shown {
+    pub spans: Arc<Spans>,
+    /// the block is being highlighted on the worker; `spans` is empty (plain) until then
+    pub pending: bool,
+}
+
+/// The coloured parts of a block for drawing (EDIT-121). A short block, a block in the cache and a
+/// language that is not known are as [`highlight`]. A long block that is not in the cache is
+/// plain at first and `pending`: it goes to the worker, which fills the cache, bumps
+/// [`generation`] and repaints. The cache is by language and text, so a result for a text that was
+/// edited meanwhile is never applied to the new text.
+pub fn highlight_shown(word: &str, code: &str) -> Shown {
+    shown(word, code, ALL_SYNC.load(Ordering::Acquire))
+}
+
+/// [`highlight_shown`]; `all_sync` highlights on the calling thread whatever the size.
+fn shown(word: &str, code: &str, all_sync: bool) -> Shown {
+    let done = |spans| Shown { spans, pending: false };
+    let Some(syntax) = syntax_for(word) else { return done(Arc::new(Vec::new())) };
+    if all_sync || code.lines().take(ASYNC_LINES).count() < ASYNC_LINES {
+        return done(lookup(word, code).0);
+    }
+    let key = key_of(syntax, code);
+    if let Some(hit) = cache().lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+        return done(hit.clone());
+    }
+    enqueue(key, syntax, code);
+    Shown { spans: Arc::new(Vec::new()), pending: true }
 }
 
 /// The languages whose grammars are compiled in the background at start (EDIT-118), each with a
@@ -476,5 +644,116 @@ mod tests {
         for none in ["", "text", "txt", "plaintext", "none"] {
             assert_eq!(badge_language(none), None, "{none:?}");
         }
+    }
+
+    /// A TypeScript block of `n` lines that no other test uses (`tag` makes the text its own).
+    fn long_ts(tag: &str, n: usize) -> String {
+        (0..n).map(|i| format!("const {tag}{i}: number = {i} + f(\"s{i}\"); // c\n")).collect()
+    }
+
+    /// Ask until the block is no longer pending (the worker has it), at most 30 s.
+    fn settle(word: &str, code: &str) -> Shown {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            let s = highlight_shown(word, code);
+            if !s.pending || std::time::Instant::now() > end {
+                return s;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    // spec: EDIT-121
+    #[test]
+    fn edit_121_a_short_block_is_highlighted_at_once_and_a_long_one_is_plain_then_coloured_by_the_worker() {
+        let short = long_ts("short119", ASYNC_LINES - 1);
+        let s = highlight_shown("ts", &short);
+        assert!(!s.pending && !s.spans.is_empty(), "a block under the threshold is coloured on the first look");
+        assert_eq!(s.spans, highlight("ts", &short));
+
+        let long = long_ts("long119", ASYNC_LINES + 10);
+        let before = generation();
+        let first = highlight_shown("ts", &long);
+        assert!(first.pending && first.spans.is_empty(), "plain at first");
+        let done = settle("ts", &long);
+        assert!(!done.pending && !done.spans.is_empty(), "coloured after the worker");
+        assert!(generation() > before, "the generation says a block is done");
+        assert_eq!(done.spans, run_syntect_for("ts", &long), "the same colours as the synchronous highlight");
+        // an unknown language is never pending
+        let s = highlight_shown("klingon", &long);
+        assert!(!s.pending && s.spans.is_empty());
+    }
+
+    /// What the grammar of `word` makes of `code`, without the cache.
+    fn run_syntect_for(word: &str, code: &str) -> Arc<Spans> {
+        Arc::new(run_syntect(syntax_for(word).unwrap(), code))
+    }
+
+    // spec: EDIT-121
+    #[test]
+    fn edit_121_an_edited_block_never_gets_the_result_of_the_old_text() {
+        let old = long_ts("old119", ASYNC_LINES + 5);
+        let edited = old.replacen("old1190", "edited119x", 1);
+        assert!(highlight_shown("ts", &old).pending);
+        // the edit comes while the worker may still be busy with the old text
+        let now = highlight_shown("ts", &edited);
+        assert!(now.pending || now.spans != run_syntect_for("ts", &old), "never the spans of the old text");
+        let done = settle("ts", &edited);
+        assert_eq!(done.spans, run_syntect_for("ts", &edited));
+        assert_ne!(done.spans, run_syntect_for("ts", &old), "the edit moved the spans");
+    }
+
+    // spec: EDIT-121
+    #[test]
+    fn edit_121_the_queue_is_bounded_keeps_the_newest_and_asks_once_per_block() {
+        let ts = syntax_for("ts").unwrap();
+        let mut q = Queue::default();
+        for n in 0..QUEUE_MAX as u64 + 3 {
+            q.push(n, ts, "");
+        }
+        assert_eq!(q.waiting.len(), QUEUE_MAX);
+        assert_eq!(q.waiting.front().unwrap().0, 3, "the oldest were dropped");
+        assert_eq!(q.waiting.back().unwrap().0, QUEUE_MAX as u64 + 2, "the newest is kept");
+        q.push(5, ts, "");
+        assert_eq!(q.waiting.len(), QUEUE_MAX, "a block that waits is not queued twice");
+        // and the real queue answers for a block asked for again and again
+        let code = long_ts("once119", ASYNC_LINES + 1);
+        for _ in 0..5 {
+            assert!(highlight_shown("ts", &code).pending || !highlight_shown("ts", &code).spans.is_empty());
+        }
+        settle("ts", &code);
+    }
+
+    // spec: EDIT-121
+    #[test]
+    fn edit_121_the_window_is_asked_to_repaint_when_the_worker_has_a_result_and_everything_can_be_sync() {
+        static REPAINTS: AtomicU64 = AtomicU64::new(0);
+        set_repaint(|| {
+            REPAINTS.fetch_add(1, Ordering::SeqCst);
+        });
+        let code = long_ts("repaint119", ASYNC_LINES + 2);
+        settle("ts", &code);
+        assert!(REPAINTS.load(Ordering::SeqCst) >= 1, "a repaint was asked for");
+        // the exports and screenshots highlight on the calling thread
+        let other = long_ts("sync119", ASYNC_LINES + 2);
+        let s = shown("ts", &other, true);
+        assert!(!s.pending && !s.spans.is_empty());
+        assert!(!highlight("ts", &long_ts("export119", ASYNC_LINES + 2)).is_empty(), "an export call is full at once");
+    }
+
+    // spec: EDIT-121
+    #[test]
+    fn edit_121_the_lines_an_edit_did_not_touch_keep_their_spans_and_the_rest_is_plain() {
+        let old = "const a = 1;\nconst b = 2;\nconst c = 3;\n";
+        let spans = run_syntect_for("ts", old);
+        let new = "const a = 1;\nconst bb = 22;\nconst c = 3;\n";
+        let (kept, lines) = carry_over(old, &spans, new).unwrap();
+        assert_eq!(lines, 2);
+        let line = |s: &str, at: usize| s.split_inclusive('\n').take(at).map(str::len).sum::<usize>();
+        assert!(kept.iter().all(|(r, _)| r.end <= line(new, 1) || r.start >= line(new, 2)), "nothing in the changed line");
+        assert!(kept.iter().any(|(r, _)| r.start >= line(new, 2)), "the last line is moved by the longer one before it");
+        let last = |s: &Spans, from: usize| s.iter().filter(|(r, _)| r.start >= from).map(|(r, k)| (r.start - from, r.end - from, *k)).collect::<Vec<_>>();
+        assert_eq!(last(&kept, line(new, 2)), last(&spans, line(old, 2)));
+        assert!(carry_over("a\n", &Vec::new(), "b\n").is_none(), "no line in common");
     }
 }

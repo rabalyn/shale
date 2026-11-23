@@ -243,7 +243,7 @@ fn code_job(word: &str, code: &str, size: f32) -> LayoutJob {
     let format = |color| TextFormat { font_id: FontId::new(size, FontFamily::Monospace), color, ..Default::default() };
     let mut job = LayoutJob::default();
     let mut at = 0;
-    for (r, kind) in syntax::highlight(word, code).iter() {
+    for (r, kind) in syntax::highlight_shown(word, code).spans.iter() {
         job.append(&code[at..r.start], 0.0, format(theme::palette().code));
         job.append(&code[r.clone()], 0.0, format(theme::palette().syntax(*kind)));
         at = r.end;
@@ -1356,6 +1356,27 @@ mod tests {
         assert_eq!(colours(&job, "\"fooo\""), theme::palette().syntax(syntax::Kind::String));
         assert_eq!(colours(&job, "log"), theme::palette().syntax(syntax::Kind::Function));
         assert_eq!(colours(&job, "x"), theme::palette().code);
+    }
+
+    // spec: EDIT-121
+    #[test]
+    fn edit_121_the_reading_view_shows_a_long_block_plain_and_then_coloured_in_the_same_text_and_size() {
+        let code: String = (0..syntax::ASYNC_LINES + 10).map(|i| format!("const read119_{i}: number = {i};\n")).collect();
+        let keyword = theme::palette().syntax(syntax::Kind::Keyword);
+        let coloured = |job: &LayoutJob| job.sections.iter().any(|s| s.format.color == keyword);
+        let plain = code_job("ts", &code, 14.0);
+        assert!(!coloured(&plain), "plain at first");
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let done = loop {
+            let job = code_job("ts", &code, 14.0);
+            if coloured(&job) || std::time::Instant::now() > end {
+                break job;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+        assert!(coloured(&done), "coloured when the worker is done");
+        assert_eq!(done.text, plain.text);
+        assert!(done.sections.iter().chain(&plain.sections).all(|s| s.format.font_id == FontId::new(14.0, FontFamily::Monospace)), "the same monospace font in both");
     }
 
     fn shapes_text(shapes: &[egui::epaint::ClippedShape]) -> Vec<(String, Rect)> {

@@ -549,6 +549,12 @@ impl ShaleApp {
         }
         let persist = opts.screenshot.is_none();
         let scripted = opts.keys.is_some();
+        // long code blocks are highlighted on a worker and the window repaints when one is done (EDIT-121); a screenshot shows the end state at once
+        let ctx = cc.egui_ctx.clone();
+        crate::syntax::set_repaint(move || ctx.request_repaint());
+        if !persist {
+            crate::syntax::set_all_sync();
+        }
         // the window reads the vault on a worker thread (NET-019); the start screen shows it
         // (a screenshot run has no one to wait for the load: it reads the vault here)
         let mut app = Self::build_with(opts, persist, persist.then_some(&cc.egui_ctx));

@@ -76,6 +76,10 @@ without a newline at the end, so a command you paste does not run at once; the i
 a moment. The click does not move the cursor or unfold the block. **Ctrl+Shift+C** copies the code block at the cursor;
 when the cursor is in no code block nothing happens.
 
+A code block of 20 lines or more shows as plain code for a moment when it first appears (or after you edit it) and gets its
+colours a few tens of milliseconds later: it is coloured on a background thread so the note stays responsive. The block does
+not change size when the colours arrive. Exports are always fully coloured.
+
 ![[editor-code-box.png]]
 
 # The title line and pasting

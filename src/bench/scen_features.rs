@@ -123,6 +123,29 @@ fn syntax_highlight_long(fx: &mut Fixtures) -> Body {
     })
 }
 
+/// A TypeScript block of 200 lines that is new for every `n` (the cache of highlighted blocks is by text).
+fn ts_block(n: u32) -> String {
+    (0..200).map(|i| format!("export const v{n}_{i}: Map<string, number> = new Map([[\"k{i}\", {i} * 2]]); // note {i}\n")).collect()
+}
+
+/// What the UI thread paid for a 200-line TypeScript block before #245 (EDIT-121), and what the exports still pay.
+fn syntax_highlight_ts200(_fx: &mut Fixtures) -> Body {
+    let mut n = 0;
+    Box::new(move || {
+        n += 1;
+        black_box(crate::syntax::highlight("ts", &ts_block(n)));
+    })
+}
+
+/// What the UI thread pays now (EDIT-121): the look-up and the queueing of the same block, which the worker colours.
+fn syntax_shown_ts200(_fx: &mut Fixtures) -> Body {
+    let mut n = 1_000_000;
+    Box::new(move || {
+        n += 1;
+        black_box(crate::syntax::highlight_shown("ts", &ts_block(n)));
+    })
+}
+
 const FORMULAS: &[&str] = &[
     r"\frac{a+b}{c-d}",
     r"\sqrt{x^2+y^2}",
@@ -287,6 +310,8 @@ pub fn list() -> Vec<Scenario> {
         p("startup.app.large", 3, true, startup_build_large).cold(),
         p("startup.app.recovery.large", 3, false, startup_recovery_large).cold(),
         p("syntax.highlight.long", 5, false, syntax_highlight_long),
+        p("syntax.highlight.typescript", 10, false, syntax_highlight_ts200),
+        p("syntax.shown.typescript", 10, false, syntax_shown_ts200),
         p("math.typeset.formulas", 10, false, math_typeset),
         p("table.parse.long", 20, false, table_parse_long),
         p("vim.keys.long", 20, false, vim_keys_long),
