@@ -772,7 +772,7 @@ mod tests {
             assert_eq!(Some(a.mime.as_str()), crate::media::audio_mime_for_ext(ext), ".{ext}");
             assert!(a.mime.starts_with("audio/"), "{ext}: {}", a.mime);
             // what a receiver does with the type gives the extension back (oga and ogg share a type)
-            assert!(crate::media::ext_for_mime(&a.mime).is_some_and(|e| e == ext || (ext, e) == ("oga", "ogg")), "{ext}: {}", a.mime);
+            assert!(crate::media::audio_ext_for_mime(&a.mime).is_some_and(|e| e == ext || (ext, e) == ("oga", "ogg")), "{ext}: {}", a.mime);
             d.attachments.push(a);
         }
         // …and the message carries that type, which a reader reads back

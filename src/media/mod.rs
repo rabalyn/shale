@@ -59,7 +59,7 @@ pub fn audio_mime_for_ext(ext: &str) -> Option<&'static str> {
 }
 
 /// The extension of `AUDIO_EXTS` for a sound's content type (parameters and case ignored).
-fn audio_ext_for_mime(mime: &str) -> Option<&'static str> {
+pub(crate) fn audio_ext_for_mime(mime: &str) -> Option<&'static str> {
     AUDIO_TYPES.iter().find(|(_, m, aliases)| m.eq_ignore_ascii_case(mime) || aliases.iter().any(|a| a.eq_ignore_ascii_case(mime))).map(|(e, _, _)| *e)
 }
 
@@ -116,6 +116,7 @@ pub fn media_kind(p: &Path) -> Option<Kind> {
 }
 
 /// The file extension for a content type of a media file ("image/jpeg" → "jpg"), None if it is none.
+#[cfg(target_os = "linux")]
 pub fn ext_for_mime(mime: &str) -> Option<&'static str> {
     let m = mime.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
     if let Some(ext) = audio_ext_for_mime(&m) {
@@ -515,20 +516,27 @@ mod tests {
             let mime = audio_mime_for_ext(ext).unwrap_or_else(|| panic!("no content type for .{ext}"));
             assert!(mime.starts_with("audio/"), "{ext}: {mime}");
             // `oga` is the same container as `ogg`: a received audio/ogg gets the first of the two
-            let back = ext_for_mime(mime).unwrap_or_else(|| panic!("no extension for {mime}"));
+            let back = audio_ext_for_mime(mime).unwrap_or_else(|| panic!("no extension for {mime}"));
             assert!(back == ext || (ext, back) == ("oga", "ogg"), "{ext} → {mime} → {back}");
             assert!(AUDIO_EXTS.contains(&back));
             assert_eq!(audio_mime_for_ext(&ext.to_ascii_uppercase()), Some(mime), "any case");
         }
         // the other names of a type give the same extension, with parameters and in any case
-        for (mime, ext) in [("audio/x-wav", "wav"), ("audio/WAVE", "wav"), ("audio/mp3", "mp3"), ("audio/x-m4a", "m4a"), ("audio/x-flac", "flac"), ("audio/ogg; codecs=vorbis", "ogg")] {
-            assert_eq!(ext_for_mime(mime), Some(ext), "{mime}");
+        for (mime, ext) in [("audio/x-wav", "wav"), ("audio/WAVE", "wav"), ("audio/mp3", "mp3"), ("audio/x-m4a", "m4a"), ("audio/x-flac", "flac")] {
+            assert_eq!(audio_ext_for_mime(mime), Some(ext), "{mime}");
         }
         assert_eq!(audio_mime_for_ext("txt"), None);
-        assert_eq!(ext_for_mime("audio/x-nothing"), None);
-        // the other kinds are still answered
-        assert_eq!(ext_for_mime("image/jpeg"), Some("jpg"));
-        assert_eq!(ext_for_mime("video/mp4"), Some("mp4"));
+        assert_eq!(audio_ext_for_mime("audio/x-nothing"), None);
+        assert_eq!(attachment_audio_ext("voice", "audio/ogg; codecs=vorbis"), Some("ogg"));
+        assert_eq!(attachment_audio_ext("memo.WAV", "application/octet-stream"), Some("wav"));
+        assert_eq!(attachment_audio_ext("notes.txt", "text/plain"), None);
+        // ext_for_mime (the import from programs, Linux) reads the same table and still answers the other kinds
+        #[cfg(target_os = "linux")]
+        {
+            assert_eq!(ext_for_mime("audio/WAVE; x=1"), Some("wav"));
+            assert_eq!(ext_for_mime("image/jpeg"), Some("jpg"));
+            assert_eq!(ext_for_mime("video/mp4"), Some("mp4"));
+        }
     }
 
     // spec: VAULT-012
