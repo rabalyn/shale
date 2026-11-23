@@ -284,6 +284,27 @@ fn the_contents_box_is_greyed_for_a_kind_without_contents() {
     }
 }
 
+// spec: TEX-040
+#[test]
+fn the_box_for_the_page_break_after_the_contents_is_on_and_needs_a_kind_with_contents() {
+    let mut t = T::new("dlg-tocbreak", usable());
+    put_set(&t);
+    open_on(&mut t, "Plan.md", "# Plan\n");
+    click(&mut t, "engine:latex");
+    click(&mut t, "kind");
+    click(&mut t, "kind:pub");
+    assert!(dialog(&t).opts.toc_break, "on by default");
+    click(&mut t, "toc-break");
+    assert!(!dialog(&t).opts.toc_break);
+    click(&mut t, "toc-break");
+    assert!(dialog(&t).opts.toc_break);
+    // a kind without contents: greyed, a click changes nothing
+    click(&mut t, "kind");
+    click(&mut t, "kind:beamer");
+    click(&mut t, "toc-break");
+    assert!(dialog(&t).opts.toc_break);
+}
+
 // spec: TEX-016
 #[test]
 fn without_a_tex_the_status_says_so_and_export_is_off_while_looking_it_is_off_too() {

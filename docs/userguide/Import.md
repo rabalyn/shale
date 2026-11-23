@@ -114,7 +114,8 @@ A note becomes a Word file again with **⋯ → Export to Word…** in the note'
 file list), by the same **pandoc** that imports Word files; the setting "Import Word files as notes" does not have to be on.
 The dialog asks where to save (`<vault>/exports/<name>.docx`, so the export shows up in the vault), whether to put a **Table of
 contents** in (on or off as the [[PDF]] dialog has it for the note; Word asks to update its fields when it opens the file, say
-yes to fill the contents in), whether to **Open the file afterwards**, and says where pandoc was found, or that it was not
+yes to fill the contents in) and a **Page break after the table of contents** (on, so the text starts on a new page; the
+note's `print-toc-page-break: false` starts it off), whether to **Open the file afterwards**, and says where pandoc was found, or that it was not
 (Export then waits). The export runs in the background: closing the dialog, or **Cancel**, stops it, and a file is written only
 when it is whole; if pandoc fails, nothing is written and the dialog shows pandoc's first error line (the same when it
 takes more than two minutes or needs more than 2 GB of memory, which is where it is stopped). The note is exported as

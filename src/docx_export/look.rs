@@ -22,6 +22,9 @@ pub struct PrintLook {
     pub heading_sizes: Option<[f32; 6]>,
     /// the deepest heading level that starts a page, 1 to 6
     pub break_before: Option<u8>,
+    /// `print-toc-page-break`: whether what follows the table of contents starts a page (DOCX-013); the export
+    /// replaces it with the choice of its dialog
+    pub toc_page_break: Option<bool>,
 }
 
 /// The size of a standard paper in millimetres, portrait.
@@ -79,6 +82,7 @@ impl PrintLook {
             },
             heading_sizes: get("print-heading-sizes").and_then(export::parse_heading_sizes),
             break_before: get("print-break-before").and_then(|v| v.trim().parse::<u8>().ok()).filter(|l| (1..=6).contains(l)),
+            toc_page_break: get("print-toc-page-break").and_then(export::parse_bool),
         }
     }
 }
