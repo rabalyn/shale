@@ -558,7 +558,7 @@ impl ShaleApp {
     }
 
     /// Set up the app without a window. `persist` = read/write the user's config file.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "bench"))]
     pub fn build(opts: Options, persist: bool) -> Self {
         Self::build_with(opts, persist, None)
     }
