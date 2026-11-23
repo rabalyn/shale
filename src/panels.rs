@@ -380,6 +380,10 @@ impl ShaleApp {
             self.history_panel_body(ui);
             return;
         }
+        if panel == RightPanel::Thread {
+            self.thread_panel_body(ui);
+            return;
+        }
         let Some(rel) = self.current_path() else {
             ui.label(muted("Open a note to see its links."));
             return;
@@ -493,7 +497,7 @@ impl ShaleApp {
                     }
                 });
             }
-            RightPanel::Calendar | RightPanel::History => {}
+            RightPanel::Calendar | RightPanel::History | RightPanel::Thread => {}
             RightPanel::LocalGraph => {
                 ui.horizontal(|ui| {
                     ui.label(muted("Depth"));

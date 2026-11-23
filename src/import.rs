@@ -8,6 +8,7 @@ use crate::calendar::store::Occ;
 use crate::calendar::time as t;
 use crate::mail::{self, Mail};
 use crate::media;
+use crate::thread;
 use crate::vault::{rel_to_string, Vault};
 use std::path::{Path, PathBuf};
 
@@ -120,6 +121,79 @@ pub struct Item {
     pub already: Option<PathBuf>,
     /// the people of an e-mail or event (linked to their contact notes)
     pub people: Vec<crate::import::people::Person>,
+    /// e-mail: the notes of the vault it continues, as a suggestion (IMP-068)
+    pub continues: Option<Continues>,
+}
+
+/// An e-mail that continues notes of the vault: found by the reply headers, offered in the Import
+/// dialog as "Continues [[note]]" (IMP-068, ADR-0032).
+#[derive(Clone, Debug)]
+pub struct Continues {
+    /// the notes it may continue, the nearest first
+    pub candidates: Vec<thread::Candidate>,
+    /// where the mail goes in the chain of each candidate's thread (same order)
+    pub plans: Vec<thread::Plan>,
+    /// the candidate that is chosen
+    pub chosen: usize,
+    /// the tick box: link the new note into the chain
+    pub on: bool,
+    /// the answer to "Keep the thread in date order?" when the mail is older than a note of the
+    /// thread: true = Update, false = Leave the chain (IMP-071)
+    pub update: bool,
+}
+
+impl Continues {
+    /// The note the mail continues.
+    pub fn anchor(&self) -> Option<&Path> {
+        self.candidates.get(self.chosen).map(|c| c.rel.as_path())
+    }
+
+    /// Where the mail goes in the chain of the chosen note's thread.
+    pub fn plan(&self) -> Option<&thread::Plan> {
+        self.plans.get(self.chosen)
+    }
+}
+
+/// What the thread data of a mail is: its ids as the thread properties write them (IMP-067).
+fn angle(id: &str) -> String {
+    let bare = thread::bare_id(id);
+    if bare.is_empty() {
+        String::new()
+    } else {
+        format!("<{bare}>")
+    }
+}
+
+/// The ids of a mail for the matching and the chain (ADR-0032).
+pub fn mail_ident(mail: &Mail) -> thread::Ident {
+    let stamp = mail.date.map(|d| local_stamp(d, false)).unwrap_or_else(|| mail.date_raw.clone());
+    thread::Ident { id: thread::bare_id(&mail.message_id), in_reply_to: thread::bare_id(&mail.in_reply_to), references: thread::bare_ids(&mail.references), network: String::new(), date_key: thread::date_key(&stamp) }
+}
+
+/// Search the vault for the notes each e-mail of `items` continues, by its reply headers only
+/// (IMP-068), and put the suggestion in `Item::continues` (ticked; the older-mail question starts
+/// with Update). Items that have a suggestion already keep it.
+pub fn find_continues(vault: &Vault, items: &mut [Item]) {
+    if !items.iter().any(|i| i.continues.is_none() && matches!(i.source, Source::Email { .. })) {
+        return;
+    }
+    let index = thread::Index::build(vault);
+    for it in items.iter_mut().filter(|i| i.continues.is_none()) {
+        let Source::Email { mail, .. } = &it.source else { continue };
+        let ident = mail_ident(mail);
+        let candidates = index.matches(&ident);
+        if candidates.is_empty() {
+            continue;
+        }
+        let plans = candidates.iter().map(|c| index.plan(&ident, &c.rel)).collect();
+        it.continues = Some(Continues { candidates, plans, chosen: 0, on: true, update: true });
+    }
+}
+
+/// The folder the first ticked continuation points to: where the Import dialog presets its folder
+/// (IMP-069).
+pub fn continued_folder(items: &[Item]) -> Option<String> {
+    items.iter().filter(|i| i.include).filter_map(|i| i.continues.as_ref().filter(|c| c.on)).find_map(|c| c.anchor()).map(|a| rel_to_string(a.parent().unwrap_or(Path::new(""))))
 }
 
 impl Item {
@@ -280,7 +354,7 @@ pub fn email_item(mail: Mail, original: (String, Vec<u8>)) -> Item {
     let subject = if mail.subject.trim().is_empty() { "(no subject)".to_string() } else { mail.subject.clone() };
     let title = safe_title(&format!("{} {subject}", ymd_text(date)));
     let att_on = mail.attachments.iter().map(|a| attachment_starts_on(a, true)).collect();
-    Item { source: Source::Email { mail, original }, include: true, title, att_on, already: None, people: vec![] }
+    Item { source: Source::Email { mail, original }, include: true, title, att_on, already: None, people: vec![], continues: None }
 }
 
 /// Whether an attachment of a message starts ticked in the dialog. Small pictures inside the text
@@ -320,17 +394,17 @@ pub fn eml_item(raw: Vec<u8>, file_name: Option<&str>) -> Item {
 pub fn social_item(saved: crate::social::note::SavedPost, network: &'static str, replies: bool) -> Item {
     let title = crate::social::note::post_title(&saved.thread[0]);
     let att_on = vec![true; saved.media.len()];
-    Item { source: Source::Social { replies: replies && !saved.replies.is_empty(), saved, network }, include: true, title, att_on, already: None, people: vec![] }
+    Item { source: Source::Social { replies: replies && !saved.replies.is_empty(), saved, network }, include: true, title, att_on, already: None, people: vec![], continues: None }
 }
 
 pub fn event_item(event: Event, calendar: String, original: Option<(String, Vec<u8>)>) -> Item {
     let title = safe_title(&format!("{} {}", ymd_text(event_ymd(&event)), if event.summary.trim().is_empty() { "Event" } else { event.summary.trim() }));
-    Item { source: Source::Event { event: Box::new(event), calendar, original }, include: true, title, att_on: vec![], already: None, people: vec![] }
+    Item { source: Source::Event { event: Box::new(event), calendar, original }, include: true, title, att_on: vec![], already: None, people: vec![], continues: None }
 }
 
 fn files_item(paths: Vec<PathBuf>) -> Item {
     let title = if paths.len() == 1 { paths[0].file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "File".into()) } else { format!("{} Files", ymd_text(today_ymd())) };
-    Item { source: Source::Files(paths), include: true, title: safe_title(&title), att_on: vec![], already: None, people: vec![] }
+    Item { source: Source::Files(paths), include: true, title: safe_title(&title), att_on: vec![], already: None, people: vec![], continues: None }
 }
 
 /// What the Import does with Word files (IMP-035, IMP-036).
@@ -369,12 +443,12 @@ pub fn word_items(items: &mut Vec<Item>, word: &Word) {
 pub fn markdown_item(name: String, text: String) -> Item {
     let title = safe_title(&Path::new(&name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| name.clone()));
     let lift = crate::markdown::lift_headings(&text).is_some();
-    Item { source: Source::Markdown { name, text, lift }, include: true, title, att_on: vec![], already: None, people: vec![] }
+    Item { source: Source::Markdown { name, text, lift }, include: true, title, att_on: vec![], already: None, people: vec![], continues: None }
 }
 
 /// An item for a picture, PDF or audio file; its title is the file name the file is saved under.
 pub fn media_item(kind: media::Kind, name: String, data: MediaData) -> Item {
-    Item { source: Source::Media { kind, name: name.clone(), data, how: Default::default() }, include: true, title: name, att_on: vec![], already: None, people: vec![] }
+    Item { source: Source::Media { kind, name: name.clone(), data, how: Default::default() }, include: true, title: name, att_on: vec![], already: None, people: vec![], continues: None }
 }
 
 fn calendar_items(ics: &[u8], calendar: &str, file_name: &str) -> Vec<Item> {
@@ -555,10 +629,34 @@ fn attachment_line(rel: &Path) -> String {
 /// embeds (`![[file|200]]`, `embed_size.rs`).
 pub const PICTURE_WIDTH: u32 = 200;
 
+/// What else shapes the note of an e-mail: the header list (IMP-052), what is cut out of the text
+/// (IMP-065, IMP-066) and the links of its thread (IMP-070).
+#[derive(Clone, Debug, Default)]
+pub struct EmailExtras {
+    pub header_list: bool,
+    pub cut: mail_segments::TextCut,
+    pub chain: Chain,
+}
+
+/// The `previous` and `next` links of a new mail note, as wikilink texts (IMP-070).
+#[derive(Clone, Debug, Default)]
+pub struct Chain {
+    pub previous: Option<String>,
+    pub next: Option<String>,
+}
+
+/// The root of a mail's thread as the `thread-id` property writes it (IMP-067, ADR-0032): the first
+/// of `References`, else `In-Reply-To`, else the mail's own id; `None` when it has no id at all.
+fn mail_thread_id(mail: &Mail) -> Option<String> {
+    Some(angle(&mail_ident(mail).thread_id())).filter(|t| !t.is_empty())
+}
+
 /// The note for an e-mail (attachment links already made). The properties are the one record of
 /// the header (IMP-050, IMP-051); `header_list` also writes them as a list below the title (IMP-052);
 /// `cut` takes signatures and quoted mails out of the text (IMP-065, IMP-066).
-pub fn email_note(mail: &Mail, tags: &[String], attachments: &[PathBuf], original: Option<&Path>, people: &[String], header_list: bool, cut: mail_segments::TextCut) -> String {
+pub fn email_note(mail: &Mail, tags: &[String], attachments: &[PathBuf], original: Option<&Path>, people: &[String], extra: &EmailExtras) -> String {
+    let EmailExtras { header_list, cut, chain } = extra;
+    let (header_list, cut) = (*header_list, *cut);
     let subject = if mail.subject.trim().is_empty() { "(no subject)" } else { mail.subject.trim() };
     let date = mail.date.map(|d| local_stamp(d, false)).unwrap_or_default();
     let mut s = front(
@@ -570,6 +668,11 @@ pub fn email_note(mail: &Mail, tags: &[String], attachments: &[PathBuf], origina
             ("cc", if mail.cc.is_empty() { String::new() } else { yaml(&mail.cc) }),
             ("date", if date.is_empty() && !mail.date_raw.is_empty() { yaml(&mail.date_raw) } else { date.clone() }),
             ("message-id", if mail.message_id.is_empty() { String::new() } else { yaml(&mail.message_id) }),
+            ("in-reply-to", if mail.in_reply_to.is_empty() { String::new() } else { yaml(&angle(&mail.in_reply_to)) }),
+            ("references", list(&thread::bare_ids(&mail.references).iter().map(|r| angle(r)).collect::<Vec<_>>())),
+            ("thread-id", mail_thread_id(mail).map(|t| yaml(&t)).unwrap_or_default()),
+            ("previous", chain.previous.as_deref().map(yaml).unwrap_or_default()),
+            ("next", chain.next.as_deref().map(yaml).unwrap_or_default()),
             ("people", list(people)),
             ("original", original.map(|o| yaml(&format!("[[{}]]", rel_to_string(o)))).unwrap_or_default()),
         ],
@@ -694,6 +797,8 @@ pub struct Imported {
     pub linked: Vec<Linked>,
     /// messages about anything that failed
     pub errors: Vec<String>,
+    /// the notes that were not new but got a `previous` / `next` line (IMP-070)
+    pub touched: Vec<PathBuf>,
 }
 
 /// The file name a media item is saved under: the title, with the extension of the original name.
@@ -731,6 +836,7 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
     let mut files = Vec::new();
     let mut linked = Vec::new();
     let mut errors = Vec::new();
+    let mut touched = Vec::new();
     let root = vault.root.clone();
     for it in items.iter().filter(|i| i.include) {
         if let Source::Media { name, data, how, .. } = &it.source {
@@ -774,6 +880,8 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
                 Err(e) => errors.push(e),
             }
         }
+        // the notes next to a new mail in its thread: (note, property to set to the new note's link)
+        let mut neighbours: Vec<(PathBuf, &'static str)> = Vec::new();
         let result: Result<String, String> = (|| {
             Ok(match &it.source {
                 Source::Email { mail, original } => {
@@ -789,7 +897,18 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
                     } else {
                         None
                     };
-                    email_note(mail, &o.tags, &atts, orig.as_deref(), &people, o.header_list, o.cut)
+                    // the chain of the thread (IMP-070, IMP-071): a continued mail names its neighbours
+                    let mut chain = Chain::default();
+                    if let Some(c) = it.continues.as_ref().filter(|c| c.on) {
+                        if let Some(plan) = c.anchor().filter(|a| vault.notes.contains_key(*a)).map(|a| thread::Index::build(vault).plan(&mail_ident(mail), a)) {
+                            // an older mail: only when the person said Update; "Leave the chain" writes no link
+                            if !plan.is_older() || c.update {
+                                chain = Chain { previous: plan.previous.as_ref().map(|p| people::link_to(vault, p)), next: plan.next.as_ref().map(|p| people::link_to(vault, p)) };
+                                neighbours = vec![(plan.previous.clone(), "next"), (plan.next.clone(), "previous")].into_iter().filter_map(|(p, k)| p.map(|p| (p, k))).collect();
+                            }
+                        }
+                    }
+                    email_note(mail, &o.tags, &atts, orig.as_deref(), &people, &EmailExtras { header_list: o.header_list, cut: o.cut, chain })
                 }
                 Source::Event { event, calendar, original } => {
                     let orig = match (o.keep_original, original) {
@@ -834,14 +953,25 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
                     None => vault.create_file(&rel, &text),
                 };
                 match written {
-                    Ok(r) => made.push(r),
+                    Ok(r) => {
+                        // the neighbours get the link to the new note, and only that line (IMP-070)
+                        let link = yaml(&people::link_to(vault, &r));
+                        for (n, key) in neighbours {
+                            match vault.edit_note(&n, |t| thread::set_property(t, key, &link)) {
+                                Ok(true) => touched.push(n),
+                                Ok(false) => {}
+                                Err(e) => errors.push(format!("“{}”: could not change its {key} link: {e}", rel_to_string(&n))),
+                            }
+                        }
+                        made.push(r)
+                    }
                     Err(e) => errors.push(format!("“{title}”: could not write the note: {e}")),
                 }
             }
             Err(e) => errors.push(format!("“{title}”: {e}")),
         }
     }
-    Imported { notes: made, files, linked, errors }
+    Imported { notes: made, files, linked, errors, touched }
 }
 
 #[cfg(test)]
@@ -1027,7 +1157,7 @@ mod tests {
     fn a_header_with_quotes_and_backslashes_is_read_back_as_written() {
         for from in [r#""Nils Mundhenke" <nils@example.org>"#, r#"A \ B "C" <a@x>"#, "it's <a@x>"] {
             let mail = Mail { subject: "Plan".into(), from: from.into(), ..Default::default() };
-            let note = email_note(&mail, &[], &[], None, &[], false, Default::default());
+            let note = email_note(&mail, &[], &[], None, &[], &EmailExtras::default());
             let got = crate::markdown::front_matter_values(&note);
             assert_eq!(got.iter().find(|(k, _)| k == "from").map(|(_, v)| v.clone()), Some(vec![from.to_string()]), "{note}");
         }
@@ -1042,15 +1172,15 @@ mod tests {
         let mail = Mail { subject: "Plan".into(), from: "A <a@x>".into(), to: "B <b@x>".into(), date_raw: "Thu, 13 Nov 2026 10:22:33 +0100".into(), text: "Hallo  \r\n\r\n\r\n\r\nWelt\n-- \nAnna\n".into(), ..Default::default() };
         let atts = [PathBuf::from("z_media/2026/11/261113_foto.jpg"), PathBuf::from("z_media/2026/11/261113_plan.pdf")];
         let orig = PathBuf::from("z_media/2026/11/261113_Plan.eml");
-        let note = email_note(&mail, &[], &atts, Some(&orig), &[], false, Default::default());
+        let note = email_note(&mail, &[], &atts, Some(&orig), &[], &EmailExtras::default());
         assert!(note.contains("date: \"Thu, 13 Nov 2026 10:22:33 +0100\"\n"), "an unreadable date is kept as written: {note}");
         assert!(note.ends_with("\n---\n\n# Plan\n\n## Attachments\n\n- ![[z_media/2026/11/261113_foto.jpg|200]]\n- [[z_media/2026/11/261113_plan.pdf]]\n\n## Message\n\nHallo\n\nWelt\n\n-- \nAnna\n"), "{note}");
         assert!(!note.contains("**"), "{note}");
-        let listed = email_note(&mail, &[], &atts, Some(&orig), &["[[A]]".into()], true, Default::default());
+        let listed = email_note(&mail, &[], &atts, Some(&orig), &["[[A]]".into()], &EmailExtras { header_list: true, ..Default::default() });
         assert!(listed.contains("\n# Plan\n\n- **From:** A <a@x>\n- **To:** B <b@x>\n- **Date:** Thu, 13 Nov 2026 10:22:33 +0100\n- **People:** [[A]]\n\n## Attachments\n\n"), "{listed}");
         assert!(listed.contains("- Original message: [[z_media/2026/11/261113_Plan.eml]]\n\n## Message"), "{listed}");
         // without attachments there is no section
-        let bare = email_note(&mail, &[], &[], None, &[], false, Default::default());
+        let bare = email_note(&mail, &[], &[], None, &[], &EmailExtras::default());
         assert!(bare.contains("# Plan\n\n## Message\n\nHallo"), "{bare}");
     }
 
@@ -1277,7 +1407,7 @@ mod tests {
         ];
         items[0].title = "A cat".into();
         let before = std::fs::read_dir(v.root.join("z_media")).map(|d| d.count()).unwrap_or(0);
-        let Imported { notes, files, linked, errors } = import(&mut v, &items, &o);
+        let Imported { notes, files, linked, errors, .. } = import(&mut v, &items, &o);
         assert!(notes.is_empty() && errors.is_empty(), "{notes:?} {errors:?}");
         // a linked file keeps its name (no "A cat"), a library link where there is a library
         assert_eq!(linked, vec![Linked { link: format!("![](<{}>)", media::intake::file_uri(&abs.join("cat.png"))), path: abs.join("cat.png") }, Linked { link: "![[@Lib/song.mp3]]".into(), path: abs.join("Lib/song.mp3") }]);

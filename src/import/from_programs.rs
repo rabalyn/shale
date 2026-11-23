@@ -8,7 +8,7 @@ use super::*;
 fn text_item(text: String) -> Item {
     let first = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("Text");
     let title = safe_title(&format!("{} {}", ymd_text(today_ymd()), first.chars().take(60).collect::<String>()));
-    Item { source: Source::Text(text), include: true, title, att_on: vec![], already: None, people: vec![] }
+    Item { source: Source::Text(text), include: true, title, att_on: vec![], already: None, people: vec![], continues: None }
 }
 
 /// Text from a drop: UTF-8, or UTF-16 (which some programs send).

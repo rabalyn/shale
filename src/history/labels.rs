@@ -94,6 +94,7 @@ pub fn source_label(versions: &[Version], i: usize, this_device: &str, now: i64)
             }
         }
         Some(Reason::Delete) => "deleted".to_string(),
+        Some(Reason::Import) => "imported".to_string(),
         None => "changed outside Shale".to_string(),
     }
 }

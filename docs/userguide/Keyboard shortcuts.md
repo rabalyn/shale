@@ -25,6 +25,8 @@ Text editing keys and vim keys are fixed.
 | Ctrl+E | Edit / reading view |
 | Ctrl+, | Settings |
 | Ctrl+Shift+D | Data usage: what Shale keeps on disk, and its caches |
+| Ctrl+Shift+PageUp / Ctrl+Shift+PageDown | Previous / next mail of the thread of the note, by date (see [[Thread view]]) |
+| Ctrl+Shift+T | Thread overview: opens the Thread view in the right sidebar and gives it the keyboard (↑ ↓, Enter, Esc) |
 | F1 | Open the user guide (built into Shale, unpacked into its data folder and opened as a vault) |
 | Ctrl+S | Save now (notes also save automatically) |
 | Ctrl+W | Close tab |

@@ -77,6 +77,8 @@ pub struct Mail {
     /// when it was sent (UTC seconds), if the date could be read
     pub date: Option<i64>,
     pub message_id: String,
+    /// the `In-Reply-To` Message-ID as written (threads of imported mails, IMP-067)
+    pub in_reply_to: String,
     /// `Reply-To` and `References` as written (replies, MAIL-126)
     pub reply_to: String,
     pub references: String,
@@ -861,6 +863,7 @@ pub fn parse(raw: &[u8]) -> Mail {
         date: parse_date(&date_raw),
         date_raw,
         message_id: header(&h, "message-id").unwrap_or("").trim().to_string(),
+        in_reply_to: header(&h, "in-reply-to").unwrap_or("").split_whitespace().next().unwrap_or("").to_string(),
         reply_to: get("reply-to"),
         references: header(&h, "references").unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" "),
         text: text.trim_end().to_string(),

@@ -100,6 +100,8 @@ pub enum Reason {
     Merge,
     Rename,
     Delete,
+    /// an import wrote notes (IMP-072)
+    Import,
 }
 
 impl Reason {
@@ -114,11 +116,12 @@ impl Reason {
             Reason::Merge => "merge",
             Reason::Rename => "rename",
             Reason::Delete => "delete",
+            Reason::Import => "import",
         }
     }
 
     pub fn parse(s: &str) -> Option<Reason> {
-        [Reason::Save, Reason::Idle, Reason::Close, Reason::Initial, Reason::Sync, Reason::Restore, Reason::Merge, Reason::Rename, Reason::Delete].into_iter().find(|r| r.as_str() == s.trim())
+        [Reason::Save, Reason::Idle, Reason::Close, Reason::Initial, Reason::Sync, Reason::Restore, Reason::Merge, Reason::Rename, Reason::Delete, Reason::Import].into_iter().find(|r| r.as_str() == s.trim())
     }
 }
 

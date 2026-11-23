@@ -221,7 +221,10 @@ fn lay_009_dropping_an_icon_on_the_content_makes_a_new_view_and_two_panels_show_
     assert_eq!(w.views().len(), 1);
     // let go: a second view with its own menubar holds the icon, and both panels are drawn
     w.release(into);
-    assert_eq!(w.views(), vec![vec![panel(RightPanel::Backlinks), panel(RightPanel::Outgoing), panel(RightPanel::LocalGraph), panel(RightPanel::Calendar), panel(RightPanel::History)], vec![panel(RightPanel::Outline)]]);
+    assert_eq!(
+        w.views(),
+        vec![vec![panel(RightPanel::Backlinks), panel(RightPanel::Outgoing), panel(RightPanel::LocalGraph), panel(RightPanel::Calendar), panel(RightPanel::History), panel(RightPanel::Thread)], vec![panel(RightPanel::Outline)]]
+    );
     assert_eq!(w.app.side.bars.len(), 2, "each view has its menubar");
     assert!(w.bar(1).min.y > w.body(0).min.y && w.body(1).min.y > w.bar(1).max.y - 1.0, "the views are stacked");
     assert!(w.right_has("Linked mentions") && w.right_has("Second") && w.right_has("First"), "backlinks and outline at once: {:?}", w.right_text());
@@ -284,7 +287,7 @@ fn lay_005_icons_are_dragged_between_menubars_right_to_right_left_to_right_and_r
     assert!(matches!(w.app.side.cue, Cue::Bar { view: 1, at: 1, .. }), "{:?}", w.app.side.cue);
     w.release(to);
     assert_eq!(w.views()[0], [panel(RightPanel::Backlinks)]);
-    assert_eq!(w.views()[1], [panel(RightPanel::Outgoing), panel(RightPanel::Outline), panel(RightPanel::LocalGraph), panel(RightPanel::Calendar), panel(RightPanel::History)]);
+    assert_eq!(w.views()[1], [panel(RightPanel::Outgoing), panel(RightPanel::Outline), panel(RightPanel::LocalGraph), panel(RightPanel::Calendar), panel(RightPanel::History), panel(RightPanel::Thread)]);
     assert!(w.right_has("Second") || w.right_has("No headings"), "the moved icon is the active one of its view and its panel shows");
     // right to left: Calendar into the ribbon, between Files and Search
     let cal = w.bar_icon(1, panel(RightPanel::Calendar)).center();
@@ -344,7 +347,7 @@ fn lay_007_taking_the_last_icon_out_of_a_view_removes_the_view_and_an_empty_side
     assert_eq!(w.app.side.bars.len(), 1);
     assert_eq!(w.ribbon().last(), Some(&panel(RightPanel::Outline)));
     // every panel goes to the ribbon: the sidebar has no view and says so
-    for p in [RightPanel::Backlinks, RightPanel::Outgoing, RightPanel::LocalGraph, RightPanel::Calendar, RightPanel::History] {
+    for p in [RightPanel::Backlinks, RightPanel::Outgoing, RightPanel::LocalGraph, RightPanel::Calendar, RightPanel::History, RightPanel::Thread] {
         w.drag_and_drop(w.bar_icon(0, panel(p)).center(), below);
     }
     assert!(w.views().is_empty());

@@ -29,7 +29,7 @@ pub enum Kind {
 /// (EDIT-061). `print-*` keys are technical as a whole.
 pub fn is_technical(key: &str) -> bool {
     let k = key.trim().to_lowercase().replace('_', "-");
-    k.starts_with("print-") || matches!(k.as_str(), "message-id" | "in-reply-to" | "references" | "event-uid" | "uid" | "id" | "source" | "numbered-headings")
+    k.starts_with("print-") || matches!(k.as_str(), "message-id" | "in-reply-to" | "references" | "thread-id" | "event-uid" | "uid" | "id" | "source" | "numbered-headings")
 }
 
 /// A person of an address list: `"Müller, Hans" <h@x.de>` is name `Hans Müller`, email `h@x.de`.

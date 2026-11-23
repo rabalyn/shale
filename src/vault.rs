@@ -119,6 +119,9 @@ pub struct NoteIndex {
     pub resolved: Vec<Option<PathBuf>>,
     pub tasks: Vec<Task>,
     pub tags: Vec<String>,
+    /// What the front matter says of the note's thread (ADR-0032); read with the links, so the thread
+    /// overview and the import never read the texts.
+    pub thread: Option<Box<crate::thread::Meta>>,
     /// Why the file could not be read (invalid UTF-8, no permission). `text` is empty then, and
     /// the file is never written (DATA-008).
     pub unreadable: Option<String>,
@@ -222,6 +225,7 @@ struct Parsed {
     tasks: Vec<Task>,
     tags: Vec<String>,
     resolved: Vec<Option<PathBuf>>,
+    thread: Option<Box<crate::thread::Meta>>,
 }
 
 impl Parsed {
@@ -230,6 +234,7 @@ impl Parsed {
         n.tasks = self.tasks;
         n.tags = self.tags;
         n.resolved = self.resolved;
+        n.thread = self.thread;
     }
 }
 
@@ -837,7 +842,7 @@ impl Vault {
         tags.sort();
         tags.dedup();
         let resolved = links.iter().map(|l| self.resolve(&l.target, Some(rel))).collect();
-        Parsed { links, tasks, tags, resolved }
+        Parsed { links, tasks, tags, resolved, thread: crate::thread::Meta::parse(&n.text).map(Box::new) }
     }
 
     /// Update the index from an editor buffer (the file itself is written separately).

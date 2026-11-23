@@ -302,7 +302,7 @@ fn messages_carry_trailers_that_parse_and_a_message_without_them_gives_its_subje
     assert_eq!(plain, Meta { subject: "Fixed the typo".into(), ..Default::default() });
     assert_eq!(parse_message("").subject, "");
     assert_eq!(parse_message("s\n\nShale-Reason: something-new\n").reason, None);
-    for r in [Reason::Save, Reason::Idle, Reason::Close, Reason::Initial, Reason::Sync, Reason::Restore, Reason::Merge, Reason::Rename, Reason::Delete] {
+    for r in [Reason::Save, Reason::Idle, Reason::Close, Reason::Initial, Reason::Sync, Reason::Restore, Reason::Merge, Reason::Rename, Reason::Delete, Reason::Import] {
         assert_eq!(Reason::parse(r.as_str()), Some(r));
     }
 }
