@@ -129,8 +129,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   or a small question asks which (the same setting). Other text pastes as usual.
 
 - **Sound players.** `![[song.mp3]]` shows a small player instead of a link, in the editor, the
-  markdown preview and the reading view (mp3, ogg, oga, flac, m4a, aac and wav play; opus files
-  are recognised but cannot be played yet). It shows the cover from the file's tags (or a tile
+  markdown preview and the reading view (mp3, ogg, oga, flac, m4a, aac and wav play, also the A-law and µ-law WAV files of phone systems
+  and answering machines such as FRITZ!Box call recordings; what Shale cannot decode itself, opus and
+  ADPCM WAV among it, plays through ffmpeg when that is installed, and otherwise the player says what
+  the file holds instead of calling it damaged). It shows the cover from the file's tags (or a tile
   with the file name), a round play/pause button over it (in the reading view Space too, once a click gave the player
   the keyboard; in the editor a click on the player leaves the keyboard and the cursor with the text), a progress bar (click to jump, drag to choose and seek on release) with the time,
   and a mute button and volume slider. Only one file plays at a time; it keeps playing while

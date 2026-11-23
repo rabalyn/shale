@@ -9,8 +9,12 @@ Embed a sound like a picture, with `![[file.mp3]]`. Here is one:
 
 ![[sound-player.png]]
 
-- **Formats.** mp3, ogg, oga, flac, m4a, aac and wav play. opus files are recognised and get a
-  player, but cannot be played yet.
+- **Formats.** mp3, ogg, oga, flac, m4a, aac and wav play, including the A-law and µ-law WAV
+  files that phone systems and answering machines write (call recordings of a FRITZ!Box). opus
+  files and WAV files with ADPCM sound are played through ffmpeg when it is installed (see
+  below); without it they get a player that says they cannot be played yet. A file that cannot be
+  played says what it holds ("WAV with ADPCM sound, which Shale can't play yet.") and is not called
+  damaged unless nothing about it can be read.
 - **Where.** The player shows in the editor, the markdown preview and the [[Reading view]].
   A link without the `!` stays a plain link.
 - **The card.** It shows the cover from the file's tags, or a tile with the file name.
@@ -51,6 +55,9 @@ Videos are decoded by `ffmpeg` and `ffprobe` on your computer. They are optional
 with `apt install ffmpeg` (Linux), `brew install ffmpeg` (macOS) or `winget install ffmpeg`
 (Windows), or get them from https://ffmpeg.org/download.html. Shale finds them by itself; open
 the note again after installing.
+
+Sounds that Shale cannot decode itself (opus, ADPCM in a WAV file, other odd formats) are played
+through ffmpeg too when it is installed.
 
 Without them the video shows a tile with a play mark, and a click opens the file in your
 system's video player. Settings → Appearance says where ffmpeg was found, or that it
