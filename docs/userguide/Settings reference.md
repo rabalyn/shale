@@ -291,7 +291,7 @@ Some behaviour is decided by a note's own properties (front matter) instead of a
 | `version` | 1 | written by Shale |
 | `people_dir` | `Adressbuch` | Settings → Vault → People, "People folder" ([[Tags and people]]) |
 | `sync` | the group of the four keys below | Settings → Sync |
-| `sync.enabled` | on (only matters when the vault is a git repository) | Settings → Sync, "Sync this vault automatically" ([[Git sync]]) |
+| `sync.enabled` | on (only matters when the vault is a git repository; a folder with its own `.git` asks first when it is opened, "Don't sync" sets it off) | Settings → Sync, "Sync this vault automatically" ([[Git sync]]) |
 | `sync.interval_minutes` | 5 (1 to 1440) | Git sync, "Every … minutes" |
 | `sync.commit_prefix` | empty | Git sync, "Commit message prefix" |
 | `sync.commit_suffix` | empty | Git sync, "suffix" |
