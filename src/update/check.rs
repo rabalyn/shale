@@ -1,8 +1,10 @@
 //! Looking for a newer release (UPD-003 to UPD-006): the request to GitHub, the release it
 //! answers with, the comparison of versions, the choice of the file for this computer, and the
-//! download of that file into a staging folder, verified against its `.sha256` (UPD-007).
+//! download of that file into a staging folder, verified against its `.sha256` (UPD-006) and
+//! against the signature of the owner of the release key (UPD-022).
 //! Everything that touches the network goes through [`crate::download`] (`curl`).
 
+use super::sshsig;
 use crate::download::{self, Request};
 use crate::pdf::tex::archive::sha256_hex;
 use serde::Deserialize;
@@ -18,27 +20,31 @@ pub const REPOSITORY: &str = "rabalyn/shale";
 /// The most bytes of the release description from the API, of a checksum file and of a download.
 const MAX_API: u64 = 4 << 20;
 const MAX_SUM: u64 = 64 << 10;
+const MAX_SIG: u64 = sshsig::MAX_SIG;
 const MAX_ASSET: u64 = 400 << 20;
 /// The most characters of the release notes that are kept.
 const MAX_NOTES: usize = 20_000;
 
-/// Where releases are asked for. Production: GitHub, https only; tests: a pretend server on
-/// `127.0.0.1` (there is no setting for it).
+/// Where releases are asked for, and whose signature counts. Production: GitHub, https only, the
+/// key built into Shale; tests: a pretend server on `127.0.0.1` and a key of the test (there is
+/// no setting for either).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Source {
     api: String,
     allow_http: bool,
+    signer: [u8; 32],
 }
 
 impl Source {
     pub fn github() -> Source {
-        Source { api: API.to_string(), allow_http: false }
+        Source { api: API.to_string(), allow_http: false, signer: sshsig::release_key() }
     }
 
-    /// Tests only: a pretend GitHub at `base` (`http://127.0.0.1:port`).
+    /// Tests only: a pretend GitHub at `base` (`http://127.0.0.1:port`), whose releases are
+    /// signed with the key of the test seed [`super::fake_github::SIGNER`].
     #[cfg(all(test, unix))]
     pub fn pretend(base: &str) -> Source {
-        Source { api: base.trim_end_matches('/').to_string(), allow_http: true }
+        Source { api: base.trim_end_matches('/').to_string(), allow_http: true, signer: sshsig::testing::public(super::fake_github::SIGNER) }
     }
 
     /// The address of the newest release.
@@ -221,13 +227,33 @@ pub fn asset_name(version: &str, os: &str, arch: &str) -> Option<String> {
     Some(format!("shale-{version}-{system}.{ext}"))
 }
 
-/// The download of this system and its checksum file, or what is missing in words.
-pub fn asset_for<'a>(release: &'a Release, os: &str, arch: &str) -> Result<(&'a Asset, &'a Asset), String> {
+/// The download of this system, its checksum file and its signature file, or what is missing in
+/// words. A release without a signature file is not installed by Shale (UPD-022): the owner signs
+/// the files after GitHub has published them, so older releases and the first hours of a new one
+/// have none.
+pub fn asset_for<'a>(release: &'a Release, os: &str, arch: &str) -> Result<(&'a Asset, &'a Asset, &'a Asset), String> {
     let name = asset_name(&release.version, os, arch).ok_or_else(|| format!("there is no download of Shale {} for {os} on {arch}", release.version))?;
     let find = |n: &str| release.assets.iter().find(|a| a.name == n);
     let file = find(&name).ok_or_else(|| format!("the release {} has no file {name}", release.version))?;
     let sum = find(&format!("{name}.sha256")).ok_or_else(|| format!("the release {} has no checksum file for {name}, so it is not installed", release.version))?;
-    Ok((file, sum))
+    let sig = find(&format!("{name}.sig")).ok_or_else(|| {
+        format!(
+            "the release {} has no signature file for {name} (it is signed some time after it is published, and older releases are not signed), so Shale does not download or install it by itself; you can download it from {}",
+            release.version,
+            release_page(&release.version)
+        )
+    })?;
+    Ok((file, sum, sig))
+}
+
+/// The page of all releases on GitHub.
+pub fn releases_page() -> String {
+    format!("https://github.com/{REPOSITORY}/releases")
+}
+
+/// The page of a release on GitHub.
+pub fn release_page(version: &str) -> String {
+    format!("https://github.com/{REPOSITORY}/releases/tag/v{version}")
 }
 
 /// The hash in a `.sha256` file (`<hex>  <name>`, as `sha256sum` and `shasum -a 256` write it),
@@ -301,12 +327,32 @@ pub fn verify(archive: &Path, sum_file: &Path, name: &str) -> Result<(), String>
     result
 }
 
-/// Download the file of `release` for this system and its checksum into `<root>/<version>/` and
-/// verify it. A file that is already there and matches is not downloaded again.
+/// Whether `sig_file` is the signature of `archive` by the owner of `signer`, in the namespace of
+/// the file `name`; nothing is deleted.
+pub fn check_signature(archive: &Path, sig_file: &Path, name: &str, signer: &[u8; 32]) -> Result<(), String> {
+    let text = crate::fsutil::read_to_string(sig_file).map_err(|e| format!("the signature file could not be read ({e})"))?;
+    sshsig::verify_file(archive, &text, signer, &sshsig::namespace(name))
+}
+
+/// [`check_signature`] for a download that was just made: one that fails is deleted with its
+/// signature file, and the error says so.
+pub fn verify_signature(archive: &Path, sig_file: &Path, name: &str, signer: &[u8; 32]) -> Result<(), String> {
+    check_signature(archive, sig_file, name, signer).map_err(|e| {
+        let _ = std::fs::remove_file(archive);
+        let _ = std::fs::remove_file(sig_file);
+        format!(
+            "{name} is not signed by the owner of Shale's release key: {e}. It was deleted and nothing was installed. Do not use this file; tell the owner of Shale, and download the release by hand from {} only if you trust it.",
+            releases_page()
+        )
+    })
+}
+
+/// Download the file of `release` for this system, its checksum and its signature into
+/// `<root>/<version>/` and verify both. A file that is already there and passes is not downloaded again.
 pub fn stage(source: &Source, release: &Release, os: &str, arch: &str, root: &Path, cancel: &AtomicBool) -> Result<Staged, String> {
     let _flow = tracing::info_span!("flow.update_download", peer = "app").entered();
-    let (file, sum) = asset_for(release, os, arch)?;
-    for a in [file, sum] {
+    let (file, sum, sig) = asset_for(release, os, arch)?;
+    for a in [file, sum, sig] {
         if !source.accepts(&a.url) {
             return Err(format!("the release names the address {:?} for {}, which is not a download of Shale: refused", a.url, a.name));
         }
@@ -316,14 +362,17 @@ pub fn stage(source: &Source, release: &Release, os: &str, arch: &str, root: &Pa
         let dir = root.join(&release.version);
         std::fs::create_dir_all(&dir).map(|()| dir.clone()).map_err(|e| format!("{} could not be made ({e})", dir.display()))
     })?;
-    let (archive, sum_file) = (dir.join(&file.name), dir.join(&sum.name));
+    let (archive, sum_file, sig_file) = (dir.join(&file.name), dir.join(&sum.name), dir.join(&sig.name));
     let get = |a: &Asset, to: &Path, max: u64, secs: u64| download::to_file(cancel, &Request { url: &a.url, max_bytes: max, timeout: Duration::from_secs(secs), allow_http: source.allow_http, headers: &[] }, to);
-    // the checksum is always fetched anew: a download that was kept is checked against the current one
+    // the checksum and the signature are always fetched anew: a download that was kept is checked against the current ones
     tracing::info_span!("flow.update_download.checksum_download", peer = "github").in_scope(|| get(sum, &sum_file, MAX_SUM, 120))?;
-    if !(archive.is_file() && verify_quiet(&archive, &sum_file, &file.name)) {
+    tracing::info_span!("flow.update_download.signature_download", peer = "github").in_scope(|| get(sig, &sig_file, MAX_SIG, 120))?;
+    let kept = archive.is_file() && verify_quiet(&archive, &sum_file, &file.name) && check_signature(&archive, &sig_file, &file.name, &source.signer).is_ok();
+    if !kept {
         let _ = std::fs::remove_file(&archive);
         tracing::info_span!("flow.update_download.archive_download", peer = "github").in_scope(|| get(file, &archive, MAX_ASSET, 30 * 60))?;
         tracing::info_span!("flow.update_download.verify", peer = "disk").in_scope(|| verify(&archive, &sum_file, &file.name))?;
+        tracing::info_span!("flow.update_download.verify_signature", peer = "disk").in_scope(|| verify_signature(&archive, &sig_file, &file.name, &source.signer))?;
     }
     Ok(Staged { version: release.version.clone(), dir, archive })
 }

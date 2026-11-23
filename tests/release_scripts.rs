@@ -49,6 +49,32 @@ fn forge_013_forge_014_test_release_script_passes() {
     run("scripts/test-release.sh");
 }
 
+// spec: UPD-025
+#[test]
+fn upd_022_test_sign_release_script_passes() {
+    run("scripts/test-sign-release.sh");
+}
+
+// spec: UPD-025: the owner signs by hand on his own computer; no script of the landing, the
+// release or CI runs the signing, and none names the key
+#[test]
+fn upd_022_nothing_but_the_owner_runs_the_signing_script_and_no_workflow_names_the_key() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut files = vec![root.join("scripts/land.sh"), root.join("scripts/make-release.sh"), root.join("scripts/make-tag.sh"), root.join("scripts/release-lib.sh")];
+    for dir in [".github/workflows", ".forgejo/workflows"] {
+        for e in std::fs::read_dir(root.join(dir)).unwrap() {
+            files.push(e.unwrap().path());
+        }
+    }
+    assert!(files.len() > 6, "the workflows were found");
+    for f in files {
+        let text = std::fs::read_to_string(&f).unwrap();
+        for word in ["sign-release", "shale_github_signing", "SHALE_SIGNING_KEY"] {
+            assert!(!text.contains(word), "{} names {word}", f.display());
+        }
+    }
+}
+
 // spec: BUILD-013, FORGE-014: scripts/test-release.sh unsets the variable itself, so a release that
 // runs land.sh and its cargo test (which has it set in the environment) does not fail (#406)
 #[test]
