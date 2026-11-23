@@ -1,4 +1,4 @@
-# ADR-0032: Files, Search and Tags on either side: move or copy
+# ADR-0033: Files, Search and Tags on either side: move or copy
 
 - **Status**: Accepted (2026-11-23)
 - **Date**: 2026-11-23

@@ -55,7 +55,7 @@ impl Item {
     }
 
     /// Files, Search and Tags: the views of the left sidebar, which can be in the ribbon, in a
-    /// right view or in both (LAY-020, ADR-0032).
+    /// right view or in both (LAY-020, ADR-0033).
     pub fn is_movable(self) -> bool {
         matches!(self, Item::Files | Item::Search | Item::Tags)
     }
