@@ -311,14 +311,15 @@ pub fn find_web_links(text: &str) -> Vec<WebLink> {
                 continue;
             }
             let url_start = label_end + 2;
-            let Some(pe) = line[url_start..].find(')') else { continue };
-            let url = line[url_start..url_start + pe].trim();
+            // the destination is read as everywhere (a title after it is no part of the address)
+            let Some((dest_end, close)) = crate::markdown::md_destination(&line[url_start..]) else { continue };
+            let url = line[url_start..url_start + dest_end].trim();
             let url = url.trim_start_matches('<').trim_end_matches('>');
             if !is_web_url(url) {
                 continue;
             }
             let start = if s > 0 && line.as_bytes()[s - 1] == b'!' { s - 1 } else { s };
-            let end = url_start + pe + 1;
+            let end = url_start + close + 1;
             out.push(WebLink { range: off + start..off + end, label_range: off + s + 1..off + label_end, label: if label.is_empty() { url.to_string() } else { label.to_string() }, url: url.to_string() });
             taken.push(start..end);
             i = end;
@@ -596,5 +597,15 @@ mod tests {
         assert_eq!(&t[w[0].range.clone()], "[this is google](https://google.com)");
         assert_eq!(&t[w[0].label_range.clone()], "this is google");
         assert_eq!(w[1].url, "https://example.org/x");
+    }
+
+    // spec: LINK-001
+    #[test]
+    fn a_web_link_with_a_title_has_the_address_without_it() {
+        let t = "[a](https://a.org \"t\") ![b](<https://b.org/x y> 'u') [c](https://c.org/p_(x) (v)) [d](https://d.org)";
+        let w = find_web_links(t);
+        assert_eq!(w.iter().map(|w| w.url.as_str()).collect::<Vec<_>>(), ["https://a.org", "https://b.org/x y", "https://c.org/p_(x)", "https://d.org"]);
+        assert_eq!(&t[w[0].range.clone()], "[a](https://a.org \"t\")");
+        assert_eq!(w[1].label, "b");
     }
 }

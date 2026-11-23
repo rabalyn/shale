@@ -2422,6 +2422,29 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    // spec: VAULT-016, VAULT-041, LINK-001
+    #[test]
+    fn a_markdown_link_with_a_title_resolves_is_a_backlink_and_follows_a_rename_and_a_move() {
+        let note = "[a](Target.md \"the title\") [b](<Target.md> 'it\\'s') [c](../Target.md (t)) ![p](pic.png \"pic\") [d](Target.md#Intro 't')";
+        let (mut v, d) = vault_with("mdtitle", &[("Target.md", "# Intro\n"), ("pic.png", ""), ("a/Src.md", note), ("Top.md", "[t](a/../Target.md \"x\")")]);
+        // resolved, and so in the backlinks
+        let n = &v.notes[Path::new("a/Src.md")];
+        assert_eq!(n.links.len(), 5);
+        assert!(n.resolved.iter().all(|r| r.is_some()), "{:?}", n.resolved);
+        let mut from: Vec<PathBuf> = v.backlinks(Path::new("Target.md")).into_iter().map(|(p, _)| p).collect();
+        from.sort();
+        assert_eq!(from, vec![PathBuf::from("Top.md"), PathBuf::from("a/Src.md")]);
+        v.rename(Path::new("Target.md"), Path::new("Goal Note.md"), true).unwrap();
+        v.rename(Path::new("pic.png"), Path::new("cover.png"), true).unwrap();
+        // the targets change, the titles stay as they were
+        assert_eq!(text(&v, "a/Src.md"), "[a](Goal%20Note.md \"the title\") [b](<Goal Note.md> 'it\\'s') [c](../Goal%20Note.md (t)) ![p](cover.png \"pic\") [d](Goal%20Note.md#Intro 't')");
+        assert!(v.notes[Path::new("a/Src.md")].resolved.iter().all(|r| r.is_some()));
+        v.move_into(Path::new("Goal Note.md"), Path::new("a")).unwrap();
+        assert!(v.notes[Path::new("a/Src.md")].resolved.iter().all(|r| r.is_some()));
+        assert!(text(&v, "a/Src.md").contains(" \"the title\")") && text(&v, "a/Src.md").contains(" 'it\\'s')"), "{}", text(&v, "a/Src.md"));
+        let _ = fs::remove_dir_all(&d);
+    }
+
     // spec: VAULT-016, VAULT-041
     #[test]
     fn links_in_front_matter_properties_follow_a_rename_and_a_move() {
