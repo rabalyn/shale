@@ -370,3 +370,32 @@ fn job_007_the_summary_is_the_text_of_one_task_or_the_number_of_several_and_time
     assert_eq!(ui::summary(&[info("a"), info("b"), info("c")]), "3 tasks running");
     assert_eq!((ui::elapsed(Duration::from_secs(5)), ui::elapsed(Duration::from_secs(59)), ui::elapsed(Duration::from_secs(125))), ("5 s".into(), "59 s".into(), "2 min".into()));
 }
+
+// spec: JOB-030
+#[test]
+fn job_030_a_quiet_task_is_known_to_its_views_at_once_but_listed_only_after_two_seconds() {
+    const QUIET: Key = Key::quiet("test-quiet");
+    let busy = Busy::default();
+    let (job, release) = gated(&busy, QUIET, "Saving a version…");
+    let (loud, release_loud) = gated(&busy, SYNC, "Syncing with git…");
+    assert!(busy.is_running(&QUIET) && busy.info(&QUIET).is_some(), "the view of the action sees it at once");
+    assert_eq!(busy.list().iter().map(|t| t.label.as_str()).collect::<Vec<_>>(), ["Syncing with git…"], "the indicator does not list it yet");
+    assert!(busy.begin(QUIET, "again").is_none(), "and a second one is refused as for any task");
+    std::thread::sleep(QUIET_FOR + Duration::from_millis(100));
+    assert_eq!(busy.list().len(), 2, "after two seconds it is listed");
+    release.send(()).unwrap();
+    release_loud.send(()).unwrap();
+    assert_eq!(result(&job), Ok(7));
+    assert_eq!(result(&loud), Ok(7));
+    assert!(busy.list().is_empty());
+}
+
+// spec: JOB-003
+#[test]
+fn job_003_a_closing_window_can_wait_for_a_job_a_moment() {
+    let busy = Busy::default();
+    let (job, release) = gated(&busy, SYNC, "Syncing with git…");
+    assert!(matches!(job.recv_timeout(Duration::from_millis(10)), Err(std::sync::mpsc::RecvTimeoutError::Timeout)));
+    release.send(()).unwrap();
+    assert_eq!(job.recv_timeout(WAIT), Ok(Ok(7)));
+}

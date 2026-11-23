@@ -11,7 +11,7 @@ use crate::vault_state::LfsDownload;
 use eframe::egui::{self, Ui};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{Receiver, TryRecvError};
+use std::sync::mpsc::TryRecvError;
 use std::time::{Duration, Instant};
 
 /// The git sync as a task (JOB-003): it cannot be stopped, because a sync that ends between its
@@ -21,15 +21,16 @@ pub(crate) const GIT_SYNC: Key = Key::new("git-sync");
 /// "Store media with Git LFS" as a task; like the sync, it is not stopped half way.
 pub(crate) const LFS_SETUP: Key = Key::new("git-lfs-setup");
 
-/// What an LFS download job sends back (the outer error: the job itself died).
-type PullResult = Result<Result<(), String>, String>;
+/// The LFS download queue as a task (JOB-032): one download runs at a time, the others wait in
+/// `pulls`. It cannot be stopped, because `git lfs pull` writes the files itself.
+pub(crate) const LFS_DOWNLOAD: Key = Key::new("git-lfs-download");
 
 /// A running `git lfs pull`: for one file a player asked for, or for the whole vault (`always`).
 struct PullJob {
     vault: PathBuf,
     /// The file (absolute); None: the whole repository.
     file: Option<PathBuf>,
-    rx: Receiver<PullResult>,
+    job: busy::Job<Result<(), String>>,
 }
 
 /// The sync's state in the app.
@@ -200,7 +201,7 @@ impl ShaleApp {
             self.sync.pulls.push_back(Some(abs));
         }
         if let Some(job) = &self.sync.pull {
-            let r = match job.rx.try_recv() {
+            let r = match job.job.try_recv() {
                 Ok(r) => r.unwrap_or_else(|e| Err(format!("the download stopped with an internal error: {e}"))),
                 Err(TryRecvError::Empty) => {
                     ctx.request_repaint_after(Duration::from_millis(200));
@@ -219,17 +220,26 @@ impl ShaleApp {
         }
         if self.sync.pull.is_none() {
             if let Some(next) = self.sync.pulls.pop_front() {
-                self.start_pull(ctx, root, next);
+                if !self.start_pull(ctx, root, next.clone()) {
+                    self.sync.pulls.push_front(next); // the action still runs elsewhere: try again next frame
+                }
             }
         }
     }
 
     /// `git lfs pull` in the background, holding the tree lock: for one file (SYNC-020, VAULT-018
     /// checks its path) or for the whole vault.
-    fn start_pull(&mut self, ctx: &egui::Context, root: PathBuf, file: Option<PathBuf>) {
+    /// False: a download task is still listed, nothing was started.
+    fn start_pull(&mut self, ctx: &egui::Context, root: PathBuf, file: Option<PathBuf>) -> bool {
         let (git, tree, ctx2, job_root) = (self.sync.git.clone(), self.sync.tree.clone(), ctx.clone(), root.clone());
         let rel = file.as_ref().map(|abs| abs.strip_prefix(&root).map(Path::to_path_buf).map_err(|_| "the file is not in the vault".to_string()));
-        let rx = crate::jobs::spawn(
+        let label = match &file {
+            Some(abs) => format!("Downloading {} from Git LFS…", abs.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()),
+            None => "Downloading the LFS files of the vault…".to_string(),
+        };
+        let job = self.busy.spawn(
+            LFS_DOWNLOAD,
+            label,
             move || match rel {
                 None => lfs::pull_all(&git, &job_root, &tree),
                 Some(Ok(rel)) => lfs::download(&git, &job_root, &rel, &tree),
@@ -237,7 +247,9 @@ impl ShaleApp {
             },
             move || ctx2.request_repaint(),
         );
-        self.sync.pull = Some(PullJob { vault: root, file, rx });
+        let started = job.is_some();
+        self.sync.pull = job.map(|job| PullJob { vault: root, file, job });
+        started
     }
 
     pub(crate) fn git_version(&mut self) -> Option<String> {
@@ -503,7 +515,7 @@ impl ShaleApp {
         let repo = gitsync::is_repo(&root);
         let ctx = ui.ctx().clone();
         // where the vault is, looked up once in a background job (SYNC-061)
-        self.sync.setup.detect_for(&root, &ctx);
+        self.sync.setup.detect_for(&root, &ctx, &self.busy);
         if repo {
             match &self.sync.remote {
                 Some(u) => crate::theme::hint(ui, format!("Remote: {u}")),
@@ -511,8 +523,8 @@ impl ShaleApp {
             };
         }
         let findings = self.sync.setup.findings(&root).to_vec();
-        let (moving, moved) = (self.sync.setup.moveout.running(), self.sync.setup.moveout.result.clone());
-        if crate::gitsync::wizard::warnings_ui(ui, &findings, repo, self.sync.remote.is_some(), moving, moved.as_ref()) {
+        let moved = self.sync.setup.moveout.result.clone();
+        if crate::gitsync::wizard::warnings_ui(ui, &findings, repo, self.sync.remote.is_some(), &self.busy, moved.as_ref()) {
             self.start_moveout();
         }
         if self.sync.remote.is_none() {
@@ -534,7 +546,7 @@ impl ShaleApp {
                 let r = ui.add(egui::TextEdit::singleline(&mut self.sync.url).hint_text("https://… or git@host:notes.git").desired_width(300.0));
                 self.sync.rects.push(("url", r.rect));
                 let label = if self.sync.remote.is_some() { "Change remote" } else { "Connect" };
-                let b = ui.button(label);
+                let b = busy::ui::button(ui, &self.busy, &[&crate::gitsync::wizard::CONNECT], egui::Button::new(label));
                 self.sync.rects.push(("connect", b.rect));
                 if b.clicked() {
                     let url = self.sync.url.trim().to_string();
@@ -553,6 +565,7 @@ impl ShaleApp {
                         }
                     }
                 }
+                busy::ui::status(ui, &self.busy, &crate::gitsync::wizard::CONNECT);
             });
             crate::settings::anchor::mark(ui, "sync.remote", remote.response.rect);
         }
@@ -620,6 +633,7 @@ impl ShaleApp {
 
     /// Git LFS: installed or not, and the button that stores media with it (SYNC-016, SYNC-017).
     fn lfs_settings_ui(&mut self, ui: &mut Ui) {
+        busy::ui::status(ui, &self.busy, &LFS_DOWNLOAD);
         let Some(version) = self.sync.lfs.version.clone() else {
             crate::theme::hint(ui, format!("Git LFS is not installed, so media files (audio, video) are stored like any other file. {}", lfs::INSTALL_HINT));
             return;
@@ -807,6 +821,26 @@ mod tests {
             });
             out.textures_delta.clear();
             changed
+        }
+
+        /// Every text a frame of the page paints.
+        fn texts(&mut self, app: &mut ShaleApp) -> Vec<String> {
+            fn collect(shape: &egui::Shape, out: &mut Vec<String>) {
+                match shape {
+                    egui::Shape::Text(t) => out.push(t.galley.text().to_string()),
+                    egui::Shape::Vec(v) => v.iter().for_each(|s| collect(s, out)),
+                    _ => {}
+                }
+            }
+            self.frame(app, vec![]);
+            self.t += 0.05;
+            let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 900.0))), time: Some(self.t), ..Default::default() };
+            let out = self.ctx.run_ui(raw, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| app.sync_settings_ui(ui));
+            });
+            let mut texts = vec![];
+            out.shapes.iter().for_each(|c| collect(&c.shape, &mut texts));
+            texts
         }
 
         fn click(&mut self, app: &mut ShaleApp, key: &str) -> bool {
@@ -1138,6 +1172,49 @@ mod tests {
         looks.forget(&abs);
         assert!(looks.wait_for(&ctx, &abs).is_some_and(|f| f.pointer.is_none()), "the look-up sees the real file");
         assert_eq!(app.media.notice(&ctx, &abs), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: JOB-032
+    #[test]
+    fn job_032_the_lfs_download_queue_is_a_task_that_names_the_file_cannot_stop_and_shows_in_the_settings() {
+        let root = std::env::temp_dir().join(format!("shale-app-lfs-task-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let git = hermetic();
+        assert!(std::process::Command::new("git").arg("-C").arg(&root).args(["init", "--quiet"]).envs(git.env.iter().cloned()).status().unwrap().success());
+        let mut app = app_on(&root);
+        let ctx = egui::Context::default();
+        // the download waits for the tree lock, so it runs as long as the test wants
+        let guard = app.sync.tree.try_hold().expect("the lock is free");
+        app.sync.pulls.push_back(Some(root.join("Song.mp3")));
+        app.sync.pulls.push_back(None);
+        app.lfs_pull_tick(&ctx);
+        let task = app.busy.info(&LFS_DOWNLOAD).expect("the download is a task");
+        assert_eq!((task.label.as_str(), task.cancellable), ("Downloading Song.mp3 from Git LFS…", false));
+        assert_eq!(app.sync.pulls.len(), 1, "the other one waits behind it");
+        // the settings show it with a spinner
+        let mut h = H { ctx: egui::Context::default(), t: 0.0 };
+        let shown = h.texts(&mut app);
+        assert!(shown.iter().any(|t| t == "Downloading Song.mp3 from Git LFS…"), "{shown:?}");
+        drop(guard);
+        wait_pulls(&mut app);
+        assert!(app.busy.list().is_empty(), "no task is left");
+        // the whole vault has its own text
+        let guard = app.sync.tree.try_hold().expect("the lock is free");
+        app.sync.pulls.push_back(None);
+        app.lfs_pull_tick(&ctx);
+        assert_eq!(app.busy.info(&LFS_DOWNLOAD).map(|t| t.label), Some("Downloading the LFS files of the vault…".to_string()));
+        drop(guard);
+        wait_pulls(&mut app);
+        // a download that finds its task still listed waits for the next frame and is not lost
+        let held = app.busy.begin(LFS_DOWNLOAD, "held by the test").unwrap();
+        app.sync.pulls.push_back(None);
+        app.lfs_pull_tick(&ctx);
+        assert!(app.sync.pull.is_none() && app.sync.pulls.len() == 1);
+        drop(held);
+        wait_pulls(&mut app);
+        assert!(app.busy.list().is_empty());
         let _ = std::fs::remove_dir_all(&root);
     }
 }

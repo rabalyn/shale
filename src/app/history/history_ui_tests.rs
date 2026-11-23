@@ -486,3 +486,20 @@ fn hist_018_a_made_up_history_has_a_version_per_step_an_hour_apart_ending_an_hou
     assert_eq!(versions[2].meta.reason, Some(Reason::Initial));
     assert!(t.app.history_active(), "the window keeps the made-up history");
 }
+
+// spec: JOB-031
+#[cfg(unix)]
+#[test]
+fn job_031_the_panel_shows_the_read_that_runs_as_a_task_with_a_spinner() {
+    let mut w = W::new("job031-panel", WIDE);
+    let gate = crate::gitsync::hold_git(&mut w.t.app.sync.git, &w.t.root);
+    w.t.app.history.panel = Default::default();
+    w.frames(3);
+    let task = w.t.app.busy.info(&HISTORY_QUERY).expect("the read of the list is a task");
+    assert!(w.has_text(&task.label), "the panel says what the task says: {:?}", w.hl.text);
+    assert!(w.t.app.busy.list().is_empty(), "the indicator waits two seconds, the panel does not");
+    std::fs::write(&gate, "").unwrap();
+    w.settle();
+    assert_eq!(w.t.app.history.panel.versions.len(), 3);
+    assert!(w.t.app.busy.list().is_empty() && !w.t.app.busy.is_running(&HISTORY_QUERY));
+}

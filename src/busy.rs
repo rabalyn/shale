@@ -13,9 +13,9 @@
 
 use crate::jobs;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Receiver, TryRecvError};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, TryRecvError};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 mod demo;
 pub mod ui;
@@ -25,12 +25,25 @@ mod tests;
 
 /// What a task is: the action that runs. Two running tasks never share a key.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Key(&'static str);
+pub struct Key {
+    kind: &'static str,
+    quiet: bool,
+}
+
+/// How long a quiet task runs before the indicator lists it (JOB-030).
+pub const QUIET_FOR: Duration = Duration::from_secs(2);
 
 impl Key {
     /// The key of an action, as a constant of the module that owns the action.
     pub const fn new(kind: &'static str) -> Key {
-        Key(kind)
+        Key { kind, quiet: false }
+    }
+
+    /// The key of housekeeping that is usually over in a moment (a snapshot of the file history):
+    /// the views of the action see the task at once ([`Busy::info`]), but the indicator lists it
+    /// only when it has run for [`QUIET_FOR`], so it does not flicker (JOB-030).
+    pub const fn quiet(kind: &'static str) -> Key {
+        Key { kind, quiet: true }
     }
 }
 
@@ -120,9 +133,9 @@ impl Busy {
         self.tasks().list.iter().any(|e| e.key == *key)
     }
 
-    /// Every running task, the oldest first.
+    /// Every running task, the oldest first, except a quiet one that has not run for [`QUIET_FOR`] yet.
     pub fn list(&self) -> Vec<TaskInfo> {
-        self.tasks().list.iter().map(Entry::info).collect()
+        self.tasks().list.iter().filter(|e| !e.key.quiet || e.started.elapsed() >= QUIET_FOR).map(Entry::info).collect()
     }
 
     /// Ask the task to stop; true when it can be stopped. It stays listed until its job has ended.
@@ -189,6 +202,11 @@ impl<T> Job<T> {
     /// The result if the job has ended: its value, or the message of a panic. `Empty` while it runs.
     pub fn try_recv(&self) -> Result<Result<T, String>, TryRecvError> {
         self.rx.try_recv()
+    }
+
+    /// Wait for the result for at most `limit` (the window that closes waits for the last job a moment).
+    pub fn recv_timeout(&self, limit: Duration) -> Result<Result<T, String>, RecvTimeoutError> {
+        self.rx.recv_timeout(limit)
     }
 
     /// Ask the job to stop (nothing happens for a task that cannot be stopped).

@@ -94,7 +94,10 @@ impl ShaleApp {
         if let Some(e) = panel.error.clone() {
             theme::problem(ui, e);
         } else if panel.loading && !shown {
-            ui.label(muted("Reading the history\u{2026}"));
+            // the read that runs is a task (JOB-031); before it starts the request only waits in the queue
+            if !crate::busy::ui::status(ui, &self.busy, &crate::app::history::HISTORY_QUERY) {
+                ui.label(muted("Reading the history\u{2026}"));
+            }
         } else if shown && panel.versions.is_empty() {
             ui.label(muted("No versions yet. Shale keeps a version when you save a note, and when you stop typing."));
         }

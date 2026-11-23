@@ -33,6 +33,7 @@ fn ui_git(_root: &Path) -> Git {
 
 use super::detect::Finding;
 use super::{connect_moving, credentials, Git, TreeLock};
+use crate::busy::{self, Busy};
 use crate::secret::Secret;
 use api::RepoInfo;
 use eframe::egui;
@@ -40,7 +41,6 @@ use provider::{Kind, Server};
 use ssh::Key;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use test_sync::{Problem, Remote};
 
@@ -103,7 +103,19 @@ pub enum Msg {
     Inspected(Remote, bool, bool),
 }
 
-type Job = Receiver<Result<Result<Msg, String>, String>>;
+type Job = busy::Job<Result<Msg, String>>;
+
+/// One call of the wizard (sign in, make a key, create a repository, connect and ask the server) as
+/// a task (JOB-033). It cannot be stopped: a provider call or a connect that is dropped half way
+/// would leave a token, a key or a repository behind that nobody was told about. Closing the dialog
+/// leaves it running and in the indicator, and its result is dropped.
+pub(crate) const WIZARD_CALL: busy::Key = busy::Key::new("git-wizard-call");
+/// Looking at where the vault is (SYNC-061), as a quiet task (JOB-033): it runs whenever the page is shown for a new vault.
+pub(crate) const VAULT_PLACE: busy::Key = busy::Key::quiet("vault-place");
+/// Moving `.git` out of the vault (SYNC-063): not stopped half way.
+pub(crate) const MOVE_OUT: busy::Key = busy::Key::new("git-move-out");
+/// Advanced → Connect, which may move a local history into the vault (SYNC-072): not stopped half way.
+pub(crate) const CONNECT: busy::Key = busy::Key::new("git-connect");
 
 /// The wizard's state while it is open.
 pub struct Wizard {
@@ -134,7 +146,7 @@ pub struct Wizard {
     pub test: Test,
     /// What the last step said went wrong (or right), in words.
     pub message: Option<(String, bool)>,
-    pub(super) job: Option<(&'static str, Job)>,
+    pub(super) job: Option<Job>,
     /// The text of the final screen of the history choices.
     pub done: Option<String>,
 }
@@ -223,29 +235,23 @@ pub struct Detect {
     /// The vault the findings are for.
     pub for_vault: Option<PathBuf>,
     pub findings: Vec<Finding>,
-    pub(super) job: Option<Receiver<Result<Vec<Finding>, String>>>,
+    pub(super) job: Option<busy::Job<Vec<Finding>>>,
 }
-
-/// Where a move's result arrives (the outer error: the job itself died).
-type MoveJob = Receiver<Result<Result<PathBuf, String>, String>>;
 
 /// A running or finished move of `.git` out of the vault (SYNC-063).
 #[derive(Default)]
 pub struct MoveOut {
-    pub(super) job: Option<(PathBuf, MoveJob)>,
+    pub(super) job: Option<(PathBuf, busy::Job<Result<PathBuf, String>>)>,
     /// How the last move ended: words and whether it went well.
     pub result: Option<(String, bool)>,
 }
-
-/// Where the result of an Advanced connection arrives: whether a history moved (the outer error: the job died).
-type JoinJob = Receiver<Result<Result<bool, String>, String>>;
 
 /// Connecting that may move a local-only history into the vault (SYNC-072): while one runs, no
 /// snapshot, thinning or read of the history starts, and Advanced → Connect keeps its job here.
 #[derive(Default)]
 pub struct Joining {
     count: Arc<AtomicUsize>,
-    pub(super) job: Option<(PathBuf, String, JoinJob)>,
+    pub(super) job: Option<(PathBuf, String, busy::Job<Result<bool, String>>)>,
 }
 
 /// Counts a connecting job as running until it is dropped (also when the job panics).
@@ -305,20 +311,21 @@ impl Setup {
     }
 
     /// Look at where `vault` is, in a job, unless that was done (SYNC-061).
-    pub fn detect_for(&mut self, vault: &Path, ctx: &egui::Context) {
+    pub fn detect_for(&mut self, vault: &Path, ctx: &egui::Context, busy: &Busy) {
         if self.detect.for_vault.as_deref() == Some(vault) || self.detect.job.is_some() {
             return;
         }
+        let (v, ctx) = (vault.to_path_buf(), ctx.clone());
+        let Some(job) = busy.spawn(VAULT_PLACE, "Looking at where the vault is…", move || super::detect::detect_real(&v), move || ctx.request_repaint()) else { return };
         self.detect.for_vault = Some(vault.to_path_buf());
         self.detect.findings.clear();
-        let (v, ctx) = (vault.to_path_buf(), ctx.clone());
-        self.detect.job = Some(crate::jobs::spawn(move || super::detect::detect_real(&v), move || ctx.request_repaint()));
+        self.detect.job = Some(job);
     }
 
     /// Take a finished detection.
     pub fn poll_detect(&mut self) {
-        if let Some(rx) = &self.detect.job {
-            if let Ok(r) = rx.try_recv() {
+        if let Some(job) = &self.detect.job {
+            if let Ok(r) = job.try_recv() {
                 self.detect.job = None;
                 self.detect.findings = r.unwrap_or_default();
             }
