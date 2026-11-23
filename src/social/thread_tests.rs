@@ -344,3 +344,58 @@ fn soc_046_the_opened_post_stays_put_when_the_height_of_a_post_above_it_changes_
     let again = w.app.social.post_rects.iter().find(|(k, _)| *k == top.0).unwrap().1;
     assert!((again.min.y - top.1.min.y).abs() < 1.0, "{} vs {}", again.min.y, top.1.min.y);
 }
+
+// spec: SOC-045, SOC-048, NAV-062
+#[test]
+fn soc_045_nav_062_a_pinned_feeds_tab_opens_a_conversation_in_a_new_tab_and_back_and_forward_open_beside_it() {
+    let mut w = window("thread-pinned");
+    w.app.set_tab_pinned(0, true);
+    // the count of replies: the conversation opens in a new tab, the pinned tab stays on its feed
+    w.click("replies:0");
+    assert_eq!((w.app.tabbar.tabs.len(), w.app.tabbar.active), (2, 1), "a new tab holds the conversation");
+    assert_eq!((w.view(0), w.view(1)), (View::Social(Some(home())), thread_ref("h0")));
+    assert!(w.app.tabbar.tabs[0].pinned && w.app.tabbar.tabs[0].back.is_empty(), "the pinned tab has no new step");
+    wait_for(&mut w, ready);
+    assert!(shown(&w).contains(&"c0".to_string()));
+    // Show thread does the same from the pinned tab
+    w.click_tab(0);
+    w.frames(3);
+    w.click("thread:0");
+    assert_eq!((w.app.tabbar.tabs.len(), w.view(0)), (3, View::Social(Some(home()))));
+    assert_eq!(w.view(2), thread_ref("h0"));
+    // Back and Forward of the pinned tab open the other view beside it and leave the tab as it is
+    w.app.tabbar.tabs[0].back.push(View::Calendar);
+    w.app.tabbar.tabs[0].fwd.push(thread_ref("h0"));
+    w.app.tabbar.active = 0;
+    w.app.go_back();
+    assert_eq!((w.app.tabbar.tabs.len(), w.view(0), w.view(3)), (4, View::Social(Some(home())), View::Calendar));
+    assert_eq!(w.app.tabbar.tabs[0].back.len(), 1, "the history of the pinned tab is kept");
+    w.app.tabbar.active = 0;
+    w.app.go_forward();
+    assert_eq!((w.app.tabbar.tabs.len(), w.view(0), w.view(4)), (5, View::Social(Some(home())), thread_ref("h0")));
+    assert_eq!(w.app.tabbar.tabs[0].fwd.len(), 1);
+}
+
+// spec: SOC-035, SOC-068, NAV-062
+#[test]
+fn soc_068_nav_062_the_new_feeds_and_a_search_hit_open_beside_a_pinned_feeds_tab() {
+    use super::notifications::{NOTIFICATIONS, OWN};
+    let mut w = window("feeds-pinned");
+    w.app.set_tab_pinned(0, true);
+    // Notifications and Your posts, picked in the feed list of the pinned tab
+    for (i, feed) in [NOTIFICATIONS, OWN].into_iter().enumerate() {
+        w.app.tabbar.active = 0;
+        w.frames(2);
+        w.click("feed-combo");
+        w.click(&format!("feed:{feed}"));
+        assert_eq!((w.app.tabbar.tabs.len(), w.app.tabbar.active), (i + 2, i + 1), "{feed} opens in a new tab");
+        assert_eq!(w.view(i + 1), View::Social(Some(super::FeedRef::new(home().account, feed.to_string()))));
+        assert_eq!(w.view(0), View::Social(Some(home())), "the pinned tab keeps its feed");
+    }
+    // a hit of the search: always a new tab
+    w.app.tabbar.active = 0;
+    let first = w.app.social.timelines[&(home().account, "home".to_string())].posts[0].clone();
+    w.app.open_post_hit(&super::ui_tests::hit_of(&home().account, "home", first));
+    assert_eq!((w.app.tabbar.tabs.len(), w.app.tabbar.active), (4, 3));
+    assert_eq!(w.view(0), View::Social(Some(home())));
+}
