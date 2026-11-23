@@ -23,7 +23,7 @@ pub fn target(app: &str, server: &str, user: &str) -> String {
 mod tests {
     use super::*;
 
-    // spec: SEC-024
+    // spec: SEC-024, SEC-025
     #[test]
     fn keyring_item_names_never_collide() {
         let triples = [

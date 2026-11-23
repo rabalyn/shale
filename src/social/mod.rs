@@ -946,7 +946,7 @@ pub(crate) mod tests {
         handle.join().unwrap();
     }
 
-    // spec: SOC-003
+    // spec: SOC-003, SEC-016
     #[test]
     fn network_names_and_debug_redaction() {
         assert_eq!(Network::Bluesky.key(), "bluesky");

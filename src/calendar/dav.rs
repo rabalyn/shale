@@ -288,6 +288,28 @@ pub fn request_upload(method: &str, url: &str, headers: &[&str], upload: Upload,
     request_bytes_opts(method, url, headers, "", acct, max_bytes, How { follow: true, upload: Some(upload) })
 }
 
+/// The curl command of a request: its arguments hold no user name, password, header or body (they
+/// arrive on standard input, `-K -`, SEC-002), and `-q` comes first so that `~/.curlrc` is ignored.
+fn curl_command(follow: bool, protos: &str, max_time: &str, max_bytes: u64, method: &str, url: &str) -> std::process::Command {
+    let mut curl = crate::program::command("curl");
+    // -q must come first: don't read ~/.curlrc (it could turn off certificate checks or trace the password to a file)
+    curl.args(["-q", "-sS", "-i"]).args(if follow { &["-L", "--max-redirs", "5"][..] } else { &[][..] }).args(["--proto", protos, "--proto-redir", protos]).args([
+        "--connect-timeout",
+        "10",
+        "--max-time",
+        max_time,
+        "--max-filesize",
+        &max_bytes.to_string(),
+    ]);
+    // tests only: trust the test environment's certificate authority (tests/caldav-env/, CALENV-002)
+    #[cfg(test)]
+    if let Some(ca) = TEST_CA.lock().unwrap().as_ref() {
+        curl.arg("--cacert").arg(ca);
+    }
+    curl.args(["-X", method, "-w", WRITE_OUT, "-K", "-", url]);
+    curl
+}
+
 fn request_bytes_opts(method: &str, url: &str, headers: &[&str], body: &str, acct: &Account, max_bytes: u64, how: How) -> Result<BytesResponse, String> {
     let How { follow, upload } = how;
     let origin = check_url(url)?;
@@ -344,22 +366,8 @@ fn request_bytes_opts(method: &str, url: &str, headers: &[&str], body: &str, acc
     // a local http server may redirect to http; the final address is checked below
     let protos = if origin.scheme == "http" { "=http,https" } else { "=https" };
     let max_time = if max_bytes > 10_000_000 || upload.is_some() { "300" } else { "30" };
-    let mut curl = crate::program::command("curl");
-    // -q must come first: don't read ~/.curlrc (it could turn off certificate checks or trace the password to a file)
-    curl.args(["-q", "-sS", "-i"]).args(if follow { &["-L", "--max-redirs", "5"][..] } else { &[][..] }).args(["--proto", protos, "--proto-redir", protos]).args([
-        "--connect-timeout",
-        "10",
-        "--max-time",
-        max_time,
-        "--max-filesize",
-        &max_bytes.to_string(),
-    ]);
-    // tests only: trust the test environment's certificate authority (tests/caldav-env/, CALENV-002)
-    #[cfg(test)]
-    if let Some(ca) = TEST_CA.lock().unwrap().as_ref() {
-        curl.arg("--cacert").arg(ca);
-    }
-    let mut child = curl.args(["-X", method, "-w", WRITE_OUT, "-K", "-", url]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| format!("could not run curl ({e}) — is curl installed?"))?;
+    let mut curl = curl_command(follow, protos, max_time, max_bytes, method, url);
+    let mut child = curl.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| format!("could not run curl ({e}) — is curl installed?"))?;
     child.stdin.take().unwrap().write_all(cfg.as_bytes()).map_err(|e| e.to_string())?;
     drop(cfg);
     let out = child.wait_with_output().map_err(|e| e.to_string())?;
@@ -881,6 +889,53 @@ pub(crate) mod tests {
         quote_into(&mut s, &["a\"b", ":", "c\\d\r\n\te"]);
         assert_eq!(s, "\"a\\\"b:c\\\\d\\r\\n\\te\"");
     }
+
+    // spec: SEC-002
+    #[test]
+    fn the_curl_command_has_no_secret_in_it_and_ignores_the_curlrc() {
+        let cmd = curl_command(true, "=https", "30", 1000, "PROPFIND", "https://dav.example.com/cal/");
+        let args: Vec<String> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(args.first().map(String::as_str), Some("-q"), "{args:?}");
+        let k = args.iter().position(|a| a == "-K").expect("the configuration is read with -K");
+        assert_eq!(args[k + 1], "-", "{args:?}");
+        for banned in ["--user", "-u", "--data", "-d", "--data-binary", "-H", "--header", "--form", "-F"] {
+            assert!(!args.iter().any(|a| a == banned), "{banned} is on the command line: {args:?}");
+        }
+        // nothing but fixed words, numbers and the method and address is on the line
+        assert!(args.iter().all(|a| !a.contains('@') && !a.contains("pw")), "{args:?}");
+        assert_eq!(args.last().map(String::as_str), Some("https://dav.example.com/cal/"));
+    }
+
+    // spec: SEC-002
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn while_curl_runs_the_password_is_on_no_command_line_of_the_system() {
+        if !has_curl() {
+            return;
+        }
+        let secret = "pw-never-on-a-command-line-4711";
+        let acct = Account { url: String::new(), username: "ada-never-on-a-command-line".into(), password: secret.into() };
+        let (base, h) = mock_http(1, move |_, _, headers, body| {
+            assert!(headers.to_ascii_lowercase().contains("authorization: basic"), "{headers}");
+            // curl waits for this answer: look at every command line on this computer now
+            let mut curls = 0;
+            for entry in std::fs::read_dir("/proc").unwrap().flatten() {
+                let Ok(raw) = std::fs::read(entry.path().join("cmdline")) else { continue };
+                let line = String::from_utf8_lossy(&raw).replace('\0', " ");
+                if line.contains("-K - ") && line.contains("--proto") {
+                    curls += 1;
+                    assert!(line.starts_with("curl -q ") || line.contains("/curl -q "), "{line}");
+                    assert!(!line.contains(secret) && !line.contains("never-on-a-command-line") && !line.contains("BODYTEXT"), "{line}");
+                }
+            }
+            assert!(curls >= 1, "the running curl was not found");
+            assert_eq!(body, "BODYTEXT");
+            (200, String::new())
+        });
+        let r = request("PUT", &format!("{base}/x"), "0", "BODYTEXT", &acct).unwrap();
+        assert_eq!(r.status, 200);
+        h.join().unwrap();
+    }
     use std::io::{BufRead, BufReader, Read};
     use std::net::TcpListener;
     use std::process::Command;
@@ -931,7 +986,7 @@ pub(crate) mod tests {
         assert!(request("PROPFIND", "http://127.0.0.1:1/", "0", "", &bad_user).is_err());
     }
 
-    // spec: SEC-007
+    // spec: SEC-007, SEC-016
     #[test]
     fn passwords_stay_out_of_debug_output() {
         let acct = Account { url: "https://x".into(), username: "ada".into(), password: "hunter2".into() };
@@ -1281,7 +1336,7 @@ pub(crate) mod tests {
         assert_eq!(seen.len(), 4);
     }
 
-    // spec: CAL-004, CAL-011
+    // spec: CAL-004, CAL-011, SEC-004
     #[test]
     fn writes_and_removes_events() {
         if !has_curl() {
@@ -1404,7 +1459,7 @@ pub(crate) mod tests {
         assert_eq!(r.body, "<x>HTTP/1.1 200 OK\r\n\r\nnot a header</x>");
     }
 
-    // spec: CAL-004
+    // spec: CAL-004, SEC-004
     #[test]
     fn fetched_events_know_their_address() {
         if !has_curl() {

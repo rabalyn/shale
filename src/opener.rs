@@ -819,7 +819,7 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
-    // spec: SEC-006, MAIL-054
+    // spec: SEC-006, MAIL-054, SEC-013
     #[test]
     fn temp_copies_live_in_a_private_folder_and_are_checked() {
         let p = save_temp_copy("../../evil name.pdf", b"%PDF").unwrap();
@@ -892,7 +892,7 @@ mod tests {
         assert!(safe_name(&"x".repeat(500)).len() <= 120);
     }
 
-    // spec: SEC-006, SEC-005
+    // spec: SEC-006, SEC-005, SEC-022
     #[test]
     fn no_other_code_starts_an_opener() {
         let mut bad = Vec::new();
@@ -922,6 +922,7 @@ mod tests {
     }
 }
 
+// spec: SEC-006, SEC-022
 /// SEC-006 end to end: the real opener starts a (fake, recording) `xdg-open` (on Windows: asks a
 /// recording fake shell), so the checks, the argument list and the start of the child are all
 /// exercised, not only `check_url` and friends. SEC-022: runs on every system.
