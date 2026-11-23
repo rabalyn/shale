@@ -121,11 +121,11 @@ pub struct Item {
     pub already: Option<PathBuf>,
     /// the people of an e-mail or event (linked to their contact notes)
     pub people: Vec<crate::import::people::Person>,
-    /// e-mail: the notes of the vault it continues, as a suggestion (IMP-068)
+    /// e-mail, post: the notes of the vault it continues, as a suggestion (IMP-068, SOC-071)
     pub continues: Option<Continues>,
 }
 
-/// An e-mail that continues notes of the vault: found by the reply headers, offered in the Import
+/// An e-mail or post that continues notes of the vault: found by the reply headers, offered in the Import
 /// dialog as "Continues [[note]]" (IMP-068, ADR-0032).
 #[derive(Clone, Debug)]
 pub struct Continues {
@@ -170,17 +170,39 @@ pub fn mail_ident(mail: &Mail) -> thread::Ident {
     thread::Ident { id: thread::bare_id(&mail.message_id), in_reply_to: thread::bare_id(&mail.in_reply_to), references: thread::bare_ids(&mail.references), network: String::new(), date_key: thread::date_key(&stamp) }
 }
 
-/// Search the vault for the notes each e-mail of `items` continues, by its reply headers only
-/// (IMP-068), and put the suggestion in `Item::continues` (ticked; the older-mail question starts
+/// The ids of an item that can continue a thread: an e-mail or a post; `None` for other items.
+fn thread_ident(source: &Source) -> Option<thread::Ident> {
+    match source {
+        Source::Email { mail, .. } => Some(mail_ident(mail)),
+        Source::Social { saved, .. } => Some(crate::social::note::post_ident(saved)),
+        _ => None,
+    }
+}
+
+/// The chain of a continued item: the links its note gets and the neighbours that get a link to it
+/// (IMP-070, IMP-071, SOC-072). An older item only when the person said Update; "Leave the chain"
+/// writes no link and touches nothing.
+fn continued_chain(vault: &Vault, it: &Item, ident: &thread::Ident) -> (Chain, Vec<(PathBuf, &'static str)>) {
+    let Some(c) = it.continues.as_ref().filter(|c| c.on) else { return Default::default() };
+    let Some(plan) = c.anchor().filter(|a| vault.notes.contains_key(*a)).map(|a| thread::Index::build(vault).plan(ident, a)) else { return Default::default() };
+    if plan.is_older() && !c.update {
+        return Default::default();
+    }
+    let chain = Chain { previous: plan.previous.as_ref().map(|p| people::link_to(vault, p)), next: plan.next.as_ref().map(|p| people::link_to(vault, p)) };
+    let neighbours = vec![(plan.previous.clone(), "next"), (plan.next.clone(), "previous")].into_iter().filter_map(|(p, k)| p.map(|p| (p, k))).collect();
+    (chain, neighbours)
+}
+
+/// Search the vault for the notes each e-mail and post of `items` continues, by its reply ids only
+/// (IMP-068, SOC-071), and put the suggestion in `Item::continues` (ticked; the older-mail question starts
 /// with Update). Items that have a suggestion already keep it.
 pub fn find_continues(vault: &Vault, items: &mut [Item]) {
-    if !items.iter().any(|i| i.continues.is_none() && matches!(i.source, Source::Email { .. })) {
+    if !items.iter().any(|i| i.continues.is_none() && matches!(i.source, Source::Email { .. } | Source::Social { .. })) {
         return;
     }
     let index = thread::Index::build(vault);
     for it in items.iter_mut().filter(|i| i.continues.is_none()) {
-        let Source::Email { mail, .. } = &it.source else { continue };
-        let ident = mail_ident(mail);
+        let Some(ident) = thread_ident(&it.source) else { continue };
         let candidates = index.matches(&ident);
         if candidates.is_empty() {
             continue;
@@ -898,16 +920,8 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
                         None
                     };
                     // the chain of the thread (IMP-070, IMP-071): a continued mail names its neighbours
-                    let mut chain = Chain::default();
-                    if let Some(c) = it.continues.as_ref().filter(|c| c.on) {
-                        if let Some(plan) = c.anchor().filter(|a| vault.notes.contains_key(*a)).map(|a| thread::Index::build(vault).plan(&mail_ident(mail), a)) {
-                            // an older mail: only when the person said Update; "Leave the chain" writes no link
-                            if !plan.is_older() || c.update {
-                                chain = Chain { previous: plan.previous.as_ref().map(|p| people::link_to(vault, p)), next: plan.next.as_ref().map(|p| people::link_to(vault, p)) };
-                                neighbours = vec![(plan.previous.clone(), "next"), (plan.next.clone(), "previous")].into_iter().filter_map(|(p, k)| p.map(|p| (p, k))).collect();
-                            }
-                        }
-                    }
+                    let chain;
+                    (chain, neighbours) = continued_chain(vault, it, &mail_ident(mail));
                     email_note(mail, &o.tags, &atts, orig.as_deref(), &people, &EmailExtras { header_list: o.header_list, cut: o.cut, chain })
                 }
                 Source::Event { event, calendar, original } => {
@@ -933,6 +947,8 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
                 Source::Social { saved, replies, .. } => {
                     // only the ticked files are saved; the others stay links to their web address
                     let date = crate::social::note::media_date(saved);
+                    let chain;
+                    (chain, neighbours) = continued_chain(vault, it, &crate::social::note::post_ident(saved));
                     let mut chosen = crate::social::note::SavedPost { media: vec![], failed_media: vec![], thread_error: None, replies: if *replies { saved.replies.clone() } else { vec![] }, ..saved.clone() };
                     let mut paths = vec![];
                     for (m, on) in saved.media.iter().zip(&it.att_on) {
@@ -941,7 +957,7 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
                             chosen.media.push(m.clone());
                         }
                     }
-                    crate::social::note::post_note(&chosen, &paths, &o.tags, &people, o.header_list)
+                    crate::social::note::post_note(&chosen, &paths, &o.tags, &people, o.header_list, &chain)
                 }
             })
         })();
@@ -1184,6 +1200,7 @@ mod tests {
         assert!(bare.contains("# Plan\n\n## Message\n\nHallo"), "{bare}");
     }
 
+    // spec: SOC-020
     // spec: SOC-011, SOC-012
     #[test]
     fn a_saved_post_becomes_a_note_with_pictures_and_a_second_import_is_spotted() {

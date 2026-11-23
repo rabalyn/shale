@@ -652,6 +652,10 @@ pub fn self_thread(root: Post, ancestors: Vec<Post>, descendants: Vec<Post>) -> 
 /// Most replies of other people that are kept with a saved post.
 pub const MAX_REPLIES: usize = 300;
 
+/// What fetching the conversation of a post gives: its self-thread, the replies of other people and
+/// the id of the post that starts the conversation (SOC-070).
+pub type ThreadFetch = (Vec<Post>, Vec<Reply>, Option<String>);
+
 /// A reply of somebody else (or a reply of the author to somebody else), shown below the thread.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Reply {
@@ -818,7 +822,9 @@ impl Client {
 
     /// The whole self-thread of a post (see `self_thread`), in reading order, including the post, and the
     /// replies of other people below it (see `conversation`).
-    pub fn thread_with_replies(&mut self, post: &Post) -> Result<(Vec<Post>, Vec<Reply>), String> {
+    /// The self-thread, the replies of other people and the id of the post that starts the whole
+    /// conversation when `post` is a reply (SOC-070).
+    pub fn thread_with_replies(&mut self, post: &Post) -> Result<ThreadFetch, String> {
         match &mut self.backend {
             Backend::Mastodon { token, .. } => mastodon::thread_full(&self.account.server, token.expose(), post),
             Backend::Bluesky(api) => bluesky::thread_full(api, post),
@@ -907,6 +913,7 @@ pub(crate) mod tests {
         assert_eq!(parse_rfc3339("2024-02-29Tä2:30:45Z"), None);
     }
 
+    // spec: SOC-015
     #[test]
     fn urls_and_names() {
         assert_eq!(url_encode("a b&c/ü"), "a%20b%26c%2F%C3%BC");
@@ -922,6 +929,24 @@ pub(crate) mod tests {
         assert_eq!(file_name_from_url("https://files.m.test/", "x.jpg"), "x.jpg");
     }
 
+    // spec: SOC-015
+    #[test]
+    fn downloads_and_answers_are_limited_and_a_download_is_refused_unless_it_is_https_or_local() {
+        assert_eq!((MAX_MEDIA_BYTES, MAX_JSON), (64_000_000, 20_000_000), "64 MB for downloads, 20 MB for answers");
+        assert!(download("http://example.invalid/x.png").unwrap_err().contains("https"), "plain http to another computer");
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let (base, handle) = crate::calendar::dav::tests::mock_http(2, |_, path, headers, _| {
+            assert!(!headers.to_ascii_lowercase().contains("authorization"), "no login goes to a file server: {headers}");
+            (200, if path == "/big" { "x".repeat(3000) } else { "small".into() })
+        });
+        assert_eq!(download_up_to(&format!("{base}/small"), 1000).unwrap().0, b"small");
+        assert!(download_up_to(&format!("{base}/big"), 1000).is_err(), "a file over the limit is refused");
+        handle.join().unwrap();
+    }
+
+    // spec: SOC-003
     #[test]
     fn network_names_and_debug_redaction() {
         assert_eq!(Network::Bluesky.key(), "bluesky");
@@ -961,6 +986,7 @@ pub(crate) mod tests {
         assert!(conversation(&thread, &[]).is_empty());
     }
 
+    // spec: SOC-014
     #[test]
     fn self_thread_rule() {
         let p = |id: &str, a: &str, t: i64, r: Option<&str>| post(id, a, t, r);

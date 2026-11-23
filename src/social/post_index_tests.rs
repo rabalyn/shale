@@ -17,6 +17,7 @@ fn with_text(id: &str, who: &str, at: i64, text: &str) -> Post {
     Post { text_markdown: text.into(), ..post(id, who, at, None) }
 }
 
+// spec: SOC-031
 // spec: SOC-030
 #[test]
 fn a_post_is_found_by_text_author_link_date_and_thread_context() {

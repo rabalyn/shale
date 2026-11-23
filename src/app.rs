@@ -3747,6 +3747,7 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: SOC-005
     // spec: SOC-007, SOC-012
     #[test]
     fn saving_a_post_opens_the_import_dialog_and_the_note_lands_in_the_vault() {
