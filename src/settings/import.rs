@@ -28,7 +28,7 @@ pub enum Probe {
     Missing,
 }
 
-/// The task of the look for pandoc (IMP-036, JOB-018). It cannot be stopped: it runs
+/// The task of the look for pandoc (IMP-036, JOB-023). It cannot be stopped: it runs
 /// `pandoc --version`.
 pub const PANDOC_PROBE: Key = Key::new("pandoc-probe");
 
@@ -226,7 +226,7 @@ impl ShaleApp {
 mod tests {
     use super::*;
 
-    // spec: IMP-036, JOB-018
+    // spec: IMP-036, JOB-023
     #[test]
     fn the_look_for_pandoc_is_a_task_that_ends_when_its_result_is_in_and_never_runs_twice() {
         let busy = Busy::default();

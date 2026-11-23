@@ -8,7 +8,7 @@ use crate::media::outside::{self, Library, Outside, Spot};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::TryRecvError;
 
-/// The task of opening one outside file (MEDIA-017, JOB-018). Several run side by side, one per
+/// The task of opening one outside file (MEDIA-017, JOB-023). Several run side by side, one per
 /// file; a second click on the same file while it opens does nothing (JOB-005).
 const OUTSIDE_OPEN: &str = "outside-open";
 

@@ -150,3 +150,64 @@ fn the_dialog_counts_the_outside_media_of_the_open_vault_and_again_after_a_refre
     let _ = std::fs::remove_dir_all(&d);
     let _ = std::fs::remove_dir_all(&videos);
 }
+
+// spec: USE-012, JOB-016
+#[test]
+fn job_016_the_rebuild_of_the_mail_index_is_a_task_that_cancel_stops_and_a_later_rebuild_completes() {
+    use crate::mail::ui::MAIL_REBUILD;
+    let (mut app, d) = test_app("usage-mail-task");
+    app.ctx = Some(egui::Context::default());
+    let cfg = app.cfg.clone();
+    let start = Instant::now();
+    while app.mail.ready_store().is_none() {
+        app.mail.tick(&cfg, true);
+        assert!(start.elapsed() < Duration::from_secs(40), "the store opens");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let store = app.mail.ready_store().unwrap();
+    let inbox = store.ensure_folder("acct1", "A", "INBOX", Some("/"), None, true).unwrap();
+    for uid in 1..=3u32 {
+        let raw = format!("From: a@x.de\r\nSubject: s{uid}\r\nMessage-ID: <s{uid}@x>\r\n\r\nbody {uid}\r\n");
+        let m = store.save_message(&inbox, 7, uid, raw.as_bytes(), "", None).unwrap();
+        store.commit(vec![crate::mail::db::Op::message(m)]).unwrap();
+    }
+    let count = |store: &crate::mail::store::MailStore| store.reader().unwrap().count_messages().unwrap();
+    assert_eq!(count(&store), 3);
+    let wait_for_the_end = |app: &mut ShaleApp| {
+        let start = Instant::now();
+        while app.usage.running(CacheId::MailIndex) {
+            app.usage_tick();
+            assert!(start.elapsed() < Duration::from_secs(40), "the rebuild ends");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    };
+    // the writer waits at a gate, so the rebuild is still queued while the registry is looked at
+    assert!(app.busy.info(&MAIL_REBUILD).is_none());
+    let gate = store.hold_writer();
+    app.usage_start(CacheId::MailIndex, Kind::Clear);
+    let task = app.busy.info(&MAIL_REBUILD).expect("the rebuild is listed while it runs");
+    assert_eq!(task.label, "Rebuilding the mail index…");
+    assert!(task.cancellable && !task.cancelling);
+    assert!(app.busy.list().iter().any(|t| t.id == task.id), "the indicator lists it");
+    // a second rebuild does not start: the task is the one already there
+    app.usage_start(CacheId::MailIndex, Kind::Clear);
+    assert_eq!(app.busy.list().len(), 1);
+    // Cancel: the task stays until the job ends, then it is gone and the store is back
+    assert!(app.busy.cancel(task.id));
+    assert!(app.busy.info(&MAIL_REBUILD).unwrap().cancelling);
+    gate.send(()).unwrap();
+    wait_for_the_end(&mut app);
+    assert!(app.busy.info(&MAIL_REBUILD).is_none(), "the task ended with the job");
+    assert!(app.mail.ready_store().is_some(), "the store is given back");
+    assert!(said(&app).iter().any(|t| t.starts_with("Mail index: the rebuild was stopped")), "{:?}", said(&app));
+    assert_eq!(count(&store), 3, "stopped before any row went: the index is as it was");
+    crate::mail::db::quick_check(&store.index_path()).expect("the index passes the integrity check");
+    // a rebuild after Cancel is a new task with a fresh token and completes
+    app.usage_start(CacheId::MailIndex, Kind::Clear);
+    assert!(!app.busy.info(&MAIL_REBUILD).is_some_and(|t| t.cancelling));
+    wait_for_the_end(&mut app);
+    assert!(app.busy.info(&MAIL_REBUILD).is_none());
+    assert_eq!(count(&store), 3);
+    assert!(said(&app).iter().any(|t| t.starts_with("Mail index rebuilt from the message files: 3")), "{:?}", said(&app));
+    let _ = std::fs::remove_dir_all(&d);
+}

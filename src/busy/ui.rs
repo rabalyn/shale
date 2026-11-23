@@ -64,7 +64,7 @@ pub fn summary(tasks: &[TaskInfo]) -> String {
 pub fn indicator(ctx: &egui::Context, busy: &Busy, top_right: Pos2) {
     let now = std::time::Instant::now();
     let tasks = busy.list_at(now);
-    // a task that waits to be listed (JOB-017) brings the indicator when its time has come
+    // a task that waits to be listed (JOB-022) brings the indicator when its time has come
     if let Some(wait) = busy.next_listing(now) {
         ctx.request_repaint_after(wait);
     }

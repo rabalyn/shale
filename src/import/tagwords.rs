@@ -304,7 +304,7 @@ pub fn learn_from_vault(notes: &[(String, Vec<String>)], cancel: &crate::busy::C
     Some(learn(&docs))
 }
 
-/// The task of learning the words of the tags (TAG-003, JOB-018).
+/// The task of learning the words of the tags (TAG-003, JOB-023).
 pub const TAG_LEARNING: crate::busy::Key = crate::busy::Key::new("tag-learning");
 
 /// Learning is listed in the busy indicator only when it takes this long: it runs on its own
@@ -498,7 +498,7 @@ mod tests {
         (crate::vault::Vault::open(&d).unwrap(), d)
     }
 
-    // spec: TAG-003, JOB-018
+    // spec: TAG-003, JOB-023
     #[test]
     fn tag_003_learning_is_a_task_that_is_listed_after_two_seconds_and_ends_with_the_job() {
         let (v, d) = vault_with_notes("task");
@@ -522,7 +522,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
-    // spec: TAG-003, JOB-006, JOB-018
+    // spec: TAG-003, JOB-006, JOB-023
     #[test]
     fn tag_003_a_cancelled_learning_writes_nothing_and_ends_its_task() {
         let (v, d) = vault_with_notes("cancel");
@@ -546,7 +546,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
-    // spec: TAG-003, JOB-006, JOB-018
+    // spec: TAG-003, JOB-006, JOB-023
     #[test]
     fn tag_003_learning_looks_at_the_cancel_token_between_two_notes() {
         let notes = vec![("Projektor Leinwand".to_string(), vec!["av".to_string()]), ("Projektor Leinwand Kabel".to_string(), vec!["av".to_string()])];

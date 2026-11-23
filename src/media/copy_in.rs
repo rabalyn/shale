@@ -243,7 +243,7 @@ mod tests {
         assert_eq!(r.changes[0].0, 7..20);
     }
 
-    // spec: MEDIA-021, JOB-006, JOB-018
+    // spec: MEDIA-021, JOB-006, JOB-023
     #[test]
     fn a_cancelled_copy_stops_before_the_next_file_and_says_so() {
         let d = Dirs::new("cancel");

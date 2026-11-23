@@ -371,7 +371,7 @@ fn the_end_of_an_install_or_update_says_which_mirror_it_came_from() {
     assert_eq!(done_notice(Err("boom".into()), "The update").text, "The update failed: boom");
 }
 
-// spec: TEX-001, JOB-018
+// spec: TEX-001, JOB-023
 #[test]
 fn the_look_for_tex_is_a_task_that_ends_with_the_look_and_never_runs_twice() {
     let mut t = T::new("probe-task", found(Err("none"), Err("none"), None));

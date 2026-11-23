@@ -790,7 +790,7 @@ fn a_click_on_an_outside_link_does_not_stop_the_window_while_the_file_is_handed_
     assert!(opened.lock().unwrap().iter().any(|p| p.ends_with("tone.wav")), "{:?}", opened.lock().unwrap());
 }
 
-// spec: MEDIA-017, JOB-018, JOB-005
+// spec: MEDIA-017, JOB-023, JOB-005
 #[test]
 fn opening_an_outside_file_is_a_task_per_file_listed_while_it_is_handed_over_and_the_same_file_twice_is_refused() {
     let o = Outside::new("open-task");
@@ -823,7 +823,7 @@ fn opening_an_outside_file_is_a_task_per_file_listed_while_it_is_handed_over_and
     assert!(fx.app.busy.list().is_empty(), "the tasks are gone with the jobs");
 }
 
-// spec: MEDIA-021, JOB-018, JOB-006
+// spec: MEDIA-021, JOB-023, JOB-006
 #[test]
 fn the_copy_into_the_vault_is_a_task_that_cancel_reaches_and_that_ends_with_the_copy() {
     use crate::app::OUTSIDE_COPY;

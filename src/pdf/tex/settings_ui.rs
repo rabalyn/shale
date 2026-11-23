@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
-/// The task of the look for TeX (TEX-001, JOB-018). It cannot be stopped: it runs a few programs
+/// The task of the look for TeX (TEX-001, JOB-023). It cannot be stopped: it runs a few programs
 /// with `--version`.
 pub const TEX_PROBE: crate::busy::Key = crate::busy::Key::new("tex-probe");
 

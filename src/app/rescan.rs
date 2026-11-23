@@ -12,11 +12,11 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// The task of a scan of the vault folder (NET-013, JOB-017).
+/// The task of a scan of the vault folder (NET-013, JOB-022).
 pub const VAULT_RESCAN: Key = Key::new("vault-rescan");
 
 /// A scan is listed in the busy indicator only when it takes this long (a slow network share): a
-/// scan that is over in a moment is nothing to show (JOB-017).
+/// scan that is over in a moment is nothing to show (JOB-022).
 pub const LISTED_AFTER: Duration = Duration::from_secs(2);
 
 /// Size and modification time of a drawing file (what `DrawingDoc::seen` holds).

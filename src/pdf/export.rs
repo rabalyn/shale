@@ -6,6 +6,7 @@
 //! - Drawings: vector output (shapes, hatching, arrows and the hand-drawn text as outlines), on a
 //!   page that fits the drawing or on a paper size, with a white, dark or no background.
 
+use crate::busy::Cancel;
 use crate::drawing::{self, Element, Scene, View};
 use crate::markdown;
 use crate::pdf::write::{Bookmark, Dest, Doc, FontKind, Image, Page, Rgba, TextStyle};
@@ -705,6 +706,8 @@ pub(super) struct Writer<'a> {
     pub(super) jumps: Vec<(usize, [f32; 4], String)>,
     /// the pictures drawn inside lines by file: their image of the document and size in pixels (PDF-030); none for one that cannot be read
     inline_images: HashMap<PathBuf, Option<(usize, Vec2)>>,
+    /// a note's export as a task: asked between two pictures, the layout ends early (JOB-017)
+    cancel: Option<Cancel>,
 }
 
 impl<'a> Writer<'a> {
@@ -713,7 +716,11 @@ impl<'a> Writer<'a> {
         let mut doc = Doc::new(title);
         let page = doc.add_page(w, h);
         let [top, right, bottom, left] = opts.margins();
-        Writer { doc, opts, w, h, top, right, bottom, left, page, y: top, members: None, book_links: vec![], heads: vec![PageHead::default()], running: None, jumps: Vec::new(), inline_images: HashMap::new() }
+        Writer { doc, opts, w, h, top, right, bottom, left, page, y: top, members: None, book_links: vec![], heads: vec![PageHead::default()], running: None, jumps: Vec::new(), inline_images: HashMap::new(), cancel: None }
+    }
+    /// Whether Cancel was asked for: the layout stops before the next picture.
+    fn stopped(&self) -> bool {
+        self.cancel.as_ref().is_some_and(Cancel::is_cancelled)
     }
     pub(super) fn cw(&self) -> f32 {
         self.w - self.left - self.right
@@ -1087,6 +1094,9 @@ impl<'a> Writer<'a> {
                 // a picture, PDF or sound of a library or a file outside the vault is printed too (MEDIA-016)
                 let target = vault.resolve_media(&line_links[0].target, Some(rel)).file(vault);
                 if let (Some((t, abs)), true) = (target, opts.embeds) {
+                    if self.stopped() {
+                        return places;
+                    }
                     let kind = vault.file(&t).map(|f| f.kind).unwrap_or(FileKind::Other);
                     // the link under the thumbnail (PDF-004); the size the editor gives it (PDF-005)
                     let caption = crate::caption::text(&line_links[0]);
@@ -1123,6 +1133,9 @@ impl<'a> Writer<'a> {
                         if let Ok(r) = crate::fsutil::read(&abs).map_err(|e| e.to_string()).and_then(|d| crate::pdf::view::render_pages(d, 40, 2.0)) {
                             let last = r.images.len().saturating_sub(1);
                             for (n, img) in r.images.iter().enumerate() {
+                                if self.stopped() {
+                                    return places;
+                                }
                                 if let Some(rgba) = rgba_of(img) {
                                     // the editor shows its pages rendered at 1.5; these are at 2.0
                                     let size = self.page_size(crate::embed_size::pdf_page(Vec2::new(img.size[0] as f32, img.size[1] as f32) * 0.75, ref_w));
@@ -1674,17 +1687,28 @@ fn natural_size(w: u32, h: u32) -> Vec2 {
 /// `print-heading-color` are read from `text` here (PDF-013); its paper, margins, text size, title
 /// and contents are the dialog's choices in `opts`, which start from the note's
 /// ([`ExportOptions::with_note_properties`]).
+#[cfg(test)]
 pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) -> Result<Vec<u8>, String> {
-    let _flow = tracing::info_span!("flow.pdf_export", peer = "export").entered();
-    // the paper always has Shale's colours, whatever the theme of the window (CFG-061, PDF-007)
-    theme::with_palette(theme::Palette::shale(), || export_note_in_shale(vault, rel, text, opts))
+    export_note_until(vault, rel, text, opts, None)
 }
 
-fn export_note_in_shale(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) -> Result<Vec<u8>, String> {
+/// What an export that was stopped says (a book's export says the same).
+pub const CANCELLED: &str = "The export was cancelled";
+
+/// [`export_note`] as a task: `cancel` is looked at before each picture, and a note that was stopped
+/// is an error, never a half-made PDF (JOB-017).
+pub fn export_note_until(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions, cancel: Option<&Cancel>) -> Result<Vec<u8>, String> {
+    let _flow = tracing::info_span!("flow.pdf_export", peer = "export").entered();
+    // the paper always has Shale's colours, whatever the theme of the window (CFG-061, PDF-007)
+    theme::with_palette(theme::Palette::shale(), || export_note_in_shale(vault, rel, text, opts, cancel))
+}
+
+fn export_note_in_shale(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions, cancel: Option<&Cancel>) -> Result<Vec<u8>, String> {
     let opts = &opts.clone().with_note_text_properties(text);
     // the title line's text: no `.md`, no date prefix (VAULT-025)
     let name = vault.file(rel).map(|f| f.title()).unwrap_or_else(|| crate::vault::title_of(&rel.to_string_lossy()).to_string());
     let mut w = Writer::new(&name, opts);
+    w.cancel = cancel.cloned();
     let base = opts.font_pt;
     let heads = markdown::heading_numbers(text);
     // a first heading `# Title` that says the same as the title makes the title a second print of it (PDF-008)
@@ -1716,6 +1740,9 @@ fn export_note_in_shale(vault: &Vault, rel: &Path, text: &str, opts: &ExportOpti
     let contents: Vec<&(usize, usize, String, Option<String>)> = heads.iter().filter(|h| opts.toc && (1..=3).contains(&h.1)).collect();
     let slots = if contents.is_empty() { vec![] } else { w.reserve_contents(contents.len()) };
     let places = tracing::info_span!("flow.pdf_export.layout", peer = "vault").in_scope(|| w.note_body(vault, rel, text, &numbers, None));
+    if w.stopped() {
+        return Err(CANCELLED.into());
+    }
     let label = |line: usize, title: &str| match numbers.get(&line) {
         Some(n) => format!("{n} {}", markdown::heading_plain(title)),
         None => markdown::heading_plain(title),

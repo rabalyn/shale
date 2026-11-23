@@ -52,6 +52,9 @@ const REFRESH_EVERY: Duration = Duration::from_millis(800);
 /// The check of the mail index when the store opens (MAIL-006, JOB-015): started at app start, shown by the mail view through this key.
 pub const MAIL_INDEX: Key = Key::new("mail-index");
 
+/// The rebuild of the mail index (USE-012, JOB-016): a task that Cancel can stop between two folders.
+pub const MAIL_REBUILD: Key = Key::new("mail-rebuild");
+
 /// What the store is doing.
 pub enum StoreState {
     Closed,

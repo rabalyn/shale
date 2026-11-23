@@ -170,7 +170,7 @@ fn the_mail_index_is_rebuilt_through_the_open_store() {
     assert_eq!(store.reader().unwrap().count_messages().unwrap(), 1, "the file was indexed at the start");
     let before = stats(CacheId::MailIndex, &p).unwrap();
     assert!(before.bytes > 0 && before.entries == 1, "{before:?}");
-    assert_eq!(clear(CacheId::MailIndex, &p, Some(&store)).map(|f| f.entries), Ok(1));
+    assert_eq!(clear(CacheId::MailIndex, &p, Some((&store, &crate::busy::Cancel::default()))).map(|f| f.entries), Ok(1));
     drop(store);
     let _ = fs::remove_dir_all(&d);
 }
@@ -460,7 +460,7 @@ fn finish(u: &mut DataUsage) {
     panic!("the jobs of the data usage did not end");
 }
 
-// spec: USE-007, JOB-018
+// spec: USE-007, JOB-023
 #[test]
 fn a_clear_and_a_prune_are_tasks_with_a_text_each_and_a_prune_waits_to_be_listed() {
     let (p, d) = places_with_caches("tasks");
@@ -487,7 +487,7 @@ fn a_clear_and_a_prune_are_tasks_with_a_text_each_and_a_prune_waits_to_be_listed
     let _ = fs::remove_dir_all(&d);
 }
 
-// spec: USE-005, JOB-018
+// spec: USE-005, JOB-023
 #[test]
 fn counting_is_two_tasks_listed_after_two_seconds_and_a_new_count_replaces_the_old_one() {
     let (p, d) = places_with_caches("count-tasks");

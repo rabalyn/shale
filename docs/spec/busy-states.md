@@ -3,13 +3,13 @@
 **IS NOW** = true of the code today · **SHOULD BE** = agreed target.
 Format: [ADR-0001](../decisions/0001-spec-driven-development.md). Issue: #397.
 
-The rules are JOB-003 to JOB-014 in [engineering.md](engineering.md#background-jobs-job): every action that
+The rules are JOB-003 to JOB-020 in [engineering.md](engineering.md#background-jobs-job): every action that
 loads or runs longer than a moment is a task of the busy registry (`busy::Busy`), shows a spinner and
 what happens, cannot be started twice, offers Cancel where the work can stop (or Close for a dialog
 whose work goes on), and shows in the indicator at the top right of the editor pane while it runs.
 This page lists every such action as of 2026-11-22: where it runs today, whether the work can stop,
 what the window shows today, and where it stands on the registry. Rows marked *planned* are the
-work of the follow-up issues of #397 (JOB-009, JOB-010).
+work of the follow-up issues of #397 (JOB-009); JOB-010 says which dialogs show Close and which Cancel.
 
 "Thread" means `jobs::spawn` / `jobs::run` (JOB-001, JOB-002): a worker thread whose result always
 arrives. "UI thread" means the window itself waits, the worst case this page is about. "Stop" is
@@ -22,14 +22,14 @@ would leave a mess (JOB-006).
 |---|---|---|---|---|
 | Open a vault (`ShaleApp::open_vault_in_background`, `Vault::open`: read and index every note, NET-019) | thread (`app/vault_load.rs`); headless paths (screenshots, tests) read on the calling thread | yes: the result is ignored when it ends | the start screen: spinner, "Opening ‹folder›…" and Cancel | **IS NOW** (NET-019): task `vault-open` |
 | A close or switch of the vault that waits for a running sync (VAULT-036, VAULT-037) | none: a pending action that `vault_leave_tick` carries on each frame once the sync has ended (30 s at most, counted over frames) | yes: Cancel drops it and keeps the vault open | "Waiting for the sync to finish…" with Cancel in the indicator | **IS NOW**: task `vault-leave-wait` |
-| Rescan of the vault folder (every 3 s or longer, NET-013) | thread (`app/rescan.rs`) | no (the next scan is skipped while one runs) | nothing | **IS NOW** (JOB-017): task `vault-rescan`, "Reading the vault folder…", listed only when a scan takes longer than 2 s (a slow network share); no Cancel |
+| Rescan of the vault folder (every 3 s or longer, NET-013) | thread (`app/rescan.rs`) | no (the next scan is skipped while one runs) | nothing | **IS NOW** (JOB-022): task `vault-rescan`, "Reading the vault folder…", listed only when a scan takes longer than 2 s (a slow network share); no Cancel |
 | Vault check (names and outside links, VAULT-028, MEDIA-022) | thread | yes, between two folders | spinner and "Checking file names and links…" with Cancel, button off | **IS NOW** (JOB-012) |
-| Search in all notes (sidebar, NAV-024) | UI thread, debounced; once per query and vault state (PERF-004) | no | nothing | planned, not done in #525: the list is to be made on a thread with "Searching…", a newer query dropping the older result; it needs the text of every note (and the mail and post indexes) on the worker, which the vault does not share today (a snapshot per change, or shared texts): a change of its own |
-| Reading dropped files, looking a mail up in Thunderbird's folders (`app/drops.rs`) | thread | no | the hint at the bottom of the window | **IS NOW** (JOB-018): one task per read, "Reading the dropped files…"; no Cancel |
-| Copy the outside media of a note into the vault (MEDIA-021) | thread (`app/outside_copy.rs`) | yes, between two files (the copied ones keep their new links) | a toast when done | **IS NOW** (JOB-018): task `outside-copy`, "Copying media into the vault…", with Cancel |
-| Open an outside media file with the system's program (MEDIA-017) | thread (`app/outside_open.rs`) | no | a busy card in the player | **IS NOW** (JOB-018): one task per file, "Opening ‹name›…"; no Cancel |
-| Tag learning (`import/tagwords.rs`) | thread | yes, between two notes (nothing is written) | nothing | **IS NOW** (JOB-017, JOB-018): task `tag-learning`, "Learning the words of the tags…", listed after 2 s, with Cancel |
-| Data usage: counting, Clear, Prune (USE) | thread (`data_usage`) | no | the task's spinner and text at the cache, "counting…" in the dialog | **IS NOW** (JOB-018): one task per cache ("Clearing the social pictures…", "Cleaning up …"); the two counts and a prune are listed after 2 s; no Cancel |
+| Search in all notes (sidebar, NAV-024) | UI thread, debounced; once per query and vault state (PERF-004) | no | nothing | planned, split off as #622: the list is to be made on a thread with "Searching…", a newer query dropping the older result; it needs the text of every note (and the mail and post indexes) on the worker, which the vault does not share today (a snapshot per change, or shared texts): a change of its own |
+| Reading dropped files, looking a mail up in Thunderbird's folders (`app/drops.rs`) | thread | no | the hint at the bottom of the window | **IS NOW** (JOB-023): one task per read, "Reading the dropped files…"; no Cancel |
+| Copy the outside media of a note into the vault (MEDIA-021) | thread (`app/outside_copy.rs`) | yes, between two files (the copied ones keep their new links) | a toast when done | **IS NOW** (JOB-023): task `outside-copy`, "Copying media into the vault…", with Cancel |
+| Open an outside media file with the system's program (MEDIA-017) | thread (`app/outside_open.rs`) | no | a busy card in the player | **IS NOW** (JOB-023): one task per file, "Opening ‹name›…"; no Cancel |
+| Tag learning (`import/tagwords.rs`) | thread | yes, between two notes (nothing is written) | nothing | **IS NOW** (JOB-022, JOB-023): task `tag-learning`, "Learning the words of the tags…", listed after 2 s, with Cancel |
+| Data usage: counting, Clear, Prune (USE) | thread (`data_usage`) | no | the task's spinner and text at the cache, "counting…" in the dialog | **IS NOW** (JOB-023): one task per cache ("Clearing the social pictures…", "Cleaning up …"); the two counts and a prune are listed after 2 s; no Cancel |
 | Link preview download (`link_preview.rs`) | thread, one at a time | no (a timeout ends it) | spinner in the preview card | not a task: it belongs to its card |
 | PDF page rendering of the reader (`pdf/view.rs`) | thread | no | spinner in the page | not a task: it belongs to its page |
 | Picture and video loading (`media/widget.rs`) | thread / player | no | spinner in the widget | not a task: it belongs to its widget |
@@ -49,21 +49,21 @@ would leave a mess (JOB-006).
 
 | Action | Runs today | Stop | Shows today | Registry |
 |---|---|---|---|---|
-| PDF export of a note or drawing (built-in, PDF-001) | **UI thread** (`run_export`) | no | nothing (the window waits) | planned: a thread and a task "Exporting PDF…" with Cancel between pictures |
+| PDF export of a note or drawing (built-in, PDF-001) | thread (`pdf/note_export.rs`) | yes, before each picture; nothing is written when it stops | spinner and "Exporting to PDF… Cancel stops it.", Export off | **IS NOW** (JOB-017): "Exporting “Notes” to PDF…" |
 | PDF export of a folder, a book (BOOK-010) | thread | yes, between notes | spinner and "Laying out the book: 3 of 12 notes" with Cancel | **IS NOW** (JOB-013): "Exporting “Handbook” to PDF…" |
-| PDF export through LaTeX (TEX-016) | thread (compile) | yes (flag ends the process) | spinner "Compiling with LuaLaTeX… Cancel stops it." | planned: a task; Close keeps it running |
-| Export to Word (DOCX-002) | thread (pandoc) | yes (flag ends the process) | "Exporting to Word… Cancel stops it." (no spinner) | planned: a task and a spinner |
+| PDF export through LaTeX (TEX-016) | thread (compile) | yes (flag ends the process) | spinner "Compiling with LuaLaTeX… Cancel stops it." | **IS NOW** (JOB-018): "Exporting “Notes” to PDF with LaTeX…"; the dialog keeps Cancel (JOB-010) |
+| Export to Word (DOCX-002) | thread (pandoc) | yes (flag ends the process) | spinner and "Exporting to Word… Cancel stops it." | **IS NOW** (JOB-019): "Exporting “Notes” to Word…"; the dialog keeps Cancel (JOB-010) |
 | `shale --export-pdf` (BOOK-011) | the main thread, no window | no | the terminal | out of scope (no window) |
 
 ## Import
 
 | Action | Runs today | Stop | Shows today | Registry |
 |---|---|---|---|---|
-| Import dialog: converting Word files with pandoc (IMP) | thread | yes (flag) | "Converting the Word files with pandoc…", Import off | planned: a task; Close lets a started import finish |
-| Import of mails, events, files into notes (`import_action`) | UI thread | no | nothing (usually quick) | planned: a thread when it is more than a few files |
-| Mail import from the mail view (MAIL-070) | thread (`app/mail.rs`) | no | nothing until the dialog opens | **IS NOW** (JOB-018): "Reading the mails…" (the same read as a drop) |
+| Import dialog: converting Word files with pandoc (IMP-035) | thread | yes (flag) | spinner and "Converting the Word files with pandoc… Cancel stops it.", Import off | **IS NOW** (JOB-020); the dialog keeps Cancel (JOB-010) |
+| Import of mails, events, files into notes (`import_action`) | UI thread | no | nothing (usually quick) | not moved: it needs the vault and the sync tree held, and writes one history snapshot (IMP-070…IMP-074, JOB-020); planned as a thread only when it proves slow |
+| Mail import from the mail view (MAIL-070) | thread (`app/mail.rs`) | no | nothing until the dialog opens | **IS NOW** (JOB-023): "Reading the mails…" (the same read as a drop) |
 | Import of saved web pages from the spool of the browser extension (CLIP-009, CLIP-067, #427) | none yet | no (a half-written clip is worse than a late one; the rest waits in the spool) | not built | planned with the clipper: a task "Importing saved web pages…" on a worker thread (SHOULD BE, CLIP-067) |
-| Pandoc probe, TeX probe (settings) | thread | no | the task's spinner and text | **IS NOW** (JOB-018): tasks `pandoc-probe` ("Looking for pandoc…") and `tex-probe` ("Looking for TeX on this computer…"); no Cancel |
+| Pandoc probe, TeX probe (settings) | thread | no | the task's spinner and text | **IS NOW** (JOB-023): tasks `pandoc-probe` ("Looking for pandoc…") and `tex-probe` ("Looking for TeX on this computer…"); no Cancel |
 
 ## TeX, updates
 
@@ -78,7 +78,7 @@ would leave a mess (JOB-006).
 | Action | Runs today | Stop | Shows today | Registry |
 |---|---|---|---|---|
 | Opening the mail store (`MailStore::open`, MAIL-050; the integrity check, MAIL-006, and a possible index rebuild) | thread, started with the first frame of the window when an account is set up (else when the mail view first opens) | no | a spinner and "Checking the mail index…" in the view ("Opening the local mail copy…" in the instant between) | **IS NOW** (JOB-015) |
-| Rebuilding the mail index (USE-012) | the store's writer thread | no | "Rebuilding the mail index from the message files…" | planned: a task |
+| Rebuilding the mail index (USE-012) | job of the Data usage dialog, which asks the store's writer thread | yes: between two folders (each folder is rebuilt in one transaction, so none is left empty) | a spinner, "Rebuilding the mail index…" and Cancel in the mail view | **IS NOW** (JOB-016) |
 | Mail sync (IMAP, MAIL) | thread per account (`imap_sync::start`) | yes (flag) | progress in the view, "Cancel sync" | planned: a task per account |
 | Mail: loading a listing, reading and downloading a message, search, send, sign-in (OAuth), key and GnuPG work | threads of the mail UI (`mail/ui.rs`, `send.rs`, `oauth.rs`) | sign-in: flag and timeout; the others: no | per-view lines ("Loading the list from the server…", "Reading the message…", "Searching…") | not tasks (they belong to their view); send and sign-in planned |
 | Mail watch (IDLE, `mail/watch.rs`) | a thread of its own for the session | yes | nothing | not a task: it runs for the whole session |

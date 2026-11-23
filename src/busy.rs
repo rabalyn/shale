@@ -54,6 +54,11 @@ impl Cancel {
     pub fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::SeqCst)
     }
+
+    /// The same request as the plain flag that the older jobs (pandoc, LuaLaTeX) look at.
+    pub fn flag(&self) -> Arc<AtomicBool> {
+        self.0.clone()
+    }
 }
 
 /// What the registry knows of a running task.
@@ -75,7 +80,7 @@ struct Entry {
     label: String,
     started: Instant,
     cancel: Option<Cancel>,
-    /// the indicator lists the task only when it has run this long (JOB-017)
+    /// the indicator lists the task only when it has run this long (JOB-022)
     listed_after: Duration,
 }
 
@@ -102,7 +107,7 @@ impl Busy {
 
     /// Like [`Busy::begin`] for work that is usually quick and happens on its own (the rescan of
     /// the vault folder, the learning of tag words): the indicator lists the task only when it has
-    /// run for `listed_after` (JOB-017). It counts as running at once: the key is taken, and
+    /// run for `listed_after` (JOB-022). It counts as running at once: the key is taken, and
     /// [`Busy::info`] finds it.
     pub fn begin_listed_after(&self, key: Key, label: impl Into<String>, listed_after: Duration) -> Option<Task> {
         let mut tasks = self.tasks();
@@ -143,7 +148,7 @@ impl Busy {
         self.list_at(Instant::now())
     }
 
-    /// [`Busy::list`] at the time `now`: a task that waits to be listed (JOB-017) is left out
+    /// [`Busy::list`] at the time `now`: a task that waits to be listed (JOB-022) is left out
     /// until it has run for its time.
     pub fn list_at(&self, now: Instant) -> Vec<TaskInfo> {
         self.tasks().list.iter().filter(|e| e.listed(now)).map(Entry::info).collect()

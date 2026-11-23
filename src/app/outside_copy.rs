@@ -9,7 +9,7 @@ use crate::vault::rel_to_string;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError};
 
-/// The task of the copy of outside media into the vault (MEDIA-021, JOB-018): it can stop between two files.
+/// The task of the copy of outside media into the vault (MEDIA-021, JOB-023): it can stop between two files.
 pub const OUTSIDE_COPY: Key = Key::new("outside-copy");
 
 /// The copy that runs: the note whose links it is for.

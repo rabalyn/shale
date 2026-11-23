@@ -295,6 +295,29 @@ fn job_015_the_store_opens_at_start_when_there_is_an_account_though_the_mail_vie
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// spec: JOB-016
+#[test]
+fn job_016_the_mail_view_shows_the_rebuild_of_the_index_with_a_spinner_and_cancel_while_its_task_runs() {
+    use crate::mail::ui::{StoreState, MAIL_REBUILD};
+    let (mut app, mut h, dir) = window("mail-rebuild");
+    app.show_view(crate::app::View::Mail, false);
+    let store = std::sync::Arc::new(crate::mail::store::MailStore::open(&dir.join("mail-test")).unwrap());
+    app.mail.store = StoreState::Rebuilding(store);
+    let mut task = app.busy.begin(MAIL_REBUILD, "Rebuilding the mail index…").expect("the registry of the window is the mail view's");
+    let cancel = task.cancellable();
+    h.frames(&mut app, 3);
+    assert!(painted_at(&h, "Rebuilding the mail index…").is_some(), "the view says what runs");
+    assert!(painted_at(&h, "Rebuilding the mail index from the message files…").is_none());
+    let button = h.find_label(&mut app, "Cancel");
+    h.click(&mut app, button.center(), PointerButton::Primary);
+    assert!(cancel.is_cancelled(), "Cancel in the view reaches the job");
+    drop(task);
+    h.frames(&mut app, 3);
+    assert!(painted_at(&h, "Rebuilding the mail index…").is_none());
+    assert!(painted_at(&h, "Rebuilding the mail index from the message files…").is_some(), "no task: the plain line");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 fn window(tag: &str) -> (ShaleApp, Headless, std::path::PathBuf) {
     let dir = std::env::temp_dir().join(format!("shale-busy-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -371,9 +394,9 @@ fn job_007_the_summary_is_the_text_of_one_task_or_the_number_of_several_and_time
     assert_eq!((ui::elapsed(Duration::from_secs(5)), ui::elapsed(Duration::from_secs(59)), ui::elapsed(Duration::from_secs(125))), ("5 s".into(), "59 s".into(), "2 min".into()));
 }
 
-// spec: JOB-017
+// spec: JOB-022
 #[test]
-fn job_017_a_task_that_waits_to_be_listed_is_running_at_once_and_listed_after_its_time() {
+fn job_022_a_task_that_waits_to_be_listed_is_running_at_once_and_listed_after_its_time() {
     let busy = Busy::default();
     let after = Duration::from_secs(2);
     let task = busy.begin_listed_after(SYNC, "Reading the vault folder…", after).expect("begins");
@@ -393,9 +416,9 @@ fn job_017_a_task_that_waits_to_be_listed_is_running_at_once_and_listed_after_it
     assert!(busy.list_at(started + after).is_empty() && busy.next_listing(started).is_none(), "a task that ended leaves nothing");
 }
 
-// spec: JOB-017
+// spec: JOB-022
 #[test]
-fn job_017_runs_of_one_action_with_their_own_number_go_side_by_side_and_the_same_number_is_refused() {
+fn job_022_runs_of_one_action_with_their_own_number_go_side_by_side_and_the_same_number_is_refused() {
     let busy = Busy::default();
     let one = busy.begin(Key::numbered("test-open", 1), "Opening a.mp4…").expect("begins");
     let two = busy.begin(Key::numbered("test-open", 2), "Opening b.mp4…").expect("another file runs next to it");
@@ -406,9 +429,9 @@ fn job_017_runs_of_one_action_with_their_own_number_go_side_by_side_and_the_same
     drop(two);
 }
 
-// spec: JOB-017
+// spec: JOB-022
 #[test]
-fn job_017_the_indicator_draws_nothing_for_a_task_that_waits_and_asks_to_be_drawn_again_for_its_time() {
+fn job_022_the_indicator_draws_nothing_for_a_task_that_waits_and_asks_to_be_drawn_again_for_its_time() {
     let ctx = egui::Context::default();
     let busy = Busy::default();
     let _task = busy.begin_listed_after(SYNC, "Learning the words of the tags…", Duration::from_secs(3600)).expect("begins");
