@@ -215,7 +215,7 @@ fn net_019_a_second_open_while_one_loads_is_refused_until_cancel() {
     assert_eq!(w.root(), Some(w.dir("one")));
 }
 
-// spec: NET-019
+// spec: NET-019, VAULT-037
 #[test]
 fn net_019_the_start_dialog_opens_a_folder_in_the_background() {
     let mut w = W::new("dialog");
