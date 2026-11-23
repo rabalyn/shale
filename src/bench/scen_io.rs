@@ -75,7 +75,7 @@ fn pdf_export_note(fx: &mut Fixtures) -> Body {
     let vault = super::scenarios::open(&g);
     let text = fx.long_text(Size::Large);
     Box::new(move || {
-        black_box(crate::pdf::export::export_note(&vault, &g.long_note, &text, &crate::pdf::export::ExportOptions::for_note()).expect("the note exports"));
+        black_box(crate::pdf::export::export_note_until(&vault, &g.long_note, &text, &crate::pdf::export::ExportOptions::for_note(), None).expect("the note exports"));
     })
 }
 

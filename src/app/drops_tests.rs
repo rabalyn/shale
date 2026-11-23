@@ -570,7 +570,7 @@ fn media_019_one_file_can_be_copied_and_another_linked_and_a_file_of_the_vault_i
     assert_eq!(s.title(), "Imported 2 files and 1 linked file");
 }
 
-// spec: IMP-035, IMP-036
+// spec: IMP-035, IMP-036, JOB-020
 #[cfg(unix)]
 #[test]
 fn imp_035_a_word_file_is_converted_in_a_job_while_the_dialog_waits_and_then_becomes_a_note() {
@@ -600,11 +600,15 @@ fn imp_035_a_word_file_is_converted_in_a_job_while_the_dialog_waits_and_then_bec
     d.folder = "Sub".into();
     assert!(!w.app.import_action(&mut d, crate::import::dialog::ImportAction::Import), "the dialog stays while pandoc works");
     assert!(d.converting.is_some());
+    // the conversion is a task of the registry with its text and Cancel (JOB-020)
+    let listed = w.app.busy.info(&crate::import::dialog::IMPORT_CONVERT);
+    assert!(listed.as_ref().is_some_and(|t| t.cancellable && t.label == "Converting the Word files with pandoc…"), "{listed:?}");
     w.app.modal = Some(Modal::Import(d));
     w.frames(2);
     assert!(w.dialog_open() && w.painted("Converting the Word files with pandoc"), "the window is not blocked: it says what is going on");
     std::fs::write(&gate, b"").unwrap();
     w.until("the note", |a| a.modal.is_none());
+    assert!(w.app.busy.list().is_empty(), "the task is gone with its job");
     let root = w.app.vault.as_ref().unwrap().root.clone();
     let note = std::fs::read_to_string(root.join("Sub/Quarterly Plan.md")).unwrap();
     let (y, m, _) = crate::media::local_date();

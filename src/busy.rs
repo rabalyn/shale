@@ -51,13 +51,13 @@ impl Cancel {
         self.0.store(true, Ordering::SeqCst);
     }
 
-    /// The same request as a plain flag, for work that takes an `AtomicBool`.
-    pub fn flag(&self) -> Arc<AtomicBool> {
-        self.0.clone()
-    }
-
     pub fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::SeqCst)
+    }
+
+    /// The same request as the plain flag that the older jobs (pandoc, LuaLaTeX) look at.
+    pub fn flag(&self) -> Arc<AtomicBool> {
+        self.0.clone()
     }
 }
 
