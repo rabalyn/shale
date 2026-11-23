@@ -88,7 +88,8 @@ change within a second.
 
 One table, `fonts` (`[fonts]` in the file), in the settings file. Each area has a `family` (an installed font family such as
 "DejaVu Sans"; left out: Shale's own font) and a `size` in points (8 to 48). Settings → Fonts shows them
-(see [[Fonts]]).
+(see [[Fonts]]). There is no setting for the list of fonts: it draws each entry in its own font,
+loading the entries on screen once you stop scrolling.
 
 | Key | Default | Where |
 |---|---|---|

@@ -7,6 +7,7 @@
 //! of the settings (in the dialog or in the settings file) is used at once and fonts are only
 //! rebuilt when the set of chosen families changes.
 
+use crate::font_list::ListFonts;
 use crate::theme;
 use eframe::egui::{self, FontFamily, FontId, Ui};
 use serde::{Deserialize, Serialize};
@@ -305,8 +306,19 @@ impl EditorFonts {
     }
 }
 
+/// How often the fonts of this context were set (CFG-077).
+#[cfg(test)]
+pub(crate) fn set_fonts_calls(ctx: &egui::Context) -> usize {
+    ctx.data(|d| d.get_temp::<usize>(egui::Id::NULL.with("fonts-set-calls"))).unwrap_or(0)
+}
+
 /// Set the fonts of egui and remember in which pass, for what is laid out with them and kept ([`settled`]).
 pub fn set_fonts(ctx: &egui::Context, definitions: egui::FontDefinitions) {
+    #[cfg(test)]
+    {
+        let n = set_fonts_calls(ctx);
+        ctx.data_mut(|d| d.insert_temp(egui::Id::NULL.with("fonts-set-calls"), n + 1));
+    }
     let pass = ctx.cumulative_pass_nr();
     ctx.data_mut(|d| d.insert_temp(egui::Id::NULL.with("fonts-set-in-pass"), pass));
     ctx.set_fonts(definitions);
@@ -404,26 +416,40 @@ impl SystemFonts {
     /// italic face only when the family has one of its own (CFG-039): not the regular face that
     /// the search offers in its place, nor a face that is not what was asked for.
     fn face(&self, name: &str, v: Variant) -> Option<(Vec<u8>, u32)> {
-        let db = self.db.as_ref()?;
-        let find = |v: Variant| {
-            let weight = if v.bold() { fontdb::Weight::BOLD } else { fontdb::Weight::NORMAL };
-            let style = if v.italic() { fontdb::Style::Italic } else { fontdb::Style::Normal };
-            db.query(&fontdb::Query { families: &[fontdb::Family::Name(name)], weight, stretch: fontdb::Stretch::Normal, style })
-        };
-        let id = find(v)?;
-        if v != Variant::Regular {
-            let info = db.face(id)?;
-            let fits = (!v.bold() || info.weight.0 >= 600) && (!v.italic() || info.style != fontdb::Style::Normal);
-            if !fits || find(Variant::Regular) == Some(id) {
-                return None;
-            }
-        }
-        db.with_face_data(id, |data, index| {
-            let mut bytes = data.to_vec();
-            hide_mono_bitmaps(&mut bytes);
-            (bytes, index)
-        })
+        face_in(self.db.as_ref()?, name, v)
     }
+
+    /// The installed fonts, for a thread that reads faces (CFG-042).
+    pub fn database(&self) -> Option<Arc<fontdb::Database>> {
+        self.db.clone()
+    }
+}
+
+/// A face of a family in `db` (see [`SystemFonts::face`]).
+fn face_in(db: &fontdb::Database, name: &str, v: Variant) -> Option<(Vec<u8>, u32)> {
+    let find = |v: Variant| {
+        let weight = if v.bold() { fontdb::Weight::BOLD } else { fontdb::Weight::NORMAL };
+        let style = if v.italic() { fontdb::Style::Italic } else { fontdb::Style::Normal };
+        db.query(&fontdb::Query { families: &[fontdb::Family::Name(name)], weight, stretch: fontdb::Stretch::Normal, style })
+    };
+    let id = find(v)?;
+    if v != Variant::Regular {
+        let info = db.face(id)?;
+        let fits = (!v.bold() || info.weight.0 >= 600) && (!v.italic() || info.style != fontdb::Style::Normal);
+        if !fits || find(Variant::Regular) == Some(id) {
+            return None;
+        }
+    }
+    db.with_face_data(id, |data, index| {
+        let mut bytes = data.to_vec();
+        hide_mono_bitmaps(&mut bytes);
+        (bytes, index)
+    })
+}
+
+/// The regular face of `name` as egui font data, for a font that is only listed (CFG-042).
+pub fn regular_face(db: &fontdb::Database, name: &str) -> Option<(Vec<u8>, u32)> {
+    face_in(db, name, Variant::Regular)
 }
 
 /// Hide the embedded black-and-white bitmaps (`EBDT`, `EBLC`) of every face in `font` that has
@@ -469,7 +495,7 @@ pub fn hide_mono_bitmaps(font: &mut [u8]) {
 struct Loaded {
     name: String,
     faces: Faces,
-    data: Vec<(Variant, egui::FontData)>,
+    data: Vec<(Variant, Arc<egui::FontData>)>,
 }
 
 /// How many fonts that are only shown as a sample stay loaded (CFG-040).
@@ -485,6 +511,16 @@ pub enum Preview {
     Missing,
 }
 
+/// How an entry of the font picker is drawn (CFG-077).
+#[derive(Clone, Debug, PartialEq)]
+pub enum ListLook {
+    /// its face is not in egui (yet): the name in Shale's font
+    Fallback,
+    /// its face is in egui; `symbol`: its letters are pictures, so the name stays in Shale's font
+    /// and a sample in the font follows
+    Own { family: FontFamily, symbol: bool },
+}
+
 /// What is in use, and what the settings ask for (CFG-036).
 pub struct FontState {
     pub system: SystemFonts,
@@ -496,8 +532,11 @@ pub struct FontState {
     usable: BTreeMap<String, Faces>,
     /// Fonts loaded only for a sample text (CFG-040), the one asked for last at the end.
     previews: Vec<String>,
-    /// A font for a sample was asked for that is not loaded.
+    /// A font for a sample was asked for that is not loaded, or the faces of the picker's rows
+    /// changed.
     previews_changed: bool,
+    /// The faces of the entries of the font picker (CFG-077).
+    list: ListFonts,
     /// The settings `resolved` (or `pending`) was made from.
     seen: Option<FontsCfg>,
     /// A chosen family waits for the search for the installed fonts to end.
@@ -517,6 +556,7 @@ impl FontState {
             usable: BTreeMap::new(),
             previews: Vec::new(),
             previews_changed: false,
+            list: ListFonts::default(),
             seen: None,
             waiting: false,
             installed: BTreeSet::new(),
@@ -554,6 +594,20 @@ impl FontState {
         Preview::Loading
     }
 
+    /// The entries of the font picker that are on screen in this frame (CFG-077): their faces
+    /// are read and handed to egui once the list rests.
+    pub fn list_want(&mut self, names: Vec<String>, now: f64) {
+        self.list.want(names, now);
+    }
+
+    /// How an entry of the font picker is drawn (CFG-077).
+    pub fn list_look(&self, name: &str) -> ListLook {
+        match self.list.included().iter().find(|f| f.name == name) {
+            Some(f) if self.usable.contains_key(name) => ListLook::Own { family: family_of(name), symbol: f.symbol },
+            _ => ListLook::Fallback,
+        }
+    }
+
     /// The font an area is drawn in.
     pub fn area(&self, area: Area) -> AreaFont {
         self.resolved.get(area).clone()
@@ -566,6 +620,12 @@ impl FontState {
     /// Make what is in use follow the settings. Comes back with something to tell the user when
     /// a chosen font is not installed (CFG-035).
     pub fn sync(&mut self, ctx: &egui::Context, cfg: &FontsCfg) -> Option<String> {
+        let now = ctx.input(|i| i.time);
+        self.sync_at(ctx, cfg, now)
+    }
+
+    /// [`FontState::sync`] at the time `now` (in seconds).
+    fn sync_at(&mut self, ctx: &egui::Context, cfg: &FontsCfg, now: f64) -> Option<String> {
         if let Some((r, usable, pass)) = self.pending.take() {
             if ctx.cumulative_pass_nr() > pass {
                 self.use_resolved(ctx, r);
@@ -576,6 +636,7 @@ impl FontState {
         }
         let was_ready = self.system.ready();
         self.system.poll();
+        self.previews_changed |= self.list.step(ctx, self.system.database().as_ref(), now);
         let arrived = self.system.ready() && !was_ready;
         let wanted = cfg.families();
         if self.seen.as_ref() == Some(cfg) && !(self.waiting && arrived) && !self.previews_changed {
@@ -620,6 +681,12 @@ impl FontState {
                 }
             }
         }
+        // the faces of the picker's entries (CFG-077): the regular face only, all in one batch
+        for f in self.list.included() {
+            if !loaded.iter().any(|l| l.name == f.name) {
+                loaded.push(Loaded { name: f.name.clone(), faces: Faces::default(), data: vec![(Variant::Regular, f.data.clone())] });
+            }
+        }
         let now: BTreeSet<String> = loaded.iter().map(|l| l.name.clone()).collect();
         let usable: BTreeMap<String, Faces> = loaded.iter().map(|l| (l.name.clone(), l.faces)).collect();
         if self.waiting {
@@ -657,7 +724,7 @@ impl FontState {
             };
             let mut d = egui::FontData::from_owned(bytes);
             d.index = index;
-            data.push((v, d));
+            data.push((v, Arc::new(d)));
             match v {
                 Variant::Regular => {}
                 Variant::Bold => faces.bold = true,
@@ -1178,5 +1245,79 @@ pub(crate) mod tests {
         assert_eq!(st.previews.last().map(String::as_str), Some("F5"));
         st.preview(Some("F0"), 14.0);
         assert!(st.previews.contains(&"F5".to_string()) && !st.previews.contains(&"F4".to_string()));
+    }
+
+    /// A database of three families, and their names.
+    fn three_families() -> (fontdb::Database, Vec<String>) {
+        let (mut db, _) = virgil_db();
+        db.load_font_data(epaint_default_fonts::HACK_REGULAR.to_vec());
+        db.load_font_data(epaint_default_fonts::UBUNTU_LIGHT.to_vec());
+        let mut s = SystemFonts::default();
+        s.set(db);
+        let names = s.families().to_vec();
+        (s.db.take().and_then(|d| Arc::try_unwrap(d).ok()).expect("the only owner"), names)
+    }
+
+    /// One frame of the picker at time `t` with `names` on screen (none: the picker is closed).
+    fn list_frame(st: &mut FontState, ctx: &egui::Context, cfg: &FontsCfg, t: f64, names: &[String]) {
+        if !names.is_empty() {
+            st.list_want(names.to_vec(), t);
+        }
+        st.sync_at(ctx, cfg, t);
+        pass(ctx);
+    }
+
+    // spec: CFG-077
+    #[test]
+    fn cfg_077_a_face_is_loaded_for_the_rows_on_screen_in_one_batch_and_the_row_falls_back_before() {
+        let ctx = egui::Context::default();
+        theme::apply(&ctx);
+        let (db, names) = three_families();
+        assert_eq!(names.len(), 3);
+        let mut st = FontState::new();
+        st.system.set(db);
+        let cfg = FontsCfg::default();
+        list_frame(&mut st, &ctx, &cfg, 0.0, &[]);
+        let base = set_fonts_calls(&ctx);
+        // scrolling: every frame shows other rows; nothing is read, set_fonts is not called
+        let started = std::time::Instant::now();
+        for i in 0..60 {
+            let t = 1.0 + f64::from(i) * 0.02;
+            list_frame(&mut st, &ctx, &cfg, t, &[names[i as usize % 3].clone()]);
+            assert_eq!(st.list_look(&names[i as usize % 3]), ListLook::Fallback, "the row shows its name in Shale's font");
+        }
+        let scrolling = started.elapsed();
+        assert_eq!((set_fonts_calls(&ctx), st.list.kept(), st.list.reading()), (base, 0, false), "a list that moves loads nothing");
+        // at rest: the faces are read by the worker, then all go into egui at once
+        let mut t = 3.0;
+        while st.list.kept() < names.len() {
+            t += 0.2;
+            list_frame(&mut st, &ctx, &cfg, t, &names);
+            std::thread::sleep(Duration::from_millis(5));
+            assert!(t < 100.0, "the worker answers");
+        }
+        t += 0.2;
+        let started = std::time::Instant::now();
+        list_frame(&mut st, &ctx, &cfg, t, &names);
+        let batch = started.elapsed();
+        eprintln!("CFG-077: 60 frames of scrolling {scrolling:?}; the one frame that sets the batch of {} faces {batch:?}", names.len());
+        assert_eq!(set_fonts_calls(&ctx), base + 1, "one set_fonts for the whole batch");
+        // egui has the fonts from the next pass on
+        for n in &names {
+            assert_eq!(st.list_look(n), ListLook::Own { family: family_of(n), symbol: false });
+        }
+        // resting, scrolling back and forth over faces that are there: no more set_fonts
+        for i in 0..40 {
+            t += 0.05;
+            list_frame(&mut st, &ctx, &cfg, t, &names[i % 3..]);
+        }
+        assert_eq!(set_fonts_calls(&ctx), base + 1);
+        // the picker closes: the faces are dropped again, with one more set_fonts
+        t += 0.05;
+        list_frame(&mut st, &ctx, &cfg, t, &[]);
+        t += 0.05;
+        list_frame(&mut st, &ctx, &cfg, t, &[]);
+        assert_eq!((set_fonts_calls(&ctx), st.list.kept(), st.list_look(&names[0])), (base + 2, 0, ListLook::Fallback));
+        assert_eq!(st.installed, BTreeSet::new());
     }
 }

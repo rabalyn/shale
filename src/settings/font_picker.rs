@@ -3,12 +3,16 @@
 //! `markdown::fuzzy_score`), ↓ / ↑ move, Enter picks, Esc closes, a click picks. The first
 //! entry is "Default", Shale's own font. Every area of the Fonts tab uses it. The list opens on
 //! the chosen font, the mouse highlights the entry it moves over, and the highlighted entry is
-//! handed back for the sample text of the row (CFG-040).
+//! handed back for the sample text of the row (CFG-040). Each entry is drawn in its own font
+//! (CFG-077): the rows on screen ask `FontState` for their faces, which come in batches, and a
+//! row whose face is not there yet shows its name in Shale's font.
 
+use crate::font_list::SYMBOL_SAMPLE;
+use crate::fonts::{FontState, ListLook};
 use crate::keys::Keymap;
 use crate::markdown;
 use crate::picker::ListKeys;
-use eframe::egui::{self, Popup, PopupCloseBehavior, Ui};
+use eframe::egui::{self, text::LayoutJob, Popup, PopupCloseBehavior, TextFormat, Ui, WidgetText};
 
 /// The name of the first entry, which picks Shale's own font.
 pub const DEFAULT_ENTRY: &str = "Default";
@@ -45,6 +49,23 @@ pub fn entries<'a>(families: &'a [String], query: &str) -> Vec<Option<&'a str>> 
     out
 }
 
+/// The text of an entry in the way the font allows (CFG-077): in its own font; as the name in
+/// Shale's font followed by a sample in the font when its letters are pictures; in Shale's font
+/// while the font is not there.
+pub(crate) fn entry_text(ui: &Ui, label: &str, look: &ListLook) -> WidgetText {
+    match look {
+        ListLook::Fallback => label.into(),
+        ListLook::Own { family, symbol: false } => egui::RichText::new(label).family(family.clone()).into(),
+        ListLook::Own { family, symbol: true } => {
+            let own = egui::TextStyle::Button.resolve(ui.style());
+            let mut job = LayoutJob::default();
+            job.append(&format!("{label}  "), 0.0, TextFormat { font_id: own.clone(), ..Default::default() });
+            job.append(SYMBOL_SAMPLE, 0.0, TextFormat { font_id: egui::FontId::new(own.size, family.clone()), ..Default::default() });
+            job.into()
+        }
+    }
+}
+
 /// What happened in the picker in this frame.
 pub struct Outcome {
     /// where the button of the picker is
@@ -57,7 +78,7 @@ pub struct Outcome {
 
 /// The picker for `current` (`None`: Shale's own font). `families` is the list of installed
 /// fonts; `searching` says it is not complete yet.
-pub fn show(ui: &mut Ui, salt: &str, current: &mut Option<String>, families: &[String], searching: bool, keymap: &Keymap) -> Outcome {
+pub fn show(ui: &mut Ui, salt: &str, current: &mut Option<String>, families: &[String], searching: bool, keymap: &Keymap, fonts: &mut FontState) -> Outcome {
     let id = ui.make_persistent_id(("font-picker", salt));
     let shown = current.as_deref().unwrap_or(DEFAULT_ENTRY);
     let button = ui.add(egui::Button::new(format!("{shown}  ⏷")).min_size(egui::vec2(220.0, 0.0))).on_hover_text("Choose the font; type to search the installed fonts");
@@ -116,12 +137,22 @@ pub fn show(ui: &mut Ui, salt: &str, current: &mut Option<String>, families: &[S
             }
         }
         let mut hover = None;
+        let mut visible = Vec::new();
+        let now = ui.input(|inp| inp.time);
         let out = area.show_rows(ui, row_h, list.len(), |ui, range| {
             for i in range {
                 let name = list[i].unwrap_or(DEFAULT_ENTRY);
                 let on = list[i].map(str::to_string) == *current;
                 let label = if on { format!("{name}  ✓") } else { name.to_string() };
-                let row = ui.add_sized([ui.available_width(), row_h - ui.spacing().item_spacing.y], egui::Button::selectable(i == st.sel, label));
+                let look = match list[i] {
+                    Some(f) => {
+                        visible.push(f.to_string());
+                        fonts.list_look(f)
+                    }
+                    None => ListLook::Fallback,
+                };
+                let text = entry_text(ui, &label, &look);
+                let row = ui.add_sized([ui.available_width(), row_h - ui.spacing().item_spacing.y], egui::Button::selectable(i == st.sel, text));
                 if row.clicked() {
                     *current = list[i].map(str::to_string);
                     picked = true;
@@ -132,6 +163,7 @@ pub fn show(ui: &mut Ui, salt: &str, current: &mut Option<String>, families: &[S
                 }
             }
         });
+        fonts.list_want(visible, now);
         if let Some(i) = hover {
             st.sel = i;
         }
@@ -165,5 +197,28 @@ mod tests {
         assert_eq!(entries(&f, "defa")[0], None, "typing 'default' keeps the Default entry");
         // the best match first
         assert_eq!(entries(&f, "dvsans")[0], Some("DejaVu Sans"));
+    }
+
+    // spec: CFG-077
+    #[test]
+    fn cfg_077_a_symbol_font_shows_its_name_in_shale_s_font_and_a_sample_in_the_font() {
+        let ctx = egui::Context::default();
+        let fam = egui::FontFamily::Name("system:Sym".into());
+        let own = |symbol| crate::fonts::ListLook::Own { family: fam.clone(), symbol };
+        let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0))), ..Default::default() };
+        let mut seen = Vec::new();
+        let mut out = ctx.run_ui(raw, |ui| {
+            for look in [crate::fonts::ListLook::Fallback, own(false), own(true)] {
+                seen.push(entry_text(ui, "Sym", &look));
+            }
+        });
+        out.textures_delta.clear();
+        assert!(matches!(&seen[0], egui::WidgetText::Text(t) if t == "Sym"), "the fallback is plain text in Shale's font");
+        assert!(matches!(&seen[1], egui::WidgetText::RichText(_)), "a font that shows its name draws it in the font");
+        let egui::WidgetText::LayoutJob(job) = &seen[2] else { panic!("a symbol font is a job of two parts") };
+        assert_eq!(job.sections.len(), 2);
+        assert_eq!(job.text, format!("Sym  {}", crate::font_list::SYMBOL_SAMPLE));
+        assert_ne!(job.sections[0].format.font_id.family, fam, "the name is in Shale's font");
+        assert_eq!(job.sections[1].format.font_id.family, fam, "the sample is in the symbol font");
     }
 }

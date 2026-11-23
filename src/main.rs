@@ -57,6 +57,7 @@ mod fold;
 mod fold_ui;
 #[cfg(test)]
 mod fold_ui_tests;
+mod font_list;
 mod fonts;
 #[cfg(test)]
 mod fonts_ui_tests;
