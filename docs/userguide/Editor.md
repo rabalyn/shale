@@ -375,7 +375,7 @@ at least 240 x 160, and never bigger than the window) with a **Reset size** butt
 
 The status bar shows NORMAL, INSERT, VISUAL or V-LINE. The vim keys themselves cannot be
 rebound. In normal mode **Space Tab** goes back to the view this tab showed just before, and
-again to return. **Space f f** and **Space f g** open the pickers of [[Search and pickers]].
+again to return. **Space f f** and **Space f g** open the pickers of [[Search and pickers]] (in every view, not only here).
 
 # Keyboard only
 

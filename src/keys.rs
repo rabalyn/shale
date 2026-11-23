@@ -19,6 +19,9 @@ pub enum Scope {
     /// The field has the keyboard, so a key here is an arrow, Enter, Esc or a chord with Ctrl or Alt.
     ListWindow,
     MailView,
+    /// The search and find keys (KEY-040): sequences with Space as the leader (or a Ctrl / Alt chord), read in every main
+    /// view (editor in normal mode, reading view, mail, calendar, Feeds, tasks, graph, …) while no text field has the keyboard.
+    MainViews,
     /// The buttons of a note (KEY-014): active while the focused pane shows a note, in the editor and in the reading view.
     NoteView,
     /// Vim-lite normal mode (EDIT-015): sequences that start with Space.
@@ -27,7 +30,7 @@ pub enum Scope {
 
 impl Scope {
     /// The scopes in the order the keybindings list shows them.
-    pub const ALL: [Scope; 7] = [Scope::Global, Scope::FileList, Scope::SearchResults, Scope::ListWindow, Scope::MailView, Scope::NoteView, Scope::EditorNormal];
+    pub const ALL: [Scope; 8] = [Scope::Global, Scope::FileList, Scope::SearchResults, Scope::ListWindow, Scope::MailView, Scope::MainViews, Scope::NoteView, Scope::EditorNormal];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -36,6 +39,7 @@ impl Scope {
             Scope::SearchResults => "Search results",
             Scope::ListWindow => "List windows (pickers, quick switcher)",
             Scope::MailView => "Mail view",
+            Scope::MainViews => "Main views (search and find)",
             Scope::NoteView => "Note view",
             Scope::EditorNormal => "Vim-style editing, normal mode",
         }
@@ -49,6 +53,7 @@ impl Scope {
             Scope::SearchResults => &[Key::Enter, Key::Escape, Key::Slash],
             Scope::ListWindow => &[],
             Scope::MailView => &[Key::Enter, Key::Escape],
+            Scope::MainViews => &[],
             Scope::NoteView => &[],
             // every key vim-lite uses in normal mode (EDIT-011…014), with or without Shift; but see
             // `Keymap::check`: Shift+K is no vim key (the link preview has it, EDIT-033)
@@ -85,10 +90,15 @@ impl Scope {
         }
     }
 
-    /// Two scopes can see the same key press when they are the same, one is Global, or they are
-    /// the note view and vim-style normal mode (the editor shows a note, KEY-014). Symmetric.
+    /// Two scopes can see the same key press when they are the same, one is Global, they are
+    /// the note view and vim-style normal mode (the editor shows a note, KEY-014), or one is the
+    /// main views (KEY-040), which are read in the mail view, the note view and normal mode. Symmetric.
     fn overlaps(self, other: Scope) -> bool {
-        self == other || self == Scope::Global || other == Scope::Global || matches!((self, other), (Scope::NoteView, Scope::EditorNormal) | (Scope::EditorNormal, Scope::NoteView))
+        self == other
+            || self == Scope::Global
+            || other == Scope::Global
+            || matches!((self, other), (Scope::NoteView, Scope::EditorNormal) | (Scope::EditorNormal, Scope::NoteView))
+            || matches!((self, other), (Scope::MainViews, Scope::MailView | Scope::NoteView | Scope::EditorNormal) | (Scope::MailView | Scope::NoteView | Scope::EditorNormal, Scope::MainViews))
     }
 }
 
@@ -287,8 +297,8 @@ actions! {
     // KEY-035…KEY-037
     NoteCopyCode => "note.copy_code", "Copy the code of the code block at the cursor", NoteView, ["Ctrl+Shift+C"];
     NormalAlternate => "normal.alternate_view", "Back to the previous view of this tab (again: forward)", EditorNormal, ["Space Tab"];
-    NormalFindFile => "normal.find_file", "Find a file by name", EditorNormal, ["Space F F"];
-    NormalSearchAll => "normal.search_all", "Search notes, mail and posts", EditorNormal, ["Space F G"];
+    NormalFindFile => "normal.find_file", "Find a file by name", MainViews, ["Space F F"];
+    NormalSearchAll => "normal.search_all", "Search notes, mail and posts", MainViews, ["Space F G"];
     NormalLinkPreview => "normal.link_preview", "Preview the link under the cursor (again: into the preview)", EditorNormal, ["Shift+K"];
     TreeNextFile => "files.next_file", "Next file", FileList, ["J", "Down"];
     TreePrevFile => "files.prev_file", "Previous file", FileList, ["K", "Up"];
@@ -321,7 +331,7 @@ actions! {
     MailPrev => "mail.prev", "Previous folder, message or line of the pane with the keyboard", MailView, ["K", "Up"];
     MailNextFolder => "mail.next_folder", "Next folder", MailView, ["Ctrl+J"];
     MailPrevFolder => "mail.prev_folder", "Previous folder", MailView, ["Ctrl+K"];
-    MailMark => "mail.mark", "Mark the message for a selection", MailView, ["Space"];
+    MailMark => "mail.mark", "Mark the message for a selection", MailView, ["X"];
     MailSearch => "mail.search", "Search mail", MailView, ["Slash"];
     MailSearchScope => "mail.search_scope", "Search all folders or this folder", MailView, ["T"];
     MailImport => "mail.import", "Import to vault", MailView, ["I"];
@@ -546,6 +556,10 @@ impl Keymap {
         if matches!(scope, Scope::Global | Scope::NoteView) && !first.ctrl && !first.alt && !function_key {
             return Err(format!("{} needs Ctrl or Alt: a shortcut that works everywhere must not get in the way of typing", b.display()));
         }
+        // a bare key would take the single keys of the views (j, k, …): the main views start with Space
+        if scope == Scope::MainViews && !first.ctrl && !first.alt && first.key != Key::Space {
+            return Err(format!("{} needs Space, Ctrl or Alt: the single keys belong to the views", b.display()));
+        }
         // a list window has a text field with the keyboard: one chord, and a key that is no typing
         if scope == Scope::ListWindow {
             if b.0.len() > 1 {
@@ -563,7 +577,7 @@ impl Keymap {
         // Ctrl+R redoes in vim normal mode (EDIT-021)
         // the editor moves rows with Alt+Up / Alt+Down (EDIT-026 lists, KEY-014)
         let moves_rows = scope == Scope::NoteView && first.alt && !first.ctrl && matches!(first.key, Key::ArrowUp | Key::ArrowDown);
-        let vim_redo = scope == Scope::EditorNormal && first.ctrl && !first.alt && !first.shift && first.key == Key::R;
+        let vim_redo = matches!(scope, Scope::EditorNormal | Scope::MainViews) && first.ctrl && !first.alt && !first.shift && first.key == Key::R;
         // vim-lite has a plain k but no K (EDIT-033)
         let shift_k_is_free = scope == Scope::EditorNormal && first.shift && first.key == Key::K;
         if (!first.ctrl && !first.alt && scope.reserved().contains(&first.key) && !shift_k_is_free) || vim_redo || moves_rows {
@@ -651,6 +665,14 @@ impl Keymap {
     /// (the keys are consumed). Starting a sequence returns `None` and remembers its chords; a
     /// key that continues no sequence forgets them (KEY-009).
     pub fn poll(&mut self, input: &mut InputState, scope: Scope) -> Option<Action> {
+        self.poll_in(input, &[scope])
+    }
+
+    /// `poll` over several scopes read together as one (the main views and vim-style normal mode
+    /// both start with Space, so one sequence must see both). The unfinished sequence is kept under
+    /// the first scope.
+    pub fn poll_in(&mut self, input: &mut InputState, scopes: &[Scope]) -> Option<Action> {
+        let scope = scopes[0];
         if self.recording {
             return None;
         }
@@ -661,7 +683,7 @@ impl Keymap {
         let pending: Vec<Chord> = self.pending.get(&scope).map(|(c, _)| c.clone()).unwrap_or_default();
         let depth = pending.len();
         let mut started = None;
-        for d in DEFS.iter().filter(|d| d.scope == scope) {
+        for d in DEFS.iter().filter(|d| scopes.contains(&d.scope)) {
             for b in self.bindings(d.action) {
                 if b.0.len() <= depth || b.0[..depth] != pending[..] {
                     continue;
@@ -889,16 +911,17 @@ mod tests {
         }
     }
 
-    // spec: KEY-017
+    // spec: KEY-017, KEY-040
     #[test]
     fn no_two_actions_of_scopes_that_are_active_together_clash_on_any_system() {
-        let sets: [&[Scope]; 6] = [
+        let sets: [&[Scope]; 7] = [
             &[Scope::Global, Scope::FileList],
             &[Scope::Global, Scope::SearchResults],
             &[Scope::Global, Scope::ListWindow],
-            &[Scope::Global, Scope::MailView],
+            &[Scope::Global, Scope::MailView, Scope::MainViews],
             &[Scope::Global, Scope::NoteView],
             &[Scope::Global, Scope::NoteView, Scope::EditorNormal],
+            &[Scope::Global, Scope::MainViews, Scope::NoteView, Scope::EditorNormal],
         ];
         for (system, mac) in [("linux", false), ("windows", false), ("macos", true)] {
             let k = Keymap::for_os(mac);
@@ -1310,6 +1333,52 @@ mod tests {
         // nothing triggers while a key is being recorded
         k.recording = true;
         assert_eq!(frame(&mut k, Scope::Global, vec![key_event(Key::H, Modifiers::COMMAND)]), None);
+    }
+
+    // spec: KEY-040, KEY-043
+    #[test]
+    fn key_040_the_search_keys_are_in_their_own_scope_that_clashes_with_the_views_that_read_it() {
+        let mut k = linux();
+        for a in [Action::NormalFindFile, Action::NormalSearchAll] {
+            assert_eq!(a.def().scope, Scope::MainViews);
+        }
+        assert_eq!(k.bindings(Action::NormalFindFile), vec![b("Space F F")]);
+        assert_eq!(k.bindings(Action::NormalSearchAll), vec![b("Space F G")]);
+        // ids are the stored names of the settings and stay as they were
+        assert_eq!((Action::NormalFindFile.def().id, Action::NormalSearchAll.def().id), ("normal.find_file", "normal.search_all"));
+        // the mail view reads it too: Space is no mail key now (the mark is x), and a mail key cannot take it back
+        assert_eq!(k.bindings(Action::MailMark), vec![b("X")]);
+        assert!(k.check(Action::MailMark, &b("Space")).unwrap_err().contains("already used"));
+        assert!(k.check(Action::MailMark, &b("Space F")).unwrap_err().contains("already used"));
+        // the single letters of the mail view stay free for it, also after a Space
+        assert_eq!(k.check(Action::MailMark, &b("F")), Err("f is already used by “Set or clear the flag”".to_string()));
+        // vim-style normal mode reads it too: Space Tab and Space F G side by side
+        assert!(k.check(Action::NormalAlternate, &b("Space F G")).unwrap_err().contains("already used"));
+        assert!(k.check(Action::NormalFindFile, &b("Space Tab")).unwrap_err().contains("already used"));
+        // the file list and the search results have Space of their own and do not overlap it
+        assert_eq!(k.check(Action::TreeToggleFolder, &b("Space")), Ok(()));
+        assert!(!Scope::MainViews.overlaps(Scope::FileList) && !Scope::MainViews.overlaps(Scope::SearchResults) && !Scope::MainViews.overlaps(Scope::ListWindow));
+        // a bare key would take the keys of every view
+        assert!(k.check(Action::NormalFindFile, &b("J")).unwrap_err().contains("needs Space, Ctrl or Alt"));
+        assert!(k.check(Action::NormalFindFile, &b("Ctrl+R")).unwrap_err().contains("fixed meaning"));
+        assert_eq!(k.set(Action::NormalFindFile, b("Space P")), Ok(()));
+        assert_eq!(k.set(Action::NormalSearchAll, b("Ctrl+Alt+S")), Ok(()));
+        // one poll reads the main views and normal mode as one sequence
+        let mut k = linux();
+        let both = [Scope::MainViews, Scope::EditorNormal];
+        let none = Modifiers::NONE;
+        let poll = |k: &mut Keymap, key| {
+            let ctx = egui::Context::default();
+            let mut out = None;
+            let mut full = ctx.run_ui(RawInput { events: vec![key_event(key, none)], ..Default::default() }, |ui| out = ui.input_mut(|i| k.poll_in(i, &both)));
+            full.textures_delta.clear();
+            out
+        };
+        assert_eq!(poll(&mut k, Key::Space), None);
+        assert_eq!(poll(&mut k, Key::F), None);
+        assert_eq!(poll(&mut k, Key::G), Some(Action::NormalSearchAll));
+        assert_eq!(poll(&mut k, Key::Space), None);
+        assert_eq!(poll(&mut k, Key::Tab), Some(Action::NormalAlternate));
     }
 
     // spec: NAV-006
