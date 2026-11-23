@@ -771,6 +771,7 @@ impl ShaleApp {
         app.mail.busy = app.busy.clone();
         app.sync.managed.busy = app.busy.clone();
         app.tex.busy = app.busy.clone();
+        app.update.busy = app.busy.clone();
         // the audio attachments play in the app's one player (MAIL-240, MEDIA-007)
         app.mail.media = app.media.clone();
         if persist {

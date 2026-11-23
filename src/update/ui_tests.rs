@@ -2,11 +2,13 @@
 //! which mode to use, the buttons of the notice, the release notes and Settings → Updates. The
 //! check, download and install are the counting fakes of `tests.rs`.
 
-use super::logic_tests::{fake, portable_kind, state, temp, Counts};
+use super::logic_tests::{fake, gated, portable_kind, state, temp, Counts};
 use super::*;
 use crate::app::{Options, SettingsTab, ShaleApp};
 use crate::ui_test_support::Headless;
 use eframe::egui::{self, Event, PointerButton, ViewportCommand};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 struct T {
     app: ShaleApp,
@@ -26,6 +28,7 @@ impl T {
         let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(dir), view: None, keys: None }, false);
         let (backend, counts) = fake(latest);
         app.update = state(kind, backend);
+        app.update.busy = app.busy.clone();
         app.cfg.updates.mode = mode;
         prepare(&mut app, &counts);
         let mut t = T { app, hl: Headless::new(), counts };
@@ -276,4 +279,106 @@ fn upd_020_settings_says_why_a_package_managed_install_cannot_update_itself_and_
     t.app.open_settings(SettingsTab::Updates);
     t.hl.frames(&mut t.app, 4);
     assert!(t.shows("/opt/x cannot be written by you") && t.shows("you install them by hand"), "{:?}", t.painted());
+}
+
+/// A window whose check, download and install wait for the returned gate (the check starts in the first frame).
+fn held(mode: UpdateMode, latest: Option<&str>) -> (T, Arc<AtomicBool>) {
+    let (backend, counts, gate) = gated(latest);
+    let mut t = T::prepared(mode, None, portable_kind(), |app, _| app.update.backend = backend);
+    t.counts = counts;
+    (t, gate)
+}
+
+// spec: JOB-036
+#[test]
+fn job_036_the_check_is_a_quiet_task_that_can_stop_and_the_settings_page_shows_it() {
+    let (mut t, gate) = held(UpdateMode::Notify, Some("9.9.9"));
+    t.app.open_settings(SettingsTab::Updates);
+    let task = t.app.busy.info(&UPDATE_CHECK).expect("the check is a task");
+    assert_eq!((task.label.as_str(), task.cancellable), ("Checking for updates…", true));
+    assert!(t.app.busy.list().is_empty(), "a check that also runs by itself is quiet in the indicator");
+    assert!(t.shows("Checking for updates…") && t.shows("Cancel"), "{:?}", t.painted());
+    // Cancel ends it without a word of a failure, and the button is back
+    t.click("Cancel");
+    t.settle(|t| !t.app.update.busy());
+    assert!(t.app.busy.list().is_empty() && t.app.update.result.is_none(), "{:?}", t.app.update.result);
+    assert!(t.shows("Check for updates now") && !t.shows("The check failed"), "{:?}", t.painted());
+    // a check that is asked for runs to its end
+    t.click("Check for updates now");
+    assert!(t.app.busy.is_running(&UPDATE_CHECK), "the button started the check");
+    assert!(t.hl.try_label(&mut t.app, "Check for updates now").is_some());
+    gate.store(true, std::sync::atomic::Ordering::SeqCst);
+    t.settle(|t| matches!(t.app.update.result, Some(CheckResult::Available(_))));
+    assert!(t.app.busy.list().is_empty());
+}
+
+// spec: JOB-036
+#[test]
+fn job_036_the_download_is_a_task_that_can_stop_and_the_notice_shows_it_with_cancel() {
+    let (mut t, gate) = held(UpdateMode::Notify, Some("9.9.9"));
+    gate.store(true, std::sync::atomic::Ordering::SeqCst);
+    t.settle(|t| t.app.update.found.is_some());
+    gate.store(false, std::sync::atomic::Ordering::SeqCst);
+    t.click("Download");
+    let task = t.app.busy.info(&UPDATE_DOWNLOAD).expect("the download is a task");
+    assert_eq!((task.label.as_str(), task.cancellable), ("Downloading Shale 9.9.9…", true));
+    assert_eq!(t.app.busy.list().len(), 1, "and the indicator lists it");
+    assert!(t.shows("Downloading Shale 9.9.9…") && t.shows("Cancel"), "{:?}", t.painted());
+    // Cancel: the notice is back with its buttons, and nothing is left running
+    t.click("Cancel");
+    t.settle(|t| t.app.update.phase == Phase::Idle && !t.app.update.busy());
+    assert!(t.shows("Shale 9.9.9 is available.") && t.hl.try_label(&mut t.app, "Download").is_some(), "{:?}", t.painted());
+    assert!(t.app.busy.list().is_empty());
+    // the same download, not stopped
+    t.click("Download");
+    gate.store(true, std::sync::atomic::Ordering::SeqCst);
+    t.settle(|t| matches!(t.app.update.phase, Phase::Ready(_)));
+    assert!(t.app.busy.list().is_empty());
+}
+
+// spec: JOB-036
+#[test]
+fn job_036_the_install_is_a_task_that_cannot_stop_and_the_notice_says_what_it_does() {
+    let (mut t, gate) = held(UpdateMode::Notify, Some("9.9.9"));
+    gate.store(true, std::sync::atomic::Ordering::SeqCst);
+    t.settle(|t| t.app.update.found.is_some());
+    t.click("Download");
+    t.settle(|t| matches!(t.app.update.phase, Phase::Ready(_)));
+    gate.store(false, std::sync::atomic::Ordering::SeqCst);
+    t.click("Install now");
+    let task = t.app.busy.info(&UPDATE_INSTALL).expect("the install is a task");
+    assert_eq!((task.label.as_str(), task.cancellable), ("Installing Shale 9.9.9…", false));
+    assert!(t.shows("Installing Shale 9.9.9…") && !t.shows("Cancel"), "{:?}", t.painted());
+    gate.store(true, std::sync::atomic::Ordering::SeqCst);
+    t.settle(|t| matches!(t.app.update.phase, Phase::Installed(_)));
+    assert!(t.app.busy.list().is_empty());
+}
+
+// spec: JOB-036
+#[test]
+fn job_036_a_step_that_finds_its_task_still_listed_keeps_what_it_had_and_tries_again() {
+    let (mut t, gate) = held(UpdateMode::Notify, Some("9.9.9"));
+    gate.store(true, std::sync::atomic::Ordering::SeqCst);
+    t.settle(|t| t.app.update.found.is_some());
+    let ctx = egui::Context::default();
+    let mut cfg = UpdateConfig::default();
+    // a download while the task of a download is listed: nothing starts, the notice stays
+    let held_download = t.app.busy.begin(UPDATE_DOWNLOAD, "held by the test").unwrap();
+    t.app.update.act(&ctx, &mut cfg, Action::Download);
+    assert_eq!((t.app.update.phase.clone(), t.app.update.busy()), (Phase::Idle, false));
+    drop(held_download);
+    t.click("Download");
+    t.settle(|t| matches!(t.app.update.phase, Phase::Ready(_)));
+    // an install while the task of an install is listed: the downloaded file stays ready
+    let held_install = t.app.busy.begin(UPDATE_INSTALL, "held by the test").unwrap();
+    t.app.update.act(&ctx, &mut cfg, Action::Install);
+    assert!(matches!(t.app.update.phase, Phase::Ready(_)) && !t.app.update.busy(), "{:?}", t.app.update.phase);
+    drop(held_install);
+    // a check that is asked for while the task of a check is listed waits, and the request is not lost
+    let held_check = t.app.busy.begin(UPDATE_CHECK, "held by the test").unwrap();
+    t.app.update.check_now();
+    t.app.update.tick(&ctx, &mut cfg);
+    assert!(t.app.update.force && !t.app.update.busy());
+    drop(held_check);
+    t.settle(|t| !t.app.update.force);
 }

@@ -872,6 +872,39 @@ pub(super) fn fake(latest: Option<&str>) -> (Backend, Counts) {
     (backend, c)
 }
 
+/// The same fake with the three steps held back: the check and the download wait for the gate or
+/// for Cancel (then they end with "cancelled"), the install waits for the gate only.
+pub(super) fn gated(latest: Option<&str>) -> (Backend, Counts, Arc<AtomicBool>) {
+    let (inner, counts) = fake(latest);
+    let gate = Arc::new(AtomicBool::new(false));
+    fn wait(gate: &AtomicBool, cancel: Option<&AtomicBool>) -> Result<(), String> {
+        while !gate.load(Ordering::SeqCst) {
+            if cancel.is_some_and(|c| c.load(Ordering::SeqCst)) {
+                return Err("cancelled".into());
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        Ok(())
+    }
+    let (g1, g2, g3) = (gate.clone(), gate.clone(), gate.clone());
+    let (check, fetch, install) = (inner.check.clone(), inner.fetch.clone(), inner.install.clone());
+    let backend = Backend {
+        check: Arc::new(move |cancel| {
+            wait(&g1, Some(cancel))?;
+            check(cancel)
+        }),
+        fetch: Arc::new(move |r, cancel| {
+            wait(&g2, Some(cancel))?;
+            fetch(r, cancel)
+        }),
+        install: Arc::new(move |kind, staged, cancel| {
+            wait(&g3, None)?;
+            install(kind, staged, cancel)
+        }),
+    };
+    (backend, counts, gate)
+}
+
 pub(super) fn portable_kind() -> InstallKind {
     InstallKind::LinuxPortable { dir: "/p".into(), whole: true }
 }
