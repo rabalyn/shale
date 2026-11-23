@@ -42,6 +42,25 @@ impl From<KnownVaults> for Vec<KnownVault> {
     }
 }
 
+/// How a folder lies to another known vault (VAULT-039); the label is the other vault's.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Nesting {
+    /// the folder is inside the other vault
+    Inside(String),
+    /// the other vault is inside the folder
+    Contains(String),
+}
+
+impl Nesting {
+    /// The warning Shale shows once, when the folder is added.
+    pub fn warning(&self) -> String {
+        match self {
+            Nesting::Inside(other) => format!("This folder lies inside the vault “{other}”, so its notes show up in both. Shale opens it anyway."),
+            Nesting::Contains(other) => format!("This folder contains the vault “{other}”, so that vault's notes show up in both. Shale opens it anyway."),
+        }
+    }
+}
+
 impl KnownVaults {
     /// The entries, the vault opened last first.
     pub fn entries(&self) -> &[KnownVault] {
@@ -68,6 +87,65 @@ impl KnownVaults {
         } else {
             entry.name.clone()
         }
+    }
+
+    /// Whether the vault in `path` is listed.
+    pub fn contains(&self, path: &Path) -> bool {
+        let path = canonical(path);
+        self.0.iter().any(|e| e.path == path)
+    }
+
+    /// Give the entry of `path` another name (VAULT-032). An empty name is refused with its reason.
+    pub fn rename(&mut self, path: &Path, name: &str) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("The name cannot be empty.".into());
+        }
+        let path = canonical(path);
+        match self.0.iter_mut().find(|e| e.path == path) {
+            Some(e) => {
+                e.name = name.to_string();
+                Ok(())
+            }
+            None => Err("That vault is not in the list any more.".into()),
+        }
+    }
+
+    /// Remove the entry of `path` from the list; the folder is not touched (VAULT-038).
+    pub fn forget(&mut self, path: &Path) {
+        let path = canonical(path);
+        self.0.retain(|e| e.path != path);
+    }
+
+    /// Point the entry at `old` to the folder `new`, keeping its name and its place (VAULT-038).
+    /// Refused when another entry has that folder already.
+    pub fn relocate(&mut self, old: &Path, new: &Path) -> Result<(), String> {
+        let (old, new) = (canonical(old), canonical(new));
+        if let Some(other) = self.0.iter().find(|e| e.path == new && e.path != old) {
+            return Err(format!("That folder is already known as “{}”.", other.name));
+        }
+        match self.0.iter_mut().find(|e| e.path == old) {
+            Some(e) => {
+                e.path = new;
+                Ok(())
+            }
+            None => Err("That vault is not in the list any more.".into()),
+        }
+    }
+
+    /// The known vault that `path` lies inside of, or that lies inside `path` (VAULT-039); the entry
+    /// of `path` itself, and the one at `skip`, do not count.
+    pub fn nested_with(&self, path: &Path, skip: Option<&Path>) -> Option<Nesting> {
+        let (path, skip) = (canonical(path), skip.map(canonical));
+        self.0.iter().filter(|e| e.path != path && Some(&e.path) != skip.as_ref()).find_map(|e| {
+            if path.starts_with(&e.path) {
+                Some(Nesting::Inside(self.label(e)))
+            } else if e.path.starts_with(&path) {
+                Some(Nesting::Contains(self.label(e)))
+            } else {
+                None
+            }
+        })
     }
 
     /// The label of the vault in `path`: its entry's, or its folder's name when it is not listed.
@@ -186,6 +264,50 @@ mod tests {
     fn vault_031_an_empty_name_in_the_file_is_refused_and_the_folder_name_is_used() {
         let k: KnownVaults = serde_json::from_str(r#"[{"name": "", "path": "/x/one"}, {"name": "  ", "path": "/x/two"}, {"path": "/x/three"}, {"name": "dup", "path": "/x/one"}, {"name": "n", "path": ""}]"#).unwrap();
         assert_eq!(k.entries(), [entry("one", "/x/one"), entry("two", "/x/two"), entry("three", "/x/three")]);
+    }
+
+    // spec: VAULT-032
+    #[test]
+    fn vault_032_rename_refuses_an_empty_name_and_keeps_the_entry_in_place() {
+        let mut k = KnownVaults::default();
+        k.add(Path::new("/nowhere/a"));
+        k.add(Path::new("/nowhere/b"));
+        assert_eq!(k.rename(Path::new("/nowhere/a"), "  "), Err("The name cannot be empty.".to_string()));
+        assert_eq!(k.rename(Path::new("/nowhere/a"), " Mine "), Ok(()));
+        assert_eq!(k.entries(), [entry("b", "/nowhere/b"), entry("Mine", "/nowhere/a")]);
+        assert!(k.rename(Path::new("/nowhere/zzz"), "x").is_err());
+    }
+
+    // spec: VAULT-038
+    #[test]
+    fn vault_038_forget_and_relocate_change_the_list_only() {
+        let mut k = KnownVaults::default();
+        k.add(Path::new("/nowhere/a"));
+        k.add(Path::new("/nowhere/b"));
+        k.0[1].name = "Mine".into();
+        assert_eq!(k.relocate(Path::new("/nowhere/a"), Path::new("/elsewhere/a2")), Ok(()));
+        assert_eq!(k.entries(), [entry("b", "/nowhere/b"), entry("Mine", "/elsewhere/a2")], "the name and the place stay");
+        assert!(k.relocate(Path::new("/elsewhere/a2"), Path::new("/nowhere/b")).unwrap_err().contains("already known as “b”"));
+        assert!(k.relocate(Path::new("/nowhere/gone"), Path::new("/x")).is_err());
+        assert!(k.contains(Path::new("/nowhere/b/")));
+        k.forget(Path::new("/nowhere/b"));
+        assert!(!k.contains(Path::new("/nowhere/b")));
+        assert_eq!(k.entries().len(), 1);
+    }
+
+    // spec: VAULT-039
+    #[test]
+    fn vault_039_a_folder_in_or_around_a_known_vault_is_found_and_the_same_folder_is_not() {
+        let mut k = KnownVaults::default();
+        k.add(Path::new("/v/outer"));
+        k.add(Path::new("/w/lone"));
+        assert_eq!(k.nested_with(Path::new("/v/outer/inner"), None), Some(Nesting::Inside("outer".into())));
+        assert_eq!(k.nested_with(Path::new("/v"), None), Some(Nesting::Contains("outer".into())));
+        assert_eq!(k.nested_with(Path::new("/v/outer"), None), None, "a folder is not nested in itself");
+        assert_eq!(k.nested_with(Path::new("/v/outer-two"), None), None, "a name that only starts alike is not inside");
+        assert_eq!(k.nested_with(Path::new("/v/outer/inner"), Some(Path::new("/v/outer"))), None, "the entry being moved does not count");
+        assert!(Nesting::Inside("outer".into()).warning().contains("inside the vault “outer”"));
+        assert!(Nesting::Contains("outer".into()).warning().contains("contains the vault “outer”"));
     }
 
     // spec: CFG-075

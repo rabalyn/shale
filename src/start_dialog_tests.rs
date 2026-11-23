@@ -167,3 +167,16 @@ fn vault_031_the_start_dialog_shows_the_parent_folder_of_vaults_with_the_same_na
     let parent = |p: &PathBuf| crate::known_vaults::canonical(p).parent().unwrap().to_string_lossy().into_owned();
     assert!(w.painted(&format!("notes ({})", parent(&a))).is_some() && w.painted(&format!("notes ({})", parent(&b))).is_some());
 }
+
+// spec: VAULT-038
+#[test]
+fn vault_038_the_start_dialog_greys_out_a_vault_whose_folder_is_missing_and_does_not_create_it() {
+    let mut w = W::new();
+    let gone = w.dir.join("gone");
+    w.app.cfg.vaults.add(&gone);
+    w.settle();
+    assert!(w.painted("gone (folder missing)").is_some(), "{:?}", w.hl.text.iter().map(|t| &t.0).collect::<Vec<_>>());
+    w.click_text("gone (folder missing)");
+    w.settle();
+    assert!(w.app.vault.is_none() && !gone.exists(), "a click does not make the folder");
+}

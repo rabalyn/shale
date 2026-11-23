@@ -249,6 +249,8 @@ pub enum Modal {
     Changes,
     /// a conflict copy next to its original (NET-015)
     Conflict(Box<conflict::View>),
+    /// the vault dropdown and the dialogs under it (VAULT-030)
+    Vaults(Box<crate::vault_menu::VaultModal>),
     /// the "Turn on sync" wizard (SYNC-047); its state is `ShaleApp::sync.setup.wizard`
     SyncWizard,
     Export(Box<crate::pdf::export_dialog::ExportDialog>),
@@ -420,6 +422,8 @@ pub struct ShaleApp {
     pub vault: Option<Vault>,
     /// the vault being read on a worker thread, behind the start screen's spinner (NET-019)
     pub vault_load: vault_load::VaultLoad,
+    /// which known vaults have their folder (VAULT-038), looked up off the UI thread
+    pub presence: crate::vault_menu::Presence,
     /// the open tabs, the active one and what the tab bar drew last frame
     pub tabbar: tabs::TabBar,
     /// the panes of the middle area; `tabbar` is the tab bar of the focused one (NAV-032)
@@ -681,6 +685,7 @@ impl ShaleApp {
             sync: sync::SyncState::with_managed(crate::gitsync::install_ui::ManagedState::new(persist, &tag)),
             vault: None,
             vault_load: Default::default(),
+            presence: Default::default(),
             tabbar: tabs::TabBar::new(),
             panes: panes::Panes::new(),
             notes: HashMap::new(),
@@ -989,8 +994,15 @@ impl ShaleApp {
         self.notes.clear();
         self.drawings.clear();
         self.tabbar.active = 0;
+        // the folders are looked at again the next time the list is shown
+        self.presence.clear();
         if known {
+            // a folder that is new to the list and lies in or around another vault: warned once (VAULT-039)
+            let nesting = if self.cfg.vaults.contains(path) { None } else { self.cfg.vaults.nested_with(path, None) };
             self.cfg.remember_vault(path.to_path_buf());
+            if let Some(n) = nesting {
+                self.toast(n.warning());
+            }
         }
         // (opening a note rewrites the saved list, so read it first)
         let saved_panes: Vec<crate::vault_state::SavedPane> = if self.vdata.state.panes.is_empty() {
@@ -3165,6 +3177,7 @@ impl ShaleApp {
             ui.ctx().request_repaint_after(Duration::from_millis(250));
         }
         self.vault_load_tick(ui.ctx());
+        self.presence.poll();
         self.rescan_tick(ui.ctx());
         if self.notes.values().any(|d| d.dirty) || self.drawings.values().any(|d| d.dirty) {
             ui.ctx().request_repaint_after(Duration::from_millis(300));

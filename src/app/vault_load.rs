@@ -77,7 +77,9 @@ impl VaultLoad {
     }
 
     /// Read the vault in `path` on a worker thread. False: a load already runs.
-    pub fn start(&mut self, busy: &Busy, path: &Path, after: After, ctx: Option<egui::Context>) -> bool {
+    /// `must_exist`: the folder of a known vault is never made (VAULT-038): when it is not there the
+    /// load fails.
+    pub fn start(&mut self, busy: &Busy, path: &Path, after: After, must_exist: bool, ctx: Option<egui::Context>) -> bool {
         if self.flight.is_some() {
             return false;
         }
@@ -86,7 +88,7 @@ impl VaultLoad {
         self.error = None;
         let (open, root) = (self.opener.clone(), path.to_path_buf());
         let rx = crate::jobs::spawn(
-            move || tracing::info_span!("flow.vault_open.scan", peer = "disk").in_scope(|| open(&root)),
+            move || tracing::info_span!("flow.vault_open.scan", peer = "disk").in_scope(|| if must_exist && !root.is_dir() { Err("its folder is missing".to_string()) } else { open(&root) }),
             move || {
                 if let Some(c) = ctx {
                     c.request_repaint();
@@ -138,8 +140,10 @@ impl ShaleApp {
         if self.vault_load.is_loading() || !self.prepare_vault_switch() {
             return;
         }
+        // a known vault's folder is never made silently (VAULT-038); that is looked at on the worker
+        let must_exist = self.cfg.vaults.contains(path);
         let ctx = self.ctx.clone();
-        self.vault_load.start(&self.busy, path, after, ctx);
+        self.vault_load.start(&self.busy, path, after, must_exist, ctx);
     }
 
     /// Every frame: take in a vault that has arrived and open it, or show why it did not load.
@@ -162,7 +166,13 @@ impl ShaleApp {
                     }
                 }
             }
-            Err(e) => self.vault_load.error = Some(format!("Could not open vault: {e}")),
+            Err(e) => {
+                // (with a vault open the start screen is not there to show it)
+                if self.vault.is_some() {
+                    self.toast(format!("Could not open “{}”: {e}. Use Locate… or Forget in the vault list.", self.cfg.vaults.label_of(&loaded.path)));
+                }
+                self.vault_load.error = Some(format!("Could not open vault: {e}"));
+            }
         }
     }
 }

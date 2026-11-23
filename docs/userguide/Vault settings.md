@@ -23,6 +23,16 @@ Shale keeps settings in two places:
   the same name, the folder they are in follows the name. A vault is added when it has opened
   (also one given with `--vault` or passed on by a second start). The list replaces the old
   "recent" list, which is converted at the first start.
+- The vault name at the bottom left of the window, with a ▾, opens the list of known vaults. Click
+  one (or move with the arrows and press Enter) to open it; **Open…** and **Create…** add a
+  folder, and Create only takes an empty folder (hidden files such as `.DS_Store` do not count; a
+  folder that does not exist yet is made) and can start with sample notes. Right-click a vault and
+  choose **Rename** to give it another name: the name stays on this computer, the folder keeps its
+  name. If a vault's folder is gone (moved, a drive that is not mounted), its entry is greyed out,
+  here and on the start screen: **Locate…** points it at the folder's new place and **Forget**
+  removes the entry (the folder is never touched). Shale does not make that folder again by itself.
+  A folder inside another known vault, or around one, may be added; Shale warns once, because the
+  notes then show up in both vaults.
 - Learned tag words are in `.shale/tag-words.json` ([[Tags and people]]).
 
 # Names that work on every system
