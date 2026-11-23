@@ -974,10 +974,16 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   rewrites more than two other notes, open notes are saved first (IMP-071). The new note and the neighbour
   lines are one history snapshot (IMP-072); a rename keeps the chain because `previous` and `next` are
   links, and old notes with only a `message-id` still match as the parent (IMP-073).
+- **A saved post continues its conversation the same way** (ADR-0032, #575). A post note has `in-reply-to`
+  and `thread-id` (the root of the conversation as the network gives it, else the post replied to, else the
+  post's own id) besides `post-id` and `network` (SOC-070). The Import dialog offers "Continues [[note]]" for
+  saved posts of the same network that it replies to, that reply to it or that share its `thread-id`; a saved
+  self-thread matches by every id in its `thread-ids` (SOC-071). `previous` / `next`, the question for an older
+  post and the one history snapshot are those of mails (SOC-072).
 - **Thread view** (NAV-070, KEY-050): a panel of the right sidebar lists the notes with the same
   `thread-id` as the open note, oldest first, with date, sender and title and the current one marked; a
   click opens the note (a pinned tab is not replaced). Ctrl+Shift+PageUp / Ctrl+Shift+PageDown step to
-  the previous / next mail of the thread, Ctrl+Shift+T opens the view and gives it the keyboard.
+  the previous / next mail or post of the thread, Ctrl+Shift+T opens the view and gives it the keyboard.
 - Drop onto a folder in the file list to import into that folder, or onto a note to also add
   links to the new notes there.
 - After an import of two or more items a window, **Import summary**, says what was made: the new

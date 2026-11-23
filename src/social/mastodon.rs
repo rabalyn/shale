@@ -216,8 +216,8 @@ pub(crate) fn newer_pages(top: Option<&str>, cap: usize, mut fetch: impl FnMut(O
     Ok(Fresh { posts, top: newest, gap: None })
 }
 
-/// The self-thread and the replies of other people.
-pub fn thread_full(server: &str, token: &str, post: &Post) -> Result<(Vec<Post>, Vec<Reply>), String> {
+/// The self-thread, the replies of other people and the id of the first status of the conversation.
+pub fn thread_full(server: &str, token: &str, post: &Post) -> Result<ThreadFetch, String> {
     let server = base(server)?;
     if post.id.is_empty() || !post.id.chars().all(|c| c.is_ascii_alphanumeric()) {
         return Err("bad post id".into());
@@ -225,7 +225,9 @@ pub fn thread_full(server: &str, token: &str, post: &Post) -> Result<(Vec<Post>,
     let v = api("GET", &format!("{server}/api/v1/statuses/{}/context", post.id), Some(token), None)?;
     let t = thread_from_context(post, &v, &server);
     let r = replies_from_context(&t, &v, &server);
-    Ok((t, r))
+    // the first ancestor is the status that starts the conversation
+    let root = v["ancestors"].as_array().and_then(|a| a.first()).map(|s| text(&s["id"])).filter(|i| !i.is_empty());
+    Ok((t, r, root))
 }
 
 /// The conversation around a post: the ancestors, and all descendants as a tree (SOC-045).

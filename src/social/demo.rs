@@ -270,5 +270,5 @@ pub fn saved(p: &Post) -> SavedPost {
         }
     }
     let replies = if p.id == thread_id() { replies() } else { vec![] };
-    SavedPost { thread, reposted_by: p.reposted_by.clone(), media, failed_media: vec![], thread_error: None, replies }
+    SavedPost { thread, reposted_by: p.reposted_by.clone(), media, failed_media: vec![], thread_error: None, replies, root: None }
 }

@@ -200,7 +200,7 @@ pub(crate) fn size_text(n: usize) -> String {
 const OUTSIDE_CHOICES: [(&str, &str, Choice, &str); 2] =
     [("copy", "Copy into the vault", Choice::Copy, "A copy goes to the media folder (z_media/)"), ("link", "Link where it is", Choice::Link, "The note links the file where it is; nothing is copied")];
 
-/// "Continues [[note]]" of a mail that answers a note of the vault (IMP-068): the tick box, the
+/// "Continues [[note]]" of a mail or post that answers a note of the vault (IMP-068, SOC-071): the tick box, the
 /// choice when several notes qualify and, when the mail is older than a note of its thread, the
 /// question "Keep the thread in date order?" (IMP-071). True when the choice that decides the
 /// folder changed (IMP-069).
@@ -209,7 +209,7 @@ fn continues_line(ui: &mut Ui, i: usize, c: &mut import::Continues, rec: &mut im
     let (was_on, was) = (c.on, c.chosen);
     ui.horizontal_wrapped(|ui| {
         rec(format!("continues:{i}"), ui.checkbox(&mut c.on, egui::RichText::new("Continues").size(12.5)))
-            .on_hover_text("Found by the reply headers of the mail (In-Reply-To, References). Ticked: the new note is linked into the thread (previous and next) and goes in the folder of that note. Unticked: it gets its ids only and no other note is touched");
+            .on_hover_text("Found by the reply headers of the mail or the reply ids of the post (never the subject or the text). Ticked: the new note is linked into the thread (previous and next) and goes in the folder of that note. Unticked: it gets its ids only and no other note is touched");
         if c.candidates.len() > 1 {
             let label = c.anchor().map(name).unwrap_or_default();
             egui::ComboBox::from_id_salt(format!("continues-pick:{i}")).selected_text(format!("[[{label}]]")).show_ui(ui, |ui| {
@@ -226,10 +226,10 @@ fn continues_line(ui: &mut Ui, i: usize, c: &mut import::Continues, rec: &mut im
             let n = plan.changes();
             ui.horizontal_wrapped(|ui| {
                 ui.label(egui::RichText::new(format!("Keep the thread in date order? This changes the previous and next of {n} note{}.", if n == 1 { "" } else { "s" })).size(12.0).color(theme::palette().muted));
-                if rec(format!("continues-update:{i}"), ui.selectable_label(c.update, "Update")).on_hover_text("Insert the mail at its place: it gets both links and its neighbours get a new next / previous line").clicked() {
+                if rec(format!("continues-update:{i}"), ui.selectable_label(c.update, "Update")).on_hover_text("Insert it at its place: it gets both links and its neighbours get a new next / previous line").clicked() {
                     c.update = true;
                 }
-                if rec(format!("continues-leave:{i}"), ui.selectable_label(!c.update, "Leave the chain")).on_hover_text("Write the mail without previous and next; no other note is touched").clicked() {
+                if rec(format!("continues-leave:{i}"), ui.selectable_label(!c.update, "Leave the chain")).on_hover_text("Write it without previous and next; no other note is touched").clicked() {
                     c.update = false;
                 }
             });
