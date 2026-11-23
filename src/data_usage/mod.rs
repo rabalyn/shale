@@ -221,7 +221,7 @@ pub fn clear(id: CacheId, places: &Places, mail: Option<(&MailStore, &Cancel)>) 
 }
 
 /// What a rebuild of the mail index that Cancel stopped reports (USE-012).
-pub const REBUILD_CANCELLED: &str = "the rebuild was stopped; the message files not read yet are indexed the next time the mail store opens, or by another rebuild";
+pub const REBUILD_CANCELLED: &str = "the rebuild was stopped; the folders it had not reached keep their messages as they were, and another rebuild goes on with them";
 
 /// Empty the debug log in place: a recording that is on goes on appending to it (USE-016).
 fn empty_log(path: &std::path::Path) -> Result<Freed, String> {
