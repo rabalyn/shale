@@ -11,6 +11,7 @@ How they work: [ADR-0001](../decisions/0001-spec-driven-development.md).
 | [tex-export.md](tex-export.md) | PDF export through LaTeX templates, the managed TeX Live, template sets, the test stack | TEX |
 | [book-export.md](book-export.md) | A folder, up to the vault, as one PDF: the folder convention, the book layout, the dialog and `--export-pdf` | BOOK |
 | [word-export.md](word-export.md) | A note as a Word file through pandoc: the dialog, the filter, the reference document, finishing the file | DOCX |
+| [web-clipper.md](web-clipper.md) | The browser extension that saves a page or selection into the vault: native host and spool, capture, conversion, images, clip target | CLIP |
 | [social.md](social.md) | Mastodon and Bluesky feeds, saving posts as notes | SOC |
 | [updates.md](updates.md) | Checking GitHub releases, the checksum, notify / download / install, the install kinds, restart | UPD |
 | [engineering.md](engineering.md) | Forge and work tracking, development rules, build and release, background jobs, performance | FORGE, DEV, BUILD, JOB, PERF |
