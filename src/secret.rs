@@ -474,7 +474,7 @@ mod tests {
         assert_eq!(moved.raw().as_ptr(), addr);
     }
 
-    // spec: SEC-014
+    // spec: SEC-014, SEC-015
     #[test]
     fn an_insert_beyond_the_capacity_is_refused() {
         let cap = page_size();
@@ -487,7 +487,7 @@ mod tests {
         assert_eq!(s.raw().len(), cap);
     }
 
-    // spec: SEC-014
+    // spec: SEC-014, SEC-015
     #[test]
     fn inserting_and_deleting_in_the_middle_handles_multibyte_text() {
         let mut s = Secret::new("aöb");
@@ -503,7 +503,7 @@ mod tests {
         assert_eq!(s.expose(), "a!");
     }
 
-    // spec: SEC-014
+    // spec: SEC-014, SEC-015
     #[test]
     fn deleting_zeroes_the_freed_tail() {
         let mut s = Secret::new("hunter2-hunter2");
@@ -515,7 +515,7 @@ mod tests {
         assert!(s.raw().iter().all(|b| *b == 0));
     }
 
-    // spec: SEC-014
+    // spec: SEC-014, SEC-015
     #[test]
     fn replace_with_works_in_place_and_refuses_a_text_that_does_not_fit() {
         let mut s = Secret::new("a-longer-old-secret");
@@ -560,7 +560,7 @@ mod tests {
         assert_eq!(format!("{:?}", Some(&s)), "Some(Secret(***))");
     }
 
-    // spec: SEC-003
+    // spec: SEC-003, SEC-014
     #[test]
     fn it_is_a_plain_string_in_json_and_back() {
         let s = Secret::new("p\"w\u{e4}");
@@ -594,7 +594,7 @@ mod tests {
         assert!(Secret::default().is_empty());
     }
 
-    // spec: SEC-014, SEC-018
+    // spec: SEC-014, SEC-018, SEC-023
     #[test]
     fn a_buffer_is_locked_when_the_system_lets_it_and_still_works_when_not() {
         let before = lock_failures();
@@ -611,6 +611,19 @@ mod tests {
         assert_eq!(s.expose(), "abc", "an unlocked secret works the same");
         typed(&mut s, "def");
         assert_eq!(s.expose(), "abcdef");
+        drop(s);
+    }
+
+    // spec: SEC-018
+    #[test]
+    fn a_failed_lock_is_told_once_in_a_debug_build_and_never_in_a_release_build() {
+        fail_locks_on_this_thread(true);
+        let before = lock_failures();
+        let s = Secret::new("abc");
+        fail_locks_on_this_thread(false);
+        assert!(lock_failures() > before);
+        // the note is printed by the first failure of the run (other tests may have been first)
+        assert_eq!(LOCK_FAILURE_TOLD.load(Ordering::Relaxed), cfg!(debug_assertions));
         drop(s);
     }
 
@@ -650,7 +663,7 @@ mod tests {
         harden_process(true).unwrap();
     }
 
-    // spec: SEC-019
+    // spec: SEC-019, SEC-023
     #[cfg(target_os = "linux")]
     #[test]
     fn harden_process_makes_a_release_process_not_dumpable() {

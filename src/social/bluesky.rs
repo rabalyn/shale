@@ -1345,7 +1345,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // spec: SOC-063, SOC-066, SOC-067
+    // spec: SOC-063, SOC-066, SOC-067, SEC-026
     #[test]
     fn a_video_is_one_per_post_not_with_pictures_and_bluesky_refuses_polls_and_times() {
         let video = Some(DraftVideo { path: "a.mp4".into(), alt: String::new() });
@@ -1521,6 +1521,7 @@ mod tests {
         assert_eq!(r.iter().map(|r| (r.post.text_markdown.as_str(), r.depth)).collect::<Vec<_>>(), [("post c1", 0), ("post a9", 1), ("post c2", 0)]);
     }
 
+    // spec: SEC-016
     #[test]
     fn sessions_do_not_show_their_tokens() {
         let s = Session { pds: "https://p".into(), did: "did:plc:a".into(), handle: "a".into(), access_jwt: "jwt-secret-1".into(), refresh_jwt: "jwt-secret-2".into() };

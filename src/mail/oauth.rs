@@ -1104,7 +1104,7 @@ mod tests {
         assert!(matches!(r.wait_for_code(&cancel, Duration::from_secs(10)), Err(OAuthError::Denied(t)) if t.contains("cancelled")));
     }
 
-    // spec: MAIL-084, MAIL-082
+    // spec: MAIL-084, MAIL-082, SEC-017
     #[test]
     fn sasl_responses_follow_the_specifications() {
         assert_eq!(*xoauth2_response("someuser@example.com", "ya29.vF9dft4qmTc2Nvb3RlckBhbHRhdmlzdGEuY29tCg"), b"user=someuser@example.com\x01auth=Bearer ya29.vF9dft4qmTc2Nvb3RlckBhbHRhdmlzdGEuY29tCg\x01\x01".to_vec());
@@ -1136,7 +1136,7 @@ mod tests {
         assert!(!format!("{cfg:?}").contains("SECRET-CS"));
     }
 
-    // spec: MAIL-082
+    // spec: MAIL-082, SEC-016
     #[test]
     fn token_answers_are_read_and_errors_are_told_apart() {
         let t = parse_token_response(200, r#"{"access_token":"at","token_type":"Bearer","expires_in":3599,"refresh_token":"rt","scope":"mail"}"#, false).unwrap();

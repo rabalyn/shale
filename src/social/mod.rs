@@ -922,6 +922,7 @@ pub(crate) mod tests {
         assert_eq!(file_name_from_url("https://files.m.test/", "x.jpg"), "x.jpg");
     }
 
+    // spec: SEC-016
     #[test]
     fn network_names_and_debug_redaction() {
         assert_eq!(Network::Bluesky.key(), "bluesky");
