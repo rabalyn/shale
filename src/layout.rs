@@ -339,13 +339,20 @@ impl ShaleApp {
                         })
                     });
                     if !self.cfg.vaults.entries().is_empty() {
+                        self.check_vault_folders();
                         ui.add_space(12.0);
                         ui.label(muted("Recent vaults"));
                         for e in self.cfg.vaults.entries().to_vec() {
                             let shown = self.cfg.vaults.label(&e);
                             // a vault whose folder is missing is greyed out and does not open (VAULT-038)
-                            let present = e.path.is_dir();
-                            let link = if present { egui::Link::new(shown) } else { egui::Link::new(egui::RichText::new(format!("{shown} (folder missing)")).color(theme::palette().muted)) };
+                            // (the answer comes from a worker, once: not a look at the disk in every frame)
+                            let state = self.presence.is_missing(&e.path);
+                            let present = state == Some(false);
+                            let link = match state {
+                                Some(false) => egui::Link::new(shown),
+                                Some(true) => egui::Link::new(egui::RichText::new(format!("{shown} (folder missing)")).color(theme::palette().muted)),
+                                None => egui::Link::new(egui::RichText::new(format!("{shown} (checking…)")).color(theme::palette().muted)),
+                            };
                             if ui.add_enabled(present && !self.vault_load.is_loading(), link).on_hover_text(e.path.to_string_lossy()).clicked() {
                                 self.actions.push(Action::OpenVault(e.path));
                             }

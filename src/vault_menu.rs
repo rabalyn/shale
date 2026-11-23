@@ -10,15 +10,16 @@ use crate::layout::shellexpand;
 use crate::picker::ListKeys;
 use crate::theme;
 use eframe::egui::{self, Context, Key, Ui};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{Receiver, TryRecvError};
+use std::sync::Arc;
 
 /// What a vault dialog shows.
 pub enum VaultModal {
-    /// the list of the known vaults; `missing` are the paths whose folder is not there, looked up when
-    /// the list opens and not on every frame (a share may take long to answer)
+    /// the list of the known vaults
     Menu {
         sel: usize,
-        missing: Vec<PathBuf>,
     },
     Folder(Box<FolderPicker>),
     /// the name of a vault (VAULT-032)
@@ -99,6 +100,85 @@ pub fn is_empty_folder(dir: &Path) -> std::io::Result<bool> {
     Ok(true)
 }
 
+/// A running look-up: the folders asked about and the answers to come.
+type Lookup = (Vec<PathBuf>, Receiver<Result<Vec<bool>, String>>);
+
+/// Whether the folders of the known vaults are there (VAULT-038). A folder on an unreachable share
+/// can take seconds to answer, so the look-up runs on a worker thread, once per folder: the
+/// answer is kept until [`Presence::clear`], and until it has come the folder is "checking".
+pub struct Presence {
+    /// true: the folder is there
+    known: HashMap<PathBuf, bool>,
+    job: Option<Lookup>,
+    checker: Arc<dyn Fn(&Path) -> bool + Send + Sync>,
+}
+
+impl Default for Presence {
+    fn default() -> Self {
+        Self { known: HashMap::new(), job: None, checker: Arc::new(|p| p.is_dir()) }
+    }
+}
+
+impl Presence {
+    /// `Some(true)`: the folder is missing; `None`: not looked up yet.
+    pub fn is_missing(&self, path: &Path) -> Option<bool> {
+        self.known.get(path).map(|there| !there)
+    }
+
+    /// Forget the answers: the next [`Presence::request`] looks again (a drive may be mounted by now).
+    pub fn clear(&mut self) {
+        self.known.clear();
+    }
+
+    /// Whether a look-up runs (the headless tests wait for it, DEV-041).
+    #[cfg(test)]
+    pub(crate) fn pending(&self) -> bool {
+        self.job.is_some()
+    }
+
+    /// Take in the answer of the running look-up.
+    pub fn poll(&mut self) {
+        let Some((paths, rx)) = &self.job else { return };
+        let answer = match rx.try_recv() {
+            Ok(r) => r,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => Err("stopped".to_string()),
+        };
+        // a look-up that crashed counts as "there": the folder is tried when it is opened
+        let there = answer.unwrap_or_else(|_| vec![true; paths.len()]);
+        for (p, t) in paths.iter().zip(there) {
+            self.known.insert(p.clone(), t);
+        }
+        self.job = None;
+    }
+
+    /// Start a look-up for the folders that have no answer yet, unless one runs.
+    pub fn request(&mut self, wanted: impl Iterator<Item = PathBuf>, ctx: Option<Context>) {
+        if self.job.is_some() {
+            return;
+        }
+        let todo: Vec<PathBuf> = wanted.filter(|p| !self.known.contains_key(p)).collect();
+        if todo.is_empty() {
+            return;
+        }
+        let (check, paths) = (self.checker.clone(), todo.clone());
+        let rx = crate::jobs::spawn(
+            move || paths.iter().map(|p| check(p)).collect::<Vec<bool>>(),
+            move || {
+                if let Some(c) = ctx {
+                    c.request_repaint();
+                }
+            },
+        );
+        self.job = Some((todo, rx));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_checker(&mut self, f: impl Fn(&Path) -> bool + Send + Sync + 'static) {
+        self.checker = Arc::new(f);
+    }
+}
+
 /// What a vault dialog does next.
 enum Next {
     Keep,
@@ -109,20 +189,28 @@ enum Next {
 impl ShaleApp {
     /// Open the dropdown: the open vault is the selected line.
     pub(crate) fn open_vault_menu(&mut self) {
+        // the folders are looked at again: one may be back, or gone
+        self.presence.clear();
         self.modal = Some(Modal::Vaults(Box::new(self.vault_menu())));
+    }
+
+    /// Look up the folders of the known vaults that have no answer yet (VAULT-038).
+    pub(crate) fn check_vault_folders(&mut self) {
+        let wanted = self.cfg.vaults.entries().iter().map(|e| e.path.clone());
+        self.presence.request(wanted, self.ctx.clone());
     }
 
     fn vault_menu(&self) -> VaultModal {
         let open = self.vault.as_ref().map(|v| canonical(&v.root));
         let entries = self.cfg.vaults.entries();
         let sel = open.and_then(|o| entries.iter().position(|e| e.path == o)).unwrap_or(0);
-        VaultModal::Menu { sel, missing: entries.iter().filter(|e| !e.path.is_dir()).map(|e| e.path.clone()).collect() }
+        VaultModal::Menu { sel }
     }
 
     /// The dialog of `m`; false when it is done.
     pub(crate) fn vault_modal(&mut self, ctx: &Context, m: &mut VaultModal) -> bool {
         let next = match m {
-            VaultModal::Menu { sel, missing } => self.vault_menu_dialog(ctx, sel, missing),
+            VaultModal::Menu { sel } => self.vault_menu_dialog(ctx, sel),
             VaultModal::Folder(p) => self.folder_dialog(ctx, p),
             VaultModal::Rename { path, name, error } => self.vault_rename_dialog(ctx, path, name, error),
         };
@@ -136,7 +224,8 @@ impl ShaleApp {
         }
     }
 
-    fn vault_menu_dialog(&mut self, ctx: &Context, sel: &mut usize, missing: &[PathBuf]) -> Next {
+    fn vault_menu_dialog(&mut self, ctx: &Context, sel: &mut usize) -> Next {
+        self.check_vault_folders();
         let entries: Vec<KnownVault> = self.cfg.vaults.entries().to_vec();
         let labels: Vec<String> = entries.iter().map(|e| self.cfg.vaults.label(e)).collect();
         let open = self.vault.as_ref().map(|v| canonical(&v.root));
@@ -156,12 +245,15 @@ impl ShaleApp {
                 ui.label(muted("No vaults yet."));
             }
             for (i, e) in entries.iter().enumerate() {
-                let (is_open, is_missing) = (open.as_ref() == Some(&e.path), missing.contains(&e.path));
+                // (None: the look-up has not answered yet; the entry cannot be opened until it has)
+                let (is_open, state) = (open.as_ref() == Some(&e.path), self.presence.is_missing(&e.path));
+                let is_missing = state == Some(true);
+                let usable = state == Some(false);
                 ui.horizontal(|ui| {
                     let shown = if is_open { format!("✓ {}", labels[i]) } else { format!("   {}", labels[i]) };
-                    let text = if is_missing { egui::RichText::new(shown).color(theme::palette().muted) } else { egui::RichText::new(shown) };
+                    let text = if !usable { egui::RichText::new(shown).color(theme::palette().muted) } else { egui::RichText::new(shown) };
                     let r = ui.selectable_label(i == *sel, text).on_hover_text(e.path.to_string_lossy());
-                    if r.clicked() && !is_missing {
+                    if r.clicked() && usable {
                         pick = Some(i);
                     }
                     r.context_menu(|ui| {
@@ -170,6 +262,9 @@ impl ShaleApp {
                             ui.close();
                         }
                     });
+                    if state.is_none() {
+                        ui.label(muted("checking…"));
+                    }
                     if is_missing {
                         ui.label(muted("folder missing"));
                         if ui.button("Locate…").clicked() {
@@ -197,7 +292,7 @@ impl ShaleApp {
             *sel = p;
             match p {
                 p if p < entries.len() => {
-                    if !missing.contains(&entries[p].path) {
+                    if self.presence.is_missing(&entries[p].path) == Some(false) {
                         // the open vault stays as it is
                         if open.as_ref() != Some(&entries[p].path) {
                             self.actions.push(Action::OpenVault(entries[p].path.clone()));

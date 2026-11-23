@@ -80,6 +80,8 @@ impl W {
     fn open_dropdown(&mut self) {
         let label = self.hl.text.iter().find(|(t, _)| t.starts_with("▣  ") && t.ends_with("  ▾")).map(|(t, _)| t.clone()).expect("the vault label");
         self.click_text(&label);
+        // the folders are looked up on a worker: wait for the answers
+        self.settle();
         assert!(matches!(self.app.modal, Some(Modal::Vaults(_))), "the label opens the dropdown");
     }
 
@@ -300,8 +302,10 @@ fn vault_038_a_vault_whose_folder_is_missing_is_greyed_out_and_is_never_created(
     assert!(!w.dir("two").exists(), "the folder is not made");
     // nor by another way in
     w.app.open_vault_in_background(&w.dir("two"), crate::app::vault_load::After::Nothing);
-    assert!(!w.app.vault_load.is_loading() && !w.dir("two").exists());
-    assert!(w.toasted("is missing"), "{:?}", w.app.toasts);
+    w.settle();
+    assert!(!w.app.vault_load.is_loading() && !w.dir("two").exists(), "the load fails and does not make the folder");
+    assert_eq!(w.root(), Some(w.dir("one")), "the open vault stays");
+    assert!(w.toasted("its folder is missing"), "{:?}", w.app.toasts);
     // Rename works as for any entry
     w.click("two", PointerButton::Secondary);
     assert!(w.painted("Rename"));
@@ -316,7 +320,7 @@ fn vault_038_forget_removes_the_entry_and_leaves_the_folder() {
     w.click_text("Forget");
     assert_eq!(w.names(), ["one"]);
     assert!(w.dir("moved").is_dir(), "no folder was touched");
-    assert!(matches!(&w.app.modal, Some(Modal::Vaults(m)) if matches!(&**m, VaultModal::Menu { missing, .. } if missing.is_empty())), "the list is shown again");
+    assert!(matches!(&w.app.modal, Some(Modal::Vaults(m)) if matches!(&**m, VaultModal::Menu { .. })), "the list is shown again");
     assert!(!w.painted("Forget"));
 }
 
@@ -402,4 +406,63 @@ fn only_written(dir: &std::path::Path) -> Vec<String> {
         names.extend(d.flatten().map(|e| format!(".shale/{}", e.file_name().to_string_lossy())).filter(|n| n != ".shale/tag-words.json"));
     }
     names
+}
+
+// spec: VAULT-038
+#[test]
+fn vault_038_the_folders_are_looked_up_once_on_a_worker_and_not_in_every_frame() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+    let mut w = W::new("presence");
+    let (calls, threads) = (Arc::new(AtomicUsize::new(0)), Arc::new(Mutex::new(Vec::new())));
+    let (c, t) = (calls.clone(), threads.clone());
+    w.app.presence.with_checker(move |p| {
+        c.fetch_add(1, Ordering::SeqCst);
+        t.lock().unwrap().push(std::thread::current().id());
+        p.is_dir()
+    });
+    // the start screen: no vault is open
+    w.app.presence.clear();
+    w.app.vault = None;
+    w.hl.frames(&mut w.app, 3);
+    w.settle();
+    w.hl.frames(&mut w.app, 30);
+    assert_eq!(calls.load(Ordering::SeqCst), 2, "one look-up for each of the two known vaults, however many frames");
+    assert!(threads.lock().unwrap().iter().all(|id| *id != std::thread::current().id()), "not on the UI thread");
+    assert!(w.painted("two"), "{:?}", w.all_text());
+    // the dropdown looks again when it is opened, and once
+    w.app.open_vault(&w.dir("one"));
+    w.settle();
+    let before = calls.load(Ordering::SeqCst);
+    w.open_dropdown();
+    w.hl.frames(&mut w.app, 30);
+    assert_eq!(calls.load(Ordering::SeqCst) - before, 2, "again when the list opens, not in every frame");
+}
+
+// spec: VAULT-038
+#[test]
+fn vault_038_a_folder_that_has_not_been_looked_up_yet_is_checking_and_cannot_be_opened() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    let mut w = W::new("checking");
+    let gate = Arc::new(AtomicBool::new(false));
+    let g = gate.clone();
+    w.app.presence.with_checker(move |p| {
+        while !g.load(Ordering::SeqCst) {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        p.is_dir()
+    });
+    let label = "▣  one  ▾";
+    w.click_text(label);
+    w.hl.frames(&mut w.app, 3);
+    assert!(w.painted("checking…"), "{:?}", w.all_text());
+    w.click_text("two");
+    assert!(w.app.modal.is_some() && !w.app.vault_load.is_loading(), "a click waits for the answer");
+    gate.store(true, Ordering::SeqCst);
+    w.settle();
+    assert!(!w.painted("checking…"));
+    w.click_text("two");
+    w.settle();
+    assert_eq!(w.root(), Some(w.dir("two")));
 }

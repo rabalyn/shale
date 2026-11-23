@@ -414,6 +414,8 @@ pub struct ShaleApp {
     pub vault: Option<Vault>,
     /// the vault being read on a worker thread, behind the start screen's spinner (NET-019)
     pub vault_load: vault_load::VaultLoad,
+    /// which known vaults have their folder (VAULT-038), looked up off the UI thread
+    pub presence: crate::vault_menu::Presence,
     /// the open tabs, the active one and what the tab bar drew last frame
     pub tabbar: tabs::TabBar,
     /// the panes of the middle area; `tabbar` is the tab bar of the focused one (NAV-032)
@@ -674,6 +676,7 @@ impl ShaleApp {
             sync: sync::SyncState::with_managed(crate::gitsync::install_ui::ManagedState::new(persist, &tag)),
             vault: None,
             vault_load: Default::default(),
+            presence: Default::default(),
             tabbar: tabs::TabBar::new(),
             panes: panes::Panes::new(),
             notes: HashMap::new(),
@@ -982,6 +985,8 @@ impl ShaleApp {
         self.notes.clear();
         self.drawings.clear();
         self.tabbar.active = 0;
+        // the folders are looked at again the next time the list is shown
+        self.presence.clear();
         if known {
             // a folder that is new to the list and lies in or around another vault: warned once (VAULT-039)
             let nesting = if self.cfg.vaults.contains(path) { None } else { self.cfg.vaults.nested_with(path, None) };
@@ -3155,6 +3160,7 @@ impl ShaleApp {
             ui.ctx().request_repaint_after(Duration::from_millis(250));
         }
         self.vault_load_tick(ui.ctx());
+        self.presence.poll();
         self.rescan_tick(ui.ctx());
         if self.notes.values().any(|d| d.dirty) || self.drawings.values().any(|d| d.dirty) {
             ui.ctx().request_repaint_after(Duration::from_millis(300));
