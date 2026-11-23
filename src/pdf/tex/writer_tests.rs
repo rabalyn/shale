@@ -320,7 +320,7 @@ fn the_table_of_contents_is_there_when_asked_for_and_the_kind_has_one() {
     let note = "# A\ntext\n## B\n";
     let tex = |kind_id: &str, toc: bool| doc_with(note, kind_id, &ExportOptions { toc, ..ExportOptions::for_note() }, &[("author", "A"), ("recipient", "R")], &[]).unwrap().tex;
     let on = tex("pub", true);
-    assert!(body_of(&on).starts_with("\\maketitle\n\\tableofcontents\n") && on.contains("\\setcounter{tocdepth}{3}\n"), "{on}");
+    assert!(body_of(&on).starts_with("\\maketitle\n\\tableofcontents\n\\newpage\n\n") && on.contains("\\setcounter{tocdepth}{3}\n"), "{on}");
     assert!(tex("thesis", true).contains("\\setcounter{tocdepth}{2}\n"), "chapter, section, subsection");
     assert!(!tex("pub", false).contains("tableofcontents") && !tex("pub", false).contains("tocdepth"));
     for k in ["beamer", "letter", "poster", "sciposter", "leaflet", "announcement"] {
@@ -328,6 +328,26 @@ fn the_table_of_contents_is_there_when_asked_for_and_the_kind_has_one() {
     }
     assert!(!doc_with("no headings\n", "pub", &ExportOptions::for_note(), &[("author", "A")], &[]).unwrap().tex.contains("tableofcontents"), "an empty list is not printed");
     assert!(on.contains("\\hypersetup{bookmarksdepth=5}"), "the bookmarks of the PDF reach every level");
+}
+
+// spec: TEX-040, TEX-009
+#[test]
+fn a_page_break_follows_the_table_of_contents_unless_asked_otherwise_and_is_not_doubled() {
+    let body = |note: &str, kind_id: &str, opts: &ExportOptions| body_of(&doc_with(note, kind_id, opts, &[("author", "A")], &[]).unwrap().tex);
+    let note = "# A\ntext\n## B\n";
+    for kind_id in ["pub", "thesis"] {
+        let on = body(note, kind_id, &ExportOptions::for_note());
+        assert!(on.starts_with("\\maketitle\n\\tableofcontents\n\\newpage\n\n"), "{kind_id}: {on}");
+        let off = body(note, kind_id, &ExportOptions { toc_break: false, ..ExportOptions::for_note() });
+        assert!(off.contains("\\tableofcontents\n") && !off.contains("\\newpage"), "{kind_id}: {off}");
+    }
+    // the note's `print-toc-page-break` is what the dialog starts from
+    let said = ExportOptions::for_note().with_note_properties("---\nprint-toc-page-break: false\n---\n# A\n");
+    assert!(!said.toc_break && !body(note, "pub", &said).contains("\\newpage"));
+    // no contents: no break; a page break of the note right after the contents is that break, not a second
+    assert!(!body(note, "pub", &ExportOptions { toc: false, ..ExportOptions::for_note() }).contains("\\newpage"));
+    let marked = body(&format!("{BREAK}\n# A\ntext\n"), "pub", &ExportOptions { break_before: 1, ..ExportOptions::for_note() });
+    assert_eq!(marked.matches("\\newpage").count(), 1, "{marked}");
 }
 
 // spec: TEX-012
@@ -739,7 +759,7 @@ const BREAK: &str = "<div style=\"page-break-after: always;\"></div>";
 fn a_page_break_marker_is_a_newpage_once_and_the_html_is_not_written() {
     let note = format!("# One\n\nbefore\n\n{BREAK}\n\nafter\n\n<div style='break-before: page'></div>\n\n```\n{BREAK}\n```\n\nlast\n");
     for kind in ["pub", "report"] {
-        let t = doc(&note, kind);
+        let t = doc_with(&note, kind, &ExportOptions { toc_break: false, ..ExportOptions::for_note() }, &[("author", "Ada")], &[]).unwrap().tex;
         assert_eq!(t.matches("\\newpage").count(), 2, "{kind}: one for each marker, none for the one in the code: {t}");
         assert_eq!(t.matches("<div").count(), 0, "{kind}: no raw HTML (the code's is escaped): {t}");
         assert!(!t.contains("break-before"), "{kind}: {t}");
@@ -748,7 +768,7 @@ fn a_page_break_marker_is_a_newpage_once_and_the_html_is_not_written() {
         assert!(b[at..].starts_with("before\n\n\\newpage\n\nafter"), "{kind}: {b}");
     }
     // markers one after the other are one new page, and one at the very end is written too
-    let t = doc(&format!("a\n{BREAK}\n{BREAK}\n\n{BREAK}\nb\n{BREAK}\n"), "pub");
+    let t = doc_with(&format!("a\n{BREAK}\n{BREAK}\n\n{BREAK}\nb\n{BREAK}\n"), "pub", &ExportOptions { toc_break: false, ..ExportOptions::for_note() }, &[("author", "Ada")], &[]).unwrap().tex;
     assert_eq!(t.matches("\\newpage").count(), 2, "{t}");
     // in slides and boxes the frames and boxes are the pages
     for kind in ["beamer", "sciposter"] {
@@ -794,7 +814,7 @@ fn an_alignment_wrapper_is_a_center_or_flushright_environment_and_the_html_is_no
 #[test]
 fn print_break_before_writes_a_newpage_before_the_headings_up_to_its_level_but_not_the_first_block() {
     let note = "# One\n\ntext\n\n## Sub\n\ntext\n\n### Deep\n\n# Two\n\ntext\n";
-    let at = |level: u8, kind: &str| doc_with(note, kind, &ExportOptions { break_before: level, ..ExportOptions::for_note() }, &[("author", "Ada")], &[]).unwrap().tex;
+    let at = |level: u8, kind: &str| doc_with(note, kind, &ExportOptions { break_before: level, toc_break: false, ..ExportOptions::for_note() }, &[("author", "Ada")], &[]).unwrap().tex;
     assert_eq!(at(0, "pub").matches("\\newpage").count(), 0);
     let one = at(1, "pub");
     assert_eq!(one.matches("\\newpage").count(), 1, "before Two only: {one}");
@@ -802,7 +822,7 @@ fn print_break_before_writes_a_newpage_before_the_headings_up_to_its_level_but_n
     assert_eq!(at(2, "pub").matches("\\newpage").count(), 2, "before Sub and Two");
     assert_eq!(at(6, "pub").matches("\\newpage").count(), 3);
     // a marker right before such a heading does not double it
-    let t = doc_with(&format!("a\n{BREAK}\n# One\nb\n# Two\n"), "pub", &ExportOptions { break_before: 1, ..ExportOptions::for_note() }, &[("author", "Ada")], &[]).unwrap().tex;
+    let t = doc_with(&format!("a\n{BREAK}\n# One\nb\n# Two\n"), "pub", &ExportOptions { break_before: 1, toc_break: false, ..ExportOptions::for_note() }, &[("author", "Ada")], &[]).unwrap().tex;
     assert_eq!(t.matches("\\newpage").count(), 2, "{t}");
     // slides and the like have their own pages
     assert_eq!(at(1, "beamer").matches("\\newpage").count(), 0);

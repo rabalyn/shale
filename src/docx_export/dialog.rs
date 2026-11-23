@@ -31,6 +31,8 @@ pub struct DocxDialog {
     pub original: Option<PathBuf>,
     pub use_original: bool,
     pub toc: bool,
+    /// a page break after the table of contents (DOCX-013)
+    pub toc_break: bool,
     pub open_after: bool,
     pub error: Option<String>,
     job: Option<Running>,
@@ -46,8 +48,8 @@ pub enum DialogResult {
 }
 
 impl DocxDialog {
-    pub fn new(rel: PathBuf, name: String, path: PathBuf, pandoc: Option<PathBuf>, original: Option<PathBuf>, toc: bool) -> Self {
-        DocxDialog { rel, name, path: path.to_string_lossy().into_owned(), pandoc, use_original: original.is_some(), original, toc, open_after: false, error: None, job: None, rects: vec![] }
+    pub fn new(rel: PathBuf, name: String, path: PathBuf, pandoc: Option<PathBuf>, original: Option<PathBuf>, toc: bool, toc_break: bool) -> Self {
+        DocxDialog { rel, name, path: path.to_string_lossy().into_owned(), pandoc, use_original: original.is_some(), original, toc, toc_break, open_after: false, error: None, job: None, rects: vec![] }
     }
 
     pub fn working(&self) -> bool {
@@ -96,6 +98,7 @@ pub fn show(ui: &mut Ui, d: &mut DocxDialog) {
                     rec("use-original", ui.checkbox(&mut d.use_original, "Use the original Word file as the template")).on_hover_text(hint);
                 }
                 rec("toc", ui.checkbox(&mut d.toc, "Table of contents"));
+                ui.add_enabled_ui(d.toc, |ui| rec("toc-break", ui.checkbox(&mut d.toc_break, "Page break after the table of contents")));
             });
             ui.end_row();
         });

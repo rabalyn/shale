@@ -2136,12 +2136,13 @@ impl ShaleApp {
         self.flush_all();
         let Some(v) = &self.vault else { return };
         let name = dir.file_name().or_else(|| v.root.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Vault".to_string());
-        let opts = crate::pdf::export::ExportOptions { numbered_headings: self.cfg.numbered_headings, ..crate::pdf::export::ExportOptions::for_note() };
         let path = v.root.join("exports").join(format!("{name}.pdf"));
         let book = crate::pdf::book_dialog::BookExport::new(v, dir, &self.busy);
         let plan = book.plan.as_ref().ok();
         let title = plan.map(|p| p.title.clone()).unwrap_or_else(|| name.clone());
         let text = plan.and_then(|p| p.note.as_deref()).map(|n| self.note_text(n)).unwrap_or_default();
+        // the top folder note may say `print-toc-page-break` (BOOK-018)
+        let opts = crate::pdf::export::ExportOptions { numbered_headings: self.cfg.numbered_headings, ..crate::pdf::export::ExportOptions::for_note() }.with_toc_break_property(&text);
         let last = &self.vdata.state.latex_export;
         let noted = crate::pdf::tex::dialog::note_choice(&crate::markdown::front_matter_values(&text));
         let engine = if noted.is_some() || last.latex { ExportEngine::Latex } else { ExportEngine::Builtin };

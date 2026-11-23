@@ -229,6 +229,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
     each; anything else is ignored); they replace the usual proportions
   - `print-title`: `true` or `false`, the note's name as a title
   - `print-toc`: `true` or `false`, the contents page
+  - `print-toc-page-break` (#578, PDF-031): `true` (the default) or `false`; with `true` the text after the contents starts a new page
+    (the dialogs of the PDF, LaTeX, Word and folder-book exports have the box "Page break after the table of contents")
   - `print-break-before`: a heading level 1 to 6; every heading up to that level starts a new page
     (`1`: every `#`; the dialog has a box "Start each # heading on a new page" for it)
   - **Paper look** (#367): a note with any of these keys is printed plainly: list marks and quotes in the text
@@ -918,7 +920,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 - **Export to Word** (DOCX-001 to DOCX-010, rabalyn/shale#487): a note's ⋯ menu and its context menu in the file list have **Export to Word…**,
   the reverse of the Word import, by the same `pandoc` (the Word import setting need not be on). The dialog saves to `<vault>/exports/<name>.docx`
   and has the boxes **Use the original Word file as the template** (for a note imported with its original kept, its `source:` property),
-  **Table of contents** and **Open the file afterwards**; the export is a background job that Cancel stops, and nothing is written when it
+  **Table of contents**, **Page break after the table of contents** (on; DOCX-013) and **Open the file afterwards**; the export is a background job that Cancel stops, and nothing is written when it
   fails. Shale cleans the note's text (front matter off, embeds by their vault path), pandoc reads it with commonmark and a Lua filter of
   Shale's (highlights, text and background colours, underline, sub- and superscript, strike-through, line breaks, links to notes as their words,
   pictures as wide as in the editor with their captions as alternative text, page breaks, alignment wrappers, the import's title block as Word's

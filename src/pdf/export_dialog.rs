@@ -90,6 +90,14 @@ pub(crate) fn break_before_box(ui: &mut Ui, opts: &mut ExportOptions, enabled: b
     });
 }
 
+/// The box "Page break after the table of contents" (PDF-031), on by default: greyed while there is no
+/// table of contents (`enabled` false: the box is off or the kind of document has none).
+pub(crate) fn toc_break_box(ui: &mut Ui, opts: &mut ExportOptions, enabled: bool, rec: &mut dyn FnMut(&str, egui::Response) -> egui::Response) {
+    ui.add_enabled_ui(enabled, |ui| {
+        rec("toc-break", ui.checkbox(&mut opts.toc_break, "Page break after the table of contents")).on_disabled_hover_text("There is no table of contents");
+    });
+}
+
 pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
     d.rects.clear();
     let mut rects: Vec<(String, Rect)> = Vec::new();
@@ -213,6 +221,8 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
             ui.vertical(|ui| {
                 rec("title", ui.checkbox(&mut d.opts.title, if d.book.is_some() { "Title page" } else { "The note's name as a title" }));
                 rec("toc", ui.checkbox(&mut d.opts.toc, "Table of contents"));
+                let on = d.opts.toc;
+                toc_break_box(ui, &mut d.opts, on, &mut rec);
                 if d.book.is_some() {
                     rec("new-page-each", ui.checkbox(&mut d.opts.new_page_each, "Each note on a new page"));
                 }
@@ -421,5 +431,30 @@ mod tests {
         // a drawing has no headings, a folder as a book has its own page rules (BOOK-005)
         let (_, d) = setup(true);
         assert!(!has(&d, "break-before"));
+    }
+
+    // spec: PDF-031
+    #[test]
+    fn the_dialog_has_a_box_for_the_page_break_after_the_table_of_contents_filled_from_the_note_pdf_031() {
+        let (mut h, mut d) = setup(false);
+        assert!(d.rects.iter().any(|r| r.0 == "toc-break") && d.opts.toc_break, "there, and on by default");
+        h.click(&mut d, "toc-break");
+        assert!(!d.opts.toc_break);
+        h.click(&mut d, "toc-break");
+        assert!(d.opts.toc_break);
+        // the box belongs to the contents: with those off it is greyed and a click changes nothing
+        h.click(&mut d, "toc");
+        h.click(&mut d, "toc-break");
+        assert!(!d.opts.toc && d.opts.toc_break);
+        // a note that says no: the dialog opens with the box off
+        let opts = ExportOptions::for_note().with_note_properties("---\nprint-toc-page-break: false\n---\nx");
+        let mut d = ExportDialog::new(PathBuf::from("x.md"), false, "X".into(), opts, PathBuf::from("/tmp/x.pdf"));
+        let mut h = H { ctx: egui::Context::default(), t: 0.0, last: DialogResult::Open };
+        h.frame(&mut d, vec![]);
+        h.frame(&mut d, vec![]);
+        assert!(!d.opts.toc_break);
+        // a drawing has no contents and so no such box
+        let (_, d) = setup(true);
+        assert!(!d.rects.iter().any(|r| r.0 == "toc-break"));
     }
 }

@@ -172,6 +172,10 @@ fn write_book_in_shale(req: &BookRequest) -> Result<Document, String> {
     let mut main = String::from("\\maketitle\n");
     if toc {
         main.push_str("\\tableofcontents\n");
+        // the top folder note's text starts a page; a chapter starts one anyway and does not make a second (BOOK-018)
+        if req.opts.toc_break {
+            main.push_str(super::body::NEW_PAGE);
+        }
     }
     for s in &secs {
         match s.role {
