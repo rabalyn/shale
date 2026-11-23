@@ -119,6 +119,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 - Type `[[` to get matching notes; ↑/↓ or Ctrl+J/Ctrl+K move through the list, Enter, Tab or a
   click picks an entry, and the last entry creates a new note. Esc closes the list.
+- Type `#` and a letter (or a word in the `tags:` property at the top of a note) to get the vault's
+  tags that match, best match first: `#prj` finds `projects/shale`, nested tags included; ↑/↓ or
+  Ctrl+J/Ctrl+K choose, Enter, Tab or a click picks, Esc closes. Nothing opens in code, in a link, in
+  a URL or on a heading (EDIT-120).
 - Type `[!` to pick a file: `/` starts at the vault, `~/` at your home folder, and Tab completes
   like a shell; ↑/↓ or Ctrl+J/Ctrl+K choose, Enter or a click picks. A file from outside the vault is
   copied to `z_media/<year>/<month>/`, or (a picture, PDF, sound or video) linked where it is, or

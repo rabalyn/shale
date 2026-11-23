@@ -76,6 +76,8 @@ pub struct LinkAssist {
     /// the open list is the `[[p` people list
     ac_people: bool,
     pub(crate) media: MediaPicker,
+    /// the tag list for `#ta` and `tags:` (EDIT-120)
+    pub(crate) tags: crate::tag_assist::TagAssist,
     /// this frame: the `[[` entry picked by keyboard
     ac_pick: Option<usize>,
     /// this frame: the text going into the text box, and the picker state then
@@ -109,6 +111,7 @@ impl LinkAssist {
             ac_labels: vec![],
             ac_people: false,
             media: MediaPicker::default(),
+            tags: Default::default(),
             ac_pick: None,
             text_before: String::new(),
             picker_before: None,
@@ -122,7 +125,7 @@ impl LinkAssist {
 
     /// Is a suggestion list or the file picker open?
     pub fn is_open(&self) -> bool {
-        self.media.active || self.ac_active
+        self.media.active || self.ac_active || self.tags.active
     }
 
     /// Short description of the picker state (testing aid).
@@ -174,7 +177,8 @@ impl LinkAssist {
                 }
             });
         }
-        out.picking = self.ac_pick.is_some();
+        self.tags.take_keys(ui);
+        out.picking = self.ac_pick.is_some() || self.tags.pick.is_some();
 
         // `[!path` file picker: Tab completes, arrows choose, Enter picks, Esc closes.
         let home = dirs::home_dir().unwrap_or_default();
@@ -477,6 +481,8 @@ impl LinkAssist {
                 }
             }
         }
+        // --- #tag list (EDIT-120)
+        changed |= self.tags.after(ui, self.id, text, vault, output, typing);
         // While a suggestion popup is open, switch the desktop input method (IBus, Fcitx, dead
         // keys) off for this window: otherwise it may keep Esc and the arrow keys for itself and
         // hand Tab / Enter over as typed text.
@@ -752,12 +758,12 @@ impl LinkAssist {
 }
 
 /// ↓ or Ctrl+J in an open list: take the key, say whether it was pressed (EDIT-001, EDIT-002).
-fn down_key(i: &mut egui::InputState) -> bool {
+pub(crate) fn down_key(i: &mut egui::InputState) -> bool {
     i.consume_key(Modifiers::NONE, Key::ArrowDown) || i.consume_key(Modifiers::CTRL, Key::J)
 }
 
 /// ↑ or Ctrl+K in an open list.
-fn up_key(i: &mut egui::InputState) -> bool {
+pub(crate) fn up_key(i: &mut egui::InputState) -> bool {
     i.consume_key(Modifiers::NONE, Key::ArrowUp) || i.consume_key(Modifiers::CTRL, Key::K)
 }
 

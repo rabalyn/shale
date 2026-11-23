@@ -11,6 +11,12 @@ Tags are `#tag` in the text (nested `a/b` is fine, not inside links or code) or 
 front matter of a note, as the notes made by [[Import]] have. The task list filters
 by `#tag` ([[Tasks]]).
 
+While you write a tag, Shale lists the tags the vault already has: type `#` and a letter, or a word
+in the `tags:` property at the top of the note. The list is fuzzy and the best match is first: `#prj`
+finds `projects/shale`, and a tag that starts with what you typed comes before one that only has the
+letters. Up and Down choose, Enter or Tab pick, a click picks, Esc closes the list. It does not open
+in code, in a link, in a web address or on a heading (`# Title`).
+
 # Tags found automatically
 
 - Tags of the vault that are written in the imported text are set right away (`#lecture-hall-b`
