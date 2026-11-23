@@ -1185,6 +1185,7 @@ mod tests {
         assert_eq!((CryptoStandard::OpenPgp.program(), CryptoStandard::Smime.program()), ("gpg", "gpgsm"));
     }
 
+    // spec: MAIL-020
     #[test]
     fn mail_accounts_load_and_have_no_plain_text_mode() {
         let c: Config = serde_json::from_str(r#"{"mail_accounts": [{"id": "a1", "host": "imap.example.com", "user": "ada"}]}"#).unwrap();

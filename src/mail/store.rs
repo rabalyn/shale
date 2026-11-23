@@ -1223,7 +1223,7 @@ mod tests {
         assert_eq!(cut_text("abc", 10), "abc");
     }
 
-    // spec: MAIL-009
+    // spec: MAIL-009, MAIL-106
     #[test]
     fn nothing_here_deletes_a_message_file() {
         let sources = [include_str!("store.rs"), include_str!("imap_sync.rs"), include_str!("ops.rs")];
@@ -1235,6 +1235,7 @@ mod tests {
         }
     }
 
+    // spec: MAIL-013
     #[test]
     fn rebuilding_adopts_the_newest_uidvalidity_and_keeps_old_ones_as_local_copies() {
         let root = temp_root("uv");

@@ -819,7 +819,7 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
-    // spec: SEC-006
+    // spec: SEC-006, MAIL-054
     #[test]
     fn temp_copies_live_in_a_private_folder_and_are_checked() {
         let p = save_temp_copy("../../evil name.pdf", b"%PDF").unwrap();
@@ -881,6 +881,7 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    // spec: MAIL-054
     #[test]
     fn temp_names_are_made_safe() {
         assert_eq!(safe_name("a/b\\c.txt"), "a_b_c.txt");
