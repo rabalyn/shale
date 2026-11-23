@@ -4,7 +4,11 @@
 Format: [ADR-0001](../decisions/0001-spec-driven-development.md). Decisions and rejected alternatives:
 [ADR-0036](../decisions/0036-browser-extension-clipper.md). Issue: #427.
 
-Nothing here is built yet: every row is **SHOULD BE** (#427). Owner decision 2026-11-22: this round
+Nothing here is built yet: every row is **SHOULD BE** (#427). The code is split into these issues (each flips its rows to IS NOW):
+#612 clip format and spool core (CLIP-003 to CLIP-006, CLIP-011, CLIP-032); #613 native host (CLIP-001, CLIP-002, CLIP-007, CLIP-008, host side of CLIP-060 and CLIP-062);
+#614 clip target setting (CLIP-057 to CLIP-059, CLIP-062, CLIP-063, CLIP-065); #615 import of spooled clips (CLIP-009, CLIP-010, CLIP-012, CLIP-034 to CLIP-040, CLIP-043 to CLIP-049, CLIP-066 to CLIP-068);
+#616 extension core (CLIP-016 to CLIP-031, CLIP-033, CLIP-041, CLIP-042); #617 host manifests (CLIP-013 to CLIP-015); #618 extension settings and first run (CLIP-050 to CLIP-055, CLIP-060 to CLIP-065 extension side);
+#619 Paste as Markdown (CLIP-056); #620 packaging (no rows yet); #621 user guide and limits (CLIP-069, CLIP-070). Owner decision 2026-11-22: this round
 starts; the code is split into issues that each name their rows. The rows were brought up to date
 with `main` on 2026-11-23: the busy registry (JOB-003…JOB-014, CLIP-067), device-local state
 (NET-016, CLIP-066), the Import pipeline (IMP-003, IMP-004, IMP-006, CLIP-009, CLIP-012) and the

@@ -3,7 +3,7 @@
 - **Status**: Proposed
 - **Date**: 2026-11-19 (revived and brought up to date with `main` 2026-11-23; numbered 0036 because 0023 was taken meanwhile)
 - **Specs**: CLIP-001…CLIP-070 ([`docs/spec/web-clipper.md`](../spec/web-clipper.md)), CFG-001, CFG-002, CFG-075, VAULT-018, VAULT-029, NET-016, JOB-003, IMP-003, IMP-004, SEC-001
-- **Issues**: #427
+- **Issues**: #427; split into #612, #613, #614, #615, #616, #617, #618, #619, #620, #621
 
 ## Context
 
