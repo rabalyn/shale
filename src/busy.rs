@@ -12,6 +12,7 @@
 //! finds the action idle.
 
 use crate::jobs;
+use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, TryRecvError};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -25,12 +26,18 @@ mod tests;
 
 /// What a task is: the action that runs. Two running tasks never share a key.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Key(&'static str);
+pub struct Key(Cow<'static, str>);
 
 impl Key {
     /// The key of an action, as a constant of the module that owns the action.
     pub const fn new(kind: &'static str) -> Key {
-        Key(kind)
+        Key(Cow::Borrowed(kind))
+    }
+
+    /// The key of this action for one subject (an account, a calendar): tasks of the same action
+    /// with different subjects run side by side, two with the same subject never do.
+    pub fn with(&self, subject: &str) -> Key {
+        Key(Cow::Owned(format!("{}\u{1f}{subject}", self.0)))
     }
 }
 
@@ -42,6 +49,11 @@ pub struct Cancel(Arc<AtomicBool>);
 impl Cancel {
     pub fn cancel(&self) {
         self.0.store(true, Ordering::SeqCst);
+    }
+
+    /// The same request as a plain flag, for work that takes an `AtomicBool`.
+    pub fn flag(&self) -> Arc<AtomicBool> {
+        self.0.clone()
     }
 
     pub fn is_cancelled(&self) -> bool {

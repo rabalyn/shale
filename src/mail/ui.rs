@@ -55,6 +55,10 @@ pub const MAIL_INDEX: Key = Key::new("mail-index");
 /// The rebuild of the mail index (USE-012, JOB-016): a task that Cancel can stop between two folders.
 pub const MAIL_REBUILD: Key = Key::new("mail-rebuild");
 
+/// The sync of one mail account (JOB-021): one task per account, `MAIL_SYNC.with(account id)`, that Cancel
+/// stops between two batches of messages or two folders. The idle wait of the watch (IDLE) is not a task.
+pub const MAIL_SYNC: Key = Key::new("mail-sync");
+
 /// What the store is doing.
 pub enum StoreState {
     Closed,
@@ -163,7 +167,7 @@ pub enum SignInState {
 
 /// One sync of one account, running or finished.
 pub struct SyncRun {
-    rx: Receiver<Progress>,
+    pub(crate) rx: Receiver<Progress>,
     pub cancel: Arc<AtomicBool>,
     pub folder: String,
     pub done: usize,
@@ -1734,10 +1738,12 @@ impl MailView {
             return;
         }
         let (Some(store), Some(account)) = (self.ready_store(), cfg.mail_accounts.iter().find(|a| a.id == id).cloned()) else { return };
-        let cancel = Arc::new(AtomicBool::new(false));
         let display = if account.name.is_empty() { account.host.clone() } else { account.name.clone() };
+        // the task ends with the job, before its last report is taken in (JOB-021)
+        let Some(mut task) = self.busy.begin(MAIL_SYNC.with(id), format!("Syncing {display}…")) else { return };
+        let cancel = task.cancellable().flag();
         let connector: Arc<dyn imap_sync::Connector> = Arc::new(self.lazy_connector(&account, None));
-        let rx = imap_sync::start(store, account.id.clone(), display, connector, self.opts.clone(), cancel.clone());
+        let rx = imap_sync::start(store, account.id.clone(), display, connector, self.opts.clone(), cancel.clone(), task);
         self.syncs.insert(id.to_string(), SyncRun { rx, cancel, folder: String::new(), done: 0, total: 0, added: 0, errors: vec![], finished: None });
     }
 

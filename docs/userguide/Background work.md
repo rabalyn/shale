@@ -22,6 +22,11 @@ and you cannot start it twice by accident.
   index…" shows in the indicator and, with a spinner and **Cancel**, in the mail view. Cancel stops
   between two folders: every folder is either built again or as it was, so no mail seems to be
   missing; rebuild again to go on with the rest.
+- **Each mail account's sync is a task of its own**: "Syncing ‹account›…" shows in the indicator and, with
+  a spinner and **Cancel**, in the mail view for every account that is syncing. Cancel stops that account
+  between two folders or two batches of messages, never in the middle of a message, so nothing is half
+  saved; the view says "Sync stopped" and the next sync goes on with what is missing. The other accounts
+  keep syncing. Waiting for new mail (IDLE) is not a task.
 - **The buttons that would start the same thing again are off** while it runs. Point at one and it
   says what is still running. A key or the timer cannot start it a second time either.
 - **Cancel** stands next to the spinner where the work can be stopped, for example the check of file names
