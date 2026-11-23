@@ -150,6 +150,7 @@ mod table_grid;
 mod table_select;
 #[cfg(test)]
 mod table_tests;
+mod tag_assist;
 mod task_box;
 #[cfg(test)]
 mod test_exec;
