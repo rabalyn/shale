@@ -20,7 +20,9 @@ Back to [[Start here]].
   message says so.
 - A link by name (`[[Editor]]`) finds the note wherever it is; a link by path
   (`[[Folder/Note]]`, `./Note`, `../Note`) is exact.
-- Web links `[text](https://…)` open in your browser.
+- Web links `[text](https://…)` open in your browser. A Markdown link or image may have a title,
+  `[x](Note.md "title")`, `[x](Note.md 'title')` or `[x](Note.md (title))`: it is a link like any
+  other, and renaming or moving what it points to changes only the address, never the title.
 - Settings → Editor → Links: follow links only with Ctrl+click, create notes next to the
   current note, update links when renaming (see [[Settings reference]]).
 
@@ -82,7 +84,7 @@ Drag notes, drawings, files and folders in the file list into another folder. Re
 its menu, or by typing a new name in its title line. In every case links in other notes (and in
 drawings) are updated, so nothing breaks: `[[Note]]`, `[[Note|alias]]`, `[[Note#Heading]]`,
 embeds of notes, pictures, PDFs and other files, Markdown links such as `[x](folder/Note.md)` and
-`![x](pic.png)` (also with `../` paths), and links in a note's properties such as
+`![x](pic.png)` (also with `../` paths, and with a title `[x](Note.md "title")`), and links in a note's properties such as
 `related: "[[Note]]"`. A link by name stays a name, as long as that name still finds the same
 file. A note you are editing keeps its unsaved changes while its links are updated. The whole
 rename is one step in the note's history ([[File history]]). The setting "Update links in other notes

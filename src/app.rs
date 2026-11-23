@@ -1766,6 +1766,7 @@ impl ShaleApp {
         let changed = v.rename(rel, to, update_links).map_err(|e| e.to_string())?;
         let failed = v.failed_rewrites.clone();
         self.after_move(rel, to, is_dir, &changed.changed);
+        let failed = self.rewrite_reasons(failed);
         self.remember_open_files();
         Ok((changed, failed))
     }
@@ -1801,6 +1802,23 @@ impl ShaleApp {
             }
             Err(e) => self.toast(format!("Could not fix the link: {e}")),
         }
+    }
+
+    /// The notes whose links a rename could not rewrite, with the reason: a note that still holds
+    /// unsaved edits (its save failed before the rename, VAULT-042) was not changed on disk by
+    /// another program, its buffer is simply newer than the file, so it says so (VAULT-016).
+    fn rewrite_reasons(&self, failed: Vec<(PathBuf, String)>) -> Vec<(PathBuf, String)> {
+        failed
+            .into_iter()
+            .map(|(p, why)| {
+                let unsaved = self.notes.get(&p).is_some_and(|d| d.dirty) || self.drawings.get(&p).is_some_and(|d| d.dirty);
+                if unsaved {
+                    (p, "its unsaved changes could not be saved before the rename, so the file was left as it is".to_string())
+                } else {
+                    (p, why)
+                }
+            })
+            .collect()
     }
 
     /// After a file or folder moved from `rel` to `to`: open notes, drawings and tabs follow it,
@@ -1893,6 +1911,7 @@ impl ShaleApp {
         let (to, changed) = v.move_into(rel, into).map_err(|e| e.to_string())?;
         let failed = v.failed_rewrites.clone();
         self.after_move(rel, &to, is_dir, &changed.changed);
+        let failed = self.rewrite_reasons(failed);
         if let Some(m) = rewrite_problems("Moved", &changed.changed, &failed) {
             self.toast(m);
         }

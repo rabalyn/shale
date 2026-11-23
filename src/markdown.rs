@@ -222,9 +222,9 @@ pub fn find_links(text: &str) -> Vec<LinkSpan> {
                     let text_end = i + 1 + close_rel;
                     let label = &line[i + 1..text_end];
                     if !label.contains('[') && !label.contains(']') {
-                        if let Some(paren_rel) = md_destination_len(&line[text_end + 2..]) {
+                        if let Some((dest_end, close)) = md_destination(&line[text_end + 2..]) {
                             let t_start = text_end + 2;
-                            let t_end = t_start + paren_rel;
+                            let t_end = t_start + dest_end;
                             let raw = line[t_start..t_end].trim();
                             let raw = raw.trim_start_matches('<').trim_end_matches('>');
                             // a `file://` address of a media file is a link too (MEDIA-015); its target stays as
@@ -241,7 +241,7 @@ pub fn find_links(text: &str) -> Vec<LinkSpan> {
                                 };
                                 // Use the file name part: folder/Note.md -> keep the path for resolution.
                                 out.push(LinkSpan {
-                                    range: off + start..off + t_end + 1,
+                                    range: off + start..off + t_start + close + 1,
                                     target_range: off + t_start..off + t_end,
                                     target: strip_md_ext(&target).to_string(),
                                     heading,
@@ -249,7 +249,7 @@ pub fn find_links(text: &str) -> Vec<LinkSpan> {
                                     embed,
                                     markdown_style: true,
                                 });
-                                i = t_end + 1;
+                                i = t_start + close + 1;
                                 continue;
                             }
                         }
@@ -262,34 +262,85 @@ pub fn find_links(text: &str) -> Vec<LinkSpan> {
     out
 }
 
-/// The length of a markdown link's destination: `rest` is the text after `](`, the result ends
-/// where the closing `)` stands, or is `None` when no valid destination closes (the `[x](` is plain
-/// text then, LINK-001). A destination in `<…>` holds no `<` and ends at the first `>`, and only
-/// blanks may follow it; any other destination holds no control character and balanced
-/// parentheses, and ends at the first unmatched `)`. Spaces stay allowed in it (Shale's file
-/// links), a `[[` (a wiki link) and a `](` (a nested link) are not.
-fn md_destination_len(rest: &str) -> Option<usize> {
+/// Where a markdown link's destination and its end are: `rest` is the text after `](`, the result
+/// is `(dest_end, close)`, the end of the destination (with the blanks that follow it, when no title
+/// follows) and the place of the closing `)`; `None` when no valid destination closes (the `[x](` is
+/// plain text then, LINK-001). A destination in `<…>` holds no `<` and ends at the first `>`; any
+/// other destination holds no control character and balanced parentheses. Spaces stay allowed in it
+/// (Shale's file links), a `[[` (a wiki link) and a `](` (a nested link) are not. A CommonMark title
+/// (`"t"`, `'t'` or `(t)`, after at least one space or tab, with `\` escapes, on the one line) may
+/// follow the destination before the `)`: it is no part of the destination, so nothing that reads a
+/// link's target ever sees it, and a rewrite of the target leaves it as it is (LINK-001).
+pub(crate) fn md_destination(rest: &str) -> Option<(usize, usize)> {
     let lead = rest.len() - rest.trim_start().len();
     if rest[lead..].starts_with('<') {
         let close = rest[lead + 1..].find(['<', '>'])? + lead + 1;
         if rest.as_bytes()[close] != b'>' || rest[..close].contains("[[") {
             return None;
         }
-        let after = &rest[close + 1..];
-        let blanks = after.len() - after.trim_start().len();
-        return after[blanks..].starts_with(')').then_some(close + 1 + blanks);
+        let end = close + 1;
+        let after = &rest[end..];
+        let blanks = after.len() - after.trim_start_matches([' ', '\t']).len();
+        if after[blanks..].starts_with(')') {
+            return Some((end + blanks, end + blanks));
+        }
+        // a title needs a blank before it
+        if blanks == 0 {
+            return None;
+        }
+        return title_then_close(after).map(|c| (end, end + c));
     }
     let mut depth = 0usize;
-    for (p, c) in rest.char_indices() {
+    for (p, c) in rest[lead..].char_indices().map(|(p, c)| (p + lead, c)) {
         match c {
+            ' ' | '\t' if depth == 0 => {
+                if let Some(close) = title_then_close(&rest[p..]) {
+                    return Some((p, p + close));
+                }
+                // a tab that starts no title is a control character
+                if c == '\t' {
+                    return None;
+                }
+            }
             '(' => depth += 1,
-            ')' if depth == 0 => return Some(p),
+            ')' if depth == 0 => return Some((p, p)),
             ')' => depth -= 1,
             c if c.is_control() => return None,
             // a `[[` starts a wiki link, which a destination does not swallow
             '[' if rest[p + 1..].starts_with('[') => return None,
             // a nested link is no target
             ']' if rest[p + 1..].starts_with('(') => return None,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// `s` starts with the blanks before a title: the place (in `s`) of the `)` that closes the link
+/// when blanks, a title and blanks, then the `)` follow, else `None`.
+fn title_then_close(s: &str) -> Option<usize> {
+    let blanks = |t: &str| t.len() - t.trim_start_matches([' ', '\t']).len();
+    let at = blanks(s);
+    let t = &s[at..];
+    let (open, close) = match t.chars().next()? {
+        '"' => ('"', '"'),
+        '\'' => ('\'', '\''),
+        '(' => ('(', ')'),
+        _ => return None,
+    };
+    let mut chars = t.char_indices().skip(1);
+    while let Some((p, c)) = chars.next() {
+        match c {
+            '\\' => {
+                chars.next();
+            }
+            // a `(title)` holds no unescaped `(`
+            c if c == open && open == '(' => return None,
+            c if c == close => {
+                let end = at + p + 1;
+                let more = blanks(&s[end..]);
+                return s[end + more..].starts_with(')').then_some(end + more);
+            }
             _ => {}
         }
     }
@@ -1539,6 +1590,73 @@ a
         assert_eq!(back[1].heading.as_deref(), Some("Intro"));
         assert_eq!(back[2].target, "New (1)");
         assert_eq!(back[3].target, "../a%b");
+    }
+
+    // spec: LINK-001
+    #[test]
+    fn a_markdown_link_or_image_may_have_a_title_in_any_of_the_three_forms() {
+        for (t, target, title) in [
+            ("[x](path.md \"the title\")", "path", "\"the title\""),
+            ("[x](path.md 'the title')", "path", "'the title'"),
+            ("[x](path.md (the title))", "path", "(the title)"),
+            ("![alt](pic.png 'title')", "pic.png", "'title'"),
+            ("[x](path.md\t\"t\"  )", "path", "\"t\""),
+            ("[x](  path.md   \"t\" )", "path", "\"t\""),
+            ("[x](My Note.md \"t\")", "My Note", "\"t\""),
+            ("[x](dir/New (1).md \"t\")", "dir/New (1)", "\"t\""),
+            ("[x](<my note.md> \"t\")", "my note", "\"t\""),
+            ("[x](<my note.md>\t't')", "my note", "'t'"),
+            ("[x](path.md \"a \\\" ) b\")", "path", "\"a \\\" ) b\""),
+            ("[x](path.md 'it\\'s')", "path", "'it\\'s'"),
+            ("[x](path.md (a \\( b))", "path", "(a \\( b)"),
+            ("[x](path.md \"\")", "path", "\"\""),
+        ] {
+            let l = find_links(t);
+            assert_eq!(l.len(), 1, "{t}");
+            assert_eq!(l[0].target, target, "{t}");
+            assert_eq!(l[0].range, 0..t.len(), "the whole link, the title included: {t}");
+            assert!(t[l[0].target_range.clone()].trim().len() < t.len() && !t[l[0].target_range.clone()].contains(title), "the title is no part of the target: {t}");
+            assert!(l[0].markdown_style && l[0].heading.is_none(), "{t}");
+            // only the target changes, the title and the blanks stay (LINK-018)
+            let new = format!("{}{}{}", &t[..l[0].target_range.start], replace_target(t, &l[0], "N.md"), &t[l[0].target_range.end..]);
+            assert!(new.contains(title), "{new}");
+            let after = find_links(&new);
+            assert_eq!((after.len(), after[0].target.as_str(), after[0].range.end), (1, "N", new.len()), "{new}");
+        }
+        let l = find_links("[x](a.md \"t\")")[0].clone();
+        assert_eq!(written_target("[x](a.md \"t\")", &l), "a.md");
+        // the heading comes before the title
+        let h = find_links("[x](a.md#Intro \"t\")");
+        assert_eq!((h[0].target.as_str(), h[0].heading.as_deref()), ("a", Some("Intro")));
+        assert!(!h[0].embed);
+        assert!(find_links("![x](a.png 't')")[0].embed);
+        // an outside file link keeps its address
+        let f = find_links("![v](file:///tmp/a.mp4 \"t\")");
+        assert_eq!(f[0].target, "file:///tmp/a.mp4");
+        // a title in a code span or fence is no link
+        assert!(find_links("`[x](a.md \"t\")`\n```\n[x](a.md 'title')\n```").is_empty());
+        // two links on a line
+        assert_eq!(find_links("[a](a.md \"1\") [b](b.md '2')").iter().map(|l| l.target.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+    }
+
+    // spec: LINK-001
+    #[test]
+    fn what_is_no_title_stays_part_of_the_destination_or_makes_no_link() {
+        // no blank before the title, an unclosed title, text after it: the old reading of the destination
+        for (t, dest) in [("[x](a.md\"t\")", "a.md\"t\""), ("[x](a.md \"t)", "a.md \"t"), ("[x](a.md 'x' y)", "a.md 'x' y"), ("[x](a.md (t(u)))", "a.md (t(u))")] {
+            let l = find_links(t);
+            assert_eq!(l.len(), 1, "{t}");
+            assert_eq!(&t[l[0].target_range.clone()], dest, "{t}");
+        }
+        assert!(find_links("[x](<a.md>\"t\")").is_empty());
+        assert!(find_links("[x](<a.md> \"t\" x)").is_empty());
+        // a title does not span a line, so a blank line cannot be inside it either
+        assert!(find_links("[x](a.md \"t\n\nu\")").is_empty());
+        // a destination with a blank that is no title keeps it (Shale's file names with spaces)
+        assert_eq!(find_links("[x](My Note \"quoted\" more.md)")[0].target, "My Note \"quoted\" more");
+        assert_eq!(find_links("[x](a b.md)")[0].target, "a b");
+        // a tab that starts no title is still a control character
+        assert!(find_links("[x](a\tb.md)").is_empty());
     }
 
     // spec: LINK-001
