@@ -320,8 +320,8 @@ fn pointer_a_flat_scribble_resizes_without_nan() {
 // spec: DRAW-019
 #[test]
 fn pointer_lines_and_arrows_get_end_handles_and_no_resize_box() {
-    // lines and arrows are changed by their ends only: dragging a corner of their bounds is
-    // not a resize, and with several shapes selected there are no handles at all
+    // a single line or arrow is changed by its ends only: dragging a corner of its bounds is
+    // not a resize (#99 keeps it so; several elements resize as a group: DRAW-020)
     let (mut h, mut d) = plain();
     // make the arrow diagonal, so that the corners of its bounds are far from its ends
     let a = d.scene.elements.iter_mut().find(|e| e.id == "s3").unwrap();
@@ -334,14 +334,6 @@ fn pointer_lines_and_arrows_get_end_handles_and_no_resize_box() {
     let b = el(&d, "s3").bounds();
     h.drag_w(&mut d, (b.max.x + 4.0, b.min.y - 4.0), (b.max.x + 80.0, b.min.y - 80.0));
     assert_eq!(el(&d, "s3").points, before, "the points are not scaled");
-    // two shapes: a drag from a corner of their union never resizes anything
-    d.selection = vec!["s1".into(), "s3".into()];
-    h.settle(&mut d);
-    let (w, hh) = (el(&d, "s1").width, el(&d, "s1").height);
-    let u = d.selection_bounds().unwrap();
-    h.drag_w(&mut d, (u.max.x + 4.0, u.max.y + 4.0), (u.max.x + 60.0, u.max.y + 60.0));
-    assert!(near(el(&d, "s1").width, w) && near(el(&d, "s1").height, hh), "no group resize");
-    assert_eq!(el(&d, "s3").points, before);
 }
 
 // spec: DRAW-019
@@ -533,4 +525,95 @@ fn pointer_double_clicks_edit_labels_and_texts() {
     tool(&mut h2, &mut d2, Tool::Text);
     h2.click_at_w(&mut d2, (410.0, 112.0));
     assert_eq!(d2.editing_text.as_deref(), Some("t"), "the text tool on text edits it");
+}
+
+fn union_of(d: &DrawingDoc, ids: &[&str]) -> Rect {
+    ids.iter().map(|i| el(d, i).bounds()).reduce(|a, b| a.union(b)).unwrap()
+}
+
+/// Select the elements by id, wait a frame, and drag the corner of their box (`corner` 0..4:
+/// top left, top right, bottom left, bottom right) to the world point `to`.
+fn drag_box_corner(h: &mut H, d: &mut DrawingDoc, ids: &[&str], corner: usize, to: (f32, f32)) {
+    d.selection = ids.iter().map(|s| s.to_string()).collect();
+    h.settle(d);
+    let u = d.selection_bounds().unwrap().expand(4.0);
+    let c = [u.left_top(), u.right_top(), u.left_bottom(), u.right_bottom()][corner];
+    h.drag_w(d, (c.x, c.y), to);
+}
+
+// spec: DRAW-020
+#[test]
+fn pointer_multi_each_corner_scales_around_the_opposite_corner() {
+    // two shapes, union (40, 40) - (590, 150); a corner dragged to 1.5 times the size
+    for corner in 0..4 {
+        let (mut h, mut d) = plain();
+        let u = union_of(&d, &["s1", "s4"]);
+        let (grab, fixed) = [(u.left_top(), u.right_bottom()), (u.right_top(), u.left_bottom()), (u.left_bottom(), u.right_top()), (u.right_bottom(), u.left_top())][corner];
+        let to = (fixed.x + (grab.x - fixed.x) * 1.5, fixed.y + (grab.y - fixed.y) * 1.5);
+        drag_box_corner(&mut h, &mut d, &["s1", "s4"], corner, to);
+        let n = union_of(&d, &["s1", "s4"]);
+        assert!(near(n.width() as f64, u.width() as f64 * 1.5) && near(n.height() as f64, u.height() as f64 * 1.5), "corner {corner}: {n:?}");
+        let nfixed = [n.right_bottom(), n.left_bottom(), n.right_top(), n.left_top()][corner];
+        assert!(near(nfixed.x as f64, fixed.x as f64) && near(nfixed.y as f64, fixed.y as f64), "corner {corner}: the opposite corner stays: {nfixed:?} vs {fixed:?}");
+        // each shape scaled in place relative to the box: s1 is 220 wide, s4 170
+        assert!(near(el(&d, "s1").width, 330.0) && near(el(&d, "s4").width, 255.0), "{} {}", el(&d, "s1").width, el(&d, "s4").width);
+        assert!(near(el(&d, "s1").height, 165.0), "{}", el(&d, "s1").height);
+    }
+}
+
+// spec: DRAW-020
+#[test]
+fn pointer_multi_resize_scales_scribble_points_and_text_and_stays_valid_excalidraw() {
+    let (mut h, mut d) = scribble_and_text();
+    // union (100, 100) - (480, 150): twice as big from the top left
+    drag_box_corner(&mut h, &mut d, &["f", "t"], 3, (100.0 + 760.0, 100.0 + 100.0));
+    let f = el(&d, "f");
+    assert!(near(f.x, 100.0) && near(f.y, 100.0), "{} {}", f.x, f.y);
+    assert_eq!(f.points.first(), Some(&[0.0, 0.0]), "points stay relative to x, y");
+    assert_points(&d, &[(100.0, 100.0), (200.0, 200.0), (300.0, 100.0)], "the scribble's points double around the fixed corner");
+    assert!(near(f.width, 200.0) && near(f.height, 100.0), "{} {}", f.width, f.height);
+    let t = el(&d, "t");
+    assert!(near(t.font_size.unwrap(), 40.0), "font {:?}", t.font_size);
+    assert!(near(t.width, 160.0) && near(t.x, 700.0), "the text is scaled around its centre: {} {}", t.width, t.x);
+    // what is written reads back to the same scene
+    let back = Scene::parse(&d.file_text().unwrap()).unwrap();
+    let bf = back.elements.iter().find(|e| e.id == "f").unwrap();
+    assert_eq!(bf.points, f.points);
+    assert!(near(bf.x, f.x) && near(bf.width, f.width));
+    d.undo();
+    assert_points(&d, &[(100.0, 100.0), (150.0, 150.0), (200.0, 100.0)], "one undo takes the whole resize back");
+    assert!(near(el(&d, "t").font_size.unwrap(), 20.0));
+}
+
+// spec: DRAW-020
+#[test]
+fn pointer_multi_resize_scales_lines_with_the_shapes_and_frees_outside_ends() {
+    let (mut h, mut d) = plain();
+    // s1 and the arrow s3 (start on s1, end on s4, which is not selected); double the size
+    let u = union_of(&d, &["s1", "s3"]);
+    drag_box_corner(&mut h, &mut d, &["s1", "s3"], 3, (u.min.x + u.width() * 2.0, u.min.y + u.height() * 2.0));
+    assert!(near(el(&d, "s1").width, 440.0), "{}", el(&d, "s1").width);
+    assert!(binding_of(el(&d, "s3"), "startBinding").is_some(), "the end on a selected shape stays attached");
+    assert!(binding_of(el(&d, "s3"), "endBinding").is_none(), "the end on a shape outside the selection let go");
+    let a = el(&d, "s3");
+    assert!(a.points.len() == 2 && near(a.points[0][0], 0.0), "{:?}", a.points);
+    assert!(near(el(&d, "s4").x, 420.0), "the shape outside is untouched");
+}
+
+// spec: DRAW-020
+#[test]
+fn pointer_multi_resize_mirrors_past_the_opposite_corner_and_keeps_a_minimum_size() {
+    let (mut h, mut d) = scribble_and_text();
+    // bottom right corner dragged over the top left one: mirrored, still positive sizes
+    drag_box_corner(&mut h, &mut d, &["f", "t"], 3, (100.0 - 380.0, 100.0 - 50.0));
+    let u = union_of(&d, &["f", "t"]);
+    assert!(near(u.min.x as f64, -280.0) && near(u.max.x as f64, 100.0) && near(u.max.y as f64, 100.0), "{u:?}");
+    assert!(el(&d, "t").x < el(&d, "f").x, "the left-to-right order is turned over");
+    assert!(el(&d, "t").width > 0.0 && el(&d, "t").height > 0.0);
+    // dragging onto the fixed corner leaves a box of at least 4 x 4 and no NaN
+    let (mut h, mut d) = scribble_and_text();
+    drag_box_corner(&mut h, &mut d, &["f", "t"], 3, (100.0, 100.0));
+    let u = union_of(&d, &["f", "t"]);
+    assert!(u.width() >= 3.9 && u.height() >= 3.9, "{u:?}");
+    assert!(el(&d, "f").points.iter().all(|p| p[0].is_finite() && p[1].is_finite()));
 }

@@ -542,6 +542,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   order of shapes.
 - Double-click a shape to label it. Arrows snap to shapes and follow them when shapes move.
   Hold Shift to keep lines at 45° steps.
+- Select several shapes (Shift+click or a frame around them) and the whole selection gets one resize
+  box: drag a corner to scale every shape, line, arrow, scribble and free text in it from the
+  opposite corner (past it, the selection turns over); one undo takes it back. A single line or
+  arrow keeps its end handles.
 - "Auto arrange" untangles a diagram; "Spread out" and "Pull together" change the spacing.
 
 ### Obsidian canvases
