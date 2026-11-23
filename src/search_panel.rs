@@ -30,6 +30,9 @@ pub struct SearchBox {
     enter_wanted: bool,
     /// the solo of the count buttons (NAV-052); the default selection is in the settings
     pub filter: search_sources::Filter,
+    /// the filter form under the box (the ⚙ button, QUERY-027) and whether it is open
+    pub form: crate::search_form::State,
+    pub form_open: bool,
 }
 
 impl SearchBox {
@@ -92,10 +95,23 @@ impl ShaleApp {
         let step = if box_focused || browsing { ui.input_mut(|i| (self.keymap.take(i, KeyAction::HitSourcePrev), self.keymap.take(i, KeyAction::HitSourceNext))) } else { (false, false) };
         let tabbed = step.0 || step.1;
         // (the text box underlines what is wrong with the query, QUERY-008)
-        let r = {
-            let mut layouter = search_sources::error_layouter(&mut self.search.check, self.cfg.search.prefixes(), None);
-            ui.add(egui::TextEdit::singleline(&mut self.search.query).id(id).hint_text("Search notes, mail and posts…").desired_width(f32::INFINITY).lock_focus(true).layouter(&mut layouter))
-        };
+        let (r, gear) = ui
+            .horizontal(|ui| {
+                let width = ui.available_width() - 34.0;
+                let mut layouter = search_sources::error_layouter(&mut self.search.check, self.cfg.search.prefixes(), None);
+                let r = ui.add(egui::TextEdit::singleline(&mut self.search.query).id(id).hint_text("Search notes, mail and posts…").desired_width(width).lock_focus(true).layouter(&mut layouter));
+                let gear = ui.add(egui::Button::new("⚙").selected(self.search.form_open)).on_hover_text("Filter form");
+                (r, gear)
+            })
+            .inner;
+        // (the key of the form works in the box, and while the form is open)
+        let form_key = (box_focused || self.search.form_open) && ui.input_mut(|i| self.keymap.take(i, KeyAction::HitForm));
+        if gear.clicked() || form_key {
+            self.search.form_open = !self.search.form_open;
+            if self.search.form_open {
+                self.search.form.focus();
+            }
+        }
         if tabbed && !box_focused {
             if let Some(grabbed) = ui.ctx().memory(|m| m.focused()) {
                 ui.ctx().memory_mut(|m| m.surrender_focus(grabbed));
@@ -107,7 +123,7 @@ impl ShaleApp {
             self.search.enter_wanted = false;
         }
         let enter_from_box = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-        if self.search.query.is_empty() && !r.has_focus() && self.search.sel.is_none() {
+        if self.search.query.is_empty() && !r.has_focus() && self.search.sel.is_none() && (!self.search.form_open || ui.memory(|m| m.focused().is_none())) {
             r.request_focus();
         }
         ui.add_space(6.0);
@@ -126,6 +142,7 @@ impl ShaleApp {
         let checked = self.search.check.get(query, prefixes);
         let ask = Query::sidebar(query).with_sources(prefixes, self.search.filter.shown(self.cfg.search.selection())).with_checked(checked);
         let worker = &mut self.search_worker;
+        let listed = ask.listed();
         let by = Ask { slot: Slot::SIDEBAR, text: query, stamp: data.stamp(), debounced: typed, now: enter_from_box, listed: ask.listed(), blank: ask.is_blank(), invalid: checked.error().is_some() };
         let refreshed = self.search.results.refresh(worker, &by, |w| Start::Queued(w.submit(Slot::SIDEBAR, Request::new(&data, &ask))));
         if matches!(refreshed, Refreshed::Waits | Refreshed::Relisted) {
@@ -140,6 +157,19 @@ impl ShaleApp {
         if save || self.search.filter != before {
             // the list of the new sources, in the next frame
             ui.ctx().request_repaint();
+        }
+        let mut save = save;
+        if self.search.form_open {
+            let count = self.search.results.counts().map(|c| c.matches_text(listed, search_all::SIDEBAR_GROUP_LIMIT));
+            let opts = crate::search_form::Opts { prefixes, host_box: true, count: count.as_deref() };
+            let changed = crate::search_form::show(ui, &mut self.search.form, &mut self.search.query, &mut self.search.check, &mut self.cfg.search.advanced, None, &opts);
+            save |= changed.advanced;
+            if changed.query {
+                // what the form wrote is searched like what was typed: when the typing has settled
+                self.search.enter_wanted = false;
+                self.search.sel = None;
+                ui.ctx().request_repaint();
+            }
         }
         let hits = self.search.results.hits();
         if relisted && self.search.sel.is_some() {

@@ -122,11 +122,14 @@ pub struct Picker {
     check: Box<search_all::query::Cache>,
     /// the solo of the count buttons (NAV-052); the default selection is in the settings
     pub filter: Filter,
+    /// the filter form behind the ⚙ button (QUERY-027) and whether it is open
+    pub form: Box<crate::search_form::State>,
+    pub form_open: bool,
 }
 
 impl Picker {
     pub fn new(source: Source) -> Picker {
-        Picker { source, query: String::new(), sel: 0, results: Results::default(), check: Default::default(), filter: Filter::default() }
+        Picker { source, query: String::new(), sel: 0, results: Results::default(), check: Default::default(), filter: Filter::default(), form: Default::default(), form_open: false }
     }
 
     /// Make the list for the query when it is not the one the list is for and either the source
@@ -178,6 +181,11 @@ impl ListKeys {
             .filter_map(|(a, what)| keymap.hint(a).map(|k| format!("{k} {what}")))
             .collect::<Vec<_>>()
             .join(" · ")
+    }
+
+    /// Only the key that closes the window: the keys of the list belong to the form while it has the keyboard.
+    pub fn take_close(ui: &mut Ui, keymap: &Keymap) -> ListKeys {
+        ui.input_mut(|i| ListKeys { down: false, up: false, enter: false, esc: keymap.take(i, KeyAction::ListClose) })
     }
 
     /// Move the selection among `n` lines, wrapping around.
@@ -247,18 +255,38 @@ pub fn show(ctx: &Context, p: &mut Picker, data: &Ctx, worker: &mut SearchWorker
         &mut frame,
         |ui, f| {
             let everything = f.p.source == Source::Everything;
+            // (while a widget of the form has the keyboard, the keys of the list are the form's, except the one that closes the window)
+            let box_id = egui::Id::unique("picker-box");
+            let in_form = everything && f.p.form_open && ui.memory(|m| m.focused()).is_some_and(|id| id != box_id);
             // (Tab is no focus change here: the field keeps it for the keys of the sources)
-            let edit = egui::TextEdit::singleline(&mut f.p.query).hint_text(f.p.source.hint()).desired_width(f32::INFINITY).font(FontId::proportional(16.0)).lock_focus(true);
-            // (the search of everything underlines what is wrong with the query, QUERY-008)
-            let r = if everything {
+            let edit = egui::TextEdit::singleline(&mut f.p.query).id(box_id).hint_text(f.p.source.hint()).font(FontId::proportional(16.0)).lock_focus(true);
+            // (the search of everything underlines what is wrong with the query, QUERY-008, and has the ⚙ button of the form, QUERY-027)
+            let (r, gear) = {
                 let mut layouter = search_sources::error_layouter(&mut f.p.check, cfg.prefixes(), Some(16.0));
-                ui.add(edit.layouter(&mut layouter))
-            } else {
-                ui.add(edit)
+                if everything {
+                    ui.horizontal(|ui| {
+                        let width = ui.available_width() - 34.0;
+                        let r = ui.add(edit.desired_width(width).layouter(&mut layouter));
+                        let gear = ui.add(egui::Button::new("⚙").selected(f.p.form_open)).on_hover_text("Filter form");
+                        (r, Some(gear))
+                    })
+                    .inner
+                } else {
+                    (ui.add(edit.desired_width(f32::INFINITY)), None)
+                }
             };
-            r.request_focus();
-            f.keys = ListKeys::take(ui, keymap);
-            let source_keys = if everything { SourceKeys::take(ui, keymap) } else { SourceKeys { next: false, prev: false } };
+            if !f.p.form_open || ui.memory(|m| m.focused().is_none()) {
+                r.request_focus();
+            }
+            f.keys = if in_form { ListKeys::take_close(ui, keymap) } else { ListKeys::take(ui, keymap) };
+            let form_key = everything && ui.input_mut(|i| keymap.take(i, KeyAction::ListForm));
+            if gear.is_some_and(|g| g.clicked()) || form_key {
+                f.p.form_open = !f.p.form_open;
+                if f.p.form_open {
+                    f.p.form.focus();
+                }
+            }
+            let source_keys = if everything && !in_form { SourceKeys::take(ui, keymap) } else { SourceKeys { next: false, prev: false } };
             let prefixed = cfg.prefixes().parse(&f.p.query).prefix.is_some();
             let available = Bar::available(data.mail.is_some());
             if !prefixed && (source_keys.next || source_keys.prev) {
@@ -288,6 +316,16 @@ pub fn show(ctx: &Context, p: &mut Picker, data: &Ctx, worker: &mut SearchWorker
                 if f.save || f.p.filter != before {
                     // the list of the new sources, in this frame
                     f.p.refresh(data, f.worker, false, cfg);
+                }
+                if f.p.form_open {
+                    let count = f.p.results.counts().map(|c| c.matches_text(listed, search_all::GROUP_LIMIT));
+                    let opts = crate::search_form::Opts { prefixes: cfg.prefixes(), host_box: true, count: count.as_deref() };
+                    let changed = crate::search_form::show(ui, &mut f.p.form, &mut f.p.query, &mut f.p.check, &mut cfg.advanced, None, &opts);
+                    f.save |= changed.advanced;
+                    if changed.query {
+                        // what the form wrote is searched like what was typed, at once
+                        f.p.refresh(data, f.worker, true, cfg);
+                    }
                 }
             }
         },

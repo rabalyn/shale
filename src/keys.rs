@@ -317,6 +317,7 @@ actions! {
     // (Shift+Tab before Tab: egui lets a bare key match with Shift held)
     HitSourcePrev => "search.prev_source", "Previous source only (notes, mail, posts), then the default sources", SearchResults, ["Shift+Tab"];
     HitSourceNext => "search.next_source", "Next source only (notes, mail, posts), then the default sources", SearchResults, ["Tab"];
+    HitForm => "search.filter_form", "Show or hide the filter form (the gear button) of the sidebar search", SearchResults, ["Ctrl+Shift+G"];
     // List windows (NAV-049): the keys of the pickers, the quick switcher and the font list
     ListNext => "list.next", "Next line of a list window", ListWindow, ["Down", "Ctrl+J"];
     ListPrev => "list.prev", "Previous line of a list window", ListWindow, ["Up", "Ctrl+K"];
@@ -325,6 +326,8 @@ actions! {
     // the search of everything (NAV-055)
     ListSourcePrev => "list.prev_source", "Previous source only in the search of everything, then the default sources", ListWindow, ["Shift+Tab"];
     ListSourceNext => "list.next_source", "Next source only in the search of everything (notes, mail, posts), then the default sources", ListWindow, ["Tab"];
+    // the filter and sort form of the search (QUERY-027)
+    ListForm => "list.filter_form", "Show or hide the filter form (the gear button) in the search of everything", ListWindow, ["Ctrl+Shift+G"];
     // Mail view: the Shift keys come before the bare key of the same letter (egui lets a bare key match with Shift held)
     MailReplyAll => "mail.reply_all", "Reply all", MailView, ["Shift+R"];
     MailForward => "mail.forward", "Forward", MailView, ["Shift+F"];
@@ -773,7 +776,7 @@ mod tests {
             assert_eq!(mac.display(d.action), on_mac, "{}", d.id);
         }
         assert_eq!(DEFS.iter().filter(|d| d.scope == Scope::NoteView).count(), 26 + 5);
-        assert_eq!(DEFS.len(), 32 + 37 + 6 + 12 + 6 + 26 + 5 + 3);
+        assert_eq!(DEFS.len(), 32 + 37 + 7 + 12 + 7 + 26 + 5 + 3);
     }
 
     // spec: KEY-014

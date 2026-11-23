@@ -141,6 +141,7 @@ pub const ENTRIES: &[Entry] = &[
 #[cfg(test)]
 pub const NOT_IN_THE_DIALOG: &[(&str, &str)] = &[
     ("version", "the format of the file"),
+    ("search.advanced", "the Advanced switch of the filter form of the search: the form saves the last choice"),
     ("vaults", "the known vaults: the start screen and the vault menu"),
     ("show_left", "the left panel is toggled in the window"),
     ("show_right", "the right sidebar is toggled in the window"),

@@ -157,6 +157,8 @@ pub struct Checked {
     pub text: String,
     /// the sources of the prefix (NAV-050)
     pub prefix: Option<Selection>,
+    /// the byte where the language starts, after the prefix and the white space that follows it (the form of QUERY-025 keeps `text[..body]` as it is)
+    pub body: usize,
     /// the tree; none: the query is blank, apart from the prefix
     pub tree: Result<Option<Expr>, QueryError>,
 }
@@ -166,7 +168,7 @@ impl Checked {
     pub fn search(text: &str, prefixes: Prefixes) -> Checked {
         let parsed = prefixes.parse(text);
         let body = text.len() - parsed.text.len();
-        Checked { text: text.to_string(), prefix: parsed.prefix, tree: parse(text, body) }
+        Checked { text: text.to_string(), prefix: parsed.prefix, body, tree: parse(text, body) }
     }
 
     /// Check the text of a board lane (the lanes of #601 hold this and its error, QUERY-012): notes only, so a prefix is an error (QUERY-005).
@@ -176,9 +178,9 @@ impl Checked {
         if parsed.prefix.is_some() {
             let body = text.len() - parsed.text.len();
             let tree = Err(QueryError::new(0..body, "a lane searches notes only: no prefix"));
-            return Checked { text: text.to_string(), prefix: None, tree };
+            return Checked { text: text.to_string(), prefix: None, body: 0, tree };
         }
-        Checked { text: text.to_string(), prefix: None, tree: parse(text, 0) }
+        Checked { text: text.to_string(), prefix: None, body: 0, tree: parse(text, 0) }
     }
 
     /// What is wrong with the query, if anything.

@@ -127,6 +127,9 @@ mod recorder;
 mod recovery;
 mod script;
 mod search_all;
+mod search_form;
+#[cfg(test)]
+mod search_form_ui_tests;
 mod search_panel;
 mod search_render;
 mod search_sources;
