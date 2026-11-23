@@ -44,6 +44,10 @@ pub struct Api {
     handle: String,
     password: Secret,
     pub session: Option<Session>,
+    /// the video service (SOC-067); a test points it at a pretend one
+    pub(super) video_service: String,
+    /// how long to wait between two looks at a video the service processes (SOC-067)
+    pub(super) video_poll: std::time::Duration,
 }
 
 impl std::fmt::Debug for Api {
@@ -100,7 +104,14 @@ pub fn refresh_session(s: &Session) -> Result<Session, String> {
 
 impl Api {
     pub fn new(server: &str, handle: &str, password: &str) -> Api {
-        Api { server: server.trim().trim_end_matches('/').to_string(), handle: handle.trim().to_string(), password: Secret::new(password), session: None }
+        Api {
+            server: server.trim().trim_end_matches('/').to_string(),
+            handle: handle.trim().to_string(),
+            password: Secret::new(password),
+            session: None,
+            video_service: super::video::VIDEO_SERVICE.to_string(),
+            video_poll: std::time::Duration::from_secs(1),
+        }
     }
 
     /// Sign in now (done by itself with the first call).
@@ -403,6 +414,7 @@ fn build_post(v: &Value, record: &Value, embeds: &[&Value]) -> Option<Post> {
         },
         reply_root: Some(PostRef { uri: text(&record["reply"]["root"]["uri"]), cid: text(&record["reply"]["root"]["cid"]) }).filter(|r| !r.uri.is_empty()),
         visibility: None,
+        poll: None,
     })
 }
 
@@ -686,6 +698,12 @@ pub fn send(api: &mut Api, d: &Draft) -> Result<Post, ActionError> {
     if d.pictures.len() > d.info.max_pictures {
         return Err(format!("A Bluesky post has at most {} pictures.", d.info.max_pictures).into());
     }
+    if d.video.is_some() && !d.pictures.is_empty() {
+        return Err("A Bluesky post has pictures or a video, not both.".into());
+    }
+    if d.poll.is_some() || d.schedule.is_some() {
+        return Err("Bluesky has no polls and no scheduled posts.".into());
+    }
     let did = api.did()?;
     let mut images = vec![];
     for p in &d.pictures {
@@ -708,7 +726,12 @@ pub fn send(api: &mut Api, d: &Draft) -> Result<Post, ActionError> {
         let root = p.reply_root.as_ref().map(|r| json!({"uri": r.uri, "cid": r.cid})).unwrap_or_else(|| parent.clone());
         record["reply"] = json!({"root": root, "parent": parent});
     }
-    let pictures = (!images.is_empty()).then(|| json!({"$type": "app.bsky.embed.images", "images": images}));
+    if !d.language.is_empty() {
+        record["langs"] = json!([d.language]);
+    }
+    // a video goes through the video service first (SOC-067)
+    let video = d.video.as_ref().map(|v| super::video::bluesky_embed(api, v)).transpose()?;
+    let pictures = (!images.is_empty()).then(|| json!({"$type": "app.bsky.embed.images", "images": images})).or(video);
     let quote = d.quote.as_ref().map(|q| json!({"$type": "app.bsky.embed.record", "record": {"uri": q.id, "cid": q.cid}}));
     match (pictures, quote) {
         (Some(m), Some(r)) => record["embed"] = json!({"$type": "app.bsky.embed.recordWithMedia", "media": m, "record": r}),
@@ -755,12 +778,14 @@ pub fn send(api: &mut Api, d: &Draft) -> Result<Post, ActionError> {
         mine: Mine::default(),
         reply_root: None,
         visibility: None,
+        poll: None,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::actions::{DraftPicture, InstanceInfo};
+    use super::super::video::DraftVideo;
     use super::*;
     use crate::calendar::dav::tests::mock_http;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -1011,7 +1036,20 @@ mod tests {
     }
 
     fn draft(text: &str) -> Draft {
-        Draft { text: text.into(), cw: String::new(), visibility: super::super::actions::Visibility::Public, reply_to: None, quote: None, pictures: vec![], info: InstanceInfo::defaults(Network::Bluesky), key: "keybsky00000a".into() }
+        Draft {
+            text: text.into(),
+            cw: String::new(),
+            visibility: super::super::actions::Visibility::Public,
+            reply_to: None,
+            quote: None,
+            poll: None,
+            schedule: None,
+            language: String::new(),
+            video: None,
+            pictures: vec![],
+            info: InstanceInfo::defaults(Network::Bluesky),
+            key: "keybsky00000a".into(),
+        }
     }
 
     // spec: SOC-051, SOC-052, SOC-054
@@ -1108,6 +1146,171 @@ mod tests {
         // other refusals are errors, not posted
         assert!(is_conflict("the server answered with status 409") && !is_conflict("the server answered with status 500: Internal error"));
         handle.join().unwrap();
+    }
+
+    /// A pretend Bluesky server and video service in one: the account's session, service tokens named after their method, the video service's calls.
+    /// `already`: the upload answers 409 "already exists" with the job; `can_upload`: what the limits say.
+    fn video_server(already: bool, can_upload: bool, records: Arc<std::sync::Mutex<Vec<Value>>>, n: usize) -> (String, std::thread::JoinHandle<Vec<String>>) {
+        let polled = std::sync::atomic::AtomicUsize::new(0);
+        mock_http(n, move |method, path, headers, body| {
+            let nsid = path.split('?').next().unwrap().trim_start_matches("/xrpc/").to_string();
+            let (query, low) = (path.split_once('?').map(|q| q.1).unwrap_or(""), headers.to_ascii_lowercase());
+            let bearer = |t: &str| assert!(low.contains(&format!("authorization: bearer {}", t.to_ascii_lowercase())), "{nsid}: {headers}");
+            match (method, nsid.as_str()) {
+                ("POST", "com.atproto.server.createSession") => {
+                    let host = headers.lines().find_map(|l| l.strip_prefix("Host: ")).unwrap_or("").trim().to_string();
+                    (200, json!({"accessJwt": "jwt-1", "refreshJwt": "ref-1", "did": "did:plc:ada", "handle": "ada.test", "didDoc": {"service": [{"id": "#atproto_pds", "serviceEndpoint": format!("http://{host}")}]}}).to_string())
+                }
+                // the account's own server hands out service tokens, each for one audience and one method
+                ("GET", "com.atproto.server.getServiceAuth") => {
+                    bearer("jwt-1");
+                    // (the real hosts have no port: the pretend one is 127.0.0.1 for the service and the account's server alike)
+                    assert!(query.contains("aud=did%3Aweb%3A127.0.0.1"), "audience is a did:web: {query}");
+                    let lxm = query.split('&').find_map(|p| p.strip_prefix("lxm=")).unwrap_or("").to_string();
+                    assert!(query.contains("exp="), "{query}");
+                    (200, json!({"token": format!("svc-{lxm}")}).to_string())
+                }
+                ("GET", "app.bsky.video.getUploadLimits") => {
+                    bearer("svc-app.bsky.video.getUploadLimits");
+                    (200, json!({"canUpload": can_upload, "message": "You have reached your daily limit", "remainingDailyVideos": 3}).to_string())
+                }
+                ("POST", "app.bsky.video.uploadVideo") => {
+                    // a service token for the account's server and this one method: never the session token
+                    bearer("svc-com.atproto.repo.uploadBlob");
+                    assert!(!low.contains("jwt-1") && low.contains("content-type: video/mp4"), "{headers}");
+                    assert!(query.contains("did=did%3Aplc%3Aada") && query.contains("name=video.mp4"), "{query}");
+                    if already {
+                        (409, json!({"jobId": "j1", "state": "JOB_STATE_COMPLETED", "error": "already_exists", "message": "Video already processed"}).to_string())
+                    } else {
+                        (200, json!({"jobStatus": {"jobId": "j1", "did": "did:plc:ada", "state": "JOB_STATE_CREATED"}}).to_string())
+                    }
+                }
+                ("GET", "app.bsky.video.getJobStatus") => {
+                    bearer("svc-app.bsky.video.getJobStatus");
+                    assert!(query.contains("jobId=j1"));
+                    let blob = json!({"$type": "blob", "ref": {"$link": "bafyvideo"}, "mimeType": "video/mp4", "size": 324});
+                    if already || polled.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0 {
+                        (200, json!({"jobStatus": {"jobId": "j1", "state": "JOB_STATE_COMPLETED", "blob": blob}}).to_string())
+                    } else {
+                        (200, json!({"jobStatus": {"jobId": "j1", "state": "JOB_STATE_ENCODING", "progress": 40}}).to_string())
+                    }
+                }
+                ("POST", "com.atproto.repo.createRecord") => {
+                    bearer("jwt-1");
+                    records.lock().unwrap().push(serde_json::from_str::<Value>(body).unwrap()["record"].clone());
+                    (200, json!({"uri": "at://did:plc:ada/app.bsky.feed.post/p1", "cid": "cp1"}).to_string())
+                }
+                _ => (404, json!({"error": "NotFound"}).to_string()),
+            }
+        })
+    }
+
+    fn mp4_clip(name: &str) -> std::path::PathBuf {
+        let mut b = vec![0, 0, 0, 24, b'f', b't', b'y', b'p', b'i', b's', b'o', b'm', 0, 0, 2, 0, b'i', b's', b'o', b'm', b'm', b'p', b'4', b'1'];
+        b.extend_from_slice(&[9u8; 300]);
+        crate::social::actions::tests::file(name, &b)
+    }
+
+    // spec: SOC-065, SOC-067, SEC-027
+    #[test]
+    fn a_video_goes_through_the_video_service_with_service_tokens_and_the_post_embeds_its_blob_and_names_its_language() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let records = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+        // createSession, 3 service tokens, limits, upload, 2 looks at the job, the record, the read back
+        let (base, handle) = video_server(false, true, records.clone(), 10);
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        api.video_service = base.clone();
+        api.video_poll = std::time::Duration::from_millis(2);
+        let video = DraftVideo { path: mp4_clip("bsky-clip.mp4"), alt: " A clip ".into() };
+        send(&mut api, &Draft { video: Some(video), language: "de".into(), ..draft("Ein Video") }).unwrap();
+        let seen = handle.join().unwrap();
+        let order: Vec<&str> = seen.iter().map(|s| s.split('?').next().unwrap().rsplit('/').next().unwrap()).collect();
+        assert_eq!(
+            order,
+            [
+                "com.atproto.server.createSession",
+                "com.atproto.server.getServiceAuth",
+                "app.bsky.video.getUploadLimits",
+                "com.atproto.server.getServiceAuth",
+                "app.bsky.video.uploadVideo",
+                "com.atproto.server.getServiceAuth",
+                "app.bsky.video.getJobStatus",
+                "app.bsky.video.getJobStatus",
+                "com.atproto.repo.createRecord",
+                "app.bsky.feed.getPosts"
+            ]
+        );
+        let r = records.lock().unwrap()[0].clone();
+        assert_eq!(r["embed"]["$type"], "app.bsky.embed.video");
+        assert_eq!((r["embed"]["video"]["ref"]["$link"].as_str(), r["embed"]["alt"].as_str()), (Some("bafyvideo"), Some("A clip")));
+        assert_eq!(r["langs"], json!(["de"]));
+        // no language: no `langs`
+        assert!(send_record_without_language().is_none());
+    }
+
+    /// A text post without a language has no `langs`.
+    fn send_record_without_language() -> Option<Value> {
+        let records = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+        let (base, handle) = video_server(false, true, records.clone(), 3);
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        send(&mut api, &draft("plain")).unwrap();
+        handle.join().unwrap();
+        let r = records.lock().unwrap()[0].clone();
+        r.get("langs").cloned()
+    }
+
+    // spec: SOC-067, SEC-027
+    #[test]
+    fn a_video_the_service_already_has_is_found_by_its_job_and_one_the_account_may_not_upload_says_why() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let video = DraftVideo { path: mp4_clip("bsky-clip2.mp4"), alt: String::new() };
+        // 409 "already exists": the answer names the job, whose status holds the blob
+        let records = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+        let (base, handle) = video_server(true, true, records.clone(), 9);
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        api.video_service = base.clone();
+        api.video_poll = std::time::Duration::ZERO;
+        send(&mut api, &Draft { video: Some(video.clone()), ..draft("again") }).unwrap();
+        handle.join().unwrap();
+        let r = records.lock().unwrap()[0].clone();
+        assert_eq!(r["embed"]["video"]["ref"]["$link"], "bafyvideo");
+        assert!(r["embed"].get("alt").is_none(), "no description, none sent");
+        // the service says no: its message is the answer, nothing is uploaded
+        let (base, handle) = video_server(false, false, records, 3);
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        api.video_service = base.clone();
+        let e = send(&mut api, &Draft { video: Some(video), ..draft("no") }).unwrap_err().to_string();
+        assert!(e.contains("does not take a video from this account now: You have reached your daily limit"), "{e}");
+        assert_eq!(handle.join().unwrap().len(), 3, "session, token, limits: no upload");
+    }
+
+    // spec: SOC-063, SOC-066, SOC-067
+    #[test]
+    fn a_video_is_one_per_post_not_with_pictures_and_bluesky_refuses_polls_and_times() {
+        let video = Some(DraftVideo { path: "a.mp4".into(), alt: String::new() });
+        let mut api = Api::new("https://bsky.social", "a", "pw");
+        let both = Draft { video: video.clone(), pictures: vec![DraftPicture { path: "a.png".into(), alt: String::new() }], ..draft("x") };
+        assert!(send(&mut api, &both).unwrap_err().to_string().contains("pictures or a video, not both"));
+        let timed = Draft { schedule: Some(1), ..draft("x") };
+        assert!(send(&mut api, &timed).unwrap_err().to_string().contains("no polls and no scheduled posts"));
+        // what is no video, and what is too big, is refused before the account is asked anything
+        let text = crate::social::actions::tests::file("bsky-text.mp4", b"not a video at all, only some words");
+        assert!(crate::social::video::prepare(&text, 1000).unwrap_err().contains("is not an MP4"));
+        assert!(crate::social::video::prepare(&mp4_clip("bsky-clip3.mp4"), 100).unwrap_err().contains("videos can be up to"));
+        // whatever limit a server names, 100 MB is the most that is read (SEC-026): a sparse file just over it
+        let huge = mp4_clip("bsky-huge.mp4");
+        std::fs::OpenOptions::new().write(true).open(&huge).unwrap().set_len(100_000_001).unwrap();
+        let e = crate::social::video::prepare(&huge, u64::MAX).unwrap_err();
+        assert!(e.contains("videos can be up to 100.0 MB"), "{e}");
+        assert!(crate::social::video::prepare(&mp4_clip("bsky-clip4.mp4"), u64::MAX).is_ok());
+        assert_eq!(crate::social::video::sniff(&[0x1A, 0x45, 0xDF, 0xA3, 0, 0, 0, 0, 0, 0, 0, 0]), Some(("video/webm", "webm")));
+        assert_eq!(crate::social::video::sniff(b"\0\0\0\x18ftypqt  xxxx"), Some(("video/quicktime", "mov")));
+        assert_eq!(crate::social::video::sniff(&[0, 0, 1, 0xBA, 0, 0, 0, 0, 0, 0, 0, 0]), Some(("video/mpeg", "mpeg")));
+        assert!(crate::social::video::sniff(b"GIF89a......").is_none());
     }
 
     // spec: SOC-053, SOC-054
@@ -1264,7 +1467,7 @@ mod tests {
     #[test]
     fn sessions_do_not_show_their_tokens() {
         let s = Session { pds: "https://p".into(), did: "did:plc:a".into(), handle: "a".into(), access_jwt: "jwt-secret-1".into(), refresh_jwt: "jwt-secret-2".into() };
-        let api = Api { server: "https://bsky.social".into(), handle: "a".into(), password: "pw-secret-3".into(), session: Some(s) };
+        let api = Api { server: "https://bsky.social".into(), handle: "a".into(), password: "pw-secret-3".into(), session: Some(s), video_service: String::new(), video_poll: std::time::Duration::ZERO };
         let d = format!("{api:?}");
         assert!(!d.contains("secret") && d.contains("***"), "{d}");
         let doc = json!({"service": [{"id": "#other", "serviceEndpoint": "https://no"}, {"id": "#atproto_pds", "type": "AtprotoPersonalDataServer", "serviceEndpoint": "https://pds.example"}]});

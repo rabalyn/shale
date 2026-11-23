@@ -54,6 +54,19 @@ impl ShaleApp {
                 ui.label("minutes (0: never)");
             });
         });
+        anchor(ui, "social.post_language", |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Post language");
+                let shown = crate::social::language::name(&self.cfg.social_post_language);
+                egui::ComboBox::from_id_salt("social-post-language").selected_text(shown).show_ui(ui, |ui| {
+                    changed |= ui.selectable_value(&mut self.cfg.social_post_language, String::new(), crate::social::language::name("")).changed();
+                    for (code, _) in crate::social::language::LANGUAGES {
+                        changed |= ui.selectable_value(&mut self.cfg.social_post_language, code.to_string(), crate::social::language::name(code)).changed();
+                    }
+                });
+                crate::theme::hint(ui, "a new post starts with it");
+            });
+        });
         crate::theme::section_break(ui);
         anchor(ui, "social.index", |ui| self.post_index_settings(ui));
         changed

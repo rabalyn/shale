@@ -18,25 +18,31 @@ pub mod accounts_ui;
 pub mod actions;
 pub mod bluesky;
 pub mod compose;
+pub mod compose_extras_ui;
 pub mod compose_pictures;
 pub mod compose_ui;
 #[cfg(test)]
 mod dataflow_tests;
 pub mod demo;
 #[cfg(test)]
+mod extras_tests;
+#[cfg(test)]
 pub(crate) mod fake_server;
 pub mod feed_ui;
 pub mod images;
+pub mod language;
 pub mod markup;
 pub mod mastodon;
 pub mod note;
 #[cfg(test)]
 mod pictures_tests;
+pub mod poll;
 pub mod post_index;
 #[cfg(test)]
 mod post_index_tests;
 #[cfg(test)]
 mod quote_tests;
+pub mod schedule;
 pub mod state;
 pub mod thread;
 #[cfg(test)]
@@ -44,6 +50,7 @@ mod thread_tests;
 pub mod thread_ui;
 #[cfg(test)]
 mod ui_tests;
+pub mod video;
 pub mod viewer;
 #[cfg(test)]
 mod write_tests;
@@ -241,6 +248,9 @@ pub struct Post {
     /// Mastodon: "public", "unlisted", "private" or "direct" (a reply starts with it)
     #[serde(default)]
     pub visibility: Option<String>,
+    /// Mastodon: the poll of the status (SOC-061)
+    #[serde(default)]
+    pub poll: Option<poll::Poll>,
 }
 
 /// What the signed-in account did with a post: liked / favourited and boosted / reposted it. On
@@ -341,6 +351,8 @@ pub struct ApiError {
     /// Bluesky error name (`ExpiredToken`) or Mastodon's `error` text; may be empty
     pub code: String,
     pub message: String,
+    /// the JSON the server answered (Null when it was none); never holds a secret we sent
+    pub body: Value,
 }
 
 impl std::fmt::Display for ApiError {
@@ -357,7 +369,7 @@ impl From<ApiError> for String {
 
 impl ApiError {
     fn plain(message: impl Into<String>) -> ApiError {
-        ApiError { status: 0, code: String::new(), message: message.into() }
+        ApiError { status: 0, code: String::new(), message: message.into(), body: Value::Null }
     }
 }
 
@@ -466,7 +478,7 @@ fn answer_of(r: dav::BytesResponse) -> Result<Value, ApiError> {
         429 => "the server says: too many requests, try again in a few minutes".to_string(),
         s => format!("the server answered with status {s}{}", if detail.is_empty() { String::new() } else { format!(": {detail}") }),
     };
-    Err(ApiError { status, code, message })
+    Err(ApiError { status, code, message, body: json })
 }
 
 /// Download a media file (no login is sent). At most `MAX_MEDIA_BYTES`. Returns the bytes and
@@ -711,7 +723,7 @@ pub struct Client {
 #[derive(Clone)]
 enum Backend {
     Mastodon { token: Secret },
-    Bluesky(bluesky::Api),
+    Bluesky(Box<bluesky::Api>),
 }
 
 impl std::fmt::Debug for Client {
@@ -725,7 +737,7 @@ impl Client {
     pub fn new(account: Account, secret: &str) -> Client {
         let backend = match account.network {
             Network::Mastodon => Backend::Mastodon { token: Secret::new(secret.trim()) },
-            Network::Bluesky => Backend::Bluesky(bluesky::Api::new(&account.server, &account.handle, secret)),
+            Network::Bluesky => Backend::Bluesky(Box::new(bluesky::Api::new(&account.server, &account.handle, secret))),
         };
         Client { account, backend }
     }
@@ -844,6 +856,7 @@ pub(crate) mod tests {
             mine: Mine::default(),
             reply_root: None,
             visibility: None,
+            poll: None,
         }
     }
 

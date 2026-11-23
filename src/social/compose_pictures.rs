@@ -24,7 +24,7 @@ pub struct SystemPicker;
 impl Picker for SystemPicker {
     fn pick(&self, max: usize) -> Result<Vec<PathBuf>, String> {
         let started = std::time::Instant::now();
-        let chosen = rfd::FileDialog::new().set_title("Choose pictures").add_filter("Pictures", &PICTURE_EXTENSIONS).pick_files();
+        let chosen = rfd::FileDialog::new().set_title("Choose pictures or a video").add_filter("Pictures and videos", &[&PICTURE_EXTENSIONS[..], &super::video::VIDEO_EXTENSIONS[..]].concat()).pick_files();
         match chosen {
             Some(mut files) => {
                 files.truncate(max);

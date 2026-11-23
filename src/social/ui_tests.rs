@@ -2,7 +2,9 @@
 //! The window runs headless (`ShaleApp::run_frame`); controls are clicked with real pointer
 //! events at the places the view reports in `SocialState::rects` and `ShaleApp::tab_rects`.
 
-use super::actions::{ActionError, Draft, InstanceInfo, Reacted, Reaction};
+use super::actions::{ActionError, Draft, InstanceInfo, Reacted, Reaction, Sent};
+use super::poll::Poll;
+use super::schedule::Scheduled;
 use super::state::{post_key, Source, Timeline};
 use super::tests::post;
 use super::{demo, Feed, FeedRef, Fresh, Page, Post, Since, ThreadView};
@@ -35,6 +37,13 @@ pub(crate) struct Script {
     pub send_gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
     /// what the server allows (none: the defaults)
     pub info: Mutex<Option<InstanceInfo>>,
+    /// the votes asked for (poll id, choices) and the answers to give (none left: the poll with those options counted, SOC-062)
+    pub votes: Mutex<Vec<(String, Vec<usize>)>>,
+    pub vote_answers: Mutex<Vec<Result<Poll, ActionError>>>,
+    pub vote_gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    /// the scheduled posts the server holds (SOC-064) and the ids asked to be cancelled
+    pub scheduled: Mutex<Vec<Scheduled>>,
+    pub cancelled: Mutex<Vec<String>>,
 }
 
 impl Source for Script {
@@ -50,19 +59,50 @@ impl Source for Script {
             q.remove(0)
         }
     }
-    fn send(&self, draft: &Draft) -> Result<Post, ActionError> {
+    fn vote(&self, poll: &Poll, choices: &[usize]) -> Result<Poll, ActionError> {
+        self.votes.lock().unwrap().push((poll.id.clone(), choices.to_vec()));
+        if let Some(rx) = self.vote_gate.lock().unwrap().as_ref() {
+            let _ = rx.recv();
+        }
+        let mut q = self.vote_answers.lock().unwrap();
+        if q.is_empty() {
+            let mut p = poll.clone();
+            for c in choices {
+                p.options[*c].votes = Some(p.options[*c].votes.unwrap_or(0) + 1);
+            }
+            p.votes_count += choices.len() as u32;
+            (p.voted, p.own_votes) = (true, choices.to_vec());
+            Ok(p)
+        } else {
+            q.remove(0)
+        }
+    }
+    fn scheduled(&self) -> Result<Vec<Scheduled>, String> {
+        Ok(self.scheduled.lock().unwrap().clone())
+    }
+    fn cancel_scheduled(&self, id: &str) -> Result<(), ActionError> {
+        self.cancelled.lock().unwrap().push(id.to_string());
+        self.scheduled.lock().unwrap().retain(|s| s.id != id);
+        Ok(())
+    }
+    fn send(&self, draft: &Draft) -> Result<Sent, ActionError> {
         self.sends.lock().unwrap().push(draft.clone());
         if let Some(rx) = self.send_gate.lock().unwrap().as_ref() {
             let _ = rx.recv();
+        }
+        if let Some(at) = draft.schedule {
+            let s = Scheduled { id: format!("sch{}", self.scheduled.lock().unwrap().len() + 1), at, text: draft.text.clone(), visibility: draft.visibility.key().into(), media: draft.pictures.len(), poll: draft.poll.is_some() };
+            self.scheduled.lock().unwrap().push(s.clone());
+            return Ok(Sent::Scheduled(s));
         }
         let mut q = self.send_answers.lock().unwrap();
         if q.is_empty() {
             let mut p = post("new-post-1", "ada", crate::calendar::time::now(), draft.reply_to.as_ref().map(|r| r.id.as_str()));
             p.text_markdown = draft.text.clone();
             p.author.handle = "ada@demo.social".into();
-            Ok(p)
+            Ok(Sent::Posted(Box::new(p)))
         } else {
-            q.remove(0)
+            q.remove(0).map(|p| Sent::Posted(Box::new(p)))
         }
     }
     fn instance(&self) -> Result<InstanceInfo, String> {

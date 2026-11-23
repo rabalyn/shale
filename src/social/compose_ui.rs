@@ -4,6 +4,7 @@
 
 use super::actions::Visibility;
 use super::compose::{Compose, Stage};
+use super::compose_extras_ui as extras;
 use super::compose_pictures as pictures;
 use super::feed_ui::{inset, short, TabCtx};
 use super::state::SocialState;
@@ -28,6 +29,8 @@ struct Out {
     add_picture: bool,
     /// "Choose pictures…" was pressed
     pick: bool,
+    /// "Scheduled posts…" was pressed
+    scheduled_list: bool,
 }
 
 fn muted(t: impl Into<String>) -> RichText {
@@ -36,6 +39,7 @@ fn muted(t: impl Into<String>) -> RichText {
 
 /// Show the box when this tab has one. `vault` is where a relative picture path starts.
 pub fn show(ctx: &egui::Context, tab_rect: Rect, st: &mut SocialState, entry: &SocialAccountEntry, tab: &TabCtx) {
+    super::schedule::show_list(ctx, tab_rect, st, entry, tab);
     if !st.compose.as_ref().is_some_and(|c| c.tab == tab.id && c.account == entry.account.id) {
         return;
     }
@@ -79,6 +83,9 @@ pub fn show(ctx: &egui::Context, tab_rect: Rect, st: &mut SocialState, entry: &S
     pictures_in(ctx, st, &mut c, &info, shown.map(|r| r.response.rect));
     if out.pick {
         st.pick_pictures(ctx, info.max_pictures.saturating_sub(c.pictures.len()).max(1));
+    }
+    if out.scheduled_list {
+        st.open_scheduled(ctx, entry, tab.id);
     }
     if out.add_picture {
         match c.add_picture(tab.vault.as_deref(), &info) {
@@ -151,6 +158,7 @@ fn edit(ui: &mut Ui, c: &mut Compose, entry: &SocialAccountEntry, info: &super::
             te.request_focus();
             c.focus = false;
         }
+        extras::language_picker(ui, c, rects);
     });
     // the counter: characters of the network's own kind against its limit
     let n = c.length(network, info);
@@ -166,6 +174,9 @@ fn edit(ui: &mut Ui, c: &mut Compose, entry: &SocialAccountEntry, info: &super::
         });
     });
     ui.add_space(4.0);
+    if network == Network::Mastodon {
+        ui.add_enabled_ui(!sending, |ui| extras::poll_section(ui, c, info, rects));
+    }
     // pictures with their descriptions
     let mut remove = None;
     for (i, p) in c.pictures.iter_mut().enumerate() {
@@ -184,19 +195,24 @@ fn edit(ui: &mut Ui, c: &mut Compose, entry: &SocialAccountEntry, info: &super::
     if let Some(i) = remove {
         c.remove_picture(i);
     }
-    if c.pictures.len() < info.max_pictures {
+    extras::video_row(ui, c, sending, network, rects);
+    if c.pictures.len() < info.max_pictures && c.poll.is_none() && c.video.is_none() {
         ui.horizontal(|ui| {
-            let b =
-                ui.add_enabled(!sending && !picking, egui::Button::new(if picking { "Choosing…" } else { "Choose pictures…" })).on_hover_text("Pick picture files in a dialog. You can also drop pictures on this box or paste one (Ctrl+V).");
+            let b = ui
+                .add_enabled(!sending && !picking, egui::Button::new(if picking { "Choosing…" } else { "Choose pictures or video…" }))
+                .on_hover_text("Pick picture or video files in a dialog. You can also drop files on this box or paste a picture (Ctrl+V). A post has up to four pictures or one video.");
             rects.push(("compose:choose".into(), b.rect));
             out.pick |= b.clicked();
-            let r = ui.add_enabled(!sending, egui::TextEdit::singleline(&mut c.path).hint_text("or the path of a picture").desired_width(ui.available_width() - 110.0));
+            let r = ui.add_enabled(!sending, egui::TextEdit::singleline(&mut c.path).hint_text("or the path of a picture or video").desired_width(ui.available_width() - 110.0));
             rects.push(("compose:path".into(), r.rect));
             let enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-            let b = ui.add_enabled(!sending && !c.path.trim().is_empty(), egui::Button::new("Add picture"));
+            let b = ui.add_enabled(!sending && !c.path.trim().is_empty(), egui::Button::new("Add file"));
             rects.push(("compose:add-picture".into(), b.rect));
             out.add_picture |= b.clicked() || (enter && !c.path.trim().is_empty());
         });
+    }
+    if network == Network::Mastodon {
+        ui.add_enabled_ui(!sending, |ui| extras::schedule_section(ui, c, &mut out.scheduled_list, rects));
     }
     if let Some(e) = &c.error {
         let r = ui.add(egui::Label::new(RichText::new(e).color(theme::palette().link_missing)).wrap());
@@ -238,7 +254,20 @@ fn confirm(ui: &mut Ui, c: &Compose, entry: &SocialAccountEntry, info: &super::a
         if !c.pictures.is_empty() {
             ui.label(muted(format!("{} picture{}", c.pictures.len(), if c.pictures.len() == 1 { "" } else { "s" })));
         }
+        if c.video.is_some() {
+            ui.label(muted("1 video"));
+        }
+        if let Some(p) = c.poll.as_ref().filter(|_| network == Network::Mastodon) {
+            ui.label(muted(format!("Poll: {}", p.draft().options.join(" · "))));
+        }
+        if !c.language.is_empty() {
+            ui.label(muted(format!("Language: {}", super::language::name(&c.language))));
+        }
     });
+    if let Some(at) = c.scheduled_at(network) {
+        let r = ui.label(RichText::new(format!("Will be sent {} (your local time), not now", super::schedule::when_text(at))).strong().size(crate::fonts::px(13.0)).color(theme::palette().text_strong));
+        rects.push(("compose:confirm-schedule".into(), r.rect));
+    }
     ui.add_space(6.0);
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         let post = ui.add(egui::Button::new(RichText::new("Post").strong()).fill(theme::palette().accent.gamma_multiply(0.55)));

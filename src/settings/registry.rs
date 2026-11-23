@@ -111,6 +111,7 @@ pub const ENTRIES: &[Entry] = &[
     e("mail.mark_read_secs", Mail, "Mark a message read after (seconds)", &["mail_mark_read_secs"], "delay"),
     e("social.accounts", Social, "Feed accounts", &["social_accounts"], "mastodon bluesky social add"),
     e("social.check_minutes", Social, "Look for new posts every (minutes)", &["social_check_minutes"], "interval feeds"),
+    e("social.post_language", Social, "Post language", &["social_post_language"], "language lang locale compose iso"),
     e("social.index", Social, "Post search index", &[], "rebuild clear cache posts"),
     e("search.sources", Search, "Sources a search looks in", &["search.sources"], "notes mail posts default selection"),
     e("search.hit_display", Search, "Hits of notes", &["search.hit_display"], "results rendered raw follow lines"),

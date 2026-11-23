@@ -88,9 +88,9 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, entry: &SocialAccountEntry, tab: 
     let applied = anchor.apply.take();
     let mut content_top = 0.0;
     let out = {
-        let SocialState { images, revealed, saving, rects, viewer, threads, writes, .. } = st;
+        let SocialState { images, revealed, saving, rects, viewer, threads, writes, polls, .. } = st;
         let Some(images) = images.as_ref() else { return asks };
-        let mut cx = Cx { images, revealed, saving, rects, now: crate::calendar::time::now(), tab: tab.id, viewer, account: &aid, busy: &writes.busy };
+        let mut cx = Cx { images, revealed, saving, rects, now: crate::calendar::time::now(), tab: tab.id, viewer, account: &aid, busy: &writes.busy, polls };
         let heights = &mut threads.heights;
         if heights.len() > 50_000 {
             heights.clear();

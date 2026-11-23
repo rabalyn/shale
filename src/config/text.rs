@@ -165,6 +165,7 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
     ("social_accounts.secret", "The access token or app password. It is written here only when there is no system keyring."),
     ("social_last", "The account and feed shown last in the feed view."),
     ("social_replies", "true: saving a post includes the replies of other people (the last choice in the Import dialog)."),
+    ("social_post_language", "The language a new post in the feed view starts with, as a two-letter code such as \"de\" or \"en\" (ISO 639-1); \"\" names none. It starts as the language of the system. You can change it for each post in the compose box."),
     ("social_check_minutes", "Minutes between looks for new posts in the feeds open in tabs; 0: never."),
     ("caches", "How long each cache is kept. A number, or \"none\" for forever (ages) or no limit (sizes and counts)."),
     ("caches.picture_days", "Social pictures: days since a picture was fetched."),

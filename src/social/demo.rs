@@ -68,6 +68,7 @@ fn post(id: &str, who: Author, ago_minutes: i64, text: &str) -> Post {
         mine: Mine::default(),
         reply_root: None,
         visibility: Some("public".into()),
+        poll: None,
     }
 }
 
@@ -119,6 +120,18 @@ pub fn posts() -> Vec<Post> {
     let mut p4 = post("demo-4", author("margaret@space.example", "Margaret H.", 1.8), 62, "Sunrise over the lab this morning. Two shots, same hill.");
     p4.media = vec![image_media("demo-sunrise-1.png", 800, 500, 0.3, "A hill with a bright sun in an orange sky"), image_media("demo-sunrise-2.png", 800, 500, 1.1, "The same hill a minute later, more purple")];
     p4.like_count = 95;
+    let mut p5 = post("demo-5", author("grace@fosstodon.org", "Grace Hopper", 1.3), 95, "Poll: what do you keep your notes in?");
+    p5.poll = Some(super::poll::Poll {
+        id: "demo-poll-1".into(),
+        options: [("Plain files in a folder", 41), ("An app with sync", 22), ("Paper", 9)].iter().map(|(t, v)| super::poll::PollOption { title: (*t).into(), votes: Some(*v) }).collect(),
+        expires_at: Some(crate::calendar::time::now() + 20 * 3600),
+        expired: false,
+        multiple: false,
+        votes_count: 72,
+        voters_count: Some(72),
+        voted: true,
+        own_votes: vec![0],
+    });
     let mut p6 = post("demo-6", author("edsger@demo.social", "Edsger D.", 2.9), 130, "Simplicity is prerequisite for reliability.");
     let mut quoted = post("demo-6q", author("tony@demo.social", "Tony Hoare", 0.7), 400, "Null references were a billion dollar mistake. Sorry about that.");
     quoted.like_count = 1200;
@@ -127,6 +140,7 @@ pub fn posts() -> Vec<Post> {
     let mut out = vec![p1, p2, p3, p4];
     out.push(thread().remove(0));
     out.push(p6);
+    out.push(p5);
     out
 }
 

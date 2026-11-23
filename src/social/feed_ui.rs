@@ -48,6 +48,8 @@ pub(super) enum CardAct {
     React(Reaction),
     Reply,
     Quote,
+    /// Vote in the poll of the post (SOC-062)
+    Vote,
 }
 
 /// Where a tab's view is held still while posts come in above it (SOC-028): the post at the top
@@ -254,10 +256,12 @@ pub(super) struct Cx<'a> {
     /// the account drawn for, and the reactions on their way (SOC-050)
     pub account: &'a str,
     pub busy: &'a HashSet<String>,
+    /// the options ticked in polls (SOC-062)
+    pub polls: &'a mut super::poll::Selected,
 }
 
 impl Cx<'_> {
-    fn rec(&mut self, key: String, r: egui::Response) -> egui::Response {
+    pub(super) fn rec(&mut self, key: String, r: egui::Response) -> egui::Response {
         self.rects.push((key, r.rect));
         r
     }
@@ -569,6 +573,12 @@ pub(super) fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, look: Look) -> CardO
                 media_block(ui, cx, p, idx, inner);
                 ui.add_space(4.0);
             }
+            if let Some(poll) = &p.poll {
+                if super::poll::card(ui, cx, p, poll, idx) {
+                    act = Some(CardAct::Vote);
+                }
+                ui.add_space(4.0);
+            }
             if let Some(q) = &p.quote {
                 inset(ui, |ui| {
                     ui.label(RichText::new(format!("{} @{}", q.author.name(), q.author.handle)).size(crate::fonts::px(12.5)).color(theme::palette().muted));
@@ -719,6 +729,7 @@ pub(super) fn do_act(ctx: &egui::Context, st: &mut SocialState, entry: &SocialAc
         CardAct::React(kind) => st.react(ctx, entry, post, kind),
         CardAct::Reply => st.open_compose(ctx, entry, tab, feed, Some(post), None),
         CardAct::Quote => st.open_compose(ctx, entry, tab, feed, None, Some(post)),
+        CardAct::Vote => st.vote(ctx, entry, post),
     }
 }
 
@@ -797,6 +808,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
     let mut reload = false;
     let mut retry_feeds = false;
     let mut new_post = false;
+    let mut scheduled = false;
     let mut pick: Option<(FeedRef, bool)> = None;
     column(ui, width, |ui| {
         ui.horizontal(|ui| {
@@ -855,6 +867,12 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
                     reload = true;
                     ui.close();
                 }
+                let r = ui.add_enabled(entry.account.network == Network::Mastodon, egui::Button::new("Scheduled posts…"));
+                seen_rects.push(("scheduled-posts".into(), r.rect));
+                if r.on_hover_text("The posts you scheduled on this server: see them and cancel one").clicked() {
+                    scheduled = true;
+                    ui.close();
+                }
             });
             seen_rects.push(("feed-menu".into(), menu.response.rect));
             st.rects.extend(seen_rects);
@@ -878,6 +896,9 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
     }
     if retry_feeds {
         st.reload_feeds(&ctx, &entry);
+    }
+    if scheduled {
+        st.open_scheduled(&ctx, &entry, tab.id);
     }
     if new_post {
         st.open_compose(&ctx, &entry, tab.id, feed.as_ref().map(|f| f.id.as_str()).unwrap_or(""), None, None);
@@ -954,12 +975,12 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
     let mut post_rects: Vec<(String, Rect)> = vec![];
     let mut content_top = 0.0;
     let out = {
-        let SocialState { images, revealed, saving, rects, card_heights, viewer, writes, .. } = st;
+        let SocialState { images, revealed, saving, rects, card_heights, viewer, writes, polls, .. } = st;
         if card_heights.len() > 50_000 {
             card_heights.clear();
         }
         let Some(images) = images.as_ref() else { return asks };
-        let mut cx = Cx { images, revealed, saving, rects, now: crate::calendar::time::now(), tab: tab.id, viewer, account: &aid, busy: &writes.busy };
+        let mut cx = Cx { images, revealed, saving, rects, now: crate::calendar::time::now(), tab: tab.id, viewer, account: &aid, busy: &writes.busy, polls };
         let mut area = egui::ScrollArea::vertical().id_salt(("social-scroll", tab.id, &aid, &feed.id)).auto_shrink([false, false]);
         if let Some(off) = applied {
             area = area.vertical_scroll_offset(off);

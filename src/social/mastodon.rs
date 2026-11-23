@@ -6,8 +6,11 @@
 //! checks it and tells the user's name. The token asks for `read write` (SOC-001, SOC-056); an account
 //! that signed in before with `read` only keeps reading and is asked to sign in again to write.
 
-use super::actions::{prepare, write_error, ActionError, Draft, DraftPicture, InstanceInfo, Reacted, Reaction, TempFile, MAX_PICTURES};
+use super::actions::{iso_at, prepare, write_error, ActionError, Draft, DraftPicture, InstanceInfo, Reacted, Reaction, Sent, TempFile, MAX_PICTURES};
 use super::markup::html_to_markdown;
+use super::poll::{Poll, PollLimits};
+use super::schedule::Scheduled;
+use super::video::{self, DraftVideo};
 use super::*;
 use serde_json::json;
 
@@ -260,12 +263,7 @@ pub fn parse_status(s: &Value, server: &str) -> Option<Post> {
     // Mastodon 4.4 quote posts
     let quoted = &s["quote"]["quoted_status"];
     let quote = if quoted.is_object() { parse_status(quoted, server).map(Box::new) } else { None };
-    let mut body = html_to_markdown(&text(&s["content"]));
-    if let Some(poll) = s["poll"].as_object() {
-        for o in poll.get("options").and_then(|o| o.as_array()).into_iter().flatten() {
-            body.push_str(&format!("\n- [ ] {}", text(&o["title"])));
-        }
-    }
+    let body = html_to_markdown(&text(&s["content"]));
     let visibility = Some(text(&s["visibility"])).filter(|v| !v.is_empty());
     Some(Post {
         network: Network::Mastodon,
@@ -287,6 +285,7 @@ pub fn parse_status(s: &Value, server: &str) -> Option<Post> {
         mine: Mine { liked: s["favourited"].as_bool().unwrap_or(false), boosted: s["reblogged"].as_bool().unwrap_or(false), like_record: None, boost_record: None, unknown: false },
         reply_root: None,
         visibility,
+        poll: Poll::parse(&s["poll"]),
     })
 }
 
@@ -353,6 +352,8 @@ pub fn instance_from(v: &Value) -> InstanceInfo {
         max_pictures: c["statuses"]["max_media_attachments"].as_u64().map(|n| (n as usize).clamp(1, MAX_PICTURES)).unwrap_or(d.max_pictures),
         image_bytes: c["media_attachments"]["image_size_limit"].as_u64().filter(|n| *n > 0).unwrap_or(d.image_bytes),
         quotes: v["api_versions"]["mastodon"].as_u64().is_some_and(|n| n >= 7),
+        poll: PollLimits::from_instance(v),
+        video_bytes: c["media_attachments"]["video_size_limit"].as_u64().filter(|n| *n > 0).unwrap_or(d.video_bytes),
     }
 }
 
@@ -371,23 +372,45 @@ fn status_body(d: &Draft, media: &[String]) -> Value {
     if let (Some(q), true) = (&d.quote, d.info.quotes) {
         b["quoted_status_id"] = json!(q.id);
     }
+    if let Some(p) = &d.poll {
+        b["poll"] = json!({"options": p.options, "expires_in": p.expires_in, "multiple": p.multiple, "hide_totals": p.hide_totals});
+    }
+    if let Some(at) = d.schedule {
+        b["scheduled_at"] = json!(iso_at(at));
+    }
+    if !d.language.is_empty() {
+        b["language"] = json!(d.language);
+    }
     b
 }
 
-/// Send a post: the pictures first (SOC-053), then the status. `poll`: how long to wait between
-/// two looks at a picture the server is still processing.
-pub fn send(server: &str, token: &str, d: &Draft, poll: std::time::Duration) -> Result<Post, ActionError> {
+/// Send a post: the pictures or the video first (SOC-053, SOC-066), then the status. `poll`: how
+/// long to wait between two looks at a file the server is still processing. A post with a time
+/// (SOC-063) is answered with a scheduled status, which is no post.
+pub fn send(server: &str, token: &str, d: &Draft, poll: std::time::Duration) -> Result<Sent, ActionError> {
     let _step = tracing::info_span!("flow.social_mastodon.send", peer = "server").entered();
     let server = base(server)?;
     if d.pictures.len() > d.info.max_pictures {
         return Err(format!("This server takes at most {} pictures in a post.", d.info.max_pictures).into());
     }
-    let media = d.pictures.iter().map(|p| upload(&server, token, p, d.info.image_bytes, poll)).collect::<Result<Vec<_>, _>>()?;
+    if d.poll.is_some() && (!d.pictures.is_empty() || d.video.is_some()) {
+        return Err("A poll cannot go with pictures or a video.".into());
+    }
+    if d.video.is_some() && !d.pictures.is_empty() {
+        return Err("A post has pictures or a video, not both.".into());
+    }
+    let mut media = d.pictures.iter().map(|p| upload(&server, token, p, d.info.image_bytes, poll)).collect::<Result<Vec<_>, _>>()?;
+    if let Some(v) = &d.video {
+        media.push(upload_video(&server, token, v, d.info.video_bytes, poll)?);
+    }
     // the same key for a retry of the same draft: the server answers with the post it made the first time (SOC-057)
     let key = format!("Idempotency-Key: {}", d.key);
     let extra: Vec<&str> = if d.key.is_empty() { vec![] } else { vec![&key] };
     let v = api_with("POST", &format!("{server}/api/v1/statuses"), Some(token), Some(&status_body(d, &media)), &extra).map_err(write_error)?;
-    parse_status(&v, &server).ok_or_else(|| "the server's answer is not a post".into())
+    if d.schedule.is_some() {
+        return Scheduled::parse(&v).map(Sent::Scheduled).ok_or_else(|| "the server's answer is not a scheduled post".into());
+    }
+    parse_status(&v, &server).map(|p| Sent::Posted(Box::new(p))).ok_or_else(|| "the server's answer is not a post".into())
 }
 
 /// One picture with its description → the id of the media attachment. A server that processes
@@ -395,16 +418,27 @@ pub fn send(server: &str, token: &str, d: &Draft, poll: std::time::Duration) -> 
 fn upload(server: &str, token: &str, pic: &DraftPicture, limit: u64, poll: std::time::Duration) -> Result<String, ActionError> {
     let prepared = prepare(&pic.path, Network::Mastodon, limit)?;
     let file = TempFile::new(&prepared.bytes, prepared.ext)?;
-    let alt = pic.alt.trim();
+    upload_file(server, token, &file, prepared.mime, &pic.alt, poll, 30)
+}
+
+/// The video → the id of its media attachment; the server converts it, which takes a while (asked every `poll`, up to 5 minutes at the real pace).
+fn upload_video(server: &str, token: &str, v: &DraftVideo, limit: u64, poll: std::time::Duration) -> Result<String, ActionError> {
+    let prepared = video::prepare(&v.path, limit)?;
+    upload_file(server, token, &prepared.file, prepared.mime, &v.alt, poll, 300)
+}
+
+/// A file (already a private copy) with its description to `/api/v2/media`, then wait until the
+/// server has processed it (at most `tries` looks).
+fn upload_file(server: &str, token: &str, file: &TempFile, mime: &str, alt: &str, poll: std::time::Duration, tries: u32) -> Result<String, ActionError> {
+    let alt = alt.trim();
     let fields: Vec<(&str, &str)> = if alt.is_empty() { vec![] } else { vec![("description", alt)] };
-    let v = api_upload("POST", &format!("{server}/api/v2/media"), token, None, dav::Upload::Form { field: "file", path: &file.0, mime: prepared.mime, fields: &fields }).map_err(write_error)?;
-    drop(file);
+    let v = api_upload("POST", &format!("{server}/api/v2/media"), token, None, dav::Upload::Form { field: "file", path: &file.0, mime, fields: &fields }).map_err(write_error)?;
     let id = text(&v["id"]);
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return Err("the server did not accept the picture".into());
+        return Err("the server did not accept the file".into());
     }
     let mut ready = !v["url"].is_null();
-    for _ in 0..30 {
+    for _ in 0..tries {
         if ready {
             return Ok(id);
         }
@@ -412,7 +446,40 @@ fn upload(server: &str, token: &str, pic: &DraftPicture, limit: u64, poll: std::
         let m = api("GET", &format!("{server}/api/v1/media/{id}"), Some(token), None).map_err(write_error)?;
         ready = !m["url"].is_null();
     }
-    Err("the server is still processing the picture; try again in a minute".into())
+    Err("the server is still processing the file; try again in a minute".into())
+}
+
+/// Vote in a poll (SOC-062): the chosen options by index; the answer is the poll as it is now.
+pub fn vote(server: &str, token: &str, poll: &Poll, choices: &[usize]) -> Result<Poll, ActionError> {
+    let _step = tracing::info_span!("flow.social_mastodon.vote", peer = "server").entered();
+    let server = base(server)?;
+    if poll.id.is_empty() || !poll.id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err("bad poll id".into());
+    }
+    if choices.is_empty() || choices.iter().any(|c| *c >= poll.options.len()) {
+        return Err("choose an option first".into());
+    }
+    let v = api("POST", &format!("{server}/api/v1/polls/{}/votes", poll.id), Some(token), Some(&json!({"choices": choices}))).map_err(write_error)?;
+    Poll::parse(&v).ok_or_else(|| "the server's answer is not a poll".into())
+}
+
+/// The posts the server holds back (SOC-064), as the list shows them.
+pub fn scheduled(server: &str, token: &str) -> Result<Vec<Scheduled>, String> {
+    let _step = tracing::info_span!("flow.social_mastodon.scheduled", peer = "server").entered();
+    let server = base(server)?;
+    let v = api("GET", &format!("{server}/api/v1/scheduled_statuses"), Some(token), None)?;
+    Ok(v.as_array().into_iter().flatten().filter_map(Scheduled::parse).collect())
+}
+
+/// Delete a scheduled post (SOC-064).
+pub fn cancel_scheduled(server: &str, token: &str, id: &str) -> Result<(), ActionError> {
+    let _step = tracing::info_span!("flow.social_mastodon.cancel_scheduled", peer = "server").entered();
+    let server = base(server)?;
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err("bad id of the scheduled post".into());
+    }
+    api("DELETE", &format!("{server}/api/v1/scheduled_statuses/{id}"), Some(token), None).map_err(write_error)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -636,7 +703,28 @@ mod tests {
     }
 
     fn draft(text: &str) -> Draft {
-        Draft { text: text.into(), cw: String::new(), visibility: Visibility::Public, reply_to: None, quote: None, pictures: vec![], info: InstanceInfo::defaults(Network::Mastodon), key: "keymasto0000a".into() }
+        Draft {
+            text: text.into(),
+            cw: String::new(),
+            visibility: Visibility::Public,
+            reply_to: None,
+            quote: None,
+            pictures: vec![],
+            poll: None,
+            schedule: None,
+            language: String::new(),
+            video: None,
+            info: InstanceInfo::defaults(Network::Mastodon),
+            key: "keymasto0000a".into(),
+        }
+    }
+
+    /// The post a send made (a scheduled post fails the test).
+    fn posted(s: Sent) -> Post {
+        match s {
+            Sent::Posted(p) => *p,
+            other => panic!("not a post: {other:?}"),
+        }
     }
 
     // spec: SOC-051, SOC-052, SOC-054
@@ -660,10 +748,10 @@ mod tests {
             (200, s.to_string())
         });
         let parent = parse_status(&status("100", "2", "bob", "2024-05-17T09:00:00Z", None, "<p>q</p>"), &base).unwrap();
-        let sent = send(&base, "tok-1", &Draft { reply_to: Some(parent.clone()), cw: " spoilers ".into(), visibility: Visibility::Unlisted, ..draft("@bob@m.test hello") }, std::time::Duration::ZERO).unwrap();
+        let sent = send(&base, "tok-1", &Draft { reply_to: Some(parent.clone()), cw: " spoilers ".into(), visibility: Visibility::Unlisted, ..draft("@bob@m.test hello") }, std::time::Duration::ZERO).map(posted).unwrap();
         assert_eq!((sent.id.as_str(), sent.text_markdown.as_str(), sent.reply_to.as_deref(), sent.content_warning.as_deref(), sent.visibility.as_deref()), ("200", "@bob@m.test hello", Some("100"), Some("spoilers"), Some("unlisted")));
         // a plain post names no reply, warning, pictures or quote
-        let plain = send(&base, "tok-1", &draft("just text"), std::time::Duration::ZERO).unwrap();
+        let plain = send(&base, "tok-1", &draft("just text"), std::time::Duration::ZERO).map(posted).unwrap();
         assert_eq!((plain.reply_to, plain.content_warning, plain.visibility.as_deref()), (None, None, Some("public")));
         handle.join().unwrap();
         // the body that goes out
@@ -687,7 +775,7 @@ mod tests {
             let id = if key == "k1" { "500" } else { "501" };
             (200, status(id, "1", "ada", "2024-05-17T10:00:00Z", None, "<p>x</p>").to_string())
         });
-        let go = |key: &str| send(&base, "tok-1", &Draft { key: key.into(), ..draft("x") }, std::time::Duration::ZERO).unwrap().id;
+        let go = |key: &str| send(&base, "tok-1", &Draft { key: key.into(), ..draft("x") }, std::time::Duration::ZERO).map(posted).unwrap().id;
         assert_eq!((go("k1"), go("k1"), go("k2")), ("500".to_string(), "500".to_string(), "501".to_string()));
         handle.join().unwrap();
     }
@@ -696,7 +784,7 @@ mod tests {
     #[test]
     fn the_limits_come_from_the_servers_instance_answer_and_default_to_those_of_mastodon() {
         let v = json!({"api_versions": {"mastodon": 7}, "configuration": {"statuses": {"max_characters": 1500, "max_media_attachments": 6}, "media_attachments": {"image_size_limit": 8_000_000}}});
-        assert_eq!(instance_from(&v), InstanceInfo { max_chars: 1500, max_pictures: 4, image_bytes: 8_000_000, quotes: true });
+        assert_eq!(instance_from(&v), InstanceInfo { max_chars: 1500, max_pictures: 4, image_bytes: 8_000_000, quotes: true, poll: PollLimits::default(), video_bytes: video::MASTODON_VIDEO_BYTES });
         let old = instance_from(&json!({"api_versions": {"mastodon": 6}, "configuration": {"statuses": {"max_media_attachments": 2}}}));
         assert_eq!((old.max_chars, old.max_pictures, old.image_bytes, old.quotes), (500, 2, 16 * 1024 * 1024, false));
         assert_eq!(instance_from(&json!({})), InstanceInfo::defaults(Network::Mastodon));
@@ -752,9 +840,160 @@ mod tests {
             }
         });
         let pictures = vec![DraftPicture { path: png.clone(), alt: " A cat in a box ".into() }, DraftPicture { path: second, alt: String::new() }];
-        let sent = send(&base, "tok-1", &Draft { pictures, ..draft("pics") }, std::time::Duration::from_millis(5)).unwrap();
+        let sent = send(&base, "tok-1", &Draft { pictures, ..draft("pics") }, std::time::Duration::from_millis(5)).map(posted).unwrap();
         assert_eq!(sent.id, "300");
         assert_eq!(handle.join().unwrap(), ["POST /api/v2/media", "GET /api/v1/media/m1", "GET /api/v1/media/m1", "POST /api/v2/media", "POST /api/v1/statuses"], "the second picture goes up after the first is ready");
+    }
+
+    fn poll_json(voted: bool) -> Value {
+        json!({"id": "p9", "expires_at": "2030-01-01T10:00:00.000Z", "expired": false, "multiple": true, "votes_count": 5, "voters_count": 4, "voted": voted, "own_votes": if voted { json!([1]) } else { json!([]) },
+               "options": [{"title": "Tea", "votes_count": 3}, {"title": "Coffee", "votes_count": 2}, {"title": "Water", "votes_count": null}]})
+    }
+
+    // spec: SOC-062
+    #[test]
+    fn the_poll_of_a_status_is_parsed_with_its_votes_and_no_longer_added_to_the_text() {
+        let mut s = status("11", "1", "ada", "2024-05-17T10:30:00.000Z", None, "<p>Which?</p>");
+        s["poll"] = poll_json(true);
+        let p = parse_status(&s, "https://m.test").unwrap();
+        assert_eq!(p.text_markdown, "Which?", "the options are not text any more");
+        let poll = p.poll.unwrap();
+        assert_eq!((poll.id.as_str(), poll.multiple, poll.votes_count, poll.voters_count, poll.voted, poll.own_votes.clone()), ("p9", true, 5, Some(4), true, vec![1]));
+        assert_eq!(poll.expires_at, Some(1_893_492_000));
+        assert_eq!(poll.options.iter().map(|o| (o.title.as_str(), o.votes)).collect::<Vec<_>>(), [("Tea", Some(3)), ("Coffee", Some(2)), ("Water", None)], "hidden totals are None");
+        s["poll"] = json!(null);
+        assert!(parse_status(&s, "https://m.test").unwrap().poll.is_none());
+        s["poll"] = json!({"id": "x", "options": [{"title": "only one"}]});
+        assert!(parse_status(&s, "https://m.test").unwrap().poll.is_none(), "a poll needs two options");
+    }
+
+    // spec: SOC-062
+    #[test]
+    fn a_vote_posts_the_choices_to_the_poll_and_the_answer_is_the_new_poll() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let poll = Poll::parse(&poll_json(false)).unwrap();
+        let (base, handle) = mock_http(1, |method, path, headers, body| {
+            assert!(method == "POST" && path == "/api/v1/polls/p9/votes" && headers.to_ascii_lowercase().contains("authorization: bearer tok-1"), "{method} {path}");
+            assert_eq!(serde_json::from_str::<Value>(body).unwrap(), json!({"choices": [0, 1]}));
+            (200, poll_json(true).to_string())
+        });
+        let now = vote(&base, "tok-1", &poll, &[0, 1]).unwrap();
+        assert!(now.voted && now.own_votes == vec![1]);
+        handle.join().unwrap();
+        // nothing is sent for no choice, a choice that is not there or a poll id that could change the address
+        assert!(vote(&base, "tok-1", &poll, &[]).is_err() && vote(&base, "tok-1", &poll, &[3]).is_err());
+        assert!(vote(&base, "tok-1", &Poll { id: "../x".into(), ..poll }, &[0]).is_err());
+    }
+
+    // spec: SOC-061, SOC-063, SOC-065
+    #[test]
+    fn a_poll_a_time_and_a_language_go_into_the_status_and_the_answer_to_a_time_is_no_post() {
+        use super::super::poll::DraftPoll;
+        let d = Draft { poll: Some(DraftPoll { options: vec!["Tea".into(), "Coffee".into()], expires_in: 3600, multiple: true, hide_totals: true }), schedule: Some(1_893_492_000), language: "de".into(), ..draft("Which?") };
+        assert_eq!(
+            status_body(&d, &[]),
+            json!({"status": "Which?", "visibility": "public", "poll": {"options": ["Tea", "Coffee"], "expires_in": 3600, "multiple": true, "hide_totals": true}, "scheduled_at": "2030-01-01T10:00:00.000Z", "language": "de"})
+        );
+        assert_eq!(status_body(&draft("x"), &[]), json!({"status": "x", "visibility": "public"}), "no language, no time, no poll: none sent");
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let (base, handle) = mock_http(2, |_, path, _, body| {
+            assert_eq!(path, "/api/v1/statuses");
+            let b: Value = serde_json::from_str(body).unwrap();
+            if b["scheduled_at"].is_string() {
+                // a ScheduledStatus: no content, no account
+                (200, json!({"id": "321", "scheduled_at": b["scheduled_at"], "params": {"text": b["status"], "visibility": "public", "poll": b["poll"]}, "media_attachments": []}).to_string())
+            } else {
+                (200, status("1", "1", "ada", "2024-05-17T10:00:00Z", None, "<p>now</p>").to_string())
+            }
+        });
+        match send(&base, "tok-1", &d, std::time::Duration::ZERO).unwrap() {
+            Sent::Scheduled(s) => assert_eq!((s.id.as_str(), s.at, s.text.as_str(), s.poll), ("321", 1_893_492_000, "Which?", true)),
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(send(&base, "tok-1", &draft("now"), std::time::Duration::ZERO).unwrap(), Sent::Posted(_)));
+        handle.join().unwrap();
+        // a poll cannot go with pictures or a video: refused before anything is sent
+        let pic = DraftPicture { path: "a.png".into(), alt: String::new() };
+        let both = Draft { poll: d.poll.clone(), pictures: vec![pic], ..draft("x") };
+        assert!(send(&base, "tok-1", &both, std::time::Duration::ZERO).unwrap_err().to_string().contains("cannot go with pictures or a video"));
+    }
+
+    // spec: SOC-061, SOC-066
+    #[test]
+    fn the_instance_names_the_limits_of_polls_and_videos() {
+        let v = json!({"configuration": {"polls": {"max_options": 6, "max_characters_per_option": 80, "min_expiration": 60, "max_expiration": 604_800}, "media_attachments": {"video_size_limit": 99_000_000}}});
+        let i = instance_from(&v);
+        assert_eq!((i.poll.max_options, i.poll.max_chars, i.poll.min_expiry, i.poll.max_expiry, i.video_bytes), (6, 80, 60, 604_800, 99_000_000));
+        let d = instance_from(&json!({}));
+        assert_eq!((d.poll, d.video_bytes), (PollLimits::default(), video::MASTODON_VIDEO_BYTES));
+    }
+
+    // spec: SOC-064
+    #[test]
+    fn scheduled_posts_are_listed_and_deleted_by_their_id() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let (base, handle) = mock_http(2, |method, path, headers, _| {
+            assert!(headers.to_ascii_lowercase().contains("authorization: bearer tok-1"));
+            match (method, path) {
+                ("GET", "/api/v1/scheduled_statuses") => (200, json!([{"id": "5", "scheduled_at": "2030-01-01T10:00:00.000Z", "params": {"text": "later", "visibility": "public"}, "media_attachments": []}, {"nonsense": true}]).to_string()),
+                ("DELETE", "/api/v1/scheduled_statuses/5") => (200, "{}".into()),
+                _ => (404, json!({"error": "no"}).to_string()),
+            }
+        });
+        let list = scheduled(&base, "tok-1").unwrap();
+        assert_eq!(list.len(), 1, "what is no scheduled status is skipped");
+        assert_eq!((list[0].id.as_str(), list[0].text.as_str()), ("5", "later"));
+        cancel_scheduled(&base, "tok-1", "5").unwrap();
+        assert_eq!(handle.join().unwrap(), ["GET /api/v1/scheduled_statuses", "DELETE /api/v1/scheduled_statuses/5"]);
+        assert!(cancel_scheduled(&base, "tok-1", "5/../x").is_err(), "an id that could change the address is refused");
+    }
+
+    // spec: SOC-066, SEC-026, SEC-027
+    #[test]
+    fn a_video_goes_up_like_a_picture_with_a_longer_wait_and_a_big_one_is_refused_before_any_request() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let mut mp4 = vec![0, 0, 0, 24, b'f', b't', b'y', b'p', b'i', b's', b'o', b'm', 0, 0, 2, 0, b'i', b's', b'o', b'm', b'm', b'p', b'4', b'1'];
+        mp4.extend_from_slice(&[7u8; 300]);
+        let clip = crate::social::actions::tests::file("clip.mp4", &mp4);
+        let polled = std::sync::atomic::AtomicUsize::new(0);
+        let (base, handle) = mock_http(5, move |method, path, _, body| match (method, path) {
+            ("POST", "/api/v2/media") => {
+                assert!(body.contains("Content-Type: video/mp4") && body.contains("A short clip"), "{}", body.chars().take(200).collect::<String>());
+                (202, json!({"id": "v1", "type": "video", "url": null}).to_string())
+            }
+            ("GET", "/api/v1/media/v1") => {
+                // still converting the first two times
+                if polled.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 2 {
+                    (206, json!({"id": "v1", "url": null}).to_string())
+                } else {
+                    (200, json!({"id": "v1", "url": "https://files.test/v1.mp4"}).to_string())
+                }
+            }
+            ("POST", "/api/v1/statuses") => {
+                assert_eq!(serde_json::from_str::<Value>(body).unwrap()["media_ids"], json!(["v1"]));
+                (200, status("400", "1", "ada", "2024-05-17T10:00:00Z", None, "<p>clip</p>").to_string())
+            }
+            _ => (500, "{}".into()),
+        });
+        let d = Draft { video: Some(DraftVideo { path: clip.clone(), alt: " A short clip ".into() }), ..draft("clip") };
+        assert!(matches!(send(&base, "tok-1", &d, std::time::Duration::from_millis(2)).unwrap(), Sent::Posted(p) if p.id == "400"));
+        assert_eq!(handle.join().unwrap(), ["POST /api/v2/media", "GET /api/v1/media/v1", "GET /api/v1/media/v1", "GET /api/v1/media/v1", "POST /api/v1/statuses"]);
+        // over the limit the server names: refused with the sizes, nothing sent
+        let small = Draft { info: InstanceInfo { video_bytes: 100, ..d.info.clone() }, ..d };
+        let e = send(&base, "tok-1", &small, std::time::Duration::ZERO).unwrap_err().to_string();
+        assert!(e.contains("clip.mp4") && e.contains("videos can be up to"), "{e}");
+        // what is no video is refused
+        let text = crate::social::actions::tests::file("not-a-video.mp4", b"words, only words, nothing else here");
+        let e = send(&base, "tok-1", &Draft { video: Some(DraftVideo { path: text, alt: String::new() }), ..draft("x") }, std::time::Duration::ZERO).unwrap_err().to_string();
+        assert!(e.contains("is not an MP4, QuickTime, WebM or MPEG video"), "{e}");
     }
 
     fn entries(ids: &[u32]) -> Value {

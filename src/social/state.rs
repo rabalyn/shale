@@ -3,11 +3,13 @@
 //! that `poll` reads each frame; a job that panics sends an error instead, so no spinner runs
 //! forever (ADR-0006).
 
-use super::actions::{ActionError, Draft, InstanceInfo, Reacted, Reaction, Writes};
+use super::actions::{ActionError, Draft, InstanceInfo, Reacted, Reaction, Sent, Writes};
 use super::compose::Compose;
 use super::images::ImageCache;
 use super::note::SavedPost;
+use super::poll::Poll;
 use super::post_index::PostIndex;
+use super::schedule::{Scheduled, ScheduledState};
 use super::thread::{ThreadStatus, Threads};
 use super::{Client, Feed, FeedRef, Fresh, Network, Page, Post, Since, SocialAccountEntry, ThreadView};
 use eframe::egui::{Context, Rect};
@@ -34,7 +36,19 @@ pub trait Source: Send + Sync {
         Err("this pretend server does not take writes".into())
     }
     /// Send a post (SOC-051).
-    fn send(&self, _draft: &Draft) -> Result<Post, ActionError> {
+    fn send(&self, _draft: &Draft) -> Result<Sent, ActionError> {
+        Err("this pretend server does not take writes".into())
+    }
+    /// Vote in a poll (SOC-062).
+    fn vote(&self, _poll: &Poll, _choices: &[usize]) -> Result<Poll, ActionError> {
+        Err("this pretend server does not take writes".into())
+    }
+    /// The scheduled posts (SOC-064).
+    fn scheduled(&self) -> Result<Vec<Scheduled>, String> {
+        Ok(vec![])
+    }
+    /// Delete a scheduled post (SOC-064).
+    fn cancel_scheduled(&self, _id: &str) -> Result<(), ActionError> {
         Err("this pretend server does not take writes".into())
     }
     /// What the server allows in a post (SOC-052).
@@ -181,7 +195,10 @@ pub(super) enum Msg {
     Thread { account: String, feed: String, id: String, client: Option<Client>, result: Result<Box<ThreadView>, String> },
     Fetched { tab: u64, account: String, feed: String, client: Option<Client>, result: Result<Box<Post>, String> },
     Reacted { account: String, post: String, kind: Reaction, on: bool, client: Option<Client>, result: Result<Reacted, ActionError> },
-    Sent { account: String, feed: String, client: Option<Client>, result: Result<Box<Post>, ActionError> },
+    Sent { account: String, feed: String, client: Option<Client>, result: Result<Sent, ActionError> },
+    Voted { account: String, post: String, client: Option<Client>, result: Result<Poll, ActionError> },
+    ScheduledList { account: String, client: Option<Client>, result: Result<Vec<Scheduled>, String> },
+    ScheduledCancelled { account: String, id: String, client: Option<Client>, result: Result<(), ActionError> },
     Instance { account: String, client: Option<Client>, result: Result<InstanceInfo, String> },
     Picked { result: Result<Vec<std::path::PathBuf>, String> },
 }
@@ -237,6 +254,12 @@ pub struct SocialState {
     pub compose: Option<Compose>,
     /// pictures coming into the compose box: the file dialog, drops (SOC-058)
     pub intake: super::compose_pictures::Intake,
+    /// the options ticked in the polls on screen, before the vote is sent (SOC-062)
+    pub polls: super::poll::Selected,
+    /// the window of the scheduled posts (SOC-064)
+    pub scheduled: ScheduledState,
+    /// the language a new post starts with (the setting "Post language", SOC-065)
+    pub post_language: String,
     pub(super) clients: HashMap<String, Client>,
     pub(super) tx: Sender<Msg>,
     rx: Receiver<Msg>,
@@ -287,6 +310,9 @@ impl SocialState {
             writes: Writes::default(),
             compose: None,
             intake: Default::default(),
+            polls: Default::default(),
+            scheduled: Default::default(),
+            post_language: super::language::system(),
             clients: HashMap::new(),
             tx,
             rx,
@@ -791,6 +817,24 @@ impl SocialState {
                         self.clients.insert(account.clone(), c);
                     }
                     self.sent(&account, &feed, result);
+                }
+                Msg::Voted { account, post, client, result } => {
+                    if let Some(c) = client {
+                        self.clients.insert(account.clone(), c);
+                    }
+                    self.voted(&account, &post, result);
+                }
+                Msg::ScheduledList { account, client, result } => {
+                    if let Some(c) = client {
+                        self.clients.insert(account.clone(), c);
+                    }
+                    self.scheduled_arrived(&account, result);
+                }
+                Msg::ScheduledCancelled { account, id, client, result } => {
+                    if let Some(c) = client {
+                        self.clients.insert(account.clone(), c);
+                    }
+                    self.scheduled_cancelled(&account, &id, result);
                 }
                 Msg::Picked { result } => {
                     self.intake.picking = false;

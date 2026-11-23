@@ -7,7 +7,10 @@
 //! when it went well (SOC-050). Mastodon accounts that signed in with `read` only are asked to
 //! sign in again before anything is sent (SOC-056).
 
+use super::poll::{DraftPoll, Poll, PollLimits};
+use super::schedule::Scheduled;
 use super::state::{run, Msg, SocialState};
+use super::video::DraftVideo;
 use super::*;
 use eframe::egui::Context;
 use std::collections::HashMap;
@@ -136,6 +139,10 @@ pub struct InstanceInfo {
     pub image_bytes: u64,
     /// the server can quote a post (Mastodon 4.5, API version 7)
     pub quotes: bool,
+    /// what a poll may be (SOC-061)
+    pub poll: PollLimits,
+    /// the biggest video file in bytes (SOC-066)
+    pub video_bytes: u64,
 }
 
 /// What a Mastodon server that does not say gets (the defaults of Mastodon).
@@ -151,8 +158,8 @@ impl InstanceInfo {
     /// Before the server has answered, and for a server that names nothing.
     pub fn defaults(network: Network) -> InstanceInfo {
         match network {
-            Network::Mastodon => InstanceInfo { max_chars: MASTODON_MAX_CHARS, max_pictures: MAX_PICTURES, image_bytes: 16 * 1024 * 1024, quotes: false },
-            Network::Bluesky => InstanceInfo { max_chars: BLUESKY_MAX_CHARS, max_pictures: MAX_PICTURES, image_bytes: BLUESKY_IMAGE_BYTES, quotes: true },
+            Network::Mastodon => InstanceInfo { max_chars: MASTODON_MAX_CHARS, max_pictures: MAX_PICTURES, image_bytes: 16 * 1024 * 1024, quotes: false, poll: PollLimits::default(), video_bytes: video::MASTODON_VIDEO_BYTES },
+            Network::Bluesky => InstanceInfo { max_chars: BLUESKY_MAX_CHARS, max_pictures: MAX_PICTURES, image_bytes: BLUESKY_IMAGE_BYTES, quotes: true, poll: PollLimits::default(), video_bytes: video::MAX_VIDEO_BYTES },
         }
     }
 }
@@ -162,6 +169,14 @@ impl InstanceInfo {
 pub struct DraftPicture {
     pub path: PathBuf,
     pub alt: String,
+}
+
+/// What the server made of a send: a post, or on Mastodon a scheduled post (SOC-063), which is
+/// no post yet and goes nowhere in the feed.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Sent {
+    Posted(Box<Post>),
+    Scheduled(Scheduled),
 }
 
 /// A post as the compose box makes it, ready to be sent.
@@ -175,6 +190,14 @@ pub struct Draft {
     pub reply_to: Option<Post>,
     pub quote: Option<Post>,
     pub pictures: Vec<DraftPicture>,
+    /// Mastodon: the poll (SOC-061; not with pictures or a video)
+    pub poll: Option<DraftPoll>,
+    /// Mastodon: the moment (UTC seconds) the server is to send the post (SOC-063)
+    pub schedule: Option<i64>,
+    /// the language of the post, ISO 639-1; "" names none (SOC-065)
+    pub language: String,
+    /// the video (SOC-066, SOC-067; not with pictures)
+    pub video: Option<DraftVideo>,
     pub info: InstanceInfo,
     /// names this draft for the server: the same for a retry of the same draft, another one after a
     /// change (a TID, `new_key`); Mastodon sends it as `Idempotency-Key`, Bluesky as the `rkey` (SOC-057)
@@ -276,6 +299,7 @@ fn shrink(bytes: &[u8], limit: u64) -> Option<Vec<u8>> {
 
 /// A file in the temporary folder that is removed when this is dropped: the picture that curl
 /// reads for an upload (so its name is one Shale made).
+#[derive(Debug)]
 pub struct TempFile(pub PathBuf);
 
 impl TempFile {
@@ -290,6 +314,18 @@ impl TempFile {
     }
 }
 
+impl TempFile {
+    /// A private copy of a file (a video, SEC-026): written without reading it all into memory.
+    pub fn copy_of(src: &Path, ext: &str) -> Result<TempFile, String> {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static N: AtomicUsize = AtomicUsize::new(0);
+        let dir = crate::fsutil::private_temp_root("shale-upload").map_err(|e| format!("could not prepare the file ({e})"))?;
+        let path = dir.join(format!("{}-v{}.{ext}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+        crate::fsutil::copy_new(src, &path).map_err(|e| format!("could not prepare the file ({e})"))?;
+        Ok(TempFile(path))
+    }
+}
+
 impl Drop for TempFile {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
@@ -298,7 +334,11 @@ impl Drop for TempFile {
 
 /// "2026-11-23T10:30:00.000Z" for a Bluesky record.
 pub fn iso_now() -> String {
-    let now = t::now();
+    iso_at(t::now())
+}
+
+/// "2026-11-23T10:30:00.000Z" for a moment (UTC seconds).
+pub fn iso_at(now: i64) -> String {
     let (y, m, d) = t::civil_from_days(now.div_euclid(86_400));
     let s = now.rem_euclid(86_400);
     format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.000Z", s / 3600, s / 60 % 60, s % 60)
@@ -320,13 +360,43 @@ impl Client {
     }
 
     /// Send a new post, a reply or a quote; the post as the server made it.
-    pub fn send(&mut self, draft: &Draft) -> Result<Post, ActionError> {
+    pub fn send(&mut self, draft: &Draft) -> Result<Sent, ActionError> {
         if self.account.may_write() == Some(false) {
             return Err(ActionError::NeedsWrite);
         }
         match &mut self.backend {
             Backend::Mastodon { token } => mastodon::send(&self.account.server, token.expose(), draft, std::time::Duration::from_secs(1)),
-            Backend::Bluesky(api) => bluesky::send(api, draft),
+            Backend::Bluesky(api) => bluesky::send(api, draft).map(|p| Sent::Posted(Box::new(p))),
+        }
+    }
+
+    /// Vote in a poll (SOC-062); the answer is the poll as it is now.
+    pub fn vote(&mut self, poll: &Poll, choices: &[usize]) -> Result<Poll, ActionError> {
+        if self.account.may_write() == Some(false) {
+            return Err(ActionError::NeedsWrite);
+        }
+        match &mut self.backend {
+            Backend::Mastodon { token } => mastodon::vote(&self.account.server, token.expose(), poll, choices),
+            Backend::Bluesky(_) => Err("Bluesky has no polls".into()),
+        }
+    }
+
+    /// The posts the server holds back (SOC-064).
+    pub fn scheduled(&mut self) -> Result<Vec<Scheduled>, String> {
+        match &mut self.backend {
+            Backend::Mastodon { token } => mastodon::scheduled(&self.account.server, token.expose()),
+            Backend::Bluesky(_) => Err("Bluesky does not schedule posts".into()),
+        }
+    }
+
+    /// Delete a scheduled post (SOC-064).
+    pub fn cancel_scheduled(&mut self, id: &str) -> Result<(), ActionError> {
+        if self.account.may_write() == Some(false) {
+            return Err(ActionError::NeedsWrite);
+        }
+        match &mut self.backend {
+            Backend::Mastodon { token } => mastodon::cancel_scheduled(&self.account.server, token.expose(), id),
+            Backend::Bluesky(_) => Err("Bluesky does not schedule posts".into()),
         }
     }
 
@@ -354,11 +424,18 @@ pub struct Writes {
     pub asking: std::collections::HashSet<String>,
     /// the visibility the last post had: the next one starts with it
     pub last_visibility: Visibility,
+    /// the language chosen for the last post of each account: the next one starts with it (SOC-065)
+    pub last_language: HashMap<String, String>,
 }
 
 /// Identifies a reaction in `Writes::busy`.
 pub fn busy_key(account: &str, post: &str, kind: Reaction) -> String {
-    format!("{}|{account}|{post}", if kind == Reaction::Like { "like" } else { "boost" })
+    busy_key_of(if kind == Reaction::Like { "like" } else { "boost" }, account, post)
+}
+
+/// Identifies any job on a post in `Writes::busy` (`like`, `boost`, `vote`).
+pub fn busy_key_of(what: &str, account: &str, post: &str) -> String {
+    format!("{what}|{account}|{post}")
 }
 
 /// Apply `f` to the post when it is the one with `id`, and to the post it quotes when that is.

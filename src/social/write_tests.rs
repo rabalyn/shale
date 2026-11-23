@@ -16,18 +16,18 @@ fn home_post(w: &W, id: &str) -> Post {
     w.app.social.timelines[&key].posts.iter().find(|p| p.id == id).cloned().unwrap_or_else(|| panic!("no post {id}"))
 }
 
-fn toast_has(w: &W, text: &str) -> bool {
+pub(super) fn toast_has(w: &W, text: &str) -> bool {
     w.app.toasts.iter().any(|t| t.0.contains(text))
 }
 
 /// Type into the compose box: the text field takes the keyboard.
-fn type_text(w: &mut W, s: &str) {
+pub(super) fn type_text(w: &mut W, s: &str) {
     w.click("compose:text");
     w.frame(vec![Event::Text(s.into())]);
     w.frames(2);
 }
 
-fn ctrl_enter(w: &mut W) {
+pub(super) fn ctrl_enter(w: &mut W) {
     w.frame(vec![Event::Key { key: Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::COMMAND }]);
     w.frames(2);
 }
@@ -167,12 +167,12 @@ fn soc_056_a_refusal_of_the_server_is_remembered_and_opens_the_sign_in_too() {
     assert_eq!(a.may_write(), Some(true), "app passwords can write");
 }
 
-fn compose(w: &W) -> &Compose {
+pub(super) fn compose(w: &W) -> &Compose {
     w.app.social.compose.as_ref().expect("the compose box is open")
 }
 
 /// Send what is written: Ctrl+Enter asks, "Post" in the question sends.
-fn send_it(w: &mut W) {
+pub(super) fn send_it(w: &mut W) {
     ctrl_enter(w);
     assert_eq!(compose(w).stage, Stage::Confirm, "the question comes first");
     w.click("compose:confirm-post");
@@ -417,7 +417,7 @@ fn soc_052_the_counter_follows_the_limit_of_the_server_and_send_waits_until_the_
     type_text(&mut w, "0123456789012345678901234");
     let info = w.app.social.info_for(&w.app.cfg.social_accounts[0].account);
     assert_eq!((info.max_chars, compose(&w).length(Network::Mastodon, &info)), (20, 25));
-    assert_eq!(compose(&w).problem(Network::Mastodon, &info), Some("The post is too long"));
+    assert_eq!(compose(&w).problem(Network::Mastodon, &info), Some("The post is too long".to_string()));
     // too long: neither the button nor Ctrl+Enter go on
     w.click("compose:send");
     ctrl_enter(&mut w);
@@ -544,5 +544,5 @@ fn soc_052_each_network_counts_in_its_own_way() {
     // Bluesky counts graphemes, an address as it is
     assert_eq!(with("a😀e\u{301}👨‍👩‍👧 https://e.com/x").length(Network::Bluesky, &b), 4 + 1 + 15);
     assert!(with(&"x".repeat(301)).problem(Network::Bluesky, &b).is_some() && with(&"x".repeat(300)).problem(Network::Bluesky, &b).is_none());
-    assert_eq!(with("  \n").problem(Network::Bluesky, &b), Some("Write something or add a picture"));
+    assert_eq!(with("  \n").problem(Network::Bluesky, &b), Some("Write something or add a picture".to_string()));
 }
