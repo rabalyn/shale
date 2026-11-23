@@ -1023,8 +1023,8 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   token) or a Bluesky account (handle and an **app password** from Settings → Privacy and
   security → App passwords, never your main password). Secrets go to the system keyring. **Edit** next to an account signs in
   to it again (new app password or code) and replaces its secret; the account keeps its feeds and posts.
-- Pick the account and the feed (Mastodon: Home and your lists; Bluesky: Following and your
-  saved feeds). Posts show the avatar, name, time, "boosted by", pictures (video and GIF
+- Pick the account and the feed (Mastodon: Home, Notifications, Your posts and your lists; Bluesky:
+  Following, Notifications, Your posts and your saved feeds). Posts show the avatar, name, time, "boosted by", pictures (video and GIF
   previews have a play mark), quoted posts and link cards. A content warning stays closed until
   you click Show. The next page loads when you reach the end of the list.
 - **Several feeds at once**: every Feeds tab has its own feed, scroll position and back/forward
@@ -1040,6 +1040,20 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   exactly where it is, so you can scroll up slowly. **Check now** looks right away (a spinner shows inside the button while it runs);
   **⋯ → Reload from the top** replaces the list. If more than 200 posts came in on Bluesky,
   **Load more in between** fills the gap.
+- **Notifications are a feed** (Mastodon and Bluesky, in the picker of every account): one compact row
+  per notification (what happened, who did it, how long ago, a dot while it is unread; "Ada, Bo and 3
+  others favourited your post" when likes or boosts of one post come together, also when a page or a check cut the group) above the post it
+  is about as a normal card with all its buttons (reply, like, boost, quote, Show thread, Save to
+  vault …). A follow shows the account and **Open in browser**. Mentions, replies, quotes, favourites
+  / likes, boosts / reposts, follows and follow requests, polls, edits and posts you asked to be told about are
+  shown. The feed is checked like the others; new ones wait behind "N new notifications — show", the
+  tab title counts the unread ones, and when you have the list on screen Shale tells the server that
+  you read them (Mastodon's marker, Bluesky's "seen"), so other apps agree. Their posts are in the search index.
+  **Your posts** is the feed of your own posts, replies and boosts, with the same buttons; a post you
+  write from Shale waits there too.
+
+![The Notifications feed](userguide/z_media/screenshots/social-notifications.png)
+
 - **Search the posts you loaded**: every post a feed brings in is kept in a search index
   (`~/.local/share/shale/social-posts.db`, the same for every vault: text, author, date, links
   and the thread around it). The sidebar search (Ctrl+Shift+F) lists the posts that match under
@@ -1051,6 +1065,25 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   later, and a hit whose post is gone from both index and feed is fetched from the server.
   **Settings → Feeds → Post search index** shows how many posts are indexed, **Rebuild**s it
   from the posts your open feeds hold, or **Clear…**s it (after a question). (Mouse only for now.)
+- **The conversation of a post** opens in the same tab with a click on its reply count or **Show
+  thread** (Shift+click or middle click: a new tab): what it replies to above, the post highlighted,
+  and the replies below as a tree, moved in for each level (up to 6). It is fetched in the
+  background (spinner, an error with **Retry**) and drawn with the cards of the feed: pictures and
+  the viewer, links, content warnings, Save to vault, Open in browser and Copy link. **← Back** (or
+  the tab's Back) returns to the feed at the same place; another post's reply count opens that
+  conversation as the next step. Replies the server leaves out are noted, with Open in browser.
+
+![The conversation of a post](userguide/z_media/screenshots/social-thread.png)
+
+- **Pictures and videos open big in a viewer** over the tab (click one): fitted to the window, its description
+  (alt text) below, **◀ ▶** or Left / Right to step through the post's pictures and videos, mouse wheel or
+  `+` `-` to zoom, **100%** / **Fit** (`0`), drag to pan, Esc or **Close** to leave. The full size file
+  comes through the background picture cache (spinner while it loads, a message when it fails);
+  pictures behind a content warning stay closed until Show. **A video or GIF plays in the viewer** (SOC-076): the file
+  is fetched into the same cache (https only, no login, at most 64 MB; a Bluesky video as its real file from the
+  author's server), then plays in the media player's card with play / pause (also **Space**), seek and volume;
+  a GIF plays muted and again and again. Stepping away or closing stops it. Without ffmpeg the viewer shows the
+  video's preview picture and says so, and **Open in browser** stays.
 - **Save to vault** copies the post, and the whole thread when it is a thread by one author,
   into the Import dialog: choose the folder (default `Social`), tags and which pictures to
   bring along. **Open in browser** and **Copy link** are next to it.
@@ -1064,6 +1097,40 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   and the text (a thread: every post in order, numbered); the box **Header list in the note
   body** also writes them as a list below the title (IMP-058). The pictures are saved in `z_media/`, with their descriptions. A post
   that was saved before, also as part of a thread, is marked "Imported before".
+- **Like, boost, reply, quote, post**: every post has **Reply**, **Boost** / **Repost**,
+  **Favourite** / **Like** and **Quote** buttons (also in the conversation view), and the toolbar
+  has **New post**. Boost and Favourite / Like toggle (a second press takes it back), show whether
+  you did it (a filled button), and change the counts only when the server said yes; a spinner
+  inside the button shows while it runs and nothing moves. A quoted post inside a card has the same
+  buttons in a small row (Reply, Boost, Favourite, Quote, Show thread, Save, Open, Copy link) that act on the quoted post
+  itself (#588). A like or boost is also written into the post search index, so a post opened from the search shows
+  the state you left it in. The compose box has the text with a
+  live counter (Mastodon: the server's limit, 500 by default, addresses count 23; Bluesky: 300
+  characters), on Mastodon a content warning and who may see the post (a reply starts with the
+  author's @mention and is no more public than the post it answers), up to **4 pictures with a
+  description each** (**Choose pictures…** opens the system's file dialog, or drop picture files
+  on the box, or paste a picture with Ctrl+V, or type the path of a file or of one in the vault;
+  JPEG, PNG, GIF, WebP; Bluesky takes 1 MB, so bigger pictures are scaled down) or **one video** (MP4, QuickTime, WebM, MPEG; up to
+  what the server allows and 100 MB; on Bluesky it goes through the video service, with its size sent along and a video over 10 minutes refused when ffmpeg is installed), a **language** for the post (starts with the
+  setting Post language), on Mastodon a **poll** (options, duration, several choices, hidden totals; not together with
+  pictures or a video) and **Schedule…** to let the server send the post later (a date picked in a month grid or typed, an hour and a minute, local time, at least 5 minutes ahead;
+  **Scheduled posts…** lists them and cancels one), and **Send** (Ctrl+Enter), which
+  always asks **"Post this?"** with your handle, who may see it and the time of a scheduled post before anything is posted.
+  Mastodon **polls on cards** show their options with bars and percentages (after you voted, when the poll is closed and on your
+  own posts) or a Vote button with a spinner (#589).
+  Boosts and favourites do not ask. A **quote** uses the network's own quote (Bluesky; Mastodon
+  4.5 and later); for an older Mastodon server the post's web address is put into the text and
+  the box says so. Bluesky links, mentions and hashtags become clickable. When it is sent the box
+  closes and the post waits behind the "new posts" button (the view does not move); a failed send
+  keeps your text. **Mastodon accounts need the permission to write**: new sign-ins ask for it;
+  an account you signed in to before with read-only access keeps reading, and the first like,
+  boost, reply or post says "Sign in again to allow writing" and opens that account's **Edit**
+  sign-in.
+
+![The compose box](userguide/z_media/screenshots/social-compose.png)
+
+![A poll on a card](userguide/z_media/screenshots/social-poll.png)
+
 - Try it without an account: `shale --screenshot out.png --view social` shows made-up posts.
 
 ## People (contact notes)

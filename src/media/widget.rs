@@ -97,8 +97,26 @@ pub enum Keyboard {
 /// Draw the card for `abs` into `rect` and handle what it is given: `id` must be unique among the
 /// cards of a frame; `owner` is the note that shows it (closing its tab stops the sound).
 pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path, id: Id, keyboard: Keyboard) {
+    paint_titled(ui, rect, media, abs, Card { owner, id, keyboard, title: None });
+}
+
+/// What a card is told besides the file: who shows it, its id, who gets the keyboard, and a title
+/// to show instead of the file's name (a file of the feed cache is named by a number).
+pub struct Card<'a> {
+    pub owner: &'a Path,
+    pub id: Id,
+    pub keyboard: Keyboard,
+    pub title: Option<&'a str>,
+}
+
+/// Like [`paint`], for a [`Card`].
+pub fn paint_titled(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, card_of: Card) {
+    let Card { owner, id, keyboard, title } = card_of;
     let ctx = ui.ctx().clone();
-    let v = media.view(&ctx, abs);
+    let mut v = media.view(&ctx, abs);
+    if let Some(t) = title {
+        v.file_name = t.to_string();
+    }
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
     painter.rect(rect, CornerRadius::same(8), theme::palette().bg_secondary, Stroke::new(1.0, theme::palette().border), egui::StrokeKind::Inside);
     let card = ui.interact(rect, id, Sense::click_and_drag());

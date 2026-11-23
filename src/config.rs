@@ -447,6 +447,8 @@ pub struct Config {
     pub social_replies: bool,
     /// Minutes between looks for new posts in the feeds open in tabs (0 = never, SOC-025).
     pub social_check_minutes: u32,
+    /// The language a new post starts with (ISO 639-1 such as "de"; "" = none): Settings → Feeds (SOC-065).
+    pub social_post_language: String,
     /// How long each cache is kept (USE-020).
     #[serde(deserialize_with = "lenient")]
     pub caches: CacheRetention,
@@ -550,6 +552,7 @@ impl Default for Config {
             social_last: None,
             social_replies: false,
             social_check_minutes: 5,
+            social_post_language: crate::social::language::system(),
             caches: CacheRetention::default(),
             tex: Default::default(),
             git: Default::default(),

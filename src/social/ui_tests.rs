@@ -2,9 +2,12 @@
 //! The window runs headless (`ShaleApp::run_frame`); controls are clicked with real pointer
 //! events at the places the view reports in `SocialState::rects` and `ShaleApp::tab_rects`.
 
+use super::actions::{ActionError, Draft, InstanceInfo, Reacted, Reaction, Sent};
+use super::poll::Poll;
+use super::schedule::Scheduled;
 use super::state::{post_key, Source, Timeline};
 use super::tests::post;
-use super::{demo, Feed, FeedRef, Fresh, Page, Post, Since};
+use super::{demo, Feed, FeedRef, Fresh, Page, Post, Since, ThreadView};
 use crate::app::{Options, ShaleApp, View};
 use eframe::egui::{self, Event, Modifiers, MouseWheelUnit, PointerButton, Pos2, RawInput, Rect, Vec2};
 use std::path::PathBuf;
@@ -16,18 +19,121 @@ use std::time::{Duration, Instant};
 pub(crate) struct Script {
     pub newer: Mutex<Vec<(String, Fresh)>>,
     pub first_page: Mutex<Option<Page>>,
+    /// what the page after the first holds, given once (none: an empty page)
+    pub next_page: Mutex<Option<Page>>,
     /// what fetching a post by id gives (SOC-039); missing ids fail
     pub posts: Mutex<Vec<Post>>,
     pub post_calls: Mutex<Vec<String>>,
+    /// what the conversation of a post (by id) answers, one answer per request (the last one stays); missing ids fail (SOC-045)
+    pub threads: Mutex<std::collections::HashMap<String, Vec<Result<ThreadView, String>>>>,
+    pub thread_calls: Mutex<Vec<String>>,
+    /// a request for a conversation waits for this to be sent a message
+    pub thread_gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    /// the reactions asked for (post id, which, on), the answers to give one by one (none left: it works), and a gate that holds them (SOC-050)
+    pub reacts: Mutex<Vec<(String, Reaction, bool)>>,
+    pub react_answers: Mutex<Vec<Result<Reacted, ActionError>>>,
+    pub react_gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    /// the posts sent, the answers to give (none left: a post is made from the draft), a gate (SOC-051)
+    pub sends: Mutex<Vec<Draft>>,
+    pub send_answers: Mutex<Vec<Result<Post, ActionError>>>,
+    pub send_gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    /// what the server allows (none: the defaults)
+    pub info: Mutex<Option<InstanceInfo>>,
+    /// the votes asked for (poll id, choices) and the answers to give (none left: the poll with those options counted, SOC-062)
+    pub votes: Mutex<Vec<(String, Vec<usize>)>>,
+    pub vote_answers: Mutex<Vec<Result<Poll, ActionError>>>,
+    pub vote_gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    /// the scheduled posts the server holds (SOC-064) and the ids asked to be cancelled
+    pub scheduled: Mutex<Vec<Scheduled>>,
+    pub cancelled: Mutex<Vec<String>>,
+    /// the marks the account was told its notifications were read up to (SOC-079)
+    pub marks: Mutex<Vec<String>>,
 }
 
 impl Source for Script {
+    fn react(&self, post: &Post, kind: Reaction, on: bool) -> Result<Reacted, ActionError> {
+        self.reacts.lock().unwrap().push((post.id.clone(), kind, on));
+        if let Some(rx) = self.react_gate.lock().unwrap().as_ref() {
+            let _ = rx.recv();
+        }
+        let mut q = self.react_answers.lock().unwrap();
+        if q.is_empty() {
+            Ok(Reacted { on, record: None, count: None, fresh: None })
+        } else {
+            q.remove(0)
+        }
+    }
+    fn vote(&self, poll: &Poll, choices: &[usize]) -> Result<Poll, ActionError> {
+        self.votes.lock().unwrap().push((poll.id.clone(), choices.to_vec()));
+        if let Some(rx) = self.vote_gate.lock().unwrap().as_ref() {
+            let _ = rx.recv();
+        }
+        let mut q = self.vote_answers.lock().unwrap();
+        if q.is_empty() {
+            let mut p = poll.clone();
+            for c in choices {
+                p.options[*c].votes = Some(p.options[*c].votes.unwrap_or(0) + 1);
+            }
+            p.votes_count += choices.len() as u32;
+            (p.voted, p.own_votes) = (true, choices.to_vec());
+            Ok(p)
+        } else {
+            q.remove(0)
+        }
+    }
+    fn scheduled(&self) -> Result<Vec<Scheduled>, String> {
+        Ok(self.scheduled.lock().unwrap().clone())
+    }
+    fn cancel_scheduled(&self, id: &str) -> Result<(), ActionError> {
+        self.cancelled.lock().unwrap().push(id.to_string());
+        self.scheduled.lock().unwrap().retain(|s| s.id != id);
+        Ok(())
+    }
+    fn send(&self, draft: &Draft) -> Result<Sent, ActionError> {
+        self.sends.lock().unwrap().push(draft.clone());
+        if let Some(rx) = self.send_gate.lock().unwrap().as_ref() {
+            let _ = rx.recv();
+        }
+        if let Some(at) = draft.schedule {
+            let s = Scheduled { id: format!("sch{}", self.scheduled.lock().unwrap().len() + 1), at, text: draft.text.clone(), visibility: draft.visibility.key().into(), media: draft.pictures.len(), poll: draft.poll.is_some() };
+            self.scheduled.lock().unwrap().push(s.clone());
+            return Ok(Sent::Scheduled(s));
+        }
+        let mut q = self.send_answers.lock().unwrap();
+        if q.is_empty() {
+            let mut p = post("new-post-1", "ada", crate::calendar::time::now(), draft.reply_to.as_ref().map(|r| r.id.as_str()));
+            p.text_markdown = draft.text.clone();
+            p.author.handle = "ada@demo.social".into();
+            Ok(Sent::Posted(Box::new(p)))
+        } else {
+            q.remove(0).map(|p| Sent::Posted(Box::new(p)))
+        }
+    }
+    fn mark_read(&self, mark: &str) -> Result<(), String> {
+        self.marks.lock().unwrap().push(mark.to_string());
+        Ok(())
+    }
+    fn instance(&self) -> Result<InstanceInfo, String> {
+        Ok(self.info.lock().unwrap().clone().unwrap_or_else(|| InstanceInfo::defaults(super::Network::Mastodon)))
+    }
     fn page(&self, _feed: &Feed, cursor: Option<&str>) -> Result<Page, String> {
-        Ok(if cursor.is_none() { self.first_page.lock().unwrap().clone().unwrap_or_default() } else { Page::default() })
+        Ok(if cursor.is_none() { self.first_page.lock().unwrap().clone().unwrap_or_default() } else { self.next_page.lock().unwrap().take().unwrap_or_default() })
     }
     fn post(&self, id: &str) -> Result<Post, String> {
         self.post_calls.lock().unwrap().push(id.to_string());
         self.posts.lock().unwrap().iter().find(|p| p.id == id).cloned().ok_or_else(|| "the server does not know this post".to_string())
+    }
+    fn thread(&self, post: &Post) -> Result<ThreadView, String> {
+        self.thread_calls.lock().unwrap().push(post.id.clone());
+        if let Some(rx) = self.thread_gate.lock().unwrap().as_ref() {
+            let _ = rx.recv();
+        }
+        let mut all = self.threads.lock().unwrap();
+        match all.get_mut(&post.id) {
+            Some(answers) if answers.len() > 1 => answers.remove(0),
+            Some(answers) if !answers.is_empty() => answers[0].clone(),
+            _ => Err("the server does not know this conversation".to_string()),
+        }
     }
     fn newer(&self, feed: &Feed, _since: &Since) -> Result<Fresh, String> {
         let mut q = self.newer.lock().unwrap();
@@ -51,11 +157,11 @@ pub(crate) fn feed_posts(prefix: &str, n: usize) -> Vec<Post> {
 }
 
 pub(crate) fn home() -> FeedRef {
-    FeedRef { account: demo::account().account.id, feed: "home".into() }
+    FeedRef::new(demo::account().account.id, "home")
 }
 
 pub(crate) fn list() -> FeedRef {
-    FeedRef { account: demo::account().account.id, feed: "list:1".into() }
+    FeedRef::new(demo::account().account.id, "list:1")
 }
 
 impl W {
@@ -85,8 +191,14 @@ impl W {
     }
 
     pub fn frame(&mut self, events: Vec<Event>) {
+        self.frame_raw(events, |_| {});
+    }
+
+    /// A frame whose raw input is changed by `change` (files dropped on or hovering over the window).
+    pub fn frame_raw(&mut self, events: Vec<Event>, change: impl FnOnce(&mut RawInput)) {
         self.t += 0.05;
-        let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1500.0, 900.0))), time: Some(self.t), events, ..Default::default() };
+        let mut raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1500.0, 900.0))), time: Some(self.t), events, ..Default::default() };
+        change(&mut raw);
         let app = &mut self.app;
         let mut out = self.ctx.run_ui(raw, |ui| app.run_frame(ui));
         out.textures_delta.clear();
@@ -110,8 +222,24 @@ impl W {
         self.frames(3);
     }
 
+    /// The place of a control, once it is drawn and has stopped moving (up to 10 s): a job's
+    /// result changes the state in one frame, the control that shows it is drawn in the next, and a
+    /// window that holds it may still change its size and place after that.
+    pub fn wait_rect(&mut self, key: &str) -> Rect {
+        let start = Instant::now();
+        loop {
+            let before = self.app.social.rects.iter().rev().find(|r| r.0 == key).map(|r| r.1);
+            self.frames(1);
+            let after = self.app.social.rects.iter().rev().find(|r| r.0 == key).map(|r| r.1);
+            if (before.is_some() && before == after) || start.elapsed() > Duration::from_secs(10) {
+                return self.rect(key);
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
     pub fn click(&mut self, key: &str) {
-        let p = self.rect(key).center();
+        let p = self.wait_rect(key).center();
         self.click_at(p);
     }
 
@@ -167,8 +295,10 @@ fn perf_006_posts_far_from_the_view_are_not_laid_out_again_and_come_back_when_sc
     w.frames(6);
     assert!(w.app.social.rects.iter().any(|(k, _)| k.starts_with("save:") && k[5..].parse::<usize>().is_ok_and(|i| i > 20)), "posts further down are drawn now");
     assert!(drawn(&w) < 40 && w.app.social.post_rects[0].1.min.y < before - 1000.0, "{} drawn", drawn(&w));
-    // the list is as long as before: the last post is at its place, 143 points for each post before it
-    assert!((w.app.social.post_rects[399].1.min.y - w.app.social.post_rects[0].1.min.y - 399.0 * 143.0).abs() < 2.0);
+    // the list is as long as before: the last post is at its place, one post's step for each post before it
+    let step = w.app.social.post_rects[1].1.min.y - w.app.social.post_rects[0].1.min.y;
+    assert!(step > 100.0, "{step}");
+    assert!((w.app.social.post_rects[399].1.min.y - w.app.social.post_rects[0].1.min.y - 399.0 * step).abs() < 2.0);
 }
 
 // spec: SOC-021, SOC-022, SOC-023
@@ -263,7 +393,7 @@ fn choosing_another_feed_is_a_step_in_the_tab_history() {
 }
 
 /// Wait (up to 2 s) until a background job of the feeds has delivered, as `until` sees it.
-fn wait_for(w: &mut W, until: impl Fn(&W) -> bool) {
+pub(crate) fn wait_for(w: &mut W, until: impl Fn(&W) -> bool) {
     for _ in 0..200 {
         w.frame(vec![]);
         if until(w) {
@@ -492,7 +622,7 @@ fn key_of(id: &str) -> String {
 
 impl W {
     /// Wait until a feed has `n` new posts waiting.
-    fn until_waiting(&mut self, feed: &FeedRef, n: usize) {
+    pub(crate) fn until_waiting(&mut self, feed: &FeedRef, n: usize) {
         let start = Instant::now();
         while self.app.social.waiting_count(&feed.account, &feed.feed) != n {
             self.frames(1);
@@ -514,7 +644,7 @@ impl W {
         self.app.social.post_rects.iter().find(|(k, _)| k == key).unwrap_or_else(|| panic!("{key} is not in the list")).1.min.y
     }
 
-    fn posts(&self, feed: &FeedRef) -> Vec<String> {
+    pub(crate) fn posts(&self, feed: &FeedRef) -> Vec<String> {
         self.app.social.timelines[&(feed.account.clone(), feed.feed.clone())].posts.iter().map(|p| p.id.clone()).collect()
     }
 }
@@ -702,7 +832,7 @@ fn key_of_h(id: &str) -> String {
 }
 
 impl W {
-    fn rects_has(&self, key: &str) -> bool {
+    pub(crate) fn rects_has(&self, key: &str) -> bool {
         self.app.social.rects.iter().any(|r| r.0 == key)
     }
 }
@@ -776,7 +906,7 @@ fn without_a_second_pass_the_view_is_put_back_in_the_next_frame() {
 
 impl W {
     /// Run frames until `until` holds (jobs finish in the background).
-    fn wait_for(&mut self, what: &str, until: impl Fn(&W) -> bool) {
+    pub(crate) fn wait_for(&mut self, what: &str, until: impl Fn(&W) -> bool) {
         let start = Instant::now();
         while !until(self) {
             self.frames(1);
@@ -786,7 +916,7 @@ impl W {
     }
 }
 
-fn hit_of(account: &str, feed: &str, post: Post) -> crate::social::post_index::PostHit {
+pub(super) fn hit_of(account: &str, feed: &str, post: Post) -> crate::social::post_index::PostHit {
     crate::social::post_index::PostHit {
         account: account.into(),
         feed: feed.into(),

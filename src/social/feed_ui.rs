@@ -2,14 +2,16 @@
 //! A centred column like the task list; the next page loads when the end of the list comes
 //! into view; pictures come from `ImageCache` (never from the UI thread's network).
 
+use super::actions::{busy_key, Reaction};
 use super::images::ImageCache;
 use super::state::{post_key, FeedsState, SocialState};
-use super::{FeedRef, MediaKind, Network, Post, SocialAccountEntry};
+use super::viewer::{self, Viewer};
+use super::{thread_ui, FeedRef, MediaKind, Network, Post, SocialAccountEntry};
 use crate::media;
 use crate::theme;
 use eframe::egui::text::{LayoutJob, TextFormat};
 use eframe::egui::{self, Color32, CornerRadius, Rect, RichText, Sense, Stroke, Ui, Vec2};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// What the view asks the app to do.
 #[derive(Debug, PartialEq)]
@@ -20,6 +22,11 @@ pub enum Ask {
     Pick { feed: FeedRef, new_tab: bool },
     /// the tab named no feed (or one that is gone): this is the one shown; no history step
     Resolve(FeedRef),
+    /// the user opened the conversation of a post (its reply count, "Show thread"): in this tab
+    /// as a step of its history, or in a new one (SOC-045). `feed` is the feed the tab shows.
+    Thread { feed: FeedRef, post: Box<Post>, new_tab: bool },
+    /// the thread view's Back button: one step back in the tab's history
+    Back,
 }
 
 /// What the view needs to know about the tab it is shown in.
@@ -31,6 +38,20 @@ pub struct TabCtx {
     pub last: Option<(String, String)>,
     /// plain keys (the `.` key) may be used: no dialog is open
     pub keys: bool,
+    /// the open vault: a picture path typed in the compose box may start here (SOC-053)
+    pub vault: Option<std::path::PathBuf>,
+    /// the app's media player, which plays the videos of the viewer (SOC-076)
+    pub media: crate::media::MediaPlayer,
+}
+
+/// What a click on a button of a card asks for besides saving and the conversation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CardAct {
+    React(Reaction),
+    Reply,
+    Quote,
+    /// Vote in the poll of the post (SOC-062)
+    Vote,
 }
 
 /// Where a tab's view is held still while posts come in above it (SOC-028): the post at the top
@@ -63,11 +84,15 @@ pub fn open_web(url: &str) {
 const NEW_ROW_HEIGHT: f32 = 28.0;
 /// Side of the spinner inside a busy button.
 const BUTTON_SPINNER: f32 = 12.0;
+/// The width of the column of posts (SOC-006).
+pub(super) fn column_width(full: f32) -> f32 {
+    (full - 32.0).clamp(280.0, 700.0)
+}
 
 /// A button that shows a running job as a spinner inside itself (SOC-041, SOC-042). It keeps
 /// the room for the spinner also when idle, so it has one size and nothing next to it moves;
 /// while `busy` it is disabled. Returns the button and, while busy, where the spinner is.
-fn spinner_button(ui: &mut Ui, text: impl Into<egui::WidgetText>, fill: Option<Color32>, enabled: bool, busy: bool) -> (egui::Response, Option<Rect>) {
+pub(super) fn spinner_button(ui: &mut Ui, text: impl Into<egui::WidgetText>, fill: Option<Color32>, enabled: bool, busy: bool) -> (egui::Response, Option<Rect>) {
     let text: egui::WidgetText = text.into();
     let pad = ui.spacing().button_padding.x;
     let label_w = text.clone().into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Button).size().x;
@@ -218,19 +243,28 @@ fn rich_text(ui: &mut Ui, md: &str, size: f32, color: Color32) -> Option<String>
 }
 
 /// How far from the visible part of the list a post is drawn rather than kept as an empty space.
-const FAR: f32 = 600.0;
+pub(super) const FAR: f32 = 600.0;
 
 /// What is needed to draw a post.
-struct Cx<'a> {
-    images: &'a ImageCache,
-    revealed: &'a mut HashSet<String>,
-    saving: &'a HashSet<String>,
-    rects: &'a mut Vec<(String, Rect)>,
-    now: i64,
+pub(super) struct Cx<'a> {
+    pub images: &'a ImageCache,
+    pub revealed: &'a mut HashSet<String>,
+    pub saving: &'a HashSet<String>,
+    pub rects: &'a mut Vec<(String, Rect)>,
+    pub now: i64,
+    /// the tab drawn, and the viewer a click on a picture opens in it (SOC-044)
+    pub tab: u64,
+    pub viewer: &'a mut Option<Viewer>,
+    pub media: &'a crate::media::MediaPlayer,
+    /// the account drawn for, and the reactions on their way (SOC-050)
+    pub account: &'a str,
+    pub busy: &'a HashSet<String>,
+    /// the options ticked in polls (SOC-062)
+    pub polls: &'a mut super::poll::Selected,
 }
 
 impl Cx<'_> {
-    fn rec(&mut self, key: String, r: egui::Response) -> egui::Response {
+    pub(super) fn rec(&mut self, key: String, r: egui::Response) -> egui::Response {
         self.rects.push((key, r.rect));
         r
     }
@@ -252,7 +286,7 @@ fn avatar(ui: &mut Ui, cx: &Cx, url: &str, name: &str, size: f32) {
 }
 
 /// A picture (or the preview of a video) in a cell; None while it is still coming.
-fn thumb(ui: &mut Ui, cx: &mut Cx, key: String, m: &super::Media, cell: Vec2, natural: bool) {
+fn thumb(ui: &mut Ui, cx: &mut Cx, key: String, m: &super::Media, cell: Vec2, natural: bool) -> bool {
     let url = if m.preview_url.is_empty() && m.kind == MediaKind::Image { &m.url } else { &m.preview_url };
     let tex = cx.images.get(url).and_then(|p| media::texture(ui.ctx(), &p));
     // a single picture keeps its shape; several fill equal cells
@@ -301,9 +335,7 @@ fn thumb(ui: &mut Ui, cx: &mut Cx, key: String, m: &super::Media, cell: Vec2, na
     }
     let resp = cx.rec(key, resp);
     let resp = if m.alt.trim().is_empty() { resp } else { resp.on_hover_text(m.alt.trim()) };
-    if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-        open_web(&m.url);
-    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
 }
 
 fn media_block(ui: &mut Ui, cx: &mut Cx, p: &Post, idx: usize, width: f32) {
@@ -311,12 +343,16 @@ fn media_block(ui: &mut Ui, cx: &mut Cx, p: &Post, idx: usize, width: f32) {
     let visual: Vec<(usize, &super::Media)> = shown.iter().copied().enumerate().filter(|(_, m)| matches!(m.kind, MediaKind::Image | MediaKind::Video | MediaKind::Gifv)).collect();
     if visual.len() == 1 {
         let (k, m) = visual[0];
-        thumb(ui, cx, format!("media:{idx}:{k}"), m, Vec2::new(width, 340.0), true);
+        if thumb(ui, cx, format!("media:{idx}:{k}"), m, Vec2::new(width, 340.0), true) {
+            *cx.viewer = Viewer::open(cx.tab, p, k, cx.media);
+        }
     } else if !visual.is_empty() {
         let cell = Vec2::new((width - 6.0) / 2.0, 170.0);
         egui::Grid::new(("social-media", idx)).spacing([6.0, 6.0]).show(ui, |ui| {
             for (n, (k, m)) in visual.iter().enumerate() {
-                thumb(ui, cx, format!("media:{idx}:{k}"), m, cell, false);
+                if thumb(ui, cx, format!("media:{idx}:{k}"), m, cell, false) {
+                    *cx.viewer = Viewer::open(cx.tab, p, *k, cx.media);
+                }
                 if n % 2 == 1 {
                     ui.end_row();
                 }
@@ -333,7 +369,7 @@ fn media_block(ui: &mut Ui, cx: &mut Cx, p: &Post, idx: usize, width: f32) {
 }
 
 /// A box with a lighter fill inside a post (quote, link card).
-fn inset(ui: &mut Ui, f: impl FnOnce(&mut Ui)) -> egui::Response {
+pub(super) fn inset(ui: &mut Ui, f: impl FnOnce(&mut Ui)) -> egui::Response {
     egui::Frame::new()
         .fill(theme::palette().bg_primary)
         .stroke(Stroke::new(1.0, theme::palette().border))
@@ -346,7 +382,7 @@ fn inset(ui: &mut Ui, f: impl FnOnce(&mut Ui)) -> egui::Response {
         .response
 }
 
-fn short(s: &str, n: usize) -> String {
+pub(super) fn short(s: &str, n: usize) -> String {
     let one: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
     if one.chars().count() > n {
         format!("{}…", one.chars().take(n).collect::<String>().trim_end())
@@ -355,13 +391,130 @@ fn short(s: &str, n: usize) -> String {
     }
 }
 
-/// One post. Returns true when "Save to vault" was clicked, and where the card is.
-fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, idx: usize, width: f32) -> (bool, Rect) {
+/// How a post is drawn: which one it is in its list (the keys of its controls), the width of
+/// the card, whether it is the post a thread view was opened for, and whether "Show thread" is offered.
+#[derive(Clone, Copy)]
+pub(super) struct Look {
+    pub idx: usize,
+    pub width: f32,
+    pub highlight: bool,
+    pub show_thread: bool,
+}
+
+/// What a click on a post asked for, and where the card is.
+pub(super) struct CardOut {
+    pub save: bool,
+    /// the conversation was asked for: in a new tab (Shift+click, middle click) or not
+    pub thread: Option<bool>,
+    /// a reaction, reply or quote button was pressed (SOC-050, SOC-051)
+    pub act: Option<CardAct>,
+    /// the click was on a button of the quoted post inside the card (SOC-060): `save`, `thread`
+    /// and `act` are then about the quote, see [`CardOut::target`]
+    pub on_quote: bool,
+    pub rect: Rect,
+}
+
+impl CardOut {
+    /// The post the click was about: the card's post, or the post it quotes.
+    pub(super) fn target<'a>(&self, p: &'a Post) -> &'a Post {
+        match (&p.quote, self.on_quote) {
+            (Some(q), true) => q,
+            _ => p,
+        }
+    }
+}
+
+/// A click that opens something: Some(true) for Shift+click and middle click (a new tab, as for
+/// links in notes), Some(false) for a plain click.
+fn opens(ui: &Ui, r: &egui::Response) -> Option<bool> {
+    (r.clicked() || r.middle_clicked()).then(|| r.middle_clicked() || ui.input(|i| i.modifiers.shift))
+}
+
+/// A Boost / Repost or Favourite / Like button of a post, with a spinner inside while the
+/// reaction is on its way (SOC-042). `key` is "" for the card's own post and "q" for the one it
+/// quotes. True when pressed.
+fn reaction_button(ui: &mut Ui, cx: &mut Cx, p: &Post, kind: Reaction, key: &str, idx: usize) -> bool {
+    let mastodon = p.network == Network::Mastodon;
+    let (label, on) = match kind {
+        Reaction::Boost => (if mastodon { "Boost" } else { "Repost" }, p.mine.boosted),
+        Reaction::Like => (if mastodon { "Favourite" } else { "Like" }, p.mine.liked),
+    };
+    let busy = cx.busy.contains(&busy_key(cx.account, &p.id, kind));
+    let (b, spinner) = spinner_button(ui, label, on.then_some(theme::palette().accent.gamma_multiply(0.55)), true, busy);
+    let name = if kind == Reaction::Like { "like" } else { "boost" };
+    if let Some(at) = spinner {
+        cx.rects.push((format!("{key}{name}-spinner:{idx}"), at));
+    }
+    let hint = if on { format!("Undo your {}", kind.verb(p.network)) } else { format!("{label} this post") };
+    cx.rec(format!("{key}{name}:{idx}"), b).on_hover_text(hint).clicked()
+}
+
+/// What a click on a button of the quoted post asked for.
+#[derive(Default)]
+struct QuoteHit {
+    act: Option<CardAct>,
+    save: bool,
+    thread: Option<bool>,
+}
+
+/// The buttons of a quoted post (SOC-060), small and in one wrapping row: they act on the quoted
+/// post itself. None when nothing was pressed.
+fn quote_actions(ui: &mut Ui, cx: &mut Cx, q: &Post, idx: usize, show_thread: bool) -> Option<QuoteHit> {
+    let mut hit = QuoteHit::default();
+    ui.add_space(2.0);
+    ui.horizontal_wrapped(|ui| {
+        ui.style_mut().override_text_style = Some(egui::TextStyle::Small);
+        ui.spacing_mut().button_padding = egui::vec2(5.0, 1.0);
+        ui.spacing_mut().item_spacing = egui::vec2(4.0, 3.0);
+        if cx.rec(format!("qreply:{idx}"), ui.button("Reply")).on_hover_text("Write a reply to the quoted post").clicked() {
+            hit.act = Some(CardAct::Reply);
+        }
+        for kind in [Reaction::Boost, Reaction::Like] {
+            if reaction_button(ui, cx, q, kind, "q", idx) {
+                hit.act = Some(CardAct::React(kind));
+            }
+        }
+        if cx.rec(format!("qquote:{idx}"), ui.button("Quote")).on_hover_text("Write a post that quotes the quoted post").clicked() {
+            hit.act = Some(CardAct::Quote);
+        }
+        if show_thread && (q.reply_count > 0 || q.reply_to.is_some()) {
+            let b = cx.rec(format!("qthread:{idx}"), ui.button("Show thread")).on_hover_text("Read the conversation of the quoted post (Shift+click: in a new tab)");
+            hit.thread = opens(ui, &b);
+        }
+        let busy = cx.saving.contains(&post_key(q));
+        let (b, spinner) = spinner_button(ui, "Save to vault", None, true, busy);
+        if let Some(at) = spinner {
+            cx.rects.push((format!("qsave-spinner:{idx}"), at));
+        }
+        hit.save = cx.rec(format!("qsave:{idx}"), b).on_hover_text("Copy the quoted post into your vault").clicked();
+        if cx.rec(format!("qopen:{idx}"), ui.button("Open in browser")).clicked() {
+            open_web(&q.url);
+        }
+        if cx.rec(format!("qcopy:{idx}"), ui.button("Copy link")).clicked() {
+            ui.ctx().copy_text(q.url.clone());
+        }
+        let (a, b) = if q.network == Network::Mastodon { ("boosts", "favourites") } else { ("reposts", "likes") };
+        ui.label(RichText::new(format!("· {} {a} · {} {b} · {} replies", q.boost_count, q.like_count, q.reply_count)).size(crate::fonts::px(11.0)).color(theme::palette().faint));
+    });
+    (hit.act.is_some() || hit.save || hit.thread.is_some()).then_some(hit)
+}
+
+/// One post. Returns what was clicked, and where the card is.
+pub(super) fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, look: Look) -> CardOut {
+    let Look { idx, width, highlight, show_thread } = look;
     let key = post_key(p);
     let mut save = false;
+    let mut thread = None;
+    let mut act = None;
+    let mut on_quote = false;
     let inner = width - 24.0;
-    let card = egui::Frame::new().fill(theme::palette().bg_secondary).corner_radius(8).inner_margin(12).show(ui, |ui| {
+    let pal = theme::palette();
+    let frame = egui::Frame::new().fill(if highlight { pal.bg_active } else { pal.bg_secondary }).corner_radius(8).inner_margin(12);
+    let card = if highlight { frame.stroke(Stroke::new(1.5, pal.accent)) } else { frame }.show(ui, |ui| {
         ui.set_width(inner);
+        if let Some(n) = &p.notice {
+            super::notifications_ui::notice_row(ui, cx, n, p.network, idx);
+        }
         if let Some(b) = &p.reposted_by {
             let word = if p.network == Network::Mastodon { "boosted" } else { "reposted" };
             ui.label(RichText::new(format!("🔁 {} {word}", b.name())).size(crate::fonts::px(12.0)).color(theme::palette().muted));
@@ -391,6 +544,11 @@ fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, idx: usize, width: f32) -> (boo
                 ui.label(RichText::new(format!("@{}", p.author.handle)).size(crate::fonts::px(12.5)).color(theme::palette().muted));
             });
         });
+        // a notification about a person: nothing but the person (SOC-078)
+        if p.notice.as_ref().is_some_and(|n| n.kind.is_person()) {
+            super::notifications_ui::person_actions(ui, cx, p, idx);
+            return;
+        }
         ui.add_space(6.0);
         let mut open_body = true;
         if let Some(cw) = &p.content_warning {
@@ -421,6 +579,12 @@ fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, idx: usize, width: f32) -> (boo
                 media_block(ui, cx, p, idx, inner);
                 ui.add_space(4.0);
             }
+            if let Some(poll) = &p.poll {
+                if super::poll::card(ui, cx, p, poll, idx) {
+                    act = Some(CardAct::Vote);
+                }
+                ui.add_space(4.0);
+            }
             if let Some(q) = &p.quote {
                 inset(ui, |ui| {
                     ui.label(RichText::new(format!("{} @{}", q.author.name(), q.author.handle)).size(crate::fonts::px(12.5)).color(theme::palette().muted));
@@ -430,6 +594,10 @@ fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, idx: usize, width: f32) -> (boo
                     }
                     if !q.media.is_empty() {
                         ui.label(RichText::new(format!("{} attachment{}", q.media.len(), if q.media.len() == 1 { "" } else { "s" })).size(crate::fonts::px(12.0)).color(theme::palette().faint));
+                    }
+                    if let Some(h) = quote_actions(ui, cx, q, idx, show_thread) {
+                        on_quote = true;
+                        (act, save, thread) = (h.act.or(act), h.save || save, h.thread.or(thread));
                     }
                 });
                 ui.add_space(4.0);
@@ -448,6 +616,21 @@ fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, idx: usize, width: f32) -> (boo
                 ui.add_space(4.0);
             }
         }
+        // reply, boost, like, quote (SOC-050, SOC-051): one size whatever the state, so nothing moves
+        ui.horizontal(|ui| {
+            if cx.rec(format!("reply:{idx}"), ui.button("Reply")).on_hover_text("Write a reply to this post").clicked() {
+                act = Some(CardAct::Reply);
+            }
+            for kind in [Reaction::Boost, Reaction::Like] {
+                if reaction_button(ui, cx, p, kind, "", idx) {
+                    act = Some(CardAct::React(kind));
+                }
+            }
+            if cx.rec(format!("quote:{idx}"), ui.button("Quote")).on_hover_text("Write a post that quotes this one").clicked() {
+                act = Some(CardAct::Quote);
+            }
+        });
+        ui.add_space(2.0);
         // counts and buttons
         ui.horizontal(|ui| {
             let busy = cx.saving.contains(&key);
@@ -465,17 +648,109 @@ fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, idx: usize, width: f32) -> (boo
             if cx.rec(format!("copy:{idx}"), ui.button("Copy link")).clicked() {
                 ui.ctx().copy_text(p.url.clone());
             }
+            if show_thread && (p.reply_count > 0 || p.reply_to.is_some()) {
+                let b = cx.rec(format!("thread:{idx}"), ui.button("Show thread")).on_hover_text("Read what this post replies to and the replies to it (Shift+click: in a new tab)");
+                thread = thread.or(opens(ui, &b));
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let (a, b) = if p.network == Network::Mastodon { ("boosts", "favourites") } else { ("reposts", "likes") };
-                ui.label(RichText::new(format!("{} replies · {} {a} · {} {b}", p.reply_count, p.boost_count, p.like_count)).size(crate::fonts::px(11.5)).color(theme::palette().faint));
+                ui.label(RichText::new(format!("· {} {a} · {} {b}", p.boost_count, p.like_count)).size(crate::fonts::px(11.5)).color(theme::palette().faint));
+                // the reply count opens the conversation (SOC-045); in the thread view the opened post is the one shown
+                let count = RichText::new(format!("{} replies", p.reply_count)).size(crate::fonts::px(11.5)).color(if highlight { theme::palette().faint } else { theme::palette().link });
+                if highlight {
+                    ui.label(count);
+                } else {
+                    let r = cx.rec(format!("replies:{idx}"), ui.add(egui::Label::new(count).sense(Sense::click()))).on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Show the conversation (Shift+click: in a new tab)");
+                    thread = thread.or(opens(ui, &r));
+                }
             });
         });
     });
-    (save, card.response.rect)
+    CardOut { save, thread, act, on_quote, rect: card.response.rect }
+}
+
+/// A post of a list: drawn, or, when it is far from the view (`near`: the part of the list that
+/// counts as near) and was drawn before at this width, kept as an empty space of its height
+/// (PERF-006). A post is drawn `indent` points from the left.
+pub(super) fn list_card(ui: &mut Ui, cx: &mut Cx, heights: &mut HashMap<(String, u32), (f32, bool)>, p: &Post, look: Look, indent: f32, near: (f32, f32)) -> CardOut {
+    let k = post_key(p);
+    let at = ui.cursor().min;
+    let gap = ui.spacing().item_spacing.y;
+    let width = look.width;
+    let kept = heights.get(&(k.clone(), width.to_bits())).filter(|(_, steady)| *steady).map(|(h, _)| *h).filter(|h| at.y + h < near.0 || at.y > near.1);
+    if let Some(h) = kept {
+        // (`add_space` adds no spacing after itself; a drawn card is followed by `gap`)
+        ui.add_space(h);
+        return CardOut { save: false, thread: None, act: None, on_quote: false, rect: Rect::from_min_size(at + Vec2::new(indent, 0.0), Vec2::new(width, (h - gap).max(0.0))) };
+    }
+    let out = if indent > 0.0 {
+        ui.horizontal_top(|ui| {
+            ui.add_space(indent);
+            ui.vertical(|ui| post_card(ui, cx, p, look)).inner
+        })
+        .inner
+    } else {
+        post_card(ui, cx, p, look)
+    };
+    // only a height that came out the same twice is trusted: the first frames lay text out differently
+    let height = ui.cursor().min.y - at.y;
+    let steady = heights.get(&(k.clone(), width.to_bits())).is_some_and(|(before, _)| (before - height).abs() < 0.5);
+    heights.insert((k, width.to_bits()), (height, steady));
+    out
+}
+
+/// Keep the view still (SOC-028): when the posts above the anchor's post changed in height, the
+/// scroll offset is put back so that it stays where it was; when the user scrolled, the anchor
+/// moves with the view. `content_top` is where the list's content started this frame, `applied`
+/// the offset that was set for this frame.
+pub(super) fn keep_still<R>(ctx: &egui::Context, anchor: &mut Anchor, post_rects: &[(String, Rect)], out: &egui::containers::scroll_area::ScrollAreaOutput<R>, content_top: f32, applied: Option<f32>) {
+    let top = out.inner_rect.min.y;
+    let offset_used = top - content_top;
+    // what the user scrolled during this frame (it applies to the next one)
+    let user = out.state.clamped_offset().y - offset_used;
+    if let Some((_, r)) = post_rects.iter().find(|(k, _)| *k == anchor.key) {
+        let dy_now = r.min.y - top;
+        if applied.is_none() && (dy_now - anchor.dy).abs() > 0.5 {
+            // posts above it changed in height: put the view back (in a second pass of this frame
+            // when egui allows it, else in the next frame)
+            anchor.apply = Some(offset_used + dy_now - anchor.dy);
+            ctx.request_discard("keeping the view still");
+            ctx.request_repaint();
+        }
+    }
+    if anchor.apply.is_none() {
+        match post_rects.iter().find(|(_, r)| r.max.y > top + 0.5) {
+            Some((k, r)) => {
+                anchor.key = k.clone();
+                anchor.dy = r.min.y - top - user;
+            }
+            None => anchor.key.clear(),
+        }
+    }
+}
+
+/// Do what a reaction, reply or quote button asked for (SOC-050, SOC-051).
+pub(super) fn do_act(ctx: &egui::Context, st: &mut SocialState, entry: &SocialAccountEntry, tab: u64, feed: &str, post: &Post, act: CardAct) {
+    match act {
+        CardAct::React(kind) => st.react(ctx, entry, post, kind),
+        CardAct::Reply => st.open_compose(ctx, entry, tab, feed, Some(post), None),
+        CardAct::Quote => st.open_compose(ctx, entry, tab, feed, None, Some(post)),
+        CardAct::Vote => st.vote(ctx, entry, post),
+    }
+}
+
+/// The viewer of pictures and videos, when one is open over this tab (SOC-044, SOC-076).
+pub(super) fn show_viewer(ctx: &egui::Context, tab_rect: Rect, st: &mut SocialState, tab: &TabCtx) {
+    if let (Some(v), Some(images), Some(clips)) = (st.viewer.as_mut().filter(|v| v.tab == tab.id), st.images.as_ref(), st.clips.as_ref()) {
+        let env = viewer::Env { images, clips, media: &tab.media };
+        if viewer::show(ctx, tab_rect, v, &env, &mut st.rects, tab.keys) {
+            st.viewer = None;
+        }
+    }
 }
 
 /// A column centred in the window.
-fn column(ui: &mut Ui, width: f32, f: impl FnOnce(&mut Ui)) {
+pub(super) fn column(ui: &mut Ui, width: f32, f: impl FnOnce(&mut Ui)) {
     let full = ui.available_width();
     let pad = ((full - width) / 2.0).max(0.0);
     ui.horizontal_top(|ui| {
@@ -496,8 +771,9 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
     let mut asks = vec![];
     let ctx = ui.ctx().clone();
     st.rects.clear();
+    let tab_rect = ui.max_rect();
     let full = ui.available_width();
-    let width = (full - 32.0).clamp(280.0, 700.0);
+    let width = column_width(full);
     let Some(entry) = SocialState::account_for(accounts, tab.feed.as_ref().map(|f| f.account.as_str()), tab.last.as_ref()).cloned() else {
         // no account yet
         ui.vertical_centered(|ui| {
@@ -518,29 +794,39 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
     st.ensure_feeds(&ctx, &entry);
     if st.images.is_none() {
         st.images = Some(ImageCache::new(&ctx, st.cache_dir.clone()));
+        st.clips = Some(super::clips::Clips::new(&ctx, st.cache_dir.clone()));
+    }
+    // a tab that shows the conversation of a post instead of the feed (SOC-045)
+    if let Some(f) = tab.feed.as_ref().filter(|f| f.account == aid && f.thread.is_some()) {
+        return thread_ui::show(ui, st, &entry, tab, f);
     }
     let want = tab.feed.as_ref().filter(|f| f.account == aid).map(|f| f.feed.as_str()).unwrap_or("");
     let feed = st.resolve_feed(&aid, want, tab.last.as_ref());
     if let Some(f) = &feed {
-        let shown = FeedRef { account: aid.clone(), feed: f.id.clone() };
+        let shown = FeedRef::new(aid.clone(), f.id.clone());
         st.feed_of.insert(aid.clone(), f.id.clone());
         if tab.feed.as_ref() != Some(&shown) {
             asks.push(Ask::Resolve(shown));
         }
         st.ensure_timeline(&ctx, &entry, f);
+        if f.id == super::notifications::NOTIFICATIONS {
+            st.read_notifications(&ctx, &entry, f);
+        }
     }
     // ---- top bar
     ui.add_space(8.0);
     let mut check_now = false;
     let mut reload = false;
     let mut retry_feeds = false;
+    let mut new_post = false;
+    let mut scheduled = false;
     let mut pick: Option<(FeedRef, bool)> = None;
     column(ui, width, |ui| {
         ui.horizontal(|ui| {
-            let c = egui::ComboBox::from_id_salt(("social-account", tab.id)).selected_text(account_label(&entry)).width(210.0).show_ui(ui, |ui| {
+            let c = egui::ComboBox::from_id_salt(("social-account", tab.id)).selected_text(account_label(&entry)).width(130.0).show_ui(ui, |ui| {
                 for e in accounts {
                     if ui.selectable_label(e.account.id == aid, account_label(e)).clicked() {
-                        pick = Some((FeedRef { account: e.account.id.clone(), feed: String::new() }, false));
+                        pick = Some((FeedRef::new(e.account.id.clone(), String::new()), false));
                     }
                 }
             });
@@ -549,7 +835,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
             match st.feeds.get(&aid) {
                 Some(FeedsState::Ready(list)) => {
                     let name = feed.as_ref().map(|f| f.title.clone()).unwrap_or_default();
-                    let c = egui::ComboBox::from_id_salt(("social-feed", tab.id)).selected_text(name).width(180.0).show_ui(ui, |ui| {
+                    let c = egui::ComboBox::from_id_salt(("social-feed", tab.id)).selected_text(name).width(125.0).show_ui(ui, |ui| {
                         for f in list {
                             ui.horizontal(|ui| {
                                 let r = ui.selectable_label(feed.as_ref().map(|c| c.id == f.id).unwrap_or(false), &f.title);
@@ -557,12 +843,12 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
                                 // Shift+click and middle-click open a new tab, as for links in notes
                                 let new_tab = r.middle_clicked() || (r.clicked() && ui.input(|i| i.modifiers.shift));
                                 if r.clicked() || r.middle_clicked() {
-                                    pick = Some((FeedRef { account: aid.clone(), feed: f.id.clone() }, new_tab));
+                                    pick = Some((FeedRef::new(aid.clone(), f.id.clone()), new_tab));
                                 }
                                 let b = ui.small_button("New tab").on_hover_text("Open this feed in a new tab");
                                 seen_rects.push((format!("feed-new-tab:{}", f.id), b.rect));
                                 if b.clicked() {
-                                    pick = Some((FeedRef { account: aid.clone(), feed: f.id.clone() }, true));
+                                    pick = Some((FeedRef::new(aid.clone(), f.id.clone()), true));
                                 }
                             });
                         }
@@ -592,6 +878,12 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
                     reload = true;
                     ui.close();
                 }
+                let r = ui.add_enabled(entry.account.network == Network::Mastodon, egui::Button::new("Scheduled posts…"));
+                seen_rects.push(("scheduled-posts".into(), r.rect));
+                if r.on_hover_text("The posts you scheduled on this server: see them and cancel one").clicked() {
+                    scheduled = true;
+                    ui.close();
+                }
             });
             seen_rects.push(("feed-menu".into(), menu.response.rect));
             st.rects.extend(seen_rects);
@@ -601,6 +893,9 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
                 if r.clicked() {
                     asks.push(Ask::Accounts);
                 }
+                let r = ui.button("New post").on_hover_text("Write a new post");
+                st.rects.push(("new-post".into(), r.rect));
+                new_post = r.clicked();
             });
         });
         if let Some(FeedsState::Failed(e)) = st.feeds.get(&aid) {
@@ -612,6 +907,12 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
     }
     if retry_feeds {
         st.reload_feeds(&ctx, &entry);
+    }
+    if scheduled {
+        st.open_scheduled(&ctx, &entry, tab.id);
+    }
+    if new_post {
+        st.open_compose(&ctx, &entry, tab.id, feed.as_ref().map(|f| f.id.as_str()).unwrap_or(""), None, None);
     }
     if let Some(f) = &feed {
         if check_now {
@@ -635,7 +936,8 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
             ui.set_min_size(size);
             ui.set_max_height(NEW_ROW_HEIGHT);
             if waiting > 0 {
-                let label = format!("{waiting} new post{} — show", if waiting == 1 { "" } else { "s" });
+                let what = if feed.id == super::notifications::NOTIFICATIONS { "notification" } else { "post" };
+                let label = format!("{waiting} new {what}{} — show", if waiting == 1 { "" } else { "s" });
                 let r = ui.add(egui::Button::new(RichText::new(label).strong().color(theme::palette().text_strong)).fill(theme::palette().accent).corner_radius(12).min_size(Vec2::new(0.0, 24.0)));
                 st.rects.push(("new-posts".into(), r.rect));
                 show_new |= r.on_hover_text("Put the new posts above the list (key: .). The view stays where it is.").clicked();
@@ -668,6 +970,8 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
     let gaps: HashSet<String> = st.timelines.get(&key).map(|t| t.gaps.iter().map(|g| g.above.clone()).collect()).unwrap_or_default();
     let reloads = st.timelines.get(&key).map(|t| t.reloads).unwrap_or(0);
     let mut save_post: Option<Post> = None;
+    let mut open_thread: Option<(Post, bool)> = None;
+    let mut acted: Option<(Post, CardAct)> = None;
     let mut fill_gap: Option<String> = None;
     let mut retry = false;
     let mut near_end = false;
@@ -683,12 +987,12 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
     let mut post_rects: Vec<(String, Rect)> = vec![];
     let mut content_top = 0.0;
     let out = {
-        let SocialState { images, revealed, saving, rects, card_heights, .. } = st;
+        let SocialState { images, revealed, saving, rects, card_heights, viewer, writes, polls, .. } = st;
         if card_heights.len() > 50_000 {
             card_heights.clear();
         }
         let Some(images) = images.as_ref() else { return asks };
-        let mut cx = Cx { images, revealed, saving, rects, now: crate::calendar::time::now() };
+        let mut cx = Cx { images, revealed, saving, rects, now: crate::calendar::time::now(), tab: tab.id, viewer, media: &tab.media, account: &aid, busy: &writes.busy, polls };
         let mut area = egui::ScrollArea::vertical().id_salt(("social-scroll", tab.id, &aid, &feed.id)).auto_shrink([false, false]);
         if let Some(off) = applied {
             area = area.vertical_scroll_offset(off);
@@ -700,29 +1004,19 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
                 // a post that is far from the view and was drawn before is not laid out again: its
                 // space and rectangle stay (PERF-006); when it comes near, it is drawn and measured
                 let (near_from, near_to) = (ui.clip_rect().min.y - FAR, ui.clip_rect().max.y + FAR);
-                let gap = ui.spacing().item_spacing.y;
                 for (i, p) in posts.iter().enumerate() {
                     let k = post_key(p);
-                    let at = ui.cursor().min;
-                    let kept = card_heights.get(&(k.clone(), width.to_bits())).filter(|(_, steady)| *steady).map(|(h, _)| *h).filter(|h| at.y + h < near_from || at.y > near_to);
-                    let rect = match kept {
-                        Some(h) => {
-                            // (`add_space` adds no spacing after itself; a drawn card is followed by `gap`)
-                            ui.add_space(h);
-                            Rect::from_min_size(at, Vec2::new(width, (h - gap).max(0.0)))
-                        }
-                        None => {
-                            let (save, rect) = post_card(ui, &mut cx, p, i, width);
-                            if save {
-                                save_post = Some(p.clone());
-                            }
-                            // only a height that came out the same twice is trusted: the first frames lay text out differently
-                            let height = ui.cursor().min.y - at.y;
-                            let steady = card_heights.get(&(k.clone(), width.to_bits())).is_some_and(|(before, _)| (before - height).abs() < 0.5);
-                            card_heights.insert((k.clone(), width.to_bits()), (height, steady));
-                            rect
-                        }
-                    };
+                    let card = list_card(ui, &mut cx, card_heights, p, Look { idx: i, width, highlight: false, show_thread: true }, 0.0, (near_from, near_to));
+                    if card.save {
+                        save_post = Some(card.target(p).clone());
+                    }
+                    if let Some(new_tab) = card.thread {
+                        open_thread = Some((card.target(p).clone(), new_tab));
+                    }
+                    if let Some(a) = card.act {
+                        acted = Some((card.target(p).clone(), a));
+                    }
+                    let rect = card.rect;
                     if gaps.contains(&k) {
                         ui.vertical_centered(|ui| {
                             ui.horizontal(|ui| {
@@ -751,7 +1045,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
                         ui.spinner();
                     });
                 } else if loaded && posts.is_empty() {
-                    ui.label(RichText::new("Nothing here yet.").color(theme::palette().muted));
+                    ui.label(RichText::new(if feed.id == super::notifications::NOTIFICATIONS { "No notifications yet." } else { "Nothing here yet." }).color(theme::palette().muted));
                 } else if loaded && !has_more {
                     ui.vertical_centered(|ui| {
                         ui.label(RichText::new("That is all for now.").size(crate::fonts::px(12.5)).color(theme::palette().faint));
@@ -768,30 +1062,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
         // posts that arrived during the frame cannot exist (poll runs elsewhere); put the list back
         t.posts = posts;
     }
-    // ---- keep the view still
-    let top = out.inner_rect.min.y;
-    let offset_used = top - content_top;
-    // what the user scrolled during this frame (it applies to the next one)
-    let user = out.state.clamped_offset().y - offset_used;
-    if let Some((_, r)) = post_rects.iter().find(|(k, _)| *k == anchor.key) {
-        let dy_now = r.min.y - top;
-        if applied.is_none() && (dy_now - anchor.dy).abs() > 0.5 {
-            // posts above it changed in height: put the view back (in a second pass of this frame
-            // when egui allows it, else in the next frame)
-            anchor.apply = Some(offset_used + dy_now - anchor.dy);
-            ctx.request_discard("keeping the view still");
-            ctx.request_repaint();
-        }
-    }
-    if anchor.apply.is_none() {
-        match post_rects.iter().find(|(_, r)| r.max.y > top + 0.5) {
-            Some((k, r)) => {
-                anchor.key = k.clone();
-                anchor.dy = r.min.y - top - user;
-            }
-            None => anchor.key.clear(),
-        }
-    }
+    keep_still(&ctx, &mut anchor, &post_rects, &out, content_top, applied);
     st.anchors.insert(tab.id, anchor);
     st.post_rects = post_rects;
     st.list_rect = out.inner_rect;
@@ -810,6 +1081,15 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
     if let Some(p) = save_post {
         st.save(&ctx, &entry, &feed.id, &p);
     }
+    if let Some((post, new_tab)) = open_thread {
+        asks.push(Ask::Thread { feed: FeedRef::new(aid.clone(), feed.id.clone()), post: Box::new(post), new_tab });
+    }
+    if let Some((post, act)) = acted {
+        do_act(&ctx, st, &entry, tab.id, &feed.id, &post, act);
+    }
+    // the picture viewer covers the tab (SOC-044), the compose box floats over it (SOC-051)
+    show_viewer(&ctx, tab_rect, st, tab);
+    super::compose_ui::show(&ctx, tab_rect, st, &entry, tab);
     if st.images.as_ref().map(|i| i.pending() > 0).unwrap_or(false) {
         ctx.request_repaint_after(std::time::Duration::from_millis(300));
     }
@@ -817,7 +1097,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
 
     // spec: SOC-008
@@ -835,20 +1115,20 @@ mod tests {
     use crate::social::{demo, Account, Network};
     use eframe::egui::{Event as Ev, Modifiers, PointerButton, Pos2, RawInput};
 
-    struct H {
-        ctx: egui::Context,
+    pub(in crate::social) struct H {
+        pub ctx: egui::Context,
         t: f64,
         /// the tab shown (a `Resolve` answer fills in its feed, as the app does)
-        tab: TabCtx,
+        pub tab: TabCtx,
     }
 
     impl H {
-        fn new() -> H {
+        pub fn new() -> H {
             let ctx = egui::Context::default();
             crate::theme::install_fonts(&ctx);
-            H { ctx, t: 0.0, tab: TabCtx { id: 1, feed: None, last: None, keys: true } }
+            H { ctx, t: 0.0, tab: TabCtx { id: 1, feed: None, last: None, keys: true, vault: None, media: crate::media::MediaPlayer::default() } }
         }
-        fn frame(&mut self, events: Vec<Ev>, st: &mut SocialState, accounts: &[SocialAccountEntry]) -> Vec<Ask> {
+        pub fn frame(&mut self, events: Vec<Ev>, st: &mut SocialState, accounts: &[SocialAccountEntry]) -> Vec<Ask> {
             self.t += 0.05;
             let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 4000.0))), time: Some(self.t), events, ..Default::default() };
             let mut asks = vec![];
@@ -868,7 +1148,7 @@ mod tests {
             }
             keep
         }
-        fn click(&mut self, key: &str, st: &mut SocialState, accounts: &[SocialAccountEntry]) -> Vec<Ask> {
+        pub fn click(&mut self, key: &str, st: &mut SocialState, accounts: &[SocialAccountEntry]) -> Vec<Ask> {
             let p = st.rects.iter().rev().find(|r| r.0 == key).unwrap_or_else(|| panic!("no {key}: {:?}", st.rects.iter().map(|r| &r.0).collect::<Vec<_>>())).1.center();
             let b = |pressed| Ev::PointerButton { pos: p, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
             let mut r = self.frame(vec![Ev::PointerMoved(p)], st, accounts);
@@ -879,7 +1159,7 @@ mod tests {
         }
     }
 
-    fn demo_state() -> (SocialState, Vec<SocialAccountEntry>) {
+    pub(in crate::social) fn demo_state() -> (SocialState, Vec<SocialAccountEntry>) {
         let mut st = SocialState::new(std::env::temp_dir().join(format!("shale-social-test-{}", std::process::id())));
         let accounts = vec![demo::account()];
         st.load_demo(&accounts[0]);
@@ -951,6 +1231,158 @@ mod tests {
         assert_eq!(st.timelines[&key].posts.len(), demo::posts().len(), "the posts stay");
         h.click("retry", &mut st, &accounts);
         assert!(st.timelines[&key].loading);
+    }
+
+    impl H {
+        pub fn key(&mut self, key: egui::Key, st: &mut SocialState, accounts: &[SocialAccountEntry]) {
+            let k = |pressed| Ev::Key { key, physical_key: Some(key), pressed, repeat: false, modifiers: Modifiers::NONE };
+            self.frame(vec![k(true)], st, accounts);
+            self.frame(vec![k(false)], st, accounts);
+        }
+        /// Frames until a control of the viewer shows (the picture is decoded on a worker).
+        pub fn wait_for(&mut self, name: &str, st: &mut SocialState, accounts: &[SocialAccountEntry]) {
+            for _ in 0..300 {
+                self.frame(vec![], st, accounts);
+                if st.rects.iter().any(|r| r.0 == name) {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            panic!("no {name}: {:?}", st.rects.iter().map(|r| &r.0).collect::<Vec<_>>());
+        }
+    }
+
+    pub(in crate::social) fn has(st: &SocialState, name: &str) -> bool {
+        st.rects.iter().any(|r| r.0 == name)
+    }
+
+    pub(in crate::social) fn at(st: &SocialState) -> Option<usize> {
+        st.viewer.as_ref().map(|v| v.index)
+    }
+
+    // spec: SOC-044
+    #[test]
+    fn soc_044_a_click_opens_the_picture_big_and_the_pictures_of_the_post_can_be_stepped_through_and_closed() {
+        let (mut st, accounts) = demo_state();
+        let mut h = H::new();
+        h.frame(vec![], &mut st, &accounts);
+        assert!(st.viewer.is_none() && !has(&st, "viewer:close"));
+        h.click("media:3:0", &mut st, &accounts);
+        assert_eq!(at(&st), Some(0));
+        assert_eq!(st.viewer.as_ref().unwrap().items.len(), 2);
+        h.wait_for("viewer:image", &mut st, &accounts);
+        // fitted to the window: bigger than the preview, inside the tab
+        let big = st.rects.iter().find(|r| r.0 == "viewer:image").unwrap().1;
+        let small = st.rects.iter().find(|r| r.0 == "media:3:0").unwrap().1;
+        assert!(big.width() > small.width() && big.height() <= 4000.0 && big.width() <= 1000.0, "{big:?} {small:?}");
+        // the description of the picture is shown
+        assert!(has(&st, "viewer:alt") && has(&st, "viewer:count"));
+        assert_eq!(st.viewer.as_ref().unwrap().items[0].alt, "A hill with a bright sun in an orange sky");
+        // step: the button, the keys; the ends stop
+        h.click("viewer:next", &mut st, &accounts);
+        assert_eq!(at(&st), Some(1));
+        assert_eq!(st.viewer.as_ref().unwrap().items[1].alt, "The same hill a minute later, more purple");
+        h.key(egui::Key::ArrowRight, &mut st, &accounts);
+        assert_eq!(at(&st), Some(1), "no step past the last picture");
+        h.key(egui::Key::ArrowLeft, &mut st, &accounts);
+        assert_eq!(at(&st), Some(0));
+        h.key(egui::Key::ArrowLeft, &mut st, &accounts);
+        assert_eq!(at(&st), Some(0), "no step before the first picture");
+        h.key(egui::Key::ArrowRight, &mut st, &accounts);
+        h.click("viewer:prev", &mut st, &accounts);
+        assert_eq!(at(&st), Some(0));
+        // zoom: the buttons, the keys, the wheel; "100%" and "Fit" toggle; stepping fits again
+        h.wait_for("viewer:image", &mut st, &accounts);
+        h.click("viewer:zoom-in", &mut st, &accounts);
+        let z1 = st.viewer.as_ref().unwrap().zoom.expect("zoomed in");
+        h.key(egui::Key::Plus, &mut st, &accounts);
+        let z2 = st.viewer.as_ref().unwrap().zoom.unwrap();
+        assert!(z2 > z1);
+        h.key(egui::Key::Minus, &mut st, &accounts);
+        h.click("viewer:zoom-out", &mut st, &accounts);
+        assert!((st.viewer.as_ref().unwrap().zoom.unwrap() - z1 / 1.25).abs() < 0.001, "zoomed in twice and out twice from {z1}");
+        let over = st.rects.iter().find(|r| r.0 == "viewer:image").unwrap().1.center();
+        let before = st.viewer.as_ref().unwrap().zoom.unwrap();
+        h.frame(vec![Ev::PointerMoved(over)], &mut st, &accounts);
+        for _ in 0..6 {
+            h.frame(vec![Ev::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: Vec2::new(0.0, 100.0), modifiers: Modifiers::NONE, phase: egui::TouchPhase::Move, source: egui::MouseWheelSource::Wheel }], &mut st, &accounts);
+        }
+        assert!(st.viewer.as_ref().unwrap().zoom.unwrap() > before, "the wheel zooms in");
+        h.click("viewer:fit", &mut st, &accounts);
+        assert_eq!(st.viewer.as_ref().unwrap().zoom, None, "zoomed: the button fits it again");
+        h.click("viewer:fit", &mut st, &accounts);
+        assert_eq!(st.viewer.as_ref().unwrap().zoom, Some(1.0), "fitted: the button shows the picture's own size");
+        h.key(egui::Key::Num0, &mut st, &accounts);
+        assert_eq!(st.viewer.as_ref().unwrap().zoom, None, "fitted again");
+        h.click("viewer:zoom-in", &mut st, &accounts);
+        h.click("viewer:next", &mut st, &accounts);
+        assert_eq!(st.viewer.as_ref().unwrap().zoom, None, "the next picture starts fitted");
+        // the viewer covers only its own tab
+        st.viewer.as_mut().unwrap().tab = 2;
+        h.frame(vec![], &mut st, &accounts);
+        assert!(!has(&st, "viewer:close"));
+        st.viewer.as_mut().unwrap().tab = 1;
+        h.frame(vec![], &mut st, &accounts);
+        assert!(has(&st, "viewer:close"));
+        // Esc closes it, and so does the button
+        h.key(egui::Key::Escape, &mut st, &accounts);
+        assert!(st.viewer.is_none());
+        h.frame(vec![], &mut st, &accounts);
+        assert!(!has(&st, "viewer:close"));
+        h.click("media:3:1", &mut st, &accounts);
+        assert_eq!(at(&st), Some(1), "the second picture opens at the second picture");
+        h.click("viewer:close", &mut st, &accounts);
+        assert!(st.viewer.is_none());
+    }
+
+    // spec: SOC-044
+    #[test]
+    fn soc_044_a_picture_on_its_way_shows_a_spinner_and_one_that_fails_an_error() {
+        let (mut st, accounts) = demo_state();
+        let mut h = H::new();
+        h.frame(vec![], &mut st, &accounts);
+        let (slow, bad) = ("https://slow.test/a.png", "http://example.invalid/b.png");
+        for t in st.timelines.values_mut() {
+            t.posts[3].media[0].url = slow.into();
+            t.posts[3].media[0].alt = String::new();
+            t.posts[3].media[1].url = bad.into();
+        }
+        st.images.as_ref().unwrap().hold(slow);
+        h.click("media:3:0", &mut st, &accounts);
+        assert_eq!(at(&st), Some(0));
+        assert!(has(&st, "viewer:spinner") && !has(&st, "viewer:image") && !has(&st, "viewer:error"));
+        assert!(!has(&st, "viewer:alt"), "no description, no line for it");
+        // the next picture is refused: an error message, and the viewer still steps and closes
+        h.click("viewer:next", &mut st, &accounts);
+        h.wait_for("viewer:error", &mut st, &accounts);
+        assert!(!has(&st, "viewer:spinner"));
+        h.click("viewer:prev", &mut st, &accounts);
+        assert!(has(&st, "viewer:spinner"));
+        h.key(egui::Key::Escape, &mut st, &accounts);
+        assert!(st.viewer.is_none());
+    }
+
+    // spec: SOC-044
+    #[test]
+    fn soc_044_pictures_behind_a_content_warning_cannot_be_opened() {
+        let (mut st, accounts) = demo_state();
+        for t in st.timelines.values_mut() {
+            t.posts[3].content_warning = Some("Sunrises".into());
+            // a video whose address is not one that can be fetched
+            t.posts[1].media = vec![super::super::Media { kind: MediaKind::Video, url: "video:none".into(), preview_url: String::new(), alt: String::new(), file_name_hint: "v.mp4".into(), blob_cid: None }];
+        }
+        let mut h = H::new();
+        h.frame(vec![], &mut st, &accounts);
+        assert!(!has(&st, "media:3:0") && !has(&st, "media:3:1"), "hidden pictures cannot be clicked");
+        assert!(st.viewer.is_none());
+        h.click("cw:3", &mut st, &accounts);
+        h.click("media:3:1", &mut st, &accounts);
+        assert_eq!(at(&st), Some(1), "after Show the picture opens");
+        h.key(egui::Key::Escape, &mut st, &accounts);
+        // a video preview opens the viewer too (SOC-076)
+        h.click("media:1:0", &mut st, &accounts);
+        assert_eq!(at(&st), Some(0));
+        assert!(st.viewer.as_ref().unwrap().items[0].video.is_some());
     }
 
     #[test]

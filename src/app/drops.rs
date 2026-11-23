@@ -395,7 +395,9 @@ impl ShaleApp {
         // the setup of the LaTeX export and Settings → LaTeX take the files first: a logo or a set of
         // templates is not something to import into the vault (TEX-017)
         let tex_target = self.tex_drop_target();
-        if !dropped.is_empty() {
+        // files dropped on the compose box of the Feeds tab became pictures there (SOC-058)
+        let taken = std::mem::take(&mut self.social.intake.took_drop);
+        if !dropped.is_empty() && !taken {
             match tex_target {
                 Some(t) => self.tex_drop(t, &ctx, &dropped),
                 None => {
@@ -433,6 +435,12 @@ impl ShaleApp {
                         if let Some(t) = tex_target {
                             let paths = super::tex_setup::dropped_paths(&parts);
                             self.tex_drop(t, &ctx, &paths);
+                            continue;
+                        }
+                        // a drop on the compose box of the Feeds tab adds pictures to the post, it is no import (SOC-058)
+                        if self.social.intake.over(Pos2::new(x / zoom, y / zoom)) {
+                            self.social.intake.queued.extend(super::tex_setup::dropped_paths(&parts));
+                            ctx.request_repaint();
                             continue;
                         }
                         self.drag.last_offered = offered;
@@ -558,7 +566,12 @@ impl ShaleApp {
             }
         }
         let ext = self.drag.ext_hover.or(if hovering_files { pointer } else { None });
-        if let Some(p) = ext {
+        self.social.intake.ext_hover = self.drag.ext_hover;
+        let over_compose = ext.is_some_and(|p| self.social.intake.over(p));
+        // the box of this frame is gone unless the Feeds tab draws it again
+        self.social.intake.box_rect = None;
+        // over the compose box, the box paints its own highlight
+        if let (Some(p), false) = (ext, over_compose) {
             if let Some(t) = tex_target {
                 self.paint_hint_text(&ctx, p, self.tex_drop_hint(t));
             } else {

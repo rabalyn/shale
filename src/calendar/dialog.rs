@@ -510,7 +510,7 @@ pub struct SkipRow {
 /// Default length of a new event, in seconds.
 pub const DEFAULT_EVENT_SECS: i64 = 30 * 60;
 
-fn date_text(day: i64) -> String {
+pub(crate) fn date_text(day: i64) -> String {
     let (y, m, d) = t::civil_from_days(day);
     format!("{y:04}-{m:02}-{d:02}")
 }
@@ -522,7 +522,7 @@ pub fn parse_time_text(s: &str) -> Option<i64> {
     parse_time(s)
 }
 
-fn parse_time(s: &str) -> Option<i64> {
+pub(crate) fn parse_time(s: &str) -> Option<i64> {
     let s = s.trim();
     let (h, m) = match s.split_once(':') {
         Some((h, m)) => (h.parse::<i64>().ok()?, m.parse::<i64>().ok()?),
@@ -885,7 +885,7 @@ fn grid_start(y: i32, m: u32, monday_first: bool) -> i64 {
 }
 
 /// A "📅" button that opens one month to pick the day from. Returns true when a day was picked; the text field stays typeable.
-fn date_picker(ui: &mut Ui, key: &str, text: &mut String, monday_first: bool, rects: &mut Vec<(String, Rect)>) -> bool {
+pub(crate) fn date_picker(ui: &mut Ui, key: &str, text: &mut String, monday_first: bool, rects: &mut Vec<(String, Rect)>) -> bool {
     let id = ui.scope_id().with(("date-picker", key));
     let mut picked = false;
     // only a click on a day closes it, so "‹" and "›" must not
