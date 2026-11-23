@@ -489,7 +489,7 @@ fn lay_013_the_icon_menu_removes_restores_and_resets() {
     w.click_at(w.app.side.menu.remove.unwrap().center());
     assert_eq!(w.app.side.layout.ribbon, [Item::Files]);
     // reset layout (LAY-014): the default again, hidden icons back too
-    w.app.side.layout.hide(panel(RightPanel::Calendar));
+    w.app.side.layout.hide(panel(RightPanel::Calendar), crate::sidebar::Side::Right);
     w.frames(3);
     w.right_click_at(w.ribbon_icon(Item::Files).center());
     w.click_at(w.app.side.menu.reset.unwrap().center());
@@ -721,4 +721,203 @@ fn lay_003_the_wheel_scrolls_a_single_view_and_the_panel_of_a_shortcut() {
     w.frames(4);
     let peek = w.body(1);
     assert_wheel_scrolls(&mut w, peek, "Head2", "the shortcut's panel");
+}
+
+impl W {
+    /// Answer the question "Move or copy?": the buttons are where the window drew them.
+    fn answer(&mut self, button: fn(&crate::sidebar_ui::AskButtons) -> Option<Rect>) {
+        let at = button(&self.app.side.ask_buttons).expect("the question is open").center();
+        self.click_at(at);
+        self.frames(2);
+    }
+
+    /// Drag a view to the menubar of the first right view (behind its icons).
+    fn drag_to_first_bar(&mut self, from: Pos2) {
+        let b = self.bar(0);
+        self.drag_and_drop(from, Pos2::new(b.max.x - 4.0, b.center().y));
+    }
+
+    /// The left of the window: what the left sidebar draws.
+    fn left_has(&self, text: &str) -> bool {
+        let x = self.app.side.right_rect.map_or(f32::MAX, |r| r.min.x);
+        self.hl.text.iter().any(|(t, p)| p.x < x && p.x > 50.0 && t.contains(text))
+    }
+}
+
+fn movable_places(w: &W, item: Item) -> (bool, bool) {
+    (w.app.side.layout.ribbon.contains(&item), w.views().iter().any(|v| v.contains(&item)))
+}
+
+// spec: LAY-020, LAY-021, LAY-026
+#[test]
+fn lay_021_dragging_files_to_the_right_sidebar_asks_and_copy_keeps_both_and_it_survives_a_restart() {
+    let mut w = W::new("copy-files");
+    let before = w.app.side.layout.clone();
+    w.drag_to_first_bar(w.ribbon_icon(Item::Files).center());
+    // nothing has changed yet: the question is open, with its three answers
+    assert_eq!(w.app.side.layout, before, "the question comes first");
+    assert!(w.app.side.ask.is_some() && w.hl.text.iter().any(|(t, _)| t == "Move or copy?"), "{:?}", w.hl.text);
+    assert!(w.app.side.ask_buttons.moved.is_some() && w.app.side.ask_buttons.copied.is_some() && w.app.side.ask_buttons.cancel.is_some());
+    w.answer(|b| b.copied);
+    assert_eq!(w.app.side.ask, None);
+    assert_eq!(movable_places(&w, Item::Files), (true, true), "a copy: the ribbon keeps the icon");
+    assert_eq!(w.views()[0].last(), Some(&Item::Files), "behind the other icons, where it was dropped");
+    assert_eq!(w.app.side.layout.views[0].active, Item::Files);
+    assert!(w.right_has("Welcome") && w.left_has("Welcome"), "the file list is drawn on both sides: {:?}", w.hl.text);
+    assert_eq!(w.app.cfg.sidebars.right[0].icons.last().map(String::as_str), Some("files"), "stored");
+    assert!(w.app.cfg.sidebars.ribbon.contains(&"files".to_string()));
+    // after a restart both are there again
+    let w2 = w.restarted("copy-files-2");
+    assert_eq!(movable_places(&w2, Item::Files), (true, true));
+    assert!(w2.right_has("Welcome"), "and the right one draws the list");
+}
+
+// spec: LAY-021, LAY-026
+#[test]
+fn lay_021_moving_search_to_a_new_view_takes_it_from_the_ribbon_and_cancel_or_esc_changes_nothing() {
+    let mut w = W::new("move-search");
+    let before = w.app.side.layout.clone();
+    // Cancel
+    w.drag_and_drop(w.ribbon_icon(Item::Search).center(), w.body(0).center());
+    assert!(w.app.side.ask.is_some());
+    w.answer(|b| b.cancel);
+    assert_eq!(w.app.side.layout, before, "Cancel: nothing changed");
+    // Esc
+    w.drag_and_drop(w.ribbon_icon(Item::Search).center(), w.body(0).center());
+    w.press_esc();
+    assert_eq!((w.app.side.ask, w.app.side.layout.clone()), (None, before.clone()), "Esc: nothing changed");
+    // Move
+    w.drag_and_drop(w.ribbon_icon(Item::Search).center(), w.body(0).center());
+    w.answer(|b| b.moved);
+    assert_eq!(movable_places(&w, Item::Search), (false, true), "a move: the ribbon has lost the icon");
+    assert_eq!(w.views().len(), 2, "a new view below the first");
+    assert_eq!(w.views()[1], [Item::Search]);
+    assert!(w.right_has("Search notes, mail and posts"), "the search box is drawn in the right sidebar: {:?}", w.right_text());
+    assert!(!w.ribbon().contains(&Item::Search));
+    // the order of the stack is kept after a restart, and so is the move
+    let w2 = w.restarted("move-search-2");
+    assert_eq!(movable_places(&w2, Item::Search), (false, true));
+    assert_eq!(w2.views()[1], [Item::Search]);
+}
+
+// spec: LAY-022
+#[test]
+fn lay_022_dragging_a_view_back_to_the_ribbon_asks_unless_it_is_there_and_a_moved_one_comes_back() {
+    let mut w = W::new("back");
+    // Tags goes to the right (move) ...
+    w.drag_to_first_bar(w.ribbon_icon(Item::Tags).center());
+    w.answer(|b| b.moved);
+    assert_eq!(movable_places(&w, Item::Tags), (false, true));
+    // ... and back between Files and Search: the question again, and a move puts it at the place of the drop
+    let between = (w.ribbon_icon(Item::Files).max.y + w.ribbon_icon(Item::Search).min.y) / 2.0;
+    let x = w.ribbon_icon(Item::Files).center().x;
+    w.drag_and_drop(w.bar_icon(0, Item::Tags).center(), Pos2::new(x, between));
+    assert!(w.app.side.ask.is_some());
+    w.answer(|b| b.moved);
+    assert_eq!(movable_places(&w, Item::Tags), (true, false));
+    assert_eq!(&w.app.side.layout.ribbon[..3], [Item::Files, Item::Tags, Item::Search]);
+    // a copy in a view dragged to the ribbon, where the view is already: no question, the copy is taken out of the view
+    w.drag_to_first_bar(w.ribbon_icon(Item::Tags).center());
+    w.answer(|b| b.copied);
+    assert_eq!(movable_places(&w, Item::Tags), (true, true));
+    w.drag_and_drop(w.bar_icon(0, Item::Tags).center(), Pos2::new(x, between));
+    assert_eq!((w.app.side.ask, movable_places(&w, Item::Tags)), (None, (true, false)), "no question: it is in the ribbon already");
+    // reordering inside the right menubar asks nothing either
+    w.drag_to_first_bar(w.ribbon_icon(Item::Search).center());
+    w.answer(|b| b.copied);
+    let first = w.bar_icon(0, panel(RightPanel::Backlinks));
+    w.drag_and_drop(w.bar_icon(0, Item::Search).center(), Pos2::new(first.center().x - 6.0, first.center().y));
+    assert_eq!((w.app.side.ask, w.views()[0][0]), (None, Item::Search), "moved to the front of the bar");
+}
+
+// spec: LAY-006, LAY-020
+#[test]
+fn lay_020_the_main_views_and_commands_are_still_refused_on_the_right_and_a_movable_view_is_accepted() {
+    let mut w = W::new("movable-cue");
+    for item in [Item::Mail, Item::Social, Item::Calendar, Item::Import] {
+        w.drag_to(w.ribbon_icon(item).center(), w.bar(0).center());
+        assert_eq!(w.app.side.cue, Cue::Refused, "{item:?}");
+        w.release(w.bar(0).center());
+        assert_eq!(w.app.side.ask, None);
+    }
+    w.drag_to(w.ribbon_icon(Item::Files).center(), w.body(0).center());
+    assert!(matches!(w.app.side.cue, Cue::Zone { .. }), "{:?}", w.app.side.cue);
+    assert_eq!(w.hl.cursor, egui::CursorIcon::Grabbing);
+    w.release(w.body(0).center());
+    w.press_esc();
+}
+
+// spec: LAY-024
+#[test]
+fn lay_024_the_icon_menu_moves_and_copies_a_view_to_the_other_side_without_the_mouse_drag() {
+    let mut w = W::new("menu-move");
+    // ribbon -> right: Copy; the entry goes when the view is on the right already
+    w.right_click_at(w.ribbon_icon(Item::Tags).center());
+    let (_, copy) = w.app.side.menu.to_other.expect("Files, Search and Tags have the entries");
+    w.click_at(copy.center());
+    assert_eq!(movable_places(&w, Item::Tags), (true, true));
+    assert_eq!(w.views()[0].last(), Some(&Item::Tags), "at the end of the last view");
+    w.right_click_at(w.ribbon_icon(Item::Tags).center());
+    assert!(w.app.side.menu.to_other.is_none(), "it is there already: nothing to move or copy");
+    w.press_esc();
+    // right -> left: the entries of a right menubar are not offered while the ribbon has the view
+    w.right_click_at(w.bar_icon(0, Item::Tags).center());
+    assert!(w.app.side.menu.to_other.is_none());
+    // Remove from this view takes the copy only, and the view is not hidden
+    w.click_at(w.app.side.menu.remove.unwrap().center());
+    assert_eq!((movable_places(&w, Item::Tags), w.app.side.layout.hidden.is_empty()), ((true, false), true));
+    // Move to the right sidebar (a new view when there is none), then back with Move to the left sidebar
+    w.app.side.layout.views.clear();
+    w.frames(3);
+    w.right_click_at(w.ribbon_icon(Item::Search).center());
+    let (mv, _) = w.app.side.menu.to_other.unwrap();
+    w.click_at(mv.center());
+    assert_eq!((movable_places(&w, Item::Search), w.views()), ((false, true), vec![vec![Item::Search]]));
+    w.right_click_at(w.bar_icon(0, Item::Search).center());
+    let (mv, _) = w.app.side.menu.to_other.expect("the ribbon has lost it: Move and Copy to the left");
+    w.click_at(mv.center());
+    assert_eq!((movable_places(&w, Item::Search), w.views().len()), ((true, false), 0));
+    assert_eq!(w.app.side.layout.ribbon.last(), Some(&Item::Search), "at the end of the ribbon");
+    // the main views have no such entries
+    w.right_click_at(w.ribbon_icon(Item::Mail).center());
+    assert!(w.app.side.menu.to_other.is_none());
+}
+
+// spec: LAY-025
+#[test]
+fn lay_025_the_left_sidebar_shows_the_next_view_when_its_own_has_moved_and_says_so_when_none_is_left() {
+    let mut w = W::new("left-fallback");
+    assert!(w.app.side.left == crate::app::LeftPanel::Files && w.left_has("Welcome"));
+    for item in [Item::Files, Item::Search] {
+        w.right_click_at(w.ribbon_icon(item).center());
+        w.click_at(w.app.side.menu.to_other.unwrap().0.center());
+    }
+    assert_eq!(w.app.left_view(), Some(crate::app::LeftPanel::Tags), "Files and Search are on the right: Tags is the first one left");
+    w.right_click_at(w.ribbon_icon(Item::Tags).center());
+    w.click_at(w.app.side.menu.to_other.unwrap().0.center());
+    assert_eq!(w.app.left_view(), None);
+    assert!(w.left_has("No view is here"), "{:?}", w.hl.text);
+    // a shortcut for Search shows it where it is: in the right sidebar
+    w.app.cfg.show_right = false;
+    w.app.show_left_view(crate::app::LeftPanel::Search);
+    w.frames(2);
+    assert!(w.app.cfg.show_right && w.app.side.layout.views.iter().any(|v| v.active == Item::Search));
+    // the left one is back with the first icon that comes back to the ribbon
+    w.right_click_at(w.bar_icon(0, Item::Files).center());
+    w.click_at(w.app.side.menu.to_other.unwrap().0.center());
+    assert_eq!(w.app.left_view(), Some(crate::app::LeftPanel::Files));
+    assert!(w.left_has("Welcome"));
+}
+
+// spec: LAY-024
+#[test]
+fn lay_024_two_copies_of_a_view_share_one_state() {
+    let mut w = W::new("shared-state");
+    w.right_click_at(w.ribbon_icon(Item::Search).center());
+    w.click_at(w.app.side.menu.to_other.unwrap().1.center());
+    w.app.side.left = crate::app::LeftPanel::Search;
+    w.app.search.query = "Welcome".into();
+    w.frames(6);
+    assert!(w.left_has("Welcome") && w.right_has("Welcome"), "the same search is shown on both sides: {:?}", w.hl.text);
+    assert!(w.app.side.layout.on_left(Item::Search) && w.app.side.layout.on_right(Item::Search));
 }

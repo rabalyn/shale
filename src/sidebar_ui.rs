@@ -3,7 +3,7 @@
 
 use crate::app::{muted, Action, LeftPanel, Modal, RightPanel, ShaleApp, View};
 use crate::layout::{icon_button_sense, paint_icon};
-use crate::sidebar::{drag_border, Dest, Item, Layout, EQUAL};
+use crate::sidebar::{drag_border, Dest, Item, Layout, Mode, Side, EQUAL};
 use crate::theme;
 use eframe::egui::{self, Align, CornerRadius, FontId, Id, LayerId, Layout as UiLayout, Order, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2};
 
@@ -19,6 +19,10 @@ pub struct SideState {
     pub left: LeftPanel,
     /// the icon being dragged with the mouse
     pub drag: Option<Item>,
+    /// the side of the window the drag started at
+    pub(crate) drag_from: Side,
+    /// a view dropped on the other side, waiting for "Move or copy?" (LAY-021)
+    pub(crate) ask: Option<Ask>,
     /// a panel shown by a click on its shortcut in the ribbon (LAY-011), below the views
     pub peek: Option<RightPanel>,
     /// the share of the height of that panel (not stored, LAY-012); 0: the equal share
@@ -39,6 +43,18 @@ pub struct SideState {
     pub(crate) menu: IconMenu,
     /// what dropping now would do (for the marker, and for tests)
     pub(crate) cue: Cue,
+    /// where the buttons of the question were drawn
+    pub(crate) ask_buttons: AskButtons,
+}
+
+/// A drop of Files, Search or Tags on the other side that waits for the answer to "Move or copy?".
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Ask {
+    pub item: Item,
+    pub dest: Dest,
+    pub from: Side,
+    /// where the question is drawn
+    pub at: Pos2,
 }
 
 /// Where the entries of the open icon menu are (LAY-013, LAY-014).
@@ -47,6 +63,16 @@ pub(crate) struct IconMenu {
     pub remove: Option<Rect>,
     pub reset: Option<Rect>,
     pub restore: Vec<(Item, Rect)>,
+    /// "Move to / Copy to the other side" (LAY-024)
+    pub to_other: Option<(Rect, Rect)>,
+}
+
+/// Where the buttons of the question "Move or copy?" are drawn (LAY-021).
+#[derive(Default)]
+pub(crate) struct AskButtons {
+    pub moved: Option<Rect>,
+    pub copied: Option<Rect>,
+    pub cancel: Option<Rect>,
 }
 
 /// The menubar of one view of the right sidebar, as drawn.
@@ -100,7 +126,7 @@ impl SideState {
             return Cue::Ribbon { at, line: [Pos2::new(r.min.x + 6.0, y), Pos2::new(r.max.x - 6.0, y)] };
         }
         if let Some(b) = self.bars.iter().find(|b| b.rect.contains(pos)) {
-            if !item.is_panel() {
+            if !item.fits_right() {
                 return Cue::Refused;
             }
             let at = b.icons.iter().filter(|(_, ir)| ir.center().x < pos.x).count();
@@ -114,7 +140,7 @@ impl SideState {
         }
         let zone = self.bodies.iter().find(|(_, r)| r.contains(pos)).copied().or_else(|| self.right_rect.filter(|r| self.layout.views.is_empty() && r.contains(pos)).map(|r| (0, r)));
         match zone {
-            Some(_) if !item.is_panel() => Cue::Refused,
+            Some(_) if !item.fits_right() => Cue::Refused,
             Some((at, rect)) => Cue::Zone { at, rect },
             None => Cue::None,
         }
@@ -129,6 +155,21 @@ impl ShaleApp {
             self.side.peek_weight = EQUAL;
         }
         self.cfg.show_right = true;
+    }
+
+    /// Show a view of the left sidebar where it is: in the left sidebar when its icon is in the
+    /// ribbon, else in the right view that has it (LAY-025).
+    pub(crate) fn show_left_view(&mut self, panel: LeftPanel) {
+        self.side.left = panel;
+        let item = panel.item();
+        if !self.side.layout.on_left(item) && self.side.layout.on_right(item) {
+            if let Some(v) = self.side.layout.views.iter_mut().find(|v| v.icons.contains(&item)) {
+                v.active = item;
+            }
+            self.cfg.show_right = true;
+        } else {
+            self.cfg.show_left = true;
+        }
     }
 
     /// Show or close a panel from its shortcut in the ribbon (LAY-011).
@@ -168,6 +209,7 @@ impl ShaleApp {
             }
             if resp.drag_started() {
                 self.side.drag = Some(item);
+                self.side.drag_from = Side::Left;
             } else if resp.clicked() {
                 self.ribbon_click(item);
             } else if resp.middle_clicked() {
@@ -196,13 +238,14 @@ impl ShaleApp {
         let remove = ui.add_enabled(removable, egui::Button::new(if in_view { "Remove from this view" } else { "Remove from the ribbon" }));
         self.side.menu.remove = Some(remove.rect);
         if remove.clicked() {
-            self.side.layout.hide(item);
+            self.side.layout.hide(item, if in_view { Side::Right } else { Side::Left });
             if matches!(item, Item::Panel(p) if self.side.peek == Some(p)) {
                 self.side.peek = None;
             }
             self.layout_changed();
             ui.close();
         }
+        self.movable_menu(ui, item, in_view);
         for hidden in self.side.layout.hidden.clone() {
             let entry = ui.button(format!("Restore {}", hidden.name()));
             self.side.menu.restore.push((hidden, entry.rect));
@@ -223,6 +266,93 @@ impl ShaleApp {
             self.side.reset_widths = [true, true];
             self.layout_changed();
             ui.close();
+        }
+    }
+
+    /// "Move to / Copy to" the other side for Files, Search and Tags: the path to LAY-021 and
+    /// LAY-022 without the mouse (LAY-024). Not offered when the view is on the other side
+    /// already (then "Remove" does the same).
+    fn movable_menu(&mut self, ui: &mut Ui, item: Item, in_view: bool) {
+        let from = if in_view { Side::Right } else { Side::Left };
+        let there = if in_view { self.side.layout.on_left(item) } else { self.side.layout.on_right(item) };
+        if !item.is_movable() || there {
+            return;
+        }
+        let (to, dest) = if in_view {
+            ("left", Dest::Ribbon(self.side.layout.ribbon.len()))
+        } else {
+            match self.side.layout.views.len() {
+                0 => ("right", Dest::NewView { at: 0 }),
+                n => ("right", Dest::Bar { view: n - 1, at: self.side.layout.views[n - 1].icons.len() }),
+            }
+        };
+        let moved = ui.button(format!("Move to the {to} sidebar"));
+        let copied = ui.button(format!("Copy to the {to} sidebar"));
+        self.side.menu.to_other = Some((moved.rect, copied.rect));
+        let mode = if moved.clicked() {
+            Mode::Move
+        } else if copied.clicked() {
+            Mode::Copy
+        } else {
+            return;
+        };
+        self.place_view(item, dest, from, mode);
+        if dest.side() == Side::Right {
+            self.cfg.show_right = true;
+        }
+        ui.close();
+    }
+
+    /// Put an icon at a place and keep the layout (LAY-005, LAY-021).
+    fn place_view(&mut self, item: Item, dest: Dest, from: Side, mode: Mode) {
+        if self.side.layout.apply(item, dest, from, mode).is_ok() {
+            if let Item::Panel(p) = item {
+                if self.side.peek == Some(p) {
+                    self.side.peek = None;
+                }
+            }
+            self.layout_changed();
+        }
+    }
+
+    /// The question after a view was dropped on the other side: move, copy or cancel (LAY-021).
+    /// Esc cancels.
+    pub(crate) fn side_ask_tick(&mut self, ctx: &egui::Context) {
+        self.side.ask_buttons = AskButtons::default();
+        let Some(ask) = self.side.ask else { return };
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            self.side.ask = None;
+            return;
+        }
+        let to = if ask.dest.side() == Side::Right { "right" } else { "left" };
+        let mut answer = None;
+        let mut buttons = AskButtons::default();
+        egui::Window::new("Move or copy?").order(Order::Foreground).collapsible(false).resizable(false).fixed_pos(ask.at).show(ctx, |ui| {
+            ui.set_max_width(300.0);
+            ui.label(format!("{} to the {to} sidebar: take it from the other side (move), or show it on both sides (copy)?", ask.item.name()));
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                let moved = ui.button("Move");
+                let copied = ui.button("Copy");
+                let cancel = ui.button("Cancel");
+                (buttons.moved, buttons.copied, buttons.cancel) = (Some(moved.rect), Some(copied.rect), Some(cancel.rect));
+                answer = if moved.clicked() {
+                    Some(Some(Mode::Move))
+                } else if copied.clicked() {
+                    Some(Some(Mode::Copy))
+                } else if cancel.clicked() {
+                    Some(None)
+                } else {
+                    None
+                };
+            });
+        });
+        self.side.ask_buttons = buttons;
+        if let Some(choice) = answer {
+            self.side.ask = None;
+            if let Some(mode) = choice {
+                self.place_view(ask.item, ask.dest, ask.from, mode);
+            }
         }
     }
 
@@ -264,6 +394,7 @@ impl ShaleApp {
                     drawn.push((item, resp.rect));
                     if resp.drag_started() {
                         self.side.drag = Some(item);
+                        self.side.drag_from = Side::Right;
                     } else if resp.clicked() {
                         self.side.layout.views[i].active = item;
                         self.layout_changed();
@@ -272,10 +403,7 @@ impl ShaleApp {
                 }
                 self.side.bars.push(Bar { view: i, rect: bar, icons: drawn });
                 self.side.bodies.push((i + 1, body));
-                match active {
-                    Item::Panel(p) => p,
-                    _ => continue,
-                }
+                active
             } else {
                 // the shortcut's panel: its icon closes it again
                 let p = self.side.peek.unwrap_or(RightPanel::Backlinks);
@@ -284,13 +412,16 @@ impl ShaleApp {
                 }
                 bar_ui.label(muted(Item::Panel(p).tip()));
                 self.side.bodies.push((n, body));
-                p
+                Item::Panel(p)
             };
             // an id of its own per place and panel (a panel does not inherit the offset of the one before it): the scroll areas of the panels would share one otherwise,
             // and the wheel would scroll none of them
-            let mut body_ui = ui.new_child(UiBuilder::new().id_salt(("right-view-body", i, panel)).max_rect(body));
+            let mut body_ui = ui.new_child(UiBuilder::new().id_salt(("right-view-body", i, panel.id())).max_rect(body));
             body_ui.set_clip_rect(body.intersect(ui.clip_rect()));
-            self.right_panel_body(&mut body_ui, panel);
+            match panel {
+                Item::Panel(p) => self.right_panel_body(&mut body_ui, p),
+                view => self.movable_view_body(&mut body_ui, view),
+            }
         }
         // the views are laid out by hand: claim the whole width, or the panel takes the width of
         // nothing when the drag ends and snaps back
@@ -345,13 +476,13 @@ impl ShaleApp {
             };
             self.side.cue = Cue::None;
             if let Some(d) = dest {
-                if self.side.layout.apply(item, d).is_ok() {
-                    if let Item::Panel(p) = item {
-                        if self.side.peek == Some(p) {
-                            self.side.peek = None;
-                        }
-                    }
-                    self.layout_changed();
+                let from = self.side.drag_from;
+                // a view on its way to the other side: ask, unless it is there already (LAY-021)
+                let there = if d.side() == Side::Right { self.side.layout.on_right(item) } else { self.side.layout.on_left(item) };
+                if item.is_movable() && from != d.side() && !there {
+                    self.side.ask = Some(Ask { item, dest: d, from, at: pos.unwrap_or_default() });
+                } else {
+                    self.place_view(item, d, from, Mode::Move);
                 }
             }
             return;
