@@ -127,9 +127,19 @@ fn net_013_only_one_scan_runs_at_a_time() {
     let (mut app, d) = app_in("single", &[("N.md", b"one\n")]);
     let gates = Gates::new(&mut app);
     let ctx = egui::Context::default();
-    for _ in 0..5 {
+    // the first scan has begun (its worker thread may be slow to get going)
+    let began = Instant::now();
+    while gates.calls.load(Ordering::SeqCst) == 0 {
         app.rescan.due_now();
         frame(&mut app, &ctx);
+        assert!(began.elapsed() < Duration::from_secs(60), "the first scan did not begin");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // while it runs, more frames with a scan due must not begin another
+    for _ in 0..10 {
+        app.rescan.due_now();
+        frame(&mut app, &ctx);
+        std::thread::sleep(Duration::from_millis(5));
     }
     assert_eq!(gates.calls.load(Ordering::SeqCst), 1, "a second scan began while the first was running");
     app.rescan.postpone();
