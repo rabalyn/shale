@@ -195,6 +195,13 @@ mod tests {
         assert_eq!(summary(MAIL).as_deref(), Some("email · Anna Müller · 2026-11-12 · #work #mail"));
     }
 
+    // spec: EDIT-060, EDIT-067
+    #[test]
+    fn a_quoted_display_name_of_a_sender_shows_without_escapes() {
+        let text = "---\ntype: email\nfrom: \"\\\"Nils Mundhenke\\\" <nils@example.org>\"\ndate: 2026-11-12 14:30\n---\n";
+        assert_eq!(summary(text).as_deref(), Some("email · Nils Mundhenke · 2026-11-12"));
+    }
+
     // spec: EDIT-060
     #[test]
     fn an_event_is_summed_up_with_its_time_and_place() {
