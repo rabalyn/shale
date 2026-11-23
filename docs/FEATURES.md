@@ -542,6 +542,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   order of shapes.
 - Double-click a shape to label it. Arrows snap to shapes and follow them when shapes move.
   Hold Shift to keep lines at 45° steps.
+- Select several shapes (Shift+click or a frame around them) and the whole selection gets one resize
+  box: drag a corner to scale every shape, line, arrow, scribble and free text in it from the
+  opposite corner (past it, the selection turns over); one undo takes it back. A single line or
+  arrow keeps its end handles.
 - "Auto arrange" untangles a diagram; "Spread out" and "Pull together" change the spacing.
 
 ### Obsidian canvases
@@ -1233,7 +1237,10 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   installed one **Restart now**, which saves everything like quitting and starts the new version (UPD-001 to UPD-010,
   UPD-019, UPD-020).
 - The download is checked against the release's `.sha256` file and nothing is installed when it does not match. That
-  shows the file arrived whole, not who made it (authenticity is #422, UPD-022).
+  shows the file arrived whole, not who made it. For that the owner signs the release files with a key whose public
+  half is built into Shale (an SSH signature, `<file>.sig`); Shale installs a file only when its signature is valid, and
+  a release that has none yet (older ones, or the hours before it is signed) is only announced with a link to its page
+  (UPD-022 to UPD-025).
 - What an update does depends on how this copy was installed (UPD-011 to UPD-018): the Linux folder or an `install.sh`
   install, the macOS app and the Windows folder update themselves and keep the previous program as `shale.old` until the
   new one has run (on Windows `shale.exe.old` goes at the next start); a package-managed install (AUR `shale-bin`,

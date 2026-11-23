@@ -8,6 +8,7 @@
 pub mod check;
 pub mod install;
 pub mod kind;
+mod sshsig;
 mod ui;
 
 // the tests use `sh`, Unix paths and (UPD-015) the Linux `install.sh`: they run on Linux and macOS

@@ -1,12 +1,35 @@
 //! A pretend GitHub for the tests of the updates (UPD): plain HTTP on 127.0.0.1 that serves the
 //! newest release as JSON and the files it names, and counts the requests it gets.
 
+use super::sshsig;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+/// The seed of the key that signs the pretend releases; [`super::check::Source::pretend`] trusts it.
+pub const SIGNER: u8 = 7;
+
+/// A seed of a key that is not the one Source::pretend trusts.
+pub const OTHER_SIGNER: u8 = 8;
+
+/// How a pretend release is signed (UPD-022).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sign {
+    /// Every file has a `.sig` made with the trusted key.
+    Valid,
+    /// No `.sig` at all: a release the owner has not signed yet, or an old one.
+    Unsigned,
+    /// The `.sig` is of the trusted key but of other bytes: the file was changed after signing
+    /// (and its `.sha256` made to fit, as a thief of the account would).
+    Tampered,
+    /// Signed with a key that is not the trusted one.
+    OtherKey,
+    /// Signed with the trusted key, but for another file name (a file of an older release).
+    OtherName,
+}
 
 pub struct FakeGithub {
     pub port: u16,
@@ -80,8 +103,14 @@ impl FakeGithub {
     }
 
     /// Publish version `version` as the newest release with these files (name, bytes); each file
-    /// gets its `.sha256` (`<hex>  <name>`), unless `damage_checksums` makes the hash wrong.
+    /// gets its `.sha256` (`<hex>  <name>`), unless `damage_checksums` makes the hash wrong, and
+    /// its valid signature (UPD-022).
     pub fn publish(&self, version: &str, files: &[(&str, Vec<u8>)], damage_checksums: bool) {
+        self.publish_signed(version, files, damage_checksums, Sign::Valid);
+    }
+
+    /// [`FakeGithub::publish`] with the signature made as `sign` says.
+    pub fn publish_signed(&self, version: &str, files: &[(&str, Vec<u8>)], damage_checksums: bool, sign: Sign) {
         let mut assets = vec![];
         for (name, bytes) in files {
             let hash = if damage_checksums { "0".repeat(64) } else { crate::pdf::tex::archive::sha256_hex(bytes) };
@@ -89,6 +118,17 @@ impl FakeGithub {
             self.serve(&format!("/dl/{name}.sha256"), format!("{hash}  {name}\n"));
             assets.push(serde_json::json!({"name": name, "browser_download_url": format!("{}/dl/{name}", self.base()), "size": bytes.len()}));
             assets.push(serde_json::json!({"name": format!("{name}.sha256"), "browser_download_url": format!("{}/dl/{name}.sha256", self.base()), "size": 80}));
+            let signature = match sign {
+                Sign::Unsigned => None,
+                Sign::Valid => Some(sshsig::testing::sign(SIGNER, &sshsig::namespace(name), bytes)),
+                Sign::Tampered => Some(sshsig::testing::sign(SIGNER, &sshsig::namespace(name), b"what the owner signed")),
+                Sign::OtherKey => Some(sshsig::testing::sign(OTHER_SIGNER, &sshsig::namespace(name), bytes)),
+                Sign::OtherName => Some(sshsig::testing::sign(SIGNER, &sshsig::namespace("shale-0.0.1-linux-x86_64.tar.gz"), bytes)),
+            };
+            if let Some(text) = signature {
+                self.serve(&format!("/dl/{name}.sig"), text);
+                assets.push(serde_json::json!({"name": format!("{name}.sig"), "browser_download_url": format!("{}/dl/{name}.sig", self.base()), "size": 400}));
+            }
         }
         let release = serde_json::json!({"tag_name": format!("v{version}"), "draft": false, "prerelease": false, "body": format!("Notes of {version}"), "assets": assets});
         self.serve("/repos/rabalyn/shale/releases/latest", release.to_string());

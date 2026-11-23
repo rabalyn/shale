@@ -27,8 +27,10 @@ sequenceDiagram
     participant github
     app->>disk: prepare
     app->>github: checksum_download
+    app->>github: signature_download
     app->>github: archive_download
     app->>disk: verify
+    app->>disk: verify_signature
 ```
 <!-- dataflow:end update_download -->
 

@@ -43,6 +43,8 @@ way it is. They are append-only. *What* Shale does today is in the living specs 
 | [0033](0033-views-on-either-side.md) | Files, Search and Tags on either side of the window: move or copy, one shared state, the same stored layout | Accepted |
 | [0034](0034-kanban-boards.md) | Kanban boards as notes, one query language with a validator and budget, a background search worker, note properties (created, modified, priority), dependencies, board PDF | Accepted |
 | [0035](0035-windowed-editor.md) | A windowed editor for very long notes: stitched block layouts first, a window over the text only if that is not enough | Proposed |
+| [0036](0036-browser-extension-clipper.md) | A companion browser extension saves web pages into the vault (native messaging into a spool folder, allowlist capture, images only from the browser) | Proposed |
+| [0037](0037-signed-release-files.md) | Release files are signed by the owner with an SSH ed25519 key (SSHSIG, namespace per file), the public key is built into Shale and the updater requires the signature | Accepted |
 
 Format: Context, Decision, Consequences (and Alternatives if any). Statuses: *Proposed* →
 *Accepted* → (*Superseded by NNNN*). An accepted ADR is not edited; a new one supersedes it.

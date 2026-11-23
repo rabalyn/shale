@@ -28,11 +28,38 @@ new version, or why it could not look).
 
 # What is checked, and what is not
 
-The release has a `.sha256` file next to each download. Shale compares the SHA-256 of what it
-downloaded with it, and installs nothing when they differ (the download is deleted and the notice says
-so). That shows the file arrived whole. It does **not** show who made it: the checksum comes from
-the same release as the file. If that matters to you, choose **Notify** or **Off** and check the
-release yourself.
+Each download of a release has two files next to it. The **`.sha256`** file shows that the download
+arrived whole: Shale compares the SHA-256 of what it downloaded with it, and installs nothing when they
+differ (the download is deleted and the notice says so). That alone does not show who made the file,
+because the checksum comes from the same release as the file; someone who got into the GitHub account
+could replace both.
+
+So the owner also **signs** every download with a private key that never leaves his computer, and
+the matching public key is built into Shale. The signature is the file `<download>.sig` (an SSH
+signature, made with `ssh-keygen -Y sign`; it is tied to that one file name, so the signature of an older
+version does not fit a newer one). Shale downloads it, checks it, and installs only a file whose
+signature is valid:
+
+- **No signature on the release**: Shale does not download or install it by itself, in any mode. The
+  notice says "Shale X.Y.Z is available. It cannot be downloaded from here: … no signature file …" and gives the
+  release page, from where you can download it by hand. This is the case for releases from before the signing and for the
+  first hours of a new release, because the files are built on GitHub and signed afterwards by the owner. The
+  next check (every 24 hours, or **Check for updates now**) offers the installation once the signature is there.
+- **A signature that is wrong** (the file was changed, or another key made it): the download is deleted,
+  nothing is installed and the notice shows a warning, "… is not signed by the owner of Shale's release key".
+  Do not use that file.
+
+To check a download by hand, put the public key into an `allowed_signers` file (`shale ` followed by the
+text of the public key, below) and run
+`ssh-keygen -Y verify -f allowed_signers -I shale -n shale-release/<file name> -s <file name>.sig < <file name>`.
+The public key (also the file `src/update/release-signing.pub` of the repository):
+
+```
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAb61OywJxPunQYR/F8tjG1h8RjMk5GZWZOJnmDea0uz github signing of rabalyn/shale
+```
+
+The release page also has the build attestation, which shows that GitHub's workflow built the file
+(`gh attestation verify`).
 
 # How Shale was installed decides what an update does
 
