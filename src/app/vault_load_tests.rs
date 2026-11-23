@@ -353,3 +353,18 @@ fn vault_031_the_window_title_is_the_name_of_the_open_vault() {
     let out = w.hl.frame(&mut w.app, vec![]);
     assert_eq!(titles(&out), [format!("one ({}) – Shale", crate::known_vaults::canonical(&w.base).display())], "two vaults with one name: the parent folder follows");
 }
+
+// spec: VAULT-029
+#[test]
+fn vault_029_the_user_guide_is_not_added_to_the_known_vaults() {
+    let mut w = W::new("guide-unlisted");
+    w.app.open_vault(&w.dir("one"));
+    let before = w.app.cfg.vaults.clone();
+    let root = w.dir("guide-data");
+    w.app.guide = crate::userguide::Places { files: crate::userguide::tests::SAMPLE, root: Some(root.clone()) };
+    w.app.open_user_guide();
+    w.settle();
+    assert_eq!(w.root(), Some(root.join(format!("userguide-{}", env!("CARGO_PKG_VERSION")))), "the guide is open");
+    assert_eq!(w.app.cfg.vaults, before, "and not listed");
+    assert_eq!(w.app.cfg.vault, Some(w.dir("one")), "nor the vault opened last");
+}

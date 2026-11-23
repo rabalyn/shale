@@ -9,7 +9,7 @@ impl ShaleApp {
         match crate::userguide::prepare(&self.guide, env!("CARGO_PKG_VERSION")) {
             Ok(dir) => {
                 // the guide opens on its start note (tabs the person left in an older visit stay)
-                self.open_vault_in_background(&dir, super::vault_load::After::Note("Start here.md".into()));
+                self.open_vault_in_background(&dir, super::vault_load::After::Guide("Start here.md".into()));
             }
             Err(e) => self.toast(e),
         }

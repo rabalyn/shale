@@ -736,7 +736,8 @@ impl ShaleApp {
             app.ctx = Some(ctx.clone());
             app.open_vault_in_background(p, opts.view.clone().map_or(vault_load::After::Nothing, vault_load::After::View));
         } else if let Some(p) = vault_path {
-            app.open_vault(&p);
+            // (the demo vault of a screenshot is nobody's vault)
+            app.open_vault_as(&p, opts.vault.is_some());
             if app.shot.path.is_some() && p.join("Welcome.md").is_file() {
                 app.open(Path::new("Welcome.md"), false);
             }
@@ -930,19 +931,26 @@ impl ShaleApp {
 
     /// Open a vault here and now, on the calling thread: for headless paths (screenshots, scripts
     /// and tests). The window opens vaults with [`Self::open_vault_in_background`] (NET-019).
+    #[cfg(test)]
     pub fn open_vault(&mut self, path: &Path) {
+        self.open_vault_as(path, true);
+    }
+
+    /// [`Self::open_vault`]; `known` false: the vault is not added to the known vaults and not
+    /// remembered as the one opened last (the user guide and the demo vault, VAULT-029).
+    fn open_vault_as(&mut self, path: &Path, known: bool) {
         if !self.prepare_vault_switch() {
             return;
         }
         let _flow = tracing::info_span!("flow.vault_open", peer = "app").entered();
         match tracing::info_span!("flow.vault_open.scan", peer = "disk").in_scope(|| Vault::open(path)) {
-            Ok(v) => self.finish_open_vault(path, v),
+            Ok(v) => self.finish_open_vault(path, v, known),
             Err(e) => self.toast(format!("Could not open vault: {e}")),
         }
     }
 
     /// The vault has been read: make it the open one (state, tabs restored from its state, sync).
-    pub(crate) fn finish_open_vault(&mut self, path: &Path, v: Vault) {
+    pub(crate) fn finish_open_vault(&mut self, path: &Path, v: Vault, known: bool) {
         let had_files = !v.files.is_empty();
         // the vault being left keeps its open tabs
         self.remember_open_files();
@@ -959,7 +967,9 @@ impl ShaleApp {
         self.notes.clear();
         self.drawings.clear();
         self.tabbar.active = 0;
-        self.cfg.remember_vault(path.to_path_buf());
+        if known {
+            self.cfg.remember_vault(path.to_path_buf());
+        }
         // (opening a note rewrites the saved list, so read it first)
         let saved_panes: Vec<crate::vault_state::SavedPane> = if self.vdata.state.panes.is_empty() {
             // (a file from before panes: its last tab was the open one)
