@@ -1,0 +1,184 @@
+{
+  "schema": 2,
+  "verdict": "faster",
+  "exit_code": 0,
+  "x": {
+    "commit": "abe741d6debb8bda30beda55a84fabeebc8a9bdd",
+    "describe": "v0.7.5",
+    "date": "2026-11-23T00:22:11Z",
+    "load": 6.25,
+    "cores": 28,
+    "repeats": 1
+  },
+  "y": {
+    "commit": "afff4111016931e15819007bc2cf4f9a0756eefc",
+    "describe": "v0.7.6",
+    "date": "2026-11-23T01:08:18Z",
+    "load": 3.6,
+    "cores": 28,
+    "repeats": 1
+  },
+  "busy": false,
+  "threshold_time_pct": 10.0,
+  "threshold_bytes_pct": 15.0,
+  "threshold_allocs_pct": 10.0,
+  "rows": [
+    {
+      "id": "worst.startup",
+      "status": "both",
+      "x_median_ns": 782512166,
+      "y_median_ns": 770601827,
+      "time_delta_pct": -1.5220643866641175,
+      "time_verdict": "ok",
+      "x_range_ns": [
+        773060791,
+        788185492
+      ],
+      "y_range_ns": [
+        760411366,
+        772661082
+      ],
+      "x_allocs": 5133670,
+      "y_allocs": 5144177,
+      "allocs_delta_pct": 0.2046683951247353,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 183194231,
+      "y_peak_bytes": 183193575,
+      "bytes_delta_pct": -0.00035808987893292337,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "worst.frame.idle",
+      "status": "both",
+      "x_median_ns": 2687438,
+      "y_median_ns": 2399911,
+      "time_delta_pct": -10.698925891499636,
+      "time_verdict": "noisy",
+      "x_range_ns": [
+        2458854,
+        2943400
+      ],
+      "y_range_ns": [
+        2271438,
+        2494312
+      ],
+      "x_allocs": 10010,
+      "y_allocs": 10010,
+      "allocs_delta_pct": 0.0,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 19368344,
+      "y_peak_bytes": 19368344,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "worst.frame.typing",
+      "status": "both",
+      "x_median_ns": 25110588,
+      "y_median_ns": 24039556,
+      "time_delta_pct": -4.265260534719458,
+      "time_verdict": "ok",
+      "x_range_ns": [
+        24580557,
+        25666040
+      ],
+      "y_range_ns": [
+        23695922,
+        24802939
+      ],
+      "x_allocs": 146076,
+      "y_allocs": 146076,
+      "allocs_delta_pct": 0.0,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 22299869,
+      "y_peak_bytes": 22299869,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "worst.views.cycle",
+      "status": "both",
+      "x_median_ns": 149442444,
+      "y_median_ns": 141535637,
+      "time_delta_pct": -5.290871045979414,
+      "time_verdict": "noisy",
+      "x_range_ns": [
+        148623746,
+        221152138
+      ],
+      "y_range_ns": [
+        141477842,
+        211226974
+      ],
+      "x_allocs": 397999,
+      "y_allocs": 397999,
+      "allocs_delta_pct": 0.0,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 90851868,
+      "y_peak_bytes": 90851868,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "worst.memory.growth",
+      "status": "both",
+      "x_median_ns": 27794040125,
+      "y_median_ns": 25880797945,
+      "time_delta_pct": -6.883641857734419,
+      "time_verdict": "faster",
+      "x_range_ns": [
+        27794040125,
+        27794040125
+      ],
+      "y_range_ns": [
+        25880797945,
+        25880797945
+      ],
+      "x_allocs": 114554255,
+      "y_allocs": 114452391,
+      "allocs_delta_pct": -0.08892205706370314,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 60054244,
+      "y_peak_bytes": 59371576,
+      "bytes_delta_pct": -1.1367523001371893,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    }
+  ],
+  "regressions": [],
+  "improvements": [
+    {
+      "id": "worst.memory.growth",
+      "metric": "time",
+      "x": 27794040125,
+      "y": 25880797945,
+      "delta_pct": -6.883641857734419,
+      "confidence": "high"
+    }
+  ],
+  "tradeoffs": [],
+  "noisy": [
+    "worst.frame.idle"
+  ],
+  "changed": [],
+  "skipped": [],
+  "summary": {
+    "compared": 5,
+    "faster": 1,
+    "slower": 0,
+    "regressions": 0,
+    "noisy": 2,
+    "changed": 0,
+    "added": 0,
+    "removed": 0
+  }
+}
