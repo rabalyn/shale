@@ -18,7 +18,7 @@ and each one reads it by its own rules:
 | The text is | a run of plain words is **one piece of text**, found inside a line; the query language (below) selects the notes first | **words**: all of them, in any order, each one **matches the start of a word** (`meet` finds "meeting") | the same |
 | Case | ignored | ignored, also accents (`muller` finds `Müller`) | ignored, also accents |
 | `*` and `?` | wildcards (any run of characters, one character) | only cut the word: every word is a **word start** anyway | only cut the word: every word is a **word start** anyway |
-| `"phrase"` | the quotes are part of the text | words next to each other, in this order, **exactly** (no word starts) | the same |
+| `"phrase"` | the words inside the quotes, next to each other as typed; the quotes are no part of the text | words next to each other, in this order, **exactly** (no word starts) | the same |
 | `from:` and the other fields | a property of the note (`from: ann` in its front matter), see the query language | limit a word to one field | limit a word to one field |
 | Order of the list | the order of the files of the vault | newest first | newest first |
 
