@@ -141,7 +141,7 @@ fn vault_030_a_click_on_a_vault_opens_it_and_a_click_on_the_open_one_does_nothin
     assert_eq!(w.names(), ["two", "one"], "the vault opened last is first");
 }
 
-// spec: VAULT-030
+// spec: VAULT-030, VAULT-044
 #[test]
 fn vault_030_it_works_by_keyboard_arrows_enter_and_esc() {
     let mut w = W::new("keys");
