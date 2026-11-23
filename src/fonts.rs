@@ -1116,6 +1116,25 @@ pub(crate) mod tests {
         assert_eq!(st.area(Area::Ui).faces, Faces::default());
     }
 
+    // spec: EDIT-106
+    #[test]
+    fn the_pass_that_sets_the_fonts_is_not_settled_and_the_later_ones_name_it() {
+        let ctx = egui::Context::default();
+        let mut seen = Vec::new();
+        for pass in 0..3 {
+            let mut done = ctx.run_ui(egui::RawInput::default(), |ui| {
+                if pass == 1 {
+                    set_fonts(ui.ctx(), egui::FontDefinitions::default());
+                }
+                seen.push((settled(ui.ctx()), ui.ctx().cumulative_pass_nr()));
+            });
+            done.textures_delta.clear();
+        }
+        let at = seen[1].1;
+        assert_eq!(seen[1].0, None, "in the pass that sets the fonts nothing is kept");
+        assert_eq!(seen[2].0, Some(at), "afterwards the pass that set them is the number of the fonts");
+    }
+
     // spec: CFG-040
     #[test]
     fn cfg_040_a_font_for_a_sample_is_loaded_besides_the_chosen_ones_and_changes_no_area() {

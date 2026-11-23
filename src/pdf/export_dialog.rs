@@ -324,7 +324,7 @@ mod tests {
         (h, d)
     }
 
-    // spec: PDF-001, PDF-008
+    // spec: PDF-001, PDF-008, EDIT-024
     #[test]
     fn note_dialog_controls() {
         let (mut h, mut d) = setup(false);

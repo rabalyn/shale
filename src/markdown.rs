@@ -1745,6 +1745,7 @@ a
         }
     }
 
+    // spec: EDIT-001
     #[test]
     fn fuzzy() {
         assert!(fuzzy_score("al", "Alpha").unwrap() > fuzzy_score("al", "Total").unwrap());

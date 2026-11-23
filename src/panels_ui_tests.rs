@@ -567,7 +567,7 @@ fn shown_labels(p: &mut P) -> Vec<String> {
     p.look(Show::Modals).into_iter().map(|(_, l, _)| l).collect()
 }
 
-// spec: CFG-020, TEX-023
+// spec: CFG-020, TEX-023, EDIT-044
 #[test]
 fn set_001_every_tab_of_the_settings_shows_the_settings_of_its_domain() {
     let mut p = P::new("settings-tabs", &[]);
@@ -629,6 +629,23 @@ fn edit_044_the_vim_tab_follows_editor_indented_and_holds_the_vim_settings() {
     assert!(matches!(&p.app.modal, Some(Modal::Settings { tab, .. }) if *tab == SettingsTab::Vim));
     p.click(Show::Modals, "Keybindings tab");
     assert!(matches!(&p.app.modal, Some(Modal::Settings { tab, .. }) if *tab == SettingsTab::Keybindings));
+}
+
+// spec: EDIT-044
+#[test]
+fn edit_044_the_vim_cursor_combos_open_only_while_vim_mode_is_on() {
+    let mut p = P::new("settings-vim-combos", &[]);
+    let (stay, back) = (crate::vim::EscCursor::Stay.label(), crate::vim::EscCursor::StepBack.label());
+    p.app.cfg.vim_mode = false;
+    p.app.open_settings(SettingsTab::Vim);
+    p.click(Show::Modals, stay);
+    let off = shown_labels(&mut p);
+    assert!(!off.iter().any(|s| s == back), "a disabled combo does not open: {off:?}");
+    p.app.cfg.vim_mode = true;
+    p.app.open_settings(SettingsTab::Vim);
+    p.click(Show::Modals, stay);
+    let on = shown_labels(&mut p);
+    assert!(on.iter().any(|s| s == back), "the same click opens it while vim mode is on: {on:?}");
 }
 
 /// The labels of Settings until one starts with `text` (a background job answers after a moment).

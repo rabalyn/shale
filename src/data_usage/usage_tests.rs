@@ -80,7 +80,7 @@ fn the_undo_histories_are_counted_with_the_age_of_the_oldest_step() {
     let _ = fs::remove_dir_all(&d);
 }
 
-// spec: USE-017, USE-022
+// spec: USE-017, USE-022, EDIT-022
 #[test]
 fn the_undo_prune_drops_old_steps_empty_files_and_every_damaged_copy_and_spares_newer_files() {
     let (p, d) = places_with_caches("undo-prune");
