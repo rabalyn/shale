@@ -969,8 +969,8 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   token) or a Bluesky account (handle and an **app password** from Settings → Privacy and
   security → App passwords, never your main password). Secrets go to the system keyring. **Edit** next to an account signs in
   to it again (new app password or code) and replaces its secret; the account keeps its feeds and posts.
-- Pick the account and the feed (Mastodon: Home and your lists; Bluesky: Following and your
-  saved feeds). Posts show the avatar, name, time, "boosted by", pictures (video and GIF
+- Pick the account and the feed (Mastodon: Home, Notifications, Your posts and your lists; Bluesky:
+  Following, Notifications, Your posts and your saved feeds). Posts show the avatar, name, time, "boosted by", pictures (video and GIF
   previews have a play mark), quoted posts and link cards. A content warning stays closed until
   you click Show. The next page loads when you reach the end of the list.
 - **Several feeds at once**: every Feeds tab has its own feed, scroll position and back/forward
@@ -986,6 +986,20 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   exactly where it is, so you can scroll up slowly. **Check now** looks right away (a spinner shows inside the button while it runs);
   **⋯ → Reload from the top** replaces the list. If more than 200 posts came in on Bluesky,
   **Load more in between** fills the gap.
+- **Notifications are a feed** (Mastodon and Bluesky, in the picker of every account): one compact row
+  per notification (what happened, who did it, how long ago, a dot while it is unread; "Ada, Bo and 3
+  others favourited your post" when likes or boosts of one post come together) above the post it
+  is about as a normal card with all its buttons (reply, like, boost, quote, Show thread, Save to
+  vault …). A follow shows the account and **Open in browser**. Mentions, replies, quotes, favourites
+  / likes, boosts / reposts, follows and follow requests, polls, edits and posts you asked to be told about are
+  shown. The feed is checked like the others; new ones wait behind "N new notifications — show", the
+  tab title counts the unread ones, and when you have the list on screen Shale tells the server that
+  you read them (Mastodon's marker, Bluesky's "seen"), so other apps agree. Their posts are in the search index.
+  **Your posts** is the feed of your own posts, replies and boosts, with the same buttons; a post you
+  write from Shale waits there too.
+
+![The Notifications feed](userguide/z_media/screenshots/social-notifications.png)
+
 - **Search the posts you loaded**: every post a feed brings in is kept in a search index
   (`~/.local/share/shale/social-posts.db`, the same for every vault: text, author, date, links
   and the thread around it). The sidebar search (Ctrl+Shift+F) lists the posts that match under

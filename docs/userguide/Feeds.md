@@ -19,8 +19,8 @@ social` shows made-up posts.
 
 # Reading
 
-- Pick the account and the feed (Mastodon: Home and your lists; Bluesky: Following and saved
-  feeds). Posts show avatar, name, time, boosts, pictures, quoted posts and link cards. A
+- Pick the account and the feed (Mastodon: Home, Notifications, Your posts and your lists; Bluesky:
+  Following, Notifications, Your posts and saved feeds). Posts show avatar, name, time, boosts, pictures, quoted posts and link cards. A
   content warning stays closed until you click Show.
 - **Replies and the thread of a post:** click the number of replies under a post, or **Show thread**
   (offered for a post that has replies or is a reply). The conversation opens in the same tab: what
@@ -48,6 +48,32 @@ social` shows made-up posts.
   never moves until you click. **Check now** looks right away.
 
 ![[social-thread.png]]
+
+# Notifications and your own posts
+
+**Notifications** is a feed in the picker of every account. Each notification is a row (what happened,
+who did it, how long ago) above the post it is about; the post is a normal card with **Reply**,
+**Boost** / **Repost**, **Favourite** / **Like**, **Quote**, **Show thread**, **Save to vault** and the
+rest. When several people liked or boosted the same post, one row says "Ada, Bo and 3 others
+favourited your post". A follow (or a follow request) shows the person's avatar, name and handle
+and **Open in browser** for the profile. Shown are mentions, replies, quotes, favourites / likes,
+boosts / reposts, follows, polls that ended, edits of posts you boosted and posts of people you
+asked to be told about.
+
+- A **dot** on a row means the server had not counted that notification as read when the list
+  loaded. While the list is on screen, Shale tells the server that you have read everything up to
+  the newest entry (Mastodon: the notification marker; Bluesky: "seen"), so your other apps
+  show it as read too. The dots stay until you load the list again.
+- New notifications arrive like new posts: they wait behind **N new notifications — show** (or
+  press `.`), the list does not move, and the tab's title counts the unread ones. They are read when
+  you show them.
+- The posts in your notifications can be found with the search ([[Search syntax]]).
+
+![[social-notifications.png]]
+
+**Your posts** shows what you posted, your replies and your boosts / reposts, newest first, with the
+same buttons as any feed. A post you write in Shale waits behind its **N new posts** button, as in
+Home.
 
 # Like, boost, reply, quote and write
 
@@ -110,7 +136,7 @@ your own.
   sends, **Cancel** (or Esc) goes back to your text. While it is sent the box is busy and nothing goes out twice. If it
   fails the box stays open with your text and the message.
 - When it is out, the box closes and the post waits behind the "N new posts" button of your own
-  feed, so the list does not move; a reply also appears in the conversation you wrote it in.
+  feed (Home or Following, and Your posts), so the list does not move; a reply also appears in the conversation you wrote it in.
 
 ![[social-compose.png]]
 
