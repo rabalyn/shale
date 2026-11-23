@@ -104,7 +104,7 @@ fn cfg_011_the_button_opens_the_settings_file_in_a_tab_without_making_a_note() {
     assert!(w.app.vault.as_ref().unwrap().file(Path::new("config.toml")).is_none());
     w.app.remember_open_files();
     assert!(w.app.vdata.state.tabs.iter().all(|t| t.file.is_none() && t.feed.is_none()), "the tab is not remembered with the vault's tabs");
-    assert!(!w.app.cfg.recent.iter().any(|p| p.ends_with("config.toml")));
+    assert!(!w.app.cfg.vaults.entries().iter().any(|e| e.path.ends_with("config.toml")));
     // a second time shows the same tab
     let n = w.app.tabbar.tabs.len();
     w.app.open_settings_file();

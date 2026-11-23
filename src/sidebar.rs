@@ -55,6 +55,17 @@ impl Item {
         matches!(self, Item::Panel(_))
     }
 
+    /// Files, Search and Tags: the views of the left sidebar, which can be in the ribbon, in a
+    /// right view or in both (LAY-020, ADR-0033).
+    pub fn is_movable(self) -> bool {
+        matches!(self, Item::Files | Item::Search | Item::Tags)
+    }
+
+    /// Can a right menubar take this icon: a panel or a movable view (LAY-006, LAY-020).
+    pub fn fits_right(self) -> bool {
+        self.is_panel() || self.is_movable()
+    }
+
     /// The name stored in the settings. Never change one: stored layouts name them.
     pub fn id(self) -> &'static str {
         match self {
@@ -204,7 +215,33 @@ pub enum Dest {
     NewView { at: usize },
 }
 
-/// A right menubar takes panel icons only (LAY-006).
+impl Dest {
+    /// The side of the window the place is on.
+    pub fn side(self) -> Side {
+        match self {
+            Dest::Ribbon(_) => Side::Left,
+            Dest::Bar { .. } | Dest::NewView { .. } => Side::Right,
+        }
+    }
+}
+
+/// The left sidebar (the ribbon) or the right one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Side {
+    #[default]
+    Left,
+    Right,
+}
+
+/// What a drop of a movable view on the other side does (LAY-021): it leaves the side it came
+/// from, or stays there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    Move,
+    Copy,
+}
+
+/// A right menubar takes panel icons and the movable views only (LAY-006, LAY-020).
 #[derive(Debug, PartialEq, Eq)]
 pub struct Refused;
 
@@ -232,20 +269,22 @@ impl Layout {
         if cfg.sidebars == SidebarCfg::default() {
             return Layout::default();
         }
+        // a movable view may be on both sides (a copy); every other icon is in one place only
         let mut seen = HashSet::new();
+        let mut placed = HashSet::new();
         let mut views: Vec<View> = vec![];
         for v in &cfg.sidebars.right {
-            let icons: Vec<Item> = v.icons.iter().filter_map(|id| Item::from_id(id)).filter(|i| i.is_panel() && seen.insert(*i)).collect();
+            let icons: Vec<Item> = v.icons.iter().filter_map(|id| Item::from_id(id)).filter(|i| i.fits_right() && seen.insert((*i, i.is_movable()))).inspect(|i| _ = placed.insert(*i)).collect();
             if let Some(first) = icons.first().copied() {
                 let active = Item::from_id(&v.active).filter(|a| icons.contains(a)).unwrap_or(first);
                 let weight = if v.weight == 0 { EQUAL } else { v.weight.clamp(MIN_WEIGHT, MAX_WEIGHT) };
                 views.push(View { icons, active, weight });
             }
         }
-        let mut ribbon: Vec<Item> = cfg.sidebars.ribbon.iter().filter_map(|id| Item::from_id(id)).filter(|i| seen.insert(*i)).collect();
+        let mut ribbon: Vec<Item> = cfg.sidebars.ribbon.iter().filter_map(|id| Item::from_id(id)).filter(|i| seen.insert((*i, false))).inspect(|i| _ = placed.insert(*i)).collect();
         // an icon that is shown is not hidden; a hidden one does not come back as a missing one
-        let hidden: Vec<Item> = cfg.sidebars.hidden.iter().filter_map(|id| Item::from_id(id)).filter(|i| seen.insert(*i)).collect();
-        for item in Item::ALL.into_iter().filter(|i| seen.insert(*i)) {
+        let hidden: Vec<Item> = cfg.sidebars.hidden.iter().filter_map(|id| Item::from_id(id)).filter(|i| placed.insert(*i)).collect();
+        for item in Item::ALL.into_iter().filter(|i| placed.insert(*i)) {
             match (item.is_panel(), views.last_mut()) {
                 (false, _) => ribbon.push(item),
                 (true, Some(v)) => v.icons.push(item),
@@ -261,15 +300,45 @@ impl Layout {
         cfg.sidebars = SidebarCfg { ribbon: ids(&self.ribbon), right: self.views.iter().map(|v| RightViewCfg { icons: ids(&v.icons), active: v.active.id().to_string(), weight: v.weight }).collect(), hidden: ids(&self.hidden) };
     }
 
-    /// Move an icon to a place (LAY-005). A right menubar or a new view takes panel icons only
-    /// (LAY-006). A view that loses its last icon is removed (LAY-007); an icon that arrives in
-    /// a view becomes its active one.
-    pub fn apply(&mut self, item: Item, dest: Dest) -> Result<(), Refused> {
-        if !item.is_panel() && !matches!(dest, Dest::Ribbon(_)) {
+    fn in_ribbon(&self, item: Item) -> Option<usize> {
+        self.ribbon.iter().position(|i| *i == item)
+    }
+
+    fn in_view(&self, item: Item) -> Option<(usize, usize)> {
+        self.views.iter().enumerate().find_map(|(v, w)| w.icons.iter().position(|i| *i == item).map(|p| (v, p)))
+    }
+
+    /// Is the icon in a view of the right sidebar.
+    pub fn on_right(&self, item: Item) -> bool {
+        self.in_view(item).is_some()
+    }
+
+    /// Is the icon in the ribbon.
+    pub fn on_left(&self, item: Item) -> bool {
+        self.in_ribbon(item).is_some()
+    }
+
+    /// Move an icon to a place (LAY-005). A right menubar or a new view takes panel icons and the
+    /// movable views only (LAY-006, LAY-020). A view that loses its last icon is removed
+    /// (LAY-007); an icon that arrives in a view becomes its active one. `from` is the side the
+    /// drag started at, which matters for a movable view that is on both sides; dropping one on
+    /// the other side takes it from `from` with `Mode::Move` and leaves it there with
+    /// `Mode::Copy`, and it is not added again where it already is (LAY-021, LAY-022).
+    pub fn apply(&mut self, item: Item, dest: Dest, from: Side, mode: Mode) -> Result<(), Refused> {
+        if !item.fits_right() && dest.side() == Side::Right {
             return Err(Refused);
         }
-        let from_ribbon = self.ribbon.iter().position(|i| *i == item);
-        let from_view = self.views.iter().enumerate().find_map(|(v, w)| w.icons.iter().position(|i| *i == item).map(|p| (v, p)));
+        let (mut from_ribbon, mut from_view) = (self.in_ribbon(item), self.in_view(item));
+        let cross = item.is_movable() && from != dest.side();
+        if item.is_movable() {
+            // only the side the drag started at is the source
+            match from {
+                Side::Left => from_view = None,
+                Side::Right => from_ribbon = None,
+            }
+        }
+        let already = cross && (if dest.side() == Side::Left { self.on_left(item) } else { self.on_right(item) });
+        let keep_source = cross && mode == Mode::Copy;
         // an only icon dropped on its own view: it would leave and come back
         if let Some((v, _)) = from_view {
             let same = match dest {
@@ -280,6 +349,12 @@ impl Layout {
             if same && self.views[v].icons.len() == 1 {
                 return Ok(());
             }
+        }
+        if keep_source && !already {
+            from_ribbon = None;
+            from_view = None;
+        } else if keep_source {
+            return Ok(());
         }
         let mut dest = dest;
         if let Some(p) = from_ribbon {
@@ -308,6 +383,9 @@ impl Layout {
                 self.views[v].active = self.views[v].icons[0];
             }
         }
+        if already {
+            return Ok(());
+        }
         match dest {
             Dest::Ribbon(at) => self.ribbon.insert(at.min(self.ribbon.len()), item),
             Dest::Bar { view, at } => {
@@ -320,12 +398,15 @@ impl Layout {
         Ok(())
     }
 
-    /// Remove an icon from its menubar into the hidden ones (LAY-013). A view that loses its last
-    /// icon is removed (LAY-007). False: the icon is not in a menubar.
-    pub fn hide(&mut self, item: Item) -> bool {
-        if let Some(p) = self.ribbon.iter().position(|i| *i == item) {
+    /// Remove an icon from its menubar (on this `side`, for a movable view that is on both). It
+    /// is hidden (LAY-013) when it is then in no menubar. A view that loses its last icon is
+    /// removed (LAY-007). False: the icon is not in a menubar of that side.
+    pub fn hide(&mut self, item: Item, side: Side) -> bool {
+        let (ribbon, view) = (self.in_ribbon(item), self.in_view(item));
+        let (ribbon, view) = if item.is_movable() { (ribbon.filter(|_| side == Side::Left), view.filter(|_| side == Side::Right)) } else { (ribbon, view) };
+        if let Some(p) = ribbon {
             self.ribbon.remove(p);
-        } else if let Some((v, p)) = self.views.iter().enumerate().find_map(|(v, w)| w.icons.iter().position(|i| *i == item).map(|p| (v, p))) {
+        } else if let Some((v, p)) = view {
             self.views[v].icons.remove(p);
             if self.views[v].icons.is_empty() {
                 self.views.remove(v);
@@ -335,7 +416,9 @@ impl Layout {
         } else {
             return false;
         }
-        self.hidden.push(item);
+        if !self.on_left(item) && !self.on_right(item) {
+            self.hidden.push(item);
+        }
         true
     }
 
@@ -378,6 +461,12 @@ mod tests {
         View::new(icons.iter().map(|x| p(*x)).collect(), p(icons[0]))
     }
 
+    /// a plain move of an icon that is in one place
+    fn mv(l: &mut Layout, item: Item, dest: Dest) -> Result<(), Refused> {
+        let from = if l.on_right(item) { Side::Right } else { Side::Left };
+        l.apply(item, dest, from, Mode::Move)
+    }
+
     fn two_views() -> Layout {
         Layout { ribbon: Layout::default().ribbon, views: vec![view(&[Backlinks, Outline]), view(&[Outgoing, LocalGraph, Calendar, History, Thread])], hidden: vec![] }
     }
@@ -417,7 +506,7 @@ mod tests {
     #[test]
     fn lay_002_stored_views_are_repaired_too() {
         // a ribbon item inside a view, a double across views, an unknown id, a view that ends up empty, an active icon not in its view
-        let l = Layout::from_config(&cfg_with(&["files"], &[(&["panel:outline", "mail", "panel:outline", "nope"], "panel:calendar"), (&["files", "x"], "files"), (&["panel:backlinks", "panel:outgoing"], "panel:outgoing")]));
+        let l = Layout::from_config(&cfg_with(&["files"], &[(&["panel:outline", "mail", "panel:outline", "nope"], "panel:calendar"), (&["mail", "x"], "mail"), (&["panel:backlinks", "panel:outgoing"], "panel:outgoing")]));
         assert_eq!(l.views, vec![view(&[Outline]), View::new(vec![p(Backlinks), p(Outgoing), p(LocalGraph), p(Calendar), p(History), p(Thread)], p(Outgoing))]);
         assert!(l.ribbon.contains(&Item::Mail) && l.ribbon.contains(&Item::Files), "a ribbon item found in a view goes back to the ribbon");
         assert!(!l.ribbon.iter().any(|i| i.is_panel()));
@@ -428,14 +517,14 @@ mod tests {
     #[test]
     fn moving_in_the_ribbon_counts_the_icons_above_the_drop_point() {
         let mut l = Layout::default();
-        l.apply(Item::Files, Dest::Ribbon(3)).unwrap();
+        mv(&mut l, Item::Files, Dest::Ribbon(3)).unwrap();
         assert_eq!(&l.ribbon[..3], [Item::Search, Item::Tags, Item::Files], "down: the list shrinks above the point");
-        l.apply(Item::NewNote, Dest::Ribbon(0)).unwrap();
+        mv(&mut l, Item::NewNote, Dest::Ribbon(0)).unwrap();
         assert_eq!(l.ribbon[0], Item::NewNote);
-        l.apply(Item::Search, Dest::Ribbon(99)).unwrap();
+        mv(&mut l, Item::Search, Dest::Ribbon(99)).unwrap();
         assert_eq!(l.ribbon.last(), Some(&Item::Search));
         let before = l.clone();
-        l.apply(Item::NewNote, Dest::Ribbon(1)).unwrap();
+        mv(&mut l, Item::NewNote, Dest::Ribbon(1)).unwrap();
         assert_eq!(l, before, "dropping an icon right after itself changes nothing");
         assert_eq!(l.ribbon.len(), 12);
     }
@@ -445,24 +534,24 @@ mod tests {
     fn lay_005_icons_move_between_menubars_and_never_get_copied() {
         let mut l = two_views();
         // right to right: Outline goes to the second view, at the front, and becomes active there
-        l.apply(p(Outline), Dest::Bar { view: 1, at: 0 }).unwrap();
+        mv(&mut l, p(Outline), Dest::Bar { view: 1, at: 0 }).unwrap();
         assert_eq!(l.views[0].icons, [p(Backlinks)]);
         assert_eq!((l.views[1].icons.clone(), l.views[1].active), (vec![p(Outline), p(Outgoing), p(LocalGraph), p(Calendar), p(History), p(Thread)], p(Outline)));
         // within a view: down moves count the icons as they were
-        l.apply(p(Outline), Dest::Bar { view: 1, at: 3 }).unwrap();
+        mv(&mut l, p(Outline), Dest::Bar { view: 1, at: 3 }).unwrap();
         assert_eq!(l.views[1].icons, [p(Outgoing), p(LocalGraph), p(Outline), p(Calendar), p(History), p(Thread)]);
         // right to left: a panel becomes a ribbon shortcut, and leaves the view
-        l.apply(p(Calendar), Dest::Ribbon(2)).unwrap();
+        mv(&mut l, p(Calendar), Dest::Ribbon(2)).unwrap();
         assert_eq!(l.ribbon[2], p(Calendar));
         assert!(!l.views[1].icons.contains(&p(Calendar)));
         // left to right: the shortcut goes back to a menubar
-        l.apply(p(Calendar), Dest::Bar { view: 0, at: 1 }).unwrap();
+        mv(&mut l, p(Calendar), Dest::Bar { view: 0, at: 1 }).unwrap();
         assert_eq!(l.views[0].icons, [p(Backlinks), p(Calendar)]);
         assert!(!l.ribbon.contains(&p(Calendar)));
         every_icon_once(&l);
         // a moved active icon: the view shows its first one then
         let mut l = two_views();
-        l.apply(p(Backlinks), Dest::Ribbon(0)).unwrap();
+        mv(&mut l, p(Backlinks), Dest::Ribbon(0)).unwrap();
         assert_eq!((l.views[0].icons.clone(), l.views[0].active), (vec![p(Outline)], p(Outline)));
     }
 
@@ -471,8 +560,8 @@ mod tests {
     fn lay_006_ribbon_items_are_refused_in_a_right_menubar_and_nothing_changes() {
         let mut l = two_views();
         let before = l.clone();
-        assert_eq!(l.apply(Item::Mail, Dest::Bar { view: 0, at: 0 }), Err(Refused));
-        assert_eq!(l.apply(Item::Files, Dest::NewView { at: 1 }), Err(Refused));
+        assert_eq!(mv(&mut l, Item::Mail, Dest::Bar { view: 0, at: 0 }), Err(Refused));
+        assert_eq!(mv(&mut l, Item::Switcher, Dest::NewView { at: 1 }), Err(Refused));
         assert_eq!(l, before);
     }
 
@@ -481,22 +570,22 @@ mod tests {
     fn lay_007_the_last_icon_leaving_a_view_removes_the_view() {
         let mut l = Layout { ribbon: vec![], views: vec![view(&[Backlinks]), view(&[Outline, Outgoing]), view(&[Calendar])], hidden: vec![] };
         // the first view's only icon goes to the third view: the view is gone and the indexes shift
-        l.apply(p(Backlinks), Dest::Bar { view: 2, at: 1 }).unwrap();
+        mv(&mut l, p(Backlinks), Dest::Bar { view: 2, at: 1 }).unwrap();
         assert_eq!(l.views, vec![view(&[Outline, Outgoing]), View::new(vec![p(Calendar), p(Backlinks)], p(Backlinks))]);
         // an only icon to the ribbon: gone, no view left over
-        l.apply(p(Backlinks), Dest::Ribbon(0)).unwrap();
-        l.apply(p(Calendar), Dest::Ribbon(0)).unwrap();
+        mv(&mut l, p(Backlinks), Dest::Ribbon(0)).unwrap();
+        mv(&mut l, p(Calendar), Dest::Ribbon(0)).unwrap();
         assert_eq!(l.views, vec![view(&[Outline, Outgoing])]);
         // an only icon dropped on its own bar or beside its own view: no change
         let mut one = Layout { ribbon: vec![], views: vec![view(&[Calendar])], hidden: vec![] };
         let before = one.clone();
-        one.apply(p(Calendar), Dest::Bar { view: 0, at: 0 }).unwrap();
-        one.apply(p(Calendar), Dest::NewView { at: 1 }).unwrap();
-        one.apply(p(Calendar), Dest::NewView { at: 0 }).unwrap();
+        mv(&mut one, p(Calendar), Dest::Bar { view: 0, at: 0 }).unwrap();
+        mv(&mut one, p(Calendar), Dest::NewView { at: 1 }).unwrap();
+        mv(&mut one, p(Calendar), Dest::NewView { at: 0 }).unwrap();
         assert_eq!(one, before);
         // no view at all is a valid layout, and a drop makes the first one
         let mut none = Layout { ribbon: vec![p(Outline)], views: vec![], hidden: vec![] };
-        none.apply(p(Outline), Dest::NewView { at: 0 }).unwrap();
+        mv(&mut none, p(Outline), Dest::NewView { at: 0 }).unwrap();
         assert_eq!((none.ribbon.len(), none.views), (0, vec![view(&[Outline])]));
     }
 
@@ -504,15 +593,15 @@ mod tests {
     #[test]
     fn lay_009_a_new_view_is_made_at_the_place_of_the_drop() {
         let mut l = two_views();
-        l.apply(p(Calendar), Dest::NewView { at: 1 }).unwrap();
+        mv(&mut l, p(Calendar), Dest::NewView { at: 1 }).unwrap();
         assert_eq!(l.views, vec![view(&[Backlinks, Outline]), view(&[Calendar]), view(&[Outgoing, LocalGraph, History, Thread])]);
         // from a view that disappears above the place: the place shifts up with the stack
         let mut l = Layout { ribbon: vec![], views: vec![view(&[Backlinks]), view(&[Outline]), view(&[Calendar])], hidden: vec![] };
-        l.apply(p(Backlinks), Dest::NewView { at: 3 }).unwrap();
+        mv(&mut l, p(Backlinks), Dest::NewView { at: 3 }).unwrap();
         assert_eq!(l.views, vec![view(&[Outline]), view(&[Calendar]), view(&[Backlinks])]);
         // from the ribbon
         let mut l = Layout { ribbon: vec![p(Outline)], views: vec![view(&[Backlinks])], hidden: vec![] };
-        l.apply(p(Outline), Dest::NewView { at: 0 }).unwrap();
+        mv(&mut l, p(Outline), Dest::NewView { at: 0 }).unwrap();
         assert_eq!((l.ribbon.len(), l.views), (0, vec![view(&[Outline]), view(&[Backlinks])]));
     }
 
@@ -567,14 +656,14 @@ mod tests {
     #[test]
     fn lay_013_hiding_and_restoring_icons_keeps_each_icon_in_exactly_one_place() {
         let mut l = two_views();
-        assert!(l.hide(Item::Mail));
-        assert!(l.hide(p(Backlinks)));
-        assert!(!l.hide(Item::Mail), "an icon that is hidden cannot be hidden again");
+        assert!(l.hide(Item::Mail, Side::Left));
+        assert!(l.hide(p(Backlinks), Side::Right));
+        assert!(!l.hide(Item::Mail, Side::Left), "an icon that is hidden cannot be hidden again");
         assert_eq!(l.hidden, [Item::Mail, p(Backlinks)]);
         assert_eq!((l.views[0].icons.clone(), l.views[0].active), (vec![p(Outline)], p(Outline)));
         every_icon_once(&l);
         // the last icon of a view takes the view with it
-        assert!(l.hide(p(Outline)));
+        assert!(l.hide(p(Outline), Side::Right));
         assert_eq!(l.views, vec![view(&[Outgoing, LocalGraph, Calendar, History, Thread])]);
         // what is hidden stays hidden when the layout is stored and loaded
         let mut c = Config::default();
@@ -599,6 +688,129 @@ mod tests {
         });
         assert_eq!(l.hidden, [Item::Files]);
         assert!(l.ribbon.contains(&Item::Mail) && !l.ribbon.contains(&Item::Files));
+    }
+
+    // spec: LAY-020
+    #[test]
+    fn lay_020_files_search_and_tags_fit_a_right_menubar_and_the_other_ribbon_items_do_not() {
+        for item in [Item::Files, Item::Search, Item::Tags] {
+            assert!(item.is_movable() && item.fits_right() && !item.is_panel(), "{item:?}");
+        }
+        for item in [Item::Mail, Item::Calendar, Item::Graph, Item::Tasks, Item::Social, Item::Switcher, Item::Import, Item::Drawing, Item::NewNote] {
+            assert!(!item.fits_right(), "{item:?} is a main view or a command");
+            let mut l = two_views();
+            let before = l.clone();
+            assert_eq!(l.apply(item, Dest::Bar { view: 0, at: 0 }, Side::Left, Mode::Copy), Err(Refused));
+            assert_eq!(l, before);
+        }
+    }
+
+    // spec: LAY-021
+    #[test]
+    fn lay_021_moving_or_copying_a_view_from_the_ribbon_to_the_right_sidebar() {
+        // move: it leaves the ribbon and lands where the drop says, as the active icon
+        let mut l = two_views();
+        l.apply(Item::Files, Dest::Bar { view: 1, at: 1 }, Side::Left, Mode::Move).unwrap();
+        assert!(!l.on_left(Item::Files) && l.views[1].icons[1] == Item::Files && l.views[1].active == Item::Files);
+        every_icon_once(&l);
+        // copy: it stays in the ribbon at its place and is also in the view
+        let mut l = two_views();
+        l.apply(Item::Search, Dest::Bar { view: 0, at: 0 }, Side::Left, Mode::Copy).unwrap();
+        assert_eq!((l.ribbon.clone(), l.views[0].icons[0]), (Layout::default().ribbon, Item::Search));
+        // a copy to a new view, at a place of the stack
+        l.apply(Item::Tags, Dest::NewView { at: 1 }, Side::Left, Mode::Copy).unwrap();
+        assert_eq!(l.views[1], View::new(vec![Item::Tags], Item::Tags));
+        assert!(l.on_left(Item::Tags));
+        // it is in the view once: a second copy into another view takes it from there instead (it is not added twice)
+        l.apply(Item::Search, Dest::Bar { view: 1, at: 0 }, Side::Left, Mode::Copy).unwrap();
+        assert_eq!(l.views.iter().flat_map(|v| v.icons.iter()).filter(|i| **i == Item::Search).count(), 1, "a view is in one place per side");
+    }
+
+    // spec: LAY-022
+    #[test]
+    fn lay_022_moving_or_copying_a_view_from_the_right_sidebar_to_the_ribbon() {
+        // a view that was moved away comes back to the place of the drop
+        let mut l = two_views();
+        l.apply(Item::Files, Dest::Bar { view: 0, at: 0 }, Side::Left, Mode::Move).unwrap();
+        l.apply(Item::Files, Dest::Ribbon(2), Side::Right, Mode::Move).unwrap();
+        assert_eq!(l.ribbon[2], Item::Files);
+        assert!(!l.on_right(Item::Files));
+        assert_eq!(l.views, two_views().views);
+        // the last icon of a view going back removes the view
+        let mut l = Layout { ribbon: Layout::default().ribbon.into_iter().filter(|i| *i != Item::Tags).collect(), views: vec![view(&[Backlinks]), View::new(vec![Item::Tags], Item::Tags)], hidden: vec![] };
+        l.apply(Item::Tags, Dest::Ribbon(0), Side::Right, Mode::Move).unwrap();
+        assert_eq!((l.views.len(), l.ribbon[0]), (1, Item::Tags));
+        // a copy dragged to the ribbon, where the view already is: the copy is just taken out of the view (Move), or nothing happens (Copy)
+        let mut l = two_views();
+        l.apply(Item::Files, Dest::Bar { view: 0, at: 0 }, Side::Left, Mode::Copy).unwrap();
+        let both = l.clone();
+        l.apply(Item::Files, Dest::Ribbon(5), Side::Right, Mode::Copy).unwrap();
+        assert_eq!(l, both);
+        l.apply(Item::Files, Dest::Ribbon(5), Side::Right, Mode::Move).unwrap();
+        assert_eq!(l, two_views());
+        // a copy to the ribbon from a view: both stay
+        let mut l = Layout { ribbon: Layout::default().ribbon.into_iter().filter(|i| *i != Item::Search).collect(), views: vec![view(&[Backlinks]), View::new(vec![Item::Search], Item::Search)], hidden: vec![] };
+        l.apply(Item::Search, Dest::Ribbon(1), Side::Right, Mode::Copy).unwrap();
+        assert_eq!((l.ribbon[1], l.on_right(Item::Search)), (Item::Search, true));
+    }
+
+    // spec: LAY-023
+    #[test]
+    fn lay_023_the_order_in_the_right_stack_follows_the_drop() {
+        let mut l = two_views();
+        l.apply(Item::Files, Dest::Bar { view: 0, at: 1 }, Side::Left, Mode::Move).unwrap();
+        l.apply(Item::Search, Dest::Bar { view: 0, at: 0 }, Side::Left, Mode::Move).unwrap();
+        assert_eq!(l.views[0].icons, [Item::Search, p(Backlinks), Item::Files, p(Outline)]);
+        // within the view the icon is moved, never copied (it is on this side once)
+        mv(&mut l, Item::Search, Dest::Bar { view: 0, at: 4 }).unwrap();
+        assert_eq!(l.views[0].icons, [p(Backlinks), Item::Files, p(Outline), Item::Search]);
+    }
+
+    // spec: LAY-026
+    #[test]
+    fn lay_026_the_two_sides_of_a_movable_view_are_stored_and_an_old_layout_loads_as_before() {
+        // an old layout has Files, Search and Tags in the ribbon only
+        let l = Layout::from_config(&cfg_with(&["files", "search", "tags", "mail"], &[(&["panel:outline"], "panel:outline")]));
+        assert_eq!(&l.ribbon[..4], [Item::Files, Item::Search, Item::Tags, Item::Mail]);
+        assert!(!l.on_right(Item::Files));
+        // a copy is in both lists, a moved view only in the view; a view in no list comes back to the ribbon
+        let l = Layout::from_config(&cfg_with(&["files", "mail"], &[(&["panel:outline", "files", "search"], "search")]));
+        assert!(l.on_left(Item::Files) && l.on_right(Item::Files), "a copy stays");
+        assert!(!l.on_left(Item::Search) && l.on_right(Item::Search), "a moved view stays moved");
+        assert!(l.on_left(Item::Tags), "a view that is in no list is in the ribbon");
+        assert_eq!(l.views[0].active, Item::Search);
+        let mut c = Config::default();
+        l.store(&mut c);
+        assert_eq!(&c.sidebars.right[0].icons[..3], ["panel:outline", "files", "search"]);
+        assert_eq!(Layout::from_config(&c), l, "what is stored comes back");
+        // doubles on one side go, other ribbon items in a view go (back to the ribbon), a hidden one stays hidden
+        let mut c = cfg_with(&["files", "files"], &[(&["search", "mail", "search"], "mail"), (&["search", "tags"], "tags")]);
+        c.sidebars.hidden = vec!["tags".into(), "files".into()];
+        let l = Layout::from_config(&c);
+        assert_eq!((l.views.len(), l.views[0].icons.clone(), l.views[0].active), (2, vec![Item::Search], Item::Search));
+        assert_eq!(l.views[1].icons[0], Item::Tags);
+        assert!(l.ribbon.contains(&Item::Mail) && l.ribbon.iter().filter(|i| **i == Item::Files).count() == 1);
+        assert!(l.hidden.is_empty(), "both are shown, so neither is hidden: {:?}", l.hidden);
+    }
+
+    // spec: LAY-027
+    #[test]
+    fn lay_027_removing_a_movable_view_takes_it_from_one_side_and_hides_it_when_it_is_nowhere() {
+        let mut l = two_views();
+        l.apply(Item::Files, Dest::Bar { view: 0, at: 0 }, Side::Left, Mode::Copy).unwrap();
+        assert!(l.hide(Item::Files, Side::Right));
+        assert!(l.on_left(Item::Files) && l.hidden.is_empty(), "still in the ribbon: not hidden");
+        assert!(!l.hide(Item::Files, Side::Right), "it is not in a view any more");
+        assert!(l.hide(Item::Files, Side::Left));
+        assert_eq!(l.hidden, [Item::Files]);
+        assert!(l.restore(Item::Files));
+        assert_eq!(l.ribbon.last(), Some(&Item::Files));
+        // a view only on the right, removed there: hidden
+        let mut l = two_views();
+        l.apply(Item::Tags, Dest::Bar { view: 1, at: 0 }, Side::Left, Mode::Move).unwrap();
+        assert!(l.hide(Item::Tags, Side::Right));
+        assert_eq!(l.hidden, [Item::Tags]);
+        every_icon_once(&l);
     }
 
     // spec: LAY-015

@@ -129,12 +129,23 @@ impl NoteDoc {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub enum LeftPanel {
     #[default]
     Files,
     Search,
     Tags,
+}
+
+impl LeftPanel {
+    /// The ribbon icon of this view of the left sidebar.
+    pub fn item(self) -> crate::sidebar::Item {
+        match self {
+            LeftPanel::Files => crate::sidebar::Item::Files,
+            LeftPanel::Search => crate::sidebar::Item::Search,
+            LeftPanel::Tags => crate::sidebar::Item::Tags,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -479,6 +490,8 @@ pub struct ShaleApp {
     shot: screenshot::ScreenshotRun,
     /// the `cursor_blink` setting that the visuals of egui follow (true at the start; screenshots start steady)
     blink_applied: bool,
+    /// the title the window has been given (VAULT-031)
+    title_applied: String,
     /// the frames drawn so far (paces screenshots and scripted input)
     frames: u32,
     /// the last failure to save the global settings (shown once)
@@ -708,6 +721,7 @@ impl ShaleApp {
             shot: screenshot::ScreenshotRun::new(screenshot),
             frames: 0,
             blink_applied: true,
+            title_applied: "Shale".into(),
             cfg_error: None,
             sf: crate::settings_file::SettingsFile::new(),
             fonts: crate::fonts::FontState::new(),
@@ -741,7 +755,8 @@ impl ShaleApp {
             app.ctx = Some(ctx.clone());
             app.open_vault_in_background(p, opts.view.clone().map_or(vault_load::After::Nothing, vault_load::After::View));
         } else if let Some(p) = vault_path {
-            app.open_vault(&p);
+            // (the demo vault of a screenshot is nobody's vault)
+            app.open_vault_as(&p, opts.vault.is_some());
             if app.shot.path.is_some() && p.join("Welcome.md").is_file() {
                 app.open(Path::new("Welcome.md"), false);
             }
@@ -935,19 +950,26 @@ impl ShaleApp {
 
     /// Open a vault here and now, on the calling thread: for headless paths (screenshots, scripts
     /// and tests). The window opens vaults with [`Self::open_vault_in_background`] (NET-019).
+    #[cfg(test)]
     pub fn open_vault(&mut self, path: &Path) {
+        self.open_vault_as(path, true);
+    }
+
+    /// [`Self::open_vault`]; `known` false: the vault is not added to the known vaults and not
+    /// remembered as the one opened last (the user guide and the demo vault, VAULT-029).
+    fn open_vault_as(&mut self, path: &Path, known: bool) {
         if !self.prepare_vault_switch() {
             return;
         }
         let _flow = tracing::info_span!("flow.vault_open", peer = "app").entered();
         match tracing::info_span!("flow.vault_open.scan", peer = "disk").in_scope(|| Vault::open(path)) {
-            Ok(v) => self.finish_open_vault(path, v),
+            Ok(v) => self.finish_open_vault(path, v, known),
             Err(e) => self.toast(format!("Could not open vault: {e}")),
         }
     }
 
     /// The vault has been read: make it the open one (state, tabs restored from its state, sync).
-    pub(crate) fn finish_open_vault(&mut self, path: &Path, v: Vault) {
+    pub(crate) fn finish_open_vault(&mut self, path: &Path, v: Vault, known: bool) {
         let had_files = !v.files.is_empty();
         // the vault being left keeps its open tabs
         self.remember_open_files();
@@ -964,7 +986,9 @@ impl ShaleApp {
         self.notes.clear();
         self.drawings.clear();
         self.tabbar.active = 0;
-        self.cfg.remember_vault(path.to_path_buf());
+        if known {
+            self.cfg.remember_vault(path.to_path_buf());
+        }
         // (opening a note rewrites the saved list, so read it first)
         let saved_panes: Vec<crate::vault_state::SavedPane> = if self.vdata.state.panes.is_empty() {
             // (a file from before panes: its last tab was the open one)
@@ -1905,7 +1929,7 @@ impl ShaleApp {
     /// Put the keyboard into the left sidebar (Ctrl+H, Ctrl+Shift+B): browse the file list with
     /// the open note selected, or type in the search box.
     pub fn focus_sidebar(&mut self, ctx: &egui::Context) {
-        self.cfg.show_left = true;
+        self.show_left_view(self.side.left);
         if let Some(f) = ctx.memory(|m| m.focused()) {
             ctx.memory_mut(|m| m.surrender_focus(f));
         }
@@ -2742,8 +2766,7 @@ impl ShaleApp {
             self.close_tab(a);
         }
         if search {
-            self.side.left = LeftPanel::Search;
-            self.cfg.show_left = true;
+            self.show_left_view(LeftPanel::Search);
             self.search.focus = true;
         }
         if save {
@@ -3056,6 +3079,14 @@ impl eframe::App for ShaleApp {
 }
 
 impl ShaleApp {
+    /// The title of the window: the open vault's name, then Shale (VAULT-031).
+    fn window_title(&self) -> String {
+        match &self.vault {
+            Some(v) => format!("{} – Shale", self.cfg.vaults.label_of(&v.root)),
+            None => "Shale".into(),
+        }
+    }
+
     /// One frame of the window (the body of `eframe::App::ui`; tests call it directly).
     pub(crate) fn run_frame(&mut self, ui: &mut Ui) {
         self.drag.drop_zones.clear();
@@ -3066,6 +3097,11 @@ impl ShaleApp {
             self.blink_applied = self.cfg.cursor_blink;
             let blink = self.cfg.cursor_blink && !self.shot.active();
             ui.ctx().all_styles_mut(|s| s.visuals.text_cursor.blink = blink);
+        }
+        let title = self.window_title();
+        if self.title_applied != title {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.title_applied = title;
         }
         self.keyboard_guard(ui.ctx());
         self.shortcuts(ui);

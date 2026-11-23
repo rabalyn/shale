@@ -13,10 +13,31 @@ use std::path::{Path, PathBuf};
 
 impl ShaleApp {
     pub fn left_sidebar(&mut self, ui: &mut Ui) {
-        match self.side.left {
-            LeftPanel::Files => self.file_explorer(ui),
-            LeftPanel::Search => self.search_panel(ui),
-            LeftPanel::Tags => self.tags_panel(ui),
+        match self.left_view() {
+            Some(LeftPanel::Files) => self.file_explorer(ui),
+            Some(LeftPanel::Search) => self.search_panel(ui),
+            Some(LeftPanel::Tags) => self.tags_panel(ui),
+            None => {
+                ui.label(muted("No view is here. Drag Files, Search or Tags from the right sidebar to the ribbon, or right-click its icon and choose Move or Copy."));
+            }
+        }
+    }
+
+    /// The view the left sidebar shows: the chosen one, or the first of Files, Search and Tags
+    /// that is in the ribbon when the chosen one has moved to the right (LAY-025). None: none is.
+    pub(crate) fn left_view(&self) -> Option<LeftPanel> {
+        let in_ribbon = |p: LeftPanel| self.side.layout.on_left(p.item());
+        [self.side.left, LeftPanel::Files, LeftPanel::Search, LeftPanel::Tags].into_iter().find(|p| in_ribbon(*p))
+    }
+
+    /// The body of a view of the right sidebar that is a view of the left one (LAY-020). A copy
+    /// draws the same state as the one on the other side (LAY-024).
+    pub(crate) fn movable_view_body(&mut self, ui: &mut Ui, item: crate::sidebar::Item) {
+        match item {
+            crate::sidebar::Item::Files => self.file_explorer(ui),
+            crate::sidebar::Item::Search => self.search_panel(ui),
+            crate::sidebar::Item::Tags => self.tags_panel(ui),
+            _ => {}
         }
     }
 

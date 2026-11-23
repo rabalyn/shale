@@ -141,7 +141,7 @@ pub const ENTRIES: &[Entry] = &[
 #[cfg(test)]
 pub const NOT_IN_THE_DIALOG: &[(&str, &str)] = &[
     ("version", "the format of the file"),
-    ("recent", "the vaults opened lately: the start screen and the vault menu"),
+    ("vaults", "the known vaults: the start screen and the vault menu"),
     ("show_left", "the left panel is toggled in the window"),
     ("show_right", "the right sidebar is toggled in the window"),
     ("sidebars", "arranged in the window: the context menu of the ribbon and the sidebar"),

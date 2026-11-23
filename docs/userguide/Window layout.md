@@ -24,8 +24,14 @@ of **views**.
   Calendar, History, Thread) and shows the panel of the selected icon, so several panels can be open at once.
 - Drag a panel icon over the right sidebar ("Drop to open this icon in a new view") to make a
   new view below it. Drag icons between menubars, to the ribbon (a shortcut that shows the panel
-  below the views) and back. Icons that are no panels (Files, Mail, …) cannot go there. Taking
+  below the views) and back. Icons that are no panels and no views of the left sidebar (Mail, Feeds, …) cannot go there. Taking
   the last icon out of a view removes the view. Esc cancels a drag.
+- **Files, Search and Tags can be on either side.** Drag the icon of Files, Search or Tags from the ribbon to
+  the menubar or the content of the right sidebar (or back from a right menubar to the ribbon). When you let go,
+  Shale asks **Move or copy?**: **Move** takes the view from the side it came from, **Copy** shows it on both sides
+  (the same file tree or search, with the same state), **Cancel** (or Esc) changes nothing. Without dragging, right-click
+  the icon and choose **Move to the right sidebar** or **Copy to the right sidebar** (in a right menubar: to the left
+  sidebar). If the view the left sidebar showed has moved, it shows the next one that is still in the ribbon.
 - Drag the border between two views to change their heights.
 - Drag the border of the left or of the right sidebar to change its width; Shale keeps the widths
   (`left_sidebar_width`, `right_sidebar_width`), and **Reset layout** goes back to the default widths.
