@@ -106,12 +106,14 @@ pub fn posts() -> Vec<Post> {
         "Morning! Finished reading [@grace](https://fosstodon.org/@grace)'s notes on [#plaintext](https://demo.social/tags/plaintext). Worth your time: https://example.org/plain-text-forever",
     );
     p1.like_count = 17;
+    p1.mine.liked = true;
     p1.boost_count = 3;
     p1.reply_count = 2;
     let mut p2 = post("demo-2", linus, 25, "Merge window is open. Please send patches that compile.");
     p2.reposted_by = Some(ada);
     p2.like_count = 320;
     p2.boost_count = 88;
+    p2.mine.boosted = true;
     let mut p3 = post("demo-3", author("ken@demo.social", "Ken Thompson", 2.4), 41, "I would rather not say this out loud, but the weather forecast was right for once.");
     p3.content_warning = Some("Weather, mild sarcasm".into());
     let mut p4 = post("demo-4", author("margaret@space.example", "Margaret H.", 1.8), 62, "Sunrise over the lab this morning. Two shots, same hill.");

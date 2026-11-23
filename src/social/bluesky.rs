@@ -935,7 +935,7 @@ mod tests {
         assert_eq!(handle.join().unwrap().len(), 8, "the login, 3 uploads, 2 records and 2 reads");
     }
 
-    // spec: SOC-052
+    // spec: SOC-051, SOC-052
     #[test]
     fn links_mentions_and_tags_become_facets_with_utf8_byte_offsets() {
         let text = "Grüße 😀 @ada.test see (https://e.com/x?a=1). #Rust, @nobody.test and #123 @bad";

@@ -1025,6 +1025,28 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   and the text (a thread: every post in order, numbered); the box **Header list in the note
   body** also writes them as a list below the title (IMP-058). The pictures are saved in `z_media/`, with their descriptions. A post
   that was saved before, also as part of a thread, is marked "Imported before".
+- **Like, boost, reply, quote, post**: every post has **Reply**, **Boost** / **Repost**,
+  **Favourite** / **Like** and **Quote** buttons (also in the conversation view), and the toolbar
+  has **New post**. Boost and Favourite / Like toggle (a second press takes it back), show whether
+  you did it (a filled button), and change the counts only when the server said yes; a spinner
+  inside the button shows while it runs and nothing moves. The compose box has the text with a
+  live counter (Mastodon: the server's limit, 500 by default, addresses count 23; Bluesky: 300
+  characters), on Mastodon a content warning and who may see the post (a reply starts with the
+  author's @mention and is no more public than the post it answers), up to **4 pictures with a
+  description each** (type the path of a file, or of one in the vault; JPEG, PNG, GIF, WebP;
+  Bluesky takes 1 MB, so bigger pictures are scaled down), and **Send** (Ctrl+Enter), which
+  always asks **"Post this?"** with your handle and who may see it before anything is posted.
+  Boosts and favourites do not ask. A **quote** uses the network's own quote (Bluesky; Mastodon
+  4.5 and later); for an older Mastodon server the post's web address is put into the text and
+  the box says so. Bluesky links, mentions and hashtags become clickable. When it is sent the box
+  closes and the post waits behind the "new posts" button (the view does not move); a failed send
+  keeps your text. **Mastodon accounts need the permission to write**: new sign-ins ask for it;
+  an account you signed in to before with read-only access keeps reading, and the first like,
+  boost, reply or post says "Sign in again to allow writing" and opens that account's **Edit**
+  sign-in.
+
+![The compose box](userguide/z_media/screenshots/social-compose.png)
+
 - Try it without an account: `shale --screenshot out.png --view social` shows made-up posts.
 
 ## People (contact notes)

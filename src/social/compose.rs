@@ -145,7 +145,7 @@ impl Compose {
             path = vault.ok_or("Open a vault first, or type the full path of the picture.")?.join(&path);
         }
         let mut head = [0u8; 32];
-        let n = std::fs::File::open(&path).and_then(|mut f| std::io::Read::read(&mut f, &mut head)).map_err(|e| format!("{typed} cannot be read ({e})"))?;
+        let n = crate::fsutil::open_read(&path).and_then(|mut f| std::io::Read::read(&mut f, &mut head)).map_err(|e| format!("{typed} cannot be read ({e})"))?;
         if !matches!(image::guess_format(&head[..n]), Ok(image::ImageFormat::Png | image::ImageFormat::Jpeg | image::ImageFormat::Gif | image::ImageFormat::WebP)) {
             return Err(format!("{typed} is not a JPEG, PNG, GIF or WebP picture."));
         }

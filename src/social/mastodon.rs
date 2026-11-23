@@ -463,6 +463,7 @@ mod tests {
         assert_eq!(r.iter().map(|r| (r.post.text_markdown.as_str(), r.depth)).collect::<Vec<_>>(), [("nice", 0), ("reply to cy", 1)]);
     }
 
+    // spec: SOC-056
     #[test]
     fn sign_in_feeds_paging_thread_and_media_against_a_mock_server() {
         if std::process::Command::new("curl").arg("--version").output().is_err() {
@@ -601,7 +602,7 @@ mod tests {
         Draft { text: text.into(), cw: String::new(), visibility: Visibility::Public, reply_to: None, quote: None, pictures: vec![], info: InstanceInfo::defaults(Network::Mastodon) }
     }
 
-    // spec: SOC-051, SOC-052
+    // spec: SOC-051, SOC-052, SOC-054
     #[test]
     fn a_status_is_posted_with_its_visibility_warning_and_the_post_it_answers_against_a_mock_server() {
         if std::process::Command::new("curl").arg("--version").output().is_err() {

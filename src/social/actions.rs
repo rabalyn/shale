@@ -198,7 +198,7 @@ pub fn prepare(path: &Path, network: Network, limit: u64) -> Result<Prepared, St
     if meta.len() > MAX_MEDIA_BYTES {
         return Err(format!("{name} is too big ({} MB)", meta.len() / 1_000_000));
     }
-    let bytes = std::fs::read(path).map_err(|e| format!("{name} cannot be read ({e})"))?;
+    let bytes = crate::fsutil::read(path).map_err(|e| format!("{name} cannot be read ({e})"))?;
     let (mime, ext, format) = match image::guess_format(&bytes) {
         Ok(f @ image::ImageFormat::Png) => ("image/png", "png", f),
         Ok(f @ image::ImageFormat::Jpeg) => ("image/jpeg", "jpg", f),
@@ -257,18 +257,13 @@ pub struct TempFile(pub PathBuf);
 
 impl TempFile {
     pub fn new(bytes: &[u8], ext: &str) -> Result<TempFile, String> {
-        use std::io::Write;
         use std::sync::atomic::{AtomicUsize, Ordering};
         static N: AtomicUsize = AtomicUsize::new(0);
-        let path = std::env::temp_dir().join(format!("shale-upload-{}-{}.{ext}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
-        let mut opts = std::fs::OpenOptions::new();
-        opts.write(true).create_new(true);
-        #[cfg(unix)]
-        std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
-        let mut f = opts.open(&path).map_err(|e| format!("could not prepare the picture ({e})"))?;
-        let t = TempFile(path);
-        f.write_all(bytes).map_err(|e| format!("could not prepare the picture ({e})"))?;
-        Ok(t)
+        // a folder only this user can enter (the runtime folder, else a private one in the temp folder)
+        let dir = crate::fsutil::private_temp_root("shale-upload").map_err(|e| format!("could not prepare the picture ({e})"))?;
+        let path = dir.join(format!("{}-{}.{ext}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+        crate::fsutil::create_new(&path, bytes).map_err(|e| format!("could not prepare the picture ({e})"))?;
+        Ok(TempFile(path))
     }
 }
 
@@ -464,7 +459,7 @@ pub(crate) mod tests {
         p
     }
 
-    // spec: SOC-053
+    // spec: SOC-053, SEC-026
     #[test]
     fn a_picture_is_read_for_upload_and_what_is_no_picture_or_too_big_is_refused_with_words() {
         let ok = file("small.png", &png(40, 30, false));
@@ -495,14 +490,15 @@ pub(crate) mod tests {
         assert!(prepare(&big, Network::Bluesky, 500).unwrap_err().contains("cannot be made small enough"));
     }
 
-    // spec: SOC-053
+    // spec: SOC-053, SEC-026
     #[test]
     fn the_file_curl_reads_is_private_and_gone_after_the_upload() {
         let t = TempFile::new(b"data", "png").unwrap();
         let path = t.0.clone();
-        assert_eq!(std::fs::read(&path).unwrap(), b"data");
+        assert_eq!(crate::fsutil::read(&path).unwrap(), b"data");
+        // it lies in a folder that only this user can enter
         #[cfg(unix)]
-        assert_eq!(std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(&path).unwrap().permissions()) & 0o777, 0o600, "only its owner can read it");
+        assert_eq!(std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(path.parent().unwrap()).unwrap().permissions()) & 0o777, 0o700);
         assert!(path.to_string_lossy().ends_with(".png") && !path.to_string_lossy().contains(['"', ';', ',']));
         drop(t);
         assert!(!path.exists());

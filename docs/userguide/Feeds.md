@@ -49,6 +49,42 @@ social` shows made-up posts.
 
 ![[social-thread.png]]
 
+# Like, boost, reply, quote and write
+
+Every post has **Reply**, **Boost** (Bluesky: **Repost**), **Favourite** (Bluesky: **Like**) and
+**Quote** buttons, in the feed and in a conversation. **New post** in the toolbar starts a post of
+your own.
+
+- **Boost and Favourite / Like** act at once and do not ask. The button is filled when you did
+  it; press it again to take it back. A spinner shows inside the button while the server answers
+  (the button keeps its size and nothing moves), the count changes when it went well, and a
+  message tells you when it did not.
+- **The compose box** opens over the tab. It shows how long the post is against the limit of your
+  server ("123 / 500"; Mastodon's limit comes from the server, an address counts 23; Bluesky
+  allows 300 characters). **Send** or **Ctrl+Enter** is disabled while the post is empty or too
+  long. A **reply** starts with the author's @name on Mastodon and uses the same visibility as the
+  post it answers if that is not public. Mastodon also has **Content warning** and **who may
+  see it** (public, unlisted, followers only, mentioned people only). Bluesky has no content
+  warnings for text, so the box has none. Links and @names in a Bluesky post become links.
+- **Pictures**: up to four. Type or paste the path of a picture (a path without a folder at the
+  front starts at your vault) and press **Add picture**, then describe each one in its **alt text**
+  field. JPEG, PNG, GIF and WebP work. Bluesky takes pictures up to 1 MB, so Shale scales a bigger one down and
+  sends it as a JPEG (a too-big GIF is refused); a Mastodon picture over the server's limit is
+  refused with its size.
+- **Quote**: Bluesky and Mastodon 4.5 or later quote the post for real. On an older Mastodon
+  server the box adds the post's web address at the end of your text and tells you.
+- **Post this?** Sending always asks first, with your handle and who may see the post: **Post**
+  sends, **Cancel** (or Esc) goes back to your text. While it is sent the box is busy and nothing goes out twice. If it
+  fails the box stays open with your text and the message.
+- When it is out, the box closes and the post waits behind the "N new posts" button of your own
+  feed, so the list does not move; a reply also appears in the conversation you wrote it in.
+
+![[social-compose.png]]
+
+**Mastodon needs permission to write.** New sign-ins ask for it. If you signed in before with
+read-only access, reading keeps working, and the first like, boost, reply or post says "Sign in
+again to allow writing" and opens **Edit** for that account: sign in once more and write.
+
 # Search the posts you loaded
 
 Every post a feed brings in is kept in a local search index. The sidebar search (Ctrl+Shift+F)

@@ -228,10 +228,13 @@ fn confirm(ui: &mut Ui, c: &Compose, entry: &SocialAccountEntry, info: &super::a
     ui.add_space(6.0);
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         let post = ui.add(egui::Button::new(RichText::new("Post").strong()).fill(theme::palette().accent.gamma_multiply(0.55)));
-        post.request_focus();
         rects.push(("compose:confirm-post".into(), post.rect));
         out.post |= post.clicked();
         let cancel = ui.button("Cancel");
+        // Enter or Space on the question presses Post, unless the person moved to Cancel
+        if !cancel.has_focus() && !post.has_focus() {
+            post.request_focus();
+        }
         rects.push(("compose:confirm-cancel".into(), cancel.rect));
         out.back |= cancel.clicked();
     });

@@ -480,7 +480,7 @@ mod tests {
         std::process::Command::new("curl").arg("--version").output().is_ok()
     }
 
-    // spec: SOC-001, SOC-004, SOC-010
+    // spec: SOC-001, SOC-004, SOC-010, SOC-056
     #[test]
     fn a_mastodon_sign_in_opens_the_browser_takes_the_code_and_adds_the_account() {
         if !has_curl() {

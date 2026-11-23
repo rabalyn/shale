@@ -191,7 +191,7 @@ system keyring, never in this file):
 
 | Key | Default | Where |
 |---|---|---|
-| `social_accounts` | empty | Feeds → Accounts… (secrets in the keyring) |
+| `social_accounts` | empty | Feeds → Accounts… (secrets in the keyring; a Mastodon account also keeps `scopes`, the permissions its token was given: "read write" lets Shale like, boost and post) |
 | `social_last` | none; the account and feed shown last | set by Shale |
 | `social_replies` | off | the tick "Include replies from others" in the Import dialog |
 | `social_check_minutes` | 5 (0 = never) | Settings → Feeds, and Feeds → Accounts… |
