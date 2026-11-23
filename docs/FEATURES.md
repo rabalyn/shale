@@ -180,7 +180,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   into the vault** (the right end of its caption in the editor and the preview, a button or a line in the
   reading view), and the note's ⋯ menu has **Copy outside media into the vault** for all of its links: the
   files go to `z_media/` in the background and the links are rewritten (width and alias kept, one undo step,
-  MEDIA-021). **Settings → Vault → Check names for Windows and macOS…** also lists the vault's outside
+  MEDIA-021); a drawing's ⋯ menu has the same for the outside pictures of its `## Embedded Files`, whose
+  entries are pointed at the copies (the drawing keeps its format, MEDIA-031). **Settings → Vault → Check names for Windows and macOS…** also lists the vault's outside
   links by note (a file that is not found, a library not set up on this computer or whose folder is not
   there, file links that work on this computer only; MEDIA-022), and **Data usage** counts the outside
   files the vault links and their size (USE-026), both in background jobs. The window never waits for

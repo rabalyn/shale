@@ -805,6 +805,13 @@ impl ShaleApp {
                             self.actions.push(Action::Export(p2.clone()));
                             ui.close();
                         }
+                        // the pictures that the drawing embeds from outside the vault (MEDIA-031)
+                        let outside = self.vault.as_ref().zip(self.drawings.get(&p2)).map_or(0, |(v, d)| crate::drawing::pictures::outside_targets(&d.scene, v, &p2).len());
+                        let copy = ui.add_enabled(outside > 0 && self.outside_copy.is_none(), egui::Button::new("Copy outside media into the vault"));
+                        if copy.on_hover_text("Copies the pictures that this drawing embeds from outside the vault into the media folder and points the drawing at the copies").clicked() {
+                            self.actions.push(Action::CopyOutside { rel: p2.clone(), target: None });
+                            ui.close();
+                        }
                         if ui.button("History of this drawing").clicked() {
                             self.actions.push(Action::History(p2.clone()));
                             ui.close();

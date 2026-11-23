@@ -89,8 +89,9 @@ fn text_elements_section(text: &str, block_start: usize) -> Option<(usize, usize
         end -= 3;
     }
     for marker in ["\n## Element Links\n", "\n# Element Links\n", "\n## Embedded Files\n", "\n# Embedded Files\n"] {
-        if let Some(i) = text[head..end].find(marker) {
-            end = end.min(head + i + 1);
+        // from the line break before `head`: with no text, the next section starts right there
+        if let Some(i) = text[head - 1..end].find(marker) {
+            end = end.min(head + i);
         }
     }
     Some((head, end.max(head)))
@@ -577,5 +578,14 @@ mod tests {
         let fresh = new_file(&Scene::default());
         assert!(read(&fresh).unwrap().elements.is_empty());
         assert!(fresh.contains("excalidraw-plugin: parsed") && fresh.contains("```compressed-json\n"));
+    }
+
+    // spec: DRAW-007
+    #[test]
+    fn a_drawing_without_texts_keeps_its_embedded_files_when_it_is_written() {
+        let scene = Scene::parse(r#"{"type":"excalidraw","version":2,"elements":[]}"#).unwrap();
+        let file = new_file(&scene).replace("\n%%\n## Drawing", "\n## Embedded Files\nf1: [[@Pics/a.png]]\n\n%%\n## Drawing");
+        let again = write(&file, &read(&file).unwrap()).unwrap();
+        assert!(again.contains("## Text Elements\n## Embedded Files\nf1: [[@Pics/a.png]]\n\n%%"), "{again}");
     }
 }

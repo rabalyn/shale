@@ -119,12 +119,18 @@ fn base64_decode(s: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// The `## Embedded Files` section of a plugin drawing: (fileId, link target) per picture.
-pub fn embedded_files(text: &str) -> Vec<(String, String)> {
-    let Some(start) = ["\n## Embedded Files\n", "\n# Embedded Files\n"].iter().filter_map(|h| text.find(h).map(|i| i + h.len())).min() else { return vec![] };
+/// Where the body of `## Embedded Files` is in the text of a plugin drawing (byte offsets).
+fn embedded_section(text: &str) -> Option<std::ops::Range<usize>> {
+    let start = ["\n## Embedded Files\n", "\n# Embedded Files\n"].iter().filter_map(|h| text.find(h).map(|i| i + h.len())).min()?;
     let body = &text[start..];
     let end = [body.find("\n#"), body.find("\n%%")].into_iter().flatten().min().unwrap_or(body.len());
-    body[..end]
+    Some(start..start + end)
+}
+
+/// The `## Embedded Files` section of a plugin drawing: (fileId, link target) per picture.
+pub fn embedded_files(text: &str) -> Vec<(String, String)> {
+    let Some(section) = embedded_section(text) else { return vec![] };
+    text[section]
         .lines()
         .filter_map(|line| {
             let (id, rest) = line.split_once(": ")?;
@@ -132,6 +138,22 @@ pub fn embedded_files(text: &str) -> Vec<(String, String)> {
             (!link.target.is_empty()).then(|| (id.trim().to_string(), link.target))
         })
         .collect()
+}
+
+/// The text of a plugin drawing with the entries of `## Embedded Files` whose target is in `done`
+/// pointing at the copy in the vault (MEDIA-031): only the target changes, so the file keeps its
+/// format, its drawing data (compressed or not) and every other part. None when no entry matches.
+pub fn relink_embedded(text: &str, done: &[(String, PathBuf)]) -> Option<String> {
+    let text = text.replace("\r\n", "\n");
+    let section = embedded_section(&text)?;
+    let r = crate::media::copy_in::relink(&text[section.clone()], done)?;
+    Some(format!("{}{}{}", &text[..section.start], r.text, &text[section.end..]))
+}
+
+/// The targets of the pictures of a drawing that are outside the vault (MEDIA-031): each once, in
+/// the order of the entries; one that a file of the vault answers to is not one (MEDIA-014).
+pub fn outside_targets(scene: &Scene, vault: &Vault, rel: &Path) -> Vec<String> {
+    vault.outside_among(scene.embedded.iter().map(|(_, t)| t.as_str()), rel)
 }
 
 #[cfg(test)]
@@ -244,6 +266,34 @@ mod tests {
         let imgs = images(&scene, &v, Path::new("Sketch.excalidraw"));
         assert_eq!(imgs.len(), 2, "the library link and the file address; the text file is no picture");
         assert_eq!(imgs["f1"].get_pixel(0, 0).0, [255, 0, 0, 255]);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: MEDIA-031
+    #[test]
+    fn the_entries_of_embedded_files_are_pointed_at_their_copies_and_nothing_else_changes() {
+        let file = "---\n\n# Excalidraw Data\n\n## Text Elements\n%%\n## Embedded Files\nabc123: [[@Pics/a.png]]\n\ndef456: [[@Pics/a.png|50]]\n\nghi789: [[inside.png]]\n\nurl: https://example.org/a.png\n\n%%\n## Drawing\n```json\n{\"@Pics/a.png\": 1}\n```\n%%";
+        let done = [("@Pics/a.png".to_string(), PathBuf::from("z_media/2026/11/261123_a.png"))];
+        let want = file.replace("[[@Pics/a.png]]", "[[z_media/2026/11/261123_a.png]]").replace("[[@Pics/a.png|50]]", "[[z_media/2026/11/261123_a.png|50]]");
+        assert_eq!(relink_embedded(file, &done).as_deref(), Some(want.as_str()), "the drawing data and the other entries stay");
+        assert_eq!(relink_embedded(file, &[("@Pics/b.png".into(), PathBuf::from("z_media/b.png"))]), None);
+        assert_eq!(relink_embedded("no section", &done), None);
+        assert_eq!(relink_embedded(&file.replace('\n', "\r\n"), &done).as_deref(), Some(want.as_str()), "line ends of a Windows file are read like the plugin does");
+        // a plain `.excalidraw` has no entries, so the open drawing takes nothing
+        let mut doc = crate::drawing::DrawingDoc::new(PathBuf::from("S.excalidraw"), r#"{"type":"excalidraw","version":2,"elements":[]}"#);
+        assert!(!doc.relink_pictures(&done) && !doc.dirty);
+    }
+
+    // spec: MEDIA-031
+    #[test]
+    fn the_outside_pictures_of_a_drawing_are_listed_once_and_those_of_the_vault_are_not() {
+        let d = std::env::temp_dir().join(format!("shale-pictures-targets-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("vault")).unwrap();
+        std::fs::write(d.join("vault/dot.png"), tiny_png()).unwrap();
+        let v = Vault::open(&d.join("vault")).unwrap();
+        let scene = Scene { embedded: vec![("a".into(), "@Pics/a.png".into()), ("b".into(), "dot.png".into()), ("c".into(), "@Pics/a.png".into()), ("d".into(), "@Pics/d.png".into())], ..Scene::default() };
+        assert_eq!(outside_targets(&scene, &v, Path::new("S.excalidraw.md")), vec!["@Pics/a.png", "@Pics/d.png"]);
         let _ = std::fs::remove_dir_all(&d);
     }
 }
