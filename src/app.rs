@@ -2506,7 +2506,22 @@ impl ShaleApp {
         }
     }
 
+    /// Is a modal dialog open, so that Shale's own shortcuts (the keymap's actions of every scope
+    /// and the editor's keys) do not fire (KEY-038)? The one place every dispatcher asks; the dialog's
+    /// own keys (Enter, Tab, text, Esc, the key capture of the Keybindings tab) are no keymap
+    /// action and are not affected.
+    pub(crate) fn shortcuts_blocked(&self) -> bool {
+        self.modal.is_some()
+    }
+
     fn shortcuts(&mut self, ui: &Ui) {
+        if self.shortcuts_blocked() {
+            // a half typed sequence is forgotten; the keys stay for the dialog
+            for scope in Scope::ALL {
+                self.keymap.cancel(scope);
+            }
+            return;
+        }
         // mouse side buttons: back / forward through the notes opened in this tab
         let (mouse_back, mouse_fwd) = ui.input(|i| (i.pointer.button_pressed(egui::PointerButton::Extra1), i.pointer.button_pressed(egui::PointerButton::Extra2)));
         // Ctrl+H / Ctrl+L (like vim's h / l): keyboard into the sidebar / back into the editor;

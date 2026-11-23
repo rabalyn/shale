@@ -1335,6 +1335,8 @@ Text editing keys and vim keys are fixed.
 | Tab / Shift+Tab | Indent lists or change heading levels |
 | Shift+arrows | In a table cell edited in the grid: select a block of cells (formatting buttons and Delete / Backspace work on all of them; typing ends it) |
 
+While a dialog (Settings, an import, a confirmation, a wizard, …) is open, these shortcuts and the editor's keys do nothing; Esc closes the dialog and its own keys (Enter, Tab, typing, the key capture of the Keybindings tab) work. Shortcuts of the system are not affected.
+
 ### Mail view keys
 
 In the mail view (Ctrl+Shift+M) one of the three panes (folders, message list, message) has the
