@@ -578,7 +578,7 @@ fn removing_an_account_clears_its_password_and_keeps_its_mail() {
     assert!(w.app.toasts.iter().any(|(t, _)| t.contains("stays in")), "{:?}", w.app.toasts);
 }
 
-// spec: MAIL-050, MAIL-051, MAIL-052, MAIL-053, MAIL-054, MAIL-058
+// spec: MAIL-050, MAIL-051, MAIL-052, MAIL-053, MAIL-054, MAIL-058, MAIL-100
 #[test]
 fn sync_fills_the_folders_the_list_and_the_reading_pane_and_attachments_are_saved_to_the_vault() {
     let mut w = W::new("read", true);
@@ -1184,7 +1184,7 @@ fn an_account_without_a_password_asks_for_it_and_syncs_with_it() {
     assert_eq!(secrets::mail_secret(&w.account.id, MailSecret::Password), None, "it was not put into the keyring");
 }
 
-// spec: MAIL-060, MAIL-061
+// spec: MAIL-060, MAIL-061, MAIL-066
 #[test]
 fn search_waits_for_a_pause_runs_in_a_job_and_the_keys_work_without_the_mouse() {
     let mut w = W::new("search", true);
@@ -1482,7 +1482,7 @@ fn dates_in_the_list_are_short() {
     assert!(crate::mail::ui::list_date(Some(now - 800 * 86_400), now).starts_with("202"), "older shows the date");
 }
 
-// spec: MAIL-083, MAIL-084, MAIL-086
+// spec: MAIL-083, MAIL-084, MAIL-086, MAIL-120
 #[test]
 fn an_oauth2_account_signs_in_through_the_dialog_syncs_renews_its_token_and_asks_to_sign_in_again_when_revoked() {
     use crate::mail::oauth_fake_tests::{http_get, try_http_get, FakeOAuth};
@@ -1802,7 +1802,7 @@ fn the_reading_pane_buttons_the_marked_bar_and_the_row_menu_do_the_same_things()
     assert_eq!(w.server_flags("Sent", 1), vec!["\\Flagged"]);
 }
 
-// spec: MAIL-105
+// spec: MAIL-105, MAIL-110
 #[test]
 fn delete_in_trash_asks_first_and_names_the_count_and_only_the_confirmation_deletes() {
     let mut w = W::new("forever2", true);
@@ -1994,7 +1994,7 @@ fn world_with_unsent(tag: &str, n: u32) -> W {
     w
 }
 
-// spec: MAIL-214
+// spec: MAIL-214, MAIL-211
 #[test]
 fn sent_copies_that_only_exist_here_are_announced_and_uploaded_again_once_even_when_clicked_twice() {
     let mut w = world_with_unsent("unsent-up", 2);
@@ -2193,7 +2193,7 @@ impl W {
     }
 }
 
-// spec: MAIL-150, MAIL-151, MAIL-132, MAIL-141
+// spec: MAIL-150, MAIL-151, MAIL-132, MAIL-141, MAIL-128
 #[test]
 fn compose_with_c_complete_an_address_send_with_ctrl_enter_and_the_mail_appears_in_sent() {
     let (mut w, smtp) = compose_world("send1", 1);
@@ -2287,7 +2287,7 @@ fn reply_reply_all_and_forward_start_with_the_right_fields_and_quote_the_origina
     assert!(w.server_flags("INBOX", 2).contains(&"\\Flagged".to_string()), "plain f flags, Shift+F forwards");
 }
 
-// spec: MAIL-134
+// spec: MAIL-134, MAIL-151
 #[test]
 fn undo_send_pulls_the_mail_back_into_the_editor_and_nothing_goes_out() {
     let (mut w, smtp) = compose_world("undo1", 30);
@@ -2315,7 +2315,7 @@ fn undo_send_pulls_the_mail_back_into_the_editor_and_nothing_goes_out() {
     w.until("sent at once", |_| smtp.state().received.len() == 1);
 }
 
-// spec: MAIL-135
+// spec: MAIL-135, MAIL-127
 #[test]
 fn a_forgotten_attachment_an_empty_subject_and_an_empty_body_each_ask_before_sending() {
     let (mut w, smtp) = compose_world("confirm1", 0);
@@ -2367,7 +2367,7 @@ fn a_forgotten_attachment_an_empty_subject_and_an_empty_body_each_ask_before_sen
     assert_eq!((m.attachments.len(), m.attachments[0].name.as_str()), (1, "Welcome.md"));
 }
 
-// spec: MAIL-130, MAIL-131
+// spec: MAIL-130, MAIL-131, MAIL-150, MAIL-151
 #[test]
 fn closing_with_changes_asks_keep_or_discard_and_nothing_is_lost_either_way() {
     let (mut w, _smtp) = compose_world("close1", 10);
@@ -2446,7 +2446,7 @@ fn a_draft_is_saved_by_itself_after_a_pause_and_a_crash_leaves_it_in_drafts() {
     assert_eq!(view.local_drafts.len(), 1);
 }
 
-// spec: MAIL-133, MAIL-136
+// spec: MAIL-133, MAIL-136, MAIL-151
 #[test]
 fn a_mail_that_may_have_been_sent_waits_for_the_person_and_a_failed_one_can_be_retried() {
     let (mut w, smtp) = compose_world("unsure1", 0);
@@ -2677,7 +2677,7 @@ fn a_signed_mail_is_verified_without_any_consent_and_the_strip_says_valid_or_bad
     assert!(w.vault_files().iter().all(|f| !f.contains("decrypted")), "verifying stores nothing");
 }
 
-// spec: MAIL-180, MAIL-181, MAIL-182, MAIL-183, MAIL-184
+// spec: MAIL-180, MAIL-181, MAIL-182, MAIL-183, MAIL-184, MAIL-191
 #[test]
 fn encrypted_mail_needs_the_typed_consent_then_is_decrypted_stored_and_searchable_and_withdrawing_stops_it() {
     if !have_gnupg() {
@@ -2809,7 +2809,7 @@ fn encrypted_mail_needs_the_typed_consent_then_is_decrypted_stored_and_searchabl
     assert_eq!(w.app.mail.results.as_ref().unwrap().len(), 1, "and still searched");
 }
 
-// spec: MAIL-190, MAIL-191
+// spec: MAIL-190, MAIL-191, MAIL-192
 #[test]
 fn the_account_settings_pick_a_key_and_a_certificate_sign_by_default_and_the_standard_and_new_mail_starts_that_way() {
     if !have_gnupg() {
@@ -3054,7 +3054,7 @@ fn encryption_layouts(height: f32) -> [Vec<(String, Rect)>; 3] {
     [pending, arrived, missing]
 }
 
-// spec: MAIL-191
+// spec: MAIL-191, MAIL-235
 #[cfg(unix)]
 #[test]
 fn the_controls_of_the_encryption_section_and_the_dialog_stay_put_in_a_window_of_any_height_when_the_gnupg_result_arrives() {

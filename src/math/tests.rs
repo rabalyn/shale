@@ -192,7 +192,7 @@ fn a_formula_of_every_kind_typesets() {
     }
 }
 
-// spec: EDIT-049
+// spec: EDIT-049, TEX-029
 #[test]
 fn what_cannot_be_typeset_says_why() {
     assert!(why(r"\foo{x}").contains(r"\foo"), "an unknown command is named");

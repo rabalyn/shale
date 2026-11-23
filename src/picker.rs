@@ -15,6 +15,9 @@ use crate::vault::rel_to_string;
 use eframe::egui::{self, Color32, Context, FontId, RichText, Ui};
 use std::sync::Arc;
 
+/// The name of the command of the quick switcher that opens the vault list (VAULT-044).
+const SWITCH_VAULT: &str = "Switch vault";
+
 /// How many hits are listed at most.
 const MAX_HITS: usize = 14;
 
@@ -89,6 +92,11 @@ impl Source {
                         Some((score, Hit::new("", name, detail, Action::Open { rel: f.rel.clone(), new_tab: false })))
                     })
                     .collect();
+                // the command that shows the list of the vaults (VAULT-044): found by a part of its name
+                let typed = query.trim();
+                if let Some(score) = markdown::fuzzy_score(typed, SWITCH_VAULT).filter(|s| !typed.is_empty() && *s >= 500) {
+                    found.push((score, Hit::new("", SWITCH_VAULT.to_string(), "Command".to_string(), Action::OpenVaultMenu)));
+                }
                 found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.title.cmp(&b.1.title)));
                 found.into_iter().take(MAX_HITS).map(|(_, h)| h).collect()
             }

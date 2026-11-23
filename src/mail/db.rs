@@ -1241,7 +1241,7 @@ mod tests {
         assert!(plan.iter().any(|p| p.contains("messages_by_message_id")), "the duplicate check uses the Message-ID index: {plan:?}");
     }
 
-    // spec: NAV-023
+    // spec: NAV-023, MAIL-060
     #[test]
     fn wildcards_make_a_word_a_prefix_in_the_mail_query() {
         let q = |s: &str| fts_query_wild(s, &FIELDS);

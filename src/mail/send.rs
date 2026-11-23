@@ -683,7 +683,7 @@ pub mod tests {
         assert!(smtp.state().received.is_empty());
     }
 
-    // spec: MAIL-133
+    // spec: MAIL-133, MAIL-141
     #[test]
     fn a_crash_after_sent_before_the_copy_is_recorded_makes_the_copy_at_the_next_run_once() {
         let smtp = FakeSmtp::start(MailSecurity::ImplicitTls);

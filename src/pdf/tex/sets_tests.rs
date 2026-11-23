@@ -184,7 +184,7 @@ fn the_settings_are_filled_into_options_and_preamble_and_an_empty_value_drops_it
     assert_eq!(k.class_options(&s), ["ngerman"], "no accent colour: no accentcolor= option");
 }
 
-// spec: TEX-005
+// spec: TEX-005, TEX-008
 #[test]
 fn text_for_tex_has_its_special_characters_escaped() {
     assert_eq!(tex_escape("R&D #1 50% {a} $x$ a_b ^ ~ \\x"), "R\\&D \\#1 50\\% \\{a\\} \\$x\\$ a\\_b \\textasciicircum{} \\textasciitilde{} \\textbackslash{}x");

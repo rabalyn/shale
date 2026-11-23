@@ -119,14 +119,14 @@ fn listing(dir: &Path) -> Vec<String> {
     out
 }
 
-// spec: TEX-006
+// spec: TEX-006, TEX-025
 #[test]
 fn the_checksums_are_the_standard_ones() {
     assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
     assert_eq!(sha256_hex(b"abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 }
 
-// spec: TEX-006
+// spec: TEX-006, TEX-025
 #[test]
 fn a_zip_with_stored_and_deflated_files_and_folders_is_unpacked() {
     let d = temp("zip");
@@ -139,7 +139,7 @@ fn a_zip_with_stored_and_deflated_files_and_folders_is_unpacked() {
     std::fs::remove_dir_all(&d).unwrap();
 }
 
-// spec: TEX-006
+// spec: TEX-006, TEX-025
 #[test]
 fn a_tar_gz_of_github_with_its_global_header_and_long_names_is_unpacked() {
     let d = temp("targz");
@@ -168,7 +168,7 @@ fn a_tar_gz_of_github_with_its_global_header_and_long_names_is_unpacked() {
     std::fs::remove_dir_all(&d).unwrap();
 }
 
-// spec: TEX-006
+// spec: TEX-006, TEX-025
 #[test]
 fn entries_that_climb_out_or_start_at_the_root_are_refused_and_nothing_is_written() {
     for name in ["../escape.txt", "a/../../escape.txt", "/etc/escape.txt", "C:/escape.txt", "a\\..\\escape.txt", "x/..", "a/b:stream", "", "tab\there"] {
@@ -185,7 +185,7 @@ fn entries_that_climb_out_or_start_at_the_root_are_refused_and_nothing_is_writte
     assert_eq!(safe_path("a/./b//c").unwrap(), Path::new("a/b/c"), "dots and double slashes are only skipped");
 }
 
-// spec: TEX-006
+// spec: TEX-006, TEX-025
 #[test]
 fn links_and_special_files_are_refused() {
     let d = temp("links");
@@ -205,7 +205,7 @@ fn links_and_special_files_are_refused() {
     std::fs::remove_dir_all(&d).unwrap();
 }
 
-// spec: TEX-006
+// spec: TEX-006, TEX-025
 #[test]
 fn doubles_encryption_and_lies_about_sizes_are_refused() {
     let d = temp("lies");
@@ -234,7 +234,7 @@ fn doubles_encryption_and_lies_about_sizes_are_refused() {
     std::fs::remove_dir_all(&d).unwrap();
 }
 
-// spec: TEX-006
+// spec: TEX-006, TEX-025
 #[test]
 fn too_many_entries_are_refused() {
     let d = temp("many");
@@ -246,7 +246,32 @@ fn too_many_entries_are_refused() {
     std::fs::remove_dir_all(&d).unwrap();
 }
 
-// spec: TEX-006
+// spec: TEX-025
+#[test]
+fn an_archive_whose_files_add_up_to_more_than_the_total_limit_is_refused_and_nothing_is_written() {
+    // the limits of a template archive are the ones the rule names
+    assert_eq!((Limits::TEMPLATES.file, Limits::TEMPLATES.total), (64 << 20, 256 << 20));
+    // small limits, so that a real archive can go over them: each file is under the limit for one file, together they are over
+    let lim = Limits { total: 10, file: 8 };
+    let d = temp("total");
+    assert!(extract_with(&zip(&[z("a", b"123456")]), &d, lim).is_ok(), "one file of 6 bytes is within both limits");
+    std::fs::remove_dir_all(&d).unwrap();
+    std::fs::create_dir_all(&d).unwrap();
+    let refused = extract_with(&zip(&[z("a", b"123456"), z("b", b"abcdef")]), &d, lim).unwrap_err();
+    assert!(refused.contains("unpacks to more than"), "{refused}");
+    // a tar is cut off while it is gunzipped, at the total, before any entry is read
+    assert!(extract_with(&tar_gz(&[tar_entry("a", b'0', b"123456")]), &d, lim).is_err());
+    let roomy = temp("total-roomy");
+    assert!(extract_with(&tar_gz(&[tar_entry("a", b'0', b"123456")]), &roomy, Limits { total: 4096, file: 8 }).is_ok(), "the same tar goes through with room");
+    std::fs::remove_dir_all(&roomy).unwrap();
+    // one file over the limit for a file
+    let refused = extract_with(&zip(&[z("a", b"123456789")]), &d, lim).unwrap_err();
+    assert!(refused.contains("larger than"), "{refused}");
+    assert!(std::fs::read_dir(&d).unwrap().next().is_none(), "nothing was written");
+    std::fs::remove_dir_all(&d).unwrap();
+}
+
+// spec: TEX-006, TEX-025
 #[test]
 fn a_folder_is_copied_and_a_link_in_it_is_refused() {
     let src = temp("copy-src");
@@ -268,7 +293,7 @@ fn a_folder_is_copied_and_a_link_in_it_is_refused() {
     std::fs::remove_dir_all(&dest).unwrap();
 }
 
-// spec: TEX-006
+// spec: TEX-006, TEX-025
 #[test]
 fn the_root_folder_of_an_archive_is_stepped_into_only_when_it_is_the_only_thing() {
     let d = temp("root");

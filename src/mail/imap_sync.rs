@@ -1185,7 +1185,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // spec: MAIL-023
+    // spec: MAIL-023, MAIL-100
     #[test]
     fn a_whole_sync_sends_only_read_only_commands() {
         let (dir, server) = (root("readonly"), server());
@@ -1233,7 +1233,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // spec: MAIL-037
+    // spec: MAIL-037, MAIL-039
     #[test]
     fn an_error_in_one_folder_does_not_stop_the_others() {
         let (dir, server) = (root("onefails"), server());

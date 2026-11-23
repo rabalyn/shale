@@ -1015,7 +1015,7 @@ mod tests {
         assert_eq!(preset_server(OAuthProvider::Microsoft), Some(("outlook.office365.com", 993)));
     }
 
-    // spec: MAIL-085
+    // spec: MAIL-085, MAIL-082
     #[test]
     fn there_is_no_built_in_client_id_and_endpoints_must_be_https_except_local_http_for_custom() {
         assert!(matches!(OAuthConfig::for_account(&MailAccount::default(), None), Err(OAuthError::Config(t)) if t.contains("client ID")));
@@ -1104,7 +1104,7 @@ mod tests {
         assert!(matches!(r.wait_for_code(&cancel, Duration::from_secs(10)), Err(OAuthError::Denied(t)) if t.contains("cancelled")));
     }
 
-    // spec: MAIL-084
+    // spec: MAIL-084, MAIL-082
     #[test]
     fn sasl_responses_follow_the_specifications() {
         assert_eq!(*xoauth2_response("someuser@example.com", "ya29.vF9dft4qmTc2Nvb3RlckBhbHRhdmlzdGEuY29tCg"), b"user=someuser@example.com\x01auth=Bearer ya29.vF9dft4qmTc2Nvb3RlckBhbHRhdmlzdGEuY29tCg\x01\x01".to_vec());
