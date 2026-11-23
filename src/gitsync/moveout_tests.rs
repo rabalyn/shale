@@ -103,7 +103,7 @@ fn sync_063_a_failure_while_copying_leaves_the_vault_s_git_and_no_copy_behind() 
     fs::remove_file(v.join(".git/linked")).unwrap();
     // a socket inside .git cannot be opened for reading, by any user (an unreadable file would
     // not do: the root user reads everything), so the copy stops half way
-    let socket = std::os::unix::net::UnixListener::bind(v.join(".git/s")).unwrap();
+    let socket = crate::fsutil::bind_unix_socket(&v.join(".git/s"));
     let err = move_out(&env.git, &v, &root, &TreeLock::default(), WAIT).unwrap_err();
     assert!(err.contains("could not copy") && err.contains(".git/s"), "{err}");
     assert!(v.join(".git").is_dir(), "the vault keeps its repository");

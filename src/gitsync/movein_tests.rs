@@ -122,7 +122,7 @@ fn sync_073_a_failure_while_copying_leaves_no_git_in_the_vault_and_the_history_i
     let id = history::vault_id(&v).unwrap();
     let before = versions(&env, &v, &root);
     // a socket cannot be opened for reading, by any user (an unreadable file would not do as root)
-    let socket = std::os::unix::net::UnixListener::bind(root.join(&id).join("s")).unwrap();
+    let socket = crate::fsutil::bind_unix_socket(&root.join(&id).join("s"));
     let err = connect_moving(&env.git, &v, remote.to_str().unwrap(), &root, &TreeLock::default()).unwrap_err();
     assert!(err.contains("could not copy") && err.contains("/s"), "{err}");
     assert!(!v.join(".git").exists() && !v.join(".git.moving").exists(), "the vault has no .git");

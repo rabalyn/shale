@@ -516,7 +516,7 @@ fn media_019_the_dialog_starts_with_the_setting_and_a_linked_file_stays_where_it
     w.frames(3);
     let abs = w.out.canonicalize().unwrap();
     let text = w.app.notes.get(Path::new("Welcome.md")).expect("the open note").text.clone();
-    assert!(text.contains(&format!("- ![](<file://{}/cat.png>)\n", abs.display())) && text.contains(&format!("- [plan.pdf](<file://{}/plan.pdf>)\n", abs.display())), "{text}");
+    assert!(text.contains(&format!("- ![](<{}>)\n", crate::media::intake::file_uri(&abs.join("cat.png")))) && text.contains(&format!("- [plan.pdf](<{}>)\n", crate::media::intake::file_uri(&abs.join("plan.pdf")))), "{text}");
     assert_eq!(std::fs::read_dir(root.join("z_media")).map(|d| d.count()).unwrap_or(0), z_media_before, "nothing was copied");
     assert!(w.app.toasts.iter().any(|(t, _)| t == "Linked 2 files where they are"), "{:?}", w.app.toasts);
     let Some(Modal::ImportSummary(s)) = &w.app.modal else { panic!("two results: the summary") };
@@ -562,7 +562,7 @@ fn media_019_one_file_can_be_copied_and_another_linked_and_a_file_of_the_vault_i
     let stamp = format!("{:02}{m:02}{day:02}", y.rem_euclid(100));
     let abs = w.out.canonicalize().unwrap();
     let text = w.app.notes.get(Path::new("Welcome.md")).expect("the open note").text.clone();
-    for line in [format!("- ![[z_media/{y:04}/{m:02}/{stamp}_cat.png]]\n"), format!("- [plan.pdf](<file://{}/plan.pdf>)\n", abs.display()), "- ![[in.mp3]]\n".to_string()] {
+    for line in [format!("- ![[z_media/{y:04}/{m:02}/{stamp}_cat.png]]\n"), format!("- [plan.pdf](<{}>)\n", crate::media::intake::file_uri(&abs.join("plan.pdf"))), "- ![[in.mp3]]\n".to_string()] {
         assert!(text.contains(&line), "{line:?} in {text}");
     }
     assert!(w.app.toasts.iter().any(|(t, _)| t == "Saved 2 files to the media folder. Linked 1 file where it is"), "{:?}", w.app.toasts);

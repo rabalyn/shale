@@ -731,11 +731,62 @@ fn avoid_device_name(name: &str) -> String {
     }
 }
 
+/// A Unix socket listening at `path`, however long the path is (a test helper).
+///
+/// A socket path has a small limit (`sun_path`: 104 bytes on macOS, 108 on Linux), and macOS's
+/// temp folder (`/var/folders/xx/…/T/`) alone takes about 49 of them, so a test that binds a socket
+/// deep in a temp tree panics with "path must be shorter than SUN_LEN" there (#551). The limit is on
+/// the string given to `bind`, not on where the socket ends up, and the kernel resolves symbolic
+/// links in the folders of that string. So the socket is bound through a short link,
+/// `/tmp/shale-s<pid>-<n>`, to the folder of `path`: it is created in the real folder, under its
+/// name, and the link is removed straight away (the listener does not need the name it was bound
+/// by). `path`'s folder must exist; `/tmp` is tried first, then the system temp folder, when that
+/// is short enough.
+///
+/// # Panics
+/// When the folder cannot be resolved, or no short enough link can be made, or `bind` fails.
+#[cfg(test)]
+#[cfg(unix)]
+pub(crate) fn bind_unix_socket(path: &Path) -> std::os::unix::net::UnixListener {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    const SHORT: usize = 90; // under SUN_LEN of every Unix, with room for the NUL
+    let name = path.file_name().expect("a socket path has a file name");
+    let folder = path.parent().expect("a socket path has a folder").canonicalize().expect("the folder of the socket exists");
+    let link_name = format!("shale-s{}-{}", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed));
+    for base in [PathBuf::from("/tmp"), std::env::temp_dir()] {
+        let link = base.join(&link_name);
+        if link.join(name).as_os_str().len() >= SHORT || std::os::unix::fs::symlink(&folder, &link).is_err() {
+            continue;
+        }
+        let bound = std::os::unix::net::UnixListener::bind(link.join(name));
+        let _ = fs::remove_file(&link);
+        return bound.unwrap_or_else(|e| panic!("cannot bind the socket {} through {}: {e}", path.display(), link.display()));
+    }
+    panic!("no short folder to make a link in (/tmp and {} do not work), for the socket {}", std::env::temp_dir().display(), path.display());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashSet;
     use std::sync::Arc;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_socket_is_bound_at_a_long_path_through_a_short_link() {
+        use std::os::unix::fs::FileTypeExt;
+        let long = std::env::temp_dir().join(format!("shale-sock-test-{}-{}", std::process::id(), "x".repeat(120))).join("inner");
+        fs::create_dir_all(&long).unwrap();
+        let path = long.join("s");
+        assert!(path.as_os_str().len() > 120, "longer than any socket path may be");
+        assert!(std::os::unix::net::UnixListener::bind(&path).is_err(), "the plain bind refuses it");
+        let listener = bind_unix_socket(&path);
+        assert!(fs::symlink_metadata(&path).unwrap().file_type().is_socket(), "the socket is at the long path");
+        drop(listener);
+        let leftovers = fs::read_dir("/tmp").unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with(&format!("shale-s{}-", std::process::id()))).count();
+        assert_eq!(leftovers, 0, "the link is gone");
+        fs::remove_dir_all(long.parent().unwrap()).unwrap();
+    }
 
     // spec: DATA-012
     #[test]

@@ -448,6 +448,12 @@ fn the_settings_say_whether_old_versions_are_thinned() {
 
 const DAY_SECS: i64 = 86_400;
 
+/// The "now" of the thinning tests: noon (UTC) of 2100-01-01, a fixed time far after the history's
+/// start commit (which is made at the real time). Fixed, so that the snapshots of a test (`old_commits`
+/// spreads them over half an hour) lie well inside their UTC day of the thinning buckets (#479)
+/// whatever the hour or the time zone the test runs in (#552).
+const THIN_BASE: i64 = 4_102_444_800 + 12 * 3_600;
+
 /// Commits of `Note.md` dated `40 + d` days before `base`, `per_day` a day, oldest first; they go
 /// into the repository the window uses, through the engine.
 fn old_commits(t: &T, base: i64, days: i64, per_day: i64) {
@@ -479,7 +485,7 @@ fn stamp(t: &T) -> Option<String> {
 fn a_local_history_is_thinned_a_minute_after_start_and_then_once_a_day() {
     let mut t = setup("thin-daily", false);
     t.start();
-    let base = unix_now() as i64 + 200 * DAY_SECS;
+    let base = THIN_BASE;
     old_commits(&t, base, 3, 4);
     let n = commit_count(&t);
     assert_eq!(n, 13, "the start of the history and 12 old snapshots");
@@ -515,7 +521,7 @@ fn a_local_history_is_thinned_a_minute_after_start_and_then_once_a_day() {
 fn thinning_never_runs_beside_a_snapshot_or_a_read_and_a_snapshot_waits_for_it() {
     let mut t = setup("thin-serial", false);
     t.start();
-    let base = unix_now() as i64 + 200 * DAY_SECS;
+    let base = THIN_BASE;
     t.app.open(Path::new("Note.md"), false);
 
     // a snapshot is due when thinning is: the snapshot goes first, the thinning after it
@@ -551,7 +557,7 @@ fn thinning_never_runs_beside_a_snapshot_or_a_read_and_a_snapshot_waits_for_it()
 fn a_vault_with_its_own_git_is_never_thinned_by_the_window() {
     let mut t = setup("thin-own", true);
     t.start();
-    let base = unix_now() as i64 + 200 * DAY_SECS;
+    let base = THIN_BASE;
     old_commits(&t, base, 3, 4);
     let (n, tip) = (commit_count(&t), t.repo().run_for_test(&["rev-parse", "HEAD"]));
     assert_eq!(n, 12, "12 snapshots, no start of the history in a repository that was there");
