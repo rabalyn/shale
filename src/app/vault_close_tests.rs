@@ -121,42 +121,111 @@ fn vault_037_dropping_the_state_of_a_vault_is_one_function() {
     let _ = std::fs::remove_dir_all(&b);
 }
 
+/// Two vaults, `a` open and `c` known, and a sync of `a` that runs for `ms`.
+fn with_running_sync(tag: &str, ms: u64) -> (ShaleApp, PathBuf, PathBuf, PathBuf) {
+    let b = base(tag);
+    let (a, c) = (b.join("a"), b.join("c"));
+    make_vault(&a, "a");
+    make_vault(&c, "c");
+    let mut app = app();
+    app.open_vault(&c);
+    app.open_vault(&a);
+    app.sync_test_job(std::time::Duration::from_millis(ms), true);
+    assert!(app.sync.running());
+    (app, a, c, b)
+}
+
+/// Frames (the ticks of the window) until `done`.
+fn frames_until(app: &mut ShaleApp, what: &str, done: impl Fn(&ShaleApp) -> bool) {
+    let ctx = eframe::egui::Context::default();
+    let t = std::time::Instant::now();
+    while !done(app) {
+        assert!(t.elapsed() < std::time::Duration::from_secs(20), "{what}");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        app.sync_tick(&ctx);
+        app.vault_leave_tick();
+        app.vault_load_tick(&ctx);
+    }
+}
+
 // spec: VAULT-037
 #[test]
-fn vault_037_a_switch_waits_for_a_running_sync_and_takes_in_its_result() {
-    let b = base("sync-wait");
-    make_vault(&b.join("a"), "a");
-    let mut app = app();
-    app.open_vault(&b.join("a"));
-    // no sync: nothing to wait for
-    assert!(app.wait_for_sync(std::time::Duration::from_millis(1)));
-    app.sync_test_job(std::time::Duration::from_millis(150), true);
-    assert!(app.sync.running());
-    assert!(app.prepare_vault_switch(), "the switch goes on when the sync has ended");
-    assert!(!app.sync.running(), "the sync ended before the vault was left");
-    assert!(matches!(&app.sync.last, Some((_, Ok(_)))), "its result was taken in: {:?}", app.sync.last);
+fn vault_037_a_switch_during_a_sync_waits_without_blocking_and_completes_when_the_sync_ends() {
+    let (mut app, a, c, b) = with_running_sync("sync-switch", 400);
+    let t = std::time::Instant::now();
+    app.open_vault_in_background(&c, super::vault_load::After::Nothing);
+    assert!(t.elapsed() < std::time::Duration::from_millis(300), "the call does not wait for the sync");
+    assert_eq!(app.vault.as_ref().map(|v| v.root.clone()), Some(a.clone()), "the vault stays open meanwhile");
+    assert!(app.pending_leave.is_some() && !app.vault_load.is_loading());
+    let task = app.busy.info(&super::vault_close::LEAVE_WAIT).expect("the wait is a task");
+    assert_eq!((task.label.as_str(), task.cancellable), ("Waiting for the sync to finish…", true));
+    // a second request while it waits changes nothing
+    app.open_vault_in_background(&a, super::vault_load::After::Nothing);
+    assert_eq!(app.busy.list().iter().filter(|t| t.label.starts_with("Waiting")).count(), 1);
+    frames_until(&mut app, "the switch did not complete", |a| a.pending_leave.is_none() && !a.vault_load.is_loading() && a.vault.as_ref().is_some_and(|v| v.root == c));
+    assert!(app.busy.info(&super::vault_close::LEAVE_WAIT).is_none(), "the task ended");
+    let _ = std::fs::remove_dir_all(&b);
+}
+
+// spec: VAULT-036
+#[test]
+fn vault_036_closing_during_a_sync_waits_without_blocking_and_closes_when_the_sync_ends() {
+    let (mut app, a, _c, b) = with_running_sync("sync-close", 300);
+    let t = std::time::Instant::now();
+    app.close_vault(&a, Remove::default());
+    assert!(t.elapsed() < std::time::Duration::from_millis(200), "the call does not wait for the sync");
+    assert!(app.vault.is_some() && app.pending_leave.is_some() && app.cfg.vaults.entries().len() == 2, "nothing happened yet");
+    frames_until(&mut app, "the close did not complete", |a| a.vault.is_none());
+    assert!(app.pending_leave.is_none());
+    assert_eq!(app.cfg.vaults.entries().len(), 1, "forgotten");
+    assert!(matches!(&app.modal, Some(super::Modal::Vaults(_))), "the list is shown");
     let _ = std::fs::remove_dir_all(&b);
 }
 
 // spec: VAULT-037
 #[test]
-fn vault_037_a_sync_that_does_not_end_keeps_the_vault_open() {
-    let b = base("sync-stuck");
-    make_vault(&b.join("a"), "a");
-    let mut app = app();
-    app.open_vault(&b.join("a"));
-    app.sync_test_job(std::time::Duration::from_millis(600), true);
-    assert!(!app.wait_for_sync(std::time::Duration::from_millis(40)), "gives up after the limit");
-    assert!(app.toasts.iter().any(|(m, _)| m.contains("sync is still running")));
-    assert!(app.vault.is_some(), "nothing was dropped");
-    assert!(app.sync.running());
-    // it ends in the end, and its result is taken in
-    assert!(app.wait_for_sync(std::time::Duration::from_secs(5)));
-    assert!(!app.sync.running() && matches!(&app.sync.last, Some((_, Ok(_)))));
-    // a sync that dies counts as an error of the sync, not as a reason to stay
+fn vault_037_cancel_drops_the_wait_and_keeps_the_vault_open() {
+    let (mut app, a, c, b) = with_running_sync("sync-cancel", 300);
+    app.open_vault_in_background(&c, super::vault_load::After::Nothing);
+    let id = app.busy.info(&super::vault_close::LEAVE_WAIT).unwrap().id;
+    assert!(app.busy.cancel(id));
+    app.vault_leave_tick();
+    assert!(app.pending_leave.is_none(), "Cancel dropped it");
+    assert!(app.busy.info(&super::vault_close::LEAVE_WAIT).is_none());
+    frames_until(&mut app, "the sync did not end", |a| !a.sync.running());
+    app.vault_leave_tick();
+    assert!(!app.vault_load.is_loading());
+    assert_eq!(app.vault.as_ref().map(|v| v.root.clone()), Some(a), "still the first vault");
+    let _ = std::fs::remove_dir_all(&b);
+}
+
+// spec: VAULT-037
+#[test]
+fn vault_037_a_sync_that_runs_longer_than_the_limit_ends_the_wait_with_a_message_and_keeps_the_vault() {
+    let (mut app, a, c, b) = with_running_sync("sync-limit", 600);
+    app.open_vault_in_background(&c, super::vault_load::After::Nothing);
+    app.vault_leave_step(std::time::Instant::now() + std::time::Duration::from_secs(29));
+    assert!(app.pending_leave.is_some(), "still within the limit");
+    app.vault_leave_step(std::time::Instant::now() + std::time::Duration::from_secs(31));
+    assert!(app.pending_leave.is_none());
+    assert!(app.toasts.iter().any(|(m, _)| m.contains("sync is still running")), "{:?}", app.toasts);
+    assert_eq!(app.vault.as_ref().map(|v| v.root.clone()), Some(a));
+    assert!(app.busy.info(&super::vault_close::LEAVE_WAIT).is_none());
+    // a sync that dies is an error of the sync, not a reason to stay
+    frames_until(&mut app, "the sync did not end", |a| !a.sync.running());
     app.sync_test_job(std::time::Duration::from_millis(1), false);
-    assert!(app.wait_for_sync(std::time::Duration::from_secs(5)));
+    frames_until(&mut app, "the sync did not end", |a| !a.sync.running());
     assert!(matches!(&app.sync.last, Some((_, Err(_)))), "{:?}", app.sync.last);
+    let _ = std::fs::remove_dir_all(&b);
+}
+
+// spec: VAULT-037
+#[test]
+fn vault_037_without_a_sync_the_switch_does_not_wait() {
+    let (mut app, _a, c, b) = with_running_sync("sync-none", 1);
+    frames_until(&mut app, "the sync did not end", |a| !a.sync.running());
+    app.open_vault_in_background(&c, super::vault_load::After::Nothing);
+    assert!(app.pending_leave.is_none() && app.vault_load.is_loading(), "the load starts at once");
     let _ = std::fs::remove_dir_all(&b);
 }
 

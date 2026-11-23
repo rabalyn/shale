@@ -39,7 +39,8 @@ Shale keeps settings in two places:
   can tick **Also remove .shale/** (the vault's settings and state) and **Also remove .trash/**
   (the notes you deleted; they are gone for good). Both boxes are off, so by default nothing is
   removed; notes, attachments and a `.git` folder are never touched. Closing the open vault saves
-  your edits and waits for a sync that is running, then shows the start screen with the list.
+  your edits and, when a sync is running, waits for it (the window stays usable; the indicator shows
+  "Waiting for the sync to finish…" with Cancel), then shows the start screen with the list.
   Switching to another vault does the same, and nothing of the first vault (tabs, search,
   history, sync state) is left in the window; mail, the calendar and the global settings stay.
 - Learned tag words are in `.shale/tag-words.json` ([[Tags and people]]).

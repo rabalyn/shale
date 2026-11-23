@@ -261,34 +261,6 @@ impl ShaleApp {
         g
     }
 
-    /// Wait up to `limit` for a running sync to end and take in its result (VAULT-036, VAULT-037),
-    /// so the vault is not left while the sync changes its files. False (with a toast): it still
-    /// runs after `limit`, and the vault stays open.
-    pub(crate) fn wait_for_sync(&mut self, limit: Duration) -> bool {
-        let started = Instant::now();
-        loop {
-            let Some((root, job)) = &self.sync.job else { return true };
-            let result = match job.try_recv() {
-                Ok(r) => Some(r.unwrap_or_else(|_| Err("the sync stopped with an internal error".into()))),
-                Err(TryRecvError::Disconnected) => Some(Err("the sync stopped unexpectedly".into())),
-                Err(TryRecvError::Empty) => None,
-            };
-            match result {
-                Some(r) => {
-                    let root = root.clone();
-                    self.sync.job = None;
-                    self.after_sync(&root, r);
-                    return true;
-                }
-                None if started.elapsed() >= limit => {
-                    self.toast("The sync is still running, so the vault is not left yet. Try again when it is done".to_string());
-                    return false;
-                }
-                None => std::thread::sleep(Duration::from_millis(20)),
-            }
-        }
-    }
-
     /// A sync that only waits `run` and then reports `ok` (a panic when not), for the tests of the
     /// waits for a sync.
     #[cfg(test)]

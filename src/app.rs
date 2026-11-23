@@ -491,6 +491,8 @@ pub struct ShaleApp {
     pub guide: crate::userguide::Places,
     /// paths that a second start of Shale hands over (DATA-015); none in tests and screenshots
     pub handover: Option<crate::instance::Handover>,
+    /// a close or switch of the vault that waits for the running sync (VAULT-036, VAULT-037)
+    pub(crate) pending_leave: Option<vault_close::PendingLeave>,
     pub modal: Option<Modal>,
     /// The key registry with the user's changes (KEY-001…009).
     pub keymap: crate::keys::Keymap,
@@ -757,6 +759,7 @@ impl ShaleApp {
             word: Default::default(),
             guide: if persist { crate::userguide::Places::system() } else { crate::userguide::Places::none() },
             handover: None,
+            pending_leave: None,
         };
         // the mail view's check of the index is a task of the window's registry (JOB-015)
         app.mail.busy = app.busy.clone();
@@ -956,10 +959,6 @@ impl ShaleApp {
     /// Save what is open before another vault takes its place; false (with a toast) when an edit
     /// could not be saved, because closing the buffers would lose it (DATA-009).
     pub(crate) fn prepare_vault_switch(&mut self) -> bool {
-        // a running sync ends first: it changes the files of this vault (SYNC-013, VAULT-037)
-        if !self.wait_for_sync(vault_close::SYNC_WAIT) {
-            return false;
-        }
         self.flush_all();
         self.history_flush_now();
         if let Some(bad) = self.notes.iter().find(|(_, d)| d.dirty).map(|(k, _)| k).or_else(|| self.drawings.iter().find(|(_, d)| d.dirty).map(|(k, _)| k)) {
@@ -3158,6 +3157,7 @@ impl ShaleApp {
         self.update_tick(&ctx);
         self.take_handover(&ctx);
         self.sync_tick(&ctx);
+        self.vault_leave_tick();
         self.history_tick(&ctx);
         self.mail_tick(&ctx);
         if self.calendar.poll() {
