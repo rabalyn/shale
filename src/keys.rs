@@ -232,8 +232,8 @@ actions! {
     Settings => "global.settings", "Settings", Global, ["Ctrl+Comma"];
     DataUsage => "global.data_usage", "Data usage (what Shale keeps on disk, its caches)", Global, ["Ctrl+Shift+D"];
     UserGuide => "global.user_guide", "Open the user guide", Global, ["F1"];
-    PrevTab => "global.prev_tab", "Previous tab", Global, ["Ctrl+PageUp"];
-    NextTab => "global.next_tab", "Next tab", Global, ["Ctrl+PageDown"];
+    PrevTab => "global.prev_tab", "Previous tab", Global, ["Ctrl+PageUp", "Ctrl+Shift+Tab"];
+    NextTab => "global.next_tab", "Next tab", Global, ["Ctrl+PageDown", "Ctrl+Tab"];
     SplitRight => "global.split_right", "Split right: open this tab in a new pane to the right", Global, ["Ctrl+Backslash"];
     NextPane => "global.next_pane", "Focus the next pane", Global, ["F6"];
     PrevPane => "global.prev_pane", "Focus the previous pane", Global, ["Shift+F6"];
@@ -1464,8 +1464,8 @@ mod tests {
             (Action::PrevTab, "Ctrl+PageUp", "Ctrl+Alt+Left"),
             (Action::NextTab, "Ctrl+PageDown", "Ctrl+Alt+Right"),
         ] {
-            assert_eq!(linux.bindings(action), vec![b(on_linux)], "{action:?} on Linux");
-            assert_eq!(mac.bindings(action), vec![b(on_mac)], "{action:?} on macOS");
+            assert_eq!(linux.bindings(action)[0], b(on_linux), "{action:?} on Linux (the first default; the tab actions also have Ctrl+Tab, KEY-039)");
+            assert_eq!(mac.bindings(action), vec![b(on_mac)], "{action:?} on macOS (Cmd+Tab is the system's)");
             assert!(linux.is_default(action) && mac.is_default(action));
         }
         // the pane keys are the same on both, and close pane only differs in what Ctrl means

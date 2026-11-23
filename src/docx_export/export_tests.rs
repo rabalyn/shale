@@ -84,7 +84,7 @@ fn try_round_trip(tag: &str, file: &Path) -> Option<Result<Trip, String>> {
     let pandoc = real_pandoc()?;
     let mut vault = temp_vault(tag);
     let item = docx::docx_item(file.to_path_buf(), Some(pandoc.clone()));
-    let options = Options { folder: PathBuf::from("In"), tags: vec![], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false };
+    let options = Options { folder: PathBuf::from("In"), tags: vec![], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false, cut: Default::default() };
     let note = match docx::import_item(&mut vault, &item, &options) {
         Ok(note) => note,
         Err(e) => return Some(Err(format!("import: {e}"))),
@@ -92,7 +92,7 @@ fn try_round_trip(tag: &str, file: &Path) -> Option<Result<Trip, String>> {
     vault.rescan();
     let text = std::fs::read_to_string(vault.abs(&note)).unwrap();
     let original = original_of(&vault, &note, &text);
-    let job = Job::new(pandoc, &vault, &note, &text, original.as_deref(), false);
+    let job = Job::new(pandoc, &vault, &note, &text, original.as_deref(), false, true);
     let bytes = match export(&job, &AtomicBool::new(false)) {
         Ok(bytes) => bytes,
         Err(e) => return Some(Err(format!("export: {e}"))),
@@ -993,7 +993,7 @@ fn the_original_of_a_word_file_is_the_template_with_its_styles_and_the_styles_pa
     let text = std::fs::read_to_string(dir.join("Note.md")).unwrap();
     let original = original_of(&vault, Path::new("Note.md"), &text);
     assert_eq!(original, Some(PathBuf::from("Report.docx")));
-    let job = Job::new(pandoc.clone(), &vault, Path::new("Note.md"), &text, original.as_deref(), false);
+    let job = Job::new(pandoc.clone(), &vault, Path::new("Note.md"), &text, original.as_deref(), false, true);
     let bytes = export_valid(&job);
     let styles = part(&bytes, "word/styles.xml");
     let ids = style_ids(&styles);
@@ -1159,6 +1159,83 @@ fn the_table_of_contents_is_there_when_asked_down_to_the_third_level() {
     assert!(!without.document.contains("TOC \\o"));
 }
 
+/// The Word table of contents as pandoc writes it, then `after`.
+fn with_toc(after: &str) -> String {
+    let sdt = "<w:sdt><w:sdtPr><w:docPartObj><w:docPartGallery w:val=\"Table of Contents\"/><w:docPartUnique/></w:docPartObj></w:sdtPr><w:sdtContent><w:p><w:r><w:t>Contents</w:t></w:r></w:p></w:sdtContent></w:sdt>";
+    body(&format!("{sdt}{after}<w:sectPr/>"))
+}
+
+fn break_made(document: &str, on: Option<bool>) -> String {
+    let look = PrintLook { toc_page_break: on, ..PrintLook::default() };
+    part(&finish::finish(&docx_of(document, &styles_xml(""), &[], &[]), &look).unwrap(), "word/document.xml")
+}
+
+// spec: DOCX-013
+#[test]
+fn the_paragraph_after_the_table_of_contents_starts_a_page_and_only_when_asked() {
+    // past the bookmarks of the headings, the paragraph after the contents: with and without properties, in the order of the schema
+    let plain = with_toc("<w:bookmarkStart w:id=\"1\" w:name=\"one\"/><w:p><w:r><w:t>One</w:t></w:r></w:p><w:bookmarkEnd w:id=\"1\"/>");
+    let out = break_made(&plain, Some(true));
+    assert!(out.contains("</w:sdt><w:bookmarkStart w:id=\"1\" w:name=\"one\"/><w:p><w:pPr><w:pageBreakBefore/></w:pPr><w:r>"), "{out}");
+    let styled = with_toc("<w:p><w:pPr><w:pStyle w:val=\"Heading1\"/><w:keepNext/><w:outlineLvl w:val=\"0\"/></w:pPr><w:r><w:t>One</w:t></w:r></w:p>");
+    let out = break_made(&styled, Some(true));
+    assert!(out.contains("<w:pPr><w:pStyle w:val=\"Heading1\"/><w:keepNext/><w:pageBreakBefore/><w:outlineLvl w:val=\"0\"/></w:pPr>"), "{out}");
+    // a paragraph that has it already stays as it is: one break, no empty page
+    let again = with_toc("<w:p><w:pPr><w:pageBreakBefore/></w:pPr><w:r><w:t>One</w:t></w:r></w:p>");
+    assert_eq!(break_made(&again, Some(true)).matches("pageBreakBefore").count(), 1);
+    // a table next: a paragraph with a page break between; the end of the body: nothing to break to
+    let table = with_toc("<w:tbl><w:tr><w:tc><w:p/></w:tc></w:tr></w:tbl>");
+    assert!(break_made(&table, Some(true)).contains("</w:sdt><w:p><w:r><w:br w:type=\"page\"/></w:r></w:p><w:tbl>"));
+    assert_eq!(break_made(&with_toc(""), Some(true)), with_toc(""));
+    // off, not said, or no contents: the file is as pandoc made it
+    for on in [Some(false), None] {
+        assert_eq!(break_made(&plain, on), plain);
+    }
+    let none = body("<w:p><w:r><w:t>One</w:t></w:r></w:p>");
+    assert_eq!(break_made(&none, Some(true)), none, "no table of contents, no break");
+    // a paragraph that is centred gets both, and the file stays well formed
+    let centred = with_toc(&format!("<w:p>{}<w:r><w:t>One</w:t></w:r></w:p>", mark("center")));
+    let out = break_made(&centred, Some(true));
+    assert!(out.contains("<w:pPr><w:pageBreakBefore/><w:jc w:val=\"center\"/></w:pPr>") && roxmltree::Document::parse(&out).is_ok(), "{out}");
+}
+
+// spec: DOCX-013
+#[test]
+fn the_note_and_the_dialog_say_whether_the_table_of_contents_is_followed_by_a_page_break() {
+    let said = |v: &str| PrintLook::of(&format!("---\nprint-toc-page-break: {v}\n---\nx")).toc_page_break;
+    assert_eq!((said("false"), said("yes"), said("maybe")), (Some(false), Some(true), None));
+    assert_eq!(PrintLook::of("x").toc_page_break, None);
+    let dir = temp_dir("tocbreak");
+    std::fs::write(dir.join("N.md"), "x").unwrap();
+    let vault = Vault::open(&dir).unwrap();
+    let job = |toc: bool, toc_break: bool, text: &str| Job::new(PathBuf::from("pandoc"), &vault, Path::new("N.md"), text, None, toc, toc_break).look.toc_page_break;
+    // the dialog's box wins over the note, and there is no break without the contents
+    assert_eq!((job(true, true, "x"), job(true, false, "x"), job(false, true, "x")), (Some(true), Some(false), Some(false)));
+    assert_eq!(job(true, true, "---\nprint-toc-page-break: false\n---\nx"), Some(true));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+// spec: DOCX-013, DOCX-002
+#[test]
+fn pandocs_table_of_contents_is_followed_by_a_page_break_by_default_and_not_when_off() {
+    let md = "# One\n\nfiller text\n\n## Two\n";
+    let Some(pandoc) = real_pandoc() else { return };
+    let run = |toc: bool, toc_break: bool| {
+        let dir = temp_dir("tocbreak-run");
+        let look = PrintLook { toc_page_break: Some(toc && toc_break), ..PrintLook::default() };
+        let job = Job { pandoc: pandoc.clone(), root: dir.clone(), text: md.to_string(), look, original: None, toc, timeout: TIMEOUT };
+        let bytes = export_valid(&job);
+        let _ = std::fs::remove_dir_all(&dir);
+        part(&bytes, "word/document.xml")
+    };
+    let on = run(true, true);
+    let (toc_end, first) = (on.find("</w:sdt>").unwrap(), on.find(">One<").unwrap());
+    assert!(on[toc_end..first].contains("<w:pageBreakBefore/>"), "the heading after the contents starts a page: {on}");
+    assert_eq!(on.matches("pageBreakBefore").count(), 1);
+    assert!(!run(true, false).contains("pageBreakBefore"), "box off");
+    assert!(!run(false, true).contains("pageBreakBefore"), "no contents");
+}
+
 // spec: DOCX-005
 #[test]
 fn a_picture_is_as_wide_as_in_the_editor_and_other_embeds_are_their_names_in_italics() {
@@ -1256,7 +1333,7 @@ fn a_note_without_an_original_gets_a_reference_from_its_print_properties_and_the
     let text = format!("---\n{props}\n---\n\n# Head\n\nBody text of the note.\n\n## Second\n\nMore text.\n");
     std::fs::write(dir.join("Plain.md"), &text).unwrap();
     let vault = Vault::open(&dir).unwrap();
-    let job = Job::new(pandoc.clone(), &vault, Path::new("Plain.md"), &text, None, false);
+    let job = Job::new(pandoc.clone(), &vault, Path::new("Plain.md"), &text, None, false, true);
     let bytes = export_valid(&job);
     let (document, styles) = (part(&bytes, "word/document.xml"), part(&bytes, "word/styles.xml"));
     assert!(document.contains("<w:pgSz w:w=\"12240\" w:h=\"15840\"/>") && document.contains("w:top=\"1134\" w:right=\"1417\" w:bottom=\"1134\" w:left=\"1701\""), "the page of the note");
@@ -1271,7 +1348,7 @@ fn a_note_without_an_original_gets_a_reference_from_its_print_properties_and_the
     let want: Vec<(String, String)> = props.lines().map(|l| l.split_once(": ").unwrap()).map(|(k, v)| (k.to_string(), v.trim_matches('"').to_string())).collect();
     assert_eq!(got, want);
     // a note that says nothing: pandoc's default look and nothing of the page
-    let bare = Job::new(pandoc.clone(), &vault, Path::new("Plain.md"), "# Head\n\nText\n", None, false);
+    let bare = Job::new(pandoc.clone(), &vault, Path::new("Plain.md"), "# Head\n\nText\n", None, false, true);
     let bytes = export_valid(&bare);
     assert!(!part(&bytes, "word/document.xml").contains("<w:pgSz"), "pandoc's section as it is");
     let styles = part(&bytes, "word/styles.xml");
@@ -1499,7 +1576,7 @@ mod dialog_tests {
     }
 
     fn dialog(pandoc: Option<&str>, original: Option<&str>) -> DocxDialog {
-        DocxDialog::new(PathBuf::from("Notes/Report.md"), "Report".into(), PathBuf::from("/v/exports/Report.docx"), pandoc.map(PathBuf::from), original.map(PathBuf::from), true)
+        DocxDialog::new(PathBuf::from("Notes/Report.md"), "Report".into(), PathBuf::from("/v/exports/Report.docx"), pandoc.map(PathBuf::from), original.map(PathBuf::from), true, true)
     }
 
     // spec: DOCX-001
@@ -1520,6 +1597,22 @@ mod dialog_tests {
         assert_eq!(h.last, DialogResult::Export);
         h.click(&mut d, "cancel");
         assert_eq!(h.last, DialogResult::Cancel);
+    }
+
+    // spec: DOCX-013
+    #[test]
+    fn the_dialog_has_a_box_for_the_page_break_after_the_table_of_contents_which_needs_the_contents() {
+        let mut d = dialog(Some("/usr/bin/pandoc"), None);
+        let mut h = H::new(&mut d);
+        assert!(has(&d, "toc-break") && d.toc_break, "on by default");
+        h.click(&mut d, "toc-break");
+        assert!(!d.toc_break);
+        h.click(&mut d, "toc-break");
+        assert!(d.toc_break);
+        // with the contents off the box is greyed and a click does nothing
+        h.click(&mut d, "toc");
+        h.click(&mut d, "toc-break");
+        assert!(!d.toc && d.toc_break);
     }
 
     // spec: DOCX-001

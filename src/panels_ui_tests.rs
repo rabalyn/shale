@@ -235,7 +235,7 @@ fn panel_quick_switcher_finds_opens_creates_and_closes() {
     assert!(p.app.modal.is_none() && p.app.actions.is_empty());
 }
 
-// spec: VAULT-023
+// spec: VAULT-023, VAULT-042
 #[test]
 fn panel_rename_dialog_renames_shows_errors_and_cancels() {
     let mut p = P::new("rename", &[]);
@@ -715,6 +715,18 @@ fn cfg_074_the_import_tab_has_the_skip_signatures_setting() {
     assert!(p.app.cfg.import_skip_signatures);
 }
 
+// spec: CFG-076
+#[test]
+fn cfg_076_the_import_tab_has_the_leave_out_quoted_setting() {
+    let mut p = P::new("settings-leave-out-quoted", &[]);
+    assert!(!p.app.cfg.import_leave_out_quoted, "off by default");
+    p.app.open_settings(SettingsTab::Import);
+    p.click(Show::Modals, "Leave out quoted mails");
+    assert!(p.app.cfg.import_leave_out_quoted);
+    p.click(Show::Modals, "Leave out quoted mails");
+    assert!(!p.app.cfg.import_leave_out_quoted);
+}
+
 // spec: CFG-021
 #[test]
 fn set_002_settings_open_on_a_short_page() {
@@ -911,6 +923,17 @@ fn dev_020_the_help_button_in_settings_opens_the_user_guide_as_the_vault() {
     p.click(Show::Modals, "Open user guide (F1)");
     let copy = root.join(format!("userguide-{}", env!("CARGO_PKG_VERSION")));
     assert!(p.app.modal.is_none(), "Settings closes");
+    // the guide is read in the background (NET-019)
+    // (this harness draws only the dialogs: it takes in the vault itself)
+    crate::ui_test_support::settle_within(std::time::Duration::from_secs(60), || {
+        p.frame(Show::Modals, vec![]);
+        p.app.vault_load_tick(&p.ctx);
+        if p.app.vault_load.is_loading() {
+            vec!["the loading of a vault"]
+        } else {
+            vec![]
+        }
+    });
     assert_eq!(p.app.vault.as_ref().map(|v| v.root.clone()), Some(copy));
 }
 

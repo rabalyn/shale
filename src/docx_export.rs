@@ -171,10 +171,12 @@ pub struct Job {
 }
 
 impl Job {
-    /// The export of `text`, the text of the note `rel` as the window has it. `original`: the template, as [`original_of`] gives it.
-    pub fn new(pandoc: PathBuf, vault: &Vault, rel: &Path, text: &str, original: Option<&Path>, toc: bool) -> Job {
+    /// The export of `text`, the text of the note `rel` as the window has it. `original`: the template, as [`original_of`] gives it; `toc_break`: a page break after the table of contents.
+    pub fn new(pandoc: PathBuf, vault: &Vault, rel: &Path, text: &str, original: Option<&Path>, toc: bool, toc_break: bool) -> Job {
         let prepared = prepare_text(text, &|target| vault.resolve(target, Some(rel)).map(|p| rel_to_string(&p)));
-        Job { pandoc, root: vault.root.clone(), text: prepared, look: PrintLook::of(text), original: original.map(|o| vault.abs(o)), toc, timeout: TIMEOUT }
+        // the dialog's box says whether the table of contents is followed by a page break (DOCX-013)
+        let look = PrintLook { toc_page_break: Some(toc && toc_break), ..PrintLook::of(text) };
+        Job { pandoc, root: vault.root.clone(), text: prepared, look, original: original.map(|o| vault.abs(o)), toc, timeout: TIMEOUT }
     }
 }
 

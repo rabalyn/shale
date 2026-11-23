@@ -11,6 +11,8 @@ fn f1(hl: &mut Headless, app: &mut ShaleApp) {
     hl.frame(app, vec![ev(true)]);
     hl.frame(app, vec![ev(false)]);
     hl.frames(app, 2);
+    // the guide is read in the background (NET-019)
+    hl.settle(app);
 }
 
 fn window(tag: &str) -> (ShaleApp, Headless, PathBuf) {

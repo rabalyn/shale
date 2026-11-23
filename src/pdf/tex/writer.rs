@@ -294,6 +294,10 @@ fn write_in_shale(req: &Request) -> Result<Document, String> {
             main.push_str("\\maketitle\n");
             if toc {
                 main.push_str("\\tableofcontents\n");
+                // what follows the contents starts a page, which a first page break or heading does not repeat (TEX-040)
+                if req.opts.toc_break {
+                    main.push_str(NEW_PAGE);
+                }
             }
             if family == Family::Poster && kind.columns > 1 {
                 main.push_str(&format!("\\begin{{multicols}}{{{}}}\n", kind.columns));

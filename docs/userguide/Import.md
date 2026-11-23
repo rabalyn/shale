@@ -27,6 +27,19 @@ Turn mails, events and files into notes. Back to [[Start here]].
   picture"); tick one to bring it along. The box **Skip signatures** in the dialog (on at first; its
   start value is **Settings → Import → Skip signatures**) lets them start ticked when it is off.
   A real picture or file attached to the mail stays ticked. Keep the original message keeps every part.
+- **Skip signatures** also cuts the signature **text**. A reply holds several signatures: the sender's own
+  and one for each earlier mail it quotes. Shale reads the mail as parts (the own text, then each quoted
+  mail: lines with `>`, "On … wrote:", "Am … schrieb …:", `-----Original Message-----`, Outlook's
+  From / Sent / To / Subject block) and looks for the signature in each part: a line `-- ` (also inside
+  a quote, `> -- `), the signature blocks that Thunderbird, Gmail, Outlook and Apple Mail mark in HTML mails,
+  or a closing greeting ("Viele Grüße", "Best regards") followed by a few short lines with a phone number,
+  address or web site, and a disclaimer at the end. The signatures go; the quoted text stays, with its
+  reply header line. Shale cuts only what is clearly a signature: a mail with answers between the quoted
+  lines, a `-- ` in a code block or a greeting with nothing to reach the sender below it stays as it is.
+  Untick the box to keep the text as the mail had it (the editor still folds the signatures, see [[Editor]]).
+- **Leave out quoted mails** (off at first; **Settings → Import → Leave out quoted mails** sets the start
+  value) drops the earlier mails of the thread from the note and keeps what the sender wrote, with the
+  answers between the quoted lines. A thread is often imported mail by mail.
 - Drop onto a folder in the file list to import into it, or onto a note to also add links to the
   new notes there.
 - A picture, PDF, sound or video from outside the vault has a choice in the dialog: **Copy into the
@@ -114,7 +127,8 @@ A note becomes a Word file again with **⋯ → Export to Word…** in the note'
 file list), by the same **pandoc** that imports Word files; the setting "Import Word files as notes" does not have to be on.
 The dialog asks where to save (`<vault>/exports/<name>.docx`, so the export shows up in the vault), whether to put a **Table of
 contents** in (on or off as the [[PDF]] dialog has it for the note; Word asks to update its fields when it opens the file, say
-yes to fill the contents in), whether to **Open the file afterwards**, and says where pandoc was found, or that it was not
+yes to fill the contents in) and a **Page break after the table of contents** (on, so the text starts on a new page; the
+note's `print-toc-page-break: false` starts it off), whether to **Open the file afterwards**, and says where pandoc was found, or that it was not
 (Export then waits). The export runs in the background: closing the dialog, or **Cancel**, stops it, and a file is written only
 when it is whole; if pandoc fails, nothing is written and the dialog shows pandoc's first error line (the same when it
 takes more than two minutes or needs more than 2 GB of memory, which is where it is stopped). The note is exported as

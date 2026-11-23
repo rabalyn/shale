@@ -436,6 +436,8 @@ pub struct Config {
     pub import_header_list: bool,
     /// The Import dialog leaves out the signature parts and signature pictures of e-mails at first (IMP-061).
     pub import_skip_signatures: bool,
+    /// The Import dialog leaves the quoted mails out of the text of e-mails at first (IMP-066).
+    pub import_leave_out_quoted: bool,
     /// Mastodon and Bluesky accounts for the feed view (secrets are in the keyring).
     pub social_accounts: Vec<crate::social::SocialAccountEntry>,
     /// The account and feed shown last in the feed view.
@@ -542,6 +544,7 @@ impl Default for Config {
             pandoc_path: String::new(),
             import_header_list: false,
             import_skip_signatures: true,
+            import_leave_out_quoted: false,
             social_accounts: vec![],
             social_last: None,
             social_replies: false,
@@ -1015,6 +1018,16 @@ mod tests {
         let text = text::to_toml(&Config { import_skip_signatures: false, ..Config::default() });
         assert!(text.contains("import_skip_signatures = false"), "{text}");
         assert!(!Config::parse_text(&text).unwrap().0.import_skip_signatures);
+    }
+
+    // spec: CFG-076, CFG-001
+    #[test]
+    fn the_leave_out_quoted_setting_is_off_by_default_loads_from_old_files_and_round_trips() {
+        let (c, _) = crate::vault_state::parse::<Config>(br#"{"toolbar_size": 120}"#).unwrap();
+        assert!(!c.import_leave_out_quoted, "an old file: off");
+        let text = text::to_toml(&Config { import_leave_out_quoted: true, ..Config::default() });
+        assert!(text.contains("import_leave_out_quoted = true"), "{text}");
+        assert!(Config::parse_text(&text).unwrap().0.import_leave_out_quoted);
     }
 
     // spec: CFG-060, CFG-001

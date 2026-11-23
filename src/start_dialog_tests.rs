@@ -50,6 +50,8 @@ impl W {
 
     fn settle(&mut self) {
         self.hl.frames(&mut self.app, 6);
+        // a vault is read in the background (NET-019)
+        self.hl.settle(&mut self.app);
     }
 }
 

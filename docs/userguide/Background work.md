@@ -11,6 +11,10 @@ and you cannot start it twice by accident.
 
 - **A spinner and a phrase** next to the button or in the dialog: "Syncing with git…", "Checking
   file names and links…", "Exporting “Handbook” to PDF…".
+- **A vault is opened in the background.** At start, or when you open or create a vault, the start screen
+  shows a spinner and "Opening ‹folder›…" with **Cancel** while Shale reads the notes; the window with
+  your notes appears when it is done. Cancel drops the load and you can pick another vault. A vault that
+  cannot be read says why on the start screen.
 - **The mail index is checked as Shale starts** when you have a mail account, even if you have not
   opened the mail view: "Checking the mail index…" shows in the indicator. Open the view meanwhile
   and it shows the same text with a spinner until the check is done.

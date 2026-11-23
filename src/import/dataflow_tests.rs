@@ -23,7 +23,7 @@ fn dev_030_an_imported_email_is_a_dataflow_diagram() {
     let mut vault = Vault::open(&dir.join("vault")).unwrap();
     let raw = crate::mail::tests::sample_eml();
     let items = vec![email_item(mail::parse(&raw), ("Neubau.eml".to_string(), raw))];
-    let o = Options { folder: PathBuf::from("In"), tags: vec![], keep_original: true, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false };
+    let o = Options { folder: PathBuf::from("In"), tags: vec![], keep_original: true, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false, cut: Default::default() };
     let mut done = None;
     let flow = crate::dataflow::record(|| done = Some(import(&mut vault, &items, &o)));
     let done = done.expect("the import ran");
@@ -52,7 +52,7 @@ fn dev_030_a_word_import_is_a_dataflow_diagram() {
     crate::fsutil::create_new(&word, b"PK fake docx").unwrap();
     let mut vault = Vault::open(&dir.join("vault")).unwrap();
     let items = vec![docx::docx_item(word, Some(pandoc))];
-    let o = Options { folder: PathBuf::from("In"), tags: vec![], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false };
+    let o = Options { folder: PathBuf::from("In"), tags: vec![], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false, cut: Default::default() };
     let mut done = None;
     let flow = crate::dataflow::record(|| done = Some(import(&mut vault, &items, &o)));
     let done = done.expect("the import ran");

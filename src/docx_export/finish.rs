@@ -36,9 +36,18 @@ pub fn finish(docx: &[u8], look: &PrintLook) -> Result<Vec<u8>, String> {
     if let Some(text) = new_styles {
         file.set(STYLES, text);
     }
+    let mut document = document;
     if let Some(text) = apply(&document, edits) {
-        file.set(DOCUMENT, text);
+        document = text;
     }
+    // after the other changes, which may have changed the paragraph that follows the table of contents (DOCX-013)
+    if look.toc_page_break == Some(true) {
+        let doc = crate::xml_limits::parse(&document).map_err(|e| broken(DOCUMENT, e))?;
+        if let Some(text) = apply(&document, toc_break(&document, &doc)) {
+            document = text;
+        }
+    }
+    file.set(DOCUMENT, document);
     prune_media(&mut file)?;
     file.pack()
 }
@@ -74,6 +83,33 @@ fn alignment(src: &str, doc: &Document) -> Vec<Edit> {
         }
     }
     edits
+}
+
+/// A page break after the table of contents pandoc made (DOCX-013): the paragraph that follows it (past the
+/// bookmarks that mark the headings) starts a page, as the style of a heading that starts pages does too, so
+/// no second break comes of the two. Where a table or the end of the body follows, a paragraph with a page
+/// break is put in; at the end of the body there is nothing to break to.
+fn toc_break(src: &str, doc: &Document) -> Vec<Edit> {
+    let toc = doc.root_element().children().find(|n| is_w(*n, "body")).and_then(|b| b.children().find(|n| is_w(*n, "sdt") && n.descendants().any(|d| is_w(d, "docPartGallery") && val(d, "val") == Some("Table of Contents"))));
+    let Some(toc) = toc else { return vec![] };
+    let next = toc.next_siblings().skip(1).filter(|n| n.is_element()).find(|n| !is_w(*n, "bookmarkStart") && !is_w(*n, "bookmarkEnd"));
+    match next {
+        Some(p) if is_w(p, "p") => {
+            let set = [Op::Set("pageBreakBefore", "<w:pageBreakBefore/>".to_string())];
+            match child(p, "pPr") {
+                Some(_) => xml::edit_holder(src, p, "pPr", xml::PPR, &set).into_iter().collect(),
+                None => {
+                    let at = p.first_child().map_or(p.range().end, |c| c.range().start);
+                    vec![Edit { start: at, end: at, with: format!("<w:pPr>{}</w:pPr>", xml::changed_children(src, None, xml::PPR, &set)) }]
+                }
+            }
+        }
+        Some(other) if !is_w(other, "sectPr") => {
+            let at = toc.range().end;
+            vec![Edit { start: at, end: at, with: "<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>".to_string() }]
+        }
+        _ => vec![],
+    }
 }
 
 /// The page of the note in the last section of the body: `w:pgSz` and `w:pgMar`.

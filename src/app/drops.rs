@@ -146,6 +146,7 @@ impl ShaleApp {
         d.root = v.root.clone();
         d.header_list = self.cfg.import_header_list;
         d.skip_signatures = self.cfg.import_skip_signatures;
+        d.leave_out_quoted = self.cfg.import_leave_out_quoted;
         import::apply_skip_signatures(&mut d.items, d.skip_signatures);
         self.suggest_tags(&mut d);
         self.modal = Some(Modal::Import(d));
@@ -221,7 +222,15 @@ impl ShaleApp {
                 };
                 let tags = import::parse_tags(&d.tags);
                 let social_only = d.items.iter().filter(|i| i.include).all(|i| matches!(i.source, import::Source::Social { .. }));
-                let opts = import::Options { folder: folder.clone(), tags: tags.clone(), keep_original: d.keep_original, keep_docx: d.keep_docx, people_dir: self.vdata.settings.people_dir.clone(), header_list: d.header_list };
+                let opts = import::Options {
+                    folder: folder.clone(),
+                    tags: tags.clone(),
+                    keep_original: d.keep_original,
+                    keep_docx: d.keep_docx,
+                    people_dir: self.vdata.settings.people_dir.clone(),
+                    header_list: d.header_list,
+                    cut: import::mail_segments::TextCut { skip_signatures: d.skip_signatures, leave_out_quoted: d.leave_out_quoted },
+                };
                 let Some(v) = &mut self.vault else { return true };
                 // pandoc takes its time: the Word files are converted in a job first (IMP-035), and
                 // the dialog calls this again when it is done

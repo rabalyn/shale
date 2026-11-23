@@ -186,3 +186,103 @@ fn pinned_tabs_are_restored_pinned_and_first() {
     let want: Vec<(View, bool)> = ["Projects/Garden plan", "Ideas", "Welcome", "Daily log"].iter().enumerate().map(|(i, n)| (View::Note(PathBuf::from(format!("{n}.md"))), i == 0)).collect();
     assert_eq!(got, want);
 }
+
+impl W {
+    /// A window whose tab 0 (Welcome) is pinned and active, with notes `T1.md` … `T4.md` in the vault.
+    fn pinned_welcome(tag: &str) -> W {
+        let mut w = W::new(tag);
+        for i in 1..=4 {
+            std::fs::write(w.dir.join(format!("T{i}.md")), format!("# T{i}\nneedle\n")).unwrap();
+        }
+        w.app.vault.as_mut().unwrap().rescan();
+        w.pin_via_menu(0);
+        w.app.tabbar.active = 0;
+        w.frames(2);
+        w
+    }
+
+    /// The pinned Welcome tab kept its note and `target` opened in a new tab, which is the open one.
+    fn assert_opened_beside_the_pin(&self, target: &str, tabs_before: usize) {
+        assert_eq!(self.app.tabbar.tabs[0].view, View::Note(PathBuf::from("Welcome.md")), "the pinned tab keeps its note");
+        assert!(self.app.tabbar.tabs[0].pinned);
+        assert_eq!(self.app.tabbar.tabs.len(), tabs_before + 1, "a new tab holds the target");
+        assert_eq!(self.app.current_path(), Some(PathBuf::from(target)));
+        assert!(!self.app.tabbar.tabs[self.app.tabbar.active].pinned);
+    }
+}
+
+// spec: NAV-062
+#[test]
+fn a_pinned_tab_is_never_replaced_by_opening_a_note_whichever_way_it_is_opened() {
+    let mut w = W::pinned_welcome("pinned-open");
+    let n = w.app.tabbar.tabs.len();
+    // the file tree, the quick switcher, a graph click, the reader, an import summary: `Action::Open`
+    w.app.actions.push(crate::app::Action::Open { rel: PathBuf::from("T1.md"), new_tab: false });
+    w.app.process_actions();
+    w.assert_opened_beside_the_pin("T1.md", n);
+    // a followed link
+    w.app.tabbar.active = 0;
+    w.app.open_link("T2", None, Some(PathBuf::from("Welcome.md")), false);
+    w.assert_opened_beside_the_pin("T2.md", n + 1);
+    // a line of the search panel
+    w.app.tabbar.active = 0;
+    w.app.actions.push(crate::app::Action::GotoMatch { rel: PathBuf::from("T3.md"), line: 1, col: 0 });
+    w.app.process_actions();
+    w.assert_opened_beside_the_pin("T3.md", n + 2);
+    // an import (a saved mail, post or event) opens its note the same way
+    w.app.tabbar.active = 0;
+    w.app.open(Path::new("T4.md"), false);
+    w.assert_opened_beside_the_pin("T4.md", n + 3);
+    // a view (a mail hit, a post hit, the calendar) too
+    w.app.tabbar.active = 0;
+    w.app.show_view(View::Calendar, false);
+    assert_eq!(w.app.tabbar.tabs[0].view, View::Note(PathBuf::from("Welcome.md")));
+    assert_eq!(w.app.tabbar.tabs[w.app.tabbar.active].view, View::Calendar);
+    // a note that is open already is just made the open one
+    w.app.tabbar.active = 0;
+    w.app.open(Path::new("Ideas.md"), false);
+    assert_eq!(w.app.tabbar.tabs.len(), n + 5);
+    assert_eq!(w.app.current_path(), Some(PathBuf::from("Ideas.md")));
+}
+
+// spec: NAV-062
+#[test]
+fn an_unpinned_tab_still_opens_a_note_in_place() {
+    let mut w = W::pinned_welcome("unpinned-open");
+    w.app.tabbar.active = 1;
+    let n = w.app.tabbar.tabs.len();
+    w.app.open(Path::new("T1.md"), false);
+    assert_eq!(w.app.tabbar.tabs.len(), n, "no new tab");
+    assert_eq!(w.app.tabbar.tabs[1].view, View::Note(PathBuf::from("T1.md")));
+    assert_eq!(w.app.tabbar.tabs[0].view, View::Note(PathBuf::from("Welcome.md")));
+    // and an unpinned tab keeps its history
+    w.app.go_back();
+    assert_eq!(w.app.current_path(), Some(PathBuf::from("Ideas.md")));
+}
+
+// spec: NAV-062
+#[test]
+fn back_and_forward_of_a_pinned_tab_open_the_other_note_beside_it() {
+    let mut w = W::new("pinned-history");
+    std::fs::write(w.dir.join("T1.md"), "# T1\n").unwrap();
+    w.app.vault.as_mut().unwrap().rescan();
+    w.app.open(Path::new("Projects/Garden plan.md"), true);
+    w.app.open(Path::new("T1.md"), false);
+    let i = w.app.tabbar.active;
+    assert_eq!(w.app.tabbar.tabs[i].back.len(), 1, "the tab came from the Garden plan");
+    w.app.set_tab_pinned(i, true);
+    let i = w.app.tabbar.active;
+    let n = w.app.tabbar.tabs.len();
+    w.app.go_back();
+    assert_eq!(w.app.tabbar.tabs.len(), n + 1);
+    assert_eq!(w.app.current_path(), Some(PathBuf::from("Projects/Garden plan.md")));
+    assert_eq!(w.app.tabbar.tabs[i].view, View::Note(PathBuf::from("T1.md")), "the pinned tab stays where it is");
+    assert_eq!(w.app.tabbar.tabs[i].back.len(), 1, "and keeps its history");
+    // forward of a pinned tab with a forward step does the same
+    w.app.tabbar.tabs[i].fwd.push(View::Note(PathBuf::from("T9.md")));
+    w.app.tabbar.active = i;
+    w.app.go_forward();
+    assert_eq!(w.app.tabbar.tabs.len(), n + 2);
+    assert_eq!(w.app.tabbar.tabs[i].view, View::Note(PathBuf::from("T1.md")));
+    assert_eq!(w.app.tabbar.tabs[w.app.tabbar.active].view, View::Note(PathBuf::from("T9.md")));
+}

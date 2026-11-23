@@ -155,6 +155,10 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
         "import_skip_signatures",
         "true: the Import dialog starts with the signature parts of an e-mail (smime.p7s, signature.asc) and the pictures of its signature block unticked. false: they start ticked like other attachments (Settings > Import).",
     ),
+    (
+        "import_leave_out_quoted",
+        "true: the Import dialog starts with 'Leave out quoted mails' ticked: an imported e-mail keeps only the text its sender wrote, not the earlier mails it quotes. false: the quoted mails stay (Settings > Import).",
+    ),
     ("social_accounts", "The Mastodon and Bluesky accounts of the feed view. Their tokens are kept in the system keyring when there is one."),
     ("social_accounts.id", "A name that identifies the account, such as \"mastodon:ada@mastodon.social\"."),
     ("social_accounts.network", "\"mastodon\" or \"bluesky\"."),

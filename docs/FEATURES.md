@@ -205,7 +205,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   out, and the PDF has bookmarks for its `#`–`######` headings; the title is printed once: when the note's first
   heading is a `#` that says the same as the title, the separate title is left out, PDF-008; a note's
   properties set how it is printed, see below), insert a
-  new drawing, rename the note (links in other notes are updated), or move it to the trash. The
+  new drawing, rename the note (links in other notes are updated: wikilinks, embeds of notes and files, Markdown links and links in properties, also when a file or folder is moved or renamed from the title line; one history step), or move it to the trash. The
   trash keeps the original folder (`.trash/<date>/<path>`) and nothing in it is replaced or
   emptied; right-click the empty space of the file list and choose "Restore last deleted" to put
   the last item you trashed back.
@@ -229,6 +229,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
     each; anything else is ignored); they replace the usual proportions
   - `print-title`: `true` or `false`, the note's name as a title
   - `print-toc`: `true` or `false`, the contents page
+  - `print-toc-page-break` (#578, PDF-031): `true` (the default) or `false`; with `true` the text after the contents starts a new page
+    (the dialogs of the PDF, LaTeX, Word and folder-book exports have the box "Page break after the table of contents")
   - `print-break-before`: a heading level 1 to 6; every heading up to that level starts a new page
     (`1`: every `#`; the dialog has a box "Start each # heading on a new page" for it)
   - **Paper look** (#367): a note with any of these keys is printed plainly: list marks and quotes in the text
@@ -354,7 +356,9 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   moving still just selects the tab, and the ✕ or a middle click closes it.
 - Right-click a tab and choose **Pin tab** (or **Unpin tab**): pinned tabs move to the far left,
   show a small pin and keep their order. Drag reorders pinned tabs among themselves and the
-  others among themselves, never across the border. A pinned tab can still be closed.
+  others among themselves, never across the border. A pinned tab can still be closed. A pinned tab is
+  never replaced: opening a note any way (an import, a link, a search result, the quick switcher, the
+  file tree, back and forward) opens it in a new tab instead.
 - The order of all open tabs (notes, drawings and Feeds tabs) and which of them are pinned come
   back at the next start.
 
@@ -440,7 +444,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   action already uses asks “Overwrite it?” (Yes takes it from that action and leaves it without a key, No
   changes nothing; Enter answers No), and a binding can be a sequence of keys. While you record, a note
   under the keys says which action they would clash with.
-- Ctrl+PageUp / Ctrl+PageDown (macOS: Cmd+Opt+← / Cmd+Opt+→) switch to the previous / next tab, also from the file list and from
+- Ctrl+PageUp / Ctrl+PageDown and Ctrl+Shift+Tab / Ctrl+Tab (macOS: Cmd+Opt+← / Cmd+Opt+→) switch to the previous / next tab of the focused pane, also from the file list and from
   mail, calendar and Feeds; after the last tab comes the first.
 - In the search results j / k go from hit to hit and Ctrl+J / Ctrl+K from file to file (in the mail and posts groups from group to group).
 - **Markdown preview** (Settings → Editor, or the eye icon in the top right of the editor;
@@ -686,6 +690,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   on a CalDAV calendar changes its address, user name or password (empty password = keep the saved
   one); a new user name or password also goes to the other calendars of the same server and user.
 
+In a narrow sidebar the header wraps: the month name on its own line, the buttons below it, never over it (LAY-019).
+
 ![Calendar in the sidebar](userguide/z_media/screenshots/calendar-sidebar.png)
 
 ## Mail
@@ -919,7 +925,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 - **Export to Word** (DOCX-001 to DOCX-010, rabalyn/shale#487): a note's ⋯ menu and its context menu in the file list have **Export to Word…**,
   the reverse of the Word import, by the same `pandoc` (the Word import setting need not be on). The dialog saves to `<vault>/exports/<name>.docx`
   and has the boxes **Use the original Word file as the template** (for a note imported with its original kept, its `source:` property),
-  **Table of contents** and **Open the file afterwards**; the export is a background job that Cancel stops, and nothing is written when it
+  **Table of contents**, **Page break after the table of contents** (on; DOCX-013) and **Open the file afterwards**; the export is a background job that Cancel stops, and nothing is written when it
   fails. Shale cleans the note's text (front matter off, embeds by their vault path), pandoc reads it with commonmark and a Lua filter of
   Shale's (highlights, text and background colours, underline, sub- and superscript, strike-through, line breaks, links to notes as their words,
   pictures as wide as in the editor with their captions as alternative text, page breaks, alignment wrappers, the import's title block as Word's
@@ -939,6 +945,15 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   mail (`smime.p7s`, `signature.asc`) and the pictures of a signature block (logos, social icons,
   `image001.png`) start unticked and say why; the box **Skip signatures** (Import dialog, start value
   in Settings → Import) lets them start ticked (IMP-059, IMP-060, IMP-061, CFG-074).
+- The text of an imported mail is read as **segments**: the sender's own text and each mail it quotes
+  (`>` runs, "On … wrote:", "Am … schrieb …:", `-----Original Message-----`, Outlook's From / Sent / To /
+  Subject block, `blockquote` and `gmail_quote` of HTML mails), and each segment has its own signature
+  (`-- ` at any quote depth, the HTML markers of Thunderbird, Gmail, Outlook and Apple Mail, a closing
+  greeting with a short block of contact lines, a disclaimer). **Skip signatures** also removes the own
+  signature and the signatures inside the quoted mails and keeps the quoted text; **Leave out quoted
+  mails** (off at first, Settings → Import sets the start value) drops the quoted mails. What is not
+  clearly a signature stays (IMP-063 to IMP-066, CFG-076). The editor folds a signature inside a quote
+  too (EDIT-083).
 - Drop onto a folder in the file list to import into that folder, or onto a note to also add
   links to the new notes there.
 - After an import of two or more items a window, **Import summary**, says what was made: the new
@@ -1297,6 +1312,7 @@ Whatever runs longer than a moment says what it does, cannot be started twice an
   Point at it, or click it to keep it open (a second click closes it): it lists every task with how long it has run and **Cancel**
   where the work can stop. It disappears when nothing runs.
   ![The indicator with two tasks listed](userguide/z_media/screenshots/busy-indicator.png)
+- **Opening a vault** (NET-019, #513): a vault is read on a background thread. While it loads, the start screen shows a spinner, "Opening ‹folder›…" and **Cancel** (a vault on a slow network share or an online-only folder no longer freezes the window); the main window appears when the vault has arrived. This covers the last vault at start, `--vault`, a folder a second start hands over, the user guide and Open or Create in the start dialog.
 - **Moved so far:** the git sync and the Git LFS setup, the check of the vault's names (Cancel stops it) and the PDF export of a
   folder (Cancel stops it), and the check of the mail index (JOB-015: it starts with the window when a mail account is set up, so the mail view finds the index ready, and the view shows "Checking the mail index…" with a spinner when it is opened earlier). The other long actions follow; the list of all of them, with what each shows today, is
   [docs/spec/busy-states.md](spec/busy-states.md).
@@ -1319,7 +1335,7 @@ Text editing keys and vim keys are fixed.
 | Ctrl+W | Close tab |
 | Ctrl+Shift+F | Search notes, mail and posts |
 | Ctrl+H / Ctrl+L | Keyboard one place left / right: through the split panes in screen order, left of the first pane into the left sidebar, from there into the first pane (macOS: Cmd+Shift+H / Cmd+Shift+L, because Cmd+H hides the app) |
-| Ctrl+PageUp / Ctrl+PageDown | Previous / next tab (from the last tab on to the first), wherever the keyboard is (macOS: Cmd+Opt+← / Cmd+Opt+→) |
+| Ctrl+PageUp / Ctrl+PageDown, Ctrl+Shift+Tab / Ctrl+Tab | Previous / next tab of the focused pane in the order of the tab bar (from the last tab on to the first), wherever the keyboard is (macOS: Cmd+Opt+← / Cmd+Opt+→ only, Cmd+Tab is the system's) |
 | Ctrl+\ | Split right: open this tab in a new pane to the right (panes sit side by side, each with its own tabs) |
 | F6 / Shift+F6 | Focus the next / previous pane |
 | Ctrl+Shift+W | Close the pane with all its tabs (macOS: Cmd+Shift+W) |
