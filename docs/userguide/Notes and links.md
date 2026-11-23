@@ -79,7 +79,14 @@ library link `![[@Pictures/a.png]]` or a file link; see [[Sounds and videos]].
 ![[tree-drag.png]]
 
 Drag notes, drawings, files and folders in the file list into another folder. Rename a note from
-its menu. In both cases links in other notes (and in drawings) are updated, so nothing breaks.
+its menu, or by typing a new name in its title line. In every case links in other notes (and in
+drawings) are updated, so nothing breaks: `[[Note]]`, `[[Note|alias]]`, `[[Note#Heading]]`,
+embeds of notes, pictures, PDFs and other files, Markdown links such as `[x](folder/Note.md)` and
+`![x](pic.png)` (also with `../` paths), and links in a note's properties such as
+`related: "[[Note]]"`. A link by name stays a name, as long as that name still finds the same
+file. A note you are editing keeps its unsaved changes while its links are updated. The whole
+rename is one step in the note's history ([[File history]]). The setting "Update links in other notes
+when renaming" (on by default) turns this off.
 A name with a character that does not work on Windows (such as `:` or `?`) is not refused: the file gets
 a name without it and the message says so ([[Vault settings]]).
 

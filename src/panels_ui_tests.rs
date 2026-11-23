@@ -235,7 +235,7 @@ fn panel_quick_switcher_finds_opens_creates_and_closes() {
     assert!(p.app.modal.is_none() && p.app.actions.is_empty());
 }
 
-// spec: VAULT-023
+// spec: VAULT-023, VAULT-042
 #[test]
 fn panel_rename_dialog_renames_shows_errors_and_cancels() {
     let mut p = P::new("rename", &[]);

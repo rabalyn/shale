@@ -198,7 +198,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   out, and the PDF has bookmarks for its `#`–`######` headings; the title is printed once: when the note's first
   heading is a `#` that says the same as the title, the separate title is left out, PDF-008; a note's
   properties set how it is printed, see below), insert a
-  new drawing, rename the note (links in other notes are updated), or move it to the trash. The
+  new drawing, rename the note (links in other notes are updated: wikilinks, embeds of notes and files, Markdown links and links in properties, also when a file or folder is moved or renamed from the title line; one history step), or move it to the trash. The
   trash keeps the original folder (`.trash/<date>/<path>`) and nothing in it is replaced or
   emptied; right-click the empty space of the file list and choose "Restore last deleted" to put
   the last item you trashed back.

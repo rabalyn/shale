@@ -61,7 +61,7 @@ change within a second.
 |---|---|---|
 | `ctrl_to_follow` | off (a plain click follows a link) | Settings → Editor → Links |
 | `new_notes_next_to_current` | off (new notes go to the vault root) | Settings → Editor → Links |
-| `update_links_on_rename` | on | Settings → Editor → Links |
+| `update_links_on_rename` | on (links, embeds and property links in other notes follow a rename or move) | Settings → Editor → Links |
 | `auto_convert_canvas` | off (asks) | Settings → Editor → Drawings; or the tick in the canvas question |
 | `file_sort` | `NameAsc` (file name A to Z); also `NameDesc`, `ModifiedDesc`, `ModifiedAsc`, `CreatedDesc`, `CreatedAsc` | the sort icon above the file list |
 

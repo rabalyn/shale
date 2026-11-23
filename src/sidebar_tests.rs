@@ -531,7 +531,7 @@ fn lay_016_a_middle_click_on_mail_feeds_or_calendar_opens_a_new_tab() {
     assert_eq!(w.app.tabbar.tabs.len(), n);
 }
 
-// spec: VAULT-025
+// spec: VAULT-025, VAULT-042
 #[test]
 fn the_title_line_and_the_tab_hide_the_date_prefix_and_renaming_from_the_title_line_keeps_it() {
     let mut w = W::new("title-line");
