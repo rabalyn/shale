@@ -337,6 +337,33 @@ fn enqueue(key: u64, syntax: &'static SyntaxReference, code: &str) {
     }
 }
 
+/// The spans of an edited block that its last coloured version still gives (EDIT-121): lines that
+/// are the same at the start and at the end of both texts keep their spans (those at the end moved
+/// by the change of length), the lines between are plain. Also how many lines were kept; `None`
+/// when no line was.
+pub fn carry_over(old: &str, old_spans: &Spans, new: &str) -> Option<(Spans, usize)> {
+    let (a, b): (Vec<&str>, Vec<&str>) = (old.split_inclusive('\n').collect(), new.split_inclusive('\n').collect());
+    let prefix = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+    let suffix = a[prefix..].iter().rev().zip(b[prefix..].iter().rev()).take_while(|(x, y)| x == y).count();
+    if prefix + suffix == 0 {
+        return None;
+    }
+    let pre_end: usize = a[..prefix].iter().map(|l| l.len()).sum();
+    let tail: usize = a[a.len() - suffix..].iter().map(|l| l.len()).sum();
+    let (old_tail, new_tail) = (old.len() - tail, new.len() - tail);
+    let mut out: Spans = Vec::new();
+    for (r, kind) in old_spans {
+        if r.start < pre_end {
+            push_span(&mut out, r.start..r.end.min(pre_end), Some(*kind));
+        }
+        if r.end > old_tail {
+            let (start, end) = (r.start.max(old_tail), r.end);
+            push_span(&mut out, start - old_tail + new_tail..end - old_tail + new_tail, Some(*kind));
+        }
+    }
+    Some((out, prefix + suffix))
+}
+
 /// A block as it is drawn on the screen: its spans, and whether they are still to come.
 pub struct Shown {
     pub spans: Arc<Spans>,
@@ -712,5 +739,21 @@ mod tests {
         let s = shown("ts", &other, true);
         assert!(!s.pending && !s.spans.is_empty());
         assert!(!highlight("ts", &long_ts("export119", ASYNC_LINES + 2)).is_empty(), "an export call is full at once");
+    }
+
+    // spec: EDIT-121
+    #[test]
+    fn edit_121_the_lines_an_edit_did_not_touch_keep_their_spans_and_the_rest_is_plain() {
+        let old = "const a = 1;\nconst b = 2;\nconst c = 3;\n";
+        let spans = run_syntect_for("ts", old);
+        let new = "const a = 1;\nconst bb = 22;\nconst c = 3;\n";
+        let (kept, lines) = carry_over(old, &spans, new).unwrap();
+        assert_eq!(lines, 2);
+        let line = |s: &str, at: usize| s.split_inclusive('\n').take(at).map(str::len).sum::<usize>();
+        assert!(kept.iter().all(|(r, _)| r.end <= line(new, 1) || r.start >= line(new, 2)), "nothing in the changed line");
+        assert!(kept.iter().any(|(r, _)| r.start >= line(new, 2)), "the last line is moved by the longer one before it");
+        let last = |s: &Spans, from: usize| s.iter().filter(|(r, _)| r.start >= from).map(|(r, k)| (r.start - from, r.end - from, *k)).collect::<Vec<_>>();
+        assert_eq!(last(&kept, line(new, 2)), last(&spans, line(old, 2)));
+        assert!(carry_over("a\n", &Vec::new(), "b\n").is_none(), "no line in common");
     }
 }
