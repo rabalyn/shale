@@ -105,7 +105,7 @@ impl Source {
     /// given to the worker (QUERY-014), which counts every source.
     fn start(self, ctx: &Ctx, query: &Query, worker: &mut SearchWorker) -> Start {
         match self {
-            Source::FileNames => Start::Done(search_all::Found { hits: Source::file_names(ctx, query.text), counts: None }),
+            Source::FileNames => Start::Done(search_all::Found { hits: Source::file_names(ctx, query.text), ..Default::default() }),
             Source::Everything => Start::Queued(worker.submit(Slot::PICKER, Request::new(ctx, query))),
         }
     }
@@ -118,13 +118,15 @@ pub struct Picker {
     pub sel: usize,
     /// the list made for the query; made again when the typing has settled (NAV-024)
     results: Results,
+    /// the check of the text, made again only when the text changes (QUERY-013)
+    check: Box<search_all::query::Cache>,
     /// the solo of the count buttons (NAV-052); the default selection is in the settings
     pub filter: Filter,
 }
 
 impl Picker {
     pub fn new(source: Source) -> Picker {
-        Picker { source, query: String::new(), sel: 0, results: Results::default(), filter: Filter::default() }
+        Picker { source, query: String::new(), sel: 0, results: Results::default(), check: Default::default(), filter: Filter::default() }
     }
 
     /// Make the list for the query when it is not the one the list is for and either the source
@@ -132,11 +134,14 @@ impl Picker {
     /// True while the list is for an older query.
     fn refresh(&mut self, ctx: &Ctx, worker: &mut SearchWorker, now: bool, cfg: &SearchConfig) -> bool {
         let source = self.source;
-        // the text, with the letters of the prefixes and the sources to list
-        let query = Query::picker(&self.query).with_sources(cfg.prefixes(), self.filter.shown(cfg.selection()));
+        // the text, with the letters of the prefixes and the sources to list, and its check
+        let prefixes = cfg.prefixes();
+        let query = Query::picker(&self.query).with_sources(prefixes, self.filter.shown(cfg.selection()));
+        let query = if source == Source::Everything { query.with_checked(self.check.get(&self.query, prefixes)) } else { query };
         let listed = if source == Source::Everything { query.listed() } else { Selection::ALL };
         let blank = source == Source::Everything && query.is_blank();
-        let ask = Ask { slot: Slot::PICKER, text: query.text, stamp: ctx.stamp(), debounced: source.debounced(), now, listed, blank };
+        let invalid = query.checked.is_some_and(|c| c.error().is_some());
+        let ask = Ask { slot: Slot::PICKER, text: query.text, stamp: ctx.stamp(), debounced: source.debounced(), now, listed, blank, invalid };
         let done = self.results.refresh(worker, &ask, |w| source.start(ctx, &query, w));
         if matches!(done, Refreshed::Made | Refreshed::Relisted) {
             self.sel = 0;
@@ -243,7 +248,14 @@ pub fn show(ctx: &Context, p: &mut Picker, data: &Ctx, worker: &mut SearchWorker
         |ui, f| {
             let everything = f.p.source == Source::Everything;
             // (Tab is no focus change here: the field keeps it for the keys of the sources)
-            let r = ui.add(egui::TextEdit::singleline(&mut f.p.query).hint_text(f.p.source.hint()).desired_width(f32::INFINITY).font(FontId::proportional(16.0)).lock_focus(true));
+            let edit = egui::TextEdit::singleline(&mut f.p.query).hint_text(f.p.source.hint()).desired_width(f32::INFINITY).font(FontId::proportional(16.0)).lock_focus(true);
+            // (the search of everything underlines what is wrong with the query, QUERY-008)
+            let r = if everything {
+                let mut layouter = search_sources::error_layouter(&mut f.p.check, cfg.prefixes(), Some(16.0));
+                ui.add(edit.layouter(&mut layouter))
+            } else {
+                ui.add(edit)
+            };
             r.request_focus();
             f.keys = ListKeys::take(ui, keymap);
             let source_keys = if everything { SourceKeys::take(ui, keymap) } else { SourceKeys { next: false, prev: false } };
@@ -271,6 +283,8 @@ pub fn show(ctx: &Context, p: &mut Picker, data: &Ctx, worker: &mut SearchWorker
                 if search_sources::bar(ui, &bar, &mut f.p.filter, cfg) {
                     f.save = true;
                 }
+                let skipped: Vec<String> = f.p.results.skipped(listed).map(search_all::Skipped::message).collect();
+                search_sources::notices(ui, f.p.check.get(&f.p.query, cfg.prefixes()).error(), &skipped, f.p.results.stopped_early());
                 if f.save || f.p.filter != before {
                     // the list of the new sources, in this frame
                     f.p.refresh(data, f.worker, false, cfg);
@@ -441,6 +455,43 @@ mod tests {
         }
         p.refresh(&ctx, &mut w, false, &cfg);
         assert!(p.listed().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: QUERY-008, QUERY-013
+    #[test]
+    fn a_query_with_a_syntax_error_asks_nothing_and_the_last_valid_list_stays() {
+        let dir = std::env::temp_dir().join(format!("shale-picker-invalid-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("A.md"), "---\nstatus: doing\n---\nbanana\nberry\n").unwrap();
+        let v = Vault::open(&dir).unwrap();
+        let posts = PostIndex::in_memory();
+        let ctx = Ctx { vault: &v, mail: None, posts: &posts };
+        let cfg = SearchConfig::default();
+        let mut w = SearchWorker::default();
+        let mut p = Picker::new(Source::Everything);
+        p.query = "status:doing banana".into();
+        p.refresh(&ctx, &mut w, true, &cfg);
+        wait_for_list(&mut p, &ctx, &mut w, &cfg);
+        assert_eq!(p.listed().len(), 1);
+        for bad in ["status:doing banana AND", "(status:doing", "priority:urgent", "due:soon"] {
+            p.query = bad.into();
+            assert!(!p.refresh(&ctx, &mut w, true, &cfg), "{bad}: nothing waits, not even Enter asks");
+            assert!(!p.results.is_pending(), "{bad}: nothing was given to the worker");
+            assert_eq!(p.listed().len(), 1, "{bad}: the last valid list stays");
+            assert!(p.check.get(bad, cfg.prefixes()).error().is_some());
+        }
+        // the text is checked once while it stays the same (every frame asks)
+        let parses = p.check.parses;
+        for _ in 0..5 {
+            p.refresh(&ctx, &mut w, false, &cfg);
+        }
+        assert_eq!(p.check.parses, parses);
+        p.query = "status:doing berry".into();
+        p.refresh(&ctx, &mut w, true, &cfg);
+        wait_for_list(&mut p, &ctx, &mut w, &cfg);
+        assert_eq!(p.listed()[0].title, "berry", "a valid text is searched again");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -28,9 +28,14 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+mod deps;
+mod matcher;
+pub mod query;
 mod snapshot;
 pub mod worker;
 
+use matcher::{Budget, Run, Stop};
+use query::{Checked, Expr, TermKind};
 pub use snapshot::Snapshot;
 pub use worker::{Request, SearchWorker, Slot};
 
@@ -42,6 +47,12 @@ pub const PICKER_NOTE_LINES: usize = 3;
 pub const SIDEBAR_GROUP_LIMIT: usize = 200;
 /// How many lines of one note the sidebar lists at most.
 pub const SIDEBAR_NOTE_LINES: usize = 20;
+/// How many characters a search compares before it ends early with a partial result
+/// (QUERY-010). A wildcard comparison counts every step it takes, so `*a*a*a*b` over a long
+/// line is not cheap.
+pub const CHAR_BUDGET: u64 = 400_000_000;
+/// How long a search runs before it ends early (QUERY-010).
+pub const TIME_BUDGET: Duration = Duration::from_secs(5);
 /// A list is made at most this often while typing (NAV-024).
 pub const DEBOUNCE: Duration = Duration::from_millis(150);
 
@@ -60,22 +71,35 @@ pub struct Query<'a> {
     pub prefixes: Prefixes,
     /// the sources listed when the text has no prefix: the default selection, or a solo
     pub shown: Selection,
+    /// the text as checked (QUERY-007), kept by the view for as long as the text stays the same
+    /// (QUERY-013); none: the search checks it itself
+    pub checked: Option<&'a Checked>,
 }
 
 impl<'a> Query<'a> {
     /// What the picker asks: three lines per note, 20 hits per group.
     pub fn picker(text: &'a str) -> Query<'a> {
-        Query { text, note_lines: PICKER_NOTE_LINES, limit: GROUP_LIMIT, prefixes: Prefixes::default(), shown: Selection::ALL }
+        Query { text, note_lines: PICKER_NOTE_LINES, limit: GROUP_LIMIT, prefixes: Prefixes::default(), shown: Selection::ALL, checked: None }
     }
 
     /// What the sidebar asks: 20 lines per note, up to 200 hits per group.
     pub fn sidebar(text: &'a str) -> Query<'a> {
-        Query { text, note_lines: SIDEBAR_NOTE_LINES, limit: SIDEBAR_GROUP_LIMIT, prefixes: Prefixes::default(), shown: Selection::ALL }
+        Query { text, note_lines: SIDEBAR_NOTE_LINES, limit: SIDEBAR_GROUP_LIMIT, prefixes: Prefixes::default(), shown: Selection::ALL, checked: None }
     }
 
     /// The same with the letters of the prefixes and the sources to list.
     pub fn with_sources(self, prefixes: Prefixes, shown: Selection) -> Query<'a> {
         Query { prefixes, shown, ..self }
+    }
+
+    /// The same with the check of its text, made once for the text (QUERY-013).
+    pub fn with_checked(self, checked: &'a Checked) -> Query<'a> {
+        Query { checked: Some(checked), ..self }
+    }
+
+    /// The check of the text: the one the view made, else made now.
+    fn check(&self) -> std::borrow::Cow<'a, Checked> {
+        self.checked.map_or_else(|| std::borrow::Cow::Owned(Checked::search(self.text, self.prefixes)), std::borrow::Cow::Borrowed)
     }
 
     /// Is there nothing to search for (no text apart from the prefix)? The list is empty then.
@@ -114,11 +138,16 @@ impl Ctx<'_> {
 }
 
 /// Where the match of the pattern at the start of `text` ends (a count of characters), if it
-/// matches. The end of the text is not anchored: the match is over when the pattern is.
-fn matches_at(pat: &[char], text: &[char]) -> Option<usize> {
+/// matches. The end of the text is not anchored: the match is over when the pattern is. Every
+/// step is paid from `fuel`; with none left the pattern does not match (QUERY-010).
+fn matches_at(pat: &[char], text: &[char], fuel: &mut u64) -> Option<usize> {
     let (mut p, mut t) = (0, 0);
     let mut star: Option<(usize, usize)> = None;
     loop {
+        if *fuel == 0 {
+            return None;
+        }
+        *fuel -= 1;
         if p == pat.len() {
             return Some(t);
         }
@@ -143,9 +172,11 @@ fn matches_at(pat: &[char], text: &[char]) -> Option<usize> {
 
 /// The bytes of `line` of the first match of the wildcard pattern, ignoring case (a match is
 /// the text from where the pattern starts to where it is over, NAV-057). `pat` is lower case
-/// already. A pattern without wildcards is the plain search of the sidebar (same offsets).
-pub fn wildcard_find(line: &str, pat: &str) -> Option<Range<usize>> {
+/// already. A pattern without wildcards is the plain search of the sidebar (same offsets). The
+/// characters compared are paid from `fuel`, which is empty (0) when the budget is used up.
+fn find_wild(line: &str, pat: &str, fuel: &mut u64) -> Option<Range<usize>> {
     if !pat.contains(['*', '?']) {
+        *fuel = fuel.saturating_sub(line.len().min(MAX_LINE_CHARS * 4) as u64);
         let start = markdown::find_ci(line, pat)?;
         return Some(start..start + crate::search_render::matched_len(&line[start..], pat));
     }
@@ -161,58 +192,84 @@ pub fn wildcard_find(line: &str, pat: &str) -> Option<Range<usize>> {
             offsets.push(i);
             text.push(c.to_lowercase().next().unwrap_or(c));
         }
-        (0..text.len()).find_map(|i| matches_at(&pat, &text[i..]).map(|n| offsets[i]..offsets.get(i + n).copied().unwrap_or(line.len())))
+        *fuel = fuel.saturating_sub(text.len() as u64);
+        (0..text.len()).find_map(|i| matches_at(&pat, &text[i..], fuel).map(|n| offsets[i]..offsets.get(i + n).copied().unwrap_or(line.len())))
     })
 }
 
-/// [`scan_notes`] of the notes of a vault as they are now, without a way to stop it.
+/// [`scan_notes`] of the notes of a vault as they are now, without a way to stop it and without
+/// a budget.
 #[cfg(any(test, feature = "bench"))]
 pub fn note_hits(vault: &Vault, query: &Query) -> Vec<Hit> {
-    scan_notes(&Snapshot::of(vault), query, &AtomicBool::new(false))
+    let notes = Snapshot::of(vault);
+    let checked = query.check();
+    let Some(expr) = checked.expr() else { return vec![] };
+    scan_notes(&notes, query, expr, &mut Run::new(&notes, &AtomicBool::new(false), Budget::new(u64::MAX, Duration::from_secs(3600))))
 }
 
-/// The lines of notes that match, in the order of the vault's files (at most `q.note_lines` per
-/// note): a line is one hit; a note whose name matches but no line is one hit for the note. The
-/// scan stops at the next line once `cancel` is set (QUERY-017); what it found so far is returned.
-pub fn scan_notes(notes: &Snapshot, query: &Query, cancel: &AtomicBool) -> Vec<Hit> {
-    let q = query.text.trim().to_lowercase();
-    // a pattern of wildcards alone would match every line
-    if !q.chars().any(|c| c != '*' && c != '?') {
-        return vec![];
-    }
+/// The notes that match the query, in the order of the vault's files, and for each the lines of
+/// its text terms (at most `query.note_lines` per note): a line is one hit; a note whose name
+/// matches but no line, or that matches by its fields only, is one hit for the note. A note
+/// matches as a whole (QUERY-004); the lines are then those with a text term that is not under a
+/// NOT. The scan ends at the next line once `run` says stop, the flag of a newer query
+/// (QUERY-017) or the budget (QUERY-010); what it found so far is returned and `run.stopped` says why.
+pub fn scan_notes(notes: &Snapshot, query: &Query, expr: &Expr, run: &mut Run) -> Vec<Hit> {
+    let texts = expr.positive_texts();
     let mut out = Vec::new();
-    for s in &notes.notes {
-        let f = &s.file;
-        let name = f.display_name();
-        let before = out.len();
-        if let Some(n) = &s.note {
-            for (i, line) in n.text.lines().enumerate() {
-                if cancel.load(Ordering::Relaxed) {
-                    return out;
-                }
-                if let Some(found) = wildcard_find(line, &q) {
-                    let shown: String = line.trim().chars().take(crate::search_render::MAX_SHOWN_CHARS).collect();
-                    // the found text in the shown one: it starts after the white space that is cut off
-                    let lead = line.len() - line.trim_start().len();
-                    let marks = shown_marks(&shown, found.start.saturating_sub(lead)..found.end.saturating_sub(lead));
-                    let (rel, col) = (f.rel.clone(), found.start);
-                    out.push(Hit::new(NOTES, shown, format!("{name}  ·  line {}", i + 1), Action::GotoMatch { rel, line: i, col }).marked(marks));
-                    if out.len() >= query.limit || out.len() - before >= query.note_lines {
-                        break;
-                    }
-                }
-            }
-        }
-        if out.len() == before {
-            if let Some(found) = wildcard_find(&name, &q) {
-                out.push(Hit::new(NOTES, name, "name".into(), Action::Open { rel: f.rel.clone(), new_tab: false }).marked(vec![found]));
-            }
+    for (idx, s) in notes.notes.iter().enumerate() {
+        let scanned = run.note_matches(expr, idx).and_then(|matched| if matched { note_lines(s, &texts, query, run, &mut out) } else { Ok(()) });
+        if let Err(stop) = scanned {
+            run.stopped = Some(stop);
+            break;
         }
         if out.len() >= query.limit {
             break;
         }
     }
     out
+}
+
+/// The hits of one note that matches: the lines of its text terms, else its name when a text
+/// term matches it, else the note itself.
+fn note_lines(s: &snapshot::SnapNote, texts: &[&str], query: &Query, run: &mut Run, out: &mut Vec<Hit>) -> Result<(), Stop> {
+    let f = &s.file;
+    let name = f.display_name();
+    let before = out.len();
+    if let (Some(n), false) = (&s.note, texts.is_empty()) {
+        for (i, line) in n.text.lines().enumerate() {
+            let mut found = None;
+            for pat in texts {
+                if found.is_none() {
+                    found = run.find(line, pat)?;
+                }
+            }
+            if let Some(found) = found {
+                let shown: String = line.trim().chars().take(crate::search_render::MAX_SHOWN_CHARS).collect();
+                // the found text in the shown one: it starts after the white space that is cut off
+                let lead = line.len() - line.trim_start().len();
+                let marks = shown_marks(&shown, found.start.saturating_sub(lead)..found.end.saturating_sub(lead));
+                let (rel, col) = (f.rel.clone(), found.start);
+                out.push(Hit::new(NOTES, shown, format!("{name}  ·  line {}", i + 1), Action::GotoMatch { rel, line: i, col }).marked(marks));
+                if out.len() >= query.limit || out.len() - before >= query.note_lines {
+                    break;
+                }
+            }
+        }
+    }
+    if out.len() == before {
+        let mut found = None;
+        for pat in texts {
+            if found.is_none() {
+                found = run.find(&name, pat)?;
+            }
+        }
+        let open = Action::Open { rel: f.rel.clone(), new_tab: false };
+        out.push(match found {
+            Some(found) => Hit::new(NOTES, name, "name".into(), open).marked(vec![found]),
+            None => Hit::new(NOTES, name, "note".into(), open),
+        });
+    }
+    Ok(())
 }
 
 /// The found text `range` as the marks of the shown text: cut at its end, none when it is not in it.
@@ -250,44 +307,100 @@ pub fn post_hits(index: &PostIndex, query: &Query) -> Vec<Hit> {
         .collect()
 }
 
+/// A source that does not take the query, and what in it keeps it out (QUERY-006).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Skipped {
+    pub kind: Kind,
+    /// the field or operator the source lacks, as it is typed (`status:`, `#`, `OR`)
+    pub what: String,
+}
+
+impl Skipped {
+    /// "Mail: `status:` not supported"
+    pub fn message(&self) -> String {
+        format!("{}: `{}` not supported", self.kind.group(), self.what)
+    }
+}
+
 /// What a search found: the hits of every source, in the order of the sources, and how many each
 /// source found. No counts: nothing was searched for.
 #[derive(Default)]
 pub struct Found {
     pub hits: Vec<Hit>,
     pub counts: Option<Counts>,
+    /// the work budget was used up: the hits are partial (QUERY-010)
+    pub stopped_early: bool,
+    /// the sources the query was not asked of, because it has a field they lack (QUERY-006)
+    pub skipped: Vec<Skipped>,
 }
 
-/// Search every source for the text of the query, without its prefix: notes, then mail (while the
-/// mail store is open), then posts. Which of them are listed is [`Query::listed`]'s to say. None
-/// when `cancel` was set: the search was given up and its hits are not to be used (QUERY-017).
-pub fn search_in(notes: &Snapshot, mail: Option<&Connection>, posts: Option<&PostIndex>, query: &Query, cancel: &AtomicBool) -> Option<Found> {
-    let text = query.prefixes.parse(query.text).text;
-    if text.trim().is_empty() {
-        return Some(Found::default());
+/// What a source with only text and a few fields takes of a query: its terms side by side, as
+/// the text it searches for; or what it lacks. `fields` are the field words of the source.
+fn foreign_text(checked: &Checked, expr: &Expr, fields: &[(&str, &str)]) -> Result<String, String> {
+    let terms = expr.flat_terms().map_err(str::to_string)?;
+    let mut parts = Vec::new();
+    for term in terms {
+        match &term.kind {
+            TermKind::Text(_) => {}
+            TermKind::Prop { key, .. } if fields.iter().any(|(f, _)| f.eq_ignore_ascii_case(key)) => {}
+            TermKind::Prop { key, .. } => return Err(format!("{key}:")),
+            TermKind::Tag(_) => return Err("#".into()),
+            TermKind::Path(_) => return Err("path:".into()),
+            TermKind::Due(_) => return Err("due:".into()),
+            TermKind::Links(_) => return Err("links:".into()),
+            TermKind::Blocked => return Err("blocked".into()),
+            TermKind::Blocking => return Err("blocking".into()),
+        }
+        parts.push(checked.source(term));
     }
-    let query = &Query { text, ..*query };
+    Ok(parts.join(" "))
+}
+
+/// Search every source for the query, without its prefix: notes, then mail (while the mail
+/// store is open), then posts. Which of them are listed is [`Query::listed`]'s to say. None when
+/// `cancel` was set: the search was given up and its hits are not to be used (QUERY-017).
+pub fn search_in(notes: &Snapshot, mail: Option<&Connection>, posts: Option<&PostIndex>, query: &Query, cancel: &AtomicBool) -> Option<Found> {
+    search_within(notes, mail, posts, query, cancel, Budget::standard())
+}
+
+/// [`search_in`] with the work budget of the notes given (QUERY-010).
+pub fn search_within(notes: &Snapshot, mail: Option<&Connection>, posts: Option<&PostIndex>, query: &Query, cancel: &AtomicBool, budget: Budget) -> Option<Found> {
+    let checked = &*query.check();
+    // (a query that did not pass the check is not run: the view shows the error, QUERY-008)
+    let Some(expr) = checked.expr() else { return Some(Found::default()) };
     let _flow = tracing::info_span!("flow.vault_search", peer = "search_view").entered();
-    let mut hits = tracing::info_span!("flow.vault_search.search_notes", peer = "vault").in_scope(|| scan_notes(notes, query, cancel));
+    let mut run = Run::new(notes, cancel, budget);
+    let mut hits = tracing::info_span!("flow.vault_search.search_notes", peer = "vault").in_scope(|| scan_notes(notes, query, expr, &mut run));
     let mut counts = Counts::default();
     counts.0[0] = hits.len();
+    let mut skipped = Vec::new();
     if let Some(db) = mail {
         if cancel.load(Ordering::Relaxed) {
             return None;
         }
-        let mail = tracing::info_span!("flow.vault_search.search_mail", peer = "mail_index").in_scope(|| mail_hits(db, query));
-        counts.0[1] = mail.len();
-        hits.extend(mail);
+        match foreign_text(checked, expr, &crate::mail::db::FIELDS) {
+            Ok(text) => {
+                let mail = tracing::info_span!("flow.vault_search.search_mail", peer = "mail_index").in_scope(|| mail_hits(db, &Query { text: &text, ..*query }));
+                counts.0[1] = mail.len();
+                hits.extend(mail);
+            }
+            Err(what) => skipped.push(Skipped { kind: Kind::Mail, what }),
+        }
     }
     if let Some(index) = posts {
         if cancel.load(Ordering::Relaxed) {
             return None;
         }
-        let posts = tracing::info_span!("flow.vault_search.search_posts", peer = "post_index").in_scope(|| post_hits(index, query));
-        counts.0[2] = posts.len();
-        hits.extend(posts);
+        match foreign_text(checked, expr, &crate::social::post_index::FIELDS) {
+            Ok(text) => {
+                let posts = tracing::info_span!("flow.vault_search.search_posts", peer = "post_index").in_scope(|| post_hits(index, &Query { text: &text, ..*query }));
+                counts.0[2] = posts.len();
+                hits.extend(posts);
+            }
+            Err(what) => skipped.push(Skipped { kind: Kind::Posts, what }),
+        }
     }
-    (!cancel.load(Ordering::Relaxed)).then_some(Found { hits, counts: Some(counts) })
+    (!cancel.load(Ordering::Relaxed)).then_some(Found { hits, counts: Some(counts), stopped_early: run.stopped == Some(Stop::Budget), skipped })
 }
 
 /// [`search_in`] of what a [`Ctx`] reads, here and now (tests).
@@ -370,6 +483,9 @@ pub struct Results {
     hits: Vec<Hit>,
     unlisted: Vec<Hit>,
     counts: Option<Counts>,
+    /// the list is partial: the search ended early (QUERY-010)
+    stopped_early: bool,
+    skipped: Vec<Skipped>,
     listed: Option<Selection>,
     made_for: Option<(String, (u64, u64))>,
     made_at: Option<Instant>,
@@ -399,6 +515,8 @@ pub struct Ask<'a> {
     pub listed: Selection,
     /// there is nothing to search for: the list is empty at once, without the worker
     pub blank: bool,
+    /// the text did not pass the check (QUERY-008): nothing is asked, the last valid list stays
+    pub invalid: bool,
 }
 
 /// How a list is made when it is due.
@@ -422,6 +540,14 @@ impl Results {
             let p = self.pending.take().expect("a pending query was taken");
             self.keep(found, p.text, p.stamp, listed);
             delivered = true;
+        }
+        if ask.invalid {
+            // (what is on its way is for an older text that was valid: it may still arrive)
+            return match (self.pending.is_some(), delivered) {
+                (true, _) => Refreshed::Waits,
+                (false, true) => Refreshed::Made,
+                (false, false) => Refreshed::Unchanged,
+            };
         }
         let current = self.made_for.as_ref().is_some_and(|(t, s)| t == ask.text && *s == ask.stamp);
         let queued = self.pending.as_ref().is_some_and(|p| p.text == ask.text && p.stamp == ask.stamp);
@@ -464,6 +590,8 @@ impl Results {
     /// Make `found` the list for `text` and `stamp`.
     fn keep(&mut self, found: Found, text: String, stamp: (u64, u64), listed: Selection) {
         self.counts = found.counts;
+        self.stopped_early = found.stopped_early;
+        self.skipped = found.skipped;
         (self.hits, self.unlisted) = found.hits.into_iter().partition(|h| is_listed(h, listed));
         self.listed = Some(listed);
         self.made_for = Some((text, stamp));
@@ -483,6 +611,16 @@ impl Results {
         self.counts.as_ref()
     }
 
+    /// Did the search end early, so that the list is partial (QUERY-010)?
+    pub fn stopped_early(&self) -> bool {
+        self.stopped_early
+    }
+
+    /// The sources of `listed` the query was not asked of, with what they lack (QUERY-006).
+    pub fn skipped(&self, listed: Selection) -> impl Iterator<Item = &Skipped> {
+        self.skipped.iter().filter(move |s| listed.contains(s.kind))
+    }
+
     /// Has a list been made at all (an empty one is "nothing found")?
     pub fn is_made(&self) -> bool {
         self.made_for.is_some()
@@ -499,6 +637,12 @@ mod tests {
     use super::*;
     use crate::mail::db::{self, IndexFields, NewMessage, Op, STATE_FULL};
     use crate::social::tests::post;
+
+    /// [`find_wild`] without a budget.
+    fn wildcard_find(line: &str, pat: &str) -> Option<Range<usize>> {
+        let mut fuel = u64::MAX;
+        find_wild(line, pat, &mut fuel)
+    }
 
     // spec: NAV-023, NAV-057
     #[test]
@@ -590,6 +734,149 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// The fixture with two notes that have properties, for the queries of QUERY-002.
+    fn properties_fixture() -> (Vault, std::path::PathBuf) {
+        let (_, dir) = fixture();
+        std::fs::write(dir.join("Task.md"), "---\nstatus: doing\n---\nbanana task\nmore banana\n").unwrap();
+        std::fs::write(dir.join("Idle.md"), "---\nstatus: todo\n---\nbanana idle\n").unwrap();
+        (Vault::open(&dir).unwrap(), dir)
+    }
+
+    // spec: QUERY-002, QUERY-004
+    #[test]
+    fn query_004_fields_select_notes_and_text_terms_find_the_lines_inside_them() {
+        let (v, dir) = properties_fixture();
+        let rows = |q: &str| note_hits(&v, &Query::picker(q)).into_iter().map(|h| (h.title, h.detail)).collect::<Vec<_>>();
+        let row = |t: &str, d: &str| (t.to_string(), d.to_string());
+        assert_eq!(rows("status:doing banana"), [row("banana task", "Task  ·  line 4"), row("more banana", "Task  ·  line 5")], "the lines of the selected note only");
+        assert_eq!(rows("status:doing"), [row("Task", "note")], "no text term: the note itself");
+        assert_eq!(rows("banana status:todo"), [row("banana idle", "Idle  ·  line 4")], "the order of the terms does not matter");
+        let by_field = note_hits(&v, &Query::picker("status:doing"));
+        assert!(matches!(&by_field[0].action, Action::Open { rel, new_tab: false } if rel == std::path::Path::new("Task.md")));
+        assert!(by_field[0].marks.is_empty());
+        assert_eq!(rows("cherry OR status:doing").len(), 2, "a note that matches by a field has no lines to show");
+        assert_eq!(rows("cherry -banana"), [row("cherry", "Other  ·  line 1")], "a text term under NOT shows no lines and rules notes out");
+        let without = rows("banana AND NOT status:doing AND NOT status:todo");
+        assert!(!without.is_empty() && without.iter().all(|r| !r.1.starts_with("Task") && !r.1.starts_with("Idle")), "{without:?}");
+        assert!(rows("(banana").is_empty() && rows("banana AND").is_empty(), "a query that is refused finds nothing");
+        // what the sidebar and the picker had before: one text, lines, names
+        assert_eq!(rows("banana plans"), [row("banana plans", "name")], "a run of words is one phrase");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: QUERY-005
+    #[test]
+    fn query_005_a_prefix_still_chooses_the_sources_and_the_rest_is_the_language() {
+        let (v, dir) = properties_fixture();
+        let db = mail_db_with(&[("Banana order".into(), 10)]);
+        let posts = PostIndex::in_memory();
+        let ctx = Ctx { vault: &v, mail: Some(&db), posts: &posts };
+        let q = Query::picker("f:status:doing banana");
+        assert_eq!(q.listed(), Selection::only(Kind::Notes));
+        let hits = all_hits(&ctx, &q);
+        assert_eq!(hits.iter().map(|h| h.title.as_str()).collect::<Vec<_>>(), ["banana task", "more banana"]);
+        assert_eq!(all_hits(&ctx, &Query::picker("m: subject:banana")).iter().map(|h| h.title.as_str()).collect::<Vec<_>>(), ["Banana order"], "a prefix, then a field of mail");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: QUERY-006
+    #[test]
+    fn query_006_a_source_without_the_field_is_skipped_and_says_so() {
+        let (v, dir) = properties_fixture();
+        let db = mail_db_with(&[("Banana order".into(), 10)]);
+        let mut posts = PostIndex::in_memory();
+        let mut p = post("p1", "ada", crate::calendar::time::now() - 3600, None);
+        p.text_markdown = "banana republic".into();
+        posts.add("acct", "home", &[p]);
+        let ctx = Ctx { vault: &v, mail: Some(&db), posts: &posts };
+        let skipped = |q: &str| search(&ctx, &Query::picker(q)).skipped.iter().map(Skipped::message).collect::<Vec<_>>();
+        assert_eq!(skipped("status:doing banana"), ["Mail: `status:` not supported", "Posts: `status:` not supported"]);
+        let found = search(&ctx, &Query::picker("status:doing banana"));
+        assert_eq!(found.counts.map(|c| (c.get(Kind::Notes), c.get(Kind::Mail), c.get(Kind::Posts))), Some((2, 0, 0)), "skipped, not an empty result: nothing of them is counted or listed");
+        assert!(found.hits.iter().all(|h| h.group == NOTES));
+        assert_eq!(skipped("#todo"), ["Mail: `#` not supported", "Posts: `#` not supported"]);
+        assert_eq!(skipped("path:Fruit/ x"), ["Mail: `path:` not supported", "Posts: `path:` not supported"]);
+        assert_eq!(skipped("due:overdue"), ["Mail: `due:` not supported", "Posts: `due:` not supported"]);
+        assert_eq!(skipped("blocked"), ["Mail: `blocked` not supported", "Posts: `blocked` not supported"]);
+        assert_eq!(skipped("banana OR cherry"), ["Mail: `OR` not supported", "Posts: `OR` not supported"], "the operators too");
+        assert_eq!(skipped("banana -cherry"), ["Mail: `NOT` not supported", "Posts: `NOT` not supported"]);
+        assert!(skipped("banana").is_empty() && skipped("banana AND republic").is_empty(), "text, side by side or ANDed, they all take");
+        assert!(skipped("from:ada banana").is_empty(), "a field they have is passed on");
+        assert_eq!(skipped("to:me banana"), ["Posts: `to:` not supported"], "mail has to:, posts have not");
+        let mails = |q: &str| search(&ctx, &Query::picker(q)).hits.iter().filter(|h| h.group == MAIL).count();
+        assert_eq!((mails("from:ann banana"), mails("from:zed banana")), (1, 0), "from: limits the mail to its sender");
+        // no mail store: it is not skipped, it is not there
+        let ctx = Ctx { vault: &v, mail: None, posts: &posts };
+        assert_eq!(search(&ctx, &Query::picker("status:doing")).skipped.iter().map(Skipped::message).collect::<Vec<_>>(), ["Posts: `status:` not supported"]);
+        // the views name only the sources they list
+        let mut r = Results::default();
+        let mut w = SearchWorker::default();
+        let found = Found { skipped: vec![Skipped { kind: Kind::Mail, what: "status:".into() }, Skipped { kind: Kind::Posts, what: "status:".into() }], ..Default::default() };
+        r.refresh(&mut w, &ask("x", (1, 1), false, false, Selection::ALL), here(|| found));
+        assert_eq!(r.skipped(Selection::only(Kind::Mail)).map(Skipped::message).collect::<Vec<_>>(), ["Mail: `status:` not supported"]);
+        assert_eq!(r.skipped(Selection::only(Kind::Notes)).count(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: QUERY-010
+    #[test]
+    fn query_010_a_search_that_uses_up_its_budget_is_partial_and_says_so() {
+        let (_, dir) = fixture();
+        std::fs::write(dir.join("Long.md"), format!("{}\n", "a".repeat(1900))).unwrap();
+        let snap = Snapshot::of(&Vault::open(&dir).unwrap());
+        let q = Query::picker("banana");
+        let go = AtomicBool::new(false);
+        let normal = search_within(&snap, None, None, &q, &go, Budget::standard()).unwrap();
+        assert!(!normal.stopped_early && !normal.hits.is_empty());
+        let tight = |text: &str| search_within(&snap, None, None, &Query::picker(text), &go, Budget::new(5_000, Duration::from_secs(60))).unwrap();
+        let found = tight("*a*a*a*a*a*a*a*b");
+        assert!(found.stopped_early, "the wildcards over a long line cost more than the budget");
+        assert!(found.hits.is_empty());
+        let partial = tight("banana");
+        assert!(!partial.stopped_early, "a plain word over the same notes is cheap");
+        // the partial list is what the view lists, with the mark
+        let mut r = Results::default();
+        let mut w = SearchWorker::default();
+        r.refresh(&mut w, &ask("x", (1, 1), false, false, Selection::ALL), here(|| found));
+        assert!(r.stopped_early());
+        r.refresh(&mut w, &ask("y", (1, 1), false, false, Selection::ALL), here(|| partial));
+        assert!(!r.stopped_early(), "a new list is complete again");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: QUERY-008
+    #[test]
+    fn query_008_a_text_with_a_syntax_error_asks_nothing_and_the_last_valid_list_stays() {
+        let mut r = Results::default();
+        let mut w = SearchWorker::default();
+        let hits = || Found { hits: vec![hit(NOTES, "a")], ..Default::default() };
+        assert_eq!(r.refresh(&mut w, &ask("a", (1, 1), false, false, Selection::ALL), here(hits)), Refreshed::Made);
+        let invalid = Ask { invalid: true, ..ask("a AND", (1, 1), false, true, Selection::ALL) };
+        let never = |_: &mut SearchWorker| -> Start { panic!("nothing is asked for a query that is refused") };
+        assert_eq!(r.refresh(&mut w, &invalid, never), Refreshed::Unchanged, "even when Enter asks for it");
+        assert_eq!(r.hits().len(), 1, "the last valid list stays");
+        assert!(!r.is_pending());
+        // a query on its way, for a text that was valid, is not given up
+        let (v, dir) = fixture();
+        let posts = PostIndex::in_memory();
+        let ctx = Ctx { vault: &v, mail: None, posts: &posts };
+        let queue = |w: &mut SearchWorker| Start::Queued(w.submit(Slot::PICKER, Request::new(&ctx, &Query::picker("b"))));
+        assert_eq!(r.refresh(&mut w, &ask("b", (1, 1), false, true, Selection::ALL), queue), Refreshed::Waits);
+        assert!(r.is_pending());
+        assert_eq!(r.refresh(&mut w, &invalid, never), Refreshed::Waits, "it is still on its way");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: QUERY-007
+    #[test]
+    fn query_007_the_check_of_the_view_goes_with_the_query_to_the_search() {
+        let (v, dir) = properties_fixture();
+        let checked = Checked::search("status:doing", Prefixes::default());
+        let q = Query::picker("something else entirely").with_checked(&checked);
+        assert_eq!(note_hits(&v, &q).len(), 1, "the query that was checked is the one that runs");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     // spec: NAV-022, NAV-024
     #[test]
     fn the_groups_come_in_order_with_what_each_index_finds() {
@@ -673,7 +960,7 @@ mod tests {
 
     /// What a view asks in one frame, for a test.
     fn ask(text: &str, stamp: (u64, u64), debounced: bool, now: bool, listed: Selection) -> Ask<'_> {
-        Ask { slot: Slot::PICKER, text, stamp, debounced, now, listed, blank: false }
+        Ask { slot: Slot::PICKER, text, stamp, debounced, now, listed, blank: false, invalid: false }
     }
 
     /// A list that is made on the spot (the names of files).
@@ -686,7 +973,7 @@ mod tests {
     fn another_selection_lists_the_kept_hits_without_a_new_search() {
         let mut r = Results::default();
         let mut w = SearchWorker::default();
-        let hits = || Found { hits: vec![hit(NOTES, "a"), hit(NOTES, "b"), hit(MAIL, ""), hit(POSTS, "")], counts: Some(Counts([2, 1, 1])) };
+        let hits = || Found { hits: vec![hit(NOTES, "a"), hit(NOTES, "b"), hit(MAIL, ""), hit(POSTS, "")], counts: Some(Counts([2, 1, 1])), ..Default::default() };
         let groups = |r: &Results| r.hits().iter().map(|h| h.group).collect::<Vec<_>>();
         assert_eq!(r.refresh(&mut w, &ask("x", (1, 1), false, false, Selection::only(Kind::Mail)), here(hits)), Refreshed::Made);
         assert_eq!(groups(&r), [MAIL]);
@@ -699,7 +986,7 @@ mod tests {
         assert_eq!(r.refresh(&mut w, &ask("x", (1, 1), false, false, two), |_| panic!("no new search")), Refreshed::Unchanged);
         // a list without sources is always listed
         let mut names = Results::default();
-        names.refresh(&mut w, &ask("", (1, 1), false, false, Selection::only(Kind::Posts)), here(|| Found { hits: vec![hit("", "")], counts: None }));
+        names.refresh(&mut w, &ask("", (1, 1), false, false, Selection::only(Kind::Posts)), here(|| Found { hits: vec![hit("", "")], ..Default::default() }));
         assert_eq!(names.hits().len(), 1);
     }
 
@@ -726,7 +1013,7 @@ mod tests {
     }
 
     fn found(hits: Vec<Hit>) -> Found {
-        Found { hits, counts: None }
+        Found { hits, ..Default::default() }
     }
 
     // spec: NAV-022

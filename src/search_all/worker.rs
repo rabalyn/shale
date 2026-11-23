@@ -14,6 +14,7 @@
 //!   (QUERY-018), and [`SearchWorker::busy`] tells `Headless::settle` that a query is on its way
 //!   (QUERY-020).
 
+use super::query::Checked;
 use super::{search_in, Ctx, Found, Query, Snapshot};
 use crate::mail::db;
 use crate::search_sources::{Prefixes, Selection};
@@ -46,6 +47,8 @@ pub struct Request {
     limit: usize,
     prefixes: Prefixes,
     shown: Selection,
+    /// the text as the view checked it, once for the text (QUERY-013)
+    checked: Option<Checked>,
     /// the mail index file, while the mail store is open
     mail: Option<PathBuf>,
     posts: Home,
@@ -56,11 +59,21 @@ impl Request {
     pub fn new(ctx: &Ctx, query: &Query) -> Request {
         // (a mail connection that is not a file has nothing another connection could read)
         let mail = ctx.mail.and_then(|c| c.path()).filter(|p| !p.is_empty()).map(PathBuf::from);
-        Request { snapshot: Snapshot::of(ctx.vault), text: query.text.to_string(), note_lines: query.note_lines, limit: query.limit, prefixes: query.prefixes, shown: query.shown, mail, posts: ctx.posts.home().clone() }
+        Request {
+            snapshot: Snapshot::of(ctx.vault),
+            text: query.text.to_string(),
+            note_lines: query.note_lines,
+            limit: query.limit,
+            prefixes: query.prefixes,
+            shown: query.shown,
+            checked: query.checked.cloned(),
+            mail,
+            posts: ctx.posts.home().clone(),
+        }
     }
 
     fn query(&self) -> Query<'_> {
-        Query { text: &self.text, note_lines: self.note_lines, limit: self.limit, prefixes: self.prefixes, shown: self.shown }
+        Query { text: &self.text, note_lines: self.note_lines, limit: self.limit, prefixes: self.prefixes, shown: self.shown, checked: self.checked.as_ref() }
     }
 }
 
@@ -256,7 +269,7 @@ mod tests {
 
     /// A request that searches nothing: the runners of the tests only read its text.
     fn bare(text: &str) -> Request {
-        Request { snapshot: Snapshot::default(), text: text.into(), note_lines: 3, limit: 20, prefixes: Prefixes::default(), shown: Selection::ALL, mail: None, posts: Home::Memory("none".into()) }
+        Request { snapshot: Snapshot::default(), text: text.into(), note_lines: 3, limit: 20, prefixes: Prefixes::default(), shown: Selection::ALL, checked: None, mail: None, posts: Home::Memory("none".into()) }
     }
 
     fn titles(f: &Found) -> Vec<String> {
@@ -276,7 +289,7 @@ mod tests {
     /// Runs on the thread of the worker and answers with the name of that thread and the text.
     fn echo(_: &mut Conns, req: &Request, _: &AtomicBool) -> Option<Found> {
         let who = std::thread::current();
-        Some(Found { hits: vec![Hit::new("", format!("{}:{:?}", req.text, who.id()), who.name().unwrap_or("").into(), crate::app::Action::FocusEditor)], counts: None })
+        Some(Found { hits: vec![Hit::new("", format!("{}:{:?}", req.text, who.id()), who.name().unwrap_or("").into(), crate::app::Action::FocusEditor)], counts: None, ..Default::default() })
     }
 
     /// Runs until it is given up.
@@ -394,9 +407,16 @@ mod tests {
         let snap = Snapshot::of(&v);
         let q = Query::picker("banana");
         let go = AtomicBool::new(false);
-        assert_eq!(super::super::scan_notes(&snap, &q, &go).len(), 3, "not given up: the lines of the note");
+        let checked = super::super::query::Checked::search("banana", Prefixes::default());
+        let scan = |flag: &AtomicBool| {
+            let mut run = super::super::Run::new(&snap, flag, super::super::Budget::standard());
+            (super::super::scan_notes(&snap, &q, checked.expr().unwrap(), &mut run), run.stopped)
+        };
+        let (hits, stopped) = scan(&go);
+        assert_eq!((hits.len(), stopped), (3, None), "not given up: the lines of the note");
         let stop = AtomicBool::new(true);
-        assert!(super::super::scan_notes(&snap, &q, &stop).is_empty(), "given up: not a line is read");
+        let (hits, stopped) = scan(&stop);
+        assert_eq!((hits.len(), stopped), (0, Some(super::super::Stop::Cancelled)), "given up: not a line is read");
         assert!(search_in(&snap, None, None, &q, &stop).is_none(), "and the search has no answer");
         assert!(search_in(&snap, None, None, &q, &go).is_some_and(|f| f.hits.len() == 3));
         let _ = std::fs::remove_dir_all(&d);

@@ -13,6 +13,15 @@ your mail is set up and open) and **Posts** (the posts of your feeds that Shale 
 group with its count (`200+` when there are more). What you can type (wildcards, every word of mail and posts as a word start, `"phrases"`,
 the fields `from:`, `subject:`, `in:`, `date:` of mail and posts) is in [[Search syntax]].
 
+The search reads a small **query language**: `AND`, `OR`, `NOT` (upper case), parentheses, `-word`,
+and the fields `#tag`, `status:doing` (any property of a note), `path:Projects/`, `due:<+7d`,
+`due:overdue`, `links:[[Note]]`, `blocked` and `blocking`. For example `#todo due:overdue NOT status:done`
+lists the notes with the tag whose due date has passed. A query that is not valid (an open parenthesis,
+`due:soon`) is underlined in the box with the reason under it, and the last list stays. Mail and posts
+take only words and their own fields; when a query has something they do not understand, a line under the
+source buttons says which source was skipped. When a search takes too long it stops and says "Stopped
+early, narrow the query". The rules are in [[Search syntax]].
+
 ![[sidebar-search.png]]
 
 ## Choosing the sources: prefixes and buttons
@@ -74,7 +83,7 @@ be changed in Settings → Keybindings ("Main views").
   ignoring case; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the file in this tab, Esc closes.
   It never creates a note, unlike Ctrl+O.
 - **Space f g**: "Search notes, mail and posts" in one list (the same search as the sidebar's), grouped under Notes, Mail and
-  Posts with their counts; the syntax is in [[Search syntax]]. Enter
+  Posts with their counts; the syntax and the query language are in [[Search syntax]]. Enter
   opens the hit where it belongs: the note at the found line, the mail in the mail view, the post
   in a Feeds tab.
 
