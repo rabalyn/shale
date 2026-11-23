@@ -366,6 +366,7 @@ mod tests {
         assert!(post_title(&p).ends_with("– Grüße 😀 aus Köln"));
     }
 
+    // spec: SOC-011
     // spec: IMP-050, IMP-052, IMP-058
     #[test]
     fn the_header_is_properties_and_a_list_only_on_request() {
@@ -390,6 +391,7 @@ mod tests {
         assert_eq!(strip(&on), strip(&off));
     }
 
+    // spec: SOC-011
     #[test]
     fn single_post_note() {
         let mut p = post("42", "ada", 1_715_941_800, None);
@@ -441,6 +443,7 @@ mod tests {
         assert!(note_has_post(&n, "42") && !note_has_post(&n, "4"));
     }
 
+    // spec: SOC-011
     #[test]
     fn thread_note_layout() {
         let mut ps: Vec<Post> = (1..=3).map(|i| post(&format!("p{i}"), "ada", 1_715_941_800 + i * 60, None)).collect();
@@ -466,6 +469,7 @@ mod tests {
         assert_eq!(marker("p1"), "post-id: \"p1\"");
     }
 
+    // spec: SOC-011
     #[test]
     fn failed_thread_and_missing_paths_fall_back_to_links() {
         let mut p = post("1", "ada", 0, None);

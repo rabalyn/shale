@@ -519,6 +519,7 @@ mod tests {
                "media_attachments": [], "replies_count": 1, "reblogs_count": 2, "favourites_count": 3})
     }
 
+    // spec: SOC-001
     #[test]
     fn status_parsing() {
         let mut s = status("10", "1", "ada", "2024-05-17T10:30:00.000Z", None, "<p>Hello <a href=\"https://m.test/tags/x\" class=\"mention hashtag\">#<span>x</span></a></p>");
@@ -542,6 +543,7 @@ mod tests {
         assert!(parse_status(&json!({"foo": 1}), "https://m.test").is_none());
     }
 
+    // spec: SOC-014, SOC-019
     #[test]
     fn thread_from_a_context_fixture() {
         let ctx = json!({
@@ -558,6 +560,7 @@ mod tests {
         assert_eq!(r.iter().map(|r| (r.post.text_markdown.as_str(), r.depth)).collect::<Vec<_>>(), [("nice", 0), ("reply to cy", 1)]);
     }
 
+    // spec: SOC-001, SOC-039
     // spec: SOC-056
     #[test]
     fn sign_in_feeds_paging_thread_and_media_against_a_mock_server() {
@@ -616,6 +619,7 @@ mod tests {
         assert_eq!(seen.len(), 9, "{seen:?}");
     }
 
+    // spec: SOC-001
     #[test]
     fn errors_are_readable() {
         if std::process::Command::new("curl").arg("--version").output().is_err() {

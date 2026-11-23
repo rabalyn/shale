@@ -1126,6 +1126,7 @@ mod tests {
         assert_eq!(serde_json::from_str::<Config>(&back).unwrap().mail_accounts, c.mail_accounts);
     }
 
+    // spec: SOC-025
     // spec: SOC-003
     #[test]
     fn social_accounts_are_saved_without_secrets_that_the_keyring_holds() {

@@ -1184,6 +1184,7 @@ mod tests {
         assert!(bare.contains("# Plan\n\n## Message\n\nHallo"), "{bare}");
     }
 
+    // spec: SOC-020
     // spec: SOC-011, SOC-012
     #[test]
     fn a_saved_post_becomes_a_note_with_pictures_and_a_second_import_is_spotted() {
