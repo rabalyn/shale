@@ -4002,6 +4002,7 @@ dependencies = [
  "tracing-subscriber",
  "two-face",
  "unicode-normalization",
+ "unicode-segmentation",
  "wayland-backend",
  "wayland-client",
  "wayland-server",

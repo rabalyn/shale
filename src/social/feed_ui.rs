@@ -2,6 +2,7 @@
 //! A centred column like the task list; the next page loads when the end of the list comes
 //! into view; pictures come from `ImageCache` (never from the UI thread's network).
 
+use super::actions::{busy_key, Reaction};
 use super::images::ImageCache;
 use super::state::{post_key, FeedsState, SocialState};
 use super::viewer::{self, Viewer};
@@ -37,6 +38,16 @@ pub struct TabCtx {
     pub last: Option<(String, String)>,
     /// plain keys (the `.` key) may be used: no dialog is open
     pub keys: bool,
+    /// the open vault: a picture path typed in the compose box may start here (SOC-053)
+    pub vault: Option<std::path::PathBuf>,
+}
+
+/// What a click on a button of a card asks for besides saving and the conversation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CardAct {
+    React(Reaction),
+    Reply,
+    Quote,
 }
 
 /// Where a tab's view is held still while posts come in above it (SOC-028): the post at the top
@@ -240,6 +251,9 @@ pub(super) struct Cx<'a> {
     /// the tab drawn, and the viewer a click on a picture opens in it (SOC-044)
     pub tab: u64,
     pub viewer: &'a mut Option<Viewer>,
+    /// the account drawn for, and the reactions on their way (SOC-050)
+    pub account: &'a str,
+    pub busy: &'a HashSet<String>,
 }
 
 impl Cx<'_> {
@@ -366,7 +380,7 @@ pub(super) fn inset(ui: &mut Ui, f: impl FnOnce(&mut Ui)) -> egui::Response {
         .response
 }
 
-fn short(s: &str, n: usize) -> String {
+pub(super) fn short(s: &str, n: usize) -> String {
     let one: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
     if one.chars().count() > n {
         format!("{}…", one.chars().take(n).collect::<String>().trim_end())
@@ -390,6 +404,8 @@ pub(super) struct CardOut {
     pub save: bool,
     /// the conversation was asked for: in a new tab (Shift+click, middle click) or not
     pub thread: Option<bool>,
+    /// a reaction, reply or quote button was pressed (SOC-050, SOC-051)
+    pub act: Option<CardAct>,
     pub rect: Rect,
 }
 
@@ -405,6 +421,7 @@ pub(super) fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, look: Look) -> CardO
     let key = post_key(p);
     let mut save = false;
     let mut thread = None;
+    let mut act = None;
     let inner = width - 24.0;
     let pal = theme::palette();
     let frame = egui::Frame::new().fill(if highlight { pal.bg_active } else { pal.bg_secondary }).corner_radius(8).inner_margin(12);
@@ -496,6 +513,30 @@ pub(super) fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, look: Look) -> CardO
                 ui.add_space(4.0);
             }
         }
+        // reply, boost, like, quote (SOC-050, SOC-051): one size whatever the state, so nothing moves
+        ui.horizontal(|ui| {
+            let mastodon = p.network == Network::Mastodon;
+            let on_fill = theme::palette().accent.gamma_multiply(0.55);
+            if cx.rec(format!("reply:{idx}"), ui.button("Reply")).on_hover_text("Write a reply to this post").clicked() {
+                act = Some(CardAct::Reply);
+            }
+            for (kind, label, on) in [(Reaction::Boost, if mastodon { "Boost" } else { "Repost" }, p.mine.boosted), (Reaction::Like, if mastodon { "Favourite" } else { "Like" }, p.mine.liked)] {
+                let busy = cx.busy.contains(&busy_key(cx.account, &p.id, kind));
+                let (b, spinner) = spinner_button(ui, label, on.then_some(on_fill), true, busy);
+                let name = if kind == Reaction::Like { "like" } else { "boost" };
+                if let Some(at) = spinner {
+                    cx.rects.push((format!("{name}-spinner:{idx}"), at));
+                }
+                let hint = if on { format!("Undo your {}", kind.verb(p.network)) } else { format!("{label} this post") };
+                if cx.rec(format!("{name}:{idx}"), b).on_hover_text(hint).clicked() {
+                    act = Some(CardAct::React(kind));
+                }
+            }
+            if cx.rec(format!("quote:{idx}"), ui.button("Quote")).on_hover_text("Write a post that quotes this one").clicked() {
+                act = Some(CardAct::Quote);
+            }
+        });
+        ui.add_space(2.0);
         // counts and buttons
         ui.horizontal(|ui| {
             let busy = cx.saving.contains(&key);
@@ -531,7 +572,7 @@ pub(super) fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, look: Look) -> CardO
             });
         });
     });
-    CardOut { save, thread, rect: card.response.rect }
+    CardOut { save, thread, act, rect: card.response.rect }
 }
 
 /// A post of a list: drawn, or, when it is far from the view (`near`: the part of the list that
@@ -546,7 +587,7 @@ pub(super) fn list_card(ui: &mut Ui, cx: &mut Cx, heights: &mut HashMap<(String,
     if let Some(h) = kept {
         // (`add_space` adds no spacing after itself; a drawn card is followed by `gap`)
         ui.add_space(h);
-        return CardOut { save: false, thread: None, rect: Rect::from_min_size(at + Vec2::new(indent, 0.0), Vec2::new(width, (h - gap).max(0.0))) };
+        return CardOut { save: false, thread: None, act: None, rect: Rect::from_min_size(at + Vec2::new(indent, 0.0), Vec2::new(width, (h - gap).max(0.0))) };
     }
     let out = if indent > 0.0 {
         ui.horizontal_top(|ui| {
@@ -591,6 +632,15 @@ pub(super) fn keep_still<R>(ctx: &egui::Context, anchor: &mut Anchor, post_rects
             }
             None => anchor.key.clear(),
         }
+    }
+}
+
+/// Do what a reaction, reply or quote button asked for (SOC-050, SOC-051).
+pub(super) fn do_act(ctx: &egui::Context, st: &mut SocialState, entry: &SocialAccountEntry, tab: u64, feed: &str, post: &Post, act: CardAct) {
+    match act {
+        CardAct::React(kind) => st.react(ctx, entry, post, kind),
+        CardAct::Reply => st.open_compose(ctx, entry, tab, feed, Some(post), None),
+        CardAct::Quote => st.open_compose(ctx, entry, tab, feed, None, Some(post)),
     }
 }
 
@@ -668,10 +718,11 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
     let mut check_now = false;
     let mut reload = false;
     let mut retry_feeds = false;
+    let mut new_post = false;
     let mut pick: Option<(FeedRef, bool)> = None;
     column(ui, width, |ui| {
         ui.horizontal(|ui| {
-            let c = egui::ComboBox::from_id_salt(("social-account", tab.id)).selected_text(account_label(&entry)).width(210.0).show_ui(ui, |ui| {
+            let c = egui::ComboBox::from_id_salt(("social-account", tab.id)).selected_text(account_label(&entry)).width(130.0).show_ui(ui, |ui| {
                 for e in accounts {
                     if ui.selectable_label(e.account.id == aid, account_label(e)).clicked() {
                         pick = Some((FeedRef::new(e.account.id.clone(), String::new()), false));
@@ -683,7 +734,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
             match st.feeds.get(&aid) {
                 Some(FeedsState::Ready(list)) => {
                     let name = feed.as_ref().map(|f| f.title.clone()).unwrap_or_default();
-                    let c = egui::ComboBox::from_id_salt(("social-feed", tab.id)).selected_text(name).width(180.0).show_ui(ui, |ui| {
+                    let c = egui::ComboBox::from_id_salt(("social-feed", tab.id)).selected_text(name).width(125.0).show_ui(ui, |ui| {
                         for f in list {
                             ui.horizontal(|ui| {
                                 let r = ui.selectable_label(feed.as_ref().map(|c| c.id == f.id).unwrap_or(false), &f.title);
@@ -735,6 +786,9 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
                 if r.clicked() {
                     asks.push(Ask::Accounts);
                 }
+                let r = ui.button("New post").on_hover_text("Write a new post");
+                st.rects.push(("new-post".into(), r.rect));
+                new_post = r.clicked();
             });
         });
         if let Some(FeedsState::Failed(e)) = st.feeds.get(&aid) {
@@ -746,6 +800,9 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
     }
     if retry_feeds {
         st.reload_feeds(&ctx, &entry);
+    }
+    if new_post {
+        st.open_compose(&ctx, &entry, tab.id, feed.as_ref().map(|f| f.id.as_str()).unwrap_or(""), None, None);
     }
     if let Some(f) = &feed {
         if check_now {
@@ -803,6 +860,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
     let reloads = st.timelines.get(&key).map(|t| t.reloads).unwrap_or(0);
     let mut save_post: Option<Post> = None;
     let mut open_thread: Option<(Post, bool)> = None;
+    let mut acted: Option<(Post, CardAct)> = None;
     let mut fill_gap: Option<String> = None;
     let mut retry = false;
     let mut near_end = false;
@@ -818,12 +876,12 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
     let mut post_rects: Vec<(String, Rect)> = vec![];
     let mut content_top = 0.0;
     let out = {
-        let SocialState { images, revealed, saving, rects, card_heights, viewer, .. } = st;
+        let SocialState { images, revealed, saving, rects, card_heights, viewer, writes, .. } = st;
         if card_heights.len() > 50_000 {
             card_heights.clear();
         }
         let Some(images) = images.as_ref() else { return asks };
-        let mut cx = Cx { images, revealed, saving, rects, now: crate::calendar::time::now(), tab: tab.id, viewer };
+        let mut cx = Cx { images, revealed, saving, rects, now: crate::calendar::time::now(), tab: tab.id, viewer, account: &aid, busy: &writes.busy };
         let mut area = egui::ScrollArea::vertical().id_salt(("social-scroll", tab.id, &aid, &feed.id)).auto_shrink([false, false]);
         if let Some(off) = applied {
             area = area.vertical_scroll_offset(off);
@@ -843,6 +901,9 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
                     }
                     if let Some(new_tab) = card.thread {
                         open_thread = Some((p.clone(), new_tab));
+                    }
+                    if let Some(a) = card.act {
+                        acted = Some((p.clone(), a));
                     }
                     let rect = card.rect;
                     if gaps.contains(&k) {
@@ -912,8 +973,12 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
     if let Some((post, new_tab)) = open_thread {
         asks.push(Ask::Thread { feed: FeedRef::new(aid.clone(), feed.id.clone()), post: Box::new(post), new_tab });
     }
-    // the picture viewer covers the tab (SOC-044)
+    if let Some((post, act)) = acted {
+        do_act(&ctx, st, &entry, tab.id, &feed.id, &post, act);
+    }
+    // the picture viewer covers the tab (SOC-044), the compose box floats over it (SOC-051)
     show_viewer(&ctx, tab_rect, st, tab);
+    super::compose_ui::show(&ctx, tab_rect, st, &entry, tab);
     if st.images.as_ref().map(|i| i.pending() > 0).unwrap_or(false) {
         ctx.request_repaint_after(std::time::Duration::from_millis(300));
     }
@@ -950,7 +1015,7 @@ mod tests {
         fn new() -> H {
             let ctx = egui::Context::default();
             crate::theme::install_fonts(&ctx);
-            H { ctx, t: 0.0, tab: TabCtx { id: 1, feed: None, last: None, keys: true } }
+            H { ctx, t: 0.0, tab: TabCtx { id: 1, feed: None, last: None, keys: true, vault: None } }
         }
         fn frame(&mut self, events: Vec<Ev>, st: &mut SocialState, accounts: &[SocialAccountEntry]) -> Vec<Ask> {
             self.t += 0.05;

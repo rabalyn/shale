@@ -299,6 +299,9 @@ fn soc_047_replies_are_cards_like_the_feed_with_pictures_the_viewer_content_warn
     // a content warning is shown and can be opened
     let key = post_key(&post("cw", "dave", 1200, Some("h0")));
     assert!(!w.app.social.revealed.contains(&key));
+    // (the cards hold a row of buttons: the post with the warning is further down)
+    w.scroll(250.0);
+    w.frames(3);
     w.click("cw:2");
     assert!(w.app.social.revealed.contains(&key));
     // Save to vault works from here: the Import dialog opens with the post

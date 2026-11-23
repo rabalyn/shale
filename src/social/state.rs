@@ -3,11 +3,13 @@
 //! that `poll` reads each frame; a job that panics sends an error instead, so no spinner runs
 //! forever (ADR-0006).
 
+use super::actions::{ActionError, Draft, InstanceInfo, Reacted, Reaction, Writes};
+use super::compose::Compose;
 use super::images::ImageCache;
 use super::note::SavedPost;
 use super::post_index::PostIndex;
 use super::thread::{ThreadStatus, Threads};
-use super::{Client, Feed, FeedRef, Fresh, Page, Post, Since, SocialAccountEntry, ThreadView};
+use super::{Client, Feed, FeedRef, Fresh, Network, Page, Post, Since, SocialAccountEntry, ThreadView};
 use eframe::egui::{Context, Rect};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -27,6 +29,18 @@ pub trait Source: Send + Sync {
     fn post(&self, id: &str) -> Result<Post, String>;
     /// The conversation around a post (SOC-045).
     fn thread(&self, post: &Post) -> Result<ThreadView, String>;
+    /// Like / boost a post or undo it (SOC-050); a pretend server that does not say fails.
+    fn react(&self, _post: &Post, _kind: Reaction, _on: bool) -> Result<Reacted, ActionError> {
+        Err("this pretend server does not take writes".into())
+    }
+    /// Send a post (SOC-051).
+    fn send(&self, _draft: &Draft) -> Result<Post, ActionError> {
+        Err("this pretend server does not take writes".into())
+    }
+    /// What the server allows in a post (SOC-052).
+    fn instance(&self) -> Result<InstanceInfo, String> {
+        Ok(InstanceInfo::defaults(Network::Mastodon))
+    }
 }
 
 /// A hole in a list: posts between the post `above` (a `post_key`) and the one below it were not
@@ -158,7 +172,7 @@ pub struct Focus {
     pub post: Post,
 }
 
-enum Msg {
+pub(super) enum Msg {
     Feeds { account: String, client: Option<Client>, result: Result<Vec<Feed>, String> },
     Page { key: (String, String), client: Option<Client>, replace: bool, result: Result<Page, String> },
     Check { key: (String, String), client: Option<Client>, result: Result<Fresh, String> },
@@ -166,6 +180,9 @@ enum Msg {
     Saved { post: String, account: String, feed: String, label: &'static str, result: Result<SavedPost, String> },
     Thread { account: String, feed: String, id: String, client: Option<Client>, result: Result<Box<ThreadView>, String> },
     Fetched { tab: u64, account: String, feed: String, client: Option<Client>, result: Result<Box<Post>, String> },
+    Reacted { account: String, post: String, kind: Reaction, on: bool, client: Option<Client>, result: Result<Reacted, ActionError> },
+    Sent { account: String, feed: String, client: Option<Client>, result: Result<Box<Post>, ActionError> },
+    Instance { account: String, client: Option<Client>, result: Result<InstanceInfo, String> },
 }
 
 pub struct SocialState {
@@ -213,8 +230,12 @@ pub struct SocialState {
     pub viewer: Option<super::viewer::Viewer>,
     /// the conversations opened from posts (SOC-045)
     pub threads: Threads,
-    clients: HashMap<String, Client>,
-    tx: Sender<Msg>,
+    /// reactions on their way, accounts that cannot write, what the servers allow (SOC-050, SOC-056)
+    pub writes: Writes,
+    /// the compose box (SOC-051)
+    pub compose: Option<Compose>,
+    pub(super) clients: HashMap<String, Client>,
+    pub(super) tx: Sender<Msg>,
     rx: Receiver<Msg>,
 }
 
@@ -223,7 +244,7 @@ pub fn post_key(p: &Post) -> String {
     format!("{}|{}", p.id, p.reposted_by.as_ref().map(|b| b.id.as_str()).unwrap_or(""))
 }
 
-fn run(ctx: &Context, tx: &Sender<Msg>, job: impl FnOnce() -> Msg + Send + 'static, fail: impl FnOnce(String) -> Msg + Send + 'static) {
+pub(super) fn run(ctx: &Context, tx: &Sender<Msg>, job: impl FnOnce() -> Msg + Send + 'static, fail: impl FnOnce(String) -> Msg + Send + 'static) {
     let (ctx, tx) = (ctx.clone(), tx.clone());
     crate::jobs::run(job, move |r| {
         let msg = r.unwrap_or_else(fail);
@@ -260,6 +281,8 @@ impl SocialState {
             confirm_clear: false,
             viewer: None,
             threads: Threads::default(),
+            writes: Writes::default(),
+            compose: None,
             clients: HashMap::new(),
             tx,
             rx,
@@ -354,7 +377,7 @@ impl SocialState {
         self.clients.remove(account);
     }
 
-    fn client_source(&self, e: &SocialAccountEntry) -> impl FnOnce() -> Client + Send + 'static {
+    pub(super) fn client_source(&self, e: &SocialAccountEntry) -> impl FnOnce() -> Client + Send + 'static {
         let (cached, entry) = (self.clients.get(&e.account.id).cloned(), e.clone());
         move || cached.unwrap_or_else(|| Client::new(entry.account.clone(), entry.secret().expose()))
     }
@@ -699,6 +722,27 @@ impl SocialState {
                     // the conversation's posts are posts of the account too (SOC-045, SOC-037)
                     let posts = self.threads.arrived(&account, &id, result);
                     self.index.add(&account, &feed, &posts);
+                }
+                Msg::Reacted { account, post, kind, on, client, result } => {
+                    if let Some(c) = client {
+                        self.clients.insert(account.clone(), c);
+                    }
+                    self.reacted(&account, &post, kind, on, result);
+                }
+                Msg::Sent { account, feed, client, result } => {
+                    if let Some(c) = client {
+                        self.clients.insert(account.clone(), c);
+                    }
+                    self.sent(&account, &feed, result);
+                }
+                Msg::Instance { account, client, result } => {
+                    if let Some(c) = client {
+                        self.clients.insert(account.clone(), c);
+                    }
+                    self.writes.asking.remove(&account);
+                    if let Ok(info) = result {
+                        self.writes.info.insert(account, info);
+                    }
                 }
                 Msg::Fetched { tab, account, feed, client, result } => {
                     if let Some(c) = client {

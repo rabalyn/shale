@@ -15,7 +15,7 @@ impl ShaleApp {
     /// The Feeds tab on screen: `feed` is what its view says.
     pub fn social_view(&mut self, ui: &mut Ui, feed: Option<FeedRef>) {
         let accounts = self.cfg.social_accounts.clone();
-        let tab = TabCtx { id: self.tabbar.tabs.get(self.tabbar.active).map(|t| t.id).unwrap_or(0), feed, last: self.cfg.social_last.clone(), keys: self.modal.is_none() };
+        let tab = TabCtx { id: self.tabbar.tabs.get(self.tabbar.active).map(|t| t.id).unwrap_or(0), feed, last: self.cfg.social_last.clone(), keys: self.modal.is_none(), vault: self.vault.as_ref().map(|v| v.root.clone()) };
         let font = self.fonts.area(crate::fonts::Area::Social);
         for a in crate::fonts::with_area(ui, &font, |ui| feed_ui::show(ui, &mut self.social, &accounts, &tab)) {
             match a {
@@ -154,6 +154,24 @@ impl ShaleApp {
         for m in std::mem::take(&mut self.social.messages) {
             self.toast(m);
         }
+        // an account whose token cannot write is signed in again (SOC-056): the dialog opens on its Edit form
+        for id in std::mem::take(&mut self.social.writes.needs_write) {
+            let Some(e) = self.cfg.social_accounts.iter_mut().find(|e| e.account.id == id) else { continue };
+            // a refusal means the token has no write permission, whatever the sign-in said
+            if e.account.may_write() != Some(false) {
+                e.account.scopes = Some("read".into());
+                self.save_config();
+            }
+            let account = self.cfg.social_accounts.iter().find(|e| e.account.id == id).map(|e| e.account.clone());
+            if let (Some(a), true) = (account, self.modal.is_none() || matches!(self.modal, Some(Modal::Social(_)))) {
+                let mut d = match self.modal.take() {
+                    Some(Modal::Social(d)) => d,
+                    _ => Box::default(),
+                };
+                d.start_edit(&a);
+                self.modal = Some(Modal::Social(d));
+            }
+        }
         // the feeds open in tabs look for new posts every few minutes
         self.social.check_every = Duration::from_secs(u64::from(self.cfg.social_check_minutes) * 60);
         let (accounts, open) = (self.cfg.social_accounts.clone(), self.open_feed_refs());
@@ -194,6 +212,7 @@ impl ShaleApp {
                 match self.cfg.social_accounts.iter_mut().find(|x| x.account.id == e.account.id) {
                     Some(x) => {
                         x.secret = e.secret;
+                        x.account.scopes = e.account.scopes;
                         self.social.forget_client(&x.account.id);
                         let name = x.account.handle.clone();
                         self.save_config();

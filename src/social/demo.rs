@@ -65,6 +65,9 @@ fn post(id: &str, who: Author, ago_minutes: i64, text: &str) -> Post {
         reply_count: 0,
         boost_count: 0,
         like_count: 0,
+        mine: Mine::default(),
+        reply_root: None,
+        visibility: Some("public".into()),
     }
 }
 

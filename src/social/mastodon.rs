@@ -3,14 +3,16 @@
 //!
 //! Sign-in steps: `register_app` once per server → open `authorize_url` in the browser → the
 //! user copies the code the server shows → `exchange_code` gives the access token → `verify`
-//! checks it and tells the user's name. The token only needs the `read` permission.
+//! checks it and tells the user's name. The token asks for `read write` (SOC-001, SOC-056); an account
+//! that signed in before with `read` only keeps reading and is asked to sign in again to write.
 
+use super::actions::{prepare, write_error, ActionError, Draft, DraftPicture, InstanceInfo, Reacted, Reaction, TempFile, MAX_PICTURES};
 use super::markup::html_to_markdown;
 use super::*;
 use serde_json::json;
 
 const REDIRECT: &str = "urn:ietf:wg:oauth:2.0:oob";
-const SCOPE: &str = "read";
+const SCOPE: &str = "read write";
 const PAGE_SIZE: &str = "20";
 
 /// What `register_app` gets from the server (the secret is not shown in debug output).
@@ -58,8 +60,9 @@ pub fn authorize_url(server: &str, app: &AppCredentials) -> Result<String, Strin
     Ok(format!("{server}/oauth/authorize{}", query(&[("client_id", &app.client_id), ("scope", SCOPE), ("redirect_uri", REDIRECT), ("response_type", "code")])))
 }
 
-/// Step 3: the code from the browser → the access token.
-pub fn exchange_code(server: &str, app: &AppCredentials, code: &str) -> Result<Secret, String> {
+/// Step 3: the code from the browser → the access token and the permissions it was given
+/// (`scope`, "read write"; None when the server does not say).
+pub fn exchange_code(server: &str, app: &AppCredentials, code: &str) -> Result<(Secret, Option<String>), String> {
     let _step = tracing::info_span!("flow.social_mastodon.exchange_code", peer = "server").entered();
     let server = base(server)?;
     let mut body = json!({"client_id": app.client_id, "client_secret": app.client_secret.expose(), "redirect_uri": REDIRECT, "grant_type": "authorization_code", "code": code.trim(), "scope": SCOPE});
@@ -67,11 +70,12 @@ pub fn exchange_code(server: &str, app: &AppCredentials, code: &str) -> Result<S
     wipe_value(&mut body);
     let mut v = answer?;
     let tok = secret_of(&v["access_token"]);
+    let scope = Some(text(&v["scope"]).trim().to_string()).filter(|s| !s.is_empty());
     wipe_value(&mut v);
     if tok.is_empty() {
         Err("the server did not give an access token".into())
     } else {
-        Ok(tok)
+        Ok((tok, scope))
     }
 }
 
@@ -262,6 +266,7 @@ pub fn parse_status(s: &Value, server: &str) -> Option<Post> {
             body.push_str(&format!("\n- [ ] {}", text(&o["title"])));
         }
     }
+    let visibility = Some(text(&s["visibility"])).filter(|v| !v.is_empty());
     Some(Post {
         network: Network::Mastodon,
         id,
@@ -279,6 +284,9 @@ pub fn parse_status(s: &Value, server: &str) -> Option<Post> {
         reply_count: count(&s["replies_count"]),
         boost_count: count(&s["reblogs_count"]),
         like_count: count(&s["favourites_count"]),
+        mine: Mine { liked: s["favourited"].as_bool().unwrap_or(false), boosted: s["reblogged"].as_bool().unwrap_or(false), like_record: None, boost_record: None },
+        reply_root: None,
+        visibility,
     })
 }
 
@@ -307,8 +315,106 @@ fn parse_media(m: &Value, post_id: &str) -> Option<Media> {
     Some(Media { kind, preview_url: text(&m["preview_url"]), alt: text(&m["description"]), file_name_hint: file_name_from_url(&url, &format!("{post_id}.{ext}")), url, blob_cid: None })
 }
 
+// ---------------------------------------------------------------- writing
+
+/// Favourite / boost a post, or undo it. The answer carries the new count (SOC-050).
+pub fn react(server: &str, token: &str, id: &str, kind: Reaction, on: bool) -> Result<Reacted, ActionError> {
+    let _step = tracing::info_span!("flow.social_mastodon.react", peer = "server").entered();
+    let server = base(server)?;
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err("bad post id".into());
+    }
+    let verb = match (kind, on) {
+        (Reaction::Like, true) => "favourite",
+        (Reaction::Like, false) => "unfavourite",
+        (Reaction::Boost, true) => "reblog",
+        (Reaction::Boost, false) => "unreblog",
+    };
+    let v = api("POST", &format!("{server}/api/v1/statuses/{id}/{verb}"), Some(token), Some(&json!({}))).map_err(write_error)?;
+    // a boost answers with the boost, the post inside it
+    let status = if kind == Reaction::Boost && v["reblog"].is_object() { &v["reblog"] } else { &v };
+    let field = if kind == Reaction::Like { "favourites_count" } else { "reblogs_count" };
+    Ok(Reacted { on, record: None, count: status[field].as_u64().map(|_| count(&status[field])) })
+}
+
+/// What the server allows in a post (`/api/v2/instance`); a server that names nothing gets Mastodon's defaults.
+pub fn instance_info(server: &str, token: &str) -> Result<InstanceInfo, String> {
+    let server = base(server)?;
+    let v = api("GET", &format!("{server}/api/v2/instance"), Some(token), None)?;
+    Ok(instance_from(&v))
+}
+
+/// The limits from an instance answer. Quotes need API version 7 (Mastodon 4.5).
+pub fn instance_from(v: &Value) -> InstanceInfo {
+    let d = InstanceInfo::defaults(Network::Mastodon);
+    let c = &v["configuration"];
+    InstanceInfo {
+        max_chars: c["statuses"]["max_characters"].as_u64().map(|n| n as usize).filter(|n| *n > 0).unwrap_or(d.max_chars),
+        max_pictures: c["statuses"]["max_media_attachments"].as_u64().map(|n| (n as usize).clamp(1, MAX_PICTURES)).unwrap_or(d.max_pictures),
+        image_bytes: c["media_attachments"]["image_size_limit"].as_u64().filter(|n| *n > 0).unwrap_or(d.image_bytes),
+        quotes: v["api_versions"]["mastodon"].as_u64().is_some_and(|n| n >= 7),
+    }
+}
+
+/// The JSON body of a new status.
+fn status_body(d: &Draft, media: &[String]) -> Value {
+    let mut b = json!({"status": d.text, "visibility": d.visibility.key()});
+    if !media.is_empty() {
+        b["media_ids"] = json!(media);
+    }
+    if let Some(r) = &d.reply_to {
+        b["in_reply_to_id"] = json!(r.id);
+    }
+    if !d.cw.trim().is_empty() {
+        b["spoiler_text"] = json!(d.cw.trim());
+    }
+    if let (Some(q), true) = (&d.quote, d.info.quotes) {
+        b["quoted_status_id"] = json!(q.id);
+    }
+    b
+}
+
+/// Send a post: the pictures first (SOC-053), then the status. `poll`: how long to wait between
+/// two looks at a picture the server is still processing.
+pub fn send(server: &str, token: &str, d: &Draft, poll: std::time::Duration) -> Result<Post, ActionError> {
+    let _step = tracing::info_span!("flow.social_mastodon.send", peer = "server").entered();
+    let server = base(server)?;
+    if d.pictures.len() > d.info.max_pictures {
+        return Err(format!("This server takes at most {} pictures in a post.", d.info.max_pictures).into());
+    }
+    let media = d.pictures.iter().map(|p| upload(&server, token, p, d.info.image_bytes, poll)).collect::<Result<Vec<_>, _>>()?;
+    let v = api("POST", &format!("{server}/api/v1/statuses"), Some(token), Some(&status_body(d, &media))).map_err(write_error)?;
+    parse_status(&v, &server).ok_or_else(|| "the server's answer is not a post".into())
+}
+
+/// One picture with its description → the id of the media attachment. A server that processes
+/// the picture later (`url` still null) is asked again until it is ready.
+fn upload(server: &str, token: &str, pic: &DraftPicture, limit: u64, poll: std::time::Duration) -> Result<String, ActionError> {
+    let prepared = prepare(&pic.path, Network::Mastodon, limit)?;
+    let file = TempFile::new(&prepared.bytes, prepared.ext)?;
+    let alt = pic.alt.trim();
+    let fields: Vec<(&str, &str)> = if alt.is_empty() { vec![] } else { vec![("description", alt)] };
+    let v = api_upload("POST", &format!("{server}/api/v2/media"), token, None, dav::Upload::Form { field: "file", path: &file.0, mime: prepared.mime, fields: &fields }).map_err(write_error)?;
+    drop(file);
+    let id = text(&v["id"]);
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err("the server did not accept the picture".into());
+    }
+    let mut ready = !v["url"].is_null();
+    for _ in 0..30 {
+        if ready {
+            return Ok(id);
+        }
+        std::thread::sleep(poll);
+        let m = api("GET", &format!("{server}/api/v1/media/{id}"), Some(token), None).map_err(write_error)?;
+        ready = !m["url"].is_null();
+    }
+    Err("the server is still processing the picture; try again in a minute".into())
+}
+
 #[cfg(test)]
 mod tests {
+    use super::super::actions::Visibility;
     use super::*;
     use crate::calendar::dav::tests::mock_http;
 
@@ -371,7 +477,7 @@ mod tests {
                 ("POST", "/api/v1/apps") => (200, json!({"client_id": "cid", "client_secret": "csec"}).to_string()),
                 ("POST", "/oauth/token") => {
                     assert!(body.contains("\"code\":\"abc\"") && body.contains("csec"), "{body}");
-                    (200, json!({"access_token": "tok-1"}).to_string())
+                    (200, json!({"access_token": "tok-1", "scope": "read write"}).to_string())
                 }
                 ("GET", "/api/v1/accounts/verify_credentials") if authed => (200, json!({"acct": "ada", "display_name": "Ada"}).to_string()),
                 ("GET", "/api/v1/lists") if authed => (200, json!([{"id": "7", "title": "Friends"}]).to_string()),
@@ -387,8 +493,9 @@ mod tests {
             }
         });
         let app = register_app(&base).unwrap();
-        assert!(authorize_url(&base, &app).unwrap().contains("/oauth/authorize?client_id=cid&scope=read&redirect_uri=urn%3Aietf%3Awg%3Aoauth%3A2.0%3Aoob&response_type=code"));
-        let tok = exchange_code(&base, &app, " abc ").unwrap();
+        assert!(authorize_url(&base, &app).unwrap().contains("/oauth/authorize?client_id=cid&scope=read%20write&redirect_uri=urn%3Aietf%3Awg%3Aoauth%3A2.0%3Aoob&response_type=code"));
+        let (tok, scope) = exchange_code(&base, &app, " abc ").unwrap();
+        assert_eq!(scope.as_deref(), Some("read write"));
         let who = verify(&base, tok.expose()).unwrap();
         assert_eq!((who.handle.as_str(), who.display_name.as_str()), ("ada@127.0.0.1", "Ada"));
         let mut c = Client::new(Account::new(Network::Mastodon, &base, &who.handle, &who.display_name), tok.expose());
@@ -424,6 +531,175 @@ mod tests {
         h.join().unwrap();
         assert!(verify("http://mastodon.example", "x").unwrap_err().contains("https"));
         assert!(verify(&base, "to\nken").is_err());
+    }
+
+    // spec: SOC-050
+    #[test]
+    fn a_status_tells_whether_the_account_favourited_or_boosted_it() {
+        let mut s = status("10", "1", "ada", "2024-05-17T10:30:00Z", None, "<p>x</p>");
+        let p = parse_status(&s, "https://m.test").unwrap();
+        assert_eq!((p.mine.clone(), p.visibility.as_deref()), (Mine::default(), None));
+        s["favourited"] = json!(true);
+        s["reblogged"] = json!(true);
+        s["visibility"] = json!("unlisted");
+        let p = parse_status(&s, "https://m.test").unwrap();
+        assert_eq!((p.mine.liked, p.mine.boosted, p.visibility.as_deref()), (true, true, Some("unlisted")));
+        // a boost entry shows the post inside it with the flags of that post
+        let boost = json!({"id": "99", "reblog": s, "account": {"id": "5", "acct": "cy", "display_name": "Cy", "url": "", "avatar": ""}});
+        assert!(parse_status(&boost, "https://m.test").unwrap().mine.liked);
+    }
+
+    // spec: SOC-050, SOC-056
+    #[test]
+    fn favourite_and_boost_post_to_the_status_and_read_the_counts_the_server_names() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let (base, handle) = mock_http(6, |method, path, headers, body| {
+            assert!(method == "POST" && headers.to_ascii_lowercase().contains("authorization: bearer tok-1"), "{method} {path} {headers}");
+            let mut s = status("100", "1", "ada", "2024-05-17T10:00:00Z", None, "<p>x</p>");
+            match path {
+                "/api/v1/statuses/100/favourite" => {
+                    s["favourites_count"] = json!(4);
+                    (200, s.to_string())
+                }
+                "/api/v1/statuses/100/unfavourite" => {
+                    s["favourites_count"] = json!(3);
+                    (200, s.to_string())
+                }
+                // a boost answers with the boost, the status inside it
+                "/api/v1/statuses/100/reblog" => {
+                    s["reblogs_count"] = json!(9);
+                    (200, json!({"id": "555", "reblog": s}).to_string())
+                }
+                "/api/v1/statuses/100/unreblog" => {
+                    s["reblogs_count"] = json!(8);
+                    (200, s.to_string())
+                }
+                "/api/v1/statuses/101/favourite" => {
+                    assert_eq!(body, "{}");
+                    (403, json!({"error": "This action is outside the authorized scopes"}).to_string())
+                }
+                _ => (500, json!({"error": "Internal error"}).to_string()),
+            }
+        });
+        let r = |kind, on| react(&base, "tok-1", "100", kind, on).unwrap();
+        assert_eq!(r(Reaction::Like, true), Reacted { on: true, record: None, count: Some(4) });
+        assert_eq!(r(Reaction::Like, false), Reacted { on: false, record: None, count: Some(3) });
+        assert_eq!(r(Reaction::Boost, true).count, Some(9));
+        assert_eq!(r(Reaction::Boost, false), Reacted { on: false, record: None, count: Some(8) });
+        // a token without the permission to write is told apart from other refusals
+        assert_eq!(react(&base, "tok-1", "101", Reaction::Like, true), Err(ActionError::NeedsWrite));
+        assert_eq!(react(&base, "tok-1", "102", Reaction::Like, true), Err(ActionError::Failed("the server answered with status 500: Internal error".into())));
+        assert_eq!(handle.join().unwrap().len(), 6);
+        assert_eq!(react(&base, "tok-1", "../x", Reaction::Like, true), Err(ActionError::Failed("bad post id".into())));
+        // the sign-in asks for the permission to write
+        assert_eq!(SCOPE, "read write");
+    }
+
+    fn draft(text: &str) -> Draft {
+        Draft { text: text.into(), cw: String::new(), visibility: Visibility::Public, reply_to: None, quote: None, pictures: vec![], info: InstanceInfo::defaults(Network::Mastodon) }
+    }
+
+    // spec: SOC-051, SOC-052
+    #[test]
+    fn a_status_is_posted_with_its_visibility_warning_and_the_post_it_answers_against_a_mock_server() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let (base, handle) = mock_http(2, |method, path, headers, body| {
+            assert!(
+                method == "POST" && path == "/api/v1/statuses" && headers.to_ascii_lowercase().contains("authorization: bearer tok-1") && headers.to_ascii_lowercase().contains("content-type: application/json"),
+                "{method} {path} {headers}"
+            );
+            let b: Value = serde_json::from_str(body).unwrap();
+            let mut s = status("200", "1", "ada", "2024-05-17T10:00:00Z", b["in_reply_to_id"].as_str(), &format!("<p>{}</p>", b["status"].as_str().unwrap()));
+            s["visibility"] = b["visibility"].clone();
+            s["spoiler_text"] = b["spoiler_text"].clone();
+            if s["spoiler_text"].is_null() {
+                s["spoiler_text"] = json!("");
+            }
+            (200, s.to_string())
+        });
+        let parent = parse_status(&status("100", "2", "bob", "2024-05-17T09:00:00Z", None, "<p>q</p>"), &base).unwrap();
+        let sent = send(&base, "tok-1", &Draft { reply_to: Some(parent.clone()), cw: " spoilers ".into(), visibility: Visibility::Unlisted, ..draft("@bob@m.test hello") }, std::time::Duration::ZERO).unwrap();
+        assert_eq!((sent.id.as_str(), sent.text_markdown.as_str(), sent.reply_to.as_deref(), sent.content_warning.as_deref(), sent.visibility.as_deref()), ("200", "@bob@m.test hello", Some("100"), Some("spoilers"), Some("unlisted")));
+        // a plain post names no reply, warning, pictures or quote
+        let plain = send(&base, "tok-1", &draft("just text"), std::time::Duration::ZERO).unwrap();
+        assert_eq!((plain.reply_to, plain.content_warning, plain.visibility.as_deref()), (None, None, Some("public")));
+        handle.join().unwrap();
+        // the body that goes out
+        let b = status_body(&Draft { reply_to: Some(parent.clone()), cw: "w".into(), visibility: Visibility::Direct, ..draft("t") }, &["7".into()]);
+        assert_eq!(b, json!({"status": "t", "visibility": "direct", "media_ids": ["7"], "in_reply_to_id": "100", "spoiler_text": "w"}));
+        assert_eq!(status_body(&draft("t"), &[]), json!({"status": "t", "visibility": "public"}));
+        // too many pictures are refused before anything is sent
+        let many = Draft { pictures: vec![DraftPicture { path: "a.png".into(), alt: String::new() }; 5], ..draft("t") };
+        assert!(send(&base, "tok-1", &many, std::time::Duration::ZERO).unwrap_err().to_string().contains("at most 4 pictures"));
+    }
+
+    // spec: SOC-052
+    #[test]
+    fn the_limits_come_from_the_servers_instance_answer_and_default_to_those_of_mastodon() {
+        let v = json!({"api_versions": {"mastodon": 7}, "configuration": {"statuses": {"max_characters": 1500, "max_media_attachments": 6}, "media_attachments": {"image_size_limit": 8_000_000}}});
+        assert_eq!(instance_from(&v), InstanceInfo { max_chars: 1500, max_pictures: 4, image_bytes: 8_000_000, quotes: true });
+        let old = instance_from(&json!({"api_versions": {"mastodon": 6}, "configuration": {"statuses": {"max_media_attachments": 2}}}));
+        assert_eq!((old.max_chars, old.max_pictures, old.image_bytes, old.quotes), (500, 2, 16 * 1024 * 1024, false));
+        assert_eq!(instance_from(&json!({})), InstanceInfo::defaults(Network::Mastodon));
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let (base, handle) = mock_http(1, move |method, path, headers, _| {
+            assert!((method, path) == ("GET", "/api/v2/instance") && headers.to_ascii_lowercase().contains("authorization: bearer tok-1"), "{method} {path}");
+            (200, v.to_string())
+        });
+        assert_eq!(instance_info(&base, "tok-1").unwrap().max_chars, 1500);
+        handle.join().unwrap();
+    }
+
+    // spec: SOC-053
+    #[test]
+    fn pictures_are_uploaded_with_their_description_and_waited_for_before_the_status_names_them() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let png = crate::social::actions::tests::file("up.png", &crate::social::actions::tests::png(30, 20, false));
+        let second = crate::social::actions::tests::file("up2.png", &crate::social::actions::tests::png(20, 20, false));
+        let polled = std::sync::atomic::AtomicUsize::new(0);
+        let (base, handle) = mock_http(5, move |method, path, headers, body| {
+            let low = headers.to_ascii_lowercase();
+            assert!(low.contains("authorization: bearer tok-1"), "{method} {path}");
+            match (method, path) {
+                ("POST", "/api/v2/media") => {
+                    assert!(low.contains("content-type: multipart/form-data"), "{headers}");
+                    assert!(body.contains("name=\"file\"") && body.contains("Content-Type: image/png"), "{}", body.chars().take(300).collect::<String>());
+                    if body.contains("name=\"description\"") {
+                        // the first picture: a description, and the server processes it later (202, no address yet)
+                        assert!(body.contains("A cat in a box"));
+                        (202, json!({"id": "m1", "type": "image", "url": null}).to_string())
+                    } else {
+                        (200, json!({"id": "m2", "type": "image", "url": "https://files.test/m2.png"}).to_string())
+                    }
+                }
+                ("GET", "/api/v1/media/m1") => {
+                    // not ready the first time (206), ready the second
+                    if polled.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                        (206, json!({"id": "m1", "url": null}).to_string())
+                    } else {
+                        (200, json!({"id": "m1", "url": "https://files.test/m1.png"}).to_string())
+                    }
+                }
+                ("POST", "/api/v1/statuses") => {
+                    let b: Value = serde_json::from_str(body).unwrap();
+                    assert_eq!(b["media_ids"], json!(["m1", "m2"]), "in the order of the pictures");
+                    (200, status("300", "1", "ada", "2024-05-17T10:00:00Z", None, "<p>pics</p>").to_string())
+                }
+                _ => (500, json!({"error": "no"}).to_string()),
+            }
+        });
+        let pictures = vec![DraftPicture { path: png.clone(), alt: " A cat in a box ".into() }, DraftPicture { path: second, alt: String::new() }];
+        let sent = send(&base, "tok-1", &Draft { pictures, ..draft("pics") }, std::time::Duration::from_millis(5)).unwrap();
+        assert_eq!(sent.id, "300");
+        assert_eq!(handle.join().unwrap(), ["POST /api/v2/media", "GET /api/v1/media/m1", "GET /api/v1/media/m1", "POST /api/v2/media", "POST /api/v1/statuses"], "the second picture goes up after the first is ready");
     }
 
     fn entries(ids: &[u32]) -> Value {

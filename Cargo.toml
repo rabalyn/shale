@@ -37,6 +37,8 @@ fontdb = { version = "0.24", default-features = false, features = ["fs", "memmap
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 # names and paths of links are compared in NFC (NET-014)
 unicode-normalization = { version = "0.1", default-features = false }
+# the length of a post in graphemes, as Bluesky counts it (SOC-052)
+unicode-segmentation = "1"
 
 [features]
 # The benchmark harness (BUILD-038): `shale --bench`, scenarios, a counting allocator, comparison and

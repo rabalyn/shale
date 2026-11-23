@@ -68,6 +68,23 @@ impl Threads {
         }
     }
 
+    /// A post of the account was sent as a reply: it joins the conversations that hold the post it
+    /// answers as the opened post or as one of its replies (SOC-057); the tree is made again.
+    pub fn add_reply(&mut self, account: &str, post: &Post) {
+        let Some(parent) = post.reply_to.as_deref() else { return };
+        for ((a, _), entry) in self.map.iter_mut() {
+            let ThreadStatus::Ready(view) = &mut entry.status else { continue };
+            let holds = |v: &ThreadView| v.post.id == parent || v.replies.iter().any(|r| r.post.id == parent);
+            if a != account || !holds(view) || view.replies.iter().any(|r| r.post.id == post.id) {
+                continue;
+            }
+            let mut below: Vec<Post> = view.replies.iter().map(|r| r.post.clone()).collect();
+            below.push(post.clone());
+            let v = Arc::make_mut(view);
+            *v = super::thread_view_of(&v.post, std::mem::take(&mut v.ancestors), &below);
+        }
+    }
+
     /// Forget the conversations of an account (removed).
     pub fn forget(&mut self, account: &str) {
         self.map.retain(|k, _| k.0 != account);

@@ -2,6 +2,7 @@
 //! The window runs headless (`ShaleApp::run_frame`); controls are clicked with real pointer
 //! events at the places the view reports in `SocialState::rects` and `ShaleApp::tab_rects`.
 
+use super::actions::{ActionError, Draft, InstanceInfo, Reacted, Reaction};
 use super::state::{post_key, Source, Timeline};
 use super::tests::post;
 use super::{demo, Feed, FeedRef, Fresh, Page, Post, Since, ThreadView};
@@ -24,9 +25,49 @@ pub(crate) struct Script {
     pub thread_calls: Mutex<Vec<String>>,
     /// a request for a conversation waits for this to be sent a message
     pub thread_gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    /// the reactions asked for (post id, which, on), the answers to give one by one (none left: it works), and a gate that holds them (SOC-050)
+    pub reacts: Mutex<Vec<(String, Reaction, bool)>>,
+    pub react_answers: Mutex<Vec<Result<Reacted, ActionError>>>,
+    pub react_gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    /// the posts sent, the answers to give (none left: a post is made from the draft), a gate (SOC-051)
+    pub sends: Mutex<Vec<Draft>>,
+    pub send_answers: Mutex<Vec<Result<Post, ActionError>>>,
+    pub send_gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    /// what the server allows (none: the defaults)
+    pub info: Mutex<Option<InstanceInfo>>,
 }
 
 impl Source for Script {
+    fn react(&self, post: &Post, kind: Reaction, on: bool) -> Result<Reacted, ActionError> {
+        self.reacts.lock().unwrap().push((post.id.clone(), kind, on));
+        if let Some(rx) = self.react_gate.lock().unwrap().as_ref() {
+            let _ = rx.recv();
+        }
+        let mut q = self.react_answers.lock().unwrap();
+        if q.is_empty() {
+            Ok(Reacted { on, record: None, count: None })
+        } else {
+            q.remove(0)
+        }
+    }
+    fn send(&self, draft: &Draft) -> Result<Post, ActionError> {
+        self.sends.lock().unwrap().push(draft.clone());
+        if let Some(rx) = self.send_gate.lock().unwrap().as_ref() {
+            let _ = rx.recv();
+        }
+        let mut q = self.send_answers.lock().unwrap();
+        if q.is_empty() {
+            let mut p = post("new-post-1", "ada", crate::calendar::time::now(), draft.reply_to.as_ref().map(|r| r.id.as_str()));
+            p.text_markdown = draft.text.clone();
+            p.author.handle = "ada@demo.social".into();
+            Ok(p)
+        } else {
+            q.remove(0)
+        }
+    }
+    fn instance(&self) -> Result<InstanceInfo, String> {
+        Ok(self.info.lock().unwrap().clone().unwrap_or_else(|| InstanceInfo::defaults(super::Network::Mastodon)))
+    }
     fn page(&self, _feed: &Feed, cursor: Option<&str>) -> Result<Page, String> {
         Ok(if cursor.is_none() { self.first_page.lock().unwrap().clone().unwrap_or_default() } else { Page::default() })
     }
@@ -184,8 +225,10 @@ fn perf_006_posts_far_from_the_view_are_not_laid_out_again_and_come_back_when_sc
     w.frames(6);
     assert!(w.app.social.rects.iter().any(|(k, _)| k.starts_with("save:") && k[5..].parse::<usize>().is_ok_and(|i| i > 20)), "posts further down are drawn now");
     assert!(drawn(&w) < 40 && w.app.social.post_rects[0].1.min.y < before - 1000.0, "{} drawn", drawn(&w));
-    // the list is as long as before: the last post is at its place, 143 points for each post before it
-    assert!((w.app.social.post_rects[399].1.min.y - w.app.social.post_rects[0].1.min.y - 399.0 * 143.0).abs() < 2.0);
+    // the list is as long as before: the last post is at its place, one post's step for each post before it
+    let step = w.app.social.post_rects[1].1.min.y - w.app.social.post_rects[0].1.min.y;
+    assert!(step > 100.0, "{step}");
+    assert!((w.app.social.post_rects[399].1.min.y - w.app.social.post_rects[0].1.min.y - 399.0 * step).abs() < 2.0);
 }
 
 // spec: SOC-021, SOC-022, SOC-023

@@ -3,7 +3,7 @@
 //! with the same card as the feed (`feed_ui::post_card`). It is shown instead of the feed when the
 //! tab's `FeedRef` names a post; the tab's history makes Back return to the feed.
 
-use super::feed_ui::{column, column_width, inset, keep_still, list_card, open_web, show_viewer, spinner_button, Anchor, Ask, Cx, Look, TabCtx};
+use super::feed_ui::{column, column_width, do_act, inset, keep_still, list_card, open_web, show_viewer, spinner_button, Anchor, Ask, CardAct, Cx, Look, TabCtx};
 use super::images::ImageCache;
 use super::state::{post_key, SocialState};
 use super::thread::ThreadStatus;
@@ -79,6 +79,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, entry: &SocialAccountEntry, tab: 
     let list = items(&root, view.as_deref());
     let mut save_post: Option<Post> = None;
     let mut open_thread: Option<(Post, bool)> = None;
+    let mut acted: Option<(Post, CardAct)> = None;
     let mut retry = false;
     let mut post_rects: Vec<(String, Rect)> = vec![];
     // the opened post is held at the top of the view while posts above it change in height (a
@@ -87,9 +88,9 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, entry: &SocialAccountEntry, tab: 
     let applied = anchor.apply.take();
     let mut content_top = 0.0;
     let out = {
-        let SocialState { images, revealed, saving, rects, viewer, threads, .. } = st;
+        let SocialState { images, revealed, saving, rects, viewer, threads, writes, .. } = st;
         let Some(images) = images.as_ref() else { return asks };
-        let mut cx = Cx { images, revealed, saving, rects, now: crate::calendar::time::now(), tab: tab.id, viewer };
+        let mut cx = Cx { images, revealed, saving, rects, now: crate::calendar::time::now(), tab: tab.id, viewer, account: &aid, busy: &writes.busy };
         let heights = &mut threads.heights;
         if heights.len() > 50_000 {
             heights.clear();
@@ -112,6 +113,9 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, entry: &SocialAccountEntry, tab: 
                     }
                     if let Some(new_tab) = card.thread {
                         open_thread = Some((item.post.clone(), new_tab));
+                    }
+                    if let Some(a) = card.act {
+                        acted = Some((item.post.clone(), a));
                     }
                     if item.highlight {
                         cx.rects.push(("highlight".into(), card.rect));
@@ -164,7 +168,11 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, entry: &SocialAccountEntry, tab: 
     if let Some((post, new_tab)) = open_thread {
         asks.push(Ask::Thread { feed: f.feed_only(), post: Box::new(post), new_tab });
     }
+    if let Some((post, act)) = acted {
+        do_act(&ctx, st, entry, tab.id, &f.feed, &post, act);
+    }
     show_viewer(&ctx, tab_rect, st, tab);
+    super::compose_ui::show(&ctx, tab_rect, st, entry, tab);
     if st.images.as_ref().map(ImageCache::pending).is_some_and(|n| n > 0) {
         ctx.request_repaint_after(std::time::Duration::from_millis(300));
     }

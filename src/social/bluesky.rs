@@ -5,6 +5,7 @@
 //! The login (`Session`) lives in memory only. `Api` keeps it for the caller and renews it
 //! when it has expired (refresh token first, else a new login with the app password).
 
+use super::actions::{iso_now, prepare, ActionError, Draft, Reacted, Reaction, TempFile, BLUESKY_IMAGE_BYTES, BLUESKY_MAX_CHARS};
 use super::markup::{md_link, md_url};
 use super::*;
 use serde_json::json;
@@ -108,17 +109,13 @@ impl Api {
         Ok(self.session.insert(s))
     }
 
-    fn once(&mut self, method: &str, nsid: &str, params: &[(&str, &str)], body: Option<&Value>) -> Result<Value, ApiError> {
-        let s = self.session.as_ref().ok_or_else(|| ApiError::plain("not signed in"))?;
-        api(method, &format!("{}/xrpc/{nsid}{}", s.pds, query(params)), Some(s.access_jwt.expose()), body)
-    }
-
-    /// One XRPC call. When the login has expired: renew it (refresh token, else app password) and try once more.
-    pub fn call(&mut self, method: &str, nsid: &str, params: &[(&str, &str)], body: Option<&Value>) -> Result<Value, String> {
+    /// Run a request with the session. When the login has expired: renew it (refresh token, else app password) and try once more.
+    fn authed(&mut self, f: impl Fn(&Session) -> Result<Value, ApiError>) -> Result<Value, String> {
         if self.session.is_none() {
             self.login()?;
         }
-        match self.once(method, nsid, params, body) {
+        let once = |me: &Api| f(me.session.as_ref().ok_or_else(|| ApiError::plain("not signed in"))?);
+        match once(self) {
             Err(e) if is_expired(&e) => {
                 let renewed = self.session.as_ref().and_then(|s| refresh_session(s).ok());
                 match renewed {
@@ -127,10 +124,28 @@ impl Api {
                         self.login()?;
                     }
                 }
-                Ok(self.once(method, nsid, params, body)?)
+                Ok(once(self)?)
             }
             r => Ok(r?),
         }
+    }
+
+    /// One XRPC call (see `authed`).
+    pub fn call(&mut self, method: &str, nsid: &str, params: &[(&str, &str)], body: Option<&Value>) -> Result<Value, String> {
+        self.authed(|s| api(method, &format!("{}/xrpc/{nsid}{}", s.pds, query(params)), Some(s.access_jwt.expose()), body))
+    }
+
+    /// Upload a picture file as a blob (SOC-053): the answer holds the `blob` for the post's embed.
+    pub fn upload_blob(&mut self, path: &std::path::Path, mime: &str) -> Result<Value, String> {
+        self.authed(|s| api_upload("POST", &format!("{}/xrpc/com.atproto.repo.uploadBlob", s.pds), s.access_jwt.expose(), Some(mime), dav::Upload::Raw { path }))
+    }
+
+    /// The account's DID (signs in when that has not happened yet).
+    pub fn did(&mut self) -> Result<String, String> {
+        if self.session.is_none() {
+            self.login()?;
+        }
+        self.session.as_ref().map(|s| s.did.clone()).ok_or_else(|| "not signed in".to_string())
     }
 
     pub fn get(&mut self, nsid: &str, params: &[(&str, &str)]) -> Result<Value, String> {
@@ -382,6 +397,12 @@ fn build_post(v: &Value, record: &Value, embeds: &[&Value]) -> Option<Post> {
         reply_count: count(&v["replyCount"]),
         boost_count: count(&v["repostCount"]),
         like_count: count(&v["likeCount"]),
+        mine: {
+            let (like, repost) = (text(&v["viewer"]["like"]), text(&v["viewer"]["repost"]));
+            Mine { liked: !like.is_empty(), boosted: !repost.is_empty(), like_record: Some(like).filter(|l| !l.is_empty()), boost_record: Some(repost).filter(|l| !l.is_empty()) }
+        },
+        reply_root: Some(PostRef { uri: text(&record["reply"]["root"]["uri"]), cid: text(&record["reply"]["root"]["cid"]) }).filter(|r| !r.uri.is_empty()),
+        visibility: None,
     })
 }
 
@@ -520,8 +541,155 @@ pub fn download_blob(did: &str, cid: &str) -> Result<(Vec<u8>, Option<String>), 
     download(&format!("{pds}/xrpc/com.atproto.sync.getBlob{}", query(&[("did", did), ("cid", cid)])))
 }
 
+// ---------------------------------------------------------------- writing
+
+/// Like / repost a post, or undo it: a record in the account's repository (SOC-050). The record
+/// that undoes it comes from the post (`Mine`) and is kept from the answer.
+pub fn react(api: &mut Api, post: &Post, kind: Reaction, on: bool) -> Result<Reacted, ActionError> {
+    let _step = tracing::info_span!("flow.social_bluesky.react", peer = "server").entered();
+    let (collection, current) = match kind {
+        Reaction::Like => ("app.bsky.feed.like", &post.mine.like_record),
+        Reaction::Boost => ("app.bsky.feed.repost", &post.mine.boost_record),
+    };
+    let did = api.did()?;
+    if on {
+        if post.cid.is_empty() || !post.id.starts_with("at://") {
+            return Err("this post cannot be reacted to (its content id is missing)".into());
+        }
+        let record = json!({"$type": collection, "subject": {"uri": post.id, "cid": post.cid}, "createdAt": iso_now()});
+        let v = api.call("POST", "com.atproto.repo.createRecord", &[], Some(&json!({"repo": did, "collection": collection, "record": record})))?;
+        let uri = text(&v["uri"]);
+        if !uri.starts_with("at://") {
+            return Err("the server did not name the new record".into());
+        }
+        return Ok(Reacted { on: true, record: Some(uri), count: None });
+    }
+    // undo: the record is named by its address at://<did>/<collection>/<rkey>
+    let uri = current.as_deref().ok_or("Shale does not know which record to remove; reload the feed and try again")?;
+    let mut parts = uri.strip_prefix("at://").unwrap_or("").splitn(3, '/');
+    let (repo, coll, rkey) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+    if coll != collection || rkey.is_empty() || repo != did {
+        return Err("the record to remove is not one of this account's".into());
+    }
+    api.call("POST", "com.atproto.repo.deleteRecord", &[], Some(&json!({"repo": did, "collection": collection, "rkey": rkey})))?;
+    Ok(Reacted { on: false, record: None, count: None })
+}
+
+/// The facets of a post's text: links, mentions and hashtags with their UTF-8 byte offsets
+/// (SOC-052). `resolve` turns a handle into a DID; a mention that does not resolve stays plain text.
+pub fn facets(text: &str, mut resolve: impl FnMut(&str) -> Option<String>) -> Vec<Value> {
+    let mut out = vec![];
+    let mut at = 0;
+    for word in text.split_inclusive(char::is_whitespace) {
+        let start = at;
+        at += word.len();
+        let bare = word.trim_end_matches(char::is_whitespace);
+        let lead = bare.len() - bare.trim_start_matches(['(', '[', '{', '"', '\'']).len();
+        let tok = &bare[lead..];
+        let from = start + lead;
+        let trimmed = tok.trim_end_matches(['.', ',', ';', ':', '!', '?', ')', ']', '}', '"', '\'']);
+        let index = |t: &str| json!({"byteStart": from, "byteEnd": from + t.len()});
+        if (trimmed.starts_with("https://") || trimmed.starts_with("http://")) && trimmed.contains('.') && check_url(trimmed).is_ok() {
+            out.push(json!({"index": index(trimmed), "features": [{"$type": "app.bsky.richtext.facet#link", "uri": trimmed}]}));
+        } else if let Some(handle) = trimmed.strip_prefix('@').filter(|h| is_handle(h)) {
+            if let Some(did) = resolve(handle) {
+                out.push(json!({"index": index(trimmed), "features": [{"$type": "app.bsky.richtext.facet#mention", "did": did}]}));
+            }
+        } else if let Some(tag) = trimmed.strip_prefix('#').filter(|t| !t.is_empty() && !t.contains('#') && t.chars().count() <= 64 && !t.chars().all(|c| c.is_ascii_digit())) {
+            out.push(json!({"index": index(trimmed), "features": [{"$type": "app.bsky.richtext.facet#tag", "tag": tag}]}));
+        }
+    }
+    out
+}
+
+/// "ada.bsky.social": labels of letters, digits and hyphens, at least two.
+fn is_handle(h: &str) -> bool {
+    let labels: Vec<&str> = h.split('.').collect();
+    labels.len() >= 2 && h.len() <= 253 && labels.iter().all(|l| !l.is_empty() && l.len() <= 63 && !l.starts_with('-') && !l.ends_with('-') && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+}
+
+/// How many graphemes a Bluesky post has (the limit is 300, SOC-052).
+pub fn grapheme_count(text: &str) -> usize {
+    unicode_segmentation::UnicodeSegmentation::graphemes(text, true).count()
+}
+
+/// Send a post: pictures first (`uploadBlob`), then the record with facets, reply references and
+/// the embed (pictures, a quote, or both). Then the post is read back from the server; when it
+/// is not there yet, the post is made from what was sent.
+pub fn send(api: &mut Api, d: &Draft) -> Result<Post, ActionError> {
+    let _step = tracing::info_span!("flow.social_bluesky.send", peer = "server").entered();
+    if grapheme_count(&d.text) > BLUESKY_MAX_CHARS || d.text.len() > 3000 {
+        return Err(format!("A Bluesky post has at most {BLUESKY_MAX_CHARS} characters.").into());
+    }
+    if d.pictures.len() > d.info.max_pictures {
+        return Err(format!("A Bluesky post has at most {} pictures.", d.info.max_pictures).into());
+    }
+    let did = api.did()?;
+    let mut images = vec![];
+    for p in &d.pictures {
+        let prepared = prepare(&p.path, Network::Bluesky, BLUESKY_IMAGE_BYTES)?;
+        let file = TempFile::new(&prepared.bytes, prepared.ext)?;
+        let v = api.upload_blob(&file.0, prepared.mime)?;
+        if !v["blob"].is_object() {
+            return Err("the server did not accept the picture".into());
+        }
+        images.push(json!({"alt": p.alt.trim(), "image": v["blob"].clone()}));
+    }
+    let mut known: HashMap<String, Option<String>> = HashMap::new();
+    let facets = facets(&d.text, |h| known.entry(h.to_string()).or_insert_with(|| api.get("com.atproto.identity.resolveHandle", &[("handle", h)]).ok().map(|v| text(&v["did"])).filter(|d| !d.is_empty())).clone());
+    let mut record = json!({"$type": "app.bsky.feed.post", "text": d.text, "createdAt": iso_now()});
+    if !facets.is_empty() {
+        record["facets"] = Value::Array(facets);
+    }
+    if let Some(p) = &d.reply_to {
+        let parent = json!({"uri": p.id, "cid": p.cid});
+        let root = p.reply_root.as_ref().map(|r| json!({"uri": r.uri, "cid": r.cid})).unwrap_or_else(|| parent.clone());
+        record["reply"] = json!({"root": root, "parent": parent});
+    }
+    let pictures = (!images.is_empty()).then(|| json!({"$type": "app.bsky.embed.images", "images": images}));
+    let quote = d.quote.as_ref().map(|q| json!({"$type": "app.bsky.embed.record", "record": {"uri": q.id, "cid": q.cid}}));
+    match (pictures, quote) {
+        (Some(m), Some(r)) => record["embed"] = json!({"$type": "app.bsky.embed.recordWithMedia", "media": m, "record": r}),
+        (Some(e), None) | (None, Some(e)) => record["embed"] = e,
+        (None, None) => {}
+    }
+    let v = api.call("POST", "com.atproto.repo.createRecord", &[], Some(&json!({"repo": did, "collection": "app.bsky.feed.post", "record": record})))?;
+    let (uri, cid) = (text(&v["uri"]), text(&v["cid"]));
+    if !uri.starts_with("at://") {
+        return Err("the server did not name the new post".into());
+    }
+    if let Ok(p) = fetch_post(api, &uri) {
+        return Ok(p);
+    }
+    // the post is not in the feed server yet: made from what was sent
+    let handle = api.session.as_ref().map(|s| s.handle.clone()).unwrap_or_else(|| api.handle.clone());
+    let who = Author { id: did, handle: handle.clone(), display_name: String::new(), profile_url: format!("https://bsky.app/profile/{handle}"), avatar_url: String::new() };
+    Ok(Post {
+        network: Network::Bluesky,
+        url: web_url(&handle, &uri),
+        id: uri,
+        cid,
+        author: who,
+        created_at: t::now(),
+        text_markdown: facets_to_markdown(&d.text, &record["facets"]),
+        content_warning: None,
+        media: vec![],
+        quote: d.quote.clone().map(|q| Box::new(Post { reposted_by: None, ..q })),
+        link_card: None,
+        reply_to: d.reply_to.as_ref().map(|p| p.id.clone()),
+        reposted_by: None,
+        reply_count: 0,
+        boost_count: 0,
+        like_count: 0,
+        mine: Mine::default(),
+        reply_root: None,
+        visibility: None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
+    use super::super::actions::{DraftPicture, InstanceInfo};
     use super::*;
     use crate::calendar::dav::tests::mock_http;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -564,6 +732,229 @@ mod tests {
             record["reply"] = json!({"parent": {"uri": if r.starts_with("at://") { r.to_string() } else { format!("at://{did}/app.bsky.feed.post/{r}") }, "cid": "c"}, "root": {"uri": "at://x/y/z", "cid": "c"}});
         }
         json!({"uri": uri, "cid": format!("cid{n}"), "author": {"did": did, "handle": handle, "displayName": handle.to_uppercase(), "avatar": "https://cdn.test/av.jpg"}, "record": record, "replyCount": 1, "repostCount": 2, "likeCount": 3, "indexedAt": at})
+    }
+
+    /// A pretend server with a session, for the tests of writes: `handler(nsid, body)` answers the rest.
+    fn writing_server(n: usize, handler: impl Fn(&str, &str, &Value) -> (u16, String) + Send + 'static) -> (String, std::thread::JoinHandle<Vec<String>>) {
+        mock_http(n + 1, move |method, path, headers, body| {
+            let nsid = path.split('?').next().unwrap().trim_start_matches("/xrpc/").to_string();
+            if nsid == "com.atproto.server.createSession" {
+                let host = headers.lines().find_map(|l| l.strip_prefix("Host: ")).unwrap_or("").trim().to_string();
+                return (200, json!({"accessJwt": "jwt-1", "refreshJwt": "ref-1", "did": "did:plc:ada", "handle": "ada.test", "didDoc": {"service": [{"id": "#atproto_pds", "serviceEndpoint": format!("http://{host}")}]}}).to_string());
+            }
+            assert!(headers.to_ascii_lowercase().contains("authorization: bearer jwt-1"), "{nsid}: {headers}");
+            let json: Value = serde_json::from_str(body).unwrap_or(Value::Null);
+            handler(method, &nsid, &json)
+        })
+    }
+
+    // spec: SOC-050
+    #[test]
+    fn a_post_view_tells_what_the_account_did_with_it_and_the_records_that_undo_it() {
+        let mut v = post_view("1", "did:plc:bob", "bob.test", "2024-05-17T10:30:00Z", Some("2"), "hi");
+        assert_eq!(parse_post_view(&v).unwrap().mine, Mine::default());
+        v["viewer"] = json!({"like": "at://did:plc:ada/app.bsky.feed.like/3k1", "repost": "at://did:plc:ada/app.bsky.feed.repost/3k2"});
+        let p = parse_post_view(&v).unwrap();
+        assert_eq!(p.mine, Mine { liked: true, boosted: true, like_record: Some("at://did:plc:ada/app.bsky.feed.like/3k1".into()), boost_record: Some("at://did:plc:ada/app.bsky.feed.repost/3k2".into()) });
+        // the first post of the conversation is kept to answer it (SOC-051)
+        assert_eq!(p.reply_root, Some(PostRef { uri: "at://x/y/z".into(), cid: "c".into() }));
+    }
+
+    // spec: SOC-050
+    #[test]
+    fn like_and_repost_are_records_that_are_created_and_deleted_against_a_mock_server() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let (base, handle) = writing_server(3, |method, nsid, body| {
+            assert_eq!(method, "POST");
+            match nsid {
+                "com.atproto.repo.createRecord" => {
+                    let coll = body["collection"].as_str().unwrap().to_string();
+                    assert_eq!(
+                        (body["repo"].as_str(), body["record"]["$type"].as_str(), body["record"]["subject"]["uri"].as_str(), body["record"]["subject"]["cid"].as_str()),
+                        (Some("did:plc:ada"), Some(coll.as_str()), Some("at://did:plc:bob/app.bsky.feed.post/1"), Some("cid1"))
+                    );
+                    assert!(body["record"]["createdAt"].as_str().unwrap().ends_with('Z'));
+                    (200, json!({"uri": format!("at://did:plc:ada/{coll}/3k9"), "cid": "newcid"}).to_string())
+                }
+                "com.atproto.repo.deleteRecord" => {
+                    assert_eq!((body["repo"].as_str(), body["collection"].as_str(), body["rkey"].as_str()), (Some("did:plc:ada"), Some("app.bsky.feed.like"), Some("3k1")));
+                    (200, "{}".into())
+                }
+                _ => (404, json!({"error": "NotFound"}).to_string()),
+            }
+        });
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        let mut p = parse_post_view(&post_view("1", "did:plc:bob", "bob.test", "2024-05-17T10:30:00Z", None, "hi")).unwrap();
+        let liked = react(&mut api, &p, Reaction::Like, true).unwrap();
+        assert_eq!(liked, Reacted { on: true, record: Some("at://did:plc:ada/app.bsky.feed.like/3k9".into()), count: None });
+        let reposted = react(&mut api, &p, Reaction::Boost, true).unwrap();
+        assert_eq!(reposted.record.as_deref(), Some("at://did:plc:ada/app.bsky.feed.repost/3k9"));
+        // undo: the record that was made (or that the post view named) is deleted
+        p.mine = Mine { liked: true, like_record: Some("at://did:plc:ada/app.bsky.feed.like/3k1".into()), ..Mine::default() };
+        assert_eq!(react(&mut api, &p, Reaction::Like, false).unwrap(), Reacted { on: false, record: None, count: None });
+        // no record known, or somebody else's record: nothing is sent
+        assert!(react(&mut api, &Post { mine: Mine::default(), ..p.clone() }, Reaction::Boost, false).unwrap_err().to_string().contains("which record"));
+        let alien = Post { mine: Mine { boosted: true, boost_record: Some("at://did:plc:eve/app.bsky.feed.repost/1".into()), ..Mine::default() }, ..p.clone() };
+        assert!(react(&mut api, &alien, Reaction::Boost, false).unwrap_err().to_string().contains("not one of this account's"));
+        assert!(react(&mut api, &Post { cid: String::new(), ..p }, Reaction::Like, true).is_err(), "without the content id of the post");
+        assert_eq!(handle.join().unwrap().len(), 4, "the login and three requests");
+    }
+
+    fn draft(text: &str) -> Draft {
+        Draft { text: text.into(), cw: String::new(), visibility: super::super::actions::Visibility::Public, reply_to: None, quote: None, pictures: vec![], info: InstanceInfo::defaults(Network::Bluesky) }
+    }
+
+    // spec: SOC-051, SOC-052, SOC-054
+    #[test]
+    fn a_post_is_a_record_with_facets_the_reply_references_and_the_quote_embed_against_a_mock_server() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+        let seen2 = seen.clone();
+        // the fourth post is not in the feed server yet when it is read back
+        let (base, handle) = writing_server(9, move |method, nsid, body| match (method, nsid) {
+            ("GET", "com.atproto.identity.resolveHandle") => (200, json!({"did": "did:plc:bob"}).to_string()),
+            ("POST", "com.atproto.repo.createRecord") => {
+                assert_eq!((body["repo"].as_str(), body["collection"].as_str()), (Some("did:plc:ada"), Some("app.bsky.feed.post")));
+                seen2.lock().unwrap().push(body["record"].clone());
+                let n = seen2.lock().unwrap().len();
+                (200, json!({"uri": format!("at://did:plc:ada/app.bsky.feed.post/n{n}"), "cid": format!("cn{n}")}).to_string())
+            }
+            ("GET", "app.bsky.feed.getPosts") => {
+                let n = seen2.lock().unwrap().len();
+                if n == 4 {
+                    return (200, json!({"posts": []}).to_string());
+                }
+                let record = seen2.lock().unwrap()[n - 1].clone();
+                let mut v = post_view(&format!("n{n}"), "did:plc:ada", "ada.test", "2024-05-17T10:30:00Z", None, record["text"].as_str().unwrap());
+                v["record"] = record;
+                (200, json!({"posts": [v]}).to_string())
+            }
+            _ => (404, json!({"error": "NotFound"}).to_string()),
+        });
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        let parent = parse_post_view(&post_view("1", "did:plc:bob", "bob.test", "2024-05-17T10:30:00Z", Some("0"), "q")).unwrap();
+        let top = Post { reply_root: None, reply_to: None, ..parent.clone() };
+        // 1: a reply inside a conversation: the root of the conversation is kept, the parent is the post
+        let one = send(&mut api, &Draft { reply_to: Some(parent.clone()), ..draft("hi @bob.test see https://e.com/x #tag") }).unwrap();
+        let r = seen.lock().unwrap()[0].clone();
+        assert_eq!(r["$type"], "app.bsky.feed.post");
+        assert_eq!(r["text"], "hi @bob.test see https://e.com/x #tag");
+        assert_eq!(r["reply"], json!({"root": {"uri": "at://x/y/z", "cid": "c"}, "parent": {"uri": parent.id, "cid": "cid1"}}));
+        let kinds: Vec<&str> = r["facets"].as_array().unwrap().iter().map(|f| f["features"][0]["$type"].as_str().unwrap().rsplit('#').next().unwrap()).collect();
+        assert_eq!(kinds, ["mention", "link", "tag"]);
+        assert_eq!((r["facets"][0]["index"]["byteStart"].as_u64(), r["facets"][0]["features"][0]["did"].as_str()), (Some(3), Some("did:plc:bob")));
+        assert!(r["createdAt"].as_str().unwrap().ends_with('Z'));
+        assert_eq!((one.id.as_str(), one.cid.as_str()), ("at://did:plc:ada/app.bsky.feed.post/n1", "cidn1"));
+        // 2: a reply to a post that starts a conversation: it is its own root
+        send(&mut api, &Draft { reply_to: Some(top.clone()), ..draft("second") }).unwrap();
+        assert_eq!(seen.lock().unwrap()[1]["reply"]["root"], json!({"uri": top.id, "cid": "cid1"}));
+        assert!(seen.lock().unwrap()[1].get("facets").is_none() && seen.lock().unwrap()[1].get("embed").is_none());
+        // 3: a quote is an embedded record
+        send(&mut api, &Draft { quote: Some(top.clone()), ..draft("look at this") }).unwrap();
+        assert_eq!(seen.lock().unwrap()[2]["embed"], json!({"$type": "app.bsky.embed.record", "record": {"uri": top.id, "cid": "cid1"}}));
+        // 4: not in the feed server yet: the post is made from what was sent
+        let local = send(&mut api, &Draft { quote: Some(top.clone()), reply_to: Some(parent.clone()), ..draft("see https://e.com") }).unwrap();
+        assert_eq!(
+            (local.id.as_str(), local.author.handle.as_str(), local.reply_to.as_deref(), local.quote.as_ref().map(|q| q.id.clone())),
+            ("at://did:plc:ada/app.bsky.feed.post/n4", "ada.test", Some(parent.id.as_str()), Some(top.id.clone()))
+        );
+        assert!(local.text_markdown.contains("https://e.com"), "{}", local.text_markdown);
+        // too long: refused before anything is sent
+        let long = "x".repeat(301);
+        assert!(send(&mut api, &draft(&long)).unwrap_err().to_string().contains("at most 300"));
+        let calls = handle.join().unwrap();
+        assert_eq!(calls.iter().filter(|c| c.contains("createRecord")).count(), 4, "{calls:?}");
+    }
+
+    // spec: SOC-053, SOC-054
+    #[test]
+    fn pictures_are_blobs_with_alt_text_in_an_images_embed_also_beside_a_quote_against_a_mock_server() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let small = crate::social::actions::tests::file("bsky-small.png", &crate::social::actions::tests::png(30, 20, false));
+        // too big for Bluesky: it is made smaller before it goes up
+        let big = crate::social::actions::tests::file("bsky-big.png", &crate::social::actions::tests::png(700, 700, true));
+        let uploads = Arc::new(std::sync::Mutex::new(Vec::<(String, usize)>::new()));
+        let (up2, records) = (uploads.clone(), Arc::new(std::sync::Mutex::new(Vec::<Value>::new())));
+        let rec2 = records.clone();
+        let (base, handle) = mock_http(8, move |method, path, headers, body| {
+            let nsid = path.trim_start_matches("/xrpc/").to_string();
+            let low = headers.to_ascii_lowercase();
+            match (method, nsid.as_str()) {
+                ("POST", "com.atproto.server.createSession") => {
+                    let host = headers.lines().find_map(|l| l.strip_prefix("Host: ")).unwrap_or("").trim().to_string();
+                    (200, json!({"accessJwt": "jwt-1", "refreshJwt": "ref-1", "did": "did:plc:ada", "handle": "ada.test", "didDoc": {"service": [{"id": "#atproto_pds", "serviceEndpoint": format!("http://{host}")}]}}).to_string())
+                }
+                ("POST", "com.atproto.repo.uploadBlob") => {
+                    assert!(low.contains("authorization: bearer jwt-1"));
+                    let ct = low.lines().find_map(|l| l.strip_prefix("content-type: ")).unwrap_or("").trim().to_string();
+                    let n = up2.lock().unwrap().len();
+                    // (the mock reads the body as text: the real size is the Content-Length)
+                    let len: usize = low.lines().find_map(|l| l.strip_prefix("content-length: ")).and_then(|v| v.trim().parse().ok()).unwrap();
+                    up2.lock().unwrap().push((ct.clone(), len));
+                    (200, json!({"blob": {"$type": "blob", "ref": {"$link": format!("bafy{n}")}, "mimeType": ct, "size": len}}).to_string())
+                }
+                ("POST", "com.atproto.repo.createRecord") => {
+                    rec2.lock().unwrap().push(serde_json::from_str::<Value>(body).unwrap()["record"].clone());
+                    (200, json!({"uri": "at://did:plc:ada/app.bsky.feed.post/p1", "cid": "cp1"}).to_string())
+                }
+                ("GET", "app.bsky.feed.getPosts") => (200, json!({"posts": []}).to_string()),
+                _ => (404, json!({"error": "NotFound"}).to_string()),
+            }
+        });
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        let quoted = parse_post_view(&post_view("9", "did:plc:bob", "bob.test", "2024-05-17T10:30:00Z", None, "q")).unwrap();
+        let pictures = vec![DraftPicture { path: small, alt: " A small one ".into() }, DraftPicture { path: big, alt: String::new() }];
+        send(&mut api, &Draft { pictures: pictures.clone(), ..draft("with pictures") }).unwrap();
+        let r = records.lock().unwrap()[0].clone();
+        assert_eq!(r["embed"]["$type"], "app.bsky.embed.images");
+        assert_eq!((r["embed"]["images"][0]["alt"].as_str(), r["embed"]["images"][1]["alt"].as_str()), (Some("A small one"), Some("")));
+        assert_eq!(r["embed"]["images"][0]["image"]["ref"]["$link"], "bafy0", "the blob the server named");
+        let ups = uploads.lock().unwrap().clone();
+        assert_eq!((ups[0].0.as_str(), ups[1].0.as_str()), ("image/png", "image/jpeg"), "the big one became a JPEG");
+        assert!(ups[1].1 as u64 <= BLUESKY_IMAGE_BYTES, "{}", ups[1].1);
+        // pictures and a quote: recordWithMedia
+        send(&mut api, &Draft { pictures: pictures[..1].to_vec(), quote: Some(quoted.clone()), ..draft("both") }).unwrap();
+        let r = records.lock().unwrap()[1].clone();
+        assert_eq!(r["embed"]["$type"], "app.bsky.embed.recordWithMedia");
+        assert_eq!((r["embed"]["media"]["$type"].as_str(), r["embed"]["record"]["record"]["uri"].as_str(), r["embed"]["record"]["$type"].as_str()), (Some("app.bsky.embed.images"), Some(quoted.id.as_str()), Some("app.bsky.embed.record")));
+        // nothing is uploaded for a refused picture
+        let nothing = crate::social::actions::tests::file("bsky-text.png", b"words");
+        let before = uploads.lock().unwrap().len();
+        let e = send(&mut api, &Draft { pictures: vec![DraftPicture { path: nothing, alt: String::new() }], ..draft("x") }).unwrap_err();
+        assert!(e.to_string().contains("not a JPEG, PNG, GIF or WebP"), "{e}");
+        assert_eq!(uploads.lock().unwrap().len(), before);
+        // too many pictures
+        let five = vec![pictures[0].clone(); 5];
+        assert!(send(&mut api, &Draft { pictures: five, ..draft("x") }).unwrap_err().to_string().contains("at most 4 pictures"));
+        assert_eq!(handle.join().unwrap().len(), 8, "the login, 3 uploads, 2 records and 2 reads");
+    }
+
+    // spec: SOC-052
+    #[test]
+    fn links_mentions_and_tags_become_facets_with_utf8_byte_offsets() {
+        let text = "Grüße 😀 @ada.test see (https://e.com/x?a=1). #Rust, @nobody.test and #123 @bad";
+        let mut asked = vec![];
+        let f = facets(text, |h| {
+            asked.push(h.to_string());
+            (h == "ada.test").then(|| "did:plc:ada".to_string())
+        });
+        assert_eq!(asked, ["ada.test", "nobody.test"], "a handle needs a dot; a number is no tag");
+        let slice = |v: &Value| &text.as_bytes()[v["index"]["byteStart"].as_u64().unwrap() as usize..v["index"]["byteEnd"].as_u64().unwrap() as usize];
+        let kinds: Vec<(&str, String)> = f.iter().map(|v| (v["features"][0]["$type"].as_str().unwrap().rsplit('#').next().unwrap(), String::from_utf8(slice(v).to_vec()).unwrap())).collect();
+        // the "(" in front and the ")." behind a link are not part of it; the unresolved mention is plain text
+        assert_eq!(kinds, [("mention", "@ada.test".to_string()), ("link", "https://e.com/x?a=1".to_string()), ("tag", "#Rust".to_string())]);
+        assert_eq!((f[0]["features"][0]["did"].as_str(), f[1]["features"][0]["uri"].as_str(), f[2]["features"][0]["tag"].as_str()), (Some("did:plc:ada"), Some("https://e.com/x?a=1"), Some("Rust")));
+        // the facets read back as Markdown links (what a feed shows)
+        let md = facets_to_markdown(text, &Value::Array(f));
+        assert!(md.contains("[@ada.test](https://bsky.app/profile/did:plc:ada)") && md.contains("(https://e.com/x?a=1)"), "{md}");
+        assert!(facets("no facets here, not even e.com or @ or #", |_| None).is_empty());
+        assert_eq!(grapheme_count("a😀e\u{301}👨‍👩‍👧"), 4, "an emoji with a joiner and a letter with an accent count once");
     }
 
     #[test]

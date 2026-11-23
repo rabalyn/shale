@@ -15,7 +15,10 @@
 //! memory only. Media addresses on other servers (picture CDNs) are fetched without any login.
 
 pub mod accounts_ui;
+pub mod actions;
 pub mod bluesky;
+pub mod compose;
+pub mod compose_ui;
 #[cfg(test)]
 mod dataflow_tests;
 pub mod demo;
@@ -37,6 +40,8 @@ pub mod thread_ui;
 #[cfg(test)]
 mod ui_tests;
 pub mod viewer;
+#[cfg(test)]
+mod write_tests;
 
 use crate::calendar::dav::{self, check_url, Origin};
 use crate::calendar::time as t;
@@ -84,6 +89,10 @@ pub struct Account {
     /// Mastodon: "ada@mastodon.social"; Bluesky: "ada.bsky.social" (what you sign in with)
     pub handle: String,
     pub display_name: String,
+    /// Mastodon: the permissions the token was given at sign-in ("read write"); None when not
+    /// known (an account from before, a pasted token). Not a secret (SOC-056).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scopes: Option<String>,
 }
 
 /// An account as the settings file holds it: the account and, only when no system keyring took
@@ -124,7 +133,17 @@ impl Account {
     /// A new account; the id is made from network and handle.
     pub fn new(network: Network, server: &str, handle: &str, display_name: &str) -> Account {
         let handle = handle.trim().trim_start_matches('@').to_string();
-        Account { id: format!("{}:{handle}", network.key()), network, server: server.trim().trim_end_matches('/').to_string(), handle, display_name: display_name.to_string() }
+        Account { id: format!("{}:{handle}", network.key()), network, server: server.trim().trim_end_matches('/').to_string(), handle, display_name: display_name.to_string(), scopes: None }
+    }
+
+    /// Whether the account may write: `Some(false)` for a Mastodon token that was given only
+    /// `read` (SOC-056), `None` when it is not known (the server decides). Bluesky app passwords can write.
+    pub fn may_write(&self) -> Option<bool> {
+        match (self.network, &self.scopes) {
+            (Network::Bluesky, _) => Some(true),
+            (Network::Mastodon, None) => None,
+            (Network::Mastodon, Some(s)) => Some(s.split_whitespace().any(|x| x == "write" || x.starts_with("write:"))),
+        }
     }
 }
 
@@ -208,6 +227,34 @@ pub struct Post {
     pub reply_count: u32,
     pub boost_count: u32,
     pub like_count: u32,
+    /// what the signed-in account did with this post (SOC-050)
+    #[serde(default)]
+    pub mine: Mine,
+    /// Bluesky: the first post of the conversation, for a reply (SOC-051)
+    #[serde(default)]
+    pub reply_root: Option<PostRef>,
+    /// Mastodon: "public", "unlisted", "private" or "direct" (a reply starts with it)
+    #[serde(default)]
+    pub visibility: Option<String>,
+}
+
+/// What the signed-in account did with a post: liked / favourited and boosted / reposted it. On
+/// Bluesky the records that undo it are kept too.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Mine {
+    pub liked: bool,
+    pub boosted: bool,
+    /// Bluesky: the `at://` address of the like record
+    pub like_record: Option<String>,
+    /// Bluesky: the `at://` address of the repost record
+    pub boost_record: Option<String>,
+}
+
+/// A post as Bluesky points to it: address and content id.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PostRef {
+    pub uri: String,
+    pub cid: String,
 }
 
 /// One timeline: Mastodon "Home" or a list; Bluesky "Following" or a custom feed.
@@ -368,6 +415,28 @@ pub(crate) fn api(method: &str, url: &str, token: Option<&str>, body: Option<&Va
         hs.push(&auth);
     }
     let r = dav::request_bytes(method, url, &hs, &text, &no_login(), MAX_JSON).map_err(ApiError::plain)?;
+    answer_of(r)
+}
+
+/// One request whose body is a file (a picture, SOC-053): `Upload::Raw` (Bluesky: the bytes;
+/// `content_type` says what they are) or `Upload::Form` (Mastodon: a multipart form). The token
+/// goes as in `api`, only to this address.
+pub(crate) fn api_upload(method: &str, url: &str, token: &str, content_type: Option<&str>, upload: dav::Upload) -> Result<Value, ApiError> {
+    if token.chars().any(char::is_control) {
+        return Err(ApiError::plain("the access token contains line breaks or control characters"));
+    }
+    let auth = crate::secret::concat(&["Authorization: Bearer ", token]);
+    let ct = content_type.map(|c| format!("Content-Type: {c}"));
+    let mut hs: Vec<&str> = vec!["Accept: application/json", &auth];
+    if let Some(c) = &ct {
+        hs.push(c);
+    }
+    let r = dav::request_upload(method, url, &hs, upload, &no_login(), MAX_JSON).map_err(ApiError::plain)?;
+    answer_of(r)
+}
+
+/// The JSON answer of a server, or its error in words.
+fn answer_of(r: dav::BytesResponse) -> Result<Value, ApiError> {
     let (status, answer) = (r.status, Zeroizing::new(r.body));
     let json: Value = serde_json::from_slice(&answer).unwrap_or(Value::Null);
     if (200..300).contains(&status) {
@@ -738,6 +807,9 @@ pub(crate) mod tests {
             reply_count: 0,
             boost_count: 0,
             like_count: 0,
+            mine: Mine::default(),
+            reply_root: None,
+            visibility: None,
         }
     }
 
@@ -781,6 +853,19 @@ pub(crate) mod tests {
         assert!(!format!("{b:?}").contains("pw-secret-2"));
         let json = serde_json::to_string(&c.account).unwrap();
         assert!(json.contains("mastodon") && !json.contains("tok-secret"));
+    }
+
+    // spec: SOC-056
+    #[test]
+    fn an_account_keeps_its_permissions_without_a_secret_and_one_from_before_has_none() {
+        let old: Account = serde_json::from_str(r#"{"id":"mastodon:a@m.test","network":"mastodon","server":"https://m.test","handle":"a@m.test","display_name":"A"}"#).unwrap();
+        assert_eq!((old.scopes.clone(), old.may_write()), (None, None), "not known: the server decides");
+        assert!(!serde_json::to_string(&old).unwrap().contains("scopes"));
+        let signed = Account { scopes: Some("read write".into()), ..old };
+        let json = serde_json::to_string(&signed).unwrap();
+        assert!(json.contains(r#""scopes":"read write""#));
+        assert_eq!(serde_json::from_str::<Account>(&json).unwrap(), signed);
+        assert_eq!(Account { scopes: Some("read".into()), ..signed }.may_write(), Some(false));
     }
 
     // spec: SOC-019

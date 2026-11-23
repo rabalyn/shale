@@ -29,7 +29,8 @@ fn dev_029_dataflow_of_a_mastodon_sign_in_and_timeline() {
         let url = mastodon::authorize_url(&address, &app).unwrap();
         let (_, _, page) = tracing::info_span!("flow.social_mastodon.authorize", peer = "browser").in_scope(|| crate::mail::oauth_fake_tests::http_get(&url));
         let code = page.split_once("<code>").and_then(|(_, r)| r.split_once("</code>")).map(|(c, _)| c.to_string()).expect("the page shows a code");
-        let token = mastodon::exchange_code(&address, &app, &code).unwrap();
+        let (token, scope) = mastodon::exchange_code(&address, &app, &code).unwrap();
+        assert_eq!(scope.as_deref(), Some("read write"));
         assert_eq!(mastodon::verify(&address, token.expose()).unwrap().handle, "ada@127.0.0.1");
         let feeds = mastodon::feeds(&address, token.expose()).unwrap();
         assert_eq!(feeds.len(), 2);
