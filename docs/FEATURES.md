@@ -682,6 +682,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   on a CalDAV calendar changes its address, user name or password (empty password = keep the saved
   one); a new user name or password also goes to the other calendars of the same server and user.
 
+In a narrow sidebar the header wraps: the month name on its own line, the buttons below it, never over it (LAY-019).
+
 ![Calendar in the sidebar](userguide/z_media/screenshots/calendar-sidebar.png)
 
 ## Mail
