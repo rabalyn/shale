@@ -738,15 +738,84 @@ pub fn front_matter_lines(text: &str) -> usize {
     lines.position(|l| l.trim() == "---").map_or(0, |p| p + 2)
 }
 
+/// The text of one YAML scalar: the quotes around it are removed; in a double-quoted one the
+/// escapes are decoded (`\"`, `\\`, `\/`, `\n`, `\t`, `\r`, `\0`, `\xNN`, `\uNNNN`, `\UNNNNNNNN`; an
+/// unknown escape stays as written), in a single-quoted one `''` is one `'`. A plain value is kept
+/// as it is (EDIT-067).
+fn yaml_scalar(v: &str) -> String {
+    let v = v.trim();
+    let quoted_by = |q: char| v.len() >= 2 && v.starts_with(q) && v.ends_with(q);
+    if quoted_by('\'') {
+        return v[1..v.len() - 1].replace("''", "'");
+    }
+    if !quoted_by('"') {
+        return v.to_string();
+    }
+    let mut out = String::new();
+    let mut chars = v[1..v.len() - 1].chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        let rest = chars.as_str();
+        let hex = |n: usize| rest.get(1..1 + n).filter(|h| h.chars().all(|c| c.is_ascii_hexdigit())).and_then(|h| u32::from_str_radix(h, 16).ok()).and_then(char::from_u32);
+        let Some(e) = chars.next() else {
+            out.push('\\');
+            break;
+        };
+        let (decoded, digits): (Option<char>, usize) = match e {
+            '"' | '\\' | '/' => (Some(e), 0),
+            'n' => (Some('\n'), 0),
+            't' => (Some('\t'), 0),
+            'r' => (Some('\r'), 0),
+            '0' => (Some('\0'), 0),
+            'x' => (hex(2), 2),
+            'u' => (hex(4), 4),
+            'U' => (hex(8), 8),
+            _ => (None, 0),
+        };
+        match decoded {
+            Some(d) => {
+                out.push(d);
+                chars.by_ref().take(digits).for_each(drop);
+            }
+            None => {
+                out.push('\\');
+                out.push(e);
+            }
+        }
+    }
+    out
+}
+
+/// The items of a flow list (`a, "b, c", 'd'`): cut at the commas outside quotes.
+fn yaml_flow_items(inner: &str) -> Vec<&str> {
+    let (mut items, mut from, mut quote, mut escaped) = (Vec::new(), 0, None, false);
+    for (i, c) in inner.char_indices() {
+        match (quote, c) {
+            (Some('"'), _) if escaped => escaped = false,
+            (Some('"'), '\\') => escaped = true,
+            (Some(q), _) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') if inner[from..i].trim().is_empty() => quote = Some(c),
+            (None, ',') => {
+                items.push(&inner[from..i]);
+                from = i + 1;
+            }
+            _ => {}
+        }
+    }
+    items.push(&inner[from..]);
+    items
+}
+
 /// The properties of the front matter as (key in lower case, values): `key: value` has one value,
 /// `key: [a, b]` and a list of `- item` lines have several, `key: |` takes its indented lines.
-/// Quotes around a value are removed; nothing is interpreted (no dates, no numbers, no nesting).
+/// Quotes around a value are removed and their escapes decoded (`yaml_scalar`, EDIT-067); nothing
+/// else is interpreted (no dates, no numbers, no nesting).
 pub fn front_matter_values(text: &str) -> Vec<(String, Vec<String>)> {
-    let unquote = |v: &str| {
-        let v = v.trim();
-        let quoted = v.len() >= 2 && ((v.starts_with('"') && v.ends_with('"')) || (v.starts_with('\'') && v.ends_with('\'')));
-        (if quoted { &v[1..v.len() - 1] } else { v }).to_string()
-    };
+    let unquote = yaml_scalar;
     if front_matter_lines(text) == 0 {
         return vec![];
     }
@@ -777,7 +846,7 @@ pub fn front_matter_values(text: &str) -> Vec<(String, Vec<String>)> {
         let value = value.trim();
         let values = match value {
             "" | "|" | ">" | "|-" | ">-" => vec![],
-            v if v.starts_with('[') && v.ends_with(']') => v[1..v.len() - 1].split(',').map(unquote).filter(|x| !x.is_empty()).collect(),
+            v if v.starts_with('[') && v.ends_with(']') => yaml_flow_items(&v[1..v.len() - 1]).into_iter().map(unquote).filter(|x| !x.is_empty()).collect(),
             v => vec![unquote(v)],
         };
         open = matches!(value, "" | "|" | ">" | "|-" | ">-").then_some(out.len());
@@ -1616,6 +1685,29 @@ a
         assert_eq!(front_matter_lines(text), 4);
         assert_eq!(front_matter_lines("---\nunclosed\n"), 0);
         assert_eq!(front_matter_lines("text"), 0);
+    }
+
+    // spec: EDIT-067
+    #[test]
+    fn double_quoted_values_decode_their_escapes_and_single_quoted_ones_their_doubled_quote() {
+        let one = |v: &str| front_matter_values(&format!("---\nk: {v}\n---\n")).remove(0).1;
+        assert_eq!(one(r#""\"Nils Mundhenke\" <n@x.org>""#), vec![r#""Nils Mundhenke" <n@x.org>"#.to_string()]);
+        assert_eq!(one(r#""a\\b \/ c""#), vec![r"a\b / c".to_string()]);
+        assert_eq!(one(r#""l1\nl2\tx\ry\0z""#), vec!["l1\nl2\tx\ry\0z".to_string()]);
+        assert_eq!(one(r#""\x41\u00e4\U0001F600""#), vec!["A\u{e4}\u{1F600}".to_string()]);
+        assert_eq!(one(r#""\q \xZZ \u12""#), vec![r"\q \xZZ \u12".to_string()], "an unknown or broken escape stays as written");
+        assert_eq!(one(r#""ends with \\""#), vec![r"ends with \".to_string()]);
+        assert_eq!(one("'it''s'"), vec!["it's".to_string()]);
+        assert_eq!(one(r"'a\nb'"), vec![r"a\nb".to_string()], "no escapes in single quotes");
+        assert_eq!(one(r"plain \n \\ ''"), vec![r"plain \n \\ ''".to_string()], "a plain value is unchanged");
+    }
+
+    // spec: EDIT-067
+    #[test]
+    fn list_items_decode_like_scalars_and_a_comma_in_quotes_does_not_split() {
+        let got = front_matter_values("---\nflow: [a, \"b, \\\"c\\\"\", 'd, e', f]\nblock:\n  - \"x \\\"y\\\"\"\n  - 'it''s'\n---\n");
+        assert_eq!(got[0].1, vec!["a", "b, \"c\"", "d, e", "f"]);
+        assert_eq!(got[1].1, vec!["x \"y\"", "it's"]);
     }
 
     // spec: TEX-013

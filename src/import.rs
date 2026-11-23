@@ -1016,6 +1016,20 @@ mod tests {
         assert!(listed.starts_with(&note[..note.find("\n# ").unwrap()]), "the properties are the same");
     }
 
+    // spec: EDIT-067
+    #[test]
+    fn a_header_with_quotes_and_backslashes_is_read_back_as_written() {
+        for from in [r#""Nils Mundhenke" <nils@example.org>"#, r#"A \ B "C" <a@x>"#, "it's <a@x>"] {
+            let mail = Mail { subject: "Plan".into(), from: from.into(), ..Default::default() };
+            let note = email_note(&mail, &[], &[], None, &[], false);
+            let got = crate::markdown::front_matter_values(&note);
+            assert_eq!(got.iter().find(|(k, _)| k == "from").map(|(_, v)| v.clone()), Some(vec![from.to_string()]), "{note}");
+        }
+        let items = vec![r#"A "B" \ C"#.to_string(), "x, y".to_string()];
+        let got = crate::markdown::front_matter_values(&format!("---\nattendees:{}\n---\n", list(&items)));
+        assert_eq!(got[0].1, items);
+    }
+
     // spec: IMP-050, IMP-052, IMP-054
     #[test]
     fn an_email_goes_from_its_properties_to_the_title_the_attachments_and_the_message() {
