@@ -59,6 +59,14 @@ impl RescanState {
         Self { last: Instant::now(), interval: RESCAN_EVERY, flight: None, runner: Arc::new(scan) }
     }
 
+    /// The vault changed (VAULT-037): the scan of the old one is dropped (its result is never
+    /// applied) and the timer starts again. The way a scan is made stays.
+    pub(super) fn reset(&mut self) {
+        self.last = Instant::now();
+        self.interval = RESCAN_EVERY;
+        self.flight = None;
+    }
+
     /// A scan is running.
     #[cfg(test)]
     pub(super) fn in_flight(&self) -> bool {

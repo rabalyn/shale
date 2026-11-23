@@ -216,8 +216,8 @@ pub(crate) fn newer_pages(top: Option<&str>, cap: usize, mut fetch: impl FnMut(O
     Ok(Fresh { posts, top: newest, gap: None })
 }
 
-/// The self-thread and the replies of other people.
-pub fn thread_full(server: &str, token: &str, post: &Post) -> Result<(Vec<Post>, Vec<Reply>), String> {
+/// The self-thread, the replies of other people and the id of the first status of the conversation.
+pub fn thread_full(server: &str, token: &str, post: &Post) -> Result<ThreadFetch, String> {
     let server = base(server)?;
     if post.id.is_empty() || !post.id.chars().all(|c| c.is_ascii_alphanumeric()) {
         return Err("bad post id".into());
@@ -225,7 +225,9 @@ pub fn thread_full(server: &str, token: &str, post: &Post) -> Result<(Vec<Post>,
     let v = api("GET", &format!("{server}/api/v1/statuses/{}/context", post.id), Some(token), None)?;
     let t = thread_from_context(post, &v, &server);
     let r = replies_from_context(&t, &v, &server);
-    Ok((t, r))
+    // the first ancestor is the status that starts the conversation
+    let root = v["ancestors"].as_array().and_then(|a| a.first()).map(|s| text(&s["id"])).filter(|i| !i.is_empty());
+    Ok((t, r, root))
 }
 
 /// The conversation around a post: the ancestors, and all descendants as a tree (SOC-045).
@@ -519,6 +521,7 @@ mod tests {
                "media_attachments": [], "replies_count": 1, "reblogs_count": 2, "favourites_count": 3})
     }
 
+    // spec: SOC-001
     #[test]
     fn status_parsing() {
         let mut s = status("10", "1", "ada", "2024-05-17T10:30:00.000Z", None, "<p>Hello <a href=\"https://m.test/tags/x\" class=\"mention hashtag\">#<span>x</span></a></p>");
@@ -542,6 +545,7 @@ mod tests {
         assert!(parse_status(&json!({"foo": 1}), "https://m.test").is_none());
     }
 
+    // spec: SOC-014, SOC-019
     #[test]
     fn thread_from_a_context_fixture() {
         let ctx = json!({
@@ -558,6 +562,7 @@ mod tests {
         assert_eq!(r.iter().map(|r| (r.post.text_markdown.as_str(), r.depth)).collect::<Vec<_>>(), [("nice", 0), ("reply to cy", 1)]);
     }
 
+    // spec: SOC-001, SOC-039
     // spec: SOC-056
     #[test]
     fn sign_in_feeds_paging_thread_and_media_against_a_mock_server() {
@@ -616,6 +621,7 @@ mod tests {
         assert_eq!(seen.len(), 9, "{seen:?}");
     }
 
+    // spec: SOC-001
     #[test]
     fn errors_are_readable() {
         if std::process::Command::new("curl").arg("--version").output().is_err() {

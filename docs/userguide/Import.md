@@ -52,6 +52,9 @@ Turn mails, events and files into notes. Back to [[Start here]].
   neighbours get a new `next` / `previous` line), **Leave the chain** writes it without links. The new
   note and the neighbour lines are one entry of the file history (see [[File history]]). Renaming a
   note keeps the chain, because `previous` and `next` are links. See [[Thread view]].
+  **A saved post works the same way:** when the post answers a post you saved before (or you saved
+  an answer to it earlier), the Import dialog shows **Continues** for it, in the same network only,
+  with the same tick box, `previous` / `next` links in time order and the question for an older post.
 - Drop onto a folder in the file list to import into it, or onto a note to also add links to the
   new notes there.
 - A picture, PDF, sound or video from outside the vault has a choice in the dialog: **Copy into the

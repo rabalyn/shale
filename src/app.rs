@@ -195,6 +195,9 @@ mod thread_ui;
 mod tree_ui_tests;
 mod usage;
 mod userguide;
+pub mod vault_close;
+#[cfg(test)]
+mod vault_close_tests;
 pub mod vault_load;
 #[cfg(test)]
 mod vault_load_tests;
@@ -369,6 +372,13 @@ pub enum Action {
     RestoreTrashed,
     NewFolder(PathBuf),
     OpenVault(PathBuf),
+    /// close the vault in this folder: forget it, and remove the Shale files `remove` names (VAULT-035, VAULT-036)
+    CloseVault {
+        path: PathBuf,
+        remove: vault_close::Remove,
+    },
+    /// show the list of the vaults (the quick switcher's "Switch vault", VAULT-044)
+    OpenVaultMenu,
     /// Look at the vault folder again (e.g. after a file was copied in).
     Rescan,
     /// show a message (the app's toast)
@@ -481,6 +491,8 @@ pub struct ShaleApp {
     pub guide: crate::userguide::Places,
     /// paths that a second start of Shale hands over (DATA-015); none in tests and screenshots
     pub handover: Option<crate::instance::Handover>,
+    /// a close or switch of the vault that waits for the running sync (VAULT-036, VAULT-037)
+    pub(crate) pending_leave: Option<vault_close::PendingLeave>,
     pub modal: Option<Modal>,
     /// The key registry with the user's changes (KEY-001…009).
     pub keymap: crate::keys::Keymap,
@@ -537,6 +549,12 @@ impl ShaleApp {
         }
         let persist = opts.screenshot.is_none();
         let scripted = opts.keys.is_some();
+        // long code blocks are highlighted on a worker and the window repaints when one is done (EDIT-121); a screenshot shows the end state at once
+        let ctx = cc.egui_ctx.clone();
+        crate::syntax::set_repaint(move || ctx.request_repaint());
+        if !persist {
+            crate::syntax::set_all_sync();
+        }
         // the window reads the vault on a worker thread (NET-019); the start screen shows it
         // (a screenshot run has no one to wait for the load: it reads the vault here)
         let mut app = Self::build_with(opts, persist, persist.then_some(&cc.egui_ctx));
@@ -747,6 +765,7 @@ impl ShaleApp {
             word: Default::default(),
             guide: if persist { crate::userguide::Places::system() } else { crate::userguide::Places::none() },
             handover: None,
+            pending_leave: None,
         };
         // the mail view's check of the index is a task of the window's registry (JOB-015)
         app.mail.busy = app.busy.clone();
@@ -998,16 +1017,10 @@ impl ShaleApp {
                 self.toast(e);
             }
         }
+        // nothing of the vault being left stays (VAULT-037)
+        self.drop_vault_state();
         self.load_vault_data(&v.root);
-        self.media.stop();
         self.vault = Some(v);
-        self.tabbar.tabs.clear();
-        self.panes.reset();
-        self.notes.clear();
-        self.drawings.clear();
-        self.tabbar.active = 0;
-        // the folders are looked at again the next time the list is shown
-        self.presence.clear();
         if known {
             // a folder that is new to the list and lies in or around another vault: warned once (VAULT-039)
             let nesting = if self.cfg.vaults.contains(path) { None } else { self.cfg.vaults.nested_with(path, None) };
@@ -2612,6 +2625,8 @@ impl ShaleApp {
                 Action::RestoreTrashed => self.restore_trashed(),
                 Action::NewFolder(parent) => self.modal = Some(Modal::NewFolder { parent, name: String::new() }),
                 Action::OpenVault(p) => self.open_vault_in_background(&p, vault_load::After::Nothing),
+                Action::CloseVault { path, remove } => self.close_vault(&path, remove),
+                Action::OpenVaultMenu => self.open_vault_menu(),
                 Action::Export(rel) => self.open_export_dialog(&rel),
                 Action::ExportDocx(rel) => self.open_docx_export_dialog(&rel),
                 Action::ExportFolder(dir) => self.open_export_folder_dialog(&dir),
@@ -3160,6 +3175,7 @@ impl ShaleApp {
         self.update_tick(&ctx);
         self.take_handover(&ctx);
         self.sync_tick(&ctx);
+        self.vault_leave_tick();
         self.history_tick(&ctx);
         self.mail_tick(&ctx);
         if self.calendar.poll() {
@@ -3712,6 +3728,7 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: SOC-005
     // spec: SOC-007, SOC-012
     #[test]
     fn saving_a_post_opens_the_import_dialog_and_the_note_lands_in_the_vault() {

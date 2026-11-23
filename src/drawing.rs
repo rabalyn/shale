@@ -225,25 +225,6 @@ impl Element {
     }
 }
 
-/// The factor a dragged corner gives one axis of the resize box: how far the pointer is from the
-/// fixed corner, relative to how far the grabbed corner was. Negative past the fixed corner.
-fn box_scale(now: f32, was: f32) -> f32 {
-    if was.abs() <= 0.5 {
-        1.0
-    } else {
-        now / was
-    }
-}
-
-/// `k` such that the box (`size` wide before) is at least `MIN_BOX` wide, keeping its direction.
-fn min_scale(k: f32, size: f32) -> f32 {
-    const MIN_BOX: f32 = 4.0;
-    if size <= 0.5 || k.abs() * size >= MIN_BOX {
-        return k;
-    }
-    MIN_BOX / size * if k < 0.0 { -1.0 } else { 1.0 }
-}
-
 fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
@@ -792,13 +773,6 @@ enum Drag {
         id: String,
         anchor: Pos2,
         orig: Box<Element>,
-    },
-    /// Dragging a corner of the box around several selected elements (DRAW-020): `anchor` is
-    /// the corner that stays, `far` the corner that was grabbed, `orig` the elements before.
-    ResizeMany {
-        anchor: Pos2,
-        far: Pos2,
-        orig: Vec<Element>,
     },
     Marquee {
         start: Pos2,
@@ -1418,12 +1392,9 @@ impl DrawingDoc {
                     painter.circle_filled(sp, 5.5, if bound { ACCENT } else { bg });
                     painter.circle_stroke(sp, 5.5, Stroke::new(1.5, ACCENT));
                 }
-            } else if !self.selection.is_empty() {
+            } else if self.selection.len() == 1 {
                 if let Some(b) = self.selection_bounds() {
                     let b = b.expand(4.0 / self.zoom);
-                    if self.selection.len() >= 2 {
-                        painter.rect_stroke(Rect::from_min_max(view.to_screen(b.min), view.to_screen(b.max)), CornerRadius::ZERO, Stroke::new(1.0, ACCENT), StrokeKind::Middle);
-                    }
                     for c in [b.left_top(), b.right_top(), b.left_bottom(), b.right_bottom()] {
                         let hr = Rect::from_center_size(view.to_screen(c), Vec2::splat(8.0));
                         painter.rect_filled(hr, CornerRadius::same(2), bg);
@@ -1504,20 +1475,12 @@ impl DrawingDoc {
                     }
                 }
                 let single_linear = self.selection.len() == 1 && self.scene.live().any(|e| e.id == self.selection[0] && e.is_linear() && e.kind != "freedraw");
-                if (self.selection.len() == 1 && !single_linear) || self.selection.len() >= 2 {
+                if self.selection.len() == 1 && !single_linear {
                     if let Some(b) = self.selection_bounds() {
                         let be = b.expand(4.0 / self.zoom);
                         let corners = [(be.left_top(), b.right_bottom()), (be.right_top(), b.left_bottom()), (be.left_bottom(), b.right_top()), (be.right_bottom(), b.left_top())];
                         for (corner, anchor) in corners {
                             if (view.to_screen(corner) - sp).length() < 9.0 {
-                                if self.selection.len() >= 2 {
-                                    let far = Pos2::new(b.min.x + b.max.x - anchor.x, b.min.y + b.max.y - anchor.y);
-                                    let orig: Vec<Element> = self.scene.live().filter(|e| self.selection.contains(&e.id)).cloned().collect();
-                                    self.snapshot();
-                                    self.detach_unselected();
-                                    self.drag = Drag::ResizeMany { anchor, far, orig };
-                                    return;
-                                }
                                 let id = self.selection[0].clone();
                                 if let Some(orig) = self.scene.elements.iter().find(|e| e.id == id).cloned() {
                                     self.snapshot();
@@ -1726,38 +1689,6 @@ impl DrawingDoc {
                 }
                 self.changed();
             }
-            Drag::ResizeMany { anchor, far, orig } => {
-                let (anchor, far) = (*anchor, *far);
-                let ob = Rect::from_two_pos(anchor, far);
-                let (kx, ky) = (box_scale(wp.x - anchor.x, far.x - anchor.x), box_scale(wp.y - anchor.y, far.y - anchor.y));
-                let (kx, ky) = (min_scale(kx, ob.width()), min_scale(ky, ob.height()));
-                let fx = |v: f64| anchor.x as f64 + (v - anchor.x as f64) * kx as f64;
-                let fy = |v: f64| anchor.y as f64 + (v - anchor.y as f64) * ky as f64;
-                for o in orig.iter() {
-                    let Some(e) = self.scene.elements.iter_mut().find(|e| e.id == o.id) else { continue };
-                    if o.is_linear() && !o.points.is_empty() {
-                        let abs: Vec<Pos2> = o.points.iter().map(|p| Pos2::new(fx(o.x + p[0]) as f32, fy(o.y + p[1]) as f32)).collect();
-                        set_abs_points(e, &abs);
-                    } else if o.kind == "text" {
-                        // the font follows the height, as when one text is resized
-                        let size = (o.font_size.unwrap_or(20.0) * ky.abs().max(0.1) as f64).clamp(4.0, 400.0);
-                        let s = size / o.font_size.unwrap_or(20.0);
-                        e.font_size = Some(size);
-                        e.width = o.width * s;
-                        e.height = o.height * s;
-                        e.x = fx(o.x + o.width / 2.0) - e.width / 2.0;
-                        e.y = fy(o.y + o.height / 2.0) - e.height / 2.0;
-                    } else {
-                        let (x0, x1) = (fx(o.x), fx(o.x + o.width));
-                        let (y0, y1) = (fy(o.y), fy(o.y + o.height));
-                        e.x = x0.min(x1);
-                        e.y = y0.min(y1);
-                        e.width = (x1 - x0).abs();
-                        e.height = (y1 - y0).abs();
-                    }
-                }
-                self.changed();
-            }
             Drag::Marquee { start } => {
                 self.marquee = Some(Rect::from_two_pos(*start, wp));
             }
@@ -1820,7 +1751,7 @@ impl DrawingDoc {
                     }
                 }
             }
-            Drag::Move { .. } | Drag::Resize { .. } | Drag::ResizeMany { .. } => {
+            Drag::Move { .. } | Drag::Resize { .. } => {
                 let sel = self.selection.clone();
                 self.update_bindings();
                 self.tidy_connections(&sel);

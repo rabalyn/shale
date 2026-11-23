@@ -26,7 +26,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   (```` ```js ````, ```` ```rust ````, `python`, `ts`, `toml`, `sh`, `json`, `yaml`, `c++`, … about 140 languages, with the usual aliases) in the
   editor and the reading view; a block without a language or with an unknown one stays plain.
   Inline code colours its strings, numbers and called names. The PDF export draws code the same way,
-  on the same dark code background (PDF-007).
+  on the same dark code background (PDF-007). A long block (20 lines or more) is plain for a moment and then coloured,
+  highlighted on a background thread so typing and scrolling do not stall; exports are coloured at once.
 - Line numbers are shown left of the text (Settings → Editor, on by default); a wrapped
   line keeps one number.
 - **Folding.** Headings (up to the next heading of the same or a higher level), quotes, list items and whole lists can be
@@ -185,7 +186,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   files the vault links and their size (USE-026), both in background jobs. The window never waits for
   the disk of a shown picture or media file: whether a file is there, its date and its decoding are looked
   up in the background and asked again every few seconds, and an embed says "Loading …" until the answer
-  is there, so a NAS or USB disk that does not answer freezes nothing (MEDIA-024). The Import tab of Settings is
+  is there, so a NAS or USB disk that does not answer freezes nothing (MEDIA-024). The placeholder of a picture has its size from the file's header, so the text below does not jump when it arrives (MEDIA-029), and the decoded pictures are kept up to 256 MiB, the ones shown longest ago going first (MEDIA-030). The Import tab of Settings is
   shown under "Importing e-mails, events and files".
 
 ![Reading view](userguide/z_media/screenshots/reading.png)
@@ -541,10 +542,6 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   order of shapes.
 - Double-click a shape to label it. Arrows snap to shapes and follow them when shapes move.
   Hold Shift to keep lines at 45° steps.
-- Select several shapes (Shift+click or a frame around them) and the whole selection gets one resize
-  box: drag a corner to scale every shape, line, arrow, scribble and free text in it from the
-  opposite corner (past it, the selection turns over); one undo takes it back. A single line or
-  arrow keeps its end handles.
 - "Auto arrange" untangles a diagram; "Spread out" and "Pull together" change the spacing.
 
 ### Obsidian canvases
@@ -974,10 +971,16 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   rewrites more than two other notes, open notes are saved first (IMP-071). The new note and the neighbour
   lines are one history snapshot (IMP-072); a rename keeps the chain because `previous` and `next` are
   links, and old notes with only a `message-id` still match as the parent (IMP-073).
+- **A saved post continues its conversation the same way** (ADR-0032, #575). A post note has `in-reply-to`
+  and `thread-id` (the root of the conversation as the network gives it, else the post replied to, else the
+  post's own id) besides `post-id` and `network` (SOC-070). The Import dialog offers "Continues [[note]]" for
+  saved posts of the same network that it replies to, that reply to it or that share its `thread-id`; a saved
+  self-thread matches by every id in its `thread-ids` (SOC-071). `previous` / `next`, the question for an older
+  post and the one history snapshot are those of mails (SOC-072).
 - **Thread view** (NAV-070, KEY-050): a panel of the right sidebar lists the notes with the same
   `thread-id` as the open note, oldest first, with date, sender and title and the current one marked; a
   click opens the note (a pinned tab is not replaced). Ctrl+Shift+PageUp / Ctrl+Shift+PageDown step to
-  the previous / next mail of the thread, Ctrl+Shift+T opens the view and gives it the keyboard.
+  the previous / next mail or post of the thread, Ctrl+Shift+T opens the view and gives it the keyboard.
 - Drop onto a folder in the file list to import into that folder, or onto a note to also add
   links to the new notes there.
 - After an import of two or more items a window, **Import summary**, says what was made: the new
@@ -1413,7 +1416,7 @@ Whatever runs longer than a moment says what it does, cannot be started twice an
   where the work can stop. It disappears when nothing runs.
   ![The indicator with two tasks listed](userguide/z_media/screenshots/busy-indicator.png)
 - **Known vaults** (VAULT-029, VAULT-031, VAULT-040, CFG-075, #582): the global `config.toml` keeps a list of the vaults Shale has opened, each with a name (by default the folder's name, local to the computer) and its canonical path, so a folder is never listed twice and the list has no length cap. It replaces the recent list and is converted from it at the first start. A vault is added when it has loaded (also one from `--vault` or a second start, never one that failed to load). The start screen lists the names; the window title shows the name of the open vault, with the parent folder after it when two known vaults have the same name.
-- **Vault dropdown** (VAULT-030, VAULT-032 to VAULT-034, VAULT-038, VAULT-039, #583): the vault label at the bottom left of the window (name and ▾) opens a list of the known vaults, the open one marked, then **Open…** and **Create…**. A click or Enter opens a vault; arrows, Enter and Esc work. A right-click on a vault offers **Rename** (an empty name is refused). Open… and Create… use the app's own folder picker (a path field, the folders below, Up); Create takes an empty folder (hidden files do not count; a new path is made), can start with sample notes, and offers to open a folder with content instead. A vault whose folder is missing is greyed out in the list and on the start screen with **Locate…** (pick the new folder, the name stays) and **Forget**, and Shale never makes that folder again by itself. A folder inside a known vault, or around one, is allowed and warned about once. Close, and the "Switch vault" command, follow in #584.
+- **Vault dropdown** (VAULT-030, VAULT-032 to VAULT-034, VAULT-038, VAULT-039, #583): the vault label at the bottom left of the window (name and ▾) opens a list of the known vaults, the open one marked, then **Open…** and **Create…**. A click or Enter opens a vault; arrows, Enter and Esc work. A right-click on a vault offers **Rename** (an empty name is refused). Open… and Create… use the app's own folder picker (a path field, the folders below, Up); Create takes an empty folder (hidden files do not count; a new path is made), can start with sample notes, and offers to open a folder with content instead. A vault whose folder is missing is greyed out in the list and on the start screen with **Locate…** (pick the new folder, the name stays) and **Forget**, and Shale never makes that folder again by itself. A folder inside a known vault, or around one, is allowed and warned about once. A right-click on a vault also offers **Close** (VAULT-035, VAULT-044, #584): the vault is forgotten (its notes stay) and a question asks whether to remove `.shale/` and `.trash/` too (both off by default; there is no system trash, they are deleted for good; notes and `.git` are never touched). **Close current vault** is the last line of the list and the quick switcher has a "Switch vault" command that shows the list. Closing or switching saves all buffers, waits for a running sync without freezing the window (30 s at most, with Cancel), drops everything of the old vault (VAULT-036, VAULT-037) and keeps mail, calendar and the global settings.
 - **Opening a vault** (NET-019, #513): a vault is read on a background thread. While it loads, the start screen shows a spinner, "Opening ‹folder›…" and **Cancel** (a vault on a slow network share or an online-only folder no longer freezes the window); the main window appears when the vault has arrived. This covers the last vault at start, `--vault`, a folder a second start hands over, the user guide and Open or Create in the start dialog.
 - **Moved so far:** the git sync and the Git LFS setup, the check of the vault's names (Cancel stops it) and the PDF export of a
   folder (Cancel stops it), and the check of the mail index (JOB-015: it starts with the window when a mail account is set up, so the mail view finds the index ready, and the view shows "Checking the mail index…" with a spinner when it is opened earlier). The other long actions follow; the list of all of them, with what each shows today, is

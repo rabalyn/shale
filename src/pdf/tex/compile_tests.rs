@@ -515,7 +515,7 @@ fn container_compile(files: &[(&str, &str)], main: &str, opts: &Options) -> Resu
     compile(&engine, work, main, opts)
 }
 
-// spec: TEX-004
+// spec: TEX-004, TEX-020
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_a_small_article_compiles_to_a_pdf() {

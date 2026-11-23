@@ -1330,7 +1330,7 @@ mod tests {
         }
     }
 
-    // spec: MAIL-194, MAIL-197
+    // spec: MAIL-194, MAIL-197, MAIL-193
     #[test]
     fn signing_and_encrypting_round_trip_for_openpgp_and_a_hidden_recipient_has_no_key_id_in_the_message() {
         if !have_gnupg() {

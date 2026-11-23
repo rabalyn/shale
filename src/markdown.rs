@@ -1710,7 +1710,7 @@ a
         assert_eq!(got[1].1, vec!["x \"y\"", "it's"]);
     }
 
-    // spec: TEX-013
+    // spec: TEX-013, TEX-018
     #[test]
     fn front_matter_values_are_scalars_lists_and_blocks_with_their_quotes_removed() {
         let text = "---\nTitle: \"A: B\"\nauthor: [Ada, 'Bob C.']\nreviewer:\n  - Prof. X\n  - Prof. Y\nrecipient: |\n  Line one\n  Line two\nempty:\nnumbered-headings: false\n# comment: no\n---\nbody: not a property\n";

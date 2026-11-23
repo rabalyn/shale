@@ -357,3 +357,150 @@ fn imp_068_a_post_is_matched_only_in_its_own_network_and_the_ident_names_the_roo
     assert_eq!(reply("mastodon").thread_id(), "1");
     assert_eq!(Ident { id: "9".into(), ..Default::default() }.thread_id(), "9", "a post that starts a thread is its own root");
 }
+
+// ---- posts (SOC-070…SOC-072) ----
+
+use crate::social::note::SavedPost;
+use crate::social::{tests::post, Network};
+
+/// A saved post of the day `day` of November 2026 at noon UTC. `reply`: the post it replies to,
+/// `root`: the root of the conversation as the network says it.
+fn saved_post(id: &str, day: i64, reply: Option<&str>, root: Option<&str>) -> SavedPost {
+    let p = post(id, "ada", 1_793_620_800 + (day - 1) * 86_400, reply);
+    SavedPost { thread: vec![p], reposted_by: None, media: vec![], failed_media: vec![], thread_error: None, replies: vec![], root: root.map(String::from) }
+}
+
+fn post_items(posts: Vec<SavedPost>) -> Vec<Item> {
+    posts.into_iter().map(|s| import::social_item(s, "Mastodon", false)).collect()
+}
+
+/// Save one post the way the dialog does; `tweak` is the person's choice.
+fn save_post(v: &mut Vault, saved: SavedPost, folder: &str, tweak: impl FnOnce(&mut Item)) -> (PathBuf, Imported) {
+    let mut items = post_items(vec![saved]);
+    import::find_continues(v, &mut items);
+    tweak(&mut items[0]);
+    let done = import::import(v, &items, &options(folder));
+    assert!(done.errors.is_empty(), "{:?}", done.errors);
+    (done.notes[0].clone(), done)
+}
+
+fn stem(p: &Path) -> String {
+    p.file_stem().unwrap().to_string_lossy().into_owned()
+}
+
+// spec: SOC-070
+#[test]
+fn soc_070_a_post_note_has_in_reply_to_and_thread_id_besides_post_id_and_network() {
+    let mut v = vault("post-ids");
+    let (top, _) = save_post(&mut v, saved_post("10", 16, None, None), "Posts", |_| {});
+    let t = text(&v, &top);
+    assert_eq!((prop(&t, "post-id").as_deref(), prop(&t, "network").as_deref(), prop(&t, "thread-id").as_deref()), (Some("\"10\""), Some("mastodon"), Some("\"10\"")), "a post that starts a conversation is its own root");
+    assert!(prop(&t, "in-reply-to").is_none() && prop(&t, "previous").is_none() && prop(&t, "next").is_none(), "{t}");
+    // a reply: the parent and the root the network named
+    let mut w = vault("post-ids-b");
+    let (r, _) = save_post(&mut w, saved_post("12", 17, Some("11"), Some("10")), "Posts", |_| {});
+    let t = text(&w, &r);
+    assert_eq!((prop(&t, "in-reply-to").as_deref(), prop(&t, "thread-id").as_deref()), (Some("\"11\""), Some("\"10\"")));
+    // no root from the network: the parent stands in
+    let (r, _) = save_post(&mut w, saved_post("13", 17, Some("12"), None), "Posts", |it| it.continues = None);
+    assert_eq!(prop(&text(&w, &r), "thread-id").as_deref(), Some("\"12\""));
+    // a saved self-thread keeps thread / thread-ids and gets the new ids besides
+    let mut s = saved_post("20", 18, None, None);
+    s.thread.push(post("21", "ada", 1_793_620_800 + 17 * 86_400 + 60, Some("20")));
+    let (n, _) = save_post(&mut w, s, "Posts", |_| {});
+    let t = text(&w, &n);
+    assert_eq!((prop(&t, "thread").as_deref(), prop(&t, "thread-ids").as_deref(), prop(&t, "thread-id").as_deref()), (Some("2"), Some("[\"20\", \"21\"]"), Some("\"20\"")));
+}
+
+// spec: SOC-071
+#[test]
+fn soc_071_a_post_is_matched_by_the_post_it_replies_to_the_root_and_a_self_thread_id_in_the_same_network() {
+    let mut v = vault("post-match");
+    let (a, _) = save_post(&mut v, saved_post("10", 16, None, None), "Posts", |_| {});
+    // replies to the saved post: by in-reply-to, and by the root alone
+    let mut items = post_items(vec![saved_post("11", 17, Some("10"), Some("10")), saved_post("12", 17, Some("99"), Some("10"))]);
+    import::find_continues(&v, &mut items);
+    for it in &items {
+        let c = it.continues.as_ref().expect("a suggestion");
+        assert!(c.on, "ticked");
+        assert_eq!(c.anchor(), Some(a.as_path()));
+    }
+    // another network, an unrelated post: nothing
+    let mut other = saved_post("10", 17, Some("10"), Some("10"));
+    other.thread[0].network = Network::Bluesky;
+    let mut items = vec![import::social_item(other, "Bluesky", false)];
+    items.extend(post_items(vec![saved_post("50", 17, Some("49"), Some("48"))]));
+    import::find_continues(&v, &mut items);
+    assert!(items.iter().all(|i| i.continues.is_none()), "post ids are unique per network only, and no id is shared");
+    // a reply to a later post of a saved self-thread matches by its thread-ids
+    let mut s = saved_post("20", 18, None, None);
+    s.thread.push(post("21", "ada", 1_793_620_800 + 17 * 86_400 + 60, Some("20")));
+    let (st, _) = save_post(&mut v, s, "Posts", |_| {});
+    let mut items = post_items(vec![saved_post("22", 19, Some("21"), Some("20"))]);
+    import::find_continues(&v, &mut items);
+    assert_eq!(items[0].continues.as_ref().and_then(|c| c.anchor()), Some(st.as_path()));
+    // an older post: the note that replies to it is found
+    save_post(&mut v, saved_post("30", 20, Some("29"), Some("28")), "Posts", |_| {});
+    let mut older = post_items(vec![saved_post("29", 19, Some("28"), Some("28"))]);
+    import::find_continues(&v, &mut older);
+    assert!(older[0].continues.is_some(), "the note replying to this post is found");
+    // the folder follows the note it continues (IMP-069)
+    let (inside, _) = save_post(&mut v, saved_post("40", 16, None, None), "Deep/Posts", |_| {});
+    let mut items = post_items(vec![saved_post("41", 17, Some("40"), Some("40"))]);
+    import::find_continues(&v, &mut items);
+    assert_eq!(import::continued_folder(&items).as_deref(), inside.parent().and_then(|p| p.to_str()));
+}
+
+// spec: SOC-072
+#[test]
+fn soc_072_posts_are_chained_by_time_an_older_post_asks_and_only_the_two_neighbours_change() {
+    let mut v = vault("post-chain");
+    let (a, _) = save_post(&mut v, saved_post("10", 16, None, None), "Posts", |_| {});
+    let (c, done) = save_post(&mut v, saved_post("12", 18, Some("11"), Some("10")), "Posts", |_| {});
+    // appended: it gets previous, the last note gets its next
+    assert!(prop(&text(&v, &c), "previous").unwrap().contains(&stem(&a)) && prop(&text(&v, &c), "next").is_none());
+    assert!(prop(&text(&v, &a), "next").unwrap().contains(&stem(&c)));
+    assert_eq!(done.touched, std::slice::from_ref(&a), "one other note is rewritten");
+    // an older post in the middle: the question, and Update changes the two neighbours only
+    let mut items = post_items(vec![saved_post("11", 17, Some("10"), Some("10"))]);
+    import::find_continues(&v, &mut items);
+    let plan = items[0].continues.as_ref().unwrap().plan().unwrap();
+    assert!(plan.is_older() && plan.changes() == 2, "{plan:?}");
+    let done = import::import(&mut v, &items, &options("Posts"));
+    assert!(done.errors.is_empty(), "{:?}", done.errors);
+    let b = done.notes[0].clone();
+    assert_eq!(done.touched.len(), 2, "the two neighbours");
+    assert!(prop(&text(&v, &b), "previous").unwrap().contains(&stem(&a)) && prop(&text(&v, &b), "next").unwrap().contains(&stem(&c)));
+    assert!(prop(&text(&v, &a), "next").unwrap().contains(&stem(&b)) && prop(&text(&v, &c), "previous").unwrap().contains(&stem(&b)));
+    // Leave the chain: no links, nothing else touched
+    let before = (text(&v, &a), text(&v, &b), text(&v, &c));
+    let (l, done) = save_post(&mut v, saved_post("9", 15, Some("10"), Some("10")), "Posts", |it| it.continues.as_mut().unwrap().update = false);
+    assert!(prop(&text(&v, &l), "previous").is_none() && prop(&text(&v, &l), "next").is_none());
+    assert!(done.touched.is_empty());
+    assert_eq!(before, (text(&v, &a), text(&v, &b), text(&v, &c)));
+    // unticked: its ids only
+    let (u, done) = save_post(&mut v, saved_post("13", 19, Some("12"), Some("10")), "Posts", |it| it.continues.as_mut().unwrap().on = false);
+    assert!(prop(&text(&v, &u), "thread-id").is_some() && prop(&text(&v, &u), "previous").is_none());
+    assert!(done.touched.is_empty());
+}
+
+// spec: NAV-070, SOC-070
+#[test]
+fn nav_070_the_thread_view_lists_the_posts_of_a_conversation_and_steps_through_them_in_time_order() {
+    let mut v = vault("post-overview");
+    let (a, _) = save_post(&mut v, saved_post("10", 16, None, None), "Posts", |_| {});
+    let (c, _) = save_post(&mut v, saved_post("12", 18, Some("11"), Some("10")), "Posts", |_| {});
+    let (b, _) = save_post(&mut v, saved_post("11", 17, Some("10"), Some("10")), "Elsewhere", |it| it.continues.as_mut().unwrap().update = false);
+    // the same id on another network is another thread
+    let mut other = saved_post("10", 16, None, None);
+    other.thread[0].network = Network::Bluesky;
+    let (x, _) = save_post(&mut v, other, "Posts", |_| {});
+    let idx = Index::build(&v);
+    let rows = idx.thread_of(&c).unwrap();
+    assert_eq!(rows.iter().map(|r| &r.rel).collect::<Vec<_>>(), vec![&a, &b, &c], "oldest first, wherever the notes are, one network");
+    assert_eq!(rows[0].who, "@ada@m.test");
+    assert_eq!(idx.thread_of(&x).unwrap().len(), 1);
+    assert_eq!(thread::step(&rows, &a, 1), Some(b.clone()));
+    assert_eq!(thread::step(&rows, &b, 1), Some(c.clone()));
+    assert_eq!(thread::step(&rows, &c, 1), None);
+}

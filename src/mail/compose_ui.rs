@@ -994,6 +994,7 @@ pub fn attention(items: &[Item], account: &str) -> bool {
 mod tests {
     use super::*;
 
+    // spec: MAIL-128
     #[test]
     fn completion_replaces_the_word_being_typed_and_skips_what_is_already_there() {
         let contacts = vec![("Bob Builder".to_string(), "bob@x.de".to_string()), ("Carol".to_string(), "carol@y.de".to_string()), ("".to_string(), "bobby@z.de".to_string()), ("Müller, Hans".to_string(), "h@x.de".to_string())];
@@ -1013,6 +1014,7 @@ mod tests {
         assert_eq!(mailbox_text("Ann", "a@x.de"), "Ann <a@x.de>");
     }
 
+    // spec: MAIL-131
     #[test]
     fn a_compose_window_knows_what_is_unsaved_and_whether_there_is_anything_to_lose() {
         let mut c = Compose::new(crate::mail::compose::new_draft("a", "Ada", "ada@example.com", "Ada"));

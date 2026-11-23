@@ -2012,7 +2012,7 @@ mod tests {
         Wire::new(Io::Plain(tcp), max_line)
     }
 
-    // spec: MAIL-221
+    // spec: MAIL-221, MAIL-024
     #[test]
     fn the_wire_takes_literals_apart_and_refuses_nul_bytes_long_lines_and_a_connection_that_ends_early() {
         // literals: kept up to the budget (in total), then read and thrown away, the line goes on after each

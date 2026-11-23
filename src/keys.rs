@@ -754,7 +754,7 @@ mod tests {
         }
     }
 
-    // spec: KEY-002
+    // spec: KEY-002, MAIL-061
     #[test]
     fn the_definable_actions_are_the_listed_ones() {
         let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/spec/links-and-editor.md")).unwrap();

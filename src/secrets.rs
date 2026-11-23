@@ -533,6 +533,7 @@ mod tests {
     }
     use super::*;
 
+    // spec: SOC-003
     // spec: SEC-003
     #[test]
     fn social_secrets_have_their_own_keyring_entries() {
@@ -566,7 +567,7 @@ mod tests {
         CalendarSource { id: id.into(), name: id.into(), color: "#000000".into(), enabled: true, sync_minutes: 15, kind: SourceKind::Caldav { url: url.into(), username: user.into(), password: pw.into() } }
     }
 
-    // spec: SEC-003
+    // spec: SEC-003, MAIL-021
     #[test]
     // its own host: other tests (the calendar dialog) save "ada" at dav.example.com at the same time
     fn passwords_go_to_the_keyring_and_come_back() {

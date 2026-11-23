@@ -362,6 +362,7 @@ fn the_feeds_button_always_opens_a_new_feeds_tab_and_an_empty_tab_is_filled() {
     assert_eq!((w.app.tabbar.tabs.len(), w.app.tabbar.active), (5, 4));
 }
 
+// spec: SOC-022
 // spec: SOC-021
 #[test]
 fn choosing_another_feed_is_a_step_in_the_tab_history() {
@@ -446,6 +447,50 @@ fn removing_the_account_in_the_dialog_drops_its_posts_from_the_search_but_adding
     w.app.social_dialog_action(crate::social::accounts_ui::DialogAction::Remove(entry.account.id.clone()));
     assert!(w.app.social.index.search_wild("gone1", 5).is_empty());
     assert_eq!(w.app.social.index.count(None), 0);
+}
+
+// spec: SOC-005
+#[test]
+fn removing_an_account_forgets_its_feeds_and_posts_and_clears_its_keyring_entry() {
+    let mut w = W::new("remove-account");
+    let entry = demo::account();
+    let id = entry.account.id.clone();
+    assert!(crate::secrets::social_store(&entry.account.server, &entry.account.handle, "tok-remove"));
+    w.app.social.index.add(&id, "home", &recent("gone", 2));
+    assert!(w.app.social.timelines.keys().any(|k| k.0 == id));
+    w.app.social_dialog_action(crate::social::accounts_ui::DialogAction::Remove(id.clone()));
+    assert!(w.app.cfg.social_accounts.is_empty(), "the account is gone from the settings");
+    assert!(!w.app.social.timelines.keys().any(|k| k.0 == id), "its loaded feeds are forgotten");
+    assert!(!w.app.social.feeds.contains_key(&id));
+    assert_eq!(w.app.social.index.count(None), 0, "and its posts in the search index");
+    // the keyring is cleared by a background job
+    wait_for(&mut w, |_| crate::secrets::social_lookup(&entry.account.server, &entry.account.handle).is_none());
+}
+
+// spec: SOC-004
+#[test]
+fn escape_does_not_close_the_accounts_dialog_while_a_sign_in_runs() {
+    let mut w = W::new("esc-dialog");
+    let esc = |pressed| Event::Key { key: egui::Key::Escape, physical_key: Some(egui::Key::Escape), pressed, repeat: false, modifiers: Modifiers::NONE };
+    let press = |w: &mut W| {
+        w.frame(vec![esc(true)]);
+        w.frame(vec![esc(false)]);
+        w.frames(3);
+    };
+    w.app.open_social_accounts();
+    w.frames(3);
+    if let Some(crate::app::Modal::Social(d)) = &mut w.app.modal {
+        d.pretend_busy(true);
+    }
+    w.frames(2);
+    press(&mut w);
+    assert!(matches!(w.app.modal, Some(crate::app::Modal::Social(_))), "a sign-in is running: Esc does not close the dialog");
+    if let Some(crate::app::Modal::Social(d)) = &mut w.app.modal {
+        d.pretend_busy(false);
+    }
+    w.frames(2);
+    press(&mut w);
+    assert!(w.app.modal.is_none(), "idle again: Esc closes it");
 }
 
 // spec: SOC-035, SOC-036

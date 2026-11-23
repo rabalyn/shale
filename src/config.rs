@@ -1126,6 +1126,7 @@ mod tests {
         assert_eq!(serde_json::from_str::<Config>(&back).unwrap().mail_accounts, c.mail_accounts);
     }
 
+    // spec: SOC-025
     // spec: SOC-003
     #[test]
     fn social_accounts_are_saved_without_secrets_that_the_keyring_holds() {
@@ -1185,6 +1186,7 @@ mod tests {
         assert_eq!((CryptoStandard::OpenPgp.program(), CryptoStandard::Smime.program()), ("gpg", "gpgsm"));
     }
 
+    // spec: MAIL-020
     #[test]
     fn mail_accounts_load_and_have_no_plain_text_mode() {
         let c: Config = serde_json::from_str(r#"{"mail_accounts": [{"id": "a1", "host": "imap.example.com", "user": "ada"}]}"#).unwrap();
