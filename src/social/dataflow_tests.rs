@@ -33,7 +33,7 @@ fn dev_029_dataflow_of_a_mastodon_sign_in_and_timeline() {
         assert_eq!(scope.as_deref(), Some("read write"));
         assert_eq!(mastodon::verify(&address, token.expose()).unwrap().handle, "ada@127.0.0.1");
         let feeds = mastodon::feeds(&address, token.expose()).unwrap();
-        assert_eq!(feeds.len(), 2);
+        assert_eq!(feeds.len(), 4, "Home, Notifications, Your posts and the one list");
         let page = mastodon::timeline(&address, token.expose(), &feeds[0], None).unwrap();
         assert_eq!(page.posts.len(), 1);
     });
@@ -54,7 +54,7 @@ fn dev_029_dataflow_of_a_bluesky_sign_in_and_timeline() {
         let mut api = bluesky::Api::new(&address, "ada.test", "abcd-efgh-ijkl-mnop");
         api.session = Some(session);
         let feeds = bluesky::feeds(&mut api).unwrap();
-        assert_eq!(feeds.len(), 1);
+        assert_eq!(feeds.len(), 3, "Following, Notifications and Your posts");
         let page = bluesky::timeline(&mut api, &feeds[0], None).unwrap();
         assert_eq!(page.posts.len(), 1);
     });

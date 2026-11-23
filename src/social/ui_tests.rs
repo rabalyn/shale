@@ -44,6 +44,8 @@ pub(crate) struct Script {
     /// the scheduled posts the server holds (SOC-064) and the ids asked to be cancelled
     pub scheduled: Mutex<Vec<Scheduled>>,
     pub cancelled: Mutex<Vec<String>>,
+    /// the marks the account was told its notifications were read up to (SOC-072)
+    pub marks: Mutex<Vec<String>>,
 }
 
 impl Source for Script {
@@ -104,6 +106,10 @@ impl Source for Script {
         } else {
             q.remove(0).map(|p| Sent::Posted(Box::new(p)))
         }
+    }
+    fn mark_read(&self, mark: &str) -> Result<(), String> {
+        self.marks.lock().unwrap().push(mark.to_string());
+        Ok(())
     }
     fn instance(&self) -> Result<InstanceInfo, String> {
         Ok(self.info.lock().unwrap().clone().unwrap_or_else(|| InstanceInfo::defaults(super::Network::Mastodon)))
@@ -598,7 +604,7 @@ fn key_of(id: &str) -> String {
 
 impl W {
     /// Wait until a feed has `n` new posts waiting.
-    fn until_waiting(&mut self, feed: &FeedRef, n: usize) {
+    pub(crate) fn until_waiting(&mut self, feed: &FeedRef, n: usize) {
         let start = Instant::now();
         while self.app.social.waiting_count(&feed.account, &feed.feed) != n {
             self.frames(1);
@@ -620,7 +626,7 @@ impl W {
         self.app.social.post_rects.iter().find(|(k, _)| k == key).unwrap_or_else(|| panic!("{key} is not in the list")).1.min.y
     }
 
-    fn posts(&self, feed: &FeedRef) -> Vec<String> {
+    pub(crate) fn posts(&self, feed: &FeedRef) -> Vec<String> {
         self.app.social.timelines[&(feed.account.clone(), feed.feed.clone())].posts.iter().map(|p| p.id.clone()).collect()
     }
 }
@@ -808,7 +814,7 @@ fn key_of_h(id: &str) -> String {
 }
 
 impl W {
-    fn rects_has(&self, key: &str) -> bool {
+    pub(crate) fn rects_has(&self, key: &str) -> bool {
         self.app.social.rects.iter().any(|r| r.0 == key)
     }
 }
@@ -882,7 +888,7 @@ fn without_a_second_pass_the_view_is_put_back_in_the_next_frame() {
 
 impl W {
     /// Run frames until `until` holds (jobs finish in the background).
-    fn wait_for(&mut self, what: &str, until: impl Fn(&W) -> bool) {
+    pub(crate) fn wait_for(&mut self, what: &str, until: impl Fn(&W) -> bool) {
         let start = Instant::now();
         while !until(self) {
             self.frames(1);

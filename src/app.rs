@@ -769,7 +769,7 @@ impl ShaleApp {
                 }
                 Some("graph") => app.show_view(View::Graph, false),
                 // the feed view with made-up posts (no network); "social-import": and the dialog for saving some of them; "social-thread": the conversation of a post
-                Some(v @ ("social" | "social-import" | "social-thread")) => {
+                Some(v @ ("social" | "social-import" | "social-thread" | "social-notifications")) => {
                     let demo = crate::social::demo::account();
                     app.cfg.social_accounts = vec![demo.clone()];
                     app.social.load_demo(&demo);
@@ -779,6 +779,12 @@ impl ShaleApp {
                         let post = crate::social::demo::replies().remove(0).post;
                         app.social.threads.open(&demo.account.id, &post);
                         app.show_view(View::Social(Some(crate::social::FeedRef { thread: Some(post.id), ..crate::social::FeedRef::new(demo.account.id.clone(), "home") })), false);
+                    }
+                    if v == "social-notifications" {
+                        // the Notifications feed of the demo account, loaded already (SOC-071)
+                        let key = (demo.account.id.clone(), crate::social::notifications::NOTIFICATIONS.to_string());
+                        app.social.timelines.insert(key.clone(), crate::social::state::Timeline { posts: crate::social::demo::notifications(), loaded: true, ..Default::default() });
+                        app.show_view(View::Social(Some(crate::social::FeedRef::new(key.0, key.1))), false);
                     }
                     if v == "social-import" {
                         let posts = crate::social::demo::posts();

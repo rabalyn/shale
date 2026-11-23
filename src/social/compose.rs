@@ -427,7 +427,7 @@ impl SocialState {
                     self.threads.add_reply(account, &post);
                 }
                 for ((a, f), t) in self.timelines.iter_mut() {
-                    if a == account && matches!(f.as_str(), "home" | "timeline") && t.loaded && !t.waiting.iter().chain(&t.posts).any(|p| p.id == post.id) {
+                    if a == account && matches!(f.as_str(), "home" | "timeline" | super::notifications::OWN) && t.loaded && !t.waiting.iter().chain(&t.posts).any(|p| p.id == post.id) {
                         t.waiting.insert(0, post.clone());
                     }
                 }

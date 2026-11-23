@@ -105,11 +105,12 @@ fn full_acct(acct: &str, server: &str) -> String {
     }
 }
 
-/// Home and the user's lists.
+/// Home, Notifications, Your posts (SOC-068) and the user's lists.
 pub fn feeds(server: &str, token: &str) -> Result<Vec<Feed>, String> {
     let _step = tracing::info_span!("flow.social_mastodon.feeds", peer = "server").entered();
     let server = base(server)?;
     let mut out = vec![Feed { id: "home".into(), title: "Home".into() }];
+    out.extend(notifications::extra_feeds());
     let lists = api("GET", &format!("{server}/api/v1/lists"), Some(token), None)?;
     for l in lists.as_array().into_iter().flatten() {
         let (id, title) = (text(&l["id"]), text(&l["title"]));
@@ -120,8 +121,14 @@ pub fn feeds(server: &str, token: &str) -> Result<Vec<Feed>, String> {
     Ok(out)
 }
 
-/// The API path of a feed.
-fn timeline_path(feed: &Feed) -> Result<String, String> {
+/// The API path of a feed. "Your posts" is the statuses of the account, whose id the server tells
+/// (SOC-074).
+fn timeline_path(server: &str, token: &str, feed: &Feed) -> Result<String, String> {
+    if feed.id == notifications::OWN {
+        let me = api("GET", &format!("{server}/api/v1/accounts/verify_credentials"), Some(token), None)?;
+        let id = text(&me["id"]);
+        return if !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric()) { Ok(format!("accounts/{id}/statuses")) } else { Err("the server did not say which account this is".into()) };
+    }
     match feed.id.strip_prefix("list:") {
         Some(id) if !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric()) => Ok(format!("timelines/list/{id}")),
         Some(_) => Err("bad list".into()),
@@ -130,7 +137,7 @@ fn timeline_path(feed: &Feed) -> Result<String, String> {
 }
 
 /// The id of the newest of the timeline entries (ids are numbers, longer is newer).
-fn newest_id(items: &[Value]) -> Option<String> {
+pub(super) fn newest_id(items: &[Value]) -> Option<String> {
     items.iter().map(|s| text(&s["id"])).filter(|c| !c.is_empty()).max_by(|a, b| a.len().cmp(&b.len()).then_with(|| a.cmp(b)))
 }
 
@@ -138,7 +145,10 @@ fn newest_id(items: &[Value]) -> Option<String> {
 pub fn timeline(server: &str, token: &str, feed: &Feed, cursor: Option<&str>) -> Result<Page, String> {
     let _step = tracing::info_span!("flow.social_mastodon.timeline", peer = "server").entered();
     let server = base(server)?;
-    let path = timeline_path(feed)?;
+    if feed.id == notifications::NOTIFICATIONS {
+        return notifications::mastodon_page(&server, token, cursor);
+    }
+    let path = timeline_path(&server, token, feed)?;
     let mut params = vec![("limit", PAGE_SIZE)];
     if let Some(c) = cursor.filter(|c| !c.is_empty()) {
         params.push(("max_id", c));
@@ -160,7 +170,10 @@ const MAX_CHECK_PAGES: usize = 12;
 /// missing in between; if the cap stops the check, the next check goes on from the new top.
 pub fn newer(server: &str, token: &str, feed: &Feed, top: Option<&str>, cap: usize) -> Result<Fresh, String> {
     let server = base(server)?;
-    let path = timeline_path(feed)?;
+    if feed.id == notifications::NOTIFICATIONS {
+        return notifications::mastodon_newer(&server, token, top, cap);
+    }
+    let path = timeline_path(&server, token, feed)?;
     newer_with(&server, top, cap, |min| {
         let mut params = vec![("limit", "40")];
         if let Some(m) = min {
@@ -171,7 +184,12 @@ pub fn newer(server: &str, token: &str, feed: &Feed, top: Option<&str>, cap: usi
 }
 
 /// `newer` with the requests left to the caller (`fetch(min_id)` returns the JSON answer).
-pub(crate) fn newer_with(server: &str, top: Option<&str>, cap: usize, mut fetch: impl FnMut(Option<&str>) -> Result<Value, String>) -> Result<Fresh, String> {
+pub(crate) fn newer_with(server: &str, top: Option<&str>, cap: usize, fetch: impl FnMut(Option<&str>) -> Result<Value, String>) -> Result<Fresh, String> {
+    newer_pages(top, cap, fetch, |items| items.iter().filter_map(|s| parse_status(s, server)).collect())
+}
+
+/// `newer_with` for any list of entries: `parse` makes the posts of one page (notifications, SOC-069).
+pub(crate) fn newer_pages(top: Option<&str>, cap: usize, mut fetch: impl FnMut(Option<&str>) -> Result<Value, String>, parse: impl Fn(&[Value]) -> Vec<Post>) -> Result<Fresh, String> {
     let mut posts: Vec<Post> = vec![];
     let mut min = top.map(String::from);
     let mut newest = None;
@@ -180,7 +198,7 @@ pub(crate) fn newer_with(server: &str, top: Option<&str>, cap: usize, mut fetch:
         let items = v.as_array().ok_or("the server's answer is not a timeline")?;
         let Some(page_top) = newest_id(items) else { break };
         // this page is newer than what was found before it
-        let mut page: Vec<Post> = items.iter().filter_map(|s| parse_status(s, server)).collect();
+        let mut page: Vec<Post> = parse(items);
         page.append(&mut posts);
         posts = page;
         min = Some(page_top.clone());
@@ -286,10 +304,11 @@ pub fn parse_status(s: &Value, server: &str) -> Option<Post> {
         reply_root: None,
         visibility,
         poll: Poll::parse(&s["poll"]),
+        notice: None,
     })
 }
 
-fn parse_account(a: &Value, server: &str) -> Author {
+pub(super) fn parse_account(a: &Value, server: &str) -> Author {
     Author { id: text(&a["id"]), handle: full_acct(&text(&a["acct"]), server), display_name: text(&a["display_name"]), profile_url: text(&a["url"]), avatar_url: text(&a["avatar"]) }
 }
 
@@ -571,7 +590,7 @@ mod tests {
         assert_eq!((who.handle.as_str(), who.display_name.as_str()), ("ada@127.0.0.1", "Ada"));
         let mut c = Client::new(Account::new(Network::Mastodon, &base, &who.handle, &who.display_name), tok.expose());
         let feeds = c.feeds().unwrap();
-        assert_eq!(feeds, vec![Feed { id: "home".into(), title: "Home".into() }, Feed { id: "list:7".into(), title: "Friends".into() }]);
+        assert_eq!(feeds.iter().map(|f| (f.id.as_str(), f.title.as_str())).collect::<Vec<_>>(), [("home", "Home"), ("notifications", "Notifications"), ("own", "Your posts"), ("list:7", "Friends")]);
         let page = c.timeline(&feeds[0], None).unwrap();
         assert_eq!(page.posts.len(), 6);
         assert_eq!(page.cursor.as_deref(), Some("100"));

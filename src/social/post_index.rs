@@ -305,6 +305,17 @@ impl PostIndex {
         let tx = self.conn.transaction()?;
         // oldest first: the post a reply answers is in the index before the reply, so its text is context
         for p in posts.iter().rev() {
+            // a notification is indexed as the post it is about; one about a person is no post (SOC-073)
+            if p.notice.as_ref().is_some_and(|n| n.kind.is_person()) {
+                continue;
+            }
+            let plain;
+            let p = if p.notice.is_some() {
+                plain = Post { notice: None, ..p.clone() };
+                &plain
+            } else {
+                p
+            };
             let stamp = if p.created_at > 0 { p.created_at } else { now };
             if stamp < cutoff {
                 continue;

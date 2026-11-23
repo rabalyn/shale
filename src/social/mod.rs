@@ -34,6 +34,10 @@ pub mod language;
 pub mod markup;
 pub mod mastodon;
 pub mod note;
+pub mod notifications;
+#[cfg(test)]
+mod notifications_tests;
+pub mod notifications_ui;
 #[cfg(test)]
 mod pictures_tests;
 pub mod poll;
@@ -255,6 +259,9 @@ pub struct Post {
     /// Mastodon: the poll of the status (SOC-061)
     #[serde(default)]
     pub poll: Option<poll::Poll>,
+    /// Set on the entries of the Notifications feed: why the post is there and who did it (SOC-071)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<Box<notifications::Notice>>,
 }
 
 /// What the signed-in account did with a post: liked / favourited and boosted / reposted it. On
@@ -777,6 +784,15 @@ impl Client {
         }
     }
 
+    /// Tell the server that the notifications up to `mark` (`Notice::mark` of the newest one shown)
+    /// were read (SOC-072).
+    pub fn mark_notifications(&mut self, mark: &str) -> Result<(), String> {
+        match &mut self.backend {
+            Backend::Mastodon { token } => notifications::mastodon_mark(&self.account.server, token.expose(), mark),
+            Backend::Bluesky(api) => notifications::bluesky_mark(api, mark),
+        }
+    }
+
     /// One post by its id (to open a search hit the index and the feed no longer hold, SOC-039).
     pub fn fetch_post(&mut self, id: &str) -> Result<Post, String> {
         match &mut self.backend {
@@ -861,6 +877,7 @@ pub(crate) mod tests {
             reply_root: None,
             visibility: None,
             poll: None,
+            notice: None,
         }
     }
 

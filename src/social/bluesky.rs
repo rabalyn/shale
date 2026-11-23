@@ -173,6 +173,7 @@ impl Api {
 pub fn feeds(api: &mut Api) -> Result<Vec<Feed>, String> {
     let _step = tracing::info_span!("flow.social_bluesky.feeds", peer = "server").entered();
     let mut out = vec![Feed { id: "timeline".into(), title: "Following".into() }];
+    out.extend(notifications::extra_feeds());
     let prefs = api.get("app.bsky.actor.getPreferences", &[])?;
     let uris = saved_feed_uris(&prefs);
     if uris.is_empty() {
@@ -220,12 +221,21 @@ pub fn saved_feed_uris(prefs: &Value) -> Vec<String> {
 /// One page (30 posts) of "Following" or a custom feed.
 pub fn timeline(api: &mut Api, feed: &Feed, cursor: Option<&str>) -> Result<Page, String> {
     let _step = tracing::info_span!("flow.social_bluesky.timeline", peer = "server").entered();
+    if feed.id == notifications::NOTIFICATIONS {
+        return notifications::bluesky_page(api, cursor);
+    }
+    let own;
     let mut params: Vec<(&str, &str)> = vec![("limit", PAGE_SIZE)];
     if let Some(c) = cursor.filter(|c| !c.is_empty()) {
         params.push(("cursor", c));
     }
     let v = if feed.id == "timeline" {
         api.get("app.bsky.feed.getTimeline", &params)?
+    } else if feed.id == notifications::OWN {
+        // "Your posts" (SOC-074): the posts, replies and reposts of the account itself
+        own = api.did()?;
+        params.extend([("actor", own.as_str()), ("filter", "posts_with_replies")]);
+        api.get("app.bsky.feed.getAuthorFeed", &params)?
     } else {
         if !feed.id.starts_with("at://") {
             return Err("bad feed".into());
@@ -244,6 +254,9 @@ const MAX_CHECK_PAGES: usize = 12;
 /// is already known (`known`: `state::post_key`s). At most `cap` posts; if that limit comes
 /// first, `Fresh::gap` has the cursor to go on with.
 pub fn newer(api: &mut Api, feed: &Feed, known: &HashSet<String>, cap: usize) -> Result<Fresh, String> {
+    if feed.id == notifications::NOTIFICATIONS {
+        return notifications::bluesky_newer(api, known, cap);
+    }
     newer_with(known, cap, |cursor| timeline(api, feed, cursor))
 }
 
@@ -366,7 +379,7 @@ pub fn web_url(handle_or_did: &str, at_uri: &str) -> String {
     format!("https://bsky.app/profile/{handle_or_did}/post/{}", at_uri.rsplit('/').next().unwrap_or(""))
 }
 
-fn parse_author(a: &Value) -> Author {
+pub(super) fn parse_author(a: &Value) -> Author {
     let (did, handle) = (text(&a["did"]), text(&a["handle"]));
     let who = if handle.is_empty() || handle == "handle.invalid" { did.clone() } else { handle.clone() };
     Author { id: did, handle, display_name: text(&a["displayName"]), profile_url: format!("https://bsky.app/profile/{who}"), avatar_url: text(&a["avatar"]) }
@@ -418,6 +431,7 @@ fn build_post(v: &Value, record: &Value, embeds: &[&Value]) -> Option<Post> {
         reply_root: Some(PostRef { uri: text(&record["reply"]["root"]["uri"]), cid: text(&record["reply"]["root"]["cid"]) }).filter(|r| !r.uri.is_empty()),
         visibility: None,
         poll: None,
+        notice: None,
     })
 }
 
@@ -782,6 +796,7 @@ pub fn send(api: &mut Api, d: &Draft) -> Result<Post, ActionError> {
         reply_root: None,
         visibility: None,
         poll: None,
+        notice: None,
     })
 }
 
@@ -1576,7 +1591,7 @@ mod tests {
         });
         let mut c = Client::new(Account::new(Network::Bluesky, &base, "ada.test", "Ada"), "app-pw");
         let feeds = c.feeds().unwrap();
-        assert_eq!(feeds.iter().map(|f| f.title.as_str()).collect::<Vec<_>>(), ["Following", "Cats"]);
+        assert_eq!(feeds.iter().map(|f| f.title.as_str()).collect::<Vec<_>>(), ["Following", "Notifications", "Your posts", "Cats"]);
         // the first timeline call finds the token expired, refreshes and tries again
         let page = c.timeline(&feeds[0], None).unwrap();
         assert_eq!(page.posts.len(), 1);

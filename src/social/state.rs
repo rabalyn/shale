@@ -51,6 +51,10 @@ pub trait Source: Send + Sync {
     fn cancel_scheduled(&self, _id: &str) -> Result<(), ActionError> {
         Err("this pretend server does not take writes".into())
     }
+    /// Tell the server that the notifications up to `mark` were read (SOC-072).
+    fn mark_read(&self, _mark: &str) -> Result<(), String> {
+        Ok(())
+    }
     /// What the server allows in a post (SOC-052).
     fn instance(&self) -> Result<InstanceInfo, String> {
         Ok(InstanceInfo::defaults(Network::Mastodon))
@@ -105,6 +109,8 @@ pub struct Timeline {
     pub next_check: Option<Instant>,
     /// how often the list was replaced by a first page (a view that sees a new number starts at the top)
     pub reloads: u32,
+    /// Notifications: the `rank` of the newest notification the server was told is read (SOC-072)
+    pub marked: i64,
 }
 
 impl Timeline {
@@ -200,6 +206,7 @@ pub(super) enum Msg {
     ScheduledList { account: String, client: Option<Client>, result: Result<Vec<Scheduled>, String> },
     ScheduledCancelled { account: String, id: String, client: Option<Client>, result: Result<(), ActionError> },
     Instance { account: String, client: Option<Client>, result: Result<InstanceInfo, String> },
+    Marked { account: String, client: Option<Client>, result: Result<(), String> },
     Picked { result: Result<Vec<std::path::PathBuf>, String> },
 }
 
@@ -269,7 +276,12 @@ pub struct SocialState {
 
 /// Identifies a post in the feed: the same post boosted by two people shows twice.
 pub fn post_key(p: &Post) -> String {
-    format!("{}|{}", p.id, p.reposted_by.as_ref().map(|b| b.id.as_str()).unwrap_or(""))
+    let boost = p.reposted_by.as_ref().map(|b| b.id.as_str()).unwrap_or("");
+    // a notification entry is told from the same post in another entry (SOC-071)
+    match &p.notice {
+        Some(n) => format!("{}|{boost}|{}", p.id, n.id),
+        None => format!("{}|{boost}", p.id),
+    }
 }
 
 pub(super) fn run(ctx: &Context, tx: &Sender<Msg>, job: impl FnOnce() -> Msg + Send + 'static, fail: impl FnOnce(String) -> Msg + Send + 'static) {
@@ -553,7 +565,8 @@ impl SocialState {
             return false;
         }
         t.checking = true;
-        let since = Since { top: t.top.clone(), known: t.posts.iter().chain(&t.waiting).map(post_key).collect() };
+        // the keys of the entries and, for notifications, the ids of each notification they hold
+        let since = Since { top: t.top.clone(), known: t.posts.iter().chain(&t.waiting).flat_map(|p| std::iter::once(post_key(p)).chain(p.notice.iter().flat_map(|n| n.ids.clone()))).collect() };
         let (client, src, feed, key2) = (self.client_source(e), self.source.clone(), feed.clone(), key.clone());
         run(
             ctx,
@@ -607,9 +620,39 @@ impl SocialState {
         n
     }
 
-    /// How many new posts wait for a feed.
+    /// How many new posts wait for a feed; of notifications the unread ones (SOC-072).
     pub fn waiting_count(&self, account: &str, feed: &str) -> usize {
-        self.timelines.get(&(account.to_string(), feed.to_string())).map(|t| t.waiting.len()).unwrap_or(0)
+        let unread = |p: &&Post| p.notice.as_ref().is_none_or(|n| n.unread);
+        self.timelines.get(&(account.to_string(), feed.to_string())).map(|t| t.waiting.iter().filter(unread).count()).unwrap_or(0)
+    }
+
+    /// The Notifications feed is on screen: tell the server that what the list shows is read
+    /// (SOC-072). Only when the newest entry shown was unread and was not sent before; entries
+    /// that wait behind the "new" button are not read yet. A failure is said once.
+    pub fn read_notifications(&mut self, ctx: &Context, e: &SocialAccountEntry, feed: &Feed) {
+        let key = (e.account.id.clone(), feed.id.clone());
+        let Some(t) = self.timelines.get_mut(&key).filter(|t| t.loaded) else { return };
+        let Some(n) = super::notifications::newest(&t.posts).filter(|n| n.unread && n.rank > t.marked) else { return };
+        let (mark, rank) = (n.mark.clone(), n.rank);
+        t.marked = rank;
+        let (client, src, account) = (self.client_source(e), self.source.clone(), e.account.id.clone());
+        let account2 = account.clone();
+        run(
+            ctx,
+            &self.tx,
+            move || {
+                let (client, result) = match src {
+                    Some(s) => (None, s.mark_read(&mark)),
+                    None => {
+                        let mut c = client();
+                        let r = c.mark_notifications(&mark);
+                        (Some(c), r)
+                    }
+                };
+                Msg::Marked { account, client, result }
+            },
+            move |m| Msg::Marked { account: account2, client: None, result: Err(m) },
+        );
     }
 
     /// Fetch the page that fills the gap below the post `above`.
@@ -722,6 +765,7 @@ impl SocialState {
                                 t.cursor = page.cursor;
                                 // a fresh start: what waited or was missing is part of it
                                 t.reloads += 1;
+                                t.marked = 0;
                                 t.top = page.top;
                                 t.waiting.clear();
                                 t.gaps.clear();
@@ -850,6 +894,14 @@ impl SocialState {
                     self.writes.asking.remove(&account);
                     if let Ok(info) = result {
                         self.writes.info.insert(account, info);
+                    }
+                }
+                Msg::Marked { account, client, result } => {
+                    if let Some(c) = client {
+                        self.clients.insert(account, c);
+                    }
+                    if let Err(e) = result {
+                        self.messages.push(format!("Could not mark the notifications as read: {e}"));
                     }
                 }
                 Msg::Fetched { tab, account, feed, client, mut result } => {
@@ -1161,7 +1213,7 @@ mod tests {
         st.timelines.get_mut(&key).unwrap().next_check = Some(Instant::now());
         st.tick(&ctx, std::slice::from_ref(&e), &[FeedRef::new(e.account.id.clone(), "home")], Instant::now() + Duration::from_secs(1000));
         // the other feed is not held back by it
-        assert!(st.check(&ctx, &e, &crate::social::demo::feeds().remove(1)));
+        assert!(st.check(&ctx, &e, &crate::social::demo::feeds().remove(3)));
         release.send(()).unwrap();
         release.send(()).unwrap();
         wait(&mut st, |s| s.timelines.values().all(|t| !t.checking));

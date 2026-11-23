@@ -514,6 +514,9 @@ pub(super) fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, look: Look) -> CardO
     let frame = egui::Frame::new().fill(if highlight { pal.bg_active } else { pal.bg_secondary }).corner_radius(8).inner_margin(12);
     let card = if highlight { frame.stroke(Stroke::new(1.5, pal.accent)) } else { frame }.show(ui, |ui| {
         ui.set_width(inner);
+        if let Some(n) = &p.notice {
+            super::notifications_ui::notice_row(ui, cx, n, p.network, idx);
+        }
         if let Some(b) = &p.reposted_by {
             let word = if p.network == Network::Mastodon { "boosted" } else { "reposted" };
             ui.label(RichText::new(format!("🔁 {} {word}", b.name())).size(crate::fonts::px(12.0)).color(theme::palette().muted));
@@ -543,6 +546,11 @@ pub(super) fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, look: Look) -> CardO
                 ui.label(RichText::new(format!("@{}", p.author.handle)).size(crate::fonts::px(12.5)).color(theme::palette().muted));
             });
         });
+        // a notification about a person: nothing but the person (SOC-071)
+        if p.notice.as_ref().is_some_and(|n| n.kind.is_person()) {
+            super::notifications_ui::person_actions(ui, cx, p, idx);
+            return;
+        }
         ui.add_space(6.0);
         let mut open_body = true;
         if let Some(cw) = &p.content_warning {
@@ -801,6 +809,9 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
             asks.push(Ask::Resolve(shown));
         }
         st.ensure_timeline(&ctx, &entry, f);
+        if f.id == super::notifications::NOTIFICATIONS {
+            st.read_notifications(&ctx, &entry, f);
+        }
     }
     // ---- top bar
     ui.add_space(8.0);
@@ -925,7 +936,8 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
             ui.set_min_size(size);
             ui.set_max_height(NEW_ROW_HEIGHT);
             if waiting > 0 {
-                let label = format!("{waiting} new post{} — show", if waiting == 1 { "" } else { "s" });
+                let what = if feed.id == super::notifications::NOTIFICATIONS { "notification" } else { "post" };
+                let label = format!("{waiting} new {what}{} — show", if waiting == 1 { "" } else { "s" });
                 let r = ui.add(egui::Button::new(RichText::new(label).strong().color(theme::palette().text_strong)).fill(theme::palette().accent).corner_radius(12).min_size(Vec2::new(0.0, 24.0)));
                 st.rects.push(("new-posts".into(), r.rect));
                 show_new |= r.on_hover_text("Put the new posts above the list (key: .). The view stays where it is.").clicked();
@@ -1033,7 +1045,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
                         ui.spinner();
                     });
                 } else if loaded && posts.is_empty() {
-                    ui.label(RichText::new("Nothing here yet.").color(theme::palette().muted));
+                    ui.label(RichText::new(if feed.id == super::notifications::NOTIFICATIONS { "No notifications yet." } else { "Nothing here yet." }).color(theme::palette().muted));
                 } else if loaded && !has_more {
                     ui.vertical_centered(|ui| {
                         ui.label(RichText::new("That is all for now.").size(crate::fonts::px(12.5)).color(theme::palette().faint));
