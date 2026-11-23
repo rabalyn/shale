@@ -59,7 +59,7 @@ fn texts(p: &[(String, Rect)]) -> Vec<&str> {
     p.iter().map(|(t, _)| t.as_str()).collect()
 }
 
-// spec: EDIT-063
+// spec: EDIT-063, EDIT-061
 #[test]
 fn a_mail_card_shows_the_header_and_no_raw_yaml_or_ids() {
     let v = vault("mail");
@@ -85,7 +85,7 @@ fn the_toggle_shows_all_raw_properties_and_hides_them_again() {
     assert!(texts(&open).contains(&"▾"));
 }
 
-// spec: EDIT-063, CFG-052
+// spec: EDIT-063, CFG-052, EDIT-060
 #[test]
 fn the_folded_view_is_one_line_and_the_raw_view_all_lines() {
     let v = vault("modes");

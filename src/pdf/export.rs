@@ -2583,7 +2583,7 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
-    // spec: EDIT-024, PDF-001
+    // spec: EDIT-024, PDF-001, EDIT-030
     #[test]
     fn a_table_is_a_grid_in_the_pdf_and_plain_text_lines_when_asked() {
         let (v, d) = vault();

@@ -615,7 +615,7 @@ mod tests {
         assert_eq!(f.apply(&find_blocks("plain\ntext"), FoldCmd::Toggle, 1), None);
     }
 
-    // spec: EDIT-070
+    // spec: EDIT-070, EDIT-073
     #[test]
     fn the_first_item_of_a_list_folds_alone_first_and_the_whole_list_on_a_second_fold() {
         let t = "- a\n    - a1\n- b\n    - b1\n";

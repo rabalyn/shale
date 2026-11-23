@@ -815,7 +815,7 @@ mod tests {
         assert!(Keymap::from_overrides_for(&saved, false).overrides().is_empty());
     }
 
-    // spec: KEY-015
+    // spec: KEY-015, EDIT-066
     #[test]
     fn the_alt_keys_of_the_buttons_have_defaults_on_linux_and_windows_but_none_on_macos() {
         let (linux, mac) = (Keymap::for_os(false), Keymap::for_os(true));
@@ -831,6 +831,8 @@ mod tests {
             assert_eq!(linux.bindings(d.action), mac.bindings(d.action), "{}", d.id);
         }
         assert_eq!(linux.bindings(Action::NoteBold), vec![b("Alt+B")]);
+        assert_eq!(linux.bindings(Action::NotePageBreak), vec![b("Alt+J")], "the page break button (EDIT-066)");
+        assert!(mac.bindings(Action::NotePageBreak).is_empty());
         assert_eq!(linux.bindings(Action::RibbonSlot10), vec![b("Alt+0")]);
         assert_eq!(linux.display(Action::RibbonSlot1), "Alt+1");
         assert_eq!(linux.display(Action::SidebarLeft), "Alt+,");
@@ -1286,7 +1288,7 @@ mod tests {
         out
     }
 
-    // spec: KEY-005, EDIT-033
+    // spec: KEY-005, EDIT-033, EDIT-015
     #[test]
     fn shift_k_is_the_link_preview_and_space_space_can_replace_it() {
         let mut k = linux();

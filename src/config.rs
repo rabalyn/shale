@@ -846,7 +846,7 @@ mod tests {
         assert_eq!(Config::load().0.fonts, c.fonts);
     }
 
-    // spec: CFG-001
+    // spec: CFG-001, EDIT-016, EDIT-017, EDIT-018, EDIT-026, EDIT-030
     #[test]
     fn old_config_files_still_load() {
         let (c, newer) = crate::vault_state::parse::<Config>(br#"{"vault": "/tmp/v"}"#).unwrap();

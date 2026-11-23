@@ -764,6 +764,7 @@ mod tests {
         assert!(stored_widths(&[1.0, f32::NAN], 2, 400.0).is_none() && stored_widths(&[1.0, -2.0], 2, 400.0).is_none());
     }
 
+    // spec: EDIT-024
     #[test]
     fn cells_split_on_pipes_with_or_without_the_outer_ones() {
         assert_eq!(cells("| a | b | c |"), ["a", "b", "c"]);
@@ -785,7 +786,7 @@ mod tests {
         assert_eq!(cells("| ünï | 日本 |"), ["ünï", "日本"]);
     }
 
-    // spec: EDIT-030
+    // spec: EDIT-030, EDIT-024
     #[test]
     fn a_lone_backtick_set_in_a_cell_does_not_pair_with_one_in_the_next_cell() {
         let src = "| a | b |\n|---|---|\n| x | y |\n";

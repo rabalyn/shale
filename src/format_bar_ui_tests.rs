@@ -191,7 +191,7 @@ fn the_alignment_buttons_wrap_the_paragraph_under_the_cursor_and_take_the_wrappe
     assert_eq!(text, "alpha\nbeta\n\ngamma\n");
 }
 
-// spec: EDIT-027, EDIT-016
+// spec: EDIT-027, EDIT-016, EDIT-026
 #[test]
 fn the_buttons_work_with_the_markdown_preview_on() {
     let mut fx = Fx::new("preview", "one two\n\nlast line\n");
@@ -203,6 +203,16 @@ fn the_buttons_work_with_the_markdown_preview_on() {
     assert!(fx.has_focus());
     fx.click("Highlight: ==text==");
     assert_eq!(fx.text(), "*==one==* two\n\nlast line\n");
+}
+
+// spec: EDIT-066
+#[test]
+fn the_page_break_button_puts_the_marker_line_after_the_cursors_line() {
+    let mut fx = Fx::new("pagebreak", "one two\n\nlast line\n");
+    fx.select(3, 3);
+    fx.click("Page break: a new page in the PDF");
+    assert_eq!(fx.text(), "one two\n\n<div style=\"page-break-after: always;\"></div>\n\nlast line\n");
+    assert!(fx.has_focus());
 }
 
 // spec: EDIT-027, EDIT-010

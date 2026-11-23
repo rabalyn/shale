@@ -756,7 +756,7 @@ mod tests {
         assert!(cuts(NOTE, &[], 0).len() > 8);
     }
 
-    // spec: PDF-028, EDIT-109
+    // spec: PDF-028, EDIT-109, EDIT-110
     #[test]
     fn a_wrapper_longer_than_a_block_is_kept_whole_and_both_its_lines_are_dimmed() {
         let text = format!("intro\n\n<div align=\"center\">\n\n{}</div>\n\nafter\n", "paragraph in the wrapper\n\n".repeat(10));
