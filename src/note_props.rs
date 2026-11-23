@@ -187,9 +187,9 @@ pub fn stamp(text: &str, disk: Option<&str>, now: i64) -> Option<String> {
     (out != text).then_some(out)
 }
 
-/// For tests of other features: `text` as it was before a save added `created:` and `modified:` (a front
-/// matter that holds nothing else goes again).
-#[cfg(test)]
+/// `text` without its `created:` and `modified:` lines (a front matter that holds nothing else goes too):
+/// a note made from the text of another is a new note (VAULT-045), and tests of other features read what a
+/// save added back off.
 pub(crate) fn unstamped(text: &str) -> String {
     let n = markdown::front_matter_lines(text);
     if n == 0 {

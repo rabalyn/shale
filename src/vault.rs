@@ -1172,6 +1172,8 @@ impl Vault {
         if let Some(p) = abs.parent() {
             fs::create_dir_all(p)?;
         }
+        // a note made from the text of another (a template, a copy) is a new note: its `created:` and `modified:` come with its first save (VAULT-045)
+        let content = if kind_of(rel) == FileKind::Note { crate::note_props::unstamped(content) } else { content.to_string() };
         fsutil::create_new(&abs, content.as_bytes())?;
         self.rescan();
         Ok(rel.to_path_buf())
@@ -2151,6 +2153,29 @@ mod tests {
         assert_eq!(prop("modified").unwrap(), before);
         assert_eq!(prop("priority").unwrap(), "high");
         assert_eq!(prop("created").unwrap(), created);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-045
+    #[test]
+    fn a_note_made_from_the_text_of_another_does_not_inherit_its_created_and_modified() {
+        let d = temp_vault("note-props-seed");
+        fs::create_dir_all(&d).unwrap();
+        let mut v = Vault::open(&d).unwrap();
+        let source = "---\ntitle: Plan\ncreated: 2020-01-01T00:00:00Z\nmodified: 2020-02-01T00:00:00Z\n---\nbody\n";
+        v.create_file(Path::new("Copy.md"), source).unwrap();
+        assert_eq!(fs::read_to_string(d.join("Copy.md")).unwrap(), "---\ntitle: Plan\n---\nbody\n", "the other keys stay");
+        v.create_file(Path::new("Only.md"), "---\ncreated: 2020-01-01T00:00:00Z\nmodified: 2020-02-01T00:00:00Z\n---\nbody\n").unwrap();
+        assert_eq!(fs::read_to_string(d.join("Only.md")).unwrap(), "body\n", "an empty block goes");
+        // its first save writes its own
+        let rel = Path::new("Copy.md");
+        v.save_checked(rel, "---\ntitle: Plan\n---\nbody\nmore\n", Stamp::of("---\ntitle: Plan\n---\nbody\n")).unwrap();
+        let text = fs::read_to_string(d.join(rel)).unwrap();
+        assert!(!text.contains("2020-"), "{text}");
+        assert!(text.contains("created: ") && text.contains("title: Plan"));
+        // a drawing's text is not touched
+        v.create_file(Path::new("D.excalidraw.md"), "---\ncreated: 2020\n---\n{}").unwrap();
+        assert!(fs::read_to_string(d.join("D.excalidraw.md")).unwrap().contains("created: 2020"), "a drawing is written as it is");
         let _ = fs::remove_dir_all(&d);
     }
 

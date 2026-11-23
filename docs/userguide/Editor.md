@@ -65,7 +65,7 @@ times with the time zone, for example `2026-11-23T14:05:09+01:00`. A note withou
 when you save it; an empty note stays empty, and drawings and other files are never touched. Notes that carry no
 `created:` (made before, or by another program) are dated by the `YYMMDD_` prefix of their name and then by the file
 time, so **Created** and **Modified** in the file list sort by these dates. If you edit a note in another program,
-Shale notices at its next save, which then sets `modified:`.
+Shale notices at its next save, which then sets `modified:`. A new note made from the text of another note (a copy, a template) does not take over `created:` and `modified:`; it gets its own when it is first saved.
 
 `priority:` is optional and yours to set, with the five levels of Obsidian Tasks: `highest`, `high`, `medium`,
 `low` or `lowest`. Any other value is ignored. A note with a priority shows it in its folded properties line.
