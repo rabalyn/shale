@@ -81,6 +81,7 @@ mod jobs;
 mod key_badges;
 mod keys;
 mod keys_ui;
+mod known_vaults;
 mod layout;
 mod link_assist;
 mod link_preview;

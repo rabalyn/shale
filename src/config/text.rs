@@ -28,7 +28,9 @@ const NONE_WORD: &str = "none";
 const DESCRIPTIONS: &[(&str, &str)] = &[
     ("version", "Format version of this file. Do not change it."),
     ("vault", "The vault that was open last; it opens again at the next start."),
-    ("recent", "The vaults opened lately, newest first (at most 8)."),
+    ("vaults", "The vaults Shale knows, the one opened last first: the start screen lists them. Names are only used on this computer."),
+    ("vaults.name", "What the vault is called in the window. An empty name becomes the name of the folder."),
+    ("vaults.path", "The folder of the vault."),
     ("ctrl_to_follow", "true: a link is followed only with Ctrl+click; false: a plain click follows it."),
     ("new_notes_next_to_current", "true: a note made from a red link goes next to the current note; false: into the vault's top folder."),
     ("update_links_on_rename", "true: renaming a note changes the links to it in other notes."),
@@ -429,7 +431,7 @@ mod tests {
         use crate::calendar::store::{CalendarSource, SourceKind};
         let mut c = Config {
             vault: Some("/v".into()),
-            recent: vec!["/v".into(), "/w".into()],
+            vaults: serde_json::from_str(r#"[{"name":"V","path":"/v"},{"name":"w","path":"/w"}]"#).unwrap(),
             fonts: crate::fonts::FontsCfg {
                 same_everywhere: false,
                 all: crate::fonts::FontChoice { family: Some("Sans".into()), size: 17.0 },
@@ -590,11 +592,11 @@ mod tests {
     fn cfg_009_keys_that_need_quotes_are_quoted_and_long_lists_take_a_line_per_entry() {
         let mut c = Config::default();
         c.keybindings.insert("tabs.next one".into(), vec!["Ctrl+Tab".into()]);
-        c.recent = (0..6).map(|i| format!("/home/someone/Documents/a-long-folder-name/vault-number-{i}").into()).collect();
+        c.sidebars.hidden = (0..6).map(|i| format!("/home/someone/Documents/a-long-folder-name/vault-number-{i}")).collect();
         let text = to_toml(&c);
         assert!(text.contains("\"tabs.next one\" = [\"Ctrl+Tab\"]"), "{text}");
-        assert!(text.contains("recent = [\n  \"/home/someone/Documents/a-long-folder-name/vault-number-0\",\n"), "{text}");
-        assert_eq!(Config::parse_text(&text).unwrap().0.recent, c.recent);
+        assert!(text.contains("hidden = [\n  \"/home/someone/Documents/a-long-folder-name/vault-number-0\",\n"), "{text}");
+        assert_eq!(Config::parse_text(&text).unwrap().0.sidebars.hidden, c.sidebars.hidden);
         assert_eq!(Config::parse_text(&text).unwrap().0.keybindings, c.keybindings);
     }
 }

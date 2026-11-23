@@ -760,7 +760,7 @@ fn upd_001_the_default_is_ask_also_for_a_settings_file_from_before_the_updates()
     assert_eq!(crate::config::Config::default().updates, UpdateConfig::default());
     let (old, _) = crate::config::Config::parse_text("version = 2\nreadable_width = false\n").unwrap();
     assert_eq!(old.updates.mode, UpdateMode::Ask, "an old file has no [updates]: Ask");
-    assert_eq!(old.version, 2, "a new field with a default needs no migration (CFG-001)");
+    assert_eq!(old.version, 3, "a new field with a default needs no migration (CFG-001)");
     let (some, _) = crate::config::Config::parse_text("version = 2\n[updates]\nmode = \"Install\"\nskipped_version = \"0.7.0\"\nlast_check = 5\n").unwrap();
     assert_eq!((some.updates.mode, some.updates.skipped_version.as_str(), some.updates.last_check), (UpdateMode::Install, "0.7.0", 5));
     assert_eq!(some.updates.install_on_start, "");
