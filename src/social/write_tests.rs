@@ -43,15 +43,16 @@ fn soc_050_a_favourite_shows_a_spinner_in_its_button_keeps_its_size_and_changes_
     let (tx, rx) = std::sync::mpsc::channel();
     *w.script.react_gate.lock().unwrap() = Some(rx);
     w.script.react_answers.lock().unwrap().push(Ok(Reacted { on: true, record: None, count: Some(7), fresh: None }));
-    let (like, save) = (w.rect("like:0"), w.rect("save:0"));
+    let (like, save) = (w.wait_rect("like:0"), w.wait_rect("save:0"));
     assert!(!home_post(&w, "h0").mine.liked);
     w.click("like:0");
     // the job waits at the gate: a spinner in the button, the button keeps its size, nothing next to it moves
     w.frames(2);
     assert!(w.app.social.rects.iter().any(|r| r.0 == "like-spinner:0"), "the spinner shows");
-    assert_eq!((size(w.rect("like:0")), w.rect("save:0")), (size(like), save), "nothing moves");
-    assert_eq!(w.rect("like:0").min, like.min);
+    assert_eq!((size(w.wait_rect("like:0")), w.wait_rect("save:0")), (size(like), save), "nothing moves");
+    assert_eq!(w.wait_rect("like:0").min, like.min);
     // pressed again while it runs: no second request, and the post is not changed yet
+    wait_for(&mut w, |w| w.script.reacts.lock().unwrap().len() == 1);
     w.click("like:0");
     assert_eq!(w.script.reacts.lock().unwrap().len(), 1);
     let p = home_post(&w, "h0");
@@ -61,7 +62,7 @@ fn soc_050_a_favourite_shows_a_spinner_in_its_button_keeps_its_size_and_changes_
     w.frames(3);
     assert_eq!(home_post(&w, "h0").like_count, 7, "the count of the server");
     assert!(!w.app.social.rects.iter().any(|r| r.0 == "like-spinner:0"));
-    assert_eq!((size(w.rect("like:0")), w.rect("save:0")), (size(like), save), "the same size with and without the spinner");
+    assert_eq!((size(w.wait_rect("like:0")), w.wait_rect("save:0")), (size(like), save), "the same size with and without the spinner");
     // pressing it again takes the favourite back
     w.script.react_answers.lock().unwrap().push(Ok(Reacted { on: false, record: None, count: Some(6), fresh: None }));
     tx.send(()).unwrap();
@@ -198,7 +199,7 @@ fn soc_051_the_new_post_button_opens_the_box_with_its_fields_and_the_toolbar_doe
     // the content warning field opens with its box
     w.click("compose:cw-toggle");
     assert!(compose(&w).cw_on);
-    w.rect("compose:cw");
+    w.wait_rect("compose:cw");
     // Cancel closes without sending
     w.click("compose:cancel");
     assert!(w.app.social.compose.is_none() && w.script.sends.lock().unwrap().is_empty());
@@ -224,7 +225,7 @@ fn soc_055_send_asks_post_this_first_cancel_goes_back_to_the_text_and_post_sends
     type_text(&mut w, "Hello world");
     w.click("compose:send");
     assert_eq!(compose(&w).stage, Stage::Confirm, "Send asks first");
-    w.rect("compose:confirm-who");
+    w.wait_rect("compose:confirm-who");
     assert!(w.script.sends.lock().unwrap().is_empty());
     w.click("compose:confirm-cancel");
     assert_eq!((compose(&w).stage, compose(&w).text.as_str()), (Stage::Edit, "Hello world"), "Cancel goes back to the text, which is kept");
@@ -258,7 +259,7 @@ fn soc_055_while_it_is_sent_the_box_is_busy_and_nothing_goes_out_twice() {
     ctrl_enter(&mut w);
     w.click("compose:cancel");
     assert!(w.app.social.compose.is_some(), "Cancel does not work while it is sent");
-    assert_eq!(w.script.sends.lock().unwrap().len(), 1);
+    wait_for(&mut w, |w| w.script.sends.lock().unwrap().len() == 1);
     tx.send(()).unwrap();
     wait_for(&mut w, |w| w.app.social.compose.is_none());
     assert_eq!(w.script.sends.lock().unwrap().len(), 1);
@@ -269,14 +270,14 @@ fn soc_055_while_it_is_sent_the_box_is_busy_and_nothing_goes_out_twice() {
 fn soc_057_a_sent_post_waits_above_the_list_without_moving_the_view_and_is_indexed_and_a_failure_keeps_the_text() {
     let mut w = W::new("after-send");
     let acct = home().account;
-    let top = w.rect("save:0");
+    let top = w.wait_rect("save:0");
     w.click("new-post");
     type_text(&mut w, "Hello again");
     w.script.send_answers.lock().unwrap().push(Err(ActionError::Failed("the server said no".into())));
     send_it(&mut w);
     wait_for(&mut w, |w| w.app.social.compose.as_ref().is_some_and(|c| c.stage == Stage::Edit && c.error.is_some()));
     assert_eq!((compose(&w).text.as_str(), compose(&w).error.as_deref()), ("Hello again", Some("the server said no")), "a failed send keeps the text and says why");
-    w.rect("compose:error");
+    w.wait_rect("compose:error");
     assert_eq!(w.app.social.waiting_count(&acct, "home"), 0);
     // the second try works: the box closes, the post waits (SOC-027), the list did not move
     send_it(&mut w);
@@ -284,8 +285,8 @@ fn soc_057_a_sent_post_waits_above_the_list_without_moving_the_view_and_is_index
     w.frames(3);
     assert_eq!(w.app.social.waiting_count(&acct, "home"), 1);
     assert!(toast_has(&w, "Posted"));
-    assert_eq!(w.rect("save:0"), top, "the view stays where it was");
-    w.rect("new-posts");
+    assert_eq!(w.wait_rect("save:0"), top, "the view stays where it was");
+    w.wait_rect("new-posts");
     assert!(w.app.social.index.contains(&acct, "new-post-1|"), "the post is in the post index");
     assert_eq!(w.title(0), "Mastodon · Home (1)");
     // a button shows it above the list
@@ -480,7 +481,7 @@ fn soc_054_a_quote_without_server_support_puts_the_address_into_the_text_and_say
     let url = w.app.social.timelines[&key].posts[1].url.clone();
     w.click("quote:1");
     assert_eq!(compose(&w).quote.as_ref().map(|q| q.id.as_str()), Some("h1"));
-    w.rect("compose:quote-note");
+    w.wait_rect("compose:quote-note");
     type_text(&mut w, "Look");
     let info = w.app.social.info_for(&w.app.cfg.social_accounts[0].account);
     assert_eq!(compose(&w).length(Network::Mastodon, &info), 4 + 2 + 23, "the address counts as one");
@@ -513,7 +514,7 @@ fn soc_052_a_bluesky_box_has_no_content_warning_and_no_visibility_and_a_limit_of
     let mut w = W::new("bsky-box");
     w.app.cfg.social_accounts[0].account.network = Network::Bluesky;
     w.click("new-post");
-    w.rect("compose:no-cw");
+    w.wait_rect("compose:no-cw");
     assert!(!w.app.social.rects.iter().any(|r| r.0 == "compose:cw-toggle" || r.0 == "compose:visibility"));
     let info = w.app.social.info_for(&w.app.cfg.social_accounts[0].account);
     assert_eq!(info.max_chars, 300);

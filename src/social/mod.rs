@@ -733,7 +733,11 @@ pub struct Client {
 
 #[derive(Clone)]
 enum Backend {
-    Mastodon { token: Secret },
+    Mastodon {
+        token: Secret,
+        /// the id of the account on its server, once it is known ("Your posts", SOC-074)
+        me: Option<String>,
+    },
     Bluesky(Box<bluesky::Api>),
 }
 
@@ -747,7 +751,7 @@ impl Client {
     /// `secret`: the Mastodon access token or the Bluesky app password. Nothing is sent yet.
     pub fn new(account: Account, secret: &str) -> Client {
         let backend = match account.network {
-            Network::Mastodon => Backend::Mastodon { token: Secret::new(secret.trim()) },
+            Network::Mastodon => Backend::Mastodon { token: Secret::new(secret.trim()), me: None },
             Network::Bluesky => Backend::Bluesky(Box::new(bluesky::Api::new(&account.server, &account.handle, secret))),
         };
         Client { account, backend }
@@ -756,7 +760,7 @@ impl Client {
     /// The timelines to choose from.
     pub fn feeds(&mut self) -> Result<Vec<Feed>, String> {
         match &mut self.backend {
-            Backend::Mastodon { token } => mastodon::feeds(&self.account.server, token.expose()),
+            Backend::Mastodon { token, .. } => mastodon::feeds(&self.account.server, token.expose()),
             Backend::Bluesky(api) => bluesky::feeds(api),
         }
     }
@@ -765,7 +769,7 @@ impl Client {
     /// `Page::cursor` of the page before.
     pub fn timeline(&mut self, feed: &Feed, cursor: Option<&str>) -> Result<Page, String> {
         match &mut self.backend {
-            Backend::Mastodon { token } => mastodon::timeline(&self.account.server, token.expose(), feed, cursor),
+            Backend::Mastodon { token, me } => mastodon::timeline(&self.account.server, token.expose(), feed, cursor, me),
             Backend::Bluesky(api) => bluesky::timeline(api, feed, cursor).map(|mut page| {
                 bluesky::hydrate(api, page.posts.iter_mut());
                 page
@@ -776,7 +780,7 @@ impl Client {
     /// The posts newer than the known ones, newest first, at most `MAX_NEW` (see `Fresh`).
     pub fn newer(&mut self, feed: &Feed, since: &Since) -> Result<Fresh, String> {
         match &mut self.backend {
-            Backend::Mastodon { token } => mastodon::newer(&self.account.server, token.expose(), feed, since.top.as_deref(), MAX_NEW),
+            Backend::Mastodon { token, me } => mastodon::newer(&self.account.server, token.expose(), feed, since.top.as_deref(), MAX_NEW, me),
             Backend::Bluesky(api) => bluesky::newer(api, feed, &since.known, MAX_NEW).map(|mut fresh| {
                 bluesky::hydrate(api, fresh.posts.iter_mut());
                 fresh
@@ -788,7 +792,7 @@ impl Client {
     /// were read (SOC-072).
     pub fn mark_notifications(&mut self, mark: &str) -> Result<(), String> {
         match &mut self.backend {
-            Backend::Mastodon { token } => notifications::mastodon_mark(&self.account.server, token.expose(), mark),
+            Backend::Mastodon { token, .. } => notifications::mastodon_mark(&self.account.server, token.expose(), mark),
             Backend::Bluesky(api) => notifications::bluesky_mark(api, mark),
         }
     }
@@ -796,7 +800,7 @@ impl Client {
     /// One post by its id (to open a search hit the index and the feed no longer hold, SOC-039).
     pub fn fetch_post(&mut self, id: &str) -> Result<Post, String> {
         match &mut self.backend {
-            Backend::Mastodon { token } => mastodon::fetch_post(&self.account.server, token.expose(), id),
+            Backend::Mastodon { token, .. } => mastodon::fetch_post(&self.account.server, token.expose(), id),
             Backend::Bluesky(api) => bluesky::fetch_post(api, id).map(|mut p| {
                 bluesky::hydrate(api, std::iter::once(&mut p));
                 p
@@ -808,7 +812,7 @@ impl Client {
     /// replies of other people below it (see `conversation`).
     pub fn thread_with_replies(&mut self, post: &Post) -> Result<(Vec<Post>, Vec<Reply>), String> {
         match &mut self.backend {
-            Backend::Mastodon { token } => mastodon::thread_full(&self.account.server, token.expose(), post),
+            Backend::Mastodon { token, .. } => mastodon::thread_full(&self.account.server, token.expose(), post),
             Backend::Bluesky(api) => bluesky::thread_full(api, post),
         }
     }
@@ -816,7 +820,7 @@ impl Client {
     /// The conversation around `post`: what it replies to and everything below it (SOC-045).
     pub fn thread_view(&mut self, post: &Post) -> Result<ThreadView, String> {
         match &mut self.backend {
-            Backend::Mastodon { token } => mastodon::thread_view(&self.account.server, token.expose(), post),
+            Backend::Mastodon { token, .. } => mastodon::thread_view(&self.account.server, token.expose(), post),
             Backend::Bluesky(api) => bluesky::thread_view(api, post).map(|mut v| {
                 bluesky::hydrate(api, v.posts_mut());
                 v

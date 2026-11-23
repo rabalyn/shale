@@ -118,7 +118,7 @@ fn soc_061_a_poll_and_pictures_or_a_video_exclude_each_other_and_the_box_says_so
     w.frames(2);
     w.click("compose:add-picture");
     assert_eq!(compose(&w).pictures.len(), 1);
-    w.rect("compose:poll-note");
+    w.wait_rect("compose:poll-note");
     w.click("compose:add-poll");
     assert!(compose(&w).poll.is_none(), "no poll beside a picture");
     w.click("compose:remove:0");
@@ -132,7 +132,7 @@ fn soc_061_a_poll_and_pictures_or_a_video_exclude_each_other_and_the_box_says_so
     assert!(compose(&w).pictures.is_empty());
     // removing the poll brings the picture controls back
     w.click("compose:poll-remove");
-    w.rect("compose:choose");
+    w.wait_rect("compose:choose");
 }
 
 // spec: SOC-061, SOC-063
@@ -141,7 +141,7 @@ fn soc_061_bluesky_has_no_polls_and_no_scheduling() {
     let mut w = W::new("bsky-extras");
     w.app.cfg.social_accounts[0].account.network = Network::Bluesky;
     w.click("new-post");
-    w.rect("compose:language");
+    w.wait_rect("compose:language");
     for k in ["compose:add-poll", "compose:schedule", "compose:scheduled-list"] {
         assert!(!w.app.social.rects.iter().any(|r| r.0 == k), "{k} is not offered on Bluesky");
     }
@@ -156,7 +156,7 @@ fn soc_062_a_poll_on_a_card_shows_options_to_vote_for_and_the_bars_after_voting_
     for i in 0..3 {
         w.rect(&format!("poll:0:option:{i}"));
     }
-    w.rect("poll:0:vote");
+    w.wait_rect("poll:0:vote");
     // after voting: bars, the vote control is gone
     with_poll(&mut w, poll(true, false));
     assert!(!w.app.social.rects.iter().any(|r| r.0 == "poll:0:vote"));
@@ -192,11 +192,12 @@ fn soc_062_voting_needs_a_choice_shows_a_spinner_in_the_button_and_the_answer_re
     let (tx, rx) = std::sync::mpsc::channel();
     *w.script.vote_gate.lock().unwrap() = Some(rx);
     w.click("poll:0:option:1");
-    let before = w.rect("poll:0:vote");
+    let before = w.wait_rect("poll:0:vote");
     w.click("poll:0:vote");
+    wait_for(&mut w, |w| w.script.votes.lock().unwrap().len() == 1);
     w.frames(2);
     assert!(w.app.social.rects.iter().any(|r| r.0 == "poll:0:vote-spinner"), "a spinner in the button");
-    assert_eq!(w.rect("poll:0:vote").size(), before.size(), "the button keeps its size");
+    assert_eq!(w.wait_rect("poll:0:vote").size(), before.size(), "the button keeps its size");
     // pressed again while it runs: nothing is sent twice
     w.click("poll:0:vote");
     assert_eq!(w.script.votes.lock().unwrap().len(), 1);
@@ -257,7 +258,7 @@ fn soc_063_a_post_with_a_time_is_scheduled_the_confirm_names_it_and_nothing_goes
     assert!(want >= now + MIN_AHEAD);
     ctrl_enter(&mut w);
     assert_eq!(compose(&w).stage, super::compose::Stage::Confirm);
-    w.rect("compose:confirm-schedule");
+    w.wait_rect("compose:confirm-schedule");
     w.click("compose:confirm-post");
     wait_for(&mut w, |w| toast_has(w, "Scheduled for"));
     let sent = w.script.sends.lock().unwrap()[0].clone();
@@ -297,7 +298,7 @@ fn soc_064_the_scheduled_posts_are_listed_from_the_box_and_the_menu_and_a_cancel
     wait_for(&mut w, |w| w.app.social.scheduled.items.len() == 2);
     w.frames(3);
     assert_eq!(w.app.social.scheduled.items.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["s1", "s2"], "the earliest first");
-    w.rect("scheduled:cancel:1");
+    w.wait_rect("scheduled:cancel:1");
     w.click("scheduled:cancel:0");
     wait_for(&mut w, |w| w.app.social.scheduled.items.len() == 1);
     assert_eq!(*w.script.cancelled.lock().unwrap(), ["s1"]);
@@ -314,7 +315,7 @@ fn soc_064_the_scheduled_posts_are_listed_from_the_box_and_the_menu_and_a_cancel
     w.click("scheduled:cancel:0");
     wait_for(&mut w, |w| w.app.social.scheduled.items.is_empty());
     w.frames(3);
-    w.rect("scheduled:empty");
+    w.wait_rect("scheduled:empty");
 }
 
 // spec: SOC-065
@@ -325,7 +326,7 @@ fn soc_065_a_post_starts_with_the_language_of_the_setting_and_the_last_choice_of
     w.frames(3);
     w.click("new-post");
     assert_eq!(compose(&w).language, "de", "the setting");
-    w.rect("compose:language");
+    w.wait_rect("compose:language");
     w.app.social.compose.as_mut().unwrap().language = "fr".into();
     type_text(&mut w, "Bonjour");
     send_it(&mut w);

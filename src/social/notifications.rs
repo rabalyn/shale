@@ -208,6 +208,37 @@ pub(super) fn entries(network: Network, raws: Vec<Raw>) -> Vec<Post> {
     out
 }
 
+/// Two neighbouring entries are about the same thing and one entry: likes or boosts of the same
+/// post (a page boundary or a later check cut the group, SOC-071).
+pub fn same_group(a: &Post, b: &Post) -> bool {
+    match (a.notice.as_deref(), b.notice.as_deref()) {
+        (Some(x), Some(y)) => x.kind.groups() && x.kind == y.kind && a.id == b.id,
+        _ => false,
+    }
+}
+
+/// Take the entry `other` into `keep` (`same_group`): the people, the notifications, the unread
+/// state; the time and the mark are the newer one's. `keep` keeps its key and its place in the
+/// list, so nothing that is shown moves, and the entries between the two stay in date order
+/// because the two were neighbours.
+pub fn merge_into(keep: &mut Post, other: Post) {
+    let (Some(k), Some(o)) = (keep.notice.as_deref_mut(), other.notice.map(|n| *n)) else { return };
+    let other_newer = o.rank > k.rank;
+    let (mut first, second) = if other_newer { (o.who.clone(), k.who.clone()) } else { (k.who.clone(), o.who.clone()) };
+    for a in second {
+        if !first.iter().any(|x| x.id == a.id) {
+            first.push(a);
+        }
+    }
+    k.who = first;
+    k.unread |= o.unread;
+    let new_ids: Vec<String> = o.ids.iter().filter(|i| !k.ids.contains(i)).cloned().collect();
+    k.ids.extend(new_ids);
+    if other_newer {
+        (k.at, k.mark, k.rank) = (o.at, o.mark, o.rank);
+    }
+}
+
 /// The newest notification of the entries (what the server is told is read).
 pub fn newest(posts: &[Post]) -> Option<&Notice> {
     posts.iter().filter_map(|p| p.notice.as_deref()).max_by_key(|n| n.rank)

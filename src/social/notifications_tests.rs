@@ -101,6 +101,7 @@ fn soc_069_mastodon_notifications_page_check_and_mark_read_and_your_posts_ask_fo
             }
             ("GET", "/api/v1/accounts/verify_credentials") => ok(json!({"id": "55", "acct": "ada"})),
             ("GET", "/api/v1/accounts/55/statuses?limit=20") => ok(json!([status("700", "ada", "my post", None)])),
+            ("GET", "/api/v1/accounts/55/statuses?limit=20&max_id=700") => ok(json!([])),
             ("GET", "/api/v1/accounts/55/statuses?limit=40&min_id=700") => ok(json!([])),
             _ => (404, json!({"error": "not found"}).to_string()),
         }
@@ -124,10 +125,13 @@ fn soc_069_mastodon_notifications_page_check_and_mark_read_and_your_posts_ask_fo
     // "Your posts": the id of the account first, then its statuses
     let own = c.timeline(&feeds[2], None).unwrap();
     assert_eq!(own.posts.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["700"]);
+    // the id is kept: a second page and a check do not ask again (13 requests in all, one verify_credentials)
+    assert!(c.timeline(&feeds[2], Some("700")).unwrap().posts.is_empty());
     assert!(own.posts[0].notice.is_none());
     assert!(c.newer(&feeds[2], &Since { top: own.top.clone(), ..Default::default() }).unwrap().posts.is_empty());
     let seen = handle.join().unwrap();
     assert_eq!(seen.len(), 13, "{seen:?}");
+    assert_eq!(seen.iter().filter(|r| r.contains("verify_credentials")).count(), 1, "{seen:?}");
 }
 
 // spec: SOC-072
@@ -307,8 +311,15 @@ fn notifications_ref() -> FeedRef {
 
 /// A window on the Notifications feed that the pretend server answers with `feed_entries`.
 fn on_notifications(tag: &str) -> W {
+    on_page(tag, Page { posts: feed_entries(), top: Some("30".into()), ..Default::default() }, None)
+}
+
+/// A window on the Notifications feed whose first page is `page`; `next` is what the page after it
+/// holds (the end of a short list is on screen, so the next page is asked for at once).
+fn on_page(tag: &str, page: Page, next: Option<Page>) -> W {
     let mut w = W::new(tag);
-    *w.script.first_page.lock().unwrap() = Some(Page { posts: feed_entries(), top: Some("30".into()), ..Default::default() });
+    *w.script.first_page.lock().unwrap() = Some(page);
+    *w.script.next_page.lock().unwrap() = next;
     w.click("feed-combo");
     w.click(&format!("feed:{NOTIFICATIONS}"));
     let key = (notifications_ref().account, NOTIFICATIONS.to_string());
@@ -460,4 +471,58 @@ fn soc_072_unread_waiting_entries_are_counted_and_the_marker_is_sent_again_after
     w.click("feed-menu");
     w.click("reload");
     w.wait_for("the second marker was not sent", |w| w.script.marks.lock().unwrap().len() == 2);
+}
+
+/// Entries for the posts of `own1`: one like per person, as raws are numbered.
+fn likes(ids: &[(i64, &str)]) -> Vec<Post> {
+    let own = post("own1", "ada", crate::calendar::time::now() - 100, None);
+    entries(Network::Mastodon, ids.iter().map(|(id, who)| raw(*id, Kind::Like, who, Some(own.clone()), true)).collect())
+}
+
+// spec: SOC-071
+#[test]
+fn soc_071_a_group_that_a_page_boundary_cut_is_one_entry_again() {
+    let key = (notifications_ref().account, NOTIFICATIONS.to_string());
+    let who = |w: &W| w.app.social.timelines[&key].posts.iter().map(|p| p.notice.as_ref().unwrap().who_text()).collect::<Vec<_>>();
+    // the boundary is between a follow and likes: nothing to merge
+    let mut first = likes(&[(20, "cy")]);
+    first.extend(entries(Network::Mastodon, vec![raw(10, Kind::Follow, "dee", None, false)]));
+    let mut next = likes(&[(19, "bob"), (18, "eve")]);
+    next.extend(entries(Network::Mastodon, vec![raw(9, Kind::Follow, "fay", None, false)]));
+    let mut w = on_page("notif-page-cut", Page { posts: first, cursor: Some("c1".into()), top: Some("20".into()) }, Some(Page { posts: next, ..Default::default() }));
+    w.wait_for("the next page did not come", |w| w.app.social.timelines[&key].cursor.is_none());
+    assert_eq!(who(&w), ["CY", "DEE", "BOB and EVE", "FAY"], "likes that are not neighbours stay apart");
+    // the cut falls between two likes of the same post: one entry, with its key, place and newest time
+    let mut w = on_page("notif-page-cut-2", Page { posts: likes(&[(20, "cy")]), cursor: Some("c1".into()), ..Default::default() }, Some(Page { posts: likes(&[(19, "bob")]), ..Default::default() }));
+    w.wait_for("the next page did not come", |w| w.app.social.timelines[&key].cursor.is_none());
+    let posts = &w.app.social.timelines[&key].posts;
+    assert_eq!(posts.len(), 1, "one entry");
+    let n = posts[0].notice.as_ref().unwrap();
+    assert_eq!((n.who_text().as_str(), n.ids.len(), n.rank, n.id.as_str()), ("CY and BOB", 2, 20, "20"));
+}
+
+// spec: SOC-071
+#[test]
+fn soc_071_a_group_that_a_check_cut_is_one_entry_again_while_it_waits_and_when_it_is_shown() {
+    let mut first = likes(&[(20, "cy")]);
+    first.extend(entries(Network::Mastodon, vec![raw(10, Kind::Follow, "dee", None, false)]));
+    let mut w = on_page("notif-check-cut", Page { posts: first, top: Some("20".into()), ..Default::default() }, None);
+    let key = (notifications_ref().account, NOTIFICATIONS.to_string());
+    let fresh = |posts: Vec<Post>, top: &str| super::Fresh { posts, top: Some(top.into()), gap: None };
+    w.script.newer.lock().unwrap().push((NOTIFICATIONS.into(), fresh(likes(&[(26, "eve")]), "26")));
+    w.click("check-now");
+    w.until_waiting(&notifications_ref(), 1);
+    // a second check: a like of the same post joins the one that waits
+    w.script.newer.lock().unwrap().push((NOTIFICATIONS.into(), fresh(likes(&[(27, "fay")]), "27")));
+    w.click("check-now");
+    w.wait_for("the second check did not come", |w| w.app.social.timelines[&key].waiting.first().is_some_and(|p| p.notice.as_ref().unwrap().ids.len() == 2));
+    assert_eq!(w.app.social.timelines[&key].waiting.len(), 1);
+    assert_eq!(w.title(0), "Mastodon · Notifications (1)");
+    // shown: it joins the entry of the list that is about the same post
+    w.click("new-posts");
+    let t = &w.app.social.timelines[&key];
+    assert_eq!(t.posts.len(), 2, "the follow and one entry for the three likes");
+    let n = t.posts[0].notice.as_ref().unwrap();
+    assert_eq!((n.who_text().as_str(), n.ids.len(), n.rank), ("FAY, EVE and 1 other", 3, 27));
+    assert_eq!(super::notifications::newest(&t.posts).unwrap().mark, "27", "the server is told the newest");
 }

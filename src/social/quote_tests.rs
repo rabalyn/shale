@@ -88,12 +88,13 @@ fn soc_060_a_reaction_to_the_quoted_post_shows_a_spinner_in_its_button_which_kee
     let (tx, rx) = std::sync::mpsc::channel();
     *w.script.react_gate.lock().unwrap() = Some(rx);
     w.script.react_answers.lock().unwrap().push(Ok(Reacted { on: true, record: None, count: Some(9), fresh: None }));
-    let (like, boost, save) = (w.rect("qlike:0"), w.rect("qboost:0"), w.rect("qsave:0"));
+    let (like, boost, save) = (w.wait_rect("qlike:0"), w.wait_rect("qboost:0"), w.wait_rect("qsave:0"));
     w.click("qlike:0");
     w.frames(2);
     assert!(w.app.social.rects.iter().any(|r| r.0 == "qlike-spinner:0"), "the spinner shows in the button");
     assert!(!w.app.social.rects.iter().any(|r| r.0 == "like-spinner:0"), "not in the card's button");
-    assert_eq!((size(w.rect("qlike:0")), w.rect("qboost:0"), w.rect("qsave:0")), (size(like), boost, save), "nothing moves");
+    assert_eq!((size(w.wait_rect("qlike:0")), w.wait_rect("qboost:0"), w.wait_rect("qsave:0")), (size(like), boost, save), "nothing moves");
+    wait_for(&mut w, |w| w.script.reacts.lock().unwrap().len() == 1);
     w.click("qlike:0");
     assert_eq!(w.script.reacts.lock().unwrap().len(), 1, "not twice while it runs");
     tx.send(()).unwrap();
@@ -101,7 +102,7 @@ fn soc_060_a_reaction_to_the_quoted_post_shows_a_spinner_in_its_button_which_kee
     w.frames(3);
     assert_eq!(quoted(&w).like_count, 9);
     assert!(!w.app.social.rects.iter().any(|r| r.0 == "qlike-spinner:0"));
-    assert_eq!((size(w.rect("qlike:0")), w.rect("qsave:0")), (size(like), save), "the same size with and without the spinner");
+    assert_eq!((size(w.wait_rect("qlike:0")), w.wait_rect("qsave:0")), (size(like), save), "the same size with and without the spinner");
 }
 
 // spec: SOC-060

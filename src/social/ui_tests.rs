@@ -19,6 +19,8 @@ use std::time::{Duration, Instant};
 pub(crate) struct Script {
     pub newer: Mutex<Vec<(String, Fresh)>>,
     pub first_page: Mutex<Option<Page>>,
+    /// what the page after the first holds, given once (none: an empty page)
+    pub next_page: Mutex<Option<Page>>,
     /// what fetching a post by id gives (SOC-039); missing ids fail
     pub posts: Mutex<Vec<Post>>,
     pub post_calls: Mutex<Vec<String>>,
@@ -115,7 +117,7 @@ impl Source for Script {
         Ok(self.info.lock().unwrap().clone().unwrap_or_else(|| InstanceInfo::defaults(super::Network::Mastodon)))
     }
     fn page(&self, _feed: &Feed, cursor: Option<&str>) -> Result<Page, String> {
-        Ok(if cursor.is_none() { self.first_page.lock().unwrap().clone().unwrap_or_default() } else { Page::default() })
+        Ok(if cursor.is_none() { self.first_page.lock().unwrap().clone().unwrap_or_default() } else { self.next_page.lock().unwrap().take().unwrap_or_default() })
     }
     fn post(&self, id: &str) -> Result<Post, String> {
         self.post_calls.lock().unwrap().push(id.to_string());
@@ -220,8 +222,24 @@ impl W {
         self.frames(3);
     }
 
+    /// The place of a control, once it is drawn and has stopped moving (up to 10 s): a job's
+    /// result changes the state in one frame, the control that shows it is drawn in the next, and a
+    /// window that holds it may still change its size and place after that.
+    pub fn wait_rect(&mut self, key: &str) -> Rect {
+        let start = Instant::now();
+        loop {
+            let before = self.app.social.rects.iter().rev().find(|r| r.0 == key).map(|r| r.1);
+            self.frames(1);
+            let after = self.app.social.rects.iter().rev().find(|r| r.0 == key).map(|r| r.1);
+            if (before.is_some() && before == after) || start.elapsed() > Duration::from_secs(10) {
+                return self.rect(key);
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
     pub fn click(&mut self, key: &str) {
-        let p = self.rect(key).center();
+        let p = self.wait_rect(key).center();
         self.click_at(p);
     }
 

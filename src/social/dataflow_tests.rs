@@ -34,7 +34,7 @@ fn dev_029_dataflow_of_a_mastodon_sign_in_and_timeline() {
         assert_eq!(mastodon::verify(&address, token.expose()).unwrap().handle, "ada@127.0.0.1");
         let feeds = mastodon::feeds(&address, token.expose()).unwrap();
         assert_eq!(feeds.len(), 4, "Home, Notifications, Your posts and the one list");
-        let page = mastodon::timeline(&address, token.expose(), &feeds[0], None).unwrap();
+        let page = mastodon::timeline(&address, token.expose(), &feeds[0], None, &mut None).unwrap();
         assert_eq!(page.posts.len(), 1);
     });
     crate::dataflow::verify(&doc("social-mastodon.md"), "social_mastodon", &crate::dataflow::render_mermaid(&flow));

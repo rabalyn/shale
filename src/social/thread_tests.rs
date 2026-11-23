@@ -85,7 +85,7 @@ fn soc_045_the_reply_count_opens_the_conversation_with_the_posts_above_the_tree_
     let ys: Vec<f32> = shown(&w).iter().map(|id| rect_of(&w, id).min.y).collect();
     assert!(ys.windows(2).all(|p| p[0] < p[1]), "the posts follow each other downwards: {ys:?}");
     // the opened post is highlighted, and the view is moved to it: the posts above it are above the window
-    assert_eq!(w.rect("highlight"), rect_of(&w, "h0"));
+    assert_eq!(w.wait_rect("highlight"), rect_of(&w, "h0"));
     assert!((rect_of(&w, "h0").min.y - w.app.social.list_rect.min.y).abs() < 8.0, "the opened post is at the top of the list");
     assert!(!w.app.social.rects.iter().any(|(k, _)| k == "replies:2"), "the opened post has no reply count to click");
     // replies are moved in by their level, up to 6 levels; deeper ones stay at the last indent
@@ -150,9 +150,9 @@ fn soc_047_the_conversation_is_fetched_in_the_background_with_a_spinner_and_the_
     w.frames(5);
     // the request is held: the opened post is there, highlighted, with a spinner in place of the rest, and the window answers
     assert_eq!(shown(&w), ["h0"]);
-    w.rect("highlight");
-    w.rect("thread-spinner");
-    w.rect("thread-back");
+    w.wait_rect("highlight");
+    w.wait_rect("thread-spinner");
+    w.wait_rect("thread-back");
     assert!(!w.app.social.rects.iter().any(|(k, _)| k == "thread-retry"));
     tx.send(()).unwrap();
     wait_for(&mut w, ready);
@@ -220,7 +220,7 @@ fn soc_048_a_click_on_another_post_of_the_conversation_opens_that_one_as_another
     w.click("replies:4");
     assert_eq!((w.app.tabbar.tabs.len(), w.view(0)), (1, thread_ref("c1")));
     wait_for(&mut w, |w| shown(w) == ["c0", "c1", "z9"]);
-    assert_eq!(w.rect("highlight"), rect_of(&w, "c1"));
+    assert_eq!(w.wait_rect("highlight"), rect_of(&w, "c1"));
     w.app.go_back();
     w.frames(3);
     assert_eq!(w.view(0), thread_ref("h0"));

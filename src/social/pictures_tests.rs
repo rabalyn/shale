@@ -134,7 +134,7 @@ fn soc_058_pictures_dropped_on_the_box_join_the_post_with_a_highlight_and_refuse
     let text = w.dir.join("notes.txt");
     std::fs::write(&text, "words").unwrap();
     w.click("new-post");
-    let inside = w.rect("compose:text").center();
+    let inside = w.wait_rect("compose:text").center();
     // a drag over the box lights it up
     w.frame(vec![Event::PointerMoved(inside)]);
     w.frame_raw(vec![], |raw| raw.hovered_files.push(egui::HoveredFile::default()));
@@ -161,7 +161,7 @@ fn soc_058_a_drop_on_the_box_is_not_imported_into_the_vault_but_one_beside_it_is
     std::fs::write(&note, "# Dropped\n").unwrap();
     let pic = picture(&w, "p.png");
     w.click("new-post");
-    let inside = w.rect("compose:text").center();
+    let inside = w.wait_rect("compose:text").center();
     drop_at(&mut w, inside, &[pic]);
     assert_eq!(compose(&w).pictures.len(), 1);
     assert!(!matches!(w.app.modal, Some(Modal::Import(_))), "the drop on the box is no import");

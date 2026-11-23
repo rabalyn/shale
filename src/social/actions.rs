@@ -354,7 +354,7 @@ impl Client {
             return Err(ActionError::NeedsWrite);
         }
         match &mut self.backend {
-            Backend::Mastodon { token } => mastodon::react(&self.account.server, token.expose(), &post.id, kind, on),
+            Backend::Mastodon { token, .. } => mastodon::react(&self.account.server, token.expose(), &post.id, kind, on),
             Backend::Bluesky(api) => bluesky::react(api, post, kind, on),
         }
     }
@@ -365,7 +365,7 @@ impl Client {
             return Err(ActionError::NeedsWrite);
         }
         match &mut self.backend {
-            Backend::Mastodon { token } => mastodon::send(&self.account.server, token.expose(), draft, std::time::Duration::from_secs(1)),
+            Backend::Mastodon { token, .. } => mastodon::send(&self.account.server, token.expose(), draft, std::time::Duration::from_secs(1)),
             Backend::Bluesky(api) => bluesky::send(api, draft).map(|p| Sent::Posted(Box::new(p))),
         }
     }
@@ -376,7 +376,7 @@ impl Client {
             return Err(ActionError::NeedsWrite);
         }
         match &mut self.backend {
-            Backend::Mastodon { token } => mastodon::vote(&self.account.server, token.expose(), poll, choices),
+            Backend::Mastodon { token, .. } => mastodon::vote(&self.account.server, token.expose(), poll, choices),
             Backend::Bluesky(_) => Err("Bluesky has no polls".into()),
         }
     }
@@ -384,7 +384,7 @@ impl Client {
     /// The posts the server holds back (SOC-064).
     pub fn scheduled(&mut self) -> Result<Vec<Scheduled>, String> {
         match &mut self.backend {
-            Backend::Mastodon { token } => mastodon::scheduled(&self.account.server, token.expose()),
+            Backend::Mastodon { token, .. } => mastodon::scheduled(&self.account.server, token.expose()),
             Backend::Bluesky(_) => Err("Bluesky does not schedule posts".into()),
         }
     }
@@ -395,7 +395,7 @@ impl Client {
             return Err(ActionError::NeedsWrite);
         }
         match &mut self.backend {
-            Backend::Mastodon { token } => mastodon::cancel_scheduled(&self.account.server, token.expose(), id),
+            Backend::Mastodon { token, .. } => mastodon::cancel_scheduled(&self.account.server, token.expose(), id),
             Backend::Bluesky(_) => Err("Bluesky does not schedule posts".into()),
         }
     }
@@ -403,7 +403,7 @@ impl Client {
     /// What the server allows in a post.
     pub fn instance_info(&mut self) -> Result<InstanceInfo, String> {
         match &mut self.backend {
-            Backend::Mastodon { token } => mastodon::instance_info(&self.account.server, token.expose()),
+            Backend::Mastodon { token, .. } => mastodon::instance_info(&self.account.server, token.expose()),
             Backend::Bluesky(_) => Ok(InstanceInfo::defaults(Network::Bluesky)),
         }
     }

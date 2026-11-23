@@ -988,7 +988,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   **Load more in between** fills the gap.
 - **Notifications are a feed** (Mastodon and Bluesky, in the picker of every account): one compact row
   per notification (what happened, who did it, how long ago, a dot while it is unread; "Ada, Bo and 3
-  others favourited your post" when likes or boosts of one post come together) above the post it
+  others favourited your post" when likes or boosts of one post come together, also when a page or a check cut the group) above the post it
   is about as a normal card with all its buttons (reply, like, boost, quote, Show thread, Save to
   vault …). A follow shows the account and **Open in browser**. Mentions, replies, quotes, favourites
   / likes, boosts / reposts, follows and follow requests, polls, edits and posts you asked to be told about are

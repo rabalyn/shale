@@ -122,12 +122,18 @@ pub fn feeds(server: &str, token: &str) -> Result<Vec<Feed>, String> {
 }
 
 /// The API path of a feed. "Your posts" is the statuses of the account, whose id the server tells
-/// (SOC-074).
-fn timeline_path(server: &str, token: &str, feed: &Feed) -> Result<String, String> {
+/// once and `me` keeps (SOC-074).
+fn timeline_path(server: &str, token: &str, feed: &Feed, me: &mut Option<String>) -> Result<String, String> {
     if feed.id == notifications::OWN {
-        let me = api("GET", &format!("{server}/api/v1/accounts/verify_credentials"), Some(token), None)?;
-        let id = text(&me["id"]);
-        return if !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric()) { Ok(format!("accounts/{id}/statuses")) } else { Err("the server did not say which account this is".into()) };
+        if me.is_none() {
+            let v = api("GET", &format!("{server}/api/v1/accounts/verify_credentials"), Some(token), None)?;
+            let id = text(&v["id"]);
+            if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric()) {
+                return Err("the server did not say which account this is".into());
+            }
+            *me = Some(id);
+        }
+        return Ok(format!("accounts/{}/statuses", me.as_deref().unwrap_or_default()));
     }
     match feed.id.strip_prefix("list:") {
         Some(id) if !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric()) => Ok(format!("timelines/list/{id}")),
@@ -142,13 +148,13 @@ pub(super) fn newest_id(items: &[Value]) -> Option<String> {
 }
 
 /// One page of a timeline (20 posts). `cursor`: the last id of the page before.
-pub fn timeline(server: &str, token: &str, feed: &Feed, cursor: Option<&str>) -> Result<Page, String> {
+pub fn timeline(server: &str, token: &str, feed: &Feed, cursor: Option<&str>, me: &mut Option<String>) -> Result<Page, String> {
     let _step = tracing::info_span!("flow.social_mastodon.timeline", peer = "server").entered();
     let server = base(server)?;
     if feed.id == notifications::NOTIFICATIONS {
         return notifications::mastodon_page(&server, token, cursor);
     }
-    let path = timeline_path(&server, token, feed)?;
+    let path = timeline_path(&server, token, feed, me)?;
     let mut params = vec![("limit", PAGE_SIZE)];
     if let Some(c) = cursor.filter(|c| !c.is_empty()) {
         params.push(("max_id", c));
@@ -168,12 +174,12 @@ const MAX_CHECK_PAGES: usize = 12;
 /// the newest entry of that page is the `min_id` of the next, until a page is empty or `cap`
 /// posts are there. What is found is always the block directly above `top`, so nothing is
 /// missing in between; if the cap stops the check, the next check goes on from the new top.
-pub fn newer(server: &str, token: &str, feed: &Feed, top: Option<&str>, cap: usize) -> Result<Fresh, String> {
+pub fn newer(server: &str, token: &str, feed: &Feed, top: Option<&str>, cap: usize, me: &mut Option<String>) -> Result<Fresh, String> {
     let server = base(server)?;
     if feed.id == notifications::NOTIFICATIONS {
         return notifications::mastodon_newer(&server, token, top, cap);
     }
-    let path = timeline_path(&server, token, feed)?;
+    let path = timeline_path(&server, token, feed, me)?;
     newer_with(&server, top, cap, |min| {
         let mut params = vec![("limit", "40")];
         if let Some(m) = min {
@@ -1074,7 +1080,7 @@ mod tests {
                 _ => (404, json!({"error": "nope"}).to_string()),
             }
         });
-        let f = newer(&base, "tok-1", &Feed { id: "home".into(), title: "Home".into() }, Some("10"), 200).unwrap();
+        let f = newer(&base, "tok-1", &Feed { id: "home".into(), title: "Home".into() }, Some("10"), 200, &mut None).unwrap();
         assert_eq!((f.posts.len(), f.top.as_deref()), (2, Some("12")));
         assert_eq!(handle.join().unwrap().len(), 2);
     }

@@ -133,6 +133,13 @@ impl Timeline {
         if let (Some(cursor), Some(last)) = (fresh.gap, fresh_new.last()) {
             self.gaps.push(Gap { above: post_key(last), cursor });
         }
+        // a group that this check cut from the one that waits is one entry again (SOC-071)
+        if let (Some(last), Some(first)) = (fresh_new.last(), self.waiting.first()) {
+            if super::notifications::same_group(last, first) && !self.gaps.iter().any(|g| g.above == post_key(last)) {
+                let last = fresh_new.pop().expect("not empty");
+                super::notifications::merge_into(&mut self.waiting[0], last);
+            }
+        }
         fresh_new.append(&mut self.waiting);
         self.waiting = fresh_new;
         if fresh.top.is_some() {
@@ -179,6 +186,17 @@ impl Timeline {
         if !met && !new.is_empty() {
             if let Some(cursor) = page.cursor {
                 self.gaps.push(Gap { above: post_key(new.last().expect("not empty")), cursor });
+            }
+        }
+        // a group cut by the gap is one entry again (SOC-071)
+        if new.first().is_some_and(|f| super::notifications::same_group(&self.posts[at], f)) {
+            let first = new.remove(0);
+            super::notifications::merge_into(&mut self.posts[at], first);
+        }
+        if let (Some(last), Some(below)) = (new.last(), self.posts.get(at + 1)) {
+            if super::notifications::same_group(below, last) && !self.gaps.iter().any(|g| g.above == post_key(last)) {
+                let last = new.pop().expect("not empty");
+                super::notifications::merge_into(&mut self.posts[at + 1], last);
             }
         }
         self.posts.splice(at + 1..at + 1, new);
@@ -614,7 +632,14 @@ impl SocialState {
     pub fn show_waiting(&mut self, key: &(String, String)) -> usize {
         let Some(t) = self.timelines.get_mut(key) else { return 0 };
         let have: HashSet<String> = t.posts.iter().map(post_key).collect();
-        let fresh: Vec<Post> = std::mem::take(&mut t.waiting).into_iter().filter(|p| !have.contains(&post_key(p))).collect();
+        let mut fresh: Vec<Post> = std::mem::take(&mut t.waiting).into_iter().filter(|p| !have.contains(&post_key(p))).collect();
+        // a group that a check cut from the one in the list is one entry again (SOC-071)
+        if let (Some(last), Some(first)) = (fresh.last(), t.posts.first()) {
+            if super::notifications::same_group(last, first) && !t.gaps.iter().any(|g| g.above == post_key(last)) {
+                let last = fresh.pop().expect("not empty");
+                super::notifications::merge_into(&mut t.posts[0], last);
+            }
+        }
         let n = fresh.len();
         t.posts.splice(0..0, fresh);
         n
@@ -777,6 +802,15 @@ impl SocialState {
                                 let fresh: Vec<Post> = page.posts.into_iter().filter(|p| !have.contains(&post_key(p))).collect();
                                 // a page with nothing new would be asked for again and again
                                 t.cursor = if fresh.is_empty() { None } else { page.cursor };
+                                let mut fresh = fresh;
+                                // a group that the page boundary cut is one entry again (SOC-071)
+                                if let (Some(last), Some(first)) = (t.posts.last(), fresh.first()) {
+                                    if super::notifications::same_group(last, first) && !t.gaps.iter().any(|g| g.above == post_key(last)) {
+                                        let first = fresh.remove(0);
+                                        let at = t.posts.len() - 1;
+                                        super::notifications::merge_into(&mut t.posts[at], first);
+                                    }
+                                }
                                 t.posts.extend(fresh);
                             }
                             t.loaded = true;
