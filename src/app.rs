@@ -2362,6 +2362,24 @@ impl ShaleApp {
         }
     }
 
+    /// The search and find keys of the main views (KEY-040) are read: no dialog, no text field with
+    /// the keyboard (the note in the editor only in vim normal mode, where the keys are not typed),
+    /// not the file list or the sidebar search (Space is theirs), not a drawing (Space pans) and not
+    /// the compose window of mail. Independent of Vim-style editing.
+    pub(crate) fn main_keys_active(&self, ctx: &egui::Context) -> bool {
+        if self.shortcuts_blocked() || self.vault.is_none() || self.tree.sel.is_some() || self.search.sel.is_some() {
+            return false;
+        }
+        let Some(tab) = self.tabbar.tabs.get(self.tabbar.active) else { return false };
+        match tab.view {
+            View::Note(_) if !tab.reading => tab.editor.vim_normal_keys(ctx) || ctx.memory(|m| m.focused().is_none()),
+            View::Drawing(_) => false,
+            View::Mail => self.mail.compose.is_none() && !self.mail.away && !ctx.text_edit_focused(),
+            // another widget with the keyboard (a player after a click, a button after Tab) keeps Space
+            _ => ctx.memory(|m| m.focused().is_none()),
+        }
+    }
+
     /// Swap the view of this tab with the one before it in its history, so that doing it again
     /// swaps back (NAV-019). A note gets the keyboard.
     pub fn swap_alternate(&mut self) {
@@ -2572,10 +2590,13 @@ impl ShaleApp {
         } else {
             self.keymap.cancel(Scope::NoteView);
         }
-        // Space sequences of vim-style normal mode (EDIT-015); a half typed one is forgotten
-        // when the keys are not read any more
-        if self.normal_keys_active(ui.ctx()) {
-            match ui.input_mut(|i| self.keymap.poll(i, Scope::EditorNormal)) {
+        // Space sequences: the search and find keys of the main views (KEY-040), and with Vim-style
+        // normal mode (EDIT-015) its own; both start with Space, so one sequence reads both. A half
+        // typed one is forgotten when the keys are not read any more
+        let normal = self.normal_keys_active(ui.ctx());
+        if normal || self.main_keys_active(ui.ctx()) {
+            let scopes: &[Scope] = if normal { &[Scope::MainViews, Scope::EditorNormal] } else { &[Scope::MainViews] };
+            match ui.input_mut(|i| self.keymap.poll_in(i, scopes)) {
                 Some(KeyAction::NormalAlternate) => self.swap_alternate(),
                 Some(KeyAction::NormalFindFile) => self.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::FileNames))),
                 Some(KeyAction::NormalSearchAll) => self.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::Everything))),
@@ -2583,6 +2604,7 @@ impl ShaleApp {
                 _ => {}
             }
         } else {
+            self.keymap.cancel(Scope::MainViews);
             self.keymap.cancel(Scope::EditorNormal);
         }
         let in_mail = matches!(self.tabbar.tabs.get(self.tabbar.active).map(|t| &t.view), Some(View::Mail));

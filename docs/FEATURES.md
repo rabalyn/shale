@@ -487,7 +487,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   after a restart too). The status bar shows NORMAL, INSERT, VISUAL or V-LINE.
 - In normal mode (and in a calendar, Feeds, … tab) **Space Tab** goes back to the note or sub-app
   this tab showed just before, and again to come back, like vim's alternate file. Space is the
-  leader key of its own list in the Keybindings tab; **Space f f** opens a window to find a file by its
+  leader key of its own list in the Keybindings tab; **Space f f** (and Space f g) work in every main view, not only in normal mode: the editor in normal mode, the reading view, mail, calendar, Feeds, tasks, graph; not while a text field has the keyboard, under a dialog or in a drawing (scope "Main views" of the Keybindings tab; in the mail view the mark of a message is **x**, Space is the leader); **Space f f** opens a window to find a file by its
   name (it never creates a note, unlike Ctrl+O); **Space f g** searches the text of notes, mail
   and posts in one list grouped by source (`*` and `?` are wildcards); the vim keys themselves cannot be rebound.
 - **Choose the sources of the search** (the sidebar search, Ctrl+Shift+F, and `Space f g`): a prefix at the start of
@@ -754,7 +754,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   "meeting") and `*` / `?` work as in Space f g. Choose all folders or only the open one.
 - **Import to vault** (button, or `i`) hands the mail to the same Import dialog as a dragged
   `.eml` file: attachments, people and tags work the same, a mail that was imported before is
-  recognised, and nothing is written until you press Import. Mark several mails (Space or
+  recognised, and nothing is written until you press Import. Mark several mails (x or
   Ctrl+click) to import them together.
 - **Keyboard first.** One of the three panes has the keyboard and is framed in the accent
   colour; Ctrl+H / Ctrl+L (Cmd+Shift+H / Cmd+Shift+L on macOS; the keys that go between the file list and the editor) move it between
@@ -1334,10 +1334,10 @@ Text editing keys and vim keys are fixed.
 | Alt+, / Alt+. | Show or hide the left / right sidebar |
 | Hold Alt | A small badge with its key appears at the corner of each of these buttons that has an Alt key (it follows a key you changed). On macOS, where Option+letter types characters, these actions, and the Alt keys of the open mail, have no key until you give them one in Settings → Keybindings (scope Note view, Mail view and Everywhere) |
 | Ctrl+6 | Alternate view, in every view (also mail and drawings, where Space is taken): swap with the view this tab showed just before; again: back |
-| Space Tab | Vim-style editing, normal mode: back to the view this tab showed just before (note, calendar, Feeds, …); again: forward to this one |
+| Space Tab | Vim-style editing, normal mode (not in the mail view, where Ctrl+6 does it): back to the view this tab showed just before (note, calendar, Feeds, …); again: forward to this one |
 | Space … | A started key sequence (e.g. `Space f`) shows in the status bar and is dropped after 1.5 s without a key |
-| Space f f | Vim-style editing, normal mode: find a file by name (↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens it in this tab, Esc closes) |
-| Space f g | Vim-style editing, normal mode: search the text of notes, mail and posts (`*` and `?` are wildcards; `f:` `m:` `s:` at the start look in notes, mail or posts only; results grouped with counts; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the hit where it belongs, Esc closes) |
+| Space f f | In every main view (editor in normal mode, reading view, mail, calendar, Feeds, tasks, graph; not while a text field has the keyboard or a dialog is open; scope "Main views" in Settings → Keybindings): find a file by name (↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens it in this tab, Esc closes) |
+| Space f g | In every main view (as Space f f): search the text of notes, mail and posts (`*` and `?` are wildcards; `f:` `m:` `s:` at the start look in notes, mail or posts only; results grouped with counts; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the hit where it belongs, Esc closes) |
 | ↓ or Ctrl+J, ↑ or Ctrl+K, Enter, Esc | In a picker window (Space f f, Space f g), the quick switcher (Ctrl+O) and the font list: next line, previous line, open, close. The hint between the search field and the list shows the keys as they are bound now; all four can be changed in Settings → Keybindings ("List windows") |
 | Shift+K | Vim-style editing, normal mode: preview the link under the cursor (a note as in the reading view, a web page's title and text; press it again to move the keyboard into the preview: j / k or ↓ / ↑ scroll, Enter opens the link like `gt`, Ctrl+Enter opens it in a new pane on the right, Esc closes). Definable, e.g. as Space Space |
 | Alt+↑ / Alt+↓ | Move the current line |
@@ -1359,7 +1359,7 @@ only while no text field has the keyboard. Every key can be changed in Settings 
 | j / ↓, k / ↑ | Next / previous: folder in the folder pane, message in the list, scroll in the message pane |
 | Enter | Folder pane: go to the list; list: open the message (Drafts: open the draft; Outbox: show the mail) |
 | Ctrl+J / Ctrl+K | Next / previous folder, from any pane |
-| Space | Mark the message for a selection (list) |
+| x | Mark the message for a selection (list); Space is the leader of Space f f / Space f g in the mail view too |
 | / | Search mail (Esc leaves the field, ↓ or Enter go into the results) |
 | t | Search all folders or only this one |
 | i | Import to vault |
