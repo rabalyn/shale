@@ -173,7 +173,10 @@ Handbook/                     the book: its title is the folder note's `title`, 
 - **The folder note** introduces a folder: `index.md`, else `README.md`, else the note named like the
   folder, else the one note whose properties say `folder-note: true`. Its text is printed first in the
   folder's part, under the part's heading. The top folder's note also gives the title page its `title`,
-  `subtitle`, `author` and `date`.
+  `subtitle`, `author` and `date`, and a picture above the title: `logo: z_media/logo.png` (a path in
+  the vault, a file name or `![[logo.png]]`; PNG, JPEG, WebP, BMP or GIF, drawn 3.5 cm high and centred;
+  a picture that is missing or unreadable is left out). This guide's title page shows Shale's logo that
+  way. The LaTeX templates take their logo from the template set instead.
 - **The reading order** is, in a folder: the notes and folders its folder note names in `order:` (a list
   of names without `.md`), else the ones its links point to, in the order of their first link (a link
   to a subfolder's folder note stands for the subfolder), then all others by name, numbers by value (`2 Lists`

@@ -42,6 +42,9 @@ pub struct Plan {
     pub subtitle: Option<String>,
     pub author: Option<String>,
     pub date: Option<String>,
+    /// The picture of the title page as the top folder note's `logo:` writes it (BOOK-019): a vault path,
+    /// a file name or a wiki link, `![[logo.png]]`.
+    pub logo: Option<String>,
     /// The top folder's note, printed before the first part or chapter.
     pub intro: Option<PathBuf>,
     /// The top folder's note even when it is not printed: its front matter fills the fields of a
@@ -120,6 +123,13 @@ fn join(prefix: &str, n: usize) -> String {
 /// The first value of a front matter property of a note.
 pub fn property(text: &str, key: &str) -> Option<String> {
     markdown::front_matter_values(text).into_iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).and_then(|(_, v)| v.into_iter().find(|s| !s.trim().is_empty())).map(|s| s.trim().to_string())
+}
+
+/// The vault target a `logo:` value names: `z_media/logo.png`, `![[logo.png]]` or `[[logo.png|alias]]` (BOOK-019).
+fn logo_target(value: &str) -> String {
+    let v = value.trim().trim_start_matches('!');
+    let inner = v.strip_prefix("[[").and_then(|r| r.strip_suffix("]]")).unwrap_or(v);
+    inner.split('|').next().unwrap_or(inner).trim().to_string()
 }
 
 /// Whether the note's front matter says `key: true`.
@@ -328,7 +338,17 @@ pub fn plan(vault: &Vault, dir: &Path) -> Result<Plan, String> {
     }
     let text = note.as_deref().map(|n| cx.text(n)).unwrap_or("");
     let intro = note.clone().filter(|n| !left_out(cx.text(n)));
-    Ok(Plan { dir: dir.to_path_buf(), title: property(text, "title").unwrap_or(name), subtitle: property(text, "subtitle"), author: property(text, "author"), date: property(text, "date"), intro, note, items })
+    Ok(Plan {
+        dir: dir.to_path_buf(),
+        title: property(text, "title").unwrap_or(name),
+        subtitle: property(text, "subtitle"),
+        author: property(text, "author"),
+        date: property(text, "date"),
+        logo: property(text, "logo").map(|v| logo_target(&v)),
+        intro,
+        note,
+        items,
+    })
 }
 
 /// The notes of the book as a set, for the links between chapters (BOOK-009).

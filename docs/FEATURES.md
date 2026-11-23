@@ -255,7 +255,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 - **A folder as one PDF, a book** (BOOK, #306): **Export to PDF…** in the menu of a folder in the file list,
   or of the vault (right-click the empty space under the tree), writes the notes of the folder and its
-  subfolders as one PDF: a title page (the folder note's `title`, `subtitle`, `author`, `date`), one
+  subfolders as one PDF: a title page (the folder note's `title`, `subtitle`, `author`, `date`, and a `logo:` picture above the title, BOOK-019), one
   contents page (parts, chapters and the first level of headings, with numbers, a dotted leader and the
   page, each a link), every note on a new page (a box), numbered headings that continue the chapter's number,
   a small grey running header with the chapter's title, links between the chapters that go to the page
@@ -265,7 +265,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   links, then the rest by name with numbers by value. The dialog has a folded **Reading order** to check the
   tree; the export is a background job with Cancel.
   `shale --export-pdf <folder> <file.pdf>` does it without a window, and `scripts/userguide-pdf.sh` makes the PDF of this
-  user guide (BOOK-001 to BOOK-012), which every release has as `shale-userguide-<version>.pdf`.
+  user guide (BOOK-001 to BOOK-012, BOOK-019), which every release has as `shale-userguide-<version>.pdf`.
 - **A folder through a LaTeX template** (#309): the folder's export dialog has the engine choice of a note's.
   With **LaTeX template** and a kind of the article or book family (publication, report, exercise, thesis,
   PhD; slides, letters and posters are greyed) the book is one LaTeX document: in a thesis the subfolders are
