@@ -406,7 +406,8 @@ fn the_current_colours_of_the_split_buttons_are_saved_with_the_vault_and_come_ba
     let r = hl.find_label(&mut again, "Highlight colour: #39FF14");
     hl.click(&mut again, r.center(), PointerButton::Primary);
     hl.frames(&mut again, 3);
-    assert_eq!(again.notes.get(Path::new(NOTE)).unwrap().text, "one <mark style=\"background: #39FF14;\">two</mark> three\n");
+    // an autosave that fell in the frames (a loaded machine) adds `created:` and `modified:`; they are not what is checked
+    assert_eq!(crate::note_props::unstamped(&again.notes.get(Path::new(NOTE)).unwrap().text), "one <mark style=\"background: #39FF14;\">two</mark> three\n");
     // an unreadable value gives the default again
     again.vdata.state.highlight_colour = Some("pink".into());
     assert_eq!(again.vdata.state.toolbar_colours()[0], crate::vault_state::DEFAULT_HIGHLIGHT);

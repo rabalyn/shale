@@ -1,5 +1,5 @@
 {{- /* The embeds of a note (SITE-033 to SITE-037). The exporter's title says how the file is shown: `shale:` and `;`-separated `width=N`, `player=audio|video|pdf`, `drawing=WxH`. */ -}}
-{{- $d := .Destination -}}{{- if and (strings.HasPrefix $d "/") (not (strings.HasPrefix $d "//")) }}{{ $d = relURL $d }}{{ end -}}
+{{- $d := .Destination -}}{{- if and (strings.HasPrefix $d "/") (not (strings.HasPrefix $d "//")) }}{{ $d = relURL (strings.TrimPrefix "/" $d) }}{{ end -}}
 {{- $title := .Title -}}{{- $w := 0 -}}{{- $player := "" -}}{{- $drawing := "" -}}
 {{- if strings.HasPrefix $title "shale:" }}
 {{- range split (strings.TrimPrefix "shale:" $title) ";" }}

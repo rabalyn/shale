@@ -71,19 +71,19 @@ fn site_037_a_drawing_that_a_published_note_embeds_is_written_as_an_svg_picture(
     assert!(linked.media.is_empty() && !has(&linked, "static/media/drawings/Map.excalidraw.svg"));
 }
 
-// spec: SITE-037, SITE-007
+// spec: SITE-037, SITE-007, SITE-082
 #[test]
 fn site_037_links_in_a_drawing_follow_the_rule_of_links_in_notes() {
     let f = vault("s037l");
     let e = f.export();
     let map = text(&e, "static/media/drawings/Map.excalidraw.svg");
-    assert!(map.contains("<a href=\"/public/\" target=\"_top\">") && map.contains("<a href=\"/public/#goals\" target=\"_top\">"), "the link to a published note is a link, to its heading when it names one: {map}");
+    assert!(map.contains("<a href=\"../../public/\" target=\"_top\">") && map.contains("<a href=\"../../public/#goals\" target=\"_top\">"), "the link to a published note is a link, to its heading when it names one: {map}");
     assert!(map.contains("See Public &gt; Goals and my friend"), "{map}");
     assert!(map.contains("<a href=\"https://example.org/x\" target=\"_top\">"), "a web address is kept: {map}");
     // a note that is not published: its text, no address, no name beyond the text
     assert!(map.contains("my friend") && !map.contains("hidden") && !map.contains("Hidden") && !map.contains("[["), "{map}");
     let board = text(&e, "static/media/drawings/Board.canvas.svg");
-    assert!(board.contains("<a href=\"/public/\"") && board.contains("a card"), "{board}");
+    assert!(board.contains("<a href=\"../../public/\"") && board.contains("a card"), "{board}");
     assert!(board.contains(">Hidden</text>") && !board.contains("/hidden"), "a card of a note that is not published is its text: {board}");
     // the drawing is no note and links nothing in the data files (SITE-038)
     assert_eq!(e.notes.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["N.md", "Public.md"]);

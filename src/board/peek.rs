@@ -3,11 +3,13 @@
 //! card's note in it. The note is edited in its buffer like a note in a tab, so it saves as the
 //! editor does (a checked save, DATA-003); the priority control writes the front matter only.
 
+use super::links::{self, Edit, Lists, Picker};
 use crate::app::NoteDoc;
 use crate::editor::{EditorAction, Note, NoteEditor};
 use crate::fonts::EditorFonts;
 use crate::link_preview::{clamp_size, Grip};
 use crate::note_props::Priority;
+use crate::search_all::SearchWorker;
 use crate::theme;
 use crate::undo::Histories;
 use crate::vault::Vault;
@@ -28,6 +30,8 @@ pub struct Peek {
     anchor: Rect,
     /// where the frame was drawn last frame
     pub rect: Option<Rect>,
+    /// the field under "Blocked by" or "Blocks" while one is open (BOARD-044)
+    pub picker: Option<Picker>,
 }
 
 /// What the frame shows of the window.
@@ -40,6 +44,9 @@ pub struct With<'a> {
     pub ctrl_to_follow: bool,
     pub title: &'a str,
     pub priority: Option<Priority>,
+    /// what the card waits for and what waits for it (BOARD-044)
+    pub lists: Lists<'a>,
+    pub worker: &'a mut SearchWorker,
 }
 
 /// What the user did in the peek in this frame.
@@ -57,12 +64,14 @@ pub struct Out {
     pub action: Option<EditorAction>,
     /// the frame was resized: the size to keep as the setting of EDIT-037
     pub resized: Option<Vec2>,
+    /// a blocker was added or taken away (BOARD-044)
+    pub edit: Option<Edit>,
 }
 
 impl Peek {
     pub fn new(rel: PathBuf, anchor: Rect, size: Vec2) -> Peek {
         let (editor, id) = (NoteEditor::new(Id::unique(("board-peek-editor", &rel))), Id::unique(("board-peek", &rel)));
-        Peek { rel, editor, id, size, pos: None, anchor, rect: None }
+        Peek { rel, editor, id, size, pos: None, anchor, rect: None, picker: None }
     }
 
     /// Where the frame goes when it opens, at the height of the card: right of it, else left of it,
@@ -82,7 +91,7 @@ impl Peek {
 
     /// Draw the frame over the window.
     pub fn show(&mut self, ctx: &egui::Context, note: With) -> Out {
-        let With { doc, vault, undo, fonts, ctrl_to_follow, title, priority } = note;
+        let With { doc, vault, undo, fonts, ctrl_to_follow, title, priority, lists, worker } = note;
         let mut out = Out::default();
         let screen = ctx.content_rect();
         self.size = clamp_size(self.size, screen.size());
@@ -100,6 +109,8 @@ impl Peek {
                 ui.set_width(size.x - pad.x);
                 ui.set_height(size.y - pad.y);
                 moved = title_row(ui, id, &mut out, title, priority);
+                ui.add_space(4.0);
+                out.edit = links::show(ui, &mut self.picker, worker, vault, &lists);
                 ui.add_space(4.0);
                 let height = ui.available_height();
                 egui::ScrollArea::vertical().id_salt((id, "scroll")).max_height(height).auto_shrink([false, false]).show(ui, |ui| match &doc.unreadable {

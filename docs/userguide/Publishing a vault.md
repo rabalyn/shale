@@ -87,6 +87,14 @@ Changing a rule changes no note. Shale reads the rules and your notes and never 
 - The site has a **Graph** page (`graph.html`, linked in the header of every page) with the published notes as dots and
   the links between them as lines: zoom with the wheel, drag a dot or the background, click a dot to open the note. It
   needs no server and loads nothing from another site.
+- The site has a **Site map** page (`sitemap.html`, linked in the header next to the graph): every published note as a
+  tree by folder, a folder linking to its folder note. It is plain HTML, works without an address of the site and lists
+  only the notes you publish.
+- With an **address of the site** the site also has a **`sitemap.xml`** with the full address of the home page, every
+  folder page and every note page, and nothing else: no dates, no tag pages and not the graph or the site map page. The
+  `robots.txt` next to it allows search engines and names the sitemap. Publishing is no more or less public with
+  them: anyone who can reach the site can read it, see [[Publishing to a server]]. When the address has a path
+  (`https://host.example/wiki/`) every link of the site goes below it, so serve the folder at that path.
 - Every folder with published notes is a page that lists its notes and subfolders; a folder note (`index.md`, `README.md`,
   or a note named like the folder) is the text of that page. The home page lists the folders and the latest notes. A
   page shows the notes that link to it in a panel below the text.
@@ -106,12 +114,17 @@ Open **Settings → Publishing**. With the switch off the page shows only the sw
   `https://` address (Shale keeps one token for each server and user name, so two vaults on the same server use the
   same sign-in) or an **SSH key**. When the sign-in does not work, the page says why in the words of
   [[Git sync sign-in problems]] with a link **How to fix this**.
+- **Address of the site** (optional): the public address where the built site is served, for example
+  `https://wiki.example.org/` or `https://host.example/wiki/`. Only `http://` and `https://` addresses are accepted,
+  without a user name or password; the page tells why when one is refused and does not keep it. With an address the
+  site gets a `sitemap.xml` and a `robots.txt` for search engines (below); without one it has neither and its links
+  are paths, which work wherever you put the folder.
 - **Publish** writes the site and pushes it, in the background, with the step it is at and **Cancel**. When it is
   done the page says how many notes and media files were published and how many links became plain text, and lists
   every warning, for example each file outside the vault that was not found on this computer. A publish that is
   cancelled or fails leaves the repository as it was. The same is `shale export-site --publish <vault folder>` on
   the command line (it prints the same summary; see below). Only one publish of a vault runs at a time: a second
-  one (the button, the command line or another Shale) stops at once with "Another publish of this vault is running"
+  one (the button, the command line or another Shale) stops (after at most half a second) with "Another publish of this vault is running"
   and changes nothing.
 - **Who published last**: the page reads the branch's last commit and says from which computer and when it was
   published. **Check the target** asks again.

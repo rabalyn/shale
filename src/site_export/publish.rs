@@ -145,10 +145,21 @@ pub fn repo_dir(base: &Path, id: &str) -> PathBuf {
 /// publish of the vault stops with a message and changes nothing.
 fn lock(base: &Path, id: &str) -> Result<std::fs::File, Failure> {
     let path = base.join(id).join("publish.lock");
-    match crate::fsutil::try_lock_file(&path) {
-        Ok(Some(file)) => Ok(file),
-        Ok(None) => Err(Failure::Error("Another publish of this vault is running (in this window, in another Shale or on the command line). Wait until it ends, then publish again.".into())),
-        Err(e) => Err(Failure::Error(format!("could not lock the publish: {e}"))),
+    // A child process that another thread is starting at this moment (between `fork` and `exec`)
+    // holds a copy of every open file, this lock too, for a few milliseconds; so a lock that is
+    // taken is asked for again for a short while before it counts as held (like `program::spawn`
+    // does for "text file busy"). A real second publish holds it for much longer.
+    let mut tries = 0;
+    loop {
+        match crate::fsutil::try_lock_file(&path) {
+            Ok(Some(file)) => return Ok(file),
+            Ok(None) if tries < 50 => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Ok(None) => return Err(Failure::Error("Another publish of this vault is running (in this window, in another Shale or on the command line). Wait until it ends, then publish again.".into())),
+            Err(e) => return Err(Failure::Error(format!("could not lock the publish: {e}"))),
+        }
     }
 }
 

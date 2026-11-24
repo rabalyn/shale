@@ -378,7 +378,7 @@ fn board_013_the_peek_is_an_editor_that_saves_with_the_note() {
     w.click("Alpha");
     let r = w.app.boards.peek.as_ref().unwrap().rect.unwrap();
     // a click in the text gives the editor the keyboard; typing changes the note's buffer
-    w.click_at(Pos2::new(r.min.x + 60.0, r.min.y + 70.0));
+    w.click_at(Pos2::new(r.min.x + 60.0, r.min.y + 120.0));
     w.type_text("EDITED ");
     let rel = Path::new("Alpha.md");
     assert!(w.app.notes[rel].text.contains("EDITED"), "{:?}", w.app.notes[rel].text);
@@ -396,7 +396,7 @@ fn board_012_a_click_outside_the_peek_closes_it_and_saves_what_was_typed() {
     let mut w = W::board();
     w.click("Alpha");
     let r = w.app.boards.peek.as_ref().unwrap().rect.unwrap();
-    w.click_at(Pos2::new(r.min.x + 60.0, r.min.y + 70.0));
+    w.click_at(Pos2::new(r.min.x + 60.0, r.min.y + 120.0));
     w.type_text("EDITED ");
     // on a lane heading: not on a card
     w.click("Doing");
@@ -432,7 +432,7 @@ fn board_012_a_click_in_the_peek_its_menu_and_its_title_row_keeps_it_and_x_close
     let mut w = W::board();
     w.click("Beta");
     let r = w.app.boards.peek.as_ref().unwrap().rect.unwrap();
-    w.click_at(Pos2::new(r.min.x + 60.0, r.min.y + 70.0));
+    w.click_at(Pos2::new(r.min.x + 60.0, r.min.y + 120.0));
     assert!(w.app.boards.peek.is_some(), "a click in the editor");
     w.click("Priority: high");
     assert!(w.app.boards.peek.is_some(), "the menu opens");
@@ -884,7 +884,7 @@ fn board_013_space_space_ticks_the_task_in_the_peek_in_vim_normal_mode_and_esc_l
     w.click("Tasky");
     let r = w.app.boards.peek.as_ref().unwrap().rect.unwrap();
     // a click in the text gives the peek's editor the keyboard; vim starts in normal mode
-    w.click_at(Pos2::new(r.min.x + 80.0, r.min.y + 70.0));
+    w.click_at(Pos2::new(r.min.x + 80.0, r.min.y + 120.0));
     assert!(w.app.boards.peek.as_ref().unwrap().editor.vim_normal_keys(w.hl.ctx()), "vim normal mode in the peek");
     // put the cursor on the task line, as a click would, and tick it
     let id = w.app.boards.peek.as_ref().unwrap().editor.id;
@@ -1308,11 +1308,12 @@ fn board_028_cards_in_a_cycle_are_marked_and_listed_after_the_ordered_cards() {
 fn board_025_the_selected_card_gets_arrows_to_its_blockers_and_dependants() {
     let mut w = W::new("dep-arrows", &DEP_FILES);
     assert!(w.app.boards.view.arrows.is_empty(), "nothing selected: no arrows");
+    // (where the cards are, before the peek of B lists them too)
+    let (a, d) = (w.at("A"), w.at("D"));
     w.click("B");
     assert_eq!(w.app.boards.selected.as_deref(), Some(Path::new("B.md")));
     let arrows = w.app.boards.view.arrows.clone();
     assert_eq!(arrows.len(), 2, "A to B and B to D: {arrows:?}");
-    let (a, d) = (w.at("A"), w.at("D"));
     // the cards are in one lane, one above the other (A, C, B, D): the arrows run along the lane
     assert!(arrows[0].from.y < arrows[0].to.y && arrows[0].from.y > a.y, "{arrows:?} {a:?}");
     assert!(arrows[1].from.y < arrows[1].to.y && arrows[1].to.y < d.y + 40.0, "{arrows:?} {d:?}");
@@ -1540,3 +1541,6 @@ fn board_033_arrows_with_a_modifier_do_not_move_the_selection_and_bare_arrows_do
     w.key(Key::ArrowDown, Modifiers::NONE, "");
     assert_eq!(w.app.boards.selected.as_deref(), Some(Path::new("Gamma.md")), "a bare arrow still selects");
 }
+
+mod blockers_ui;
+mod tree_drop;

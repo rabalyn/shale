@@ -331,11 +331,16 @@ check() {
 pos() { grep -nxF -- "$1" "$EVENTS" | head -n 1 | cut -d: -f1 | sed 's/^$/0/'; }
 nopos() { local p; p=$(pos "$1"); echo "${p:-0}"; }
 
-# spec: DEV-011 (#448): the stacks and the image start together, the suites run together: five suites of 0.9 s each, helpers of 0.3 s
-par_run "all" FAKE_SLEEP=0.3
+# spec: DEV-011 (#448): the stacks and the image start together, the suites run together: five suites of 3 x S each, helpers of S
+# (S = FAKE_SLEEP; a big S keeps a loaded machine's start-up and polling overhead, #659, small against the gap)
+S=1
+par_run "all" FAKE_SLEEP=$S
 check "run: all five suites ran, with their own thread counts, and the run ends well" '[ "$CODE" = 0 ] && grep -qx "start smb_fuse_env --test-threads=1" "$EVENTS" && grep -qx "start calendar::env_tests --test-threads=1" "$EVENTS" && grep -qx "start mail_env --test-threads=1" "$EVENTS" && grep -qx "start forgejo_env --test-threads=1" "$EVENTS" && grep -qx "start tex_env --test-threads=4" "$EVENTS"'
-# sequential: 3 x 0.3 s of helpers + 3 x 0.9 s of suites = 3.6 s; at the same time: 0.3 + 0.9 s plus the polling
-check "run: the stacks, the image and the suites go at the same time (about as long as the slowest, not the sum)" '[ "$MS" -lt 2800 ]'
+# sequential: 3 helpers (3 S) + the warm-up (S) + 5 suites of 3 S (15 S) = 19 S = 19 s;
+# at the same time: helpers S + warm-up S + suites 3 S = 5 S = 5 s plus the polling.
+# The bound 12 S (under 2/3 of the sum) sits in the middle: measured 6.4 s, so 5 s of extra overhead are fine, and the sum (19 s) fails by far.
+LIMIT_MS=$((S * 12000))
+check "run: the stacks, the image and the suites go at the same time (about as long as the slowest, not the sum)" '[ "$MS" -lt "$LIMIT_MS" ]'
 check "run: every helper started before the first suite and ended before it (the suites wait for the stacks)" '
   [ "$(nopos "begin caldav up")" -gt 0 ] && [ "$(nopos "begin mail up")" -gt 0 ] && [ "$(nopos "begin tex build")" -gt 0 ] &&
   [ "$(nopos "begin tex build")" -lt "$(nopos "finish caldav up")" ] && [ "$(nopos "begin mail up")" -lt "$(nopos "finish caldav up")" ] &&
