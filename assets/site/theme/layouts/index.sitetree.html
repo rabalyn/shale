@@ -1,0 +1,6 @@
+{{- /* The site map page (SITE-080): /sitemap.html, a tree of the published notes by folder. Plain HTML, no script. */ -}}
+{{ define "main" }}
+<h1>Site map</h1>
+<p class="muted">Every note of this site, by folder.</p>
+<ul class="page-list sitetree"><li><a href="{{ .RelPermalink }}">{{ .Title }}</a>{{ partial "sitetree.html" . }}</li></ul>
+{{ end }}

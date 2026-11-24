@@ -83,8 +83,8 @@ fn hello_page(exported: i64) -> String {
 
 /// The site without a note: the config, the theme, empty data files and the hello-world page. The
 /// site is called after Shale, not after the vault, so that nothing of the vault is in it.
-fn empty_site(why: String) -> Export {
-    let mut files = theme::files("Shale site").into_iter().map(|(path, text)| OutFile { path, content: Content::Text(text) }).collect::<Vec<_>>();
+fn empty_site(why: String, address: Option<&str>) -> Export {
+    let mut files = theme::files("Shale site", address).into_iter().map(|(path, text)| OutFile { path, content: Content::Text(text) }).collect::<Vec<_>>();
     for name in ["backlinks", "graph"] {
         let text = if name == "graph" { "{\"nodes\": [], \"links\": []}\n" } else { "{}\n" };
         files.push(OutFile { path: format!("data/{name}.json"), content: Content::Text(text.into()) });
@@ -113,12 +113,13 @@ pub fn chosen_notes(vault: &Vault, settings: &crate::vault_state::VaultSettings)
 /// Work out the site of `vault`, whose libraries (MEDIA-014) are set. Reads the vault, never writes it.
 pub fn build(vault: &Vault) -> Result<Export, String> {
     let settings = rules::read_settings(&vault.root)?;
+    let address = super::address::check(&settings.publish.site_address).map_err(|e| format!("{e} (publish.site_address in .shale/settings.json)"))?;
     if !settings.publish.enabled {
-        return Ok(empty_site("Publishing is off for this vault (publish.enabled in .shale/settings.json), so the site has no note".into()));
+        return Ok(empty_site("Publishing is off for this vault (publish.enabled in .shale/settings.json), so the site has no note".into(), address.as_deref()));
     }
     let published = chosen_notes(vault, &settings);
     if published.is_empty() {
-        return Ok(empty_site("No note is chosen for publishing by the rules of this vault, so the site has no note".into()));
+        return Ok(empty_site("No note is chosen for publishing by the rules of this vault, so the site has no note".into(), address.as_deref()));
     }
     let text_of = |rel: &Path| vault.notes.get(rel).map_or("", |n| n.text.as_str());
     let name = vault_name(vault);
@@ -194,7 +195,7 @@ pub fn build(vault: &Vault) -> Result<Export, String> {
         files.push(OutFile { path: path.clone(), content: Content::Copy(abs.clone()) });
         media.push(path);
     }
-    files.extend(theme::files(&name).into_iter().map(|(path, text)| OutFile { path, content: Content::Text(text) }));
+    files.extend(theme::files(&name, address.as_deref()).into_iter().map(|(path, text)| OutFile { path, content: Content::Text(text) }));
     files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(Export { files, notes, media, links: st.links, plain: st.plain, warnings: st.warnings, empty_because: None })
 }
