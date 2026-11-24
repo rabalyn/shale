@@ -151,6 +151,23 @@ pub const CHECKED: &[(&str, &str)] = &[
     ("xltabular", "xltabular.sty"),
 ];
 
+/// The packages of `packages.txt` a document needs besides what every document has, by what it is:
+/// a board stands on `pdflscape` for its landscape pages (BOARD-031). A managed TeX Live that was
+/// installed before the package was on the list lacks it, and then the compile would fail (TEX-043).
+pub const BOARD_NEEDS: &[&str] = &["pdflscape"];
+
+/// The package of the list that brings this file (`pdflscape.sty` is `pdflscape`, `scrartcl.cls` is
+/// `koma-script`): one of [`CHECKED`], else a package that is called like the file. None for a file
+/// that is no package of Shale's list.
+pub fn package_of_file(file: &str) -> Option<&'static str> {
+    let name = file.rsplit(['/', '\\']).next().unwrap_or(file);
+    if let Some((pkg, _)) = CHECKED.iter().find(|(_, f)| *f == name) {
+        return Some(pkg);
+    }
+    let stem = name.rsplit_once('.').map_or(name, |(s, _)| s);
+    super::install::packages().into_iter().find(|p| *p == stem)
+}
+
 /// What detection found out (TEX-001).
 #[derive(Clone, Debug)]
 pub struct Detection {
@@ -293,9 +310,14 @@ pub fn probe(mut engine: Engine) -> Result<Engine, String> {
         _ => return Err("biber was not found next to lualatex".to_string()),
     }
     // the packages
-    let mut kpse = engine.command("kpsewhich");
-    kpse.args(CHECKED.iter().map(|(_, file)| file)).current_dir(work.path());
-    let run = proc::run(kpse, PROBE_TIMEOUT, None, |_| {}).map_err(|e| format!("kpsewhich could not be started ({e})"))?;
-    engine.missing = missing_packages(&run.tail_text());
+    engine.missing = missing_in(&engine, work.path())?;
     Ok(engine)
+}
+
+/// The packages of [`CHECKED`] that this engine lacks: `kpsewhich` run in `dir` looks for their files.
+pub fn missing_in(engine: &Engine, dir: &Path) -> Result<Vec<String>, String> {
+    let mut kpse = engine.command("kpsewhich");
+    kpse.args(CHECKED.iter().map(|(_, file)| file)).current_dir(dir);
+    let run = proc::run(kpse, PROBE_TIMEOUT, None, |_| {}).map_err(|e| format!("kpsewhich could not be started ({e})"))?;
+    Ok(missing_packages(&run.tail_text()))
 }

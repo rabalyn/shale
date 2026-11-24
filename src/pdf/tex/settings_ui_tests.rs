@@ -286,6 +286,24 @@ fn update_starts_a_job_and_a_failure_is_reported() {
     assert!(!n.ok && n.text.contains("The update failed"), "{n:?}");
 }
 
+// spec: TEX-043, TEX-023
+#[test]
+fn a_managed_tex_live_that_misses_packages_says_so_with_an_install_button_that_starts_a_job() {
+    let mut t = T::new("missing", found(Err("no lualatex in PATH"), Ok(good(Kind::Managed, &["pdflscape", "ulem"])), Some(1)));
+    installed_tree(&t);
+    assert!(t.shows("The managed TeX Live misses: pdflscape, ulem") && t.shows("Install"), "{:?}", t.painted());
+    assert!(!t.shows("Use the TeX Live that Shale installs."), "the managed one is not told to use itself");
+    t.app.cfg.tex.repository = "not an address".into();
+    t.click("Install");
+    t.wait_for_job();
+    let n = t.app.tex.notice.clone().expect("a notice");
+    assert!(!n.ok && n.text.contains("The install of the packages failed"), "{n:?}");
+    // the TeX of this computer is not Shale's to install into
+    let mut t = T::new("missing-system", found(Ok(good(Kind::System, &["pdflscape"])), Err("not installed"), None));
+    t.app.cfg.tex.engine = TexChoice::System;
+    assert!(t.shows("It misses these packages: pdflscape") && !t.shows("The managed TeX Live misses"), "{:?}", t.painted());
+}
+
 // spec: TEX-001, TEX-023
 #[test]
 fn check_again_looks_for_a_tex_in_a_job_and_shows_what_it_found() {
