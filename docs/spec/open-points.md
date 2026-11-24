@@ -50,6 +50,7 @@ FORGE-004, [ADR-0017](../decisions/0017-github-issues-forgejo-ci.md)). The table
 | ~~OPEN-019~~ | ~~Wipe secrets from memory: passwords, OAuth2 refresh/access tokens and client secrets are plain `String`s that stay in freed memory and can end up in swap or core dumps. Use `zeroize`/`secrecy` (or own wrappers) for secrets from the dialog to the keyring call, and see which copies egui text fields keep.~~ | Decided 2026-11-15: `Secret` type, mlock, zeroize, release builds not dumpable (SEC-014 to SEC-020, raba/shale#25). |
 | OPEN-020 | A system keyring on macOS (Keychain) and Windows (Credential Manager). | Decided and done (raba/shale#26): SEC-024 (Keychain), SEC-025 (Credential Manager); SEC-003, SEC-011, SEC-021 reworded. |
 | OPEN-021 | Should pictures and PDFs go into Git LFS too (ADR-0015 starts with audio and video only)? | Pictures are often small and diffed by nobody; big scans and PDFs grow the history like videos. A size threshold is not possible with `.gitattributes` (patterns only). |
+| OPEN-022 | How is a note chosen for the Hugo site export (SITE-002, #630)? | Decided (#630): publishing rules in the vault's settings (SITE-051 to SITE-059): include all notes, folders or tags; exclude folders and tags win; private note types need an explicit tick; a note's `publish:` property wins over every rule. Way to the server: a push of the generated tree to a publish remote of its own (SITE-062 to SITE-072); SITE-060 and SITE-061 are retired. |
 
 ## Backlog carried over from IMPLEMENTATION.md (still open after checking)
 
