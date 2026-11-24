@@ -16,7 +16,7 @@ mod process;
 #[cfg(test)]
 mod env_tests;
 #[cfg(test)]
-mod tests;
+pub(crate) mod publish_tests;
 
 pub use message::{local, Meta};
 

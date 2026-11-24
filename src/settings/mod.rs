@@ -14,6 +14,7 @@ mod help;
 pub(crate) mod import;
 mod latex;
 mod mail_social;
+mod publishing;
 pub(crate) mod registry;
 mod search;
 mod sync_calendar;
@@ -40,6 +41,8 @@ pub enum SettingsTab {
     Appearance,
     Fonts,
     Sync,
+    /// The vault as a Hugo site: the switch, the rules, the target and Publish (SITE-051).
+    Publishing,
     Calendar,
     Mail,
     Social,
@@ -62,13 +65,14 @@ impl SettingsTab {
     }
 
     /// All tabs in the order of the list.
-    pub const ALL: [SettingsTab; 16] = [
+    pub const ALL: [SettingsTab; 17] = [
         SettingsTab::Vault,
         SettingsTab::Editor,
         SettingsTab::Vim,
         SettingsTab::Appearance,
         SettingsTab::Fonts,
         SettingsTab::Sync,
+        SettingsTab::Publishing,
         SettingsTab::Calendar,
         SettingsTab::Mail,
         SettingsTab::Social,
@@ -89,6 +93,7 @@ impl SettingsTab {
             SettingsTab::Appearance => "Appearance",
             SettingsTab::Fonts => "Fonts",
             SettingsTab::Sync => "Sync",
+            SettingsTab::Publishing => "Publishing",
             SettingsTab::Calendar => "Calendar",
             SettingsTab::Mail => "Mail",
             SettingsTab::Social => "Feeds",
@@ -113,6 +118,7 @@ impl SettingsTab {
             SettingsTab::Appearance => "How notes, drawings and media look",
             SettingsTab::Fonts => "The font and text size of the editor, dialogs, mail, calendar and feeds",
             SettingsTab::Sync => "Keep this vault in a git repository",
+            SettingsTab::Publishing => "Publish notes of this vault as a website: which notes, and where",
             SettingsTab::Calendar => "Calendars and the week",
             SettingsTab::Mail => "Fetching and reading mail",
             SettingsTab::Social => "Feeds, new posts and the post search",
@@ -239,6 +245,7 @@ impl ShaleApp {
                     SettingsTab::Appearance => self.appearance_tab(ui),
                     SettingsTab::Fonts => self.fonts_tab(ui),
                     SettingsTab::Sync => self.sync_tab(ui, asks),
+                    SettingsTab::Publishing => self.publishing_tab(ui),
                     SettingsTab::Calendar => self.calendar_tab(ui, asks),
                     SettingsTab::Mail => self.mail_tab(ui, asks),
                     SettingsTab::Social => self.social_tab(ui, asks),

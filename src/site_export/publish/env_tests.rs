@@ -52,7 +52,7 @@ fn lfs_holds(token: &Secret, repo: &str, oid: &str, size: usize) -> bool {
     v["objects"][0]["actions"]["download"].is_object()
 }
 
-// spec: SITE-062, SITE-064, SITE-068, SITE-075, SITE-066
+// spec: SITE-062, SITE-064, SITE-068, SITE-075, SITE-066, SITE-052
 #[test]
 #[ignore = "needs the Forgejo test stack: tests/forgejo-env/forgejo-env.sh up"]
 fn forgejo_env_publish_over_https_with_a_token_makes_one_snapshot_and_the_next_replaces_it() {

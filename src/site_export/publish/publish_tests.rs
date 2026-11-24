@@ -15,7 +15,7 @@ struct Stack {
 
 const BRANCH: &str = "site";
 
-fn hermetic(lfs: bool) -> Git {
+pub(crate) fn hermetic(lfs: bool) -> Git {
     let none = if cfg!(windows) { "NUL" } else { "/dev/null" };
     let env = [
         ("GIT_CONFIG_GLOBAL", none),
@@ -287,7 +287,7 @@ fn site_065_a_cancelled_or_failed_publish_leaves_the_remote_as_it_was() {
     t.join().unwrap();
 }
 
-// spec: SITE-051, SITE-064, SITE-066
+// spec: SITE-051, SITE-064, SITE-066, SITE-063
 #[test]
 fn site_064_a_publish_needs_the_switch_an_address_and_a_repository_of_its_own() {
     let st = Stack::new("needs", false, &[("A.md", "a note\n")]).unwrap();
@@ -325,7 +325,7 @@ fn site_067_the_summary_counts_and_lists_every_warning_among_them_the_off_vault_
     assert!(empty.summary.empty_because.is_some_and(|w| w.contains("No note is chosen")));
 }
 
-// spec: SITE-069, SITE-071
+// spec: SITE-069, SITE-071, SITE-036
 #[test]
 fn site_069_media_go_to_lfs_are_uploaded_once_and_without_git_lfs_the_publish_says_so() {
     let Some(st) = Stack::new("lfs", true, &[("A.md", "listen ![[song.mp3]] and ![[pic.png]]\n")]) else { return };
@@ -413,7 +413,7 @@ fn site_066_the_command_publishes_prints_the_summary_and_stops_at_a_target_of_an
     assert!(run_publish(&args, &st.git, &[], &st.base, &mut o, &mut e).unwrap_err().contains("is not a folder"));
 }
 
-// spec: SITE-075, SITE-064
+// spec: SITE-075, SITE-064, SITE-052
 #[test]
 fn site_075_targets_on_one_server_and_user_share_one_keyring_entry_and_the_command_uses_the_askpass_helper() {
     use crate::gitsync::credentials::{parse_prompt, server_key, user_of, ASKPASS_ENV};

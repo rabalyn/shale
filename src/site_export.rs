@@ -12,6 +12,7 @@ pub(crate) mod anchor;
 pub(crate) mod body;
 pub(crate) mod cli;
 pub(crate) mod front;
+pub(crate) mod job;
 pub(crate) mod plan;
 pub(crate) mod publish;
 pub(crate) mod rules;
@@ -27,3 +28,5 @@ mod export_tests;
 mod hugo_tests;
 #[cfg(test)]
 mod test_support;
+#[cfg(all(test, unix))]
+mod ui_tests;
