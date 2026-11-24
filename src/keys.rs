@@ -744,7 +744,7 @@ mod tests {
         Binding::parse(s).unwrap()
     }
 
-    // spec: KEY-001
+    // spec: KEY-001, KEY-012, KEY-017
     #[test]
     fn every_default_parses_and_has_no_conflict() {
         // on macOS the Alt defaults are simply not bound, but their strings still parse and check
@@ -763,7 +763,7 @@ mod tests {
         }
     }
 
-    // spec: KEY-002, MAIL-061
+    // spec: KEY-002, MAIL-061, KEY-012, KEY-013
     #[test]
     fn the_definable_actions_are_the_listed_ones() {
         let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/spec/links-and-editor.md")).unwrap();
@@ -824,7 +824,7 @@ mod tests {
         assert!(Keymap::from_overrides_for(&saved, false).overrides().is_empty());
     }
 
-    // spec: KEY-015, EDIT-066
+    // spec: KEY-015, EDIT-066, KEY-034
     #[test]
     fn the_alt_keys_of_the_buttons_have_defaults_on_linux_and_windows_but_none_on_macos() {
         let (linux, mac) = (Keymap::for_os(false), Keymap::for_os(true));
