@@ -1403,7 +1403,10 @@ mod tests {
     #[test]
     fn job_021_a_sync_is_a_task_with_the_account_name_that_cancel_stops_between_batches_and_a_later_sync_completes() {
         let (dir, server) = (root("job021"), server());
-        server.state().fetch_delay = std::time::Duration::from_millis(40);
+        // the server serves a batch only when the test sends a token: the first one, then none until Cancel
+        let (serve, tokens) = channel();
+        let mut serve = Some(serve);
+        server.state().fetch_gate = Some(Arc::new(Mutex::new(tokens)));
         let store = Arc::new(MailStore::open(&dir).unwrap());
         let busy = crate::busy::Busy::default();
         let (c, gate) = gated(&server);
@@ -1415,13 +1418,18 @@ mod tests {
         assert!(info.cancellable && !info.cancelling);
         assert!(busy.begin(MAIL_SYNC.with("acct1"), "again").is_none(), "never two syncs of one account");
         gate.send(()).unwrap();
-        // Cancel after the first batch has been stored: the sync stops between batches
+        serve.as_ref().unwrap().send(()).unwrap();
+        // Cancel after the first batch has been stored (the next fetch waits for a token): the sync stops between batches
         let mut summary = None;
+        let mut cancelled = false;
         while let Ok(e) = rx.recv_timeout(std::time::Duration::from_secs(30)) {
             match e {
-                Progress::Folder { .. } => {
+                Progress::Folder { .. } if !cancelled => {
+                    cancelled = true;
                     assert!(busy.cancel(info.id), "the registry's Cancel reaches the sync");
                     assert!(busy.info(&MAIL_SYNC.with("acct1")).is_some_and(|t| t.cancelling));
+                    // Cancel is set: closing the gate lets the waiting fetch through, the sync stops at its next check
+                    serve.take();
                 }
                 Progress::Finished(s) => {
                     summary = Some(s);
@@ -1445,7 +1453,6 @@ mod tests {
         }
         assert!(stray.is_empty(), "no half-written file stays: {stray:?}");
         // the next sync continues normally with a fresh token
-        server.state().fetch_delay = std::time::Duration::ZERO;
         let (c, gate) = gated(&server);
         gate.send(()).unwrap();
         let rx = start_task(&busy, &store, "acct1", "Work mail", c, opts());

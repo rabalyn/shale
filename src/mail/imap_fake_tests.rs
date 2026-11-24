@@ -50,6 +50,9 @@ pub struct FakeState {
     pub password: String,
     /// Wait this long before answering a fetch (to make connections overlap).
     pub fetch_delay: Duration,
+    /// Every fetch waits for one token from this channel before it answers (a closed channel lets
+    /// all through), so a test decides when each batch is served instead of racing a delay.
+    pub fetch_gate: Option<Arc<Mutex<std::sync::mpsc::Receiver<()>>>>,
     pub connections: usize,
     pub open_connections: usize,
     pub max_open_connections: usize,
@@ -226,6 +229,7 @@ impl FakeServer {
             user: "ada".into(),
             password: "pässword \"quoted\"".into(),
             fetch_delay: Duration::ZERO,
+            fetch_gate: None,
             connections: 0,
             open_connections: 0,
             max_open_connections: 0,
@@ -632,7 +636,7 @@ fn session<S: Read + Write + ReadTimeout>(r: &mut BufReader<S>, st: &Arc<Mutex<F
                         write!(out, "* SEARCH{}\r\n{tag} OK search done\r\n", hits.iter().map(|u| format!(" {u}")).collect::<String>())?;
                     }
                     ("FETCH", Some(f)) => {
-                        let (delay, pad) = (g.fetch_delay, g.pad_message);
+                        let (delay, pad, gate) = (g.fetch_delay, g.pad_message, g.fetch_gate.clone());
                         let condstore = g.condstore;
                         let args = rest.splitn(3, ' ').nth(2).unwrap_or("");
                         let set = args.split_whitespace().next().unwrap_or("");
@@ -642,6 +646,9 @@ fn session<S: Read + Write + ReadTimeout>(r: &mut BufReader<S>, st: &Arc<Mutex<F
                         let msgs: Vec<FakeMessage> = f.msgs.iter().filter(|m| in_set(set, m.uid, max)).filter(|m| since.map(|s| m.modseq > s).unwrap_or(true)).cloned().collect();
                         let ids: Vec<u32> = f.msgs.iter().map(|m| m.uid).collect();
                         drop(g);
+                        if let Some(gate) = gate {
+                            let _ = gate.lock().unwrap().recv_timeout(Duration::from_secs(20));
+                        }
                         if !delay.is_zero() {
                             std::thread::sleep(delay);
                         }
