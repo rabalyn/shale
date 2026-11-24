@@ -28,6 +28,8 @@ markdown files. Notes link to each other with `[[wiki links]]`.
   last entry creates a new note.
 - **Drawings**: hand-drawn style sketches stored as standard `.excalidraw` JSON files.
   Put `![[Sketch.excalidraw]]` in a note to show the drawing there.
+- **Created, modified and priority**: a note Shale saves gets `created:` and `modified:` (full ISO 8601 times) in its
+  front matter, `modified:` moving only when the text changes; `priority:` takes `highest` to `lowest`.
 - **To-do list for the whole vault**: every `- [ ] task` from every note in one list.
   Tick tasks off there (the change is saved to the note), filter them, and sort by due date
   (`📅 2026-12-01` or `due:2026-12-01`).

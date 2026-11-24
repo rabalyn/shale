@@ -148,7 +148,7 @@ fn saves_make_snapshots_that_coalesce_and_idle_and_close_make_one() {
     t.app.close_tab(0);
     t.settle();
     assert_eq!(t.reasons()[0], Some(Reason::Close));
-    assert_eq!(t.repo().run_for_test(&["show", "HEAD:Note.md"]), "four\n");
+    assert_eq!(crate::note_props::unstamped(&t.repo().run_for_test(&["show", "HEAD:Note.md"])), "four\n");
     // nothing but the ID file was written into the vault
     let mut names: Vec<String> = std::fs::read_dir(&t.vault).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
     names.sort();
@@ -224,19 +224,21 @@ fn restoring_a_version_into_an_open_note_is_one_undoable_change_with_snapshots_a
     assert_eq!(versions.len(), 3, "{versions:?}");
     // type something unsaved, then restore the first version ("one")
     let doc = t.app.notes.get_mut(Path::new("Note.md")).unwrap();
-    doc.text = "three, and typed\n".into();
+    // typed after the line "three": the properties a save added stay in the buffer
+    let typed = doc.text.replace("three\n", "three, and typed\n");
+    doc.text = typed.clone();
     doc.dirty = true;
     let first = versions.last().unwrap().clone();
     t.app.history_restore_version(Path::new("Note.md"), &first);
     t.settle();
 
     // the note shows the old text, saved, and the editor's undo goes back to what was there
-    assert_eq!(t.app.notes[Path::new("Note.md")].text, "one\n");
+    assert_eq!(crate::note_props::unstamped(&t.app.notes[Path::new("Note.md")].text), "one\n");
     assert!(!t.app.notes[Path::new("Note.md")].dirty);
-    assert_eq!(crate::fsutil::read_to_string(t.vault.join("Note.md")).unwrap(), "one\n");
+    assert_eq!(crate::note_props::unstamped(&crate::fsutil::read_to_string(t.vault.join("Note.md")).unwrap()), "one\n");
     let mut text = t.app.notes[Path::new("Note.md")].text.clone();
     assert!(t.app.undo.of(Path::new("Note.md")).undo(&mut text).is_some());
-    assert_eq!(text, "three, and typed\n", "one undo step brings back the text before the restore");
+    assert_eq!(text, typed, "one undo step brings back the text before the restore");
     // history: the pre-restore snapshot holds the saved text, the restore snapshot names the version
     let after: Vec<String> = t.repo().run_for_test(&["rev-list", "HEAD"]).lines().map(str::to_string).collect();
     assert_eq!(after.len(), 5, "{after:?}");
@@ -245,8 +247,8 @@ fn restoring_a_version_into_an_open_note_is_one_undoable_change_with_snapshots_a
     assert_eq!(msgs[0].reason, Some(Reason::Restore));
     assert_eq!(msgs[0].restored.as_deref(), Some(first.commit.as_str()));
     assert_eq!(msgs[1].reason, Some(Reason::Save));
-    assert_eq!(t.repo().run_for_test(&["show", &format!("{}:Note.md", after[1])]), "three, and typed\n");
-    assert_eq!(t.repo().run_for_test(&["show", "HEAD:Note.md"]), "one\n");
+    assert_eq!(crate::note_props::unstamped(&t.repo().run_for_test(&["show", &format!("{}:Note.md", after[1])])), "three, and typed\n");
+    assert_eq!(crate::note_props::unstamped(&t.repo().run_for_test(&["show", "HEAD:Note.md"])), "one\n");
     assert!(t.toasted("Restored “Note.md”"), "{:?}", t.app.toasts);
 }
 
@@ -267,7 +269,7 @@ fn restoring_a_version_of_a_note_that_is_not_open_writes_it_like_a_save() {
     write(&t.vault, "Note.md", "three\n");
     t.app.history_restore_version(Path::new("Note.md"), &old);
     t.settle();
-    assert_eq!(crate::fsutil::read_to_string(t.vault.join("Note.md")).unwrap(), "one\n");
+    assert_eq!(crate::note_props::unstamped(&crate::fsutil::read_to_string(t.vault.join("Note.md")).unwrap()), "one\n");
     assert!(!t.app.notes.contains_key(Path::new("Note.md")), "it was not opened by the restore");
     assert_eq!(t.reasons()[..2], [Some(Reason::Restore), Some(Reason::Save)]);
     assert_eq!(t.repo().run_for_test(&["show", "HEAD~1:Note.md"]), "three\n");
@@ -288,7 +290,7 @@ fn a_version_is_shown_read_only_and_its_text_is_copied() {
     let (title, text) = t.app.history.changes.alone.clone().unwrap();
     assert_eq!(text, "one\n");
     assert!(title.starts_with("Note.md as of "), "{title}");
-    assert_eq!(t.app.notes[Path::new("Note.md")].text, "two\n", "viewing changes nothing");
+    assert_eq!(crate::note_props::unstamped(&t.app.notes[Path::new("Note.md")].text), "two\n", "viewing changes nothing");
     // copy: the text goes to the clipboard of the window
     t.app.ctx = Some(t.ctx.clone());
     t.app.history_copy_version(&v);
@@ -320,7 +322,7 @@ fn a_trashed_note_is_listed_as_deleted_with_its_last_text_and_comes_back_at_its_
     assert_eq!(list[0].path, Path::new("Note.md"));
     t.app.history_restore_deleted(&list[0]);
     t.settle();
-    assert_eq!(crate::fsutil::read_to_string(t.vault.join("Note.md")).unwrap(), "last text\n");
+    assert_eq!(crate::note_props::unstamped(&crate::fsutil::read_to_string(t.vault.join("Note.md")).unwrap()), "last text\n");
     assert_eq!(t.reasons()[0], Some(Reason::Restore));
     assert_eq!(t.messages()[0].restored.as_deref(), Some(list[0].commit.as_str()));
 
@@ -332,8 +334,8 @@ fn a_trashed_note_is_listed_as_deleted_with_its_last_text_and_comes_back_at_its_
     write(&t.vault, "Note.md", "new note\n");
     t.app.history_restore_deleted(&list[0]);
     t.settle();
-    assert_eq!(crate::fsutil::read_to_string(t.vault.join("Note (restored).md")).unwrap(), "last text\n");
-    assert_eq!(crate::fsutil::read_to_string(t.vault.join("Note.md")).unwrap(), "new note\n");
+    assert_eq!(crate::note_props::unstamped(&crate::fsutil::read_to_string(t.vault.join("Note (restored).md")).unwrap()), "last text\n");
+    assert_eq!(crate::note_props::unstamped(&crate::fsutil::read_to_string(t.vault.join("Note.md")).unwrap()), "new note\n");
 }
 
 // spec: SYNC-041
@@ -366,7 +368,7 @@ fn closing_the_window_snapshots_what_is_waiting() {
     assert_eq!(t.messages().len(), 2, "within the window: waiting");
     t.app.history_flush_now();
     assert_eq!(t.reasons()[0], Some(Reason::Close));
-    assert_eq!(t.repo().run_for_test(&["show", "HEAD:Note.md"]), "three\n");
+    assert_eq!(crate::note_props::unstamped(&t.repo().run_for_test(&["show", "HEAD:Note.md"])), "three\n");
 }
 
 // spec: SYNC-032, CFG-066, SYNC-045

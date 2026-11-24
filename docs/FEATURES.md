@@ -600,6 +600,11 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   (`A4 · 2.5 cm margins · 11 pt`), any other note as key and value rows. Ids and `print-*` settings are left out, a ▸ toggle shows every property, and people with a contact
   note are links. `properties::summary` gives the one line for a folded view (`email · Anna Müller · 2026-11-12 · #work #mail`). Settings → Appearance → "Properties in the editor"
   / "Properties in the reading view": folded, card or raw (defaults: folded in the editor, card in the reading view). In the editor a note's front matter starts folded, to its summary line or, with the setting card, to the typed card of the reading view (a click on it opens the lines), unless the setting is raw (EDIT-081, EDIT-084). The date of an e-mail card and the start of an event card are links: a click shows that day in the calendar (EDIT-108).
+- **Created, modified and priority** (VAULT-045 to VAULT-047, #600): every Markdown note Shale saves gets `created:` (the first save, never
+  changed) and `modified:` (the last save that changed the body; a change of the properties alone does not move it) in its front matter,
+  as ISO 8601 times with the time zone. A blank note, drawings and other files are left as they are. `priority:` takes `highest`, `high`,
+  `medium`, `low` or `lowest` (another value is ignored) and shows in the folded properties line. The file list's Created and Modified
+  sorts read these properties, then the `YYMMDD_` prefix and the file time. Edits outside Shale are noticed at the next save from Shale.
 - **Title line and date prefix** (VAULT-025, CFG-043): above line 1 a note shows its title line, its file name without `.md` and without a
   leading date prefix `YYMMDD_` (`261117_Plan.md` shows `Plan`); editing it renames the file and keeps the prefix. Tabs and the PDF title show the name without the prefix; the file
   list, the quick switcher and links keep the full name, so the list sorts by date. Settings → Editor → "Date prefix for new notes" (on by default) names a note made by Shale

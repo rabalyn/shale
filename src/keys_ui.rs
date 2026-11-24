@@ -763,7 +763,7 @@ mod tests {
     }
 
     fn note_text(w: &W) -> String {
-        w.app.notes[Path::new("A.md")].text.clone()
+        crate::note_props::unstamped(&w.app.notes[Path::new("A.md")].text)
     }
 
     fn settle(w: &mut W) {
@@ -1168,6 +1168,10 @@ mod tests {
         w.frame(vec![]);
         space_space(&mut w);
         assert_eq!(note_text(&w), "# A\n\n- [x] buy milk\n\nplain\n");
+        // the save of the tick added the properties above the task, which the reading view shows: the task moved down
+        settle(&mut w);
+        w.frame(vec![Event::PointerMoved(row(&w, "buy milk"))]);
+        w.frame(vec![]);
         space_space(&mut w);
         assert_eq!(note_text(&w), "# A\n\n- [ ] buy milk\n\nplain\n", "again unticks");
         // the task list: the task row under the pointer, in the buffer of its note
@@ -1312,7 +1316,7 @@ mod tests {
         w.frame(vec![]);
         assert_eq!(std::fs::read_to_string(w.dir.join("A.md")).unwrap(), "# A\n", "the autosave waits 0.8 s");
         w.press(Key::S, CTRL);
-        assert_eq!(std::fs::read_to_string(w.dir.join("A.md")).unwrap(), "# A\nedited\n", "Ctrl+S saves at once");
+        assert_eq!(crate::note_props::unstamped(&std::fs::read_to_string(w.dir.join("A.md")).unwrap()), "# A\nedited\n", "Ctrl+S saves at once");
         assert!(!w.app.notes[Path::new("A.md")].dirty);
     }
 

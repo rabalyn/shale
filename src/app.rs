@@ -1588,6 +1588,11 @@ impl ShaleApp {
         let msg = match v.save_checked(rel, &doc.text, doc.base) {
             Ok(Saved::Written(stamp)) => {
                 doc.base = stamp;
+                // the note as written: a save adds `created:` and `modified:` (VAULT-045, VAULT-046), and the buffer has them too
+                if let Some(n) = v.notes.get(rel).filter(|n| n.text != doc.text) {
+                    self.undo.of(rel).rebase(&doc.text, &n.text);
+                    doc.text = n.text.clone();
+                }
                 doc.dirty = false;
                 doc.save_error = None;
                 self.history.note_saved(rel);
@@ -3658,7 +3663,7 @@ pub(crate) mod tests {
         let v = app.vault.as_ref().unwrap();
         assert!(v.exists(&format!("{today}Plan"), None), "the link reaches the note");
         app.flush_all();
-        assert_eq!(std::fs::read_to_string(d.join("Source.md")).unwrap(), want, "saved");
+        assert_eq!(crate::note_props::unstamped(&std::fs::read_to_string(d.join("Source.md")).unwrap()), want, "saved");
         assert!(app.vault.as_ref().unwrap().backlinks(Path::new(&format!("{today}Plan.md"))).iter().any(|(p, _)| p == Path::new("Source.md")), "a backlink");
         // a relative link (LINK-010) is made where it points, with the prefix, and rewritten alike
         std::fs::write(d.join("Projects/Rel.md"), "x [[./Sub]] y\n").unwrap();

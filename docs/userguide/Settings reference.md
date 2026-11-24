@@ -284,6 +284,7 @@ Some behaviour is decided by a note's own properties (front matter) instead of a
 `print-paper`, `print-margins`, `print-font`, `print-font-size`, `print-line-spacing`, `print-paragraph-spacing`, `print-align`,
 `print-heading-color`, `print-heading-weight`, `print-heading-sizes`, `print-break-before`, `print-title`, `print-toc` and `print-toc-page-break` (any of them also switches on the plain paper look of the PDF); each has its values, default and effect in the table of
 [[PDF#Print properties of a note]]. Every one is optional, and a value that cannot be read is ignored.
+Shale itself writes `created` and `modified` (full ISO 8601 times) into every Markdown note it saves, and reads an optional `priority` (`highest`, `high`, `medium`, `low`, `lowest`); there is no setting for them (see [[Editor#Created, modified and priority]]).
 
 # Vault settings (`<vault>/.shale/settings.json`)
 
