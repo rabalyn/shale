@@ -27,6 +27,7 @@ pub(crate) mod outbox;
 pub(crate) mod send;
 #[cfg(test)]
 mod send_fuzz_tests;
+pub(crate) mod sidebar_pane;
 pub(crate) mod signature;
 #[cfg(test)]
 mod signature_tests;

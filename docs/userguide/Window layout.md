@@ -32,6 +32,13 @@ of **views**.
   (the same file tree or search, with the same state), **Cancel** (or Esc) changes nothing. Without dragging, right-click
   the icon and choose **Move to the right sidebar** or **Copy to the right sidebar** (in a right menubar: to the left
   sidebar). If the view the left sidebar showed has moved, it shows the next one that is still in the ribbon.
+- **Mail can be in the right sidebar too.** Place the Mail icon like Files, Search or Tags (drag it to a right menubar or to the
+  right sidebar's content and answer **Move or copy?**, or right-click it and choose **Move to the right sidebar** or
+  **Copy to the right sidebar**). The pane is a compact companion of the Mail tab: the accounts, the folders with their unread
+  counts and the list of messages with the unread dots. Click a message to open it in the Mail tab (Shale opens the tab if
+  there is none). The pane has its own folder choice and scroll, separate from the tab, so it can keep showing the Inbox
+  while the tab shows another folder; the mail itself and the sync are the same. With **Copy** the ribbon keeps its Mail
+  icon, which still opens the tab; the left sidebar never shows Mail. Calendar and Feeds will follow.
 - Drag the border between two views to change their heights.
 - Drag the border of the left or of the right sidebar to change its width; Shale keeps the widths
   (`left_sidebar_width`, `right_sidebar_width`), and **Reset layout** goes back to the default widths.
