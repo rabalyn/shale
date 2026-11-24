@@ -107,7 +107,7 @@ impl SettingsTab {
     /// One line above the page: what it is for.
     fn about(self) -> &'static str {
         match self {
-            SettingsTab::Vault => "The folder this vault lives in, and where its contacts are",
+            SettingsTab::Vault => "The folder this vault lives in, where its contacts are, and its bibliography",
             SettingsTab::Editor => "How notes are edited: the cursor, links, tables and the toolbar",
             SettingsTab::Vim => "Vim-style editing: the switch, the cursor of normal mode and the link preview",
             SettingsTab::Appearance => "How notes, drawings and media look",
