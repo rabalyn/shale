@@ -1,6 +1,6 @@
 # ADR-0040: Fonts of the exports: any family by name or file, from the vault, the system or TeX Live, with the licence of the font respected
 
-- **Status**: Proposed (2026-11-24; the points of "To confirm" are for the owner)
+- **Status**: Accepted (2026-11-24; the owner accepted it as written, including the points of "To confirm")
 - **Date**: 2026-11-24
 - **Specs**: PDF-034 to PDF-039 ([`docs/spec/features.md`](../spec/features.md)), TEX-054 to TEX-059 ([`docs/spec/tex-export.md`](../spec/tex-export.md)), BOOK-022 ([`docs/spec/book-export.md`](../spec/book-export.md)), CFG-080, CFG-081 ([`docs/spec/vault-and-files.md`](../spec/vault-and-files.md)), JOB-040 ([`docs/spec/engineering.md`](../spec/engineering.md), [`docs/spec/busy-states.md`](../spec/busy-states.md))
 - **Issues**: #658 (epic and this ADR); phases 2 to 5 are named in section 9

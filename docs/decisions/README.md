@@ -47,7 +47,7 @@ way it is. They are append-only. *What* Shale does today is in the living specs 
 | [0037](0037-signed-release-files.md) | Release files are signed by the owner with an SSH ed25519 key (SSHSIG, namespace per file), the public key is built into Shale and the updater requires the signature | Accepted |
 | [0038](0038-main-views-as-sidebar-companions.md) | Mail, Calendar and Feeds as compact companions in the right sidebar: placed by move or copy like Files, a view state of their own per place, shared data | Accepted |
 | [0039](0039-thesis-citations-and-references.md) | Thesis writing: Pandoc citations, `{#fig:x}` labels with `@fig:x` references for figures, tables, equations and sections, a BibTeX `.bib` bibliography, biblatex+biber in TeX, hayagriva for the built-in PDF and site, pandoc `--citeproc` for Word | Accepted |
-| [0040](0040-export-fonts.md) | Fonts of the exports: `print-font`, `print-font-sans`, `print-font-mono` take any family or a font file; the vault `fonts/`, then system fonts, then TeX Live; real faces; `fsType` licence bits; fontspec overrides with one retry | Proposed |
+| [0040](0040-export-fonts.md) | Fonts of the exports: `print-font`, `print-font-sans`, `print-font-mono` take any family or a font file; the vault `fonts/`, then system fonts, then TeX Live; real faces; `fsType` licence bits; fontspec overrides with one retry | Accepted |
 
 Format: Context, Decision, Consequences (and Alternatives if any). Statuses: *Proposed* →
 *Accepted* → (*Superseded by NNNN*). An accepted ADR is not edited; a new one supersedes it.
