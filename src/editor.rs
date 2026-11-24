@@ -5617,7 +5617,7 @@ mod tests {
         assert_eq!(format_of(&job, text, "\"fooo\"").background, theme::palette().code_bg);
     }
 
-    // spec: EDIT-110
+    // spec: EDIT-110, PDF-028
     #[test]
     fn the_lines_of_an_alignment_wrapper_are_dimmed_markup_and_the_heading_inside_is_still_a_heading() {
         let text = "<div align=\"center\">\n\n## Middle\n\ntext\n\n</div>\n\n<div align=\"right\">\nlost\n";

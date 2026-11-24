@@ -506,7 +506,7 @@ fn the_state_stays_when_the_view_switches_and_the_window_repaints_only_while_pla
     }
 }
 
-// spec: MEDIA-002, MEDIA-027
+// spec: MEDIA-002, MEDIA-027, MEDIA-013
 #[test]
 fn a_damaged_file_says_so_and_a_machine_without_sound_output_keeps_the_player_working() {
     let mut fx = Fx::new("damaged", "![[bad.mp3]]\n", &["bad.mp3"]);

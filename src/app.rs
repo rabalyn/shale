@@ -4033,6 +4033,23 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: DRAW-013
+    #[test]
+    fn a_canvas_tab_restored_at_start_opens_read_only_without_asking_also_with_the_setting_on() {
+        for auto in [false, true] {
+            let (mut app, d) = app_with_canvas(&format!("canvas-restore-{auto}"));
+            let canvas = Path::new("Maps/Map.canvas");
+            app.cfg.auto_convert_canvas = auto;
+            let tab = crate::vault_state::SavedTab { file: Some("Maps/Map.canvas".into()), ..Default::default() };
+            app.restore_pane_tabs(&crate::vault_state::SavedPane { tabs: vec![tab], ..Default::default() });
+            assert!(app.modal.is_none(), "no question (setting {auto})");
+            assert_eq!(app.current_path().as_deref(), Some(canvas));
+            assert!(app.drawings[canvas].read_only.is_some(), "read-only, not converted (setting {auto})");
+            assert!(!d.join("Maps/Map.excalidraw.md").exists(), "no copy made (setting {auto})");
+            let _ = std::fs::remove_dir_all(&d);
+        }
+    }
+
     // spec: DRAW-017
     #[test]
     fn rename_updates_an_open_drawing_and_names_the_canvas_left_behind() {

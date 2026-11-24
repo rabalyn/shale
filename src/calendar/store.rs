@@ -281,6 +281,12 @@ type DayRange = (i64, i64);
 /// More than a month view, a week and a day at a time are not kept.
 const RANGES_KEPT: usize = 6;
 
+/// The time a CalDAV calendar is loaded for on `today` (a day number): 120 days (4 months) back
+/// to 400 days (13 months) ahead, as UTC seconds (CAL-002).
+fn sync_window(today: i64) -> (i64, i64) {
+    ((today - 120) * 86_400, (today + 400) * 86_400)
+}
+
 /// The job of a calendar's sync: the state request, then the events when the version tag changed.
 /// Cancel is looked at between the requests and the answer of one that ran is dropped; nothing is
 /// written here, the events are taken in by `poll` as a whole, so a stop leaves the calendar as it
@@ -397,7 +403,7 @@ impl CalendarStore {
         };
         let cancel = task.cancellable();
         let today = t::today();
-        let (from, to) = ((today - 120) * 86_400, (today + 400) * 86_400);
+        let (from, to) = sync_window(today);
         // the loaded range moves with the days: a calendar loaded on another day is loaded fully
         let known = self.known.get(&s.id).filter(|(_, day)| *day == today).map(|(tag, _)| tag.clone());
         let (url, acct) = (url.clone(), Account { url: url.clone(), username: username.clone(), password: password.clone() });
@@ -858,6 +864,20 @@ pub(crate) mod tests {
 
     // spec: CAL-001
     #[test]
+    fn local_calendars_are_files_in_the_shale_folder_of_the_config_directory() {
+        let dir = default_local_dir();
+        assert!(dir.ends_with(std::path::Path::new("shale").join("calendars")), "{}", dir.display());
+        assert_eq!(dir.parent().and_then(|p| p.parent()), dirs::config_dir().as_deref().or(Some(&std::env::temp_dir())));
+        let store = CalendarStore::new(vec![], dir.clone());
+        // a new local calendar is one .ics file of that folder
+        let src = store.new_local_source("Home", &[]);
+        let SourceKind::Local { file } = &src.kind else { panic!("{src:?}") };
+        assert!(file.starts_with(&dir) && file.extension().is_some_and(|e| e == "ics"), "{}", file.display());
+        assert!(!file.exists(), "nothing is written until there is something to keep");
+    }
+
+    // spec: CAL-001
+    #[test]
     fn local_calendar_sample_add_delete() {
         let dir = tmp("local");
         let mut store = CalendarStore::new(vec![], dir.clone());
@@ -914,6 +934,31 @@ pub(crate) mod tests {
 
     fn dav_source(id: &str, url: String) -> CalendarSource {
         CalendarSource { id: id.into(), name: id.into(), color: "#1971c2".into(), enabled: true, sync_minutes: DEFAULT_SYNC_MINUTES, kind: SourceKind::Caldav { url, username: "ada".into(), password: "x".into() } }
+    }
+
+    // spec: CAL-002
+    #[test]
+    fn a_calendar_is_loaded_from_4_months_back_to_13_months_ahead() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let today = days_from_civil(2026, 11, 24);
+        let (from, to) = sync_window(today);
+        assert_eq!((t::civil_from_days(from / 86_400), t::civil_from_days(to / 86_400)), ((2026, 7, 27), (2027, 12, 29)));
+        // the request that load_calendar sends names exactly that time
+        let asked = Arc::new(Mutex::new(String::new()));
+        let a2 = asked.clone();
+        let (base, handle) = crate::calendar::dav::tests::mock_http(2, move |m, _, _, body| match m {
+            "PROPFIND" => (207, r#"<d:multistatus xmlns:d="DAV:"/>"#.into()),
+            _ => {
+                *a2.lock().unwrap() = body.to_string();
+                (207, r#"<d:multistatus xmlns:d="DAV:"/>"#.into())
+            }
+        });
+        let acct = Account { url: format!("{base}/w/"), username: "ada".into(), password: "x".into() };
+        load_calendar(&format!("{base}/w/"), &acct, None, (from, to), &Cancel::default()).unwrap();
+        handle.join().unwrap();
+        assert!(asked.lock().unwrap().contains(r#"<c:time-range start="20260727T000000Z" end="20271229T000000Z"/>"#), "{}", asked.lock().unwrap());
     }
 
     // spec: CAL-002
@@ -1316,6 +1361,14 @@ pub(crate) mod tests {
         assert!(msg.contains(&files[0].display().to_string()), "the message says where the copy is: {msg}");
         assert!(files[0].file_name().unwrap().to_string_lossy().starts_with("a_b"), "a safe name from the uid");
         assert!(std::fs::read_to_string(&files[0]).unwrap().contains("SUMMARY:Dentist"));
+        // owner-only: the folders that hold the copy are closed to everyone else
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for dir in [store.trash_dir.clone(), files[0].parent().unwrap().to_path_buf()] {
+                assert_eq!(std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700, "{}", dir.display());
+            }
+        }
         // the same event deleted again never overwrites the first copy
         wait(&store.save_event(&src.id, e.clone(), None, None).unwrap()).unwrap();
         store.reload_local();

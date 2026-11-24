@@ -389,7 +389,7 @@ const CANVAS: &str = r#"{
   "edges":[{"id":"e","fromNode":"a","fromSide":"bottom","toNode":"b","toSide":"top"}]
 }"#;
 
-// spec: DRAW-011
+// spec: DRAW-011, DRAW-012, DRAW-015
 #[test]
 fn a_canvas_is_shown_read_only() {
     let mut h = H::new();
@@ -497,6 +497,25 @@ fn people_and_the_file_picker_in_a_drawing() {
     h.key(&mut d, egui::Key::Escape, Modifiers::NONE);
     assert!(!d.assist.picker_visible());
     assert!(d.editing_text.is_some(), "the first Esc only closes the picker");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+// spec: DRAW-014
+#[test]
+fn the_list_has_drawings_too_the_first_esc_closes_it_and_the_next_ends_editing_and_double_bracket_bang_opens_the_picker() {
+    let (mut h, mut d, dir) = editing_label("esc");
+    h.type_text(&mut d, " [[Ske");
+    assert!(d.assist.ac_active && d.assist.ac_labels.iter().any(|l| l.contains("Sketch")), "a drawing is listed: {:?}", d.assist.ac_labels);
+    h.key(&mut d, egui::Key::Escape, Modifiers::NONE);
+    assert!(!d.assist.ac_active, "the first Esc closes the list");
+    assert!(d.editing_text.is_some(), "and keeps editing");
+    h.key(&mut d, egui::Key::Escape, Modifiers::NONE);
+    assert!(d.editing_text.is_none(), "the next one ends editing");
+    let _ = std::fs::remove_dir_all(dir);
+    // [[! is the file picker as well
+    let (mut h, mut d, dir) = editing_label("bang");
+    h.type_text(&mut d, " [[!");
+    assert!(d.assist.picker_visible(), "[[! opens the file picker");
     let _ = std::fs::remove_dir_all(dir);
 }
 

@@ -182,6 +182,7 @@ fn pandoc_is_started_with_an_argument_list_for_the_note_the_filter_the_folder_an
 
 // ---------------------------------------------------------------- DOCX-001, DOCX-007: the original
 
+// spec: DOCX-001
 #[test]
 fn the_original_is_the_word_file_the_source_property_links_to() {
     let dir = temp_dir("original");
@@ -635,7 +636,7 @@ fn paragraph(xml: &str, n: usize) -> (Vec<String>, Vec<String>) {
     (names(p), p.children().find(|c| c.is_element() && c.tag_name().name() == "pPr").map(names).unwrap_or_default())
 }
 
-// spec: DOCX-009
+// spec: DOCX-009, DOCX-006
 #[test]
 fn a_marked_paragraph_gets_its_jc_in_the_order_of_the_schema_and_the_mark_goes() {
     let doc = body(&format!(

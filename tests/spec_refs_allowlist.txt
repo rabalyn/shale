@@ -3,30 +3,3 @@
 # One `ID: reference` per line, as the failure message of the check prints it. The list may only
 # shrink: fix an entry by adding `// spec: ID` above the test, then delete its line and lower
 # ALLOWLIST_LEN. A new entry is not accepted: name the right test or give the test the ID.
-BOOK-008: pdf/book_tests.rs::the_book_has_a_title_page_with_the_title_subtitle_author_and_date_and_no_page_number
-BOOK-010: panels_ui_tests.rs::panel_file_tree_opens_folds_and_offers_menus
-CAL-006: calendar/ics.rs::times_keep_their_zone_and_repeats_keep_their_clock_time
-CAL-009: calendar/time.rs::civil_round_trip
-CAL-011: calendar/ui.rs::a_repeating_event_offers_this_date_or_all_repeats
-CAL-014: calendar/dialog.rs::event_dialog_repeats_skipped_dates_reminders_and_the_other_fields
-CAL-018: media.rs::local_date_is_sane
-CAL-031: calendar/dialog.rs::event_dialog_fields
-CAL-031: dialogs_ui_tests.rs::dialogs_event_cancel_and_a_wrong_date_store_nothing
-CALENV-001: calendar/env_tests.rs::caldav_env_discovers_and_loads_the_seeded_calendars
-CALENV-003: calendar/env_tests.rs::caldav_env_certificate_and_address_rules
-DOCX-001: docx_export/export_tests.rs::the_original_is_the_word_file_the_source_property_links_to
-DOCX-006: docx_export/export_tests.rs::a_marked_paragraph_gets_its_jc_in_the_order_of_the_schema_and_the_mark_goes
-DRAW-012: drawing/ui_tests.rs::a_canvas_is_shown_read_only
-DRAW-015: drawing/ui_tests.rs::a_canvas_is_shown_read_only
-LAY-004: sidebar_tests.rs::lay_011_a_panel_shortcut_in_the_ribbon_shows_its_panel_below_the_views_and_closes_again
-LAY-010: sidebar_tests.rs::lay_001_dropping_a_ribbon_icon_outside_the_ribbon_or_pressing_esc_changes_nothing
-MEDIA-010: media/video.rs::a_file_that_is_no_video_is_an_error_and_no_ffmpeg_is_not
-MEDIA-013: media/ui_tests.rs::a_damaged_file_says_so_and_a_machine_without_sound_output_keeps_the_player_working
-MEDIA-018: markdown.rs::library_links_and_file_links_to_media_are_links
-PDF-010: pdf/book_tests.rs::the_user_guide_is_a_book_with_every_note_once_in_the_order_of_start_here
-PDF-019: pdf/export_dialog.rs::note_dialog_controls
-PDF-021: pdf/export.rs::a_page_break_marker_starts_a_new_page_and_is_not_printed_pdf_020
-PDF-021: pdf/export.rs::bad_print_values_are_ignored_pdf_013
-PDF-022: pdf/export.rs::print_break_before_starts_the_headings_up_to_its_level_on_new_pages_pdf_021
-PDF-024: pdf/export_dialog.rs::the_dialog_shows_the_notes_paper_margins_size_and_contents_and_what_the_note_sets_for_itself_pdf_019
-PDF-028: editor.rs::the_lines_of_an_alignment_wrapper_are_dimmed_markup_and_the_heading_inside_is_still_a_heading

@@ -956,7 +956,7 @@ fn panel_task_list_says_so_when_there_are_none() {
     assert!(p.shows(Show::Tasks, "0 open · 0 done"));
 }
 
-// spec: VAULT-024
+// spec: VAULT-024, BOOK-010
 #[test]
 fn panel_file_tree_opens_folds_and_offers_menus() {
     let mut p = P::new("tree", &[("Box/Inner.md", "inner\n")]);

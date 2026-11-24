@@ -323,7 +323,7 @@ mod tests {
         }
     }
 
-    // spec: MEDIA-009
+    // spec: MEDIA-009, MEDIA-010
     #[test]
     fn a_file_that_is_no_video_is_an_error_and_no_ffmpeg_is_not() {
         let Some(_) = tools_or_skip() else { return };

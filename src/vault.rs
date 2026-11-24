@@ -1774,6 +1774,20 @@ mod tests {
         crate::drawing::Scene::read_file(&v.abs(Path::new(rel))).unwrap().live().filter_map(|e| e.text.clone()).collect()
     }
 
+    // spec: DRAW-007
+    #[test]
+    fn both_link_forms_of_the_plugin_resolve_to_its_drawing_also_as_embeds() {
+        let (d, v) = vault_with_drawings("plugin-link-forms");
+        let text = "[[Plugin.excalidraw]] [[Plugin.excalidraw.md]] ![[Plugin.excalidraw]] ![[Plugin.excalidraw.md|300]]";
+        let links = crate::markdown::find_links(text);
+        assert_eq!(links.iter().map(|l| l.embed).collect::<Vec<_>>(), [false, false, true, true]);
+        for l in &links {
+            assert_eq!(v.resolve(&l.target, Some(Path::new("Ideas.md"))), Some(PathBuf::from("Plugin.excalidraw.md")), "{}", l.target);
+        }
+        assert_eq!(v.resolve("Plain.excalidraw", None), Some(PathBuf::from("Plain.excalidraw")), "a plain drawing by its name");
+        let _ = fs::remove_dir_all(&d);
+    }
+
     // spec: DRAW-016
     #[test]
     fn drawings_and_canvases_link_like_notes() {

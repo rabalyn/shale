@@ -1269,7 +1269,7 @@ mod tests {
         assert_eq!(v.mode, Mode::Day);
     }
 
-    // spec: CAL-007
+    // spec: CAL-007, CAL-011
     #[test]
     fn a_repeating_event_offers_this_date_or_all_repeats() {
         let (store, _) = store_with_samples("series");
