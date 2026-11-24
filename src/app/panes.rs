@@ -294,6 +294,7 @@ impl ShaleApp {
                             let saved = SavedGraph { hide_missing: !g.show_missing, hide_orphans: !g.show_orphans, ..Default::default() };
                             SavedTab { view: Some(SavedTab::GRAPH.into()), graph: Some(saved).filter(|s| *s != SavedGraph::default()), pinned: t.pinned, ..Default::default() }
                         }
+                        View::Boards => SavedTab { view: Some(SavedTab::BOARDS.into()), board: self.boards.current.as_deref().map(rel_to_string), pinned: t.pinned, ..Default::default() },
                         View::SettingsFile => SavedTab { view: Some(SavedTab::SETTINGS_FILE.into()), pinned: t.pinned, ..Default::default() },
                         v => match v.path() {
                             Some(p) if matches!(v, View::Note(_)) => {

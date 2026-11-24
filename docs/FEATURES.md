@@ -585,6 +585,33 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - Filter by text or `#tag`, show done tasks, or only tasks with a due date
   (`📅 2026-12-01` or `due:2026-12-01`).
 
+## Kanban boards
+
+![Boards](userguide/z_media/screenshots/boards.png)
+
+- A **board is a note** with `type: board` in its front matter, so it stays searchable, linkable and readable in other
+  apps. Its lanes are `##` headings; under a heading `query:` (the query language of the search: `AND`, `OR`, `NOT`,
+  `#tag`, `status:doing`, `due:`, `path:`), `sort:` (`priority desc, due asc`), `drop:` (`status: doing`) and
+  `done: true` lines, and `- [[Note]]` lines that pin cards in that order. `cards: every-lane` shows a card in every lane
+  it matches (else it is in the first), `card-shows: due, status, priority, tags` chooses the chips of the cards. Lines
+  the board does not know stay as they are, and a hand edit of the file changes the view.
+- **Space b** (`main.boards`, definable) opens the boards, a main-area tab with a strip of every board of the vault and
+  **+ New board**, which writes a note with one starter lane. Lanes are added, renamed, moved and deleted in the view
+  (**⋯** menu of the lane), which rewrites the file; a double click on a lane's heading opens its settings: the filter and
+  sort form of the search, the `drop:` property and "Cards here are done".
+- A lane fills itself from its query on the background search worker, so the window keeps drawing; when a note changes
+  only the lanes it can change ask again. A lane whose query is wrong shows the reason in its heading and stays empty.
+- A **card** is a note (or a drawing, with its picture) with chips: the due date (red when past), the status, the
+  priority and the tags. Cards sort by `created`, `modified`, `due`, `priority` and `title`; a note without a value comes
+  last either way. A pinned card is only in the lane that pins it.
+- A click selects a card and opens its **peek**, an editor of the note in a window the size of the link preview
+  (drag the title, resize the edges, Esc closes) with a **Priority** control that changes the front matter only. Ctrl+Click
+  or Enter opens the note in a tab; the arrow keys move the selection.
+
+![The peek of a card](userguide/z_media/screenshots/board-peek.png)
+
+![The settings of a lane](userguide/z_media/screenshots/board-lane-settings.png)
+
 ## Linked notes and the graph
 
 ![Graph](userguide/z_media/screenshots/graph.png)
@@ -1413,6 +1440,7 @@ Text editing keys and vim keys are fixed.
 | Space f f | In every main view (editor in normal mode, reading view, mail, calendar, Feeds, tasks, graph; not while a text field has the keyboard or a dialog is open; scope "Main views" in Settings → Keybindings): find a file by name (↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens it in this tab, Esc closes) |
 | Space f g | In every main view (as Space f f): search the text of notes, mail and posts (`*` and `?` are wildcards; `f:` `m:` `s:` at the start look in notes, mail or posts only; results grouped with counts; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the hit where it belongs, Esc closes) |
 | Space Space | Check or uncheck the task: in the editor (vim normal mode) the task on the cursor's line; in the reading view and the task list the task row under the pointer; a line without a task changes nothing and says so. Not in insert mode or a text field. Definable (Settings → Keybindings, Main views) |
+| Space b | In every main view (as Space f f): show the boards, the Kanban view of Boards (a main-area tab with a strip of every note that has `type: board`). Definable (Settings → Keybindings, Main views) |
 | ↓ or Ctrl+J, ↑ or Ctrl+K, Enter, Esc | In a picker window (Space f f, Space f g), the quick switcher (Ctrl+O) and the font list: next line, previous line, open, close. The hint between the search field and the list shows the keys as they are bound now; all four can be changed in Settings → Keybindings ("List windows") |
 | Shift+K | Vim-style editing, normal mode: preview the link under the cursor (a note as in the reading view, a web page's title and text; press it again to move the keyboard into the preview: j / k or ↓ / ↑ scroll, Enter opens the link like `gt`, Ctrl+Enter opens it in a new pane on the right, Esc closes). Definable, e.g. as Space P |
 | Alt+↑ / Alt+↓ | Move the current line |

@@ -25,6 +25,9 @@ pub enum Priority {
 }
 
 impl Priority {
+    /// The levels, the most important first.
+    pub const ALL: [Priority; 5] = [Priority::Highest, Priority::High, Priority::Medium, Priority::Low, Priority::Lowest];
+
     /// The level a value names (any case); another value is none (VAULT-047).
     pub fn parse(value: &str) -> Option<Priority> {
         match value.trim().to_lowercase().as_str() {
@@ -143,7 +146,7 @@ fn body_of(text: &str) -> &str {
 
 /// `text` with the property `key: val` set: the line is replaced, or added at the end of the front
 /// matter, which a note without one gets (`---`, the line, `---`, at the top).
-fn set_property(text: &str, key: &str, val: &str) -> String {
+pub fn set_property(text: &str, key: &str, val: &str) -> String {
     let n = markdown::front_matter_lines(text);
     let nl = if text.contains("\r\n") { "\r\n" } else { "\n" };
     if n == 0 {
@@ -166,6 +169,34 @@ fn set_property(text: &str, key: &str, val: &str) -> String {
         }
     }
     out
+}
+
+/// `text` without the property `key` of its front matter: its line, and the list lines under it. The
+/// rest of the text is as it was.
+pub fn remove_property(text: &str, key: &str) -> String {
+    let n = markdown::front_matter_lines(text);
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
+    let mut out = String::with_capacity(text.len());
+    let mut skipping = false;
+    for (i, line) in lines.iter().enumerate() {
+        let inside = i > 0 && i + 1 < n;
+        let is_key = inside && line.split_once(':').is_some_and(|(k, _)| k.trim_end().eq_ignore_ascii_case(key) && !k.starts_with(char::is_whitespace));
+        let continues = skipping && inside && (line.starts_with(char::is_whitespace) || line.starts_with('-'));
+        skipping = is_key || continues;
+        if !skipping {
+            out.push_str(line);
+        }
+    }
+    out
+}
+
+/// `text` with `priority:` set to `p`, or without the property when it is none (VAULT-047). It
+/// changes the front matter only, so `modified:` stays (VAULT-046).
+pub fn with_priority(text: &str, p: Option<Priority>) -> String {
+    match p {
+        Some(p) => set_property(text, "priority", p.name()),
+        None => remove_property(text, "priority"),
+    }
 }
 
 /// What a save from Shale writes for `text` (VAULT-045, VAULT-046): `disk` is the note as it is on
@@ -217,6 +248,21 @@ mod tests {
         assert_eq!(unstamped(text), "---\ntitle: x\n---\nbody\n");
         assert_eq!(unstamped(&stamp("body\n", None, NOW).unwrap()), "body\n");
         assert_eq!(unstamped("plain\n"), "plain\n");
+    }
+
+    // spec: VAULT-047
+    #[test]
+    fn a_priority_is_set_and_taken_out_in_the_front_matter_only() {
+        let text = "---\ntitle: x\npriority: low\nstatus: doing\n---\nbody\n";
+        assert_eq!(with_priority(text, Some(Priority::Highest)), "---\ntitle: x\npriority: highest\nstatus: doing\n---\nbody\n");
+        assert_eq!(with_priority(text, None), "---\ntitle: x\nstatus: doing\n---\nbody\n");
+        assert_eq!(with_priority("body\n", Some(Priority::Medium)), "---\npriority: medium\n---\nbody\n");
+        assert_eq!(with_priority("body\n", None), "body\n");
+        assert_eq!(with_priority("---\npriority:\n  - a\n  - b\nx: y\n---\npriority: in the body\n", None), "---\nx: y\n---\npriority: in the body\n");
+        assert_eq!(Priority::ALL.map(Priority::name), ["highest", "high", "medium", "low", "lowest"]);
+        // the body is the same, so a save does not move `modified:`
+        let saved = stamp(&with_priority(text, Some(Priority::High)), Some(text), NOW).unwrap_or_default();
+        assert!(!saved.contains("modified:"), "{saved}");
     }
 
     const NOW: i64 = 1_795_000_000;

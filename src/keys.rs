@@ -304,6 +304,8 @@ actions! {
     NormalFindFile => "normal.find_file", "Find a file by name", MainViews, ["Space F F"];
     NormalSearchAll => "normal.search_all", "Search notes, mail and posts", MainViews, ["Space F G"];
     NormalToggleTask => "normal.toggle_task", "Check or uncheck the task", MainViews, ["Space Space"];
+    // BOARD-008
+    MainBoards => "main.boards", "Show the boards", MainViews, ["Space B"];
     NormalLinkPreview => "normal.link_preview", "Preview the link under the cursor (again: into the preview)", EditorNormal, ["Shift+K"];
     TreeNextFile => "files.next_file", "Next file", FileList, ["J", "Down"];
     TreePrevFile => "files.prev_file", "Previous file", FileList, ["K", "Up"];
@@ -776,7 +778,7 @@ mod tests {
             assert_eq!(mac.display(d.action), on_mac, "{}", d.id);
         }
         assert_eq!(DEFS.iter().filter(|d| d.scope == Scope::NoteView).count(), 26 + 5);
-        assert_eq!(DEFS.len(), 32 + 37 + 7 + 12 + 7 + 26 + 5 + 3);
+        assert_eq!(DEFS.len(), 32 + 37 + 7 + 12 + 7 + 26 + 5 + 4);
     }
 
     // spec: KEY-014

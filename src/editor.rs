@@ -1535,6 +1535,26 @@ impl NoteEditor {
         ui.ctx().data_mut(|d| d.insert_temp(key, placed));
     }
 
+    /// Give the editor the settings of the window before it is drawn: the tab of a note and the
+    /// peek of a card of a board (BOARD-013) edit the same way.
+    pub fn apply_settings(&mut self, cfg: &crate::config::Config, people_dir: &str, media: &crate::media::MediaPlayer) {
+        self.inline_images = cfg.inline_images;
+        self.line_numbers = cfg.line_numbers;
+        self.numbered_headings = cfg.numbered_headings;
+        self.live_preview = cfg.live_preview;
+        self.preview_raw_lines = cfg.preview_raw_lines;
+        self.properties_view = cfg.properties_in_editor;
+        self.table_cell_edit = cfg.table_cell_edit;
+        self.vim_enabled = cfg.vim_mode;
+        self.cursor_style = crate::cursor_style::CursorStyle { shape: cfg.cursor_shape, normal_shape: cfg.normal_cursor_shape, blink: cfg.cursor_blink };
+        self.esc_cursor = cfg.esc_cursor;
+        self.assist.people_dir = people_dir.to_string();
+        self.assist.numbered_headings = cfg.numbered_headings;
+        self.assist.outside = cfg.outside_files;
+        self.dark_canvas = cfg.dark_canvas;
+        self.media = media.clone();
+    }
+
     /// Show the editor. Returns (text changed, action).
     pub fn show(&mut self, ui: &mut Ui, text: &mut String, vault: &Vault, note: Note, fonts: &EditorFonts, ctrl_to_follow: bool) -> (bool, Option<EditorAction>) {
         self.follow_front_matter(ui.ctx(), text);

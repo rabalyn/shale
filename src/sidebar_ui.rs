@@ -197,6 +197,7 @@ impl ShaleApp {
                 Item::Calendar => cur == Some(View::Calendar),
                 Item::Mail => cur == Some(View::Mail),
                 Item::Tasks => cur == Some(View::Tasks),
+                Item::Boards => cur == Some(View::Boards),
                 Item::Social => matches!(cur, Some(View::Social(_))),
                 Item::Import => matches!(self.modal, Some(Modal::Import(_))),
                 Item::Panel(p) => self.cfg.show_right && self.side.peek == Some(p),

@@ -28,8 +28,8 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-mod deps;
-mod matcher;
+pub mod deps;
+pub mod matcher;
 pub mod query;
 mod snapshot;
 pub mod worker;
@@ -330,6 +330,9 @@ pub struct Found {
     pub counts: Option<Counts>,
     /// the work budget was used up: the hits are partial (QUERY-010)
     pub stopped_early: bool,
+    /// The notes a board lane matched, in the order of the vault (QUERY-019); a lane asks for these
+    /// and gets no hits.
+    pub lane: Vec<std::path::PathBuf>,
     /// the sources the query was not asked of, because it has a field they lack (QUERY-006)
     pub skipped: Vec<Skipped>,
 }
@@ -400,7 +403,7 @@ pub fn search_within(notes: &Snapshot, mail: Option<&Connection>, posts: Option<
             Err(what) => skipped.push(Skipped { kind: Kind::Posts, what }),
         }
     }
-    (!cancel.load(Ordering::Relaxed)).then_some(Found { hits, counts: Some(counts), stopped_early: run.stopped == Some(Stop::Budget), skipped })
+    (!cancel.load(Ordering::Relaxed)).then_some(Found { hits, counts: Some(counts), stopped_early: run.stopped == Some(Stop::Budget), lane: Vec::new(), skipped })
 }
 
 /// [`search_in`] of what a [`Ctx`] reads, here and now (tests).
