@@ -8,10 +8,12 @@
 
 use super::blocks::{self, Block};
 use super::body::Body;
+use super::fonts::{self, FontInput};
 use super::inline::{anchor_named, Files, Look, Targets};
 use super::sets::{class_and_preamble, tex_escape, KindManifest, Mapping, SetInfo};
 use super::writer::{document, drop_title_heading, field_values, heading, nested_levels, toc_depth, Document, SECTION};
 use crate::board::resolve::Resolved;
+use crate::fonts::resolve::Values;
 use crate::markdown;
 use crate::pdf::book::{Item, Plan};
 use crate::pdf::export::ExportOptions;
@@ -37,6 +39,8 @@ pub struct BookRequest<'a> {
     pub kind: &'a KindManifest,
     /// The values of the dialog's fields by key; an empty one is as good as none.
     pub fields: &'a BTreeMap<String, String>,
+    /// What the fonts of the book are decided from (PDF-034); none: the template's own fonts.
+    pub fonts: Option<&'a FontInput>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -218,7 +222,11 @@ fn write_book_in_shale(req: &BookRequest, board: Option<&Resolved>) -> Result<Do
         // the board is on landscape pages of its own (BOARD-031)
         head.push_str(super::board::PREAMBLE);
     }
-    let tex = document(head, true, false, toc.then(|| toc_depth(book)), &values, &main);
+    // one font for the book: the top folder note's, else the set's and the vault's; a chapter's own is ignored (BOOK-022)
+    let top = plan.note.as_deref().and_then(|n| vault.notes.get(n)).map(|n| Values::of_note(&n.text)).unwrap_or_default();
+    let chapters = secs.iter().filter(|s| s.role != Role::Intro && s.rel.is_some()).map(|s| (s.title.clone(), Values::of_note(&s.text))).collect();
+    let font_lines = fonts::overrides(req.fonts, fonts::Source { vault, set: req.set, note: top, book: true, chapters });
+    let tex = document(head, true, false, toc.then(|| toc_depth(book)), &values, &font_lines.fonts, &main);
     let files = files.into_inner();
-    Ok(Document::new(tex, files))
+    Ok(Document::new(tex, files, font_lines))
 }

@@ -221,7 +221,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   - `print-paper`: `A4`, `A5`, `Letter`, `Legal` or `<W>x<H>mm` (a width larger than the height is landscape)
   - `print-margins`: four numbers in mm, `top right bottom left`
   - `print-font`: `serif` (Liberation Serif, Times-compatible), `sans` (Ubuntu Light) or `mono` (Hack)
-  - `print-font-sans`, `print-font-mono`, and `print-font` with a family name or a vault path to a font file: the export dialog already says which font such a value (or the vault's `print_font*` settings) resolves to and warns about one that is missing or may not be embedded; the exports use these fonts from the next phases of #658
+  - `print-font-sans`, `print-font-mono`, and `print-font` with a family name or a vault path to a font file: the export dialog says which font such a value (or the vault's `print_font*` settings) resolves to and warns about one that is missing or may not be embedded; the LaTeX export uses these fonts (below), the built-in PDF follows with the next phase of #658
   - `print-font-size`: the body text in points
   - `print-line-spacing`: a factor, 1.0 being the font's own single line height
   - `print-paragraph-spacing`: the space after a body paragraph in points
@@ -295,6 +295,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
   ![The LaTeX tab of Settings with the question before the install](userguide/z_media/screenshots/settings-latex.png)
 
+- **Fonts of the LaTeX export** (#658): `print-font`, `print-font-sans` and `print-font-mono` of a note (and `font`, `font_sans`, `font_mono` in a set's `settings.toml`, and the vault's `print_font*` settings) override the template's text, sans and code fonts with fontspec. A value is a family name (a font of the vault's `fonts/` folder, an installed font, or a TeX Live font) or a vault path to a font file, which is copied into the compile with its bold and italic faces. A font that may not be embedded (its OS/2 `fsType`) is not used; a font TeX cannot find is a warning and the template's font stays (one more compile run). A book has one font, the top folder note's; the emoji font is not touched.
 - **Template sets** (Settings → LaTeX) are the templates a LaTeX export is made with, kept in your vault
   (`templates/tex/<set>/`: the class files, one small manifest per document kind, your settings and the
   logo), so they are synced and backed up with your notes and a TeX Live update cannot change a document.

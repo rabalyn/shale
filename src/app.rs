@@ -2582,7 +2582,7 @@ impl ShaleApp {
                 notes.push("the logo is a placeholder, so it is not CI-conformant".to_string());
             }
             if !made.warnings.is_empty() {
-                notes.push(format!("{} embed(s) could not be used: {}", made.warnings.len(), made.warnings.join(", ")));
+                notes.push(format!("{} warning(s): {}", made.warnings.len(), made.warnings.join(", ")));
             }
             self.toast(if notes.is_empty() { "Exported through LaTeX".to_string() } else { format!("Exported through LaTeX ({})", notes.join("; ")) });
         }
@@ -2599,6 +2599,8 @@ impl ShaleApp {
         };
         let text = self.note_text(&d.rel);
         let column = self.editor_column(&d.rel);
+        // the fonts the window knows and the vault's own choice (TEX-059)
+        let fonts = crate::pdf::tex::fonts::FontInput { catalogue: self.font_scan.catalogue(), vault: crate::fonts::resolve::Values::of_settings(&self.vdata.settings) };
         let v = self.vault.as_ref().ok_or("No vault is open")?;
         let busy = d.busy().clone();
         let tex = d.tex.as_mut().ok_or("This note has no LaTeX choices")?;
@@ -2611,15 +2613,15 @@ impl ShaleApp {
             // a board: the board and its cards' notes (BOARD-031)
             Some(book) if book.board => {
                 let board = crate::board::resolve::resolve(v, &book.folder)?;
-                crate::pdf::tex::board::write_board(&crate::pdf::tex::board::BoardRequest { vault: v, board: &board, opts: &d.opts, set, kind, fields: &tex.values })?
+                crate::pdf::tex::board::write_board(&crate::pdf::tex::board::BoardRequest { vault: v, board: &board, opts: &d.opts, set, kind, fields: &tex.values, fonts: Some(&fonts) })?
             }
             Some(book) => {
                 let plan = crate::pdf::book::plan(v, &book.folder)?;
-                crate::pdf::tex::book::write_book(&crate::pdf::tex::book::BookRequest { vault: v, plan: &plan, opts: &d.opts, set, kind, fields: &tex.values })?
+                crate::pdf::tex::book::write_book(&crate::pdf::tex::book::BookRequest { vault: v, plan: &plan, opts: &d.opts, set, kind, fields: &tex.values, fonts: Some(&fonts) })?
             }
             None => {
                 let opts = crate::pdf::export::ExportOptions { column, ..d.opts.clone() };
-                crate::pdf::tex::writer::write(&crate::pdf::tex::writer::Request { vault: v, rel: &d.rel, text: &text, opts: &opts, set, kind, fields: &tex.values })?
+                crate::pdf::tex::writer::write(&crate::pdf::tex::writer::Request { vault: v, rel: &d.rel, text: &text, opts: &opts, set, kind, fields: &tex.values, fonts: Some(&fonts) })?
             }
         };
         let ctx = ctx.clone();

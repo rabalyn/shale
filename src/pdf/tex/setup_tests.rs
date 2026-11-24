@@ -59,7 +59,15 @@ fn the_details_go_to_settings_toml_and_keep_the_logos_and_a_bad_accent_changes_n
     let back = load_settings(&dir).unwrap();
     assert_eq!(
         back,
-        SetSettings { accent: "3b".into(), language: Language::De, department: "Fachbereich Informatik".into(), author: "Ada Lovelace".into(), logo: Some("mylogo.pdf".into()), department_logo: Some("department_logo.png".into()) }
+        SetSettings {
+            accent: "3b".into(),
+            language: Language::De,
+            department: "Fachbereich Informatik".into(),
+            author: "Ada Lovelace".into(),
+            logo: Some("mylogo.pdf".into()),
+            department_logo: Some("department_logo.png".into()),
+            ..SetSettings::default()
+        }
     );
     assert_eq!(Details::from_settings(&back), Details { accent: "3b".into(), language: Language::De, department: "Fachbereich Informatik".into(), author: "Ada Lovelace".into() });
     // an accent that could end a command is refused and the file is as it was
@@ -126,4 +134,13 @@ fn the_test_page_is_a_publication_with_the_author_and_a_thesis_when_a_department
     let mut slides = tuda_set(SetSettings::default());
     slides.kinds.retain(|(id, _)| id == "beamer");
     assert!(test_page(&vault, &slides).unwrap_err().contains("has no article kind"));
+}
+
+// spec: TEX-059, TEX-017
+#[test]
+fn tex_059_the_details_of_the_guided_setup_keep_the_fonts_of_the_set() {
+    let base = SetSettings { accent: "9c".into(), font: "Libertinus Serif".into(), font_sans: "Heros".into(), font_mono: "Cursor".into(), ..SetSettings::default() };
+    let d = Details { accent: "3b".into(), language: Language::De, department: "Informatik".into(), author: "Ada".into() };
+    let applied = d.apply(&base);
+    assert_eq!((applied.accent.as_str(), applied.font.as_str(), applied.font_sans.as_str(), applied.font_mono.as_str()), ("3b", "Libertinus Serif", "Heros", "Cursor"));
 }

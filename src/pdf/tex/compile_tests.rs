@@ -5,6 +5,7 @@
 
 use super::compile::*;
 use super::engine::{Engine, Kind};
+use super::fonts::{missing_fonts, without_missing, FontOverride, LOG_LINE};
 use std::path::{Path, PathBuf};
 
 const MISSING_PACKAGE: &str = include_str!("../../testdata/tex/missing-package.log");
@@ -188,6 +189,52 @@ fn the_log_of_a_failed_compile_is_kept_under_a_unique_name_and_a_missing_log_or_
     let _ = std::fs::remove_dir_all(&root);
 }
 
+const FONT_MISSING: &str = "./main.tex:21: Package fontspec Error: The font \"Foo Serif\" cannot be found.\n! Emergency stop.\n";
+
+fn line(label: &str, names: &[&str], line: &str) -> FontOverride {
+    FontOverride { label: label.into(), names: names.iter().map(|n| n.to_string()).collect(), line: line.into() }
+}
+
+// spec: TEX-057
+#[test]
+fn tex_057_the_font_that_fontspec_cannot_find_is_named_and_only_that_error_counts() {
+    assert_eq!(missing_fonts(FONT_MISSING), ["Foo Serif"]);
+    let two = "./main.tex:9: Package fontspec Error: The font \"A\" cannot be found.\n! Package fontspec Error: The font \"B\" cannot be found.\n./main.tex:9: Package fontspec Error: The font \"A\" cannot be found.\n";
+    assert_eq!(missing_fonts(two), ["A", "B"], "each once");
+    assert!(missing_fonts(UNDEFINED).is_empty() && missing_fonts(MISSING_PACKAGE).is_empty());
+    assert!(missing_fonts("./main.tex:9: Package fontspec Error: The font \"X\" does not contain bold.\n").is_empty(), "another fontspec message");
+}
+
+// spec: TEX-057
+#[test]
+fn tex_057_the_error_as_luatex_writes_it_has_the_name_on_the_lines_after_the_message_and_a_long_name_is_broken() {
+    // as LuaLaTeX of the image wrote it: the message line has nothing after "Error:", so the problem has no font in it
+    let real = "./main.tex:22: Package fontspec Error: \n(fontspec)                The font \"No_Such Font 4U\" cannot be found; this\n(fontspec)                may be but usually is not a fontspec bug.\n";
+    assert_eq!(missing_fonts(real), ["No_Such Font 4U"]);
+    assert_eq!(problems(real)[0].message, "Package fontspec Error:", "which is why the log is read, not the problems");
+    // a line of 79 characters is broken where it is, also inside the name
+    let name = "A Very Long Font Family Name That Goes Past The End Of The Line Of The Log";
+    let line = format!("(fontspec)                The font \"{name}\" cannot be found; this");
+    let (head, tail) = line.split_at(LOG_LINE);
+    assert_eq!(missing_fonts(&format!("./main.tex:22: Package fontspec Error: \n{head}\n{tail}\n")), [name]);
+}
+
+// spec: TEX-057
+#[test]
+fn tex_057_the_lines_of_the_missing_fonts_are_taken_out_and_the_others_stay() {
+    let main = line("Foo Serif", &["Foo Serif"], "\\setmainfont{Foo Serif}");
+    let sans = line("Bar", &["Bar-Regular.otf", "Bar-Bold.otf"], "\\setsansfont{Bar-Regular.otf}[Path=./, BoldFont=Bar-Bold.otf]");
+    let source = "\\usepackage{x}\n\\setmainfont{Foo Serif}\n\\setsansfont{Bar-Regular.otf}[Path=./, BoldFont=Bar-Bold.otf]\n\\begin{document}\n";
+    let (text, warnings) = without_missing(source, &[main.clone(), sans.clone()], &["foo serif".to_string()]).unwrap();
+    assert_eq!(text, "\\usepackage{x}\n\\setsansfont{Bar-Regular.otf}[Path=./, BoldFont=Bar-Bold.otf]\n\\begin{document}\n");
+    assert_eq!(warnings, ["the font “Foo Serif” was not found by TeX; the template's font is used"]);
+    // a face of a family is a name of its line, as fontspec says it, also with the folder of Path
+    let (text, _) = without_missing(source, &[main.clone(), sans.clone()], &["./Bar-Bold.otf".to_string()]).unwrap();
+    assert!(!text.contains("setsansfont") && text.contains("setmainfont"), "{text}");
+    // a font that is not one of the writer's lines (the template's own) is no reason to start again
+    assert!(without_missing(source, &[main, sans], &["Roboto".to_string()]).is_none());
+}
+
 #[cfg(unix)]
 pub(crate) mod fake {
     use super::*;
@@ -218,7 +265,7 @@ pub(crate) mod fake {
         }
 
         /// A LuaLaTeX that counts its runs, records its command line, environment and folder, copies
-        /// `log.<n>` (or `log.last`) of the state folder to the log, and makes a PDF.
+        /// `log.<n>` (or `log.last`) of the state folder to the log, keeps the `main.tex` it was run on as `main.<n>`, stops with the code of `exit.<n>` (or `exit`) when there is one, and makes a PDF.
         pub fn lualatex(&self) {
             let st = self.state();
             script(
@@ -231,6 +278,8 @@ echo "$@" > "$S/args"; pwd > "$S/pwd"; env > "$S/env"
 for a; do last=$a; done
 stem=${{last%.tex}}
 if [ -f "$S/log.$n" ]; then cp "$S/log.$n" "$stem.log"; else cp "$S/log.last" "$stem.log"; fi
+cp "$last" "$S/main.$n"
+if [ -f "$S/exit.$n" ]; then exit $(cat "$S/exit.$n"); fi
 if [ -f "$S/exit" ]; then exit $(cat "$S/exit"); fi
 echo '%PDF-1.5 fake' > "$stem.pdf"
 if [ -f "$S/bcf" ]; then cp "$S/bcf" "$stem.bcf"; fi
@@ -596,6 +645,91 @@ if [ -f "$S/toc.$n" ]; then cp "$S/toc.$n" "$stem.toc"; fi"#,
         assert!(out.pdf.starts_with(b"%PDF"));
         assert!(f.get("args").contains("test.tex"));
         assert!(TEST_DOCUMENT.contains("biblatex") && TEST_DOCUMENT.contains("test.bib") && TEST_BIB.contains("@book{shale"));
+    }
+
+    /// A work folder whose `main.tex` has the font lines of the writer, and the lines as the compile gets them.
+    fn work_with_fonts() -> (WorkDir, Vec<FontOverride>) {
+        let w = WorkDir::new().unwrap();
+        w.write("main.tex", b"\\documentclass{article}\n\\setmainfont{Foo Serif}\n\\setmonofont{Bar Mono}\n\\begin{document}\nx\n\\end{document}\n").unwrap();
+        (w, vec![line("Foo Serif", &["Foo Serif"], "\\setmainfont{Foo Serif}"), line("Bar Mono", &["Bar Mono"], "\\setmonofont{Bar Mono}")])
+    }
+
+    fn font_error(name: &str) -> String {
+        format!("./main.tex:2: Package fontspec Error: The font \"{name}\" cannot be found.\n! Emergency stop.\n")
+    }
+
+    // spec: TEX-057
+    #[test]
+    fn tex_057_a_missing_font_is_dropped_with_a_warning_and_the_compile_runs_once_more() {
+        let f = Fake::new("fontretry");
+        f.lualatex();
+        f.put("log.1", &font_error("Foo Serif"));
+        f.put("exit.1", "1");
+        f.put("log.last", "clean log\n");
+        let (work, fonts) = work_with_fonts();
+        let out = compile(&f.engine(), work, "main.tex", &Options { fonts, ..Options::default() }).unwrap();
+        assert!(out.pdf.starts_with(b"%PDF"), "a PDF, not a failed export");
+        assert_eq!(out.runs, 2, "one run that stopped, one without the font");
+        assert_eq!(out.warnings, ["the font “Foo Serif” was not found by TeX; the template's font is used"]);
+        assert_eq!(f.get("count").trim(), "2");
+        let (first, second) = (f.get("main.1"), f.get("main.2"));
+        assert!(first.contains("\\setmainfont{Foo Serif}") && first.contains("\\setmonofont{Bar Mono}"), "the first run had both: {first}");
+        assert!(!second.contains("setmainfont") && second.contains("\\setmonofont{Bar Mono}\n\\begin{document}"), "the second run has the other override only: {second}");
+    }
+
+    // spec: TEX-057
+    #[test]
+    fn tex_057_the_run_that_stopped_does_not_use_up_a_run_the_references_need() {
+        let f = Fake::new("fontbudget");
+        f.lualatex();
+        f.put("log.1", &font_error("Foo Serif"));
+        f.put("exit.1", "1");
+        f.put("log.2", RERUN);
+        f.put("log.last", "clean log\n");
+        let (work, fonts) = work_with_fonts();
+        let out = compile(&f.engine(), work, "main.tex", &Options { fonts, max_runs: 2, ..Options::default() }).unwrap();
+        assert_eq!(out.runs, 3, "the failed run, then the two runs the numbers need");
+        assert!(out.warnings.iter().all(|w| !w.contains("may be stale")), "{:?}", out.warnings);
+    }
+
+    // spec: TEX-057
+    #[test]
+    fn tex_057_there_is_one_retry_only_and_no_other_error_is_retried() {
+        // a second missing font after the retry: the export fails as any error does
+        let f = Fake::new("fontonce");
+        f.lualatex();
+        f.put("log.1", &font_error("Foo Serif"));
+        f.put("log.2", &font_error("Bar Mono"));
+        f.put("exit.1", "1");
+        f.put("exit.2", "1");
+        let (work, fonts) = work_with_fonts();
+        let e = compile(&f.engine(), work, "main.tex", &Options { fonts, ..Options::default() }).unwrap_err();
+        assert_eq!(f.get("count").trim(), "2", "one retry");
+        assert!(e.problems.iter().any(|p| p.text().contains("Bar Mono")), "{e}");
+        // another error of the first run
+        let f = Fake::new("fontother");
+        f.lualatex();
+        f.put("log.last", UNDEFINED);
+        f.put("exit", "1");
+        let (work, fonts) = work_with_fonts();
+        assert!(compile(&f.engine(), work, "main.tex", &Options { fonts, ..Options::default() }).is_err());
+        assert_eq!(f.get("count").trim(), "1", "an undefined control sequence is not retried");
+        // a font that is not one of the writer's lines: the template's own
+        let f = Fake::new("fonttemplate");
+        f.lualatex();
+        f.put("log.last", &font_error("Roboto"));
+        f.put("exit", "1");
+        let (work, fonts) = work_with_fonts();
+        assert!(compile(&f.engine(), work, "main.tex", &Options { fonts, ..Options::default() }).is_err());
+        assert_eq!(f.get("count").trim(), "1");
+        // no override at all
+        let f = Fake::new("fontnone");
+        f.lualatex();
+        f.put("log.last", &font_error("Foo Serif"));
+        f.put("exit", "1");
+        let (work, _) = work_with_fonts();
+        assert!(compile(&f.engine(), work, "main.tex", &Options::default()).is_err());
+        assert_eq!(f.get("count").trim(), "1");
     }
 
     // spec: TEX-004

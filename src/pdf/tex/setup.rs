@@ -159,6 +159,9 @@ impl Details {
             author: self.author.trim().to_string(),
             logo: base.logo.clone(),
             department_logo: base.department_logo.clone(),
+            font: base.font.clone(),
+            font_sans: base.font_sans.clone(),
+            font_mono: base.font_mono.clone(),
         }
     }
 }
@@ -213,7 +216,7 @@ pub fn test_page(vault: &Vault, set: &SetInfo) -> Result<(String, Document), Str
         }
     }
     let opts = crate::pdf::export::ExportOptions::for_note();
-    let doc = tracing::info_span!("flow.tex_setup.test_page", peer = "vault").in_scope(|| writer::write(&writer::Request { vault, rel: Path::new(TEST_NAME), text: TEST_NOTE, opts: &opts, set, kind, fields: &fields }))?;
+    let doc = tracing::info_span!("flow.tex_setup.test_page", peer = "vault").in_scope(|| writer::write(&writer::Request { vault, rel: Path::new(TEST_NAME), text: TEST_NOTE, opts: &opts, set, kind, fields: &fields, fonts: None }))?;
     Ok((id.clone(), doc))
 }
 

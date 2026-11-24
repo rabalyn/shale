@@ -55,7 +55,7 @@ pub(super) fn fields(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
 fn doc_with(text: &str, kind_id: &str, opts: &ExportOptions, given: &[(&str, &str)], files: &[(&str, &[u8])]) -> Result<Document, String> {
     let (v, dir) = temp_vault("doc", &[&[("Plan.md", text.as_bytes())][..], files].concat());
     let set = tuda_set(SetSettings { accent: "9c".into(), ..SetSettings::default() });
-    let out = write(&Request { vault: &v, rel: Path::new("Plan.md"), text, opts, set: &set, kind: kind(&set, kind_id), fields: &fields(given) });
+    let out = write(&Request { vault: &v, rel: Path::new("Plan.md"), text, opts, set: &set, kind: kind(&set, kind_id), fields: &fields(given), fonts: None });
     let _ = std::fs::remove_dir_all(dir);
     out
 }
@@ -238,7 +238,7 @@ fn headings_of_an_article_kind_are_levels_by_nesting_and_the_title_heading_is_no
     // the date prefix of the name is not part of the title (VAULT-025), the comparison ignores case
     let (v, d) = temp_vault("prefix", &[("261117_Plan.md", b"# PLAN\n## A\n")]);
     let set = tuda_set(SetSettings::default());
-    let out = write(&Request { vault: &v, rel: Path::new("261117_Plan.md"), text: "# PLAN\n## A\n", opts: &ExportOptions::for_note(), set: &set, kind: kind(&set, "pub"), fields: &fields(&[("author", "A")]) }).unwrap();
+    let out = write(&Request { vault: &v, rel: Path::new("261117_Plan.md"), text: "# PLAN\n## A\n", opts: &ExportOptions::for_note(), set: &set, kind: kind(&set, "pub"), fields: &fields(&[("author", "A")]), fonts: None }).unwrap();
     assert!(out.tex.contains("\\title{Plan}") && body_of(&out.tex).contains("\\section{A}") && !body_of(&out.tex).contains("PLAN"), "{}", out.tex);
     let _ = std::fs::remove_dir_all(d);
     // deeper than the commands go: the last ones repeat
@@ -285,7 +285,7 @@ fn doc_department(kind_id: &str, filled: bool, wanted: bool) -> String {
     let mut set = tuda_set(SetSettings { accent: "9c".into(), ..SetSettings::default() });
     set.department_logo = filled.then(|| "department_logo.png".to_string());
     let opts = ExportOptions { department_logo: wanted, ..ExportOptions::for_note() };
-    let out = write(&Request { vault: &v, rel: Path::new("Plan.md"), text: "# Plan\ntext\n", opts: &opts, set: &set, kind: kind(&set, kind_id), fields: &fields(&[("author", "Ada"), ("recipient", "R")]) });
+    let out = write(&Request { vault: &v, rel: Path::new("Plan.md"), text: "# Plan\ntext\n", opts: &opts, set: &set, kind: kind(&set, kind_id), fields: &fields(&[("author", "Ada"), ("recipient", "R")]), fonts: None });
     let _ = std::fs::remove_dir_all(dir);
     out.unwrap_or_else(|e| panic!("{e}")).tex
 }
@@ -460,7 +460,7 @@ fn a_picture_and_a_pdf_outside_the_vault_are_files_in_the_work_folder_and_a_miss
     let note = format!("## S\n![[@Media/My Pics/pic.png|200]]\n![[@Media/doc.pdf]]\n![x]({address})\nan icon ![[@Media/My Pics/pic.png]] here\n![[@Media/gone.png]]\n![[@Nowhere/a.png]]\nin a line ![[@Media/gone.png]]\n");
     let set = tuda_set(SetSettings { accent: "9c".into(), ..SetSettings::default() });
     let opts = ExportOptions::for_note();
-    let out = write(&Request { vault: &v, rel: Path::new("Plan.md"), text: &note, opts: &opts, set: &set, kind: kind(&set, "pub"), fields: &fields(&[("author", "A")]) }).unwrap();
+    let out = write(&Request { vault: &v, rel: Path::new("Plan.md"), text: &note, opts: &opts, set: &set, kind: kind(&set, "pub"), fields: &fields(&[("author", "A")]), fonts: None }).unwrap();
     let b = body_of(&out.tex);
     assert!(b.contains("\\includegraphics[width=0.278\\linewidth,height=0.8\\textheight,keepaspectratio]{picture-1.png}"), "200 points of the editor's 720: {b}");
     assert!(b.contains("\\textit{@Media/My Pics/pic.png}") && b.contains("\\includegraphics[page=1,"), "{b}");
@@ -510,7 +510,7 @@ fn the_document_has_the_kinds_lines_the_helpers_and_one_main_file() {
     // the language of the set
     let (v, d) = temp_vault("lang", &[]);
     let set = tuda_set(SetSettings { language: Language::De, ..SetSettings::default() });
-    let out = write(&Request { vault: &v, rel: Path::new("Plan.md"), text: "x", opts: &ExportOptions::for_note(), set: &set, kind: kind(&set, "pub"), fields: &fields(&[("author", "A")]) }).unwrap();
+    let out = write(&Request { vault: &v, rel: Path::new("Plan.md"), text: "x", opts: &ExportOptions::for_note(), set: &set, kind: kind(&set, "pub"), fields: &fields(&[("author", "A")]), fonts: None }).unwrap();
     assert!(out.tex.contains("lang=de}") && out.tex.contains("\\documentclass[ngerman]{tudapub}") && out.tex.contains("\\usepackage[ngerman]{babel}"), "{}", out.tex);
     let _ = std::fs::remove_dir_all(d);
 }
@@ -536,8 +536,9 @@ fn every_kind_of_the_tuda_set_writes_the_rich_note() {
     let set = tuda_set(SetSettings::default());
     for (id, k) in &set.kinds {
         let (v, d) = temp_vault("rich", &[&[("Plan.md", RICH_NOTE.as_bytes())][..], &files].concat());
-        let out = write(&Request { vault: &v, rel: Path::new("Plan.md"), text: RICH_NOTE, opts: &ExportOptions::for_note(), set: &set, kind: k, fields: &fields(&[("author", "Ada"), ("recipient", "Dr. Hopper \\\\ Navy Street 1")]) })
-            .unwrap_or_else(|e| panic!("{id}: {e}"));
+        let out =
+            write(&Request { vault: &v, rel: Path::new("Plan.md"), text: RICH_NOTE, opts: &ExportOptions::for_note(), set: &set, kind: k, fields: &fields(&[("author", "Ada"), ("recipient", "Dr. Hopper \\\\ Navy Street 1")]), fonts: None })
+                .unwrap_or_else(|e| panic!("{id}: {e}"));
         assert!(out.tex.contains("\\begin{document}") && out.tex.trim_end().ends_with("\\end{document}") && out.warnings == ["missing: missing.png"], "{id}: {:?}", out.warnings);
         assert!(!out.tex.contains("secret") && !out.tex.contains("numbered-headings"), "{id}: the front matter is not printed");
         // the code box, the picture in a line, the jump to a heading and the other note (TEX-030 to TEX-032)
@@ -937,4 +938,252 @@ fn tex_042_a_quote_has_the_bar_and_a_note_with_print_properties_the_plain_indent
     assert!(t.contains("\\definecolor{shalequotebar}{RGB}{149,121,215}") && t.contains("\\tcbuselibrary{skins,breakable}"), "{t}");
     let paper = doc_with("## S\n> quoted\n", "pub", &ExportOptions { paper_look: true, ..ExportOptions::for_note() }, &[("author", "A")], &[]).unwrap();
     assert!(body_of(&paper.tex).contains("\\begin{quote}\nquoted\n\\end{quote}"), "{}", paper.tex);
+}
+
+// ---------------------------------------------------------------- fonts (TEX-054 to TEX-059, #658)
+
+use super::fonts::FontInput;
+use crate::fonts::resolve::Values;
+use crate::fonts::scan::{scan_system, scan_vault, Catalogue};
+use crate::fonts::test_fonts::{folder, Spec};
+use std::sync::Arc;
+
+/// A note with the `print-font*` properties given.
+fn font_note(props: &[(&str, &str)]) -> String {
+    let lines: String = props.iter().map(|(k, v)| format!("{k}: {v}\n")).collect();
+    format!("---\n{lines}---\n# Plan\ntext\n")
+}
+
+fn garamond_faces() -> Vec<(&'static str, Spec)> {
+    vec![
+        ("Garamond-Regular.ttf", Spec::new("Garamond", 400, false)),
+        ("Garamond-Bold.ttf", Spec::new("Garamond", 700, false)),
+        ("Garamond-Italic.ttf", Spec::new("Garamond", 400, true)),
+        ("Garamond-BoldItalic.ttf", Spec::new("Garamond", 700, true)),
+    ]
+}
+
+/// What a font document is made from: the vault's files below `fonts/` (or another folder when the
+/// name has one), the installed fonts (a test folder: a test never reads the machine's), the set's
+/// and the vault's settings.
+struct Fonts<'a> {
+    vault: Vec<(&'a str, Spec)>,
+    system: Vec<(&'a str, Spec)>,
+    set: SetSettings,
+    settings: Values,
+}
+
+impl<'a> Fonts<'a> {
+    fn new() -> Self {
+        Fonts { vault: vec![], system: vec![], set: SetSettings::default(), settings: Values::default() }
+    }
+
+    /// The note written as the `pub` kind of the tuda set with these fonts.
+    fn write(&self, note: &str) -> Result<Document, String> {
+        static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let (v, dir) = temp_vault("fonts", &[("Plan.md", note.as_bytes())]);
+        let sys = folder(&format!("texfonts-{n}-sys"));
+        for (name, spec) in &self.vault {
+            let rel = if name.contains('/') { name.to_string() } else { format!("fonts/{name}") };
+            spec.write(&dir, &rel);
+        }
+        for (name, spec) in &self.system {
+            spec.write(&sys, name);
+        }
+        let catalogue = Catalogue { vault: Arc::new(scan_vault(&dir)), system: Arc::new(scan_system(Some(std::slice::from_ref(&sys)))), system_ready: true, generation: 1 };
+        let input = FontInput { catalogue, vault: self.settings.clone() };
+        let set = tuda_set(SetSettings { accent: "9c".into(), ..self.set.clone() });
+        let out = write(&Request { vault: &v, rel: Path::new("Plan.md"), text: note, opts: &ExportOptions::for_note(), set: &set, kind: kind(&set, "pub"), fields: &fields(&[("author", "Ada")]), fonts: Some(&input) });
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(sys);
+        out
+    }
+
+    fn tex(&self, note: &str) -> String {
+        self.write(note).unwrap_or_else(|e| panic!("{e}")).tex
+    }
+}
+
+fn position(tex: &str, what: &str) -> usize {
+    tex.find(what).unwrap_or_else(|| panic!("{what:?} is not in\n{tex}"))
+}
+
+// spec: TEX-054
+#[test]
+fn tex_054_the_three_commands_follow_the_class_and_the_templates_setup_and_come_before_the_document() {
+    let note = font_note(&[("print-font", "TeX Gyre Pagella"), ("print-font-sans", "TeX Gyre Heros"), ("print-font-mono", "TeX Gyre Cursor")]);
+    let tex = Fonts::new().tex(&note);
+    let (main, sans, mono) = (position(&tex, "\\setmainfont{TeX Gyre Pagella}\n"), position(&tex, "\\setsansfont{TeX Gyre Heros}\n"), position(&tex, "\\setmonofont{TeX Gyre Cursor}\n"));
+    assert!(main < sans && sans < mono, "main, sans, mono: {tex}");
+    // after the class, the template's own lines and the writer's other helpers, before the document
+    let set = tuda_set(SetSettings::default());
+    let last_template_line = kind(&set, "pub").preamble.last().map(|l| position(&tex, l.trim())).unwrap_or(0);
+    assert!(position(&tex, "\\documentclass") < main && last_template_line < main && position(&tex, "\\newtcolorbox{shalequote}") < main, "{tex}");
+    assert!(mono < position(&tex, "\\begin{document}"), "{tex}");
+    // fontspec comes first, once, also though the class did not load it and the text has no emoji
+    let load = "\\IfPackageLoadedTF{fontspec}{}{\\usepackage{fontspec}}\n";
+    assert_eq!(tex.matches(load).count(), 1, "{tex}");
+    assert!(position(&tex, load) < main);
+}
+
+// spec: TEX-054
+#[test]
+fn tex_054_a_document_without_a_font_value_is_written_as_before_and_the_words_of_the_pdf_select_nothing() {
+    let plain = font_note(&[]);
+    let tex = Fonts::new().tex(&plain);
+    assert_eq!(tex, doc(&plain, "pub"), "the same document as without fonts");
+    assert!(!tex.contains("\\setmainfont") && !tex.contains("\\setsansfont") && !tex.contains("\\setmonofont") && !tex.contains("usepackage{fontspec}"), "{tex}");
+    // sans, serif and mono are the fonts of the built-in PDF: the template keeps its own
+    let words = Fonts::new().write(&font_note(&[("print-font", "serif")])).unwrap();
+    assert_eq!(words.tex, tex);
+    assert!(words.warnings.is_empty(), "{:?}", words.warnings);
+    assert!(words.fonts.is_empty() && words.files.is_empty());
+}
+
+// spec: TEX-054, TEX-059
+#[test]
+fn tex_059_the_note_wins_then_the_set_then_the_vault_for_each_role_on_its_own() {
+    let mut f = Fonts::new();
+    f.settings = Values { text: Some("Vault Text".into()), sans: Some("Vault Sans".into()), mono: Some("Vault Mono".into()) };
+    f.set = SetSettings { font: "Set Text".into(), font_sans: "Set Sans".into(), ..SetSettings::default() };
+    let tex = f.tex(&font_note(&[("print-font", "Note Text")]));
+    assert!(tex.contains("\\setmainfont{Note Text}"), "{tex}");
+    assert!(tex.contains("\\setsansfont{Set Sans}"), "the set before the vault: {tex}");
+    assert!(tex.contains("\\setmonofont{Vault Mono}"), "the vault when nothing else says: {tex}");
+    let tex = f.tex(&font_note(&[]));
+    assert!(tex.contains("\\setmainfont{Set Text}"), "{tex}");
+    // the keys of the set may be padded or empty: an empty one is a missing one
+    f.set = SetSettings { font: "  ".into(), font_sans: " Set Sans ".into(), ..SetSettings::default() };
+    let tex = f.tex(&font_note(&[]));
+    assert!(tex.contains("\\setmainfont{Vault Text}") && tex.contains("\\setsansfont{Set Sans}"), "{tex}");
+}
+
+// spec: TEX-059
+#[test]
+fn tex_059_a_bad_value_of_the_set_is_a_warning_and_the_next_entry_is_used() {
+    let mut f = Fonts::new();
+    f.set = SetSettings { font: "x".repeat(201), ..SetSettings::default() };
+    f.settings.text = Some("Vault Text".into());
+    let out = f.write(&font_note(&[])).unwrap();
+    assert!(out.tex.contains("\\setmainfont{Vault Text}"), "{}", out.tex);
+    assert!(out.warnings.iter().any(|w| w.contains("template set") && w.contains("longer than 200")), "{:?}", out.warnings);
+}
+
+// spec: TEX-054
+#[test]
+fn tex_054_a_system_font_is_passed_by_name_and_not_copied() {
+    let mut f = Fonts::new();
+    f.system = vec![("Libertinus-Regular.ttf", Spec::new("Libertinus Serif", 400, false)), ("Libertinus-Bold.ttf", Spec::new("Libertinus Serif", 700, false))];
+    let out = f.write(&font_note(&[("print-font", "libertinus-serif")])).unwrap();
+    assert!(out.tex.contains("\\setmainfont{Libertinus Serif}\n"), "the name as the font states it: {}", out.tex);
+    assert!(out.files.is_empty(), "{:?}", out.files.iter().map(|f| &f.0).collect::<Vec<_>>());
+    assert_eq!(out.fonts.len(), 1);
+}
+
+// spec: TEX-054, TEX-008
+#[test]
+fn tex_054_a_font_name_that_could_end_the_command_is_not_written() {
+    let mut f = Fonts::new();
+    for name in ["X}{x}%", "A\"B", "a#b", "a~b", "a^b", "a$b", "a&b"] {
+        f.settings.text = Some(name.to_string());
+        let out = f.write(&font_note(&[])).unwrap();
+        assert!(!out.tex.contains("\\setmainfont") && !out.tex.contains("{x}%"), "{name}: {}", out.tex);
+        assert!(out.warnings.iter().any(|w| w.starts_with("`print-font` (the vault's settings)") && w.contains("cannot be passed to TeX") && w.contains("the template's font is used")), "{name}: {:?}", out.warnings);
+        assert!(out.fonts.is_empty());
+    }
+    // with a slash it is read as a path, and that is not a font file
+    f.settings.text = Some("X}\\input{/etc/passwd}%".into());
+    let out = f.write(&font_note(&[])).unwrap();
+    assert!(!out.tex.contains("setmainfont") && !out.tex.contains("/etc/passwd") && out.warnings.iter().any(|w| w.contains("not a font file")), "{}: {:?}", out.tex, out.warnings);
+    // the characters that stay: spaces, digits, dots, hyphens, underscores, colons and parentheses of real names
+    f.settings.text = Some("Source Serif 4 (Display)-1.0_b:x".into());
+    assert!(f.tex(&font_note(&[])).contains("\\setmainfont{Source Serif 4 (Display)-1.0_b:x}"));
+}
+
+// spec: TEX-055
+#[test]
+fn tex_055_a_family_of_the_vault_is_copied_once_and_written_with_path_and_its_faces() {
+    let mut f = Fonts::new();
+    f.vault = garamond_faces();
+    f.vault.push(("Other-Regular.ttf", Spec::new("Other", 400, false)));
+    let out = f.write(&font_note(&[("print-font", "Garamond")])).unwrap();
+    assert!(out.tex.contains("\\setmainfont{Garamond-Regular.ttf}[Path=./, BoldFont=Garamond-Bold.ttf, ItalicFont=Garamond-Italic.ttf, BoldItalicFont=Garamond-BoldItalic.ttf]\n"), "{}", out.tex);
+    let mut names: Vec<&str> = out.files.iter().map(|(n, _)| n.as_str()).collect();
+    names.sort();
+    assert_eq!(names, ["Garamond-Bold.ttf", "Garamond-BoldItalic.ttf", "Garamond-Italic.ttf", "Garamond-Regular.ttf"], "the family only, a font the document does not use is not copied");
+    let regular = out.files.iter().find(|(n, _)| n == "Garamond-Regular.ttf").unwrap();
+    assert_eq!(regular.1, Spec::new("Garamond", 400, false).bytes(), "the file as it is");
+    assert_eq!(out.fonts[0].names, ["Garamond-Regular.ttf", "Garamond-Bold.ttf", "Garamond-Italic.ttf", "Garamond-BoldItalic.ttf"]);
+    assert_eq!(out.fonts[0].label, "Garamond");
+    // a face the family lacks is left out
+    f.vault = vec![garamond_faces().remove(0), garamond_faces().remove(2)];
+    let tex = f.tex(&font_note(&[("print-font", "Garamond")]));
+    assert!(tex.contains("\\setmainfont{Garamond-Regular.ttf}[Path=./, ItalicFont=Garamond-Italic.ttf]\n"), "{tex}");
+}
+
+// spec: TEX-055
+#[test]
+fn tex_055_a_vault_path_gives_one_face_and_one_file_is_copied_once_for_two_roles() {
+    let mut f = Fonts::new();
+    f.vault = garamond_faces();
+    let out = f.write(&font_note(&[("print-font", "fonts/Garamond-Bold.ttf"), ("print-font-sans", "\"[[Garamond-Bold.ttf]]\""), ("print-font-mono", "Garamond")])).unwrap();
+    assert!(out.tex.contains("\\setmainfont{Garamond-Bold.ttf}[Path=./]\n") && out.tex.contains("\\setsansfont{Garamond-Bold.ttf}[Path=./]\n"), "a path names one face and no more: {}", out.tex);
+    assert!(out.tex.contains("\\setmonofont{Garamond-Regular.ttf}[Path=./, BoldFont=Garamond-Bold.ttf,"), "{}", out.tex);
+    let bold: Vec<_> = out.files.iter().filter(|(n, _)| n == "Garamond-Bold.ttf").collect();
+    assert_eq!(bold.len(), 1, "the file the roles share is one file of the work folder");
+    assert_eq!(out.files.len(), 4);
+}
+
+// spec: TEX-055
+#[test]
+fn tex_055_the_file_of_a_set_counts_and_a_name_that_fontspec_cannot_take_is_made_one() {
+    let mut f = Fonts::new();
+    f.vault = vec![("templates/tex/tuda/fonts/My Font_Regular.ttf", Spec::new("Institute Serif", 400, false)), ("templates/tex/tuda/fonts/My Font_Bold.ttf", Spec::new("Institute Serif", 700, false))];
+    let out = f.write(&font_note(&[("print-font", "Institute Serif")])).unwrap();
+    assert!(out.tex.contains("\\setmainfont{My-Font-Regular.ttf}[Path=./, BoldFont=My-Font-Bold.ttf]\n"), "letters, digits, . and - only: {}", out.tex);
+    assert_eq!(out.files.len(), 2);
+}
+
+// spec: TEX-055
+#[test]
+fn tex_055_two_files_with_one_name_in_different_folders_are_two_files_and_the_emoji_font_is_not_replaced() {
+    let mut f = Fonts::new();
+    f.vault = vec![("fonts/a/Same.ttf", Spec::new("Aaa", 400, false)), ("fonts/b/Same.ttf", Spec::new("Bbb", 400, false)), ("fonts/shale-emoji.ttf", Spec::new("Ccc", 400, false))];
+    let out = f.write(&font_note(&[("print-font", "Aaa"), ("print-font-sans", "Bbb"), ("print-font-mono", "Ccc")])).unwrap();
+    assert!(out.tex.contains("\\setmainfont{Same.ttf}[Path=./]") && out.tex.contains("\\setsansfont{Same-2.ttf}[Path=./]"), "{}", out.tex);
+    assert!(out.tex.contains("\\setmonofont{shale-emoji-2.ttf}[Path=./]"), "{}", out.tex);
+    let a = out.files.iter().find(|(n, _)| n == "Same.ttf").unwrap();
+    let b = out.files.iter().find(|(n, _)| n == "Same-2.ttf").unwrap();
+    assert_eq!((a.1.clone(), b.1.clone()), (Spec::new("Aaa", 400, false).bytes(), Spec::new("Bbb", 400, false).bytes()));
+}
+
+// spec: TEX-055
+#[test]
+fn tex_055_a_font_that_may_not_be_embedded_is_not_written_or_copied() {
+    let mut f = Fonts::new();
+    f.vault = vec![("Locked.ttf", Spec::new("Locked", 400, false).licence(0x0002, 4))];
+    f.settings.text = Some("Vault Text".into());
+    let out = f.write(&font_note(&[("print-font", "Locked")])).unwrap();
+    assert!(out.tex.contains("\\setmainfont{Vault Text}") && !out.tex.contains("Locked"), "the next entry of the precedence: {}", out.tex);
+    assert!(out.files.is_empty());
+    assert!(out.warnings.iter().any(|w| w.contains("Locked") && w.contains("cannot be used")), "{:?}", out.warnings);
+}
+
+// spec: TEX-056
+#[test]
+fn tex_056_the_emoji_face_is_written_before_the_overrides_and_its_font_travels_with_the_document() {
+    let mut f = Fonts::new();
+    f.vault = garamond_faces();
+    let note = format!("{}\n\u{1F4C5} due\n", font_note(&[("print-font", "Garamond"), ("print-font-sans", "Fira Sans"), ("print-font-mono", "Fira Mono")]));
+    let out = f.write(&note).unwrap();
+    let face = position(&out.tex, "\\newfontface\\shaleemojiface[Path=./]{shale-emoji.ttf}");
+    for command in ["\\setmainfont", "\\setsansfont", "\\setmonofont"] {
+        assert!(face < position(&out.tex, command), "{command} after the emoji face: {}", out.tex);
+    }
+    assert!(out.tex.contains("\\shaleemoji{\u{1F4C5}}"), "{}", out.tex);
+    assert!(out.files.iter().any(|(n, _)| n == "shale-emoji.ttf"), "the emoji font is in the work folder");
+    assert_eq!(out.tex.matches("\\usepackage{fontspec}").count(), 1, "fontspec is loaded once: {}", out.tex);
+    // the override does not take the face over: it is its own font file
+    assert!(!out.tex.contains("{shale-emoji.ttf}[Path=./, "), "{}", out.tex);
 }

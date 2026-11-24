@@ -32,7 +32,7 @@ fn vault(tag: &str, files: &[(&str, &[u8])]) -> (Vault, PathBuf) {
 fn write_as(v: &Vault, kind_id: &str, opts: &ExportOptions, given: &[(&str, &str)]) -> Result<Document, String> {
     let set = tuda_set(SetSettings::default());
     let plan = book::plan(v, Path::new("Book")).unwrap();
-    write_book(&BookRequest { vault: v, plan: &plan, opts, set: &set, kind: kind(&set, kind_id), fields: &fields(given) })
+    write_book(&BookRequest { vault: v, plan: &plan, opts, set: &set, kind: kind(&set, kind_id), fields: &fields(given), fonts: None })
 }
 
 fn tex_of(v: &Vault, kind_id: &str, opts: &ExportOptions) -> String {
@@ -143,7 +143,7 @@ fn the_department_logo_is_in_a_book_too_when_the_slot_is_filled_and_the_box_is_o
         let set = set_with(filled);
         let plan = book::plan(&v, Path::new("Book")).unwrap();
         let opts = ExportOptions { department_logo: wanted, ..ExportOptions::for_note() };
-        write_book(&BookRequest { vault: &v, plan: &plan, opts: &opts, set: &set, kind: kind(&set, "thesis"), fields: &fields(&[("author", "Ada")]) }).unwrap().tex
+        write_book(&BookRequest { vault: &v, plan: &plan, opts: &opts, set: &set, kind: kind(&set, "thesis"), fields: &fields(&[("author", "Ada")]), fonts: None }).unwrap().tex
     };
     assert!(tex(true, true).contains("\\addTitleBoxLogo*{\\includegraphics[height=\\c_ptxcd_logoheight_dim]{department_logo}}"));
     for (filled, wanted) in [(false, true), (true, false)] {
@@ -291,5 +291,36 @@ fn only_kinds_of_the_article_and_book_family_hold_a_folder() {
     let mut t = TexExport::for_folder(&dir, "Book".into(), "", Some(("slides".into(), "talk".into())));
     t.status = super::dialog::TexStatus::Ready("x".into());
     assert_eq!((t.current_set().unwrap().id.as_str(), t.kind.as_str(), t.current_kind().is_none(), t.can_export(&crate::busy::Busy::default())), ("slides", "", true, false));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+// spec: BOOK-022
+#[test]
+fn book_022_a_book_has_one_font_the_top_notes_and_a_chapters_own_is_ignored_with_a_warning() {
+    use super::fonts::FontInput;
+    use crate::fonts::resolve::Values;
+    let (v, dir) = vault(
+        "fonts",
+        &[
+            ("Book/index.md", b"---\ntitle: Handbook\nprint-font: Libertinus Serif\n---\nIntro text\n"),
+            ("Book/Getting started.md", b"---\nprint-font: Chapter Font\nprint-font-mono: Chapter Mono\n---\n# Getting started\nStart here\n"),
+            ("Book/Part/Part.md", b"---\nprint-font-sans: Part Sans\n---\nPart intro\n"),
+            ("Book/Part/Lists.md", b"## Bullets\n"),
+        ],
+    );
+    let set = tuda_set(SetSettings::default());
+    let plan = book::plan(&v, Path::new("Book")).unwrap();
+    let input = FontInput { vault: Values { mono: Some("Vault Mono".into()), ..Values::default() }, ..FontInput::default() };
+    let doc = write_book(&BookRequest { vault: &v, plan: &plan, opts: &ExportOptions::for_note(), set: &set, kind: kind(&set, "thesis"), fields: &fields(&[("author", "Ada")]), fonts: Some(&input) }).unwrap();
+    assert!(doc.tex.contains("\\setmainfont{Libertinus Serif}\n"), "the top folder note's font sets the book: {}", doc.tex);
+    assert!(doc.tex.contains("\\setmonofont{Vault Mono}\n"), "the vault's where the top note says nothing, not the chapter's: {}", doc.tex);
+    assert!(!doc.tex.contains("Chapter Font") && !doc.tex.contains("Chapter Mono") && !doc.tex.contains("Part Sans") && !doc.tex.contains("\\setsansfont"), "{}", doc.tex);
+    assert_eq!(doc.tex.matches("\\setmainfont").count(), 1, "one font for the whole book, front and appendix included");
+    let said: Vec<&String> = doc.warnings.iter().filter(|w| w.contains("sets its own font")).collect();
+    assert_eq!(said.len(), 2, "the chapter and the part's note: {:?}", doc.warnings);
+    assert!(said.iter().any(|w| w.contains("Getting started")) && said.iter().any(|w| w.contains("Part")), "{said:?}");
+    // without a setting of the vault the code keeps the template's font
+    let plain = write_book(&BookRequest { vault: &v, plan: &plan, opts: &ExportOptions::for_note(), set: &set, kind: kind(&set, "thesis"), fields: &fields(&[("author", "Ada")]), fonts: Some(&FontInput::default()) }).unwrap();
+    assert!(plain.tex.contains("\\setmainfont{Libertinus Serif}") && !plain.tex.contains("\\setmonofont"), "{}", plain.tex);
     let _ = std::fs::remove_dir_all(dir);
 }

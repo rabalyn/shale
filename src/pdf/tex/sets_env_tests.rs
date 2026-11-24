@@ -189,7 +189,7 @@ fn tex_env_every_kind_of_the_imported_tuda_set_compiles_with_a_logo_in_the_slot_
     assert_eq!(choose_logo(&own, &set, &logo).unwrap(), "tuda_logo.pdf");
     let mut set = read_set("tuda", &own.join("templates/tex/tuda")).unwrap();
     assert_eq!(set.logo, LogoStatus::Present("tuda_logo.pdf".into()));
-    set.settings = SetSettings { accent: "3b".into(), language: Language::De, department: "Fachbereich Informatik & Co".into(), author: "Ada & Bob".into(), logo: set.settings.logo.clone(), department_logo: None };
+    set.settings = SetSettings { accent: "3b".into(), language: Language::De, department: "Fachbereich Informatik & Co".into(), author: "Ada & Bob".into(), logo: set.settings.logo.clone(), department_logo: None, ..SetSettings::default() };
     compile_every_kind(&set, false);
     let _ = std::fs::remove_dir_all(&own);
 }

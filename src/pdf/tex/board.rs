@@ -71,6 +71,8 @@ pub struct BoardRequest<'a> {
     pub kind: &'a KindManifest,
     /// The values of the dialog's fields by key; an empty one is as good as none.
     pub fields: &'a BTreeMap<String, String>,
+    /// What the fonts of the board's book are decided from (PDF-034); none: the template's own fonts.
+    pub fonts: Option<&'a super::fonts::FontInput>,
 }
 
 /// Write the board as one document of the kind (BOARD-031): the title, the board on landscape
@@ -78,7 +80,7 @@ pub struct BoardRequest<'a> {
 /// when the kind cannot hold a book or a required field has no value.
 pub fn write_board(req: &BoardRequest) -> Result<Document, String> {
     let plan = crate::pdf::board::plan(req.vault, req.board);
-    write_with_board(&BookRequest { vault: req.vault, plan: &plan, opts: req.opts, set: req.set, kind: req.kind, fields: req.fields }, Some(req.board))
+    write_with_board(&BookRequest { vault: req.vault, plan: &plan, opts: req.opts, set: req.set, kind: req.kind, fields: req.fields, fonts: req.fonts }, Some(req.board))
 }
 
 /// A card as it is set: its title, the chips and the anchor of its chapter when it has one.
