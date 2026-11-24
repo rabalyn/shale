@@ -748,11 +748,11 @@ fn upd_003_a_failed_request_is_an_error_in_words() {
     github.serve("/repos/rabalyn/shale/releases/latest", "<html>not json</html>");
     assert!(((backend.check)(&AtomicBool::new(false))).unwrap_err().contains("not a release"));
     // a server that is not there
-    let gone = FakeGithub::start();
-    let base = gone.base();
-    drop(gone);
-    let backend = Backend::real_for(Source::pretend(&base), temp("stage-gone"), "linux", "x86_64");
+    // (a port held closed for the whole request: a released port could be handed to a parallel test's server, #659)
+    let gone = crate::calendar::dav::tests::closed_port();
+    let backend = Backend::real_for(Source::pretend(&format!("http://127.0.0.1:{}", gone.port)), temp("stage-gone"), "linux", "x86_64");
     assert!((backend.check)(&AtomicBool::new(false)).is_err());
+    drop(gone);
 }
 
 #[cfg(unix)]
