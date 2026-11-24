@@ -219,7 +219,7 @@ fn job_028_removing_is_a_task_that_cannot_stop_and_the_looks_are_quiet_tasks() {
     assert!(t.shows("Shale's git was removed."));
     // the look for git is a task whose page shows it; the key is quiet, so the indicator waits
     t.wait_for_job();
-    let held = t.app.busy.begin(GIT_DETECT, "Looking for git…").unwrap();
+    let held = t.app.busy.begin_listed_after(GIT_DETECT, "Looking for git…", crate::busy::LISTED_AFTER).unwrap();
     t.app.sync.managed.check_again(&ctx, GitChoice::Auto);
     assert!(!t.app.sync.managed.busy(), "not started while the task is listed");
     assert!(t.shows("Looking for git…"), "{:?}", t.painted());
