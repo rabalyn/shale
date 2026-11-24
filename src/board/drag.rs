@@ -2,8 +2,8 @@
 //! and into the board file. [`plan`] decides; the window carries the plan out (`app/boards.rs`)
 //! through the checked saves of both notes, so each is one undo step.
 //!
-//! * A lane has a drop property when it has a `drop:` line, else when it is a done lane (`status: done`),
-//!   else when it has a simple query such as `status:doing` that says one ([`lanes::drop_property`]). A drop on it sets that property in
+//! * A lane has a drop property when it has a `drop:` line, or a simple query such as
+//!   `status:doing` that says one ([`lanes::drop_property`]). A drop on it sets that property in
 //!   the card's front matter and nothing else of the note.
 //! * A card that is pinned in the lane it is taken from is unpinned there, otherwise BOARD-032
 //!   would keep it in that lane.
@@ -36,23 +36,13 @@ pub struct Plan {
     pub pins: Vec<(usize, Vec<String>)>,
 }
 
-/// The property a drop on a lane sets (BOARD-019): its `drop:` line, else `status: done` when the
-/// lane is a done lane (BOARD-024), else the one its simple query says.
-pub fn property(query: &str, drop: &str, done: bool) -> Option<(String, String)> {
-    let text = if !drop.trim().is_empty() {
-        drop.trim().to_string()
-    } else if done {
-        DONE_PROPERTY.to_string()
-    } else {
-        lanes::drop_property(query)?
-    };
+/// The property a drop on a lane sets (BOARD-019): its `drop:` line, else the one its query says.
+pub fn property(query: &str, drop: &str) -> Option<(String, String)> {
+    let text = if drop.trim().is_empty() { lanes::drop_property(query)? } else { drop.trim().to_string() };
     let (key, value) = text.split_once(':')?;
     let (key, value) = (key.trim(), value.trim());
     (!key.is_empty() && !value.is_empty() && !key.contains(char::is_whitespace)).then(|| (key.to_string(), value.to_string()))
 }
-
-/// What a drop on a done lane without a `drop:` line sets (BOARD-024): the property that makes a card done.
-pub const DONE_PROPERTY: &str = "status: done";
 
 /// The link to `card` for a pin (BOARD-004): its name when that finds it from the board, else its
 /// path; a name or path that `[[ ]]` cannot hold (`#`, `|`, `^`, brackets) is a markdown link with
@@ -83,7 +73,7 @@ pub fn plan(vault: &Vault, board_rel: &Path, board: &Board, lanes: &[LaneView], 
         return None;
     }
     let lane = &board.lanes[d.to];
-    let property = if same { None } else { property(lane.query(), lane.drop(), lane.done()) };
+    let property = if same { None } else { property(lane.query(), lane.drop()) };
     let mut pins = Vec::new();
     if !same && pinned_in(&lanes[d.from]) {
         let mut from = entries(vault, board_rel, board, d.from);
@@ -112,7 +102,7 @@ mod tests {
     // spec: BOARD-019, BOARD-024
     #[test]
     fn board_019_the_property_is_the_drop_line_or_the_one_a_simple_query_says() {
-        let p = |q: &str, d: &str| property(q, d, false);
+        let p = |q: &str, d: &str| property(q, d);
         assert_eq!(p("", "status: doing"), Some(("status".into(), "doing".into())));
         assert_eq!(p("status:todo", "status: doing"), Some(("status".into(), "doing".into())), "the drop line wins");
         assert_eq!(p("status:doing", ""), Some(("status".into(), "doing".into())));
@@ -121,11 +111,6 @@ mod tests {
         assert_eq!(p("", "nonsense"), None);
         assert_eq!(p("", "status:"), None);
         assert_eq!(p("", "two words: x"), None);
-        // a done lane (BOARD-024): the drop line wins, then `status: done`, then the query
-        let done = |q: &str, d: &str| property(q, d, true);
-        assert_eq!(done("", ""), Some(("status".into(), "done".into())));
-        assert_eq!(done("status:doing", ""), Some(("status".into(), "done".into())), "a done lane makes the card done, not what the query says");
-        assert_eq!(done("#x", "status: archived"), Some(("status".into(), "archived".into())), "the drop line wins");
     }
 
     // spec: BOARD-004, BOARD-022
