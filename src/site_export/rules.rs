@@ -7,7 +7,17 @@ use crate::vault_state::{PublishSettings, VaultSettings};
 use std::path::Path;
 
 /// The note types that hold private data and that "all notes" leaves out (SITE-056).
-pub const PRIVATE_TYPES: [&str; 4] = ["email", "event", "post", "person"];
+pub const PRIVATE_TYPES: [&str; 5] = ["email", "event", "post", "social-post", "person"];
+
+/// The private kind a type belongs to: a saved post is written as `social-post` (SOC-011) and is
+/// the same kind as `post`, so one tick (and one name in `private_types`) covers both.
+pub fn kind_of(t: &str) -> &str {
+    if t == "social-post" {
+        "post"
+    } else {
+        t
+    }
+}
 
 /// The publishing settings of the vault at `root`, read without touching anything: a missing file
 /// is all default (publishing off). A file that cannot be read is an error, so a broken settings
@@ -67,7 +77,7 @@ fn has_tag(tags: &[String], rules: &[String]) -> bool {
 /// Whether a note is of a private type that is not ticked in the settings (SITE-056): its `type:`,
 /// or a place in the people folder (PPL-001).
 fn private_and_not_ticked(s: &PublishSettings, people_dir: &str, c: &Candidate) -> bool {
-    let ticked = |t: &str| s.private_types.iter().any(|x| x.trim().eq_ignore_ascii_case(t));
+    let ticked = |t: &str| s.private_types.iter().any(|x| kind_of(&x.trim().to_lowercase()) == kind_of(t));
     let kind = note_type(c.text).filter(|t| PRIVATE_TYPES.contains(&t.as_str()));
     let person = !people_dir.trim_matches('/').is_empty() && in_folder(c.rel, people_dir);
     match (kind, person) {

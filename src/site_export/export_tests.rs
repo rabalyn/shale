@@ -153,6 +153,39 @@ fn site_056_all_notes_leaves_out_the_private_types_unless_they_are_ticked() {
     assert_eq!(written_notes(&f.export()), ["Inbox/Mail.md"]);
 }
 
+// spec: SITE-056
+#[test]
+fn site_056_the_notes_the_real_writers_make_are_private_unless_ticked() {
+    use crate::import::{email_note, event_note, people, Chain, EmailExtras};
+    let mail = crate::mail::Mail { subject: "Plans".into(), from: "ann@example.org".into(), ..Default::default() };
+    let event = crate::calendar::ics::Event { summary: "Kickoff".into(), start: 1_700_000_000, end: 1_700_003_600, ..Default::default() };
+    let thread = vec![crate::social::tests::post("1", "ada", 1_715_941_800, None)];
+    let saved = crate::social::note::SavedPost { thread, reposted_by: None, media: vec![], failed_media: vec![], thread_error: None, replies: vec![], root: None };
+    let person = people::Person { name: "Ann Smith".into(), email: "ann@example.org".into(), role: people::Role::From, existing: None, on: true };
+    let notes = [
+        ("email", "Mail.md", email_note(&mail, &[], &[], None, &[], &EmailExtras::default())),
+        ("event", "Event.md", event_note(&event, "Work", &[], None, &[], false)),
+        ("post", "Post.md", crate::social::note::post_note(&saved, &[], &[], &[], false, &Chain::default())),
+        ("person", "Person.md", people::note_for(&person)),
+    ];
+    for (kind, name, text) in &notes {
+        assert!(text.contains(&format!("type: {}", if *kind == "post" { "social-post" } else { kind })), "{kind}: {text}");
+        let f = Fixture::with("s056w", "\"all_notes\": true", &[(name, text), ("Plain.md", "x\n")]);
+        assert_eq!(written_notes(&f.export()), ["Plain.md"], "{kind} is left out by all notes");
+        let f = Fixture::with("s056x", &format!("\"all_notes\": true, \"private_types\": [\"{kind}\"]"), &[(name, text), ("Plain.md", "x\n")]);
+        let exported = f.export();
+        let mut got = written_notes(&exported);
+        got.sort();
+        let mut want = vec![*name, "Plain.md"];
+        want.sort();
+        assert_eq!(got, want, "{kind} comes in when ticked");
+    }
+    // `social-post` named itself is the same tick, and any case
+    let (_, name, text) = &notes[2];
+    let f = Fixture::with("s056y", "\"all_notes\": true, \"private_types\": [\"Social-Post\"]", &[(name, text)]);
+    assert_eq!(written_notes(&f.export()), [*name]);
+}
+
 // spec: SITE-057
 #[test]
 fn site_057_a_notes_own_publish_property_wins_over_every_rule() {
