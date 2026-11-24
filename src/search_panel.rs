@@ -354,6 +354,24 @@ mod tests {
         (ShaleApp::build(Options { screenshot: None, vault: Some(d.clone()), view: None, keys: None }, false), d)
     }
 
+    // spec: NAV-007
+    #[test]
+    fn the_search_box_says_what_it_searches() {
+        let (mut app, d) = browse_app("hint");
+        let ctx = egui::Context::default();
+        let mut texts = vec![];
+        for i in 0..2 {
+            let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), time: Some(0.05 * (i + 1) as f64), ..Default::default() };
+            let mut out = ctx.run_ui(raw, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| app.search_panel(ui));
+            });
+            out.textures_delta.clear();
+            texts = out.shapes.iter().filter_map(|c| if let egui::epaint::Shape::Text(t) = &c.shape { Some(t.galley.text().to_string()) } else { None }).collect();
+        }
+        assert!(texts.iter().any(|t| t == "Search notes, mail and posts…"), "{texts:?}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     // spec: NAV-007, NAV-008, NAV-009
     #[test]
     fn search_results_are_browsed_with_j_k_and_ctrl_j_k() {

@@ -35,11 +35,13 @@ pub struct FakeGithub {
     pub port: u16,
     routes: Arc<Mutex<HashMap<String, Vec<u8>>>>,
     hits: Arc<Mutex<Vec<String>>>,
+    /// The whole head (request line and headers) of every request.
+    heads: Arc<Mutex<Vec<String>>>,
     stop: Arc<AtomicBool>,
     join: Option<std::thread::JoinHandle<()>>,
 }
 
-fn serve(mut s: TcpStream, routes: &Mutex<HashMap<String, Vec<u8>>>, hits: &Mutex<Vec<String>>) {
+fn serve(mut s: TcpStream, routes: &Mutex<HashMap<String, Vec<u8>>>, hits: &Mutex<Vec<String>>, heads: &Mutex<Vec<String>>) {
     let _ = s.set_read_timeout(Some(Duration::from_secs(5)));
     let mut raw = Vec::new();
     let mut buf = [0u8; 1024];
@@ -52,6 +54,7 @@ fn serve(mut s: TcpStream, routes: &Mutex<HashMap<String, Vec<u8>>>, hits: &Mute
     let text = String::from_utf8_lossy(&raw).into_owned();
     let path = text.split_whitespace().nth(1).unwrap_or("/").to_string();
     hits.lock().unwrap().push(path.clone());
+    heads.lock().unwrap().push(text.clone());
     let body = routes.lock().unwrap().get(&path).cloned();
     let _ = match body {
         Some(b) => {
@@ -69,23 +72,24 @@ impl FakeGithub {
         let port = listener.local_addr().unwrap().port();
         let routes = Arc::new(Mutex::new(HashMap::new()));
         let hits = Arc::new(Mutex::new(Vec::new()));
+        let heads = Arc::new(Mutex::new(Vec::new()));
         let stop = Arc::new(AtomicBool::new(false));
-        let (r, h, sp) = (routes.clone(), hits.clone(), stop.clone());
+        let (r, h, hd, sp) = (routes.clone(), hits.clone(), heads.clone(), stop.clone());
         let join = std::thread::spawn(move || {
             while !sp.load(Ordering::SeqCst) {
                 match listener.accept() {
                     Ok((s, _)) => {
-                        let (r, h) = (r.clone(), h.clone());
+                        let (r, h, hd) = (r.clone(), h.clone(), hd.clone());
                         std::thread::spawn(move || {
                             let _ = s.set_nonblocking(false);
-                            serve(s, &r, &h);
+                            serve(s, &r, &h, &hd);
                         });
                     }
                     Err(_) => std::thread::sleep(Duration::from_millis(5)),
                 }
             }
         });
-        FakeGithub { port, routes, hits, stop, join: Some(join) }
+        FakeGithub { port, routes, hits, heads, stop, join: Some(join) }
     }
 
     /// The address to give [`super::check::Source::pretend`].
@@ -100,6 +104,11 @@ impl FakeGithub {
     /// The paths asked for so far.
     pub fn hits(&self) -> Vec<String> {
         self.hits.lock().unwrap().clone()
+    }
+
+    /// The head of every request so far, in order.
+    pub fn heads(&self) -> Vec<String> {
+        self.heads.lock().unwrap().clone()
     }
 
     /// Publish version `version` as the newest release with these files (name, bytes); each file

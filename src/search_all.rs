@@ -1019,7 +1019,7 @@ mod tests {
         Found { hits, ..Default::default() }
     }
 
-    // spec: NAV-022
+    // spec: NAV-022, NAV-007
     #[test]
     fn groups_have_a_heading_with_their_count() {
         let hits = [hit("Notes", "a"), hit("Notes", "b"), hit("Posts", "")];
@@ -1027,6 +1027,9 @@ mod tests {
         let full: Vec<Hit> = (0..GROUP_LIMIT).map(|_| hit("Mail", "")).collect();
         assert_eq!(group_headers(&full, GROUP_LIMIT)[0].1, "Mail  20+", "a group at its limit may have more");
         assert_eq!(group_headers(&full, SIDEBAR_GROUP_LIMIT)[0].1, "Mail  20", "the limit is the view's");
+        let cut: Vec<Hit> = (0..SIDEBAR_GROUP_LIMIT).map(|_| hit("Mail", "")).collect();
+        assert_eq!(group_headers(&cut, SIDEBAR_GROUP_LIMIT)[0].1, format!("Mail  {SIDEBAR_GROUP_LIMIT}+"), "a group cut at the sidebar's limit says so");
+        assert_eq!(SIDEBAR_GROUP_LIMIT, 200);
         assert!(group_headers(&[hit("", "")], GROUP_LIMIT).is_empty(), "no groups, no headings");
     }
 
