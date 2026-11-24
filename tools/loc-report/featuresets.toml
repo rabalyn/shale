@@ -9,8 +9,12 @@ features = [
     "editor", "editor_cache", "editor_preview", "markdown", "lists", "fold", "fold_ui", "cursor_style",
     "heading_levels", "format", "format_bar", "syntax", "code_box", "colour_tags", "caption", "task_box",
     "table", "table_grid", "table_select", "math", "vim", "undo", "tag_assist", "link_assist",
-    "link_preview", "galley_index", "properties", "properties_ui", "reader", "embed_size",
+    "link_preview", "galley_index", "properties", "properties_ui", "note_props", "reader", "embed_size",
 ]
+
+[[set]]
+name = "Boards"
+features = ["board"]
 
 [[set]]
 name = "Drawing & media"
@@ -29,7 +33,7 @@ features = ["gitsync", "history", "conflict"]
 
 [[set]]
 name = "Search & navigation"
-features = ["search_all", "search_panel", "search_render", "search_sources", "picker", "graph", "graph_tree"]
+features = ["search_all", "search_panel", "search_render", "search_sources", "search_form", "picker", "graph", "graph_tree"]
 
 [[set]]
 name = "Mail"
