@@ -8,6 +8,7 @@
 //! (the vendored Hugo theme), `publish` (the push to the publish remote, SITE-062…SITE-076) and `cli`
 //! (`shale export-site`).
 
+pub(crate) mod address;
 pub(crate) mod anchor;
 pub(crate) mod boards;
 pub(crate) mod body;
@@ -32,6 +33,8 @@ mod drawing_tests;
 mod export_tests;
 #[cfg(test)]
 mod hugo_phase2_tests;
+#[cfg(test)]
+mod hugo_sitemap_tests;
 #[cfg(test)]
 mod hugo_tests;
 #[cfg(test)]

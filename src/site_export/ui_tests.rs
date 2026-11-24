@@ -198,6 +198,13 @@ fn site_065_cancel_stops_the_publish_and_leaves_the_target_as_it_was() {
     let _gate = crate::gitsync::hold_git(&mut gated, &gate_dir);
     t.app.sync.git = gated;
     t.click("Publish");
+    // the publish runs on a thread: give it time (a loaded machine takes longer than a few frames) to get to its second step
+    for _ in 0..250 {
+        if t.shows("Writing the site…") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
     assert!(t.shows("Publishing the site…") && t.shows("Writing the site…"), "the task and its step: {:?}", t.hl.text);
     assert!(t.shows("Cancel"));
     t.click("Cancel");
@@ -253,4 +260,33 @@ fn site_064_a_failed_sign_in_is_told_as_git_sync_tells_it_with_a_link_to_the_gui
     t.click("Check the target");
     t.wait();
     assert!(t.shows("Could not look at the target: The server did not accept the sign-in"), "{:?}", t.hl.text);
+}
+
+// spec: SITE-081
+#[test]
+fn site_081_the_address_of_the_site_is_saved_when_it_is_allowed_and_refused_otherwise() {
+    use eframe::egui::{Event, Key, Modifiers};
+    let mut t = T::new("siteaddress", ON, &[("A.md", "a note\n")]);
+    assert!(t.shows("Address of the site (optional)") && t.shows("a sitemap.xml and a robots.txt"), "{:?}", t.hl.text);
+    // click into the field below its label
+    let at = t.hl.text.iter().find(|(s, _)| s == "Address of the site (optional)").map(|(_, p)| *p).expect("the label is painted");
+    t.hl.click(&mut t.app, eframe::egui::pos2(at.x + 100.0, at.y + 28.0), PointerButton::Primary);
+    let type_text = |t: &mut T, s: &str| {
+        t.hl.frame(&mut t.app, vec![Event::Text(s.into())]);
+        t.hl.frames(&mut t.app, 2);
+    };
+    // a password in the address is told and not kept, and the message does not repeat it
+    type_text(&mut t, "https://me:secret@wiki.example.org/");
+    assert!(t.shows("can't have a user name or password in it"), "{:?}", t.hl.text);
+    assert!(!t.hl.text.iter().any(|(s, _)| s.starts_with("The address of the site can't") && s.contains("secret")));
+    assert_eq!(t.app.vdata.settings.publish.site_address, "");
+    // an address that is allowed is kept, with the slash of the config
+    t.hl.frame(&mut t.app, vec![Event::Key { key: Key::A, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::COMMAND }]);
+    type_text(&mut t, "https://wiki.example.org/wiki");
+    assert!(!t.shows("can't have a user name"), "{:?}", t.hl.text);
+    assert_eq!(t.app.vdata.settings.publish.site_address, "https://wiki.example.org/wiki/");
+    // one that is not allowed after it is told, and the one that was kept stays
+    type_text(&mut t, "?x=1");
+    assert!(t.shows("can't have a query or a fragment"), "{:?}", t.hl.text);
+    assert_eq!(t.app.vdata.settings.publish.site_address, "https://wiki.example.org/wiki/");
 }

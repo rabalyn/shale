@@ -36,6 +36,7 @@ impl ShaleApp {
         if self.publishing.lists.vault != uid {
             self.publishing.lists = Lists::of(uid, &self.vdata.settings.publish);
             self.publishing.url_text = None;
+            self.publishing.site_address_text = None;
             self.publishing.looked_once = false;
         }
         let mut changed = anchor(ui, "publishing.enabled", |ui| ui.checkbox(&mut self.vdata.settings.publish.enabled, "Publish this vault as a website").changed());
@@ -46,6 +47,7 @@ impl ShaleApp {
         }
         changed |= self.publishing_rules_ui(ui);
         changed |= self.publishing_target_ui(ui);
+        changed |= self.publishing_site_address_ui(ui);
         self.publishing_run_ui(ui);
         theme::hint(
             ui,
@@ -153,6 +155,33 @@ impl ShaleApp {
         if left {
             self.publishing.target = None;
             self.start_publish_look();
+        }
+        changed
+    }
+
+    /// The public address of the built site (SITE-081): optional, and kept only when it is allowed.
+    fn publishing_site_address_ui(&mut self, ui: &mut Ui) -> bool {
+        theme::section(ui, "Address of the site");
+        let mut changed = false;
+        let s = &mut self.vdata.settings.publish;
+        let typed = self.publishing.site_address_text.get_or_insert_with(|| s.site_address.clone());
+        anchor(ui, "publishing.site_address", |ui| {
+            ui.label("Address of the site (optional)");
+            let r = ui.add(egui::TextEdit::singleline(typed).hint_text("https://wiki.example.org/").desired_width(420.0));
+            if r.changed() {
+                if let Ok(kept) = crate::site_export::address::check(typed) {
+                    s.site_address = kept.unwrap_or_default();
+                    changed = true;
+                }
+            }
+        });
+        match crate::site_export::address::check(typed) {
+            Err(e) => {
+                theme::problem(ui, e);
+            }
+            Ok(_) => {
+                theme::hint(ui, "Where the built site is served. With it the site has a sitemap.xml and a robots.txt for search engines and its links work below a path such as https://host/wiki/; without it neither is written. The site map page for people (/sitemap.html) is always there.");
+            }
         }
         changed
     }

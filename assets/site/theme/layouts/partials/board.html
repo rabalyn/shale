@@ -12,7 +12,7 @@
 {{- if .partial }}<p class="board-note">This lane may be incomplete.</p>{{ end }}
 <ul class="board-cards">
 {{- range .cards }}
-<li class="board-card"><a href="{{ .url | relURL }}">{{ .title }}</a>
+<li class="board-card"><a href="{{ strings.TrimPrefix "/" .url | relURL }}">{{ .title }}</a>
 {{- with .chips }}<p class="board-chips">{{ range . }}<span class="board-chip">{{ . }}</span>{{ end }}</p>{{ end }}</li>
 {{- end }}
 </ul>

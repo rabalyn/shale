@@ -27,7 +27,9 @@ fn entry<'a>(entries: &'a [Entry], key: &str) -> &'a Entry {
 
 /// An empty folder of its own for a test.
 fn folder(tag: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("shale-bib-{tag}-{}", std::process::id()));
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let d = std::env::temp_dir().join(format!("shale-bib-{tag}-{}-{n}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     d

@@ -176,6 +176,7 @@ mod docx_export;
 mod drops;
 #[cfg(all(test, target_os = "linux"))]
 mod drops_tests;
+pub(crate) mod export_fonts;
 mod git_ask;
 #[cfg(test)]
 mod git_ask_tests;
@@ -488,6 +489,8 @@ pub struct ShaleApp {
     pub tag_learner: crate::import::tagwords::TagLearner,
     /// the `.bib` files that notes ask for, read in the background (EDIT-123)
     pub bib: crate::bibliography::Bibliographies,
+    /// the fonts of the vault and the system, looked up in the background for the exports (JOB-040)
+    pub font_scan: crate::fonts::scan::FontScan,
     /// the thesis document of the open note (#646)
     pub(crate) thesis: bib::ThesisState,
     pub scenes: SceneCache,
@@ -763,6 +766,7 @@ impl ShaleApp {
             drag: drops::DragState::default(),
             tag_learner: crate::import::tagwords::TagLearner::new(),
             bib: Default::default(),
+            font_scan: Default::default(),
             thesis: Default::default(),
             scenes: SceneCache::default(),
             media: crate::media::MediaPlayer::default(),
@@ -2377,6 +2381,8 @@ impl ShaleApp {
         let path = v.root.join("exports").join(format!("{name}.pdf"));
         let mut dialog = crate::pdf::export_dialog::ExportDialog::new(rel.to_path_buf(), drawing, name, opts, path).with_busy(&self.busy);
         if !drawing {
+            // the dialog says which fonts the note gets (PDF-019), so the fonts are looked up (JOB-040)
+            self.font_scan.request();
             let (title, root) = (f.title(), v.root.clone());
             let text = self.note_text(rel);
             let last = &self.vdata.state.latex_export;
