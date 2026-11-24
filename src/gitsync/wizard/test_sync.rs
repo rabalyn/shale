@@ -66,20 +66,36 @@ pub fn history_moved() -> &'static str {
     "The versions Shale kept of your notes on this computer have moved into the vault, so they stay in the history panel. The first sync sends them to the server together with your notes."
 }
 
-/// What went wrong, told apart so the wizard can say what to do.
+/// What went wrong, told apart so the wizard and the sync can say what to do (SYNC-058, SYNC-077…).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Problem {
-    /// Wrong or missing user name or token (or an SSH key the server does not know: `SshKey`).
+    /// Wrong or missing user name or token.
     Sign,
+    /// The server refused a password and wants a token (two-factor login, no passwords for git).
+    TokenNeeded,
     NoNetwork,
     NoRepository,
+    /// The server does not know the SSH key.
     SshKey,
+    /// The SSH key has a passphrase and the ssh-agent does not hold it.
+    KeyLocked,
+    /// The SSH key has a passphrase and no ssh-agent runs.
+    NoAgent,
     HostKey,
     Certificate,
+    /// A login page of a proxy answered instead of git.
+    LoginPage,
     Other(String),
 }
 
-/// Read git's error text.
+/// The cases whose words hold no text of git.
+pub(super) const FIXED: [Problem; 10] = [Problem::Sign, Problem::TokenNeeded, Problem::NoNetwork, Problem::NoRepository, Problem::SshKey, Problem::KeyLocked, Problem::NoAgent, Problem::HostKey, Problem::Certificate, Problem::LoginPage];
+
+/// The guide note with one section for each case (SYNC-082).
+pub const GUIDE_NOTE: &str = "Git sync sign-in problems";
+
+/// Read git's error text (the cases that need no more than that; `diagnose::diagnose` adds what
+/// the cheap checks found).
 pub fn classify(error: &str) -> Problem {
     let e = error.to_ascii_lowercase();
     let has = |words: &[&str]| words.iter().any(|w| e.contains(w));
@@ -89,6 +105,10 @@ pub fn classify(error: &str) -> Problem {
         Problem::HostKey
     } else if has(&["ssl certificate", "certificate verify failed", "unable to get local issuer", "self-signed", "self signed", "ssl: no alternative certificate"]) && !has(&["authentication failed"]) {
         Problem::Certificate
+    } else if has(&["text/html", "<html", "<!doctype html", "unable to update url base from redirection", "-http-push failed"]) {
+        Problem::LoginPage
+    } else if has(&["password authentication", "two-factor", "two factor", "2fa", "personal access token"]) && has(&["authentication failed", "access denied", "invalid username or password", "401", "403", "not supported", "removed"]) {
+        Problem::TokenNeeded
     } else if has(&[
         "authentication failed",
         "invalid username or password",
@@ -124,17 +144,64 @@ pub fn classify(error: &str) -> Problem {
 }
 
 impl Problem {
-    /// In plain words, with what to do.
-    pub fn words(&self) -> String {
+    /// What went wrong, in plain words.
+    pub fn what(&self) -> String {
         match self {
-            Problem::Sign => "The server did not accept the sign-in: the user name or the token is wrong, or the token has expired or may not use repositories. Go back and enter the token again.".into(),
-            Problem::NoNetwork => "Shale could not reach the server. Check your internet connection and the address of the server, then try again.".into(),
-            Problem::NoRepository => "The server has no repository at this address, or your account may not use it. Go back and pick or create the repository.".into(),
-            Problem::SshKey => "The server did not accept your SSH key. Add the public key to your account on the server (the page is linked in the previous step), then try again.".into(),
-            Problem::HostKey => "The server's SSH key is not the one this computer remembers for it, so Shale stopped. If you did not expect a change, do not go on.".into(),
+            Problem::Sign => "The server did not accept the sign-in: the user name or the token is wrong, or the token has expired or may not use repositories.".into(),
+            Problem::TokenNeeded => "The server refused a password: it wants a personal access token instead (the account may use two-factor login, or the server no longer takes passwords for git).".into(),
+            Problem::NoNetwork => "Shale could not reach the server.".into(),
+            Problem::NoRepository => "The server has no repository at this address, or your account may not use it.".into(),
+            Problem::SshKey => "The server did not accept your SSH key.".into(),
+            Problem::KeyLocked => "Your SSH key is protected by a passphrase, and your ssh-agent does not hold it, so it cannot be used.".into(),
+            Problem::NoAgent => "Your SSH key is protected by a passphrase, and no ssh-agent is running to unlock it.".into(),
+            Problem::HostKey => "The server's SSH key is not the one this computer remembers for it, so Shale stopped.".into(),
             Problem::Certificate => "The server's certificate could not be checked (it may be self-signed or expired). Shale does not go on without a valid certificate.".into(),
+            Problem::LoginPage => "A login page answered instead of git: a proxy or single sign-on in front of the server wants a sign-in first.".into(),
             Problem::Other(e) => format!("The sync did not work: {e}"),
         }
+    }
+
+    /// What to do about it, in one short sentence.
+    pub fn fix(&self) -> Option<&'static str> {
+        Some(match self {
+            Problem::Sign => "Go back and enter the token again.",
+            Problem::TokenNeeded => "Make a token on the server's website and enter it in the sign-in step instead of the password.",
+            Problem::NoNetwork => "Check your internet connection and the address of the server, then try again.",
+            Problem::NoRepository => "Go back and pick or create the repository.",
+            Problem::SshKey => "Add the public key to your account on the server (the page is linked in the previous step), then try again.",
+            Problem::KeyLocked => "Unlock it once with ssh-add in a terminal (Shale never asks for or keeps a passphrase), then try again.",
+            Problem::NoAgent => "Start an ssh-agent and add the key with ssh-add (Shale never asks for or keeps a passphrase), then try again.",
+            Problem::HostKey => "If you did not expect a change, do not go on; if the server was set up again, remove its old entry and try again.",
+            Problem::LoginPage => "Let the paths of git through the proxy (sign in with a token), or use an SSH key.",
+            Problem::Certificate | Problem::Other(_) => return None,
+        })
+    }
+
+    /// In plain words, with what to do.
+    pub fn words(&self) -> String {
+        match self.fix() {
+            Some(fix) => format!("{} {fix}", self.what()),
+            None => self.what(),
+        }
+    }
+
+    /// The heading of [`GUIDE_NOTE`] that tells more, for the cases that have one (SYNC-082).
+    pub fn guide(&self) -> Option<&'static str> {
+        Some(match self {
+            Problem::Sign => "The token was not accepted",
+            Problem::TokenNeeded => "The server wants a token, not a password",
+            Problem::SshKey => "The server does not know your SSH key",
+            Problem::KeyLocked => "The key is locked: add it to the ssh-agent",
+            Problem::NoAgent => "No ssh-agent is running",
+            Problem::HostKey => "The server's host key changed",
+            Problem::LoginPage => "A login page is in front of the server",
+            Problem::NoNetwork | Problem::NoRepository | Problem::Certificate | Problem::Other(_) => return None,
+        })
+    }
+
+    /// The case whose words these are (the wizard hands words on as text): None for any other text.
+    pub fn from_words(text: &str) -> Option<Problem> {
+        FIXED.iter().find(|p| p.words() == text).cloned()
     }
 }
 

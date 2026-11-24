@@ -63,7 +63,7 @@ keeps the notes safe, and the warning says what to do if the repository breaks (
    repository holds and says what will happen: an empty repository gets your notes and the versions; a repository with notes and an empty vault downloads them; with notes on both sides they are merged, nothing is deleted
    and a note that differs is kept in both versions (one as `Note (conflict …).md`). **Run the test sync** is one real sync. The result is
    in plain words: it worked; the user name or token was not accepted; no network to the server; no repository at that address; the SSH key
-   was not accepted; the server's certificate cannot be checked. After a failure **Back** goes to the step that fixes it, and the remote
+   was not accepted; a key with a passphrase that no ssh-agent holds (locked); a password where the server wants a token; a login page of a proxy in front of the server; a changed host key; the server's certificate cannot be checked. Each has a short fix and, where the steps are longer, a link **How to fix this** into [[Git sync sign-in problems]]. After a failure **Back** goes to the step that fixes it, and the remote
    stays set so that **Try again** works. **Finish** turns on "Sync this vault automatically".
 
 **Cancel** and **Back** change nothing in the vault. Provider sign-in through a browser (OAuth or a device code) is not offered yet.

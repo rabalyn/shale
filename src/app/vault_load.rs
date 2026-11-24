@@ -25,9 +25,9 @@ pub enum After {
     Nothing,
     /// `--view`: the view the command line asked for
     View(String),
-    /// the user guide's vault (DEV-020): open this note of it. It is not one of the known vaults
-    /// and not the vault opened last (VAULT-029).
-    Guide(PathBuf),
+    /// the user guide's vault (DEV-020): open this note of it, at this heading when there is one
+    /// (SYNC-082). It is not one of the known vaults and not the vault opened last (VAULT-029).
+    Guide(PathBuf, Option<String>),
 }
 
 /// The load that runs: for this folder.
@@ -161,14 +161,17 @@ impl ShaleApp {
         let Some(loaded) = self.vault_load.poll() else { return };
         match loaded.result {
             Ok(v) => {
-                let known = !matches!(loaded.after, After::Guide(_));
+                let known = !matches!(loaded.after, After::Guide(..));
                 self.finish_open_vault(&loaded.path, v, known);
                 match loaded.after {
                     After::Nothing => {}
                     After::View(v) => self.show_start_view(Some(&v)),
-                    After::Guide(rel) => {
+                    After::Guide(rel, heading) => {
                         if self.vault.as_ref().is_some_and(|v| v.file(&rel).is_some()) {
-                            self.open(&rel, false);
+                            match heading {
+                                Some(h) => self.open_link(&rel.with_extension("").to_string_lossy(), Some(h), None, false),
+                                None => self.open(&rel, false),
+                            }
                         }
                     }
                 }

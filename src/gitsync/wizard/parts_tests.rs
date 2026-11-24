@@ -218,7 +218,7 @@ fn sync_057_the_remote_is_empty_or_has_notes_and_the_words_say_what_the_first_sy
     assert!(both.contains("merges") && both.contains("nothing is deleted") && both.contains("conflict"), "{both}");
 }
 
-// spec: SYNC-058
+// spec: SYNC-058, SYNC-079
 #[test]
 fn sync_058_git_s_errors_become_plain_words_for_each_case() {
     let cases: [(&str, Problem); 12] = [

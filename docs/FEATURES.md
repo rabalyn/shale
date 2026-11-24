@@ -1345,7 +1345,12 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   one; elsewhere it links to the provider's website and takes the address. Before the first sync it says what will happen
   (an empty repository gets your notes, a repository with notes comes down, both with notes are merged and nothing is deleted),
   and the **test sync** is one real sync with the result in plain words (it worked, wrong user name or token, no network, no
-  repository at that address, SSH key not accepted, certificate not trusted).
+  repository at that address, SSH key not accepted, certificate not trusted). A key of your own with a passphrase works through
+  your ssh-agent (Shale never asks for or keeps a passphrase). A sign-in that fails says why in plain words with a short fix
+  (wizard, Settings → Sync and the toast): a key with a passphrase that no agent holds, no agent running, a password where the
+  server wants a token, a login page of a proxy in front of the server, a changed host key; most have a **How to fix this** link
+  into the user guide note "Git sync sign-in problems". The three sign-ins (SSH key without a passphrase, SSH key with a
+  passphrase in an agent, HTTPS token) are tested against a real Forgejo server (`tests/forgejo-env/`).
 
   ![Choosing the server](userguide/z_media/screenshots/wizard-server.png)
 
@@ -1388,7 +1393,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   Compare (changes, or the Markdown side by side), "Keep this one" (its text goes into the original; the old text is kept in the trash) and "Keep the
   other"; the copy goes to the trash. The original shows the same banner and a badge. While the original exists, the copy is left out of search, links, the graph,
   tasks and tags. OneDrive, iCloud and Google Drive copies (`Note 2.md`) cannot be told from a note by name.
-- Passwords are git's business (credential helper or SSH key); Shale never asks for one.
+- Passwords and passphrases are git's and ssh's business (credential helper, ssh-agent); Shale never asks for one.
 - Every commit ends with the lines `Shale-Reason:` (`sync`, `merge`, or why a version was kept, see File history) and
   `Shale-Device:` (the name of the computer), after the optional suffix. The sync pushes the version commits of File
   history as they are: no squash, no rewrite.

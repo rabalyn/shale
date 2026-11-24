@@ -1,12 +1,13 @@
 //! The "Turn on sync" wizard (SYNC-047…SYNC-058, ADR-0029): its state, and the jobs that talk to
 //! the network, the keyring and git. The dialog is `ui.rs`; the pieces are `provider` (what a
-//! server is), `api` (list and create repositories), `ssh` (keys) and `test_sync` (what the
-//! remote holds, the words for the result).
+//! server is), `api` (list and create repositories), `ssh` (keys), `test_sync` (what the
+//! remote holds, the words for the result) and `diagnose` (why a sign-in failed, SYNC-077…).
 //!
 //! The state is one small struct owned by the sync state (`Setup`), not fields of the window.
 //! Every slow thing is a background job (JOB-001) that reports a [`Msg`] or a message in words.
 
 pub mod api;
+pub mod diagnose;
 pub mod provider;
 pub mod ssh;
 pub mod test_sync;
@@ -15,6 +16,8 @@ mod ui;
 pub(crate) use ui::warnings_ui;
 
 // Linux only: its keyring is a pretend `secret-tool`, the one backend a separate process can fake.
+#[cfg(all(test, target_os = "linux"))]
+mod diagnose_tests;
 #[cfg(all(test, target_os = "linux"))]
 mod forgejo_env_tests;
 #[cfg(test)]
@@ -402,7 +405,8 @@ pub fn connect_and_inspect(git: &Git, vault: &Path, url: &str, ssh_key: Option<&
     if let Some(cmd) = ssh::ssh_command(ssh_key, true) {
         probe.env.push(("GIT_SSH_COMMAND".into(), cmd.into()));
     }
-    let remote = test_sync::inspect(&probe, vault).map_err(|e| test_sync::classify(&e).words())?;
+    let home = dirs::home_dir().unwrap_or_default();
+    let remote = test_sync::inspect(&probe, vault).map_err(|e| diagnose::diagnose(&e, &diagnose::gather(&probe, vault, &home, &e)).words())?;
     Ok((remote, test_sync::vault_has_notes(vault), moved))
 }
 

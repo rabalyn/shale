@@ -278,6 +278,23 @@ fn net_019_the_user_guide_opens_in_the_background_on_its_start_note() {
     assert_eq!(open, [PathBuf::from("Start here.md")]);
 }
 
+// spec: SYNC-080, SYNC-082
+#[test]
+fn sync_080_the_user_guide_opens_at_a_note_and_a_heading() {
+    const FILES: crate::userguide::Files = &[("Start here.md", b"# Start\n"), ("Git sync sign-in problems.md", b"# One\n\ntext\n\n# Two\n\nmore\n"), (".shale/settings.json", b"{}")];
+    let mut w = W::new("guide-at");
+    let root = w.dir("guide-data");
+    w.app.guide = crate::userguide::Places { files: FILES, root: Some(root.clone()) };
+    w.hold();
+    w.app.open_user_guide_at("Git sync sign-in problems", "Two");
+    assert!(w.app.vault_load.is_loading());
+    w.release();
+    w.settle();
+    assert_eq!(w.root(), Some(root.join(format!("userguide-{}", env!("CARGO_PKG_VERSION")))));
+    let open: Vec<_> = w.app.tabbar.tabs.iter().filter_map(|t| t.view.path().map(Path::to_path_buf)).collect();
+    assert_eq!(open, [PathBuf::from("Git sync sign-in problems.md")]);
+}
+
 // spec: NET-019
 #[test]
 fn net_019_a_scripted_run_waits_for_the_vault() {

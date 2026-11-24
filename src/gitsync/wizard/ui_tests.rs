@@ -372,6 +372,45 @@ fn sync_058_a_failing_test_sync_goes_back_with_the_reason_and_try_again_works() 
     assert!(matches!(t.wizard().test, Test::Worked(_)), "{:?}", t.wizard().test);
 }
 
+// spec: SYNC-080, SYNC-082
+#[test]
+fn sync_080_a_failed_test_sync_says_the_diagnosis_and_links_the_guide_section() {
+    use super::diagnose::{Agent, Facts};
+    use super::test_sync::Problem;
+    let mut t = T::new("diagnosis");
+    let guide = t.root.join("guide-data");
+    const FILES: crate::userguide::Files = &[("Start here.md", b"# Start\n"), ("Git sync sign-in problems.md", b"# The key is locked: add it to the ssh-agent\n\nsteps\n"), (".shale/settings.json", b"{}")];
+    t.app.guide = crate::userguide::Places { files: FILES, root: Some(guide.clone()) };
+    // the line under Sync now: the diagnosis instead of git's text, and a link; git's own message for anything else
+    t.app.sync.last = Some(("12:00".into(), Err("git@x: Permission denied (publickey).".into())));
+    *t.app.sync.facts.lock().unwrap() = Facts { key_encrypted: true, agent: Agent::Running, agent_has_key: false };
+    assert!(std::process::Command::new("git").args(["init", "--quiet"]).arg(&t.vault).envs(hermetic().env.iter().cloned()).status().unwrap().success());
+    t.app.sync.remote = Some("git@x:ada/notes.git".into());
+    t.open_sync_settings();
+    assert!(t.shows("Last sync 12:00 failed: Your SSH key is protected by a passphrase"), "{:?}", t.painted());
+    assert!(t.has_button("How to fix this"));
+    t.app.sync.last = Some(("12:01".into(), Err("fatal: something nobody expected".into())));
+    assert!(t.shows("Last sync 12:01 failed: fatal: something nobody expected"), "{:?}", t.painted());
+    assert!(!t.has_button("How to fix this"));
+    // the wizard's last step: the words, the fix and the link
+    t.app.sync.last = None;
+    t.app.sync.remote = None;
+    t.open_wizard();
+    t.wizard().step = Step::Test;
+    t.wizard().test = Test::Failed(Problem::KeyLocked);
+    assert!(t.shows("ssh-add in a terminal"), "{:?}", t.painted());
+    t.click("How to fix this (opens the user guide)");
+    let want = guide.join(format!("userguide-{}", env!("CARGO_PKG_VERSION")));
+    let start = Instant::now();
+    while t.app.vault.as_ref().map(|v| v.root.clone()) != Some(want.clone()) {
+        t.hl.frames(&mut t.app, 1);
+        std::thread::sleep(Duration::from_millis(10));
+        assert!(start.elapsed() < Duration::from_secs(60), "the guide did not open");
+    }
+    let open: Vec<_> = t.app.tabbar.tabs.iter().filter_map(|x| x.view.path().map(Path::to_path_buf)).collect();
+    assert_eq!(open, [PathBuf::from("Git sync sign-in problems.md")]);
+}
+
 /// A pretend Forgejo: the API of SYNC-055 and 404 for anything else (git's own requests).
 fn pretend_forgejo(n: usize) -> (String, std::thread::JoinHandle<Vec<String>>) {
     crate::calendar::dav::tests::mock_http(n, |m, p, h, b| match (m, p) {

@@ -172,7 +172,7 @@ fn sync_076_no_question_without_a_git_of_its_own_or_for_one_shale_made() {
 fn sync_076_the_user_guide_and_a_window_that_does_not_save_never_ask() {
     let mut w = W::new("guide");
     // the guide is not a known vault, also when its folder has a .git
-    w.open("repo", After::Guide(PathBuf::from("Welcome.md")));
+    w.open("repo", After::Guide(PathBuf::from("Welcome.md"), None));
     assert!(!w.asking() && w.app.cfg.vaults.entries().is_empty());
     // a window that saves nothing (screenshots, tests) has no sync and asks nothing
     w.app.persist_config = false;
