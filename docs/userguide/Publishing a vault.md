@@ -89,7 +89,9 @@ Open **Settings → Publishing**. With the switch off the page shows only the sw
   done the page says how many notes and media files were published and how many links became plain text, and lists
   every warning, for example each file outside the vault that was not found on this computer. A publish that is
   cancelled or fails leaves the repository as it was. The same is `shale export-site --publish <vault folder>` on
-  the command line (it prints the same summary; see below).
+  the command line (it prints the same summary; see below). Only one publish of a vault runs at a time: a second
+  one (the button, the command line or another Shale) stops at once with "Another publish of this vault is running"
+  and changes nothing.
 - **Who published last**: the page reads the branch's last commit and says from which computer and when it was
   published. **Check the target** asks again.
 
