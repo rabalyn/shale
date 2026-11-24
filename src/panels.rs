@@ -612,7 +612,7 @@ impl ShaleApp {
                             return;
                         };
                         ui.push_id((rel, t.line), |ui| {
-                            ui.horizontal(|ui| {
+                            let row = ui.horizontal(|ui| {
                                 ui.add_space(t.indent as f32 * 8.0);
                                 let mut d = t.done;
                                 if ui.checkbox(&mut d, "").on_hover_text("Tick off (saved to the note)").clicked() {
@@ -633,6 +633,9 @@ impl ShaleApp {
                                     ui.label(muted(v.file(rel).map(|f| f.display_name()).unwrap_or_default()).size(12.0));
                                 }
                             });
+                            if ui.rect_contains_pointer(row.response.rect) {
+                                crate::reader::note_hovered_task(ui.ctx(), Some(rel.clone()), t.check_offset);
+                            }
                         });
                     });
                     if shown == 0 {
@@ -661,7 +664,7 @@ impl ShaleApp {
                 let rendered = self.search_rendered();
                 if let Some(v) = &self.vault {
                     let data = crate::search_all::Ctx { vault: v, mail: self.mail.index(), posts: &self.social.index };
-                    let out = crate::picker::show(&ctx, p, &data, &self.keymap, &mut self.cfg.search, rendered);
+                    let out = crate::picker::show(&ctx, p, &data, &mut self.search_worker, &self.keymap, &mut self.cfg.search, rendered);
                     if out.save {
                         self.save_config();
                     }
@@ -1145,7 +1148,11 @@ impl ShaleApp {
             }
         }
         if let Modal::Export(d) = &mut modal {
-            let title = if d.book.is_some() { format!("Export the folder “{}” to PDF", d.name) } else { format!("Export “{}” to PDF", d.name) };
+            let title = match d.book.as_deref() {
+                Some(b) if b.board => format!("Export the board “{}” to PDF", d.name),
+                Some(_) => format!("Export the folder “{}” to PDF", d.name),
+                None => format!("Export “{}” to PDF", d.name),
+            };
             // a LaTeX export that is running or has just ended (TEX-016), or the book of a folder (BOOK-010)
             let finished = self.tex_export_tick(d, &ctx).or_else(|| self.book_export_tick(d)).or_else(|| self.note_export_tick(d));
             if d.tex.as_ref().is_some_and(|t| t.working()) || d.book.as_ref().is_some_and(|b| b.working()) || d.note_working() {

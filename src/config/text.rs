@@ -199,6 +199,7 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
     ("search.prefix_mail", "The one letter that starts a query for mail only: m gives m:banana."),
     ("search.prefix_posts", "The one letter that starts a query for posts only: s gives s:banana."),
     ("search.hit_display", "How the lines of notes that a search found are drawn: follow (like the editor shows notes now: rendered when live_preview is on or the note in view is in the reading view, raw otherwise), raw (the markdown as written) or rendered (bold, links by their text, tags, task boxes). The found text is marked in all of them. An unknown word means follow."),
+    ("search.advanced", "The last choice of the Advanced switch of the filter and sort form of the search: true shows the query as text, false as rows (the gear button of the picker and of the sidebar search). A query that does not fit the rows is shown as text whatever this says."),
     ("search.sources", "The sources a query without a prefix looks in and lists, from notes, mail and posts. The buttons above the results change it with Shift+click. An empty or unknown list means all three."),
     ("updates", "What Shale does about new releases on GitHub. SHALE_UPDATES=off in the environment switches it off whatever is set here."),
     ("updates.mode", "Ask (not chosen yet: the first update found asks), Off (no request, no notice), Notify (say a new version is out), Download (download and check it in the background) or Install (download, check and install it; you restart when you like)."),
@@ -474,7 +475,7 @@ mod tests {
         serde_json::to_value(c).unwrap()
     }
 
-    // spec: CFG-009, CFG-070
+    // spec: CFG-009, CFG-070, UPD-001
     #[test]
     fn cfg_009_every_key_of_the_file_has_a_description() {
         let (text, missing, keys) = render(&full());

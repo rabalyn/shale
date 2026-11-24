@@ -13,7 +13,39 @@ your mail is set up and open) and **Posts** (the posts of your feeds that Shale 
 group with its count (`200+` when there are more). What you can type (wildcards, every word of mail and posts as a word start, `"phrases"`,
 the fields `from:`, `subject:`, `in:`, `date:` of mail and posts) is in [[Search syntax]].
 
+The search reads a small **query language**: `AND`, `OR`, `NOT` (upper case), parentheses, `-word`,
+and the fields `#tag`, `status:doing` (any property of a note), `path:Projects/`, `due:<+7d`,
+`due:overdue`, `links:[[Note]]`, `blocked` and `blocking`. For example `#todo due:overdue NOT status:done`
+lists the notes with the tag whose due date has passed. A query that is not valid (an open parenthesis,
+`due:soon`) is underlined in the box with the reason under it, and the last list stays. Mail and posts
+take only words and their own fields; when a query has something they do not understand, a line under the
+source buttons says which source was skipped. When a search takes too long it stops and says "Stopped
+early, narrow the query". The rules are in [[Search syntax]].
+
 ![[sidebar-search.png]]
+
+## The filter form (the gear button)
+
+Next to the search box, in the sidebar and in the picker, is a **gear** button. It opens a **filter form** under
+the box, for building a query without remembering the syntax: **All of** (every row must match) or **Any of** (one
+of them), and rows you add with **+ Add filter**: **tag is**, **property is** (a name and a value), **due** (overdue,
+or within, before, on, after or on or after a day: a date, `today` or `+7d`), **is blocked**, **is blocking**,
+**in folder**, **links to** and **text contains**. Each row has a **not** switch and a ✕ to remove it. The form writes
+the query into the box as you go and the list follows at once; what you type in the box fills the form. A row
+that is not complete yet (an empty tag, a property without a value) is not in the query and says what it needs.
+
+![[picker-form.png]]
+
+**Advanced** shows the query as text instead. In the sidebar and the picker the text is the box above, and Advanced adds
+the live count of matches ("12 matches"); in a board lane it is a text field of its own with the error underlined. The
+last choice is remembered (**Settings** file, `search.advanced`) and is the same in the sidebar, the picker and the boards.
+
+A query that does not fit the rows (parentheses inside an `OR`, a `NOT` of a group) is not changed: the form says "This
+query is too complex for the form", Advanced stays on and you edit the text. A `f:`, `m:` or `s:` prefix stays where it is.
+The form is reached with the keyboard: **Ctrl+Shift+G** opens and closes it (the key can be changed in **Settings →
+Keybindings**, "List windows" and "Search results"), **Tab** walks through its widgets, and **Esc** still closes the picker.
+
+![[sidebar-form.png]]
 
 ## Choosing the sources: prefixes and buttons
 
@@ -60,7 +92,7 @@ formula is shown raw, and a hit shows at most 120 characters of its line.
 groups, Ctrl+J / Ctrl+K to the first hit of the next / previous note, and in mail and posts to
 the first hit of the next / previous group. Enter (or a click) opens the hit where it belongs:
 the note at the found text, the mail in the mail view, the post in a Feeds tab. Esc goes back to
-the box. The list follows your typing a moment after you stop, and shows notes you edit meanwhile.
+the box. The list follows your typing a moment after you stop, and shows notes you edit meanwhile. The search runs in the background: while a new list is being made the last one stays, with a small spinner next to the source buttons, and typing is never held up. A search that takes longer than two seconds is also listed in the indicator in the corner as "Searching…", where Cancel stops it and keeps the last list.
 
 # The pickers (Space keys)
 
@@ -74,7 +106,7 @@ be changed in Settings → Keybindings ("Main views").
   ignoring case; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the file in this tab, Esc closes.
   It never creates a note, unlike Ctrl+O.
 - **Space f g**: "Search notes, mail and posts" in one list (the same search as the sidebar's), grouped under Notes, Mail and
-  Posts with their counts; the syntax is in [[Search syntax]]. Enter
+  Posts with their counts; the syntax and the query language are in [[Search syntax]]. Enter
   opens the hit where it belongs: the note at the found line, the mail in the mail view, the post
   in a Feeds tab.
 

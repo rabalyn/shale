@@ -143,7 +143,7 @@ pub(super) fn nested_levels(levels: &[usize]) -> Vec<usize> {
 }
 
 /// The sectioning commands from the top: a rank is an index into it (deeper ones repeat the last).
-const COMMANDS: [&str; 7] = ["part", "chapter", "section", "subsection", "subsubsection", "paragraph", "subparagraph"];
+pub(super) const COMMANDS: [&str; 7] = ["part", "chapter", "section", "subsection", "subsubsection", "paragraph", "subparagraph"];
 
 /// The rank of `\section` in [`COMMANDS`]: where an article starts, and the book family one above it.
 pub(super) const SECTION: usize = 2;

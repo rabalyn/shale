@@ -191,9 +191,9 @@ fn net_013_a_result_does_not_overwrite_a_note_saved_while_the_scan_ran() {
     assert!(!app.notes[Path::new("N.md")].dirty);
     gates.deliver();
     frames_until(&mut app, "the scan did not end", |a| !a.rescan.in_flight());
-    assert_eq!(app.notes[Path::new("N.md")].text, "three\n", "the older read does not replace the newer save");
-    assert_eq!(app.vault.as_ref().unwrap().notes[Path::new("N.md")].text, "three\n");
-    assert_eq!(std::fs::read_to_string(d.join("N.md")).unwrap(), "three\n");
+    assert_eq!(crate::note_props::unstamped(&app.notes[Path::new("N.md")].text), "three\n", "the older read does not replace the newer save");
+    assert_eq!(crate::note_props::unstamped(&app.vault.as_ref().unwrap().notes[Path::new("N.md")].text), "three\n");
+    assert_eq!(crate::note_props::unstamped(&std::fs::read_to_string(d.join("N.md")).unwrap()), "three\n");
     let _ = std::fs::remove_dir_all(&d);
 }
 

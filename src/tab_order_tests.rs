@@ -144,6 +144,27 @@ fn pinning_moves_a_tab_to_the_left_with_a_pin_and_unpinning_puts_it_back() {
     assert!(w.app.tabbar.tab_marks.pinned.is_empty());
 }
 
+// spec: NAV-016
+#[test]
+fn a_pinned_tab_is_closed_by_a_middle_click_and_by_ctrl_w_without_a_question() {
+    use eframe::egui::{Event, Key, Modifiers};
+    let mut w = W::new("pinned-close");
+    w.pin_via_menu(0);
+    let p = w.tab(0).center();
+    w.click_with(p, PointerButton::Middle);
+    assert_eq!(w.order(), names(&["Ideas", "Daily log", "Garden plan"]));
+    assert!(w.app.modal.is_none(), "no question");
+    w.pin_via_menu(0);
+    w.app.tabbar.active = 0;
+    w.frames(2);
+    for pressed in [true, false] {
+        w.hl.frame(&mut w.app, vec![Event::Key { key: Key::W, physical_key: None, pressed, repeat: false, modifiers: Modifiers::COMMAND }]);
+    }
+    w.frames(2);
+    assert_eq!(w.order(), names(&["Daily log", "Garden plan"]));
+    assert!(w.app.modal.is_none(), "no question");
+}
+
 // spec: NAV-017
 #[test]
 fn a_drag_cannot_cross_the_border_between_pinned_and_unpinned_tabs() {
@@ -171,7 +192,7 @@ fn a_drag_cannot_cross_the_border_between_pinned_and_unpinned_tabs() {
     assert_eq!(w.order(), names(&["Welcome", "Ideas", "Garden plan", "Daily log"]));
 }
 
-// spec: NAV-016
+// spec: NAV-016, NAV-026
 #[test]
 fn pinned_tabs_are_restored_pinned_and_first() {
     let mut w = W::new("restore");

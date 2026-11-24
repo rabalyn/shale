@@ -210,6 +210,15 @@ impl W {
         }
     }
 
+    /// Frames until no background job of the window is left, the search worker's answer included (DEV-041).
+    pub fn settle(&mut self) {
+        crate::ui_test_support::settle_within(std::time::Duration::from_secs(60), || {
+            self.frame(vec![]);
+            self.app.busy_jobs()
+        });
+        self.frames(2);
+    }
+
     pub fn rect(&self, key: &str) -> Rect {
         self.app.social.rects.iter().rev().find(|r| r.0 == key).unwrap_or_else(|| panic!("no control {key:?}: {:?}", self.app.social.rects.iter().map(|r| &r.0).collect::<Vec<_>>())).1
     }
@@ -507,7 +516,7 @@ fn a_post_found_in_the_sidebar_search_opens_in_its_feed_scrolled_to_the_post() {
         w.app.search.query = q.into();
         // the sidebar search waits for the typing to settle (NAV-024)
         std::thread::sleep(crate::search_all::DEBOUNCE + std::time::Duration::from_millis(30));
-        w.frames(3);
+        w.settle();
     };
     // 1: a post the feed holds (in the middle of its list)
     let held = w.app.social.timelines[&list_key].posts[30].clone();

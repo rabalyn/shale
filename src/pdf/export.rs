@@ -722,6 +722,20 @@ impl<'a> Writer<'a> {
     fn stopped(&self) -> bool {
         self.cancel.as_ref().is_some_and(Cancel::is_cancelled)
     }
+    /// A page of its own size, for what is not laid out in the text column (the board of a board
+    /// export, BOARD-030). With `reuse` the empty page the writer is on is taken when there is one;
+    /// else a new page is added. The text goes on after such pages on a page from
+    /// [`Writer::new_page`]. Gives the index of the page.
+    pub(super) fn sized_page(&mut self, width: f32, height: f32, reuse: bool) -> usize {
+        if reuse && self.y <= self.top + 0.5 {
+            let page = self.doc.page(self.page);
+            (page.width, page.height) = (width, height);
+            return self.page;
+        }
+        let page = self.doc.add_page(width, height);
+        self.heads.push(PageHead::default());
+        page
+    }
     pub(super) fn cw(&self) -> f32 {
         self.w - self.left - self.right
     }
@@ -1827,7 +1841,7 @@ pub(super) fn pdf_image(img: &image::RgbaImage) -> Image {
 }
 
 /// Add a drawing's pictures to the document: fileId → image index.
-fn add_pictures(doc: &mut Doc, pictures: &HashMap<String, image::RgbaImage>) -> HashMap<String, usize> {
+pub(super) fn add_pictures(doc: &mut Doc, pictures: &HashMap<String, image::RgbaImage>) -> HashMap<String, usize> {
     pictures.iter().map(|(id, img)| (id.clone(), doc.add_image(pdf_image(img)))).collect()
 }
 

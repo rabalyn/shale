@@ -325,6 +325,7 @@ mod tests {
         }
     }
 
+    // spec: NAV-013
     #[test]
     fn opens_centred_at_its_width_and_as_tall_as_its_content() {
         let w = W::new(5, true);
@@ -454,6 +455,7 @@ mod tests {
         }
     }
 
+    // spec: NAV-013
     #[test]
     fn a_tall_dialog_fits_on_the_screen() {
         let w = W::new(200, true);
@@ -461,6 +463,7 @@ mod tests {
         assert!(r.top() >= 0.0 && r.bottom() <= SCREEN.y, "{r:?}");
     }
 
+    // spec: NAV-013
     #[test]
     fn moves_by_its_title_bar() {
         let mut w = W::new(5, true);
@@ -473,6 +476,7 @@ mod tests {
         assert!(w.open, "dragging is not a click outside");
     }
 
+    // spec: NAV-013
     #[test]
     fn resizes_from_its_corner_and_keeps_its_place() {
         let mut w = W::new(5, true);
@@ -490,6 +494,7 @@ mod tests {
         assert!(r3.height() < r.height() - 15.0 && r3.width() < 270.0, "smaller than the content: {r:?}, {r2:?} -> {r3:?}");
     }
 
+    // spec: NAV-013
     #[test]
     fn resizes_from_its_left_edge() {
         let mut w = W::new(5, true);
@@ -500,6 +505,7 @@ mod tests {
         assert!((r2.left() - (r.left() - 100.0)).abs() < 3.0 && (r2.right() - r.right()).abs() < 3.0, "{r:?} -> {r2:?}");
     }
 
+    // spec: NAV-013
     #[test]
     fn grows_with_its_content_until_resized() {
         let mut w = W::new(3, true);
@@ -750,6 +756,7 @@ mod tests {
         assert!(b.rect().height() < h - 100.0, "{h} -> {:?}", b.rect());
     }
 
+    // spec: NAV-013
     #[test]
     fn esc_and_a_click_outside_close_a_modal_dialog() {
         let mut w = W::new(3, true);
@@ -764,6 +771,7 @@ mod tests {
         assert!(!w.open);
     }
 
+    // spec: NAV-013
     #[test]
     fn a_non_modal_dialog_leaves_esc_and_outside_clicks_alone() {
         let mut w = W::new(3, false);

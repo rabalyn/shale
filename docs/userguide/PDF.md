@@ -220,6 +220,13 @@ a window (A4, numbered headings, title page, contents, each note on a new page);
 and the reason on stderr. On Windows `shale.exe` has no console of its own, so `cmd.exe` does not wait for it: use
 `start /wait shale.exe --export-pdf …` (PowerShell: `Start-Process -Wait`) when you need the exit code.
 
+# A board as one PDF
+
+A board ([[Boards]]) exports as its own kind of book: the board on landscape pages, then the notes of its cards
+(see [[Boards#Export as a PDF]]). It has the dialog of a folder's book; the board pages follow the paper of the dialog,
+always landscape. The dialog has the **Engine** choice too: with **LaTeX template** the board and the notes are
+written through a template kind of the article or book family (see [[Boards#Export as a PDF]]).
+
 # Read
 
 A PDF embedded with `![[Paper.pdf]]` is drawn inside the editor and the reading view (up to 50

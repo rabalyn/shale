@@ -563,15 +563,16 @@ fn the_user_guide_is_a_book_with_every_note_once_in_the_order_of_start_here() {
     let plan = book::plan(&v, Path::new("")).unwrap();
     assert_eq!((plan.title.as_str(), plan.intro.as_deref()), ("Shale user guide", Some(Path::new("Start here.md"))));
     assert!(plan.subtitle.is_some(), "a subtitle for the title page");
-    // every note of the guide but the excluded one is in the book, once
+    // every note of the guide but the excluded ones is in the book, once (a contact note, and the sample board, which is no chapter)
     let printed = plan.notes();
     let mut all: Vec<PathBuf> = v.files.iter().filter(|f| f.kind == crate::vault::FileKind::Note).map(|f| f.rel.clone()).collect();
-    all.retain(|n| n != Path::new("People/Ada Example.md"));
+    all.retain(|n| n != Path::new("People/Ada Example.md") && n != Path::new("Guide board.md"));
     let mut sorted = printed.clone();
     sorted.sort();
     all.sort();
     assert_eq!(sorted, all, "every note once: {printed:?}");
     assert!(v.notes[Path::new("People/Ada Example.md")].text.contains("export: false"));
+    assert!(v.notes[Path::new("Guide board.md")].text.contains("export: false"));
     // the chapters come in the order of the links of "Start here"
     let start = &v.notes[Path::new("Start here.md")].text;
     let mut linked: Vec<PathBuf> = Vec::new();

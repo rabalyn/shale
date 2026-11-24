@@ -70,6 +70,20 @@ fn open_on_folder(t: &mut T) {
     t.hl.frames(&mut t.app, 3);
 }
 
+/// A board of two lanes and its cards in the vault (BOARD-031), and its dialog opened.
+fn open_on_board(t: &mut T) {
+    for (name, text) in [
+        ("Sprint.md", "---\ntype: board\nauthor: Ada\n---\n# Sprint\n\n## Todo\nquery: status:todo\n\n## Doing\nquery: status:doing\n"),
+        ("Alpha.md", "---\nstatus: todo\n---\nalphabody\n"),
+        ("Beta.md", "---\nstatus: doing\n---\nbetabody\n"),
+    ] {
+        std::fs::write(t.dir.join(name), text).unwrap();
+    }
+    t.app.vault.as_mut().unwrap().rescan();
+    t.app.open_export_dialog(Path::new("Sprint.md"));
+    t.hl.frames(&mut t.app, 3);
+}
+
 /// Frames until `done` holds.
 fn until(t: &mut T, what: &str, done: impl Fn(&T) -> bool) {
     for _ in 0..600 {
@@ -173,6 +187,26 @@ fn a_folder_has_the_engine_choice_and_only_the_kinds_that_can_hold_a_book() {
         click(&mut t, &format!("kind:{k}"));
         assert_eq!(dialog(&t).tex.as_ref().unwrap().kind, "thesis", "{k} cannot be chosen for a folder");
     }
+}
+
+// spec: BOARD-031, BOOK-013
+#[test]
+fn a_board_has_the_engine_choice_and_only_the_kinds_that_can_hold_a_book() {
+    let mut t = T::new("dlg-board", usable());
+    put_set(&t);
+    open_on_board(&mut t);
+    assert!(dialog(&t).book.as_ref().is_some_and(|b| b.board), "the dialog of a board");
+    assert_eq!(dialog(&t).engine, ExportEngine::Builtin, "the built-in engine until the person chooses otherwise");
+    assert!(t.shows("Engine") && t.shows("LaTeX template") && has(&t, "order"), "{:?}", t.painted());
+    click(&mut t, "engine:latex");
+    for want in ["Template set", "Kind", "Reading order", "A folder is printed as an article or a book"] {
+        assert!(t.shows(want), "{want:?} in {:?}", t.painted());
+    }
+    assert!(has(&t, "folder-kinds"), "{:?}", t.painted());
+    assert_eq!(dialog(&t).tex.as_ref().unwrap().values["author"], "Ada", "the fields come from the board note");
+    click(&mut t, "kind");
+    click(&mut t, "kind:beamer");
+    assert_ne!(dialog(&t).tex.as_ref().unwrap().kind, "beamer", "slides cannot hold a book");
 }
 
 // spec: BOOK-013, TEX-033
@@ -511,6 +545,33 @@ mod fake {
         assert!(!t.app.vdata.state.latex_export.latex);
         open_on_folder(&mut t);
         assert_eq!(dialog(&t).engine, ExportEngine::Builtin);
+    }
+
+    // spec: BOARD-031
+    #[test]
+    fn a_board_is_written_as_the_board_and_its_cards_book_compiled_as_a_job_and_saved() {
+        let mut t = T::new("dlg-board-run", usable());
+        put_set(&t);
+        let (f, keep) = recording_tex("board-run");
+        t.app.tex.detection = Some(found(Ok(f.engine()), Err("not installed"), None));
+        open_on_board(&mut t);
+        click(&mut t, "engine:latex");
+        click(&mut t, "kind");
+        click(&mut t, "kind:report");
+        click(&mut t, "export");
+        until(&mut t, "the export is done", |t| t.app.modal.is_none());
+        let pdf = std::fs::read(t.dir.join("exports/Sprint.pdf")).unwrap();
+        assert!(pdf.starts_with(b"%PDF-1.5 fake"), "the PDF LuaLaTeX made is the file");
+        let tex = std::fs::read_to_string(keep.join("main.tex")).unwrap();
+        for want in ["\\usepackage{pdflscape}", "\\begin{landscape}", "{\\bfseries Todo}", "\\hyperlink{shale-2}{Alpha}", "alphabody", "betabody", "\\author{Ada}"] {
+            assert!(tex.contains(want), "{want:?} in\n{tex}");
+        }
+        assert!(tex.find("\\begin{landscape}").unwrap() < tex.find("alphabody").unwrap());
+        let last = &t.app.vdata.state.latex_export;
+        assert_eq!((last.latex, last.kind.as_str()), (true, "report"));
+        // the next dialog of a board starts on it
+        open_on_board(&mut t);
+        assert_eq!((dialog(&t).engine, dialog(&t).tex.as_ref().unwrap().kind.as_str()), (ExportEngine::Latex, "report"));
     }
 
     // spec: TEX-016

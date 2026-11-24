@@ -763,11 +763,18 @@ mod tests {
     }
 
     fn note_text(w: &W) -> String {
-        w.app.notes[Path::new("A.md")].text.clone()
+        crate::note_props::unstamped(&w.app.notes[Path::new("A.md")].text)
     }
 
     fn settle(w: &mut W) {
         for _ in 0..3 {
+            w.frame(vec![]);
+        }
+        // a search on the worker (QUERY-014) is waited for
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while w.app.search_worker.busy() {
+            assert!(std::time::Instant::now() < end, "the search worker never answered");
+            std::thread::sleep(std::time::Duration::from_millis(2));
             w.frame(vec![]);
         }
     }
@@ -1084,6 +1091,98 @@ mod tests {
         assert!(w.app.keymap.set(Action::MailMark, Binding::parse("Space s").unwrap()).unwrap_err().contains("already used by “Search notes, mail and posts”"));
     }
 
+    fn set_note(w: &mut W, text: &str) {
+        w.app.notes.get_mut(Path::new("A.md")).unwrap().text = text.to_string();
+        settle(w);
+    }
+
+    fn space_space(w: &mut W) {
+        typed(w, Key::Space, " ");
+        typed(w, Key::Space, " ");
+        settle(w);
+    }
+
+    fn toasted(w: &W, text: &str) -> bool {
+        w.app.toasts.iter().any(|t| t.0.contains(text))
+    }
+
+    // spec: KEY-045, TASK-003
+    #[test]
+    fn key_045_space_space_ticks_the_task_on_the_cursor_line_and_undoes() {
+        let mut w = vim_note("toggle-task");
+        set_note(&mut w, "# A\n- [ ] one\n- [x] two\nplain\n");
+        typed(&mut w, Key::G, "g");
+        typed(&mut w, Key::G, "g");
+        typed(&mut w, Key::J, "j");
+        space_space(&mut w);
+        assert_eq!(note_text(&w), "# A\n- [x] one\n- [x] two\nplain\n", "ticked");
+        assert!(w.app.notes[Path::new("A.md")].dirty || std::fs::read_to_string(w.dir.join("A.md")).unwrap().contains("[x] one"), "saved with the note");
+        space_space(&mut w);
+        assert_eq!(note_text(&w), "# A\n- [ ] one\n- [x] two\nplain\n", "unticked again");
+        // the next line: a task that is done is unticked
+        typed(&mut w, Key::J, "j");
+        space_space(&mut w);
+        assert_eq!(note_text(&w), "# A\n- [ ] one\n- [ ] two\nplain\n");
+        // u undoes the last toggle as one step
+        typed(&mut w, Key::U, "u");
+        settle(&mut w);
+        assert_eq!(note_text(&w), "# A\n- [ ] one\n- [x] two\nplain\n", "undone");
+    }
+
+    // spec: KEY-045
+    #[test]
+    fn key_045_space_space_without_a_task_or_while_typing_changes_nothing() {
+        let mut w = vim_note("toggle-task-none");
+        set_note(&mut w, "# A\n- [ ] one\nplain\n");
+        typed(&mut w, Key::G, "g");
+        typed(&mut w, Key::G, "g");
+        // line 0 is a heading: nothing changes and the status bar says so
+        space_space(&mut w);
+        assert_eq!(note_text(&w), "# A\n- [ ] one\nplain\n");
+        assert_eq!(w.app.tabbar.tabs[0].editor.vim.message.as_deref(), Some("No task on this line"));
+        // insert mode: Space types a space, the task stays
+        typed(&mut w, Key::J, "j");
+        typed(&mut w, Key::I, "i");
+        typed(&mut w, Key::Space, " ");
+        typed(&mut w, Key::Space, " ");
+        settle(&mut w);
+        assert!(note_text(&w).contains("- [ ] one"), "not ticked: {:?}", note_text(&w));
+        assert!(note_text(&w).contains("  "), "the spaces were typed: {:?}", note_text(&w));
+    }
+
+    // spec: KEY-045, TASK-003
+    #[test]
+    fn key_045_space_space_in_the_reading_view_and_the_task_list_takes_the_task_under_the_pointer() {
+        let mut w = W::new("toggle-task-views");
+        set_note(&mut w, "# A\n\n- [ ] buy milk\n\nplain\n");
+        w.app.toggle_reading_view();
+        settle(&mut w);
+        let row = |w: &W, name: &str| w.text_pos.iter().find(|t| t.0.contains(name)).map(|t| t.1 + Vec2::new(4.0, 6.0)).unwrap_or_else(|| panic!("no {name}: {:?}", w.texts));
+        // the pointer is not on a task: nothing
+        w.frame(vec![Event::PointerMoved(row(&w, "plain"))]);
+        space_space(&mut w);
+        assert_eq!(note_text(&w), "# A\n\n- [ ] buy milk\n\nplain\n");
+        assert!(toasted(&w, "No task here"));
+        // on the task row
+        w.frame(vec![Event::PointerMoved(row(&w, "buy milk"))]);
+        w.frame(vec![]);
+        space_space(&mut w);
+        assert_eq!(note_text(&w), "# A\n\n- [x] buy milk\n\nplain\n");
+        // the save of the tick added the properties above the task, which the reading view shows: the task moved down
+        settle(&mut w);
+        w.frame(vec![Event::PointerMoved(row(&w, "buy milk"))]);
+        w.frame(vec![]);
+        space_space(&mut w);
+        assert_eq!(note_text(&w), "# A\n\n- [ ] buy milk\n\nplain\n", "again unticks");
+        // the task list: the task row under the pointer, in the buffer of its note
+        w.app.show_view(View::Tasks, false);
+        settle(&mut w);
+        w.frame(vec![Event::PointerMoved(row(&w, "buy milk"))]);
+        w.frame(vec![]);
+        space_space(&mut w);
+        assert_eq!(note_text(&w), "# A\n\n- [x] buy milk\n\nplain\n");
+    }
+
     fn kind(w: &W) -> &'static str {
         match w.app.tabbar.tabs[w.app.tabbar.active].view {
             View::Note(_) => "note",
@@ -1217,8 +1316,41 @@ mod tests {
         w.frame(vec![]);
         assert_eq!(std::fs::read_to_string(w.dir.join("A.md")).unwrap(), "# A\n", "the autosave waits 0.8 s");
         w.press(Key::S, CTRL);
-        assert_eq!(std::fs::read_to_string(w.dir.join("A.md")).unwrap(), "# A\nedited\n", "Ctrl+S saves at once");
+        assert_eq!(crate::note_props::unstamped(&std::fs::read_to_string(w.dir.join("A.md")).unwrap()), "# A\nedited\n", "Ctrl+S saves at once");
         assert!(!w.app.notes[Path::new("A.md")].dirty);
+    }
+
+    // spec: NAV-001
+    #[test]
+    fn nav_001_every_tab_has_its_own_history_that_alt_arrows_and_the_mouse_side_buttons_walk() {
+        let mut w = W::new("tab-history");
+        settle(&mut w);
+        let first = w.app.current_path().expect("a note is open");
+        w.app.open_link("Roadmap", None, Some(first.clone()), false);
+        let second = w.app.current_path().expect("the link opened a note");
+        assert_ne!(second, first);
+        // a second tab has a history of its own: it is empty, so back does nothing there
+        w.app.tabbar.new_tab(View::Calendar);
+        settle(&mut w);
+        let alt = Modifiers { alt: true, ..Modifiers::NONE };
+        w.press(Key::ArrowLeft, alt);
+        assert_eq!(w.app.tabbar.tabs[1].view, View::Calendar, "the history of the first tab is not the second tab's");
+        assert_eq!(w.app.tabbar.tabs[0].view, View::Note(second.clone()));
+        // back and forward in the first tab, by the keys
+        w.app.tabbar.active = 0;
+        settle(&mut w);
+        w.press(Key::ArrowLeft, alt);
+        assert_eq!(w.app.current_path(), Some(first.clone()), "Alt+Left goes back");
+        w.press(Key::ArrowRight, alt);
+        assert_eq!(w.app.current_path(), Some(second.clone()), "Alt+Right goes forward");
+        // and by the mouse side buttons
+        let side = |button, pressed| Event::PointerButton { pos: Pos2::new(300.0, 300.0), button, pressed, modifiers: Modifiers::NONE };
+        w.frame(vec![side(egui::PointerButton::Extra1, true)]);
+        w.frame(vec![side(egui::PointerButton::Extra1, false)]);
+        assert_eq!(w.app.current_path(), Some(first), "the back button goes back");
+        w.frame(vec![side(egui::PointerButton::Extra2, true)]);
+        w.frame(vec![side(egui::PointerButton::Extra2, false)]);
+        assert_eq!(w.app.current_path(), Some(second), "the forward button goes forward");
     }
 
     // spec: NAV-005
@@ -1549,7 +1681,7 @@ mod tests {
         assert_eq!(w.app.search.sel, Some(0), "↓ goes into the list");
     }
 
-    // spec: NAV-007, NAV-008, NAV-025, NAV-023, SOC-036
+    // spec: NAV-007, NAV-008, NAV-025, NAV-023, SOC-036, NAV-009
     #[test]
     fn the_sidebar_search_lists_notes_mail_and_posts_and_the_keyboard_opens_each() {
         let mut w = W::new("sidebar-all");
@@ -1853,7 +1985,7 @@ mod tests {
         assert!(w.app.cfg.search.sources.len() <= 2);
     }
 
-    // spec: NAV-022
+    // spec: NAV-022, NAV-007
     #[test]
     fn the_sidebar_search_has_no_mail_group_while_the_mail_store_is_closed() {
         let mut w = W::new("sidebar-nomail");

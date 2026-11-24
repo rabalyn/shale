@@ -389,7 +389,7 @@ pub struct SavedTab {
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub reading: bool,
     /// The kind of a tab that is neither a note, a drawing nor a Feeds tab (NAV-044): one of
-    /// [`SavedTab::MAIL`], [`SavedTab::CALENDAR`], [`SavedTab::TASKS`], [`SavedTab::GRAPH`],
+    /// [`SavedTab::MAIL`], [`SavedTab::CALENDAR`], [`SavedTab::TASKS`], [`SavedTab::GRAPH`], [`SavedTab::BOARDS`],
     /// [`SavedTab::SETTINGS_FILE`]. A value this version does not know is skipped on restore.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub view: Option<String>,
@@ -405,6 +405,9 @@ pub struct SavedTab {
     /// The switches of the graph when they are not the default (NAV-047), on a `graph` tab.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub graph: Option<SavedGraph>,
+    /// The board the boards view showed (BOARD-007, vault-relative, '/' separated), on a `boards` tab.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub board: Option<String>,
     #[serde(flatten)]
     pub other: Map<String, Value>,
 }
@@ -414,6 +417,7 @@ impl SavedTab {
     pub const CALENDAR: &'static str = "calendar";
     pub const TASKS: &'static str = "tasks";
     pub const GRAPH: &'static str = "graph";
+    pub const BOARDS: &'static str = "boards";
     pub const SETTINGS_FILE: &'static str = "settings_file";
 }
 
@@ -730,7 +734,7 @@ mod tests {
     }
 
     // spec: SOC-024
-    // spec: NAV-026
+    // spec: NAV-026, NAV-016
     #[test]
     fn an_old_state_file_with_two_lists_loads_as_one_ordered_tab_list() {
         let old = br#"{"version": 1, "open_files": ["a.md", "b.md", "c.md"], "pinned_files": ["b.md"],
@@ -779,7 +783,7 @@ mod tests {
         assert!(String::from_utf8(to_bytes(&chosen)).unwrap().contains("\"latex_export\""));
     }
 
-    // spec: CFG-007
+    // spec: CFG-007, NAV-026
     #[test]
     fn unknown_fields_in_a_saved_tab_are_kept() {
         let (s, _) = parse::<VaultState>(br#"{"version": 2, "tabs": [{"file": "a.md", "zoom": 4}]}"#).unwrap();
