@@ -20,6 +20,9 @@ pub struct Changed {
     pub sort: bool,
     /// the Advanced switch, which is a setting (QUERY-026): save it
     pub advanced: bool,
+    /// the change was typed into a text box (the host may wait for the typing to pause, QUERY-028);
+    /// another change (a menu, a pick from a list, a button) is a choice that is meant at once
+    pub typed: bool,
 }
 
 /// What the host of the form says about itself.
@@ -56,8 +59,15 @@ fn finish(r: egui::Response, value: &mut String) -> bool {
     r.changed()
 }
 
+/// `edit_rest`, noting in `typed` that the change was typing.
+fn text_rest(ui: &mut Ui, value: &mut String, hint: &str, min: f32, typed: &mut bool) -> bool {
+    let changed = edit_rest(ui, value, hint, min);
+    *typed |= changed;
+    changed
+}
+
 /// The value fields of one row; true when one changed.
-fn fields(ui: &mut Ui, what: &mut What, i: usize, comp: &mut Complete, vault: &Vault, worker: &mut SearchWorker) -> bool {
+fn fields(ui: &mut Ui, what: &mut What, i: usize, comp: &mut Complete, vault: &Vault, worker: &mut SearchWorker, typed: &mut bool) -> bool {
     fn spec<'a>(row: usize, slot: Slot, key: &'a str, hint: &'a str, width: f32) -> Spec<'a> {
         Spec { row, slot, key, hint, width }
     }
@@ -80,14 +90,16 @@ fn fields(ui: &mut Ui, what: &mut What, i: usize, comp: &mut Complete, vault: &V
             });
             let mut changed = *cmp != before;
             if *cmp != DueCmp::Overdue {
-                changed |= edit_rest(ui, day, "2026-12-01, today, +7d", 130.0);
+                let day_typed = edit_rest(ui, day, "2026-12-01, today, +7d", 130.0);
+                *typed |= day_typed;
+                changed |= day_typed;
             }
             changed
         }
         What::Blocked | What::Blocking => false,
-        What::Folder(v) => edit_rest(ui, v, "Folder/", 110.0),
-        What::Links(v) => edit_rest(ui, v, "Note", 110.0),
-        What::Text(v) => edit_rest(ui, v, "text, * and ? are wildcards", 150.0),
+        What::Folder(v) => text_rest(ui, v, "Folder/", 110.0, typed),
+        What::Links(v) => text_rest(ui, v, "Note", 110.0, typed),
+        What::Text(v) => text_rest(ui, v, "text, * and ? are wildcards", 150.0, typed),
     }
 }
 
@@ -110,7 +122,7 @@ fn add_menu(ui: &mut Ui, label: &str, choices: impl FnOnce(&mut Ui)) {
 }
 
 /// The filter rows (QUERY-021); true when the rows changed.
-fn filter_rows(ui: &mut Ui, st: &mut State, vault: &Vault, worker: &mut SearchWorker) -> bool {
+fn filter_rows(ui: &mut Ui, st: &mut State, vault: &Vault, worker: &mut SearchWorker, typed: &mut bool) -> bool {
     let mut edited = false;
     st.complete.begin(vault, worker);
     let mut remove = None;
@@ -124,7 +136,7 @@ fn filter_rows(ui: &mut Ui, st: &mut State, vault: &Vault, worker: &mut SearchWo
                 }
                 ui.label(RichText::new(row.what.label()).color(theme::palette().muted));
                 edited |= ui.checkbox(&mut row.not, "not").changed();
-                edited |= fields(ui, &mut row.what, i, comp, vault, worker);
+                edited |= fields(ui, &mut row.what, i, comp, vault, worker, typed);
             });
             if let Some((slot, entry)) = comp.list(ui, i) {
                 take_entry(&mut row.what, slot, entry);
@@ -135,6 +147,7 @@ fn filter_rows(ui: &mut Ui, st: &mut State, vault: &Vault, worker: &mut SearchWo
             }
         });
     }
+    *typed |= st.complete.typed;
     if let Some(i) = remove {
         st.rows.remove(i);
         edited = true;
@@ -273,8 +286,11 @@ pub fn show(ui: &mut Ui, st: &mut State, text: &mut String, cache: &mut Cache, a
             theme::hint(ui, "Edit the query in the box above.");
         } else {
             let mut layouter = search_sources::error_layouter(cache, opts.prefixes, None);
-            let r = ui.add(egui::TextEdit::singleline(text).hint_text("status:doing OR #todo").desired_width(f32::INFINITY).layouter(&mut layouter));
+            // (an id of its own: the notes above the box come and go with the text, and an id that counts the
+            // widgets would change with them and take the keyboard from the box, #675)
+            let r = ui.add(egui::TextEdit::singleline(text).id(ui.scope_id().with("advanced-query")).hint_text("status:doing OR #todo").desired_width(f32::INFINITY).layouter(&mut layouter));
             changed.query |= r.changed();
+            changed.typed |= r.changed();
             first.get_or_insert(r);
             if let Some(e) = checked.error() {
                 theme::problem(ui, e.reason.clone());
@@ -284,7 +300,9 @@ pub fn show(ui: &mut Ui, st: &mut State, text: &mut String, cache: &mut Cache, a
             theme::hint(ui, count);
         }
     } else {
-        let edited = filter_rows(ui, st, opts.vault, opts.worker) | mode_clicked;
+        let mut typed = false;
+        let edited = filter_rows(ui, st, opts.vault, opts.worker, &mut typed) | mode_clicked;
+        changed.typed |= typed;
         if !opts.host_box {
             if let Some(e) = checked.error() {
                 theme::problem(ui, e.reason.clone());
@@ -302,7 +320,9 @@ pub fn show(ui: &mut Ui, st: &mut State, text: &mut String, cache: &mut Cache, a
         ui.add_space(4.0);
         ui.label(RichText::new("Sort").color(theme::palette().muted));
         if as_text || st.sort.error.is_some() {
-            changed.sort |= ui.add(egui::TextEdit::singleline(sort).hint_text("due asc, priority desc").desired_width(f32::INFINITY)).changed();
+            let r = ui.add(egui::TextEdit::singleline(sort).id(ui.scope_id().with("advanced-sort")).hint_text("due asc, priority desc").desired_width(f32::INFINITY));
+            changed.sort |= r.changed();
+            changed.typed |= r.changed();
             if let Some(e) = &st.sort.error {
                 theme::problem(ui, e.clone());
             }

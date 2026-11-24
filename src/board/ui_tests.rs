@@ -65,6 +65,11 @@ impl W {
         self.hl.settle(&mut self.app);
     }
 
+    /// The query, sort and drop boxes of the open lane popover, as typed.
+    fn typed(&self) -> (&str, &str, &str) {
+        self.app.boards.view.settings.as_ref().expect("the popover is open").typed()
+    }
+
     fn lanes(&self) -> Vec<(String, Vec<String>)> {
         self.app.boards.shown.lanes().iter().map(|l: &LaneView| (l.name.clone(), l.cards.iter().map(|c| c.title.clone()).collect())).collect()
     }
@@ -775,6 +780,7 @@ fn query_028_a_double_click_on_the_heading_opens_the_settings_that_write_the_fil
     let p = w.at("status: doing");
     w.click_at(p);
     w.type_text("status: review");
+    wait(&mut w, 0.6);
     assert!(w.board_text().contains("query: status:doing\nsort: priority desc, due asc\ndrop: status: review\n"), "{}", w.board_text());
     // Advanced shows the text of the query and counts the cards; changing it changes the lane
     w.click("Advanced");
@@ -783,6 +789,7 @@ fn query_028_a_double_click_on_the_heading_opens_the_settings_that_write_the_fil
     w.click_at(p);
     w.key(Key::A, Modifiers::COMMAND, "");
     w.type_text("#todo");
+    wait(&mut w, 0.6);
     assert!(w.board_text().contains("## Doing\nquery: #todo\nsort: priority desc, due asc\ndrop: status: review\n"), "{}", w.board_text());
     assert!(w.app.cfg.search.advanced, "the switch is a setting (QUERY-026)");
     w.settle();
@@ -819,6 +826,63 @@ fn query_028_the_menu_opens_the_settings_and_the_form_edits_sort_and_done() {
     assert_eq!(super::lanes::drop_property("status:doing OR status:todo"), None);
     assert_eq!(super::lanes::drop_property("(status:"), None);
     assert_eq!(super::lanes::drop_property(""), None);
+}
+
+/// Frames for `secs` seconds of the test clock (a frame is 50 ms).
+fn wait(w: &mut W, secs: f64) {
+    w.hl.frames(&mut w.app, (secs / 0.05).ceil() as usize);
+}
+
+// spec: QUERY-028
+#[test]
+fn query_028_the_advanced_box_keeps_every_typed_char_and_the_file_is_written_500_ms_after_the_last_one() {
+    let mut w = W::board();
+    open_settings_of_doing(&mut w);
+    w.click("Advanced");
+    let p = w.at("status:doing");
+    w.click_at(p);
+    w.key(Key::A, Modifiers::COMMAND, "");
+    let query = "status:doing OR #todo ";
+    let mut typed = String::new();
+    for c in query.chars() {
+        typed.push(c);
+        w.hl.frame(&mut w.app, vec![Event::Text(c.to_string())]);
+        // the box says exactly what was typed (no trim, no rewrite from the file)
+        assert_eq!(w.typed().0, typed, "the box keeps what was typed");
+    }
+    assert!(w.board_text().contains("## Doing\nquery: status:doing\n"), "nothing is written before the debounce: {}", w.board_text());
+    wait(&mut w, 0.3);
+    assert!(w.board_text().contains("## Doing\nquery: status:doing\n"), "still before 500 ms: {}", w.board_text());
+    wait(&mut w, 0.4);
+    assert!(w.board_text().contains("## Doing\nquery: status:doing OR #todo\nsort:"), "written after the debounce: {}", w.board_text());
+    wait(&mut w, 0.5);
+    assert_eq!(w.typed().0, query, "the trailing space stays after the write");
+    // a partly typed (invalid) query stays as typed, with its error, and is written on close
+    w.type_text("AND (");
+    assert_eq!(w.typed().0, "status:doing OR #todo AND (");
+    w.key(Key::Escape, Modifiers::NONE, "");
+    assert!(!w.painted("Lane “Doing”"));
+    assert!(w.board_text().contains("query: status:doing OR #todo AND (\n"), "closing writes at once: {}", w.board_text());
+    w.app.cfg.search.advanced = false;
+}
+
+// spec: QUERY-028
+#[test]
+fn query_028_a_trailing_space_in_the_drop_box_stays_and_a_choice_in_a_menu_writes_at_once() {
+    let mut w = W::board();
+    open_settings_of_doing(&mut w);
+    let p = w.at("status: doing");
+    w.click_at(p);
+    for c in "status: ".chars() {
+        w.hl.frame(&mut w.app, vec![Event::Text(c.to_string())]);
+    }
+    assert_eq!(w.typed().2, "status: ");
+    wait(&mut w, 0.7);
+    assert_eq!(w.typed().2, "status: ", "the space stays after the write");
+    assert!(w.board_text().contains("drop: status:\n"), "{}", w.board_text());
+    w.click("+ Add sort");
+    w.click("title");
+    assert!(w.board_text().contains("title"), "a menu choice is written at once: {}", w.board_text());
 }
 
 fn open_settings_of_doing(w: &mut W) {
