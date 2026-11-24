@@ -563,10 +563,10 @@ mod fake {
         let pdf = std::fs::read(t.dir.join("exports/Sprint.pdf")).unwrap();
         assert!(pdf.starts_with(b"%PDF-1.5 fake"), "the PDF LuaLaTeX made is the file");
         let tex = std::fs::read_to_string(keep.join("main.tex")).unwrap();
-        for want in ["\\usepackage{pdflscape}", "\\begin{landscape}", "{\\bfseries Todo}", "\\hyperlink{shale-2}{Alpha}", "alphabody", "betabody", "\\author{Ada}"] {
+        for want in ["\\shaleLandscape", "\\shalePortrait", "{\\bfseries Todo}", "\\hyperlink{shale-2}{Alpha}", "alphabody", "betabody", "\\author{Ada}"] {
             assert!(tex.contains(want), "{want:?} in\n{tex}");
         }
-        assert!(tex.find("\\begin{landscape}").unwrap() < tex.find("alphabody").unwrap());
+        assert!(tex.find("\n\\shaleLandscape\n").unwrap() < tex.find("alphabody").unwrap());
         let last = &t.app.vdata.state.latex_export;
         assert_eq!((last.latex, last.kind.as_str()), (true, "report"));
         // the next dialog of a board starts on it

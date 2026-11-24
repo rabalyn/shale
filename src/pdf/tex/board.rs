@@ -1,4 +1,4 @@
-//! A board through a LaTeX template (BOARD-031, #605): the board on landscape pages (`pdflscape`),
+//! A board through a LaTeX template (BOARD-031, #605): the board on real landscape pages ([`PREAMBLE`]),
 //! the lanes as columns of cards, then the notes of the cards as the book of BOOK-013…BOOK-016 has
 //! them (`book.rs`): a part for each lane that has cards, the cards as its chapters in the order of
 //! [`Resolved::chapters`], with the contents. [`crate::pdf::board::plan`] is the reading order, shared
@@ -30,10 +30,42 @@ const LANES_PER_PAGE: usize = 3;
 const COLUMN_SHARE: &str = "0.32";
 const GAP_SHARE: &str = "0.02";
 /// What fits a page of a column, in lines of text: the estimate of [`estimate`] is against this.
-const PAGE_LINES: f32 = 22.0;
+const PAGE_LINES: f32 = 17.0;
 /// The characters of a line of a title (bold) and of the chips (small) in a column.
 const TITLE_CHARS: usize = 28;
 const CHIP_CHARS: usize = 44;
+
+/// What the document needs for the board's landscape pages (BOARD-031, #641): `\shaleLandscape`
+/// ends the page and makes the paper landscape with the margins, header and footer of the class
+/// (the page box is landscape, so the template's header bar and page number stay at the top and
+/// bottom edge); `\shalePortrait` ends the page and brings the portrait layout back. One way for
+/// every class: `geometry` (the class's own, as tudapub loads it, else loaded here with `pass`, which
+/// leaves the layout alone) with a `\newgeometry` of the margins the portrait pages have, on the
+/// turned paper. `geometry` cannot change the paper itself, so the sizes of the paper and the page
+/// box are swapped here. KOMA-Script keeps the width of the header and footer as a length, which
+/// is set again to the new text width and back. (`typearea`'s `paper=landscape` was tried: for
+/// tudapub it recomputes the type area to a fraction of the page.)
+pub(super) const PREAMBLE: &str = "\\IfPackageLoadedTF{geometry}{}{\\usepackage[pass]{geometry}}
+\\makeatletter
+\\newdimen\\shale@pw \\newdimen\\shale@ph \\newdimen\\shale@l \\newdimen\\shale@t \\newdimen\\shale@w \\newdimen\\shale@h
+\\newcommand*\\shale@paper{\\pagewidth=\\paperwidth \\pageheight=\\paperheight\\relax}
+\\newcommand*\\shaleLandscape{\\clearpage
+  \\savegeometry{shale-portrait}%
+  \\ifdefined\\sls@headwidth \\let\\shale@hw\\sls@headwidth \\let\\shale@fw\\sls@footwidth \\fi
+  \\shale@pw=\\paperwidth \\shale@ph=\\paperheight
+  \\shale@l=\\dimexpr1in+\\hoffset+\\oddsidemargin\\relax
+  \\shale@t=\\dimexpr1in+\\voffset+\\topmargin\\relax
+  \\shale@w=\\dimexpr\\shale@ph-\\shale@l-\\shale@l\\relax
+  \\shale@h=\\dimexpr\\shale@pw-\\shale@ph+\\headheight+\\headsep+\\textheight\\relax
+  \\edef\\shale@geometry{includehead,nomarginpar,left=\\the\\shale@l,width=\\the\\shale@w,top=\\the\\shale@t,height=\\the\\shale@h,headheight=\\the\\headheight,headsep=\\the\\headsep,footskip=\\the\\footskip}%
+  \\expandafter\\newgeometry\\expandafter{\\shale@geometry}%
+  \\paperwidth=\\shale@ph \\paperheight=\\shale@pw \\shale@paper
+  \\ifdefined\\sls@headwidth \\KOMAoptions{headwidth=text,footwidth=text}\\fi}
+\\newcommand*\\shalePortrait{\\clearpage
+  \\loadgeometry{shale-portrait}\\paperwidth=\\shale@pw \\paperheight=\\shale@ph \\shale@paper
+  \\ifdefined\\shale@hw \\let\\sls@headwidth\\shale@hw \\let\\sls@footwidth\\shale@fw \\fi}
+\\makeatother
+";
 
 /// The board and the choices it is written with.
 pub struct BoardRequest<'a> {
@@ -135,7 +167,7 @@ pub(super) fn pages(board: &Resolved, targets: &Targets, listed: Option<usize>) 
         let count = spreads.iter().map(Vec::len).max().unwrap_or(1);
         let mut taken = vec![0usize; group.len()];
         for p in 0..count {
-            out.push_str("\\begin{landscape}\n");
+            out.push_str(if first { "\\shaleLandscape\n" } else { "\\clearpage\n" });
             if first {
                 if let Some(rank) = listed {
                     out.push_str(&format!("\\phantomsection\\addcontentsline{{toc}}{{{}}}{{{}}}\n", COMMANDS[rank.min(COMMANDS.len() - 1)], tex_escape(&board.title)));
@@ -162,8 +194,8 @@ pub(super) fn pages(board: &Resolved, targets: &Targets, listed: Option<usize>) 
                 out.push_str(&row.join(&format!("\\hspace{{{GAP_SHARE}\\linewidth}}%\n")));
                 out.push('\n');
             }
-            out.push_str("\\end{landscape}\n");
         }
     }
+    out.push_str("\\shalePortrait\n");
     out
 }

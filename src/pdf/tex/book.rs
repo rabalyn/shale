@@ -215,8 +215,8 @@ fn write_book_in_shale(req: &BookRequest, board: Option<&Resolved>) -> Result<Do
     }
     let mut head = class_and_preamble(kind, &req.set.settings, kind.shows_department_logo(req.set, req.opts.department_logo));
     if board.is_some() {
-        // the board is on landscape pages (BOARD-031)
-        head.push_str("\\IfPackageLoadedTF{pdflscape}{}{\\usepackage{pdflscape}}\n");
+        // the board is on landscape pages of its own (BOARD-031)
+        head.push_str(super::board::PREAMBLE);
     }
     let tex = document(head, true, false, toc.then(|| toc_depth(book)), &values, &main);
     let files = files.into_inner();

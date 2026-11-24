@@ -166,7 +166,7 @@ save. The PDF has
 
 **Through a LaTeX template.** The dialog has the same **Engine** choice as a folder's ([[PDF#A folder through a LaTeX template]]):
 with **LaTeX template** and a kind of the article or book family the board is written as one LaTeX document. The order is
-the same: the board on landscape pages (the `pdflscape` package; lanes as columns of framed cards with the title, a
+the same: the board on landscape pages of their own (the page itself is landscape, and the template's header and page number sit at the top and bottom of it as on the other pages; lanes as columns of framed cards with the title, a
 link to the card's chapter, and the chips; up to three lanes side by side, the next lanes on the next landscape page,
 columns that do not fit the page go on with "(continued)"), then a part for each lane that has cards with the cards as
 chapters, and the contents with the board first. A drawing card's chapter is its drawing. A lane whose query is wrong has

@@ -57,6 +57,64 @@ fn pages(pdf: Vec<u8>) -> Vec<Collect> {
         .collect()
 }
 
+/// A page as it is shown: its box in points, whether the file rotates it, and the text runs it draws
+/// with the place of their first glyph, `y` counted from the top edge of the shown page.
+pub(super) struct PageLayout {
+    pub width: f64,
+    pub height: f64,
+    pub rotated: bool,
+    pub runs: Vec<(String, f64, f64)>,
+}
+
+#[derive(Default)]
+struct Placed(Vec<(String, f64, f64)>);
+
+impl<'a> Device<'a> for Placed {
+    fn draw_path(&mut self, _: &BezPath, _: DrawProps<'a>, _: &DrawMode) {}
+    fn push_clip_path(&mut self, _: &ClipPath) {}
+    fn push_transparency_group(&mut self, _: f32, _: Option<SoftMask<'a>>, _: BlendMode) {}
+    fn draw_glyph_run(&mut self, run: &GlyphRun<'_, 'a>, p: DrawProps<'a>, _: &DrawMode) {
+        let text: String = run
+            .glyphs()
+            .iter()
+            .filter_map(|g| g.as_unicode())
+            .map(|u| {
+                if let BfString::Char(c) = u {
+                    c.to_string()
+                } else if let BfString::String(s) = u {
+                    s
+                } else {
+                    String::new()
+                }
+            })
+            .collect();
+        if let Some(g) = run.glyphs().first() {
+            let at = p.transform * g.transform();
+            self.0.push((text, at.translation().x, at.translation().y));
+        }
+    }
+    fn draw_image(&mut self, _: Image<'a, '_>, _: ImageDrawProps<'a>) {}
+    fn pop_clip(&mut self) {}
+    fn pop_transparency_group(&mut self) {}
+}
+
+/// The box, rotation and text runs of every page of a PDF (BOARD-031: the board's pages are landscape
+/// pages of their own, header and footer at the top and bottom edge).
+pub(super) fn page_layouts(pdf: Vec<u8>) -> Vec<PageLayout> {
+    let doc = hayro::hayro_syntax::Pdf::new(pdf).unwrap_or_else(|e| panic!("not a readable PDF: {e:?}"));
+    let cache = InterpreterCache::new();
+    doc.pages()
+        .iter()
+        .map(|page| {
+            let (w, h) = page.render_dimensions();
+            let mut ctx = Context::new(Affine::IDENTITY, Rect::new(0.0, 0.0, w as f64, h as f64), &cache, page.xref(), InterpreterSettings::default());
+            let mut device = Placed::default();
+            interpret_page(page, &mut ctx, &mut device);
+            PageLayout { width: w as f64, height: h as f64, rotated: !matches!(page.rotation(), hayro::hayro_syntax::page::Rotation::None), runs: device.0 }
+        })
+        .collect()
+}
+
 /// The text of the PDF with every space and line break taken out, all pages in a row.
 pub(super) fn squashed(pdf: Vec<u8>) -> String {
     page_texts(pdf).concat().chars().filter(|c| !c.is_whitespace()).collect()
