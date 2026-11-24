@@ -313,6 +313,41 @@ fn a_state_conflict_keeps_the_local_state_without_a_copy() {
 
 // spec: SYNC-005
 #[test]
+fn refuses_to_start_during_a_rebase_a_cherry_pick_or_a_revert() {
+    let env = Env::new("refuse-ops");
+    let v = env.folder("vault");
+    env.git(&v, &["init", "--quiet"]);
+    write(&v, "Note.md", "base\n");
+    env.sync(&v);
+    let who = ["-c", "user.name=t", "-c", "user.email=t@t"];
+    let commit = |text: &str| {
+        write(&v, "Note.md", text);
+        env.git(&v, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-am", text]);
+    };
+    env.git(&v, &["checkout", "--quiet", "-b", "side"]);
+    commit("side\n");
+    env.git(&v, &["checkout", "--quiet", "main"]);
+    commit("main one\n");
+    let first = env.git(&v, &["rev-parse", "HEAD"]);
+    commit("main two\n");
+    let head = env.git(&v, &["rev-parse", "HEAD"]);
+    for (start, what) in [(vec!["cherry-pick", "side"], "cherry-pick"), (vec!["revert", "--no-edit", first.as_str()], "revert"), (vec!["rebase", "side"], "rebase")] {
+        let mut args = who.to_vec();
+        args.extend(start);
+        let args: Vec<&std::ffi::OsStr> = args.into_iter().map(std::ffi::OsStr::new).collect();
+        let o = env.git.run(&v, &args).unwrap();
+        assert!(!o.ok, "{what} should stop on a conflict");
+        let before = read(&v, "Note.md");
+        let e = env.try_sync(&v).unwrap_err();
+        assert!(e.contains(what), "{e}");
+        assert_eq!(read(&v, "Note.md"), before, "{what}: the sync changed a file");
+        env.git(&v, &[what, "--abort"]);
+        assert_eq!(env.git(&v, &["rev-parse", "HEAD"]), head, "{what} aborted: back where it was");
+    }
+}
+
+// spec: SYNC-005
+#[test]
 fn refuses_to_start_during_a_merge_or_on_a_detached_head() {
     let env = Env::new("refuse");
     let v = env.folder("vault");
@@ -600,6 +635,9 @@ fn git_runs_without_a_shell_prompts_or_inherited_repository_variables() {
         assert!(envs.contains(&(OsStr::new(v), None)), "{v} not removed");
     }
     assert!(envs.contains(&(OsStr::new("GIT_TERMINAL_PROMPT"), Some(OsStr::new("0")))));
+    // stdin is closed: a git that reads it gets nothing (the hash of the empty blob)
+    let o = Git::default().run(Path::new("."), args!["hash-object", "--stdin"]).unwrap();
+    assert_eq!(o.text(), "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391", "{}", o.stderr);
 }
 
 // spec: SYNC-008
@@ -684,6 +722,7 @@ fn the_lfs_patterns_cover_exactly_the_extensions_that_have_a_player() {
     assert_eq!(got, want);
 }
 
+// spec: SYNC-022
 #[test]
 fn pointer_files_are_recognised_and_other_files_are_not() {
     let oid = "4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393";

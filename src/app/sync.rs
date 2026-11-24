@@ -701,6 +701,56 @@ mod tests {
         }
     }
 
+    // spec: SYNC-002
+    #[test]
+    fn sync_002_a_sync_starts_when_the_vault_opens_and_every_interval_but_only_while_enabled() {
+        let root = std::env::temp_dir().join(format!("shale-app-sync-timer-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let git = hermetic();
+        let remote = root.join("remote.git");
+        std::fs::create_dir_all(&remote).unwrap();
+        assert!(std::process::Command::new("git").args(["init", "--quiet", "--bare"]).arg(&remote).envs(git.env.iter().cloned()).status().unwrap().success());
+        let v = root.join("vault");
+        std::fs::create_dir_all(&v).unwrap();
+        gitsync::connect(&git, &v, remote.to_str().unwrap()).unwrap();
+        let mut app = app_on(&v);
+        app.persist_config = true;
+        let ctx = egui::Context::default();
+        assert_eq!((app.vdata.settings.sync.enabled, app.vdata.settings.sync.interval()), (true, Duration::from_secs(300)), "on, every 5 minutes by default");
+        app.vdata.settings.sync.interval_minutes = 0;
+        assert_eq!(app.vdata.settings.sync.interval(), Duration::from_secs(60), "at least 1 minute");
+        app.vdata.settings.sync.interval_minutes = 5;
+
+        // off: the open vault is not synced
+        app.vdata.settings.sync.enabled = false;
+        app.sync_tick(&ctx);
+        assert!(!app.sync.running() && app.sync.last_start.is_none());
+        // on: the first tick of an opened vault starts a sync
+        app.vdata.settings.sync.enabled = true;
+        app.sync_tick(&ctx);
+        assert!(app.sync.running(), "a sync starts when the vault is open");
+        wait(&mut app);
+        // inside the interval nothing starts, after it the next sync does
+        app.sync.last_start = Some(Instant::now() - Duration::from_secs(290));
+        app.sync_tick(&ctx);
+        assert!(!app.sync.running(), "not before the interval has passed");
+        app.sync.last_start = Some(Instant::now() - Duration::from_secs(301));
+        app.sync_tick(&ctx);
+        assert!(app.sync.running(), "the next sync starts after the interval");
+        wait(&mut app);
+        // the interval setting is the one that counts; a switched-off sync stays off
+        app.vdata.settings.sync.interval_minutes = 1;
+        app.sync.last_start = Some(Instant::now() - Duration::from_secs(61));
+        app.vdata.settings.sync.enabled = false;
+        app.sync_tick(&ctx);
+        assert!(!app.sync.running());
+        app.vdata.settings.sync.enabled = true;
+        app.sync_tick(&ctx);
+        assert!(app.sync.running());
+        wait(&mut app);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     // spec: SYNC-013, SYNC-014
     #[test]
     fn buffers_follow_the_sync_and_edits_made_meanwhile_become_copies() {
@@ -859,7 +909,7 @@ mod tests {
         }
     }
 
-    // spec: SYNC-004, SYNC-015
+    // spec: SYNC-004, SYNC-014, SYNC-015, SYNC-047
     #[test]
     fn settings_connect_a_remote_and_change_the_sync_settings() {
         let root = std::env::temp_dir().join(format!("shale-app-sync-ui-{}", std::process::id()));
@@ -896,6 +946,42 @@ mod tests {
         wait(&mut app);
         let o = std::process::Command::new("git").arg("-C").arg(&remote).args(["log", "-1", "--format=%s", "main"]).envs(git.env.iter().cloned()).output().unwrap();
         assert!(String::from_utf8_lossy(&o.stdout).starts_with("[n] Sync from "), "{}", String::from_utf8_lossy(&o.stdout));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: SYNC-014
+    #[test]
+    fn sync_014_a_failed_sync_shows_gits_error_in_the_settings_and_once_as_a_message_and_a_good_one_shows_its_time() {
+        let root = std::env::temp_dir().join(format!("shale-app-sync-result-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let git = hermetic();
+        let remote = root.join("remote.git");
+        std::fs::create_dir_all(&remote).unwrap();
+        assert!(std::process::Command::new("git").args(["init", "--quiet", "--bare"]).arg(&remote).envs(git.env.iter().cloned()).status().unwrap().success());
+        let v = root.join("vault");
+        std::fs::create_dir_all(&v).unwrap();
+        gitsync::connect(&git, &v, remote.to_str().unwrap()).unwrap();
+        crate::fsutil::write_atomic(&v.join("Note.md"), b"hi\n").unwrap();
+        let mut app = app_on(&v);
+        let mut h = H { ctx: egui::Context::default(), t: 0.0 };
+        let has = |texts: &[String], part: &str| texts.iter().any(|t| t.contains(part));
+
+        app.after_sync(&v, Err("git push: remote said no".into()));
+        let texts = h.texts(&mut app);
+        assert!(has(&texts, "failed: git push: remote said no"), "{texts:?}");
+        assert_eq!(app.toasts.iter().filter(|(t, _)| t.contains("Git sync failed: git push: remote said no")).count(), 1, "{:?}", app.toasts);
+        // the same error again: shown in the settings, not announced again
+        app.after_sync(&v, Err("git push: remote said no".into()));
+        assert_eq!(app.toasts.iter().filter(|(t, _)| t.contains("Git sync failed")).count(), 1, "{:?}", app.toasts);
+        // another error is announced
+        app.after_sync(&v, Err("git fetch: no network".into()));
+        assert_eq!(app.toasts.iter().filter(|(t, _)| t.contains("Git sync failed")).count(), 2, "{:?}", app.toasts);
+
+        // a good sync replaces the error with its time and what it did
+        app.start_sync();
+        wait(&mut app);
+        let texts = h.texts(&mut app);
+        assert!(has(&texts, "Last sync ") && has(&texts, "up to date with the remote") && !has(&texts, "failed"), "{texts:?}");
         let _ = std::fs::remove_dir_all(&root);
     }
 
