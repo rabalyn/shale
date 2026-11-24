@@ -602,7 +602,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - A **board is a note** with `type: board` in its front matter, so it stays searchable, linkable and readable in other
   apps. Its lanes are `##` headings; under a heading `query:` (the query language of the search: `AND`, `OR`, `NOT`,
   `#tag`, `status:doing`, `due:`, `path:`), `sort:` (`priority desc, due asc`), `drop:` (`status: doing`) and
-  `done: true` lines, and `- [[Note]]` lines that pin cards in that order. `cards: every-lane` shows a card in every lane
+  `done: true` lines (a drop on a done lane sets `status: done` unless it has a `drop:` line, #638), and `- [[Note]]` lines that pin cards in that order (a file name with `#`, `^`, `|` or brackets is pinned as a link with its path, and a pin that finds no note is named in its lane, #637). `cards: every-lane` shows a card in every lane
   it matches (else it is in the first), `card-shows: due, status, priority, tags` chooses the chips of the cards. Lines
   the board does not know stay as they are, and a hand edit of the file changes the view.
 - **Space b** (`main.boards`, definable) opens the boards, a main-area tab with a strip of every board of the vault and
@@ -618,7 +618,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - **Keys and long boards** (BOARD-033, BOARD-034): with a card selected, **Alt+Shift+→ / Alt+Shift+←** (`board.card_next_lane`, `board.card_prev_lane`, definable) move it to the next / previous lane like a drop below that lane's pinned cards; the card stays selected and in view. A card dragged near the top or bottom edge of a lane scrolls the lane, near the left or right edge of the board scrolls the board, faster the closer it is.
 - **Dependencies**: `blocked-by: [[A]], [[B]]` in a card's note (and `due:`, `start:`). A card is **blocked** (a red chip) while a blocker exists and is not done: `status: done`, or a card in a lane marked `done: true` (the query words `blocked` and `blocking` use the status only). Selecting a card draws **arrows** to its blockers and to the cards that wait for it (a blocker that is not on the board is named on the card). `sort: dependencies` is a topological order with **step numbers** (`step 1`, `step 2`, `step 3a`, `step 3b` for parallel cards; ties by earlier due day, higher priority, title); a **cycle** is marked "circular" and listed last. The ▾ menu next to **+ Add lane** has the preset **My dependency chain** (`query: blocked OR blocking`, `sort: dependencies`).
 - A click selects a card and opens its **peek**, an editor of the note in a window the size of the link preview
-  (drag the title, resize the edges, Esc closes) with a **Priority** control that changes the front matter only. Ctrl+Click
+  (drag the title, resize the edges; Esc, ×, or a click outside it closes it, #639) with a **Priority** control that changes the front matter only. Ctrl+Click
   or Enter opens the note in a tab; the arrow keys move the selection.
 
 ![The peek of a card](userguide/z_media/screenshots/board-peek.png)

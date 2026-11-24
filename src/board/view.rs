@@ -523,6 +523,9 @@ fn lane_ui(ui: &mut Ui, i: usize, lane: &LaneView, st: &mut State, data: &Data, 
         if let Some(e) = &lane.error {
             theme::problem(ui, e.clone());
         }
+        if !lane.missing.is_empty() {
+            theme::problem(ui, format!("Not found in the vault: {}", lane.missing.join(", ")));
+        }
         ui.add_space(4.0);
         let mut area = egui::ScrollArea::vertical().id_salt(("board-lane", i)).auto_shrink([false, false]);
         if let Some((_, dy)) = st.auto.lane.filter(|(n, _)| *n == i) {
@@ -652,7 +655,8 @@ fn settings(anchor: &egui::Response, st: &mut State, data: &Data, i: usize, env:
         }
         ui.add_space(4.0);
         ui.label(RichText::new("When a card is dropped here, set").color(theme::palette().muted));
-        let derived = drop_property(&s.query);
+        // (a done lane sets `status: done` when it has no drop line of its own, BOARD-024)
+        let derived = if lane.done { Some(super::drag::DONE_PROPERTY.to_string()) } else { drop_property(&s.query) };
         let hint = derived.clone().unwrap_or_else(|| "a property such as status: doing".to_string());
         let r = ui.add(egui::TextEdit::singleline(&mut s.drop).hint_text(hint).desired_width(f32::INFINITY));
         if r.changed() {

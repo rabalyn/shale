@@ -2,8 +2,8 @@
 //! and into the board file. [`plan`] decides; the window carries the plan out (`app/boards.rs`)
 //! through the checked saves of both notes, so each is one undo step.
 //!
-//! * A lane has a drop property when it has a `drop:` line, or a simple query such as
-//!   `status:doing` that says one ([`lanes::drop_property`]). A drop on it sets that property in
+//! * A lane has a drop property when it has a `drop:` line, else when it is a done lane (`status: done`),
+//!   else when it has a simple query such as `status:doing` that says one ([`lanes::drop_property`]). A drop on it sets that property in
 //!   the card's front matter and nothing else of the note.
 //! * A card that is pinned in the lane it is taken from is unpinned there, otherwise BOARD-032
 //!   would keep it in that lane.
@@ -11,10 +11,10 @@
 //!   manual, when it has no drop property (the pin is all a drop can do), when it is dropped among
 //!   the pinned cards on top, or when the drop is inside the lane the card came from.
 
-use super::file::{pin_target, Board};
+use super::file::{pin_item, pin_target, Board};
 use super::{lanes, LaneView};
 use crate::markdown;
-use crate::vault::{rel_to_string, FileKind, Vault};
+use crate::vault::{rel_to_string, Vault};
 use std::path::{Path, PathBuf};
 
 /// A card dropped: the card, the lane it was taken from and the one it was dropped on, and the place in the
@@ -32,35 +32,41 @@ pub struct Dropped {
 pub struct Plan {
     /// the property to set in the card's note, `status` and `doing`
     pub property: Option<(String, String)>,
-    /// the new list of pinned cards of the lanes whose list changes, as the text inside `[[ ]]`
+    /// the new list of pinned cards of the lanes whose list changes, as links (`[[Name]]`)
     pub pins: Vec<(usize, Vec<String>)>,
 }
 
-/// The property a drop on a lane sets (BOARD-019): its `drop:` line, else the one its query says.
-pub fn property(query: &str, drop: &str) -> Option<(String, String)> {
-    let text = if drop.trim().is_empty() { lanes::drop_property(query)? } else { drop.trim().to_string() };
+/// The property a drop on a lane sets (BOARD-019): its `drop:` line, else `status: done` when the
+/// lane is a done lane (BOARD-024), else the one its simple query says.
+pub fn property(query: &str, drop: &str, done: bool) -> Option<(String, String)> {
+    let text = if !drop.trim().is_empty() {
+        drop.trim().to_string()
+    } else if done {
+        DONE_PROPERTY.to_string()
+    } else {
+        lanes::drop_property(query)?
+    };
     let (key, value) = text.split_once(':')?;
     let (key, value) = (key.trim(), value.trim());
     (!key.is_empty() && !value.is_empty() && !key.contains(char::is_whitespace)).then(|| (key.to_string(), value.to_string()))
 }
 
-/// The text of a link to `card` for a pin: its name when that finds it from the board, else its path.
+/// What a drop on a done lane without a `drop:` line sets (BOARD-024): the property that makes a card done.
+pub const DONE_PROPERTY: &str = "status: done";
+
+/// The link to `card` for a pin (BOARD-004): its name when that finds it from the board, else its
+/// path; a name or path that `[[ ]]` cannot hold (`#`, `|`, `^`, brackets) is a markdown link with
+/// the path, see [`pin_item`].
 fn pin_text(vault: &Vault, board: &Path, card: &Path) -> String {
-    let strip = |s: String| match vault.file(card).map(|f| f.kind) {
-        Some(FileKind::Note | FileKind::Drawing) => markdown::strip_md_ext(&s).to_string(),
-        _ => s,
-    };
-    let name = strip(card.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
-    if vault.resolve(&name, Some(board)).as_deref() == Some(card) {
-        name
-    } else {
-        strip(rel_to_string(card))
-    }
+    let name = card.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let by_name = vault.resolve(markdown::strip_md_ext(&name), Some(board)).as_deref() == Some(card) || vault.resolve(&name, Some(board)).as_deref() == Some(card);
+    // (a drawing keeps its extension in the link, a note does not: `strip_md_ext` leaves it)
+    pin_item(&name, &rel_to_string(card), by_name)
 }
 
 /// The pins of a lane, each with the note it links to.
 fn entries(vault: &Vault, board_rel: &Path, board: &Board, lane: usize) -> Vec<(String, Option<PathBuf>)> {
-    board.lanes[lane].pins().into_iter().map(|p| (p.to_string(), vault.resolve(pin_target(p), Some(board_rel)))).collect()
+    board.lanes[lane].pins().into_iter().map(|p| (p.to_string(), vault.resolve(&pin_target(p), Some(board_rel)))).collect()
 }
 
 /// What dropping `d` changes, or none when it changes nothing. `lanes` is what the view showed,
@@ -77,7 +83,7 @@ pub fn plan(vault: &Vault, board_rel: &Path, board: &Board, lanes: &[LaneView], 
         return None;
     }
     let lane = &board.lanes[d.to];
-    let property = if same { None } else { property(lane.query(), lane.drop()) };
+    let property = if same { None } else { property(lane.query(), lane.drop(), lane.done()) };
     let mut pins = Vec::new();
     if !same && pinned_in(&lanes[d.from]) {
         let mut from = entries(vault, board_rel, board, d.from);
@@ -103,10 +109,10 @@ pub fn plan(vault: &Vault, board_rel: &Path, board: &Board, lanes: &[LaneView], 
 mod tests {
     use super::*;
 
-    // spec: BOARD-019
+    // spec: BOARD-019, BOARD-024
     #[test]
     fn board_019_the_property_is_the_drop_line_or_the_one_a_simple_query_says() {
-        let p = |q: &str, d: &str| property(q, d);
+        let p = |q: &str, d: &str| property(q, d, false);
         assert_eq!(p("", "status: doing"), Some(("status".into(), "doing".into())));
         assert_eq!(p("status:todo", "status: doing"), Some(("status".into(), "doing".into())), "the drop line wins");
         assert_eq!(p("status:doing", ""), Some(("status".into(), "doing".into())));
@@ -115,5 +121,47 @@ mod tests {
         assert_eq!(p("", "nonsense"), None);
         assert_eq!(p("", "status:"), None);
         assert_eq!(p("", "two words: x"), None);
+        // a done lane (BOARD-024): the drop line wins, then `status: done`, then the query
+        let done = |q: &str, d: &str| property(q, d, true);
+        assert_eq!(done("", ""), Some(("status".into(), "done".into())));
+        assert_eq!(done("status:doing", ""), Some(("status".into(), "done".into())), "a done lane makes the card done, not what the query says");
+        assert_eq!(done("#x", "status: archived"), Some(("status".into(), "archived".into())), "the drop line wins");
+    }
+
+    // spec: BOARD-004, BOARD-022
+    #[test]
+    fn board_004_a_pin_for_any_file_name_is_read_back_as_the_same_file() {
+        let names = ["Plain", "With #hash 1", "a|b", "up^caret", "[brackets]", "100% (done) <x>", "Größe ünï 日本", "50% (a) <b> #1", "Dup"];
+        let d = std::env::temp_dir().join(format!("shale-board-pin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("Sub")).unwrap();
+        for n in names {
+            std::fs::write(d.join(format!("{n}.md")), "x\n").unwrap();
+        }
+        std::fs::write(d.join("Sub/Dup.md"), "x\n").unwrap();
+        std::fs::write(d.join("Sub/Dir #1.md"), "x\n").unwrap();
+        std::fs::write(d.join("Board.md"), "---\ntype: board\n---\n## M\n").unwrap();
+        let v = Vault::open(&d).unwrap();
+        let mut cards: Vec<PathBuf> = names.iter().map(|n| PathBuf::from(format!("{n}.md"))).collect();
+        cards.extend([PathBuf::from("Sub/Dup.md"), PathBuf::from("Sub/Dir #1.md")]);
+        let mut pins = Vec::new();
+        for c in &cards {
+            let pin = pin_text(&v, Path::new("Board.md"), c);
+            assert_eq!(v.resolve(&pin_target(&pin), Some(Path::new("Board.md"))).as_deref(), Some(c.as_path()), "{pin}");
+            pins.push(pin);
+        }
+        // the ordinary names keep the `[[Name]]` form; the others are markdown links with the path
+        assert_eq!(pins[0], "[[Plain]]");
+        assert_eq!(pins[1], "[With #hash 1](<With %23hash 1.md>)");
+        assert_eq!(pins[5], "[[100% (done) <x>]]");
+        assert_eq!(pins[7], "[50% (a) <b> #1](<50%25 %28a%29 %3Cb%3E %231.md>)");
+        assert_eq!(pins[6], "[[Größe ünï 日本]]");
+        assert_eq!(pins[10], "[Dir #1](<Sub/Dir %231.md>)");
+        // and a board file that holds them gives them back, one pin per line
+        let mut b = Board::parse("## M\n");
+        b.lanes[0].set_pins(&pins);
+        let again = Board::parse(&b.write());
+        assert_eq!(again.lanes[0].pins(), pins.iter().map(String::as_str).collect::<Vec<_>>());
+        let _ = std::fs::remove_dir_all(d);
     }
 }

@@ -37,6 +37,7 @@ impl W {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         for (name, text) in files {
+            std::fs::create_dir_all(dir.join(name).parent().unwrap()).unwrap();
             std::fs::write(dir.join(name), text).unwrap();
         }
         let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
@@ -384,6 +385,86 @@ fn board_013_the_peek_is_an_editor_that_saves_with_the_note() {
     let saved = w.file("Alpha.md");
     assert!(saved.contains("EDITED") && saved.contains("modified:") && saved.contains("created:"), "closing saves like the editor does (a checked save): {saved}");
     assert!(!w.app.notes[rel].dirty);
+}
+
+// spec: BOARD-012
+#[test]
+fn board_012_a_click_outside_the_peek_closes_it_and_saves_what_was_typed() {
+    let mut w = W::board();
+    w.click("Alpha");
+    let r = w.app.boards.peek.as_ref().unwrap().rect.unwrap();
+    w.click_at(Pos2::new(r.min.x + 60.0, r.min.y + 70.0));
+    w.type_text("EDITED ");
+    // on a lane heading: not on a card
+    w.click("Doing");
+    assert!(w.app.boards.peek.is_none(), "a click on the top bar closes the peek");
+    assert!(w.file("Alpha.md").contains("EDITED"), "what was typed is saved: {}", w.file("Alpha.md"));
+    assert!(!w.app.notes[Path::new("Alpha.md")].dirty);
+}
+
+// spec: BOARD-012
+#[test]
+fn board_012_a_click_on_a_lane_heading_or_the_empty_board_closes_the_peek_and_one_click_on_a_card_switches_it() {
+    let mut w = flow("peek-outside");
+    w.click("Beta");
+    assert!(w.app.boards.peek.is_some());
+    w.click("Doing");
+    assert!(w.app.boards.peek.is_none(), "a click on a lane heading closes it");
+    w.click("Beta");
+    assert!(w.app.boards.peek.is_some());
+    // (the peek is right of its card: a card of the same lane is not under it)
+    w.click("Gamma");
+    assert_eq!(w.app.boards.peek.as_ref().map(|p| p.rel.clone()), Some(PathBuf::from("Gamma.md")), "one click on another card switches");
+    assert_eq!(w.app.boards.selected.as_deref(), Some(Path::new("Gamma.md")));
+    let r = w.app.boards.peek.as_ref().unwrap().rect.unwrap();
+    let empty = Pos2::new(2150.0, 800.0);
+    assert!(!r.contains(empty));
+    w.click_at(empty);
+    assert!(w.app.boards.peek.is_none(), "a click on the empty board closes it");
+}
+
+// spec: BOARD-012
+#[test]
+fn board_012_a_click_in_the_peek_its_menu_and_its_title_row_keeps_it_and_x_closes_it() {
+    let mut w = W::board();
+    w.click("Beta");
+    let r = w.app.boards.peek.as_ref().unwrap().rect.unwrap();
+    w.click_at(Pos2::new(r.min.x + 60.0, r.min.y + 70.0));
+    assert!(w.app.boards.peek.is_some(), "a click in the editor");
+    w.click("Priority: high");
+    assert!(w.app.boards.peek.is_some(), "the menu opens");
+    w.click("highest");
+    assert!(w.app.boards.peek.is_some(), "a choice in the menu keeps it (popup layers are not outside)");
+    assert!(w.file("Beta.md").contains("priority: highest"));
+    w.click("×");
+    assert!(w.app.boards.peek.is_none(), "the close button still closes it");
+}
+
+// spec: BOARD-012
+#[test]
+fn board_012_the_start_of_a_card_drag_does_not_close_the_peek() {
+    let mut w = flow("peek-drag");
+    w.click("Gamma");
+    assert!(w.app.boards.peek.is_some());
+    // (to the lane on the left: the peek is right of its card)
+    let to = w.lane_top("Todo");
+    w.drag("Beta", to);
+    assert!(w.app.boards.view.dragging(), "the card is held");
+    assert!(w.app.boards.peek.is_some(), "the peek stays while a card is dragged");
+    w.drop_at(to);
+    assert!(w.board_text().contains("- [[Beta]]"), "the drop worked: {}", w.board_text());
+}
+
+// spec: BOARD-012
+#[test]
+fn board_012_the_lane_settings_stay_open_when_a_click_outside_closes_the_peek() {
+    let mut w = W::board();
+    w.click("Alpha");
+    w.double_click("Doing");
+    assert!(w.painted("Lane “Doing”"));
+    w.click_at(Pos2::new(900.0, 700.0));
+    assert!(w.painted("Lane “Doing”"), "the settings stay (#632)");
+    assert!(w.app.boards.peek.is_none(), "the peek closed");
 }
 
 // spec: BOARD-013
@@ -885,6 +966,52 @@ fn board_019_the_drop_line_of_the_lane_wins_over_its_query() {
     assert_eq!(w.lane("Later"), strs(&["Gamma"]));
 }
 
+const DONE_BOARD: &str = "---\ntype: board\n---\n# Flow\n\n## Doing\nquery: status:doing\n\n## Finished\ndone: true\n\n## Done by query\nquery: status:review\ndone: true\n\n## Archive\ndrop: status: archived\ndone: true\n";
+
+fn done_flow(tag: &str) -> W {
+    let files = [("Board.md", DONE_BOARD), ("Beta.md", "---\nstatus: doing\nmodified: 2020-01-01T10:00:00+00:00\n---\nBeta body\n"), ("Gamma.md", "---\nstatus: doing\n---\nGamma body\n")];
+    let mut w = W::new(tag, &files);
+    w.hl.set_size(vec2(2200.0, 900.0));
+    w.settle();
+    w
+}
+
+// spec: BOARD-019, BOARD-024
+#[test]
+fn board_024_a_drop_on_a_done_lane_without_a_drop_line_sets_status_done_and_not_modified() {
+    let mut w = done_flow("drop-done");
+    let to = w.lane_top("Finished");
+    w.drag_drop("Beta", to);
+    let beta = w.file("Beta.md");
+    assert!(beta.contains("status: done") && !beta.contains("status: doing"), "{beta}");
+    assert!(beta.contains("modified: 2020-01-01T10:00:00+00:00"), "a drop does not touch modified (BOARD-020): {beta}");
+    assert_eq!(w.lane("Finished"), strs(&["Beta"]), "pinned in the manual done lane");
+    // a done lane with a simple query: done wins over the property the query says
+    let to = w.lane_top("Done by query");
+    w.drag_drop("Gamma", to);
+    let gamma = w.file("Gamma.md");
+    assert!(gamma.contains("status: done") && !gamma.contains("review"), "{gamma}");
+}
+
+// spec: BOARD-019, BOARD-024
+#[test]
+fn board_024_the_drop_line_of_a_done_lane_wins_over_status_done() {
+    let mut w = done_flow("drop-done-line");
+    let to = w.lane_top("Archive");
+    w.drag_drop("Beta", to);
+    let beta = w.file("Beta.md");
+    assert!(beta.contains("status: archived") && !beta.contains("status: done"), "{beta}");
+}
+
+// spec: BOARD-024
+#[test]
+fn board_024_the_drop_field_of_a_done_lane_shows_status_done_as_its_default() {
+    let mut w = done_flow("drop-done-hint");
+    w.double_click("Finished");
+    assert!(w.painted("When a card is dropped here, set"));
+    assert!(w.painted("status: done"), "{:?}", w.all_text());
+}
+
 // spec: BOARD-019
 #[test]
 fn board_019_the_drag_marks_the_lane_and_the_place_and_a_ghost_follows_the_pointer() {
@@ -997,6 +1124,38 @@ fn board_022_a_drop_inside_a_manual_lane_rewrites_its_link_list() {
     let to = w.at("Sketch");
     w.drag_drop("Sketch", to);
     assert_eq!(w.board_text(), text);
+}
+
+const RECEIPT: &str = "ABLAGE/Rechnungen/2026-11-12 Your receipt from Anthropic Ireland, Limited #2583-3353-7982.md";
+const RECEIPT_TEXT: &str = "---\ntype: email\nsubject: \"Your receipt from Anthropic Ireland, Limited #2583-3353-7982\"\nfrom: \"\\\"Anthropic Ireland, Limited\\\" <invoice+statements+acct_1REyrSBNUnCSzfs9@stripe.com>\"\nto: \"someone@example.org\"\ndate: 2026-11-12 09:56\nmessage-id: \"<0100abc@email.amazonses.com>\"\ntags: [rechnungen, abo, AI]\n---\nThanks for your payment.\n";
+
+// spec: BOARD-004, BOARD-022
+#[test]
+fn board_022_a_card_whose_file_name_has_a_hash_is_pinned_and_shown_again_also_when_open_in_a_tab() {
+    let board = "---\ntype: board\n---\n# Mail\n\n## Inbox\nquery: type:email\n\n## Manual\n";
+    let mut w = W::new("drop-hash", &[("Board.md", board), (RECEIPT, RECEIPT_TEXT), ("Other.md", "x\n")]);
+    w.hl.set_size(vec2(2200.0, 900.0));
+    w.app.open(Path::new(RECEIPT), true);
+    w.app.show_view(View::Boards, false);
+    w.settle();
+    let title = w.lane("Inbox").pop().expect("the receipt is a card");
+    let to = w.lane_top("Manual");
+    // (the open tab is named like the card: the card is the one that is lowest)
+    let from = w.main().filter(|(t, _)| *t == title).max_by(|a, b| a.1.y.total_cmp(&b.1.y)).map(|(_, p)| *p + vec2(6.0, 6.0)).unwrap();
+    w.hl.press_and_move(&mut w.app, from, &Headless::steps(from, to, 8));
+    w.drop_at(to);
+    assert_eq!(w.lane("Manual"), vec![title.clone()], "pinned and read back: {}", w.board_text());
+    assert_eq!(w.lane("Inbox"), Vec::<String>::new());
+    assert_eq!(w.file(RECEIPT), RECEIPT_TEXT, "the note is not changed");
+}
+
+// spec: BOARD-004
+#[test]
+fn board_004_a_pinned_link_that_finds_no_note_is_named_in_the_lane() {
+    let board = "---\ntype: board\n---\n# Mail\n\n## Manual\n- [[Other]]\n- [[Gone #1]]\n";
+    let w = W::new("pin-missing", &[("Board.md", board), ("Other.md", "x\n")]);
+    assert_eq!(w.lane("Manual"), strs(&["Other"]));
+    assert!(w.painted("Not found in the vault: [[Gone #1]]"), "{:?}", w.all_text());
 }
 
 // spec: BOARD-022

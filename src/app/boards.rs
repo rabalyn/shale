@@ -54,10 +54,25 @@ impl ShaleApp {
                 }
             }
         };
+        // a click outside the peek closes it, unless it was on a card: that card's act replaces the peek (BOARD-012)
+        if self.clicked_outside_peek(&ctx) && !acts.iter().any(|a| matches!(a, Act::Peek(..) | Act::OpenTab(..))) {
+            self.close_peek();
+        }
         for act in acts {
             self.board_act(&ctx, act);
         }
         self.boards_peek(&ctx);
+    }
+
+    /// Was there a click (a press and a release without a drag, so not the start of a card's drag)
+    /// outside the peek this frame? The frame of the peek, its menus and the lists of its editor are
+    /// layers above the board, so a click on them is not outside; neither is one in the lane settings,
+    /// which are such a layer too (they stay open, #632).
+    fn clicked_outside_peek(&self, ctx: &egui::Context) -> bool {
+        let Some(peek) = self.boards.peek.as_ref() else { return false };
+        let Some(at) = ctx.input(|i| if i.pointer.primary_clicked() { i.pointer.interact_pos() } else { None }) else { return false };
+        let on_board = ctx.layer_id_at(at).is_none_or(|l| matches!(l.order, egui::Order::Background | egui::Order::Middle));
+        on_board && !peek.rect.is_some_and(|r| r.contains(at))
     }
 
     /// What the view asked for.

@@ -94,3 +94,13 @@ fn board_026_a_resolved_board_has_the_dependency_order_the_steps_and_the_done_la
     assert_eq!(words, [vec!["step 1"], vec!["blocked", "step 2a"], vec!["blocked", "step 2b"]]);
     let _ = std::fs::remove_dir_all(d);
 }
+
+// spec: BOARD-004
+#[test]
+fn board_004_a_pin_that_points_to_no_note_is_listed_as_missing_in_its_lane() {
+    let (v, d) = with_board("missing", "---\ntype: board\n---\n# Board\n\n## Pinned\n- [[A]]\n- [[Gone #1]]\n- [Gone](<Sub/Gone %232.md>)\n");
+    let b = resolve(&v, Path::new("Board.md")).unwrap();
+    assert_eq!(titles(&b.lanes[0].cards), ["A"]);
+    assert_eq!(b.lanes[0].missing, ["[[Gone #1]]", "[Gone](<Sub/Gone %232.md>)"]);
+    let _ = std::fs::remove_dir_all(d);
+}
