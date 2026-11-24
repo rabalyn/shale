@@ -272,11 +272,12 @@ fn vault_036_a_buffer_that_cannot_be_saved_keeps_the_vault_open() {
     app.open_vault(&a);
     app.notes.get_mut(Path::new("Welcome.md")).unwrap().text = "# lost\n".into();
     app.notes.get_mut(Path::new("Welcome.md")).unwrap().dirty = true;
-    // the folder takes no new file: the save fails
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&a, std::fs::Permissions::from_mode(0o555)).unwrap();
+    // the note's path is a folder with something in it, so the save fails for root as well (a
+    // read-only folder would not stop root, which the CI container runs as)
+    let note = a.join("Welcome.md");
+    std::fs::remove_file(&note).unwrap();
+    std::fs::create_dir_all(note.join("inner")).unwrap();
     app.close_vault(&a, Remove::default());
-    std::fs::set_permissions(&a, std::fs::Permissions::from_mode(0o755)).unwrap();
     assert!(app.vault.is_some(), "the vault stays open, the edit is not lost");
     assert!(app.toasts.iter().any(|(m, _)| m.contains("could not be saved")), "{:?}", app.toasts);
     assert_eq!(app.cfg.vaults.entries().len(), 1, "it is still known");

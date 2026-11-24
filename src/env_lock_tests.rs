@@ -29,7 +29,7 @@ fn dev_034_the_holder_takes_the_lock_and_a_second_open_cannot_while_it_is_held()
     assert!(matches!(try_lock_by_a_second_open(&path), Err(TryLockError::WouldBlock)), "a second open must not get the lock");
     assert_eq!(std::fs::read_to_string(&path).unwrap().trim_end(), token, "the token is in the file");
     drop(file);
-    assert!(try_lock_by_a_second_open(&path).is_ok(), "released when the holder ends");
+    assert!(crate::fsutil::eventually(|| try_lock_by_a_second_open(&path).is_ok()), "released when the holder ends");
 }
 
 // spec: DEV-034
@@ -51,7 +51,7 @@ fn dev_034_a_stale_or_foreign_token_never_skips_the_lock() {
     assert!(!held_by_parent(&path, Some("")) && !held_by_parent(&path, None), "no token");
     drop(holder);
     // the holder ended: its token is still in the file, but nobody holds the lock
-    assert!(!held_by_parent(&path, Some(&token)), "a stale token");
+    assert!(crate::fsutil::eventually(|| !held_by_parent(&path, Some(&token))), "a stale token");
     let (_second, fresh) = acquire(&path, Some(&token)).expect("the stale token did not skip the lock: it was taken");
     assert_ne!(fresh, token);
 }

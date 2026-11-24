@@ -24,6 +24,19 @@ pub(crate) fn settle_within(limit: Duration, mut step: impl FnMut() -> Vec<&'sta
     }
 }
 
+/// Run `step` (one frame of the window, then whether what the test waits for is there) until it
+/// holds, every 5 ms, for at most 10 s; fail naming `what` after that. For what no job names:
+/// the sidebar search and the picker only hand a query to the search worker when a frame runs
+/// after the debounce (NAV-024), and a `settle` that sees the worker idle can come before that,
+/// on a slow or loaded machine (CI, #659). Fixed sleeps and frame counts break the same way.
+pub(crate) fn poll_until(what: &str, mut step: impl FnMut() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !step() {
+        assert!(Instant::now() < deadline, "never reached: {what}");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
 pub(crate) struct Headless {
     ctx: egui::Context,
     t: f64,
@@ -105,6 +118,17 @@ impl Headless {
             self.frame(app, vec![]);
             app.busy_jobs()
         });
+    }
+
+    /// `settle`, then frames until `done` holds ([`poll_until`]), then `settle` again for what
+    /// the answer started.
+    pub fn settle_until(&mut self, app: &mut ShaleApp, what: &str, done: impl Fn(&mut Headless, &mut ShaleApp) -> bool) {
+        self.settle(app);
+        poll_until(what, || {
+            self.frame(app, vec![]);
+            done(self, app)
+        });
+        self.settle(app);
     }
 
     pub fn frames(&mut self, app: &mut ShaleApp, n: usize) {

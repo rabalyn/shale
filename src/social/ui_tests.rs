@@ -521,8 +521,13 @@ fn a_post_found_in_the_sidebar_search_opens_in_its_feed_scrolled_to_the_post() {
     w.app.side.left = crate::app::LeftPanel::Search;
     let search = |w: &mut W, q: &str| {
         w.app.search.query = q.into();
-        // the sidebar search waits for the typing to settle (NAV-024)
-        std::thread::sleep(crate::search_all::DEBOUNCE + std::time::Duration::from_millis(30));
+        // the sidebar search waits for the typing to settle (NAV-024), and a frame after that sends it
+        w.settle();
+        let query = q.to_string();
+        crate::ui_test_support::poll_until("the list of the sidebar search", || {
+            w.frame(vec![]);
+            w.app.search.listed_for() == Some(query.as_str())
+        });
         w.settle();
     };
     // 1: a post the feed holds (in the middle of its list)

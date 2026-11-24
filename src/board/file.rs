@@ -180,6 +180,12 @@ pub struct Lane {
     crlf: bool,
 }
 
+/// What a line of a lane says of the text `value` the user typed: trimmed, on one line. The popover
+/// of a lane compares with it what it wrote to what the file says (QUERY-028).
+pub fn line_value(value: &str) -> String {
+    value.trim().replace(['\r', '\n'], " ")
+}
+
 fn blank(line: &str) -> bool {
     line.trim().is_empty()
 }
@@ -222,7 +228,7 @@ impl Lane {
     /// Set the line of `key` to `value`: replaced where it is, added after the lines of the keys
     /// that come before it; a blank `value` takes every line of the key out.
     pub fn set(&mut self, key: Key, value: &str) {
-        let value = value.trim().replace(['\r', '\n'], " ");
+        let value = line_value(value);
         let at = self.body.iter().position(|l| key_line(l).is_some_and(|(k, _)| k == key));
         let eol = eol(self.crlf);
         match (at, value.is_empty()) {

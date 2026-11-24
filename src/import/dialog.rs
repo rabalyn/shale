@@ -830,7 +830,12 @@ mod tests {
         // the list's own Cancel stops the work, and the dialog goes on with the files failed
         assert!(busy.cancel(busy.list()[0].id));
         wait_idle(&busy);
-        assert!(d.poll_conversion());
+        // the task is off the list a moment before the result is sent (JOB-002): the result is waited for
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !d.poll_conversion() {
+            assert!(std::time::Instant::now() < end, "the result of the job arrives");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
         assert!(matches!(&d.items[0].source, Source::Docx { ready: Some(Err(_)), .. }));
         // Cancel or closing the dialog (the same, JOB-010) stops pandoc and the task goes
         d.forget_conversions();

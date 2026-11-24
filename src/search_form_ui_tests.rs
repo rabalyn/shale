@@ -3,7 +3,6 @@
 
 use crate::app::{LeftPanel, Modal, Options, ShaleApp};
 use crate::picker::{Picker, Source};
-use crate::search_all::DEBOUNCE;
 use crate::ui_test_support::Headless;
 use eframe::egui::{accesskit::Role, Event, Key, Modifiers, PointerButton, Pos2, Rect};
 use std::path::PathBuf;
@@ -119,9 +118,14 @@ impl W {
         self.hl.frames(&mut self.app, 2);
     }
 
-    /// Wait for the typing to settle (NAV-024) and for the worker.
-    fn settle(&mut self) {
-        std::thread::sleep(DEBOUNCE + std::time::Duration::from_millis(30));
+    /// Wait until `done` holds, frame by frame (the debounced query of NAV-024 is only handed to
+    /// the worker by a frame after the debounce, so waiting for the worker is not enough, #659).
+    fn settle_until(&mut self, what: &str, done: impl Fn(&mut W) -> bool) {
+        self.hl.settle(&mut self.app);
+        crate::ui_test_support::poll_until(what, || {
+            self.hl.frame(&mut self.app, vec![]);
+            done(self)
+        });
         self.hl.settle(&mut self.app);
     }
 
@@ -238,8 +242,7 @@ fn query_026_the_last_advanced_choice_is_remembered_and_the_count_is_live() {
         }
         m => m,
     };
-    w.settle();
-    w.hl.frames(&mut w.app, 2);
+    w.settle_until("the count of the picker's search", |w| w.says("2 matches"));
     assert!(w.says("2 matches"), "banana is in A and B");
     // another picker, later: the form comes up in Advanced
     w.press(Key::Escape, Modifiers::NONE);
@@ -291,7 +294,7 @@ fn query_027_the_sidebar_search_has_the_same_form_next_to_its_box() {
     w.pick("+ Add filter", "tag is");
     w.type_in_row("tag is", "todo");
     assert_eq!(w.app.search.query, "#todo");
-    w.settle();
+    w.settle_until("the list of the sidebar's search for #todo", |w| w.app.search.listed_for() == Some("#todo") && !w.app.search.listed().is_empty());
     let notes: Vec<String> = w.app.search.listed().iter().map(|h| h.title.clone()).collect();
     assert!(
         !notes.is_empty() && w.app.search.listed().iter().all(|h| matches!(&h.action, crate::app::Action::GotoMatch { rel, .. } | crate::app::Action::Open { rel, .. } if rel.to_string_lossy() == "A.md")),
@@ -301,8 +304,7 @@ fn query_027_the_sidebar_search_has_the_same_form_next_to_its_box() {
     w.click("Advanced");
     assert!(w.app.cfg.search.advanced);
     assert!(w.says("Edit the query in the box above."));
-    w.settle();
-    w.hl.frames(&mut w.app, 2);
+    w.settle_until("the count of the sidebar's search", |w| w.says("1 match") || w.says("matches"));
     assert!(w.says("1 match") || w.says("matches"), "the count of the sidebar's search");
     w.click("Advanced");
     assert!(!w.app.cfg.search.advanced && w.has("+ Add filter"));

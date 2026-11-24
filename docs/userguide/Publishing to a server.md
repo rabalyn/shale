@@ -47,13 +47,17 @@ jobs:
             echo "Nothing new since $sha"
             exit 0
           fi
-          curl -fsSL -o hugo.tar.gz https://github.com/gohugoio/hugo/releases/download/v0.170.1/hugo_extended_0.170.1_linux-amd64.tar.gz
+          case "$(uname -m)" in
+            aarch64 | arm64) hugo_cpu=arm64; pagefind_cpu=aarch64 ;;
+            *) hugo_cpu=amd64; pagefind_cpu=x86_64 ;;
+          esac
+          curl -fsSL -o hugo.tar.gz "https://github.com/gohugoio/hugo/releases/download/v0.170.1/hugo_extended_0.170.1_linux-$hugo_cpu.tar.gz"
           tar -xzf hugo.tar.gz hugo
-          curl -fsSL -o pagefind.tar.gz https://github.com/Pagefind/pagefind/releases/download/v1.6.0/pagefind-v1.6.0-x86_64-unknown-linux-musl.tar.gz
+          curl -fsSL -o pagefind.tar.gz "https://github.com/Pagefind/pagefind/releases/download/v1.6.0/pagefind-v1.6.0-$pagefind_cpu-unknown-linux-musl.tar.gz"
           tar -xzf pagefind.tar.gz pagefind
           ./hugo --minify --destination public
           ./pagefind --site public
-          release="$releases/$(date +%Y%m%d%H%M%S)"
+          release="$releases/$(date +%Y%m%d%H%M%S)-$$"
           mkdir -p "$release"
           cp -a public/. "$release"/
           ln -sfn "$release" /srv/www/notes.next
@@ -63,7 +67,7 @@ jobs:
 ```
 
 What it does: it checks out the branch with its LFS files, stops when that commit is the one it built last, builds
-the site with Hugo and Pagefind, copies it to a new folder below `/srv/www/notes-releases` and points the symbolic
+the site with Hugo and Pagefind (the build for the CPU of the runner, x86_64 or arm64), copies it to a new folder below `/srv/www/notes-releases` and points the symbolic
 link `/srv/www/notes` at it with one rename, which is atomic. The web server's root is `/srv/www/notes`, and the three
 newest builds are kept. Change `me/site` and `site` to the repository and the branch of **Settings → Publishing**;
 make a token of a user who may read that repository and keep it as the secret `SITE_READ_TOKEN` of the builder
@@ -85,13 +89,15 @@ branch=site
 releases=/srv/www/notes-releases
 repo=$(pwd)
 unset GIT_DIR
+work=
+trap '[ -z "$work" ] || rm -rf "$work"' EXIT
 while read -r _old _new ref; do
   [ "$ref" = "refs/heads/$branch" ] || continue
   work=$(mktemp -d)
   git clone --quiet --depth 1 --branch "$branch" "file://$repo" "$work/src"
   hugo --minify --source "$work/src" --destination "$work/public"
   pagefind --site "$work/public"
-  release="$releases/$(date +%Y%m%d%H%M%S)"
+  release="$releases/$(date +%Y%m%d%H%M%S)-$$"
   mkdir -p "$releases"
   mv "$work/public" "$release"
   ln -sfn "$release" /srv/www/notes.next
@@ -102,6 +108,8 @@ done
 ```
 
 `hugo` and `pagefind` have to be in the `PATH` of the user who owns the repository. The web server's root is `/srv/www/notes`.
+The process number in the name of a build keeps two builds that start within one second apart; a build that fails changes
+nothing that is served and leaves no folder behind.
 
 # Who may read the site
 

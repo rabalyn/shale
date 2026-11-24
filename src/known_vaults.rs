@@ -253,8 +253,9 @@ mod tests {
         k.add(Path::new("/a/notes"));
         k.add(Path::new("/b/notes"));
         k.add(Path::new("/a/other"));
-        assert_eq!(k.label_of(Path::new("/a/notes")), "notes (/a)");
-        assert_eq!(k.label_of(Path::new("/b/notes")), "notes (/b)");
+        // the parent is a folder of the machine, shown as the system writes it
+        assert_eq!(k.label_of(Path::new("/a/notes")), format!("notes ({})", Path::new("/a").display()));
+        assert_eq!(k.label_of(Path::new("/b/notes")), format!("notes ({})", Path::new("/b").display()));
         assert_eq!(k.label_of(Path::new("/a/other")), "other");
         assert_eq!(k.label_of(Path::new("/c/unlisted")), "unlisted");
     }

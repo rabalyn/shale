@@ -17,6 +17,10 @@ mod process;
 mod env_tests;
 #[cfg(test)]
 pub(crate) mod publish_tests;
+#[cfg(test)]
+mod recipe_env_tests;
+#[cfg(test)]
+mod recipe_tests;
 
 pub use message::{local, Meta};
 

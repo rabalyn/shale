@@ -779,6 +779,24 @@ mod tests {
         }
     }
 
+    /// `settle`, then more frames until `done` holds (at most 10 s, `poll_until`). `settle` alone
+    /// is not enough for a search: the worker only gets the query after the debounce, measured
+    /// from the last list made, and on a slow or loaded machine (CI, #659) the answer can still
+    /// be on its way when `settle` sees the worker idle.
+    fn settle_until(w: &mut W, what: &str, done: impl Fn(&W) -> bool) {
+        settle(w);
+        crate::ui_test_support::poll_until(what, || {
+            w.frame(vec![]);
+            done(w)
+        });
+        settle(w);
+    }
+
+    /// The sidebar search has listed `query` (a debounced query is no job of the worker).
+    fn sidebar_listed(w: &W, query: &str) -> bool {
+        w.app.search.listed_for() == Some(query)
+    }
+
     /// Vim-style editing on, the open note's editor has the keyboard (normal mode).
     fn vim_note(tag: &str) -> W {
         let mut w = W::new(tag);
@@ -1506,8 +1524,8 @@ mod tests {
     /// Type into the picker of `Space f g` and let the debounce pass (NAV-024).
     fn search_for(w: &mut W, text: &str) {
         w.frame(vec![Event::Text(text.to_string())]);
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        settle(w);
+        // (what is typed is added to what the box has)
+        settle_until(w, "the picker lists the typed query", |w| picker(w).listed_for() == Some(picker(w).query.as_str()));
     }
 
     fn space_f_g(w: &mut W) {
@@ -1662,9 +1680,7 @@ mod tests {
         w.app.side.left = crate::app::LeftPanel::Search;
         w.app.search.query = "zebra".into();
         w.app.search.focus = true;
-        settle(&mut w);
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        settle(&mut w);
+        settle_until(&mut w, "the sidebar lists zebra", |w| sidebar_listed(w, "zebra"));
         assert_eq!(sidebar_rows(&w), [("Notes", RAW_HIT.to_string())]);
         assert!(shows(&w, RAW_HIT), "raw while the editor shows the markdown: {:?}", w.texts);
         w.app.cfg.live_preview = true;
@@ -1685,8 +1701,7 @@ mod tests {
         w.app.search.focus = true;
         settle(w);
         w.frame(vec![Event::Text(text.to_string())]);
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        settle(w);
+        settle_until(w, "the sidebar lists the typed query", |w| sidebar_listed(w, text));
         w.press(Key::ArrowDown, Modifiers::NONE);
         assert_eq!(w.app.search.sel, Some(0), "↓ goes into the list");
     }
@@ -1830,9 +1845,7 @@ mod tests {
         w.app.side.left = crate::app::LeftPanel::Search;
         w.app.search.query = "banana".into();
         w.app.search.focus = true;
-        settle(&mut w);
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        settle(&mut w);
+        settle_until(&mut w, "the sidebar lists Posts only", |w| sidebar_listed(w, "banana") && groups_of(sidebar_rows(w)) == ["Posts"]);
         assert_eq!(groups_of(sidebar_rows(&w)), ["Posts"], "the same default selection");
         assert_eq!(button_texts(&w), ["Notes 1", "Mail 1", "Posts 1"]);
         // …and Shift+click there changes it for the picker too
@@ -1863,8 +1876,7 @@ mod tests {
         w.app.search.focus = true;
         settle(&mut w);
         w.frame(vec![Event::Text("banana".to_string())]);
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        settle(&mut w);
+        settle_until(&mut w, "the sidebar lists the three sources", |w| groups_of(sidebar_rows(w)) == ["Notes", "Mail", "Posts"]);
         assert_eq!(button_texts(&w), ["Notes 1", "Mail 1", "Posts 1"]);
         assert_eq!(groups_of(sidebar_rows(&w)), ["Notes", "Mail", "Posts"]);
         click_source(&mut w, "Posts");
@@ -1877,8 +1889,7 @@ mod tests {
         assert_eq!(groups_of(sidebar_rows(&w)), ["Notes", "Mail", "Posts"], "back");
         // a prefix in the box
         w.app.search.query = "s: banana".into();
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        settle(&mut w);
+        settle_until(&mut w, "the sidebar lists Posts only", |w| groups_of(sidebar_rows(w)) == ["Posts"]);
         assert_eq!(groups_of(sidebar_rows(&w)), ["Posts"]);
         assert_eq!(button_texts(&w), ["Notes 1", "Mail 1", "Posts 1"]);
     }
@@ -1934,30 +1945,29 @@ mod tests {
         w.app.search.focus = true;
         settle(&mut w);
         w.frame(vec![Event::Text("banana".to_string())]);
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        settle(&mut w);
+        settle_until(&mut w, "the sidebar lists the three sources", |w| groups_of(sidebar_rows(w)) == ["Notes", "Mail", "Posts"]);
         // in the box
         w.press(Key::Tab, Modifiers::NONE);
-        settle(&mut w);
+        settle_until(&mut w, "Tab in the box solos Notes", |w| groups_of(sidebar_rows(w)) == ["Notes"]);
         assert_eq!(groups_of(sidebar_rows(&w)), ["Notes"], "Tab in the box solos the next source");
         assert!(w.ctx.memory(|m| m.has_focus(egui::Id::unique("search-input"))), "and the box keeps the keyboard");
         w.press(Key::Tab, Modifiers::SHIFT);
         w.press(Key::Tab, Modifiers::SHIFT);
-        settle(&mut w);
+        settle_until(&mut w, "Shift+Tab goes back to Posts", |w| groups_of(sidebar_rows(w)) == ["Posts"]);
         assert_eq!(groups_of(sidebar_rows(&w)), ["Posts"], "Shift+Tab goes back through the default selection to the last source");
         // while the hits are browsed
         w.app.search.filter.solo = None;
-        settle(&mut w);
+        settle_until(&mut w, "the sidebar lists the three sources again", |w| groups_of(sidebar_rows(w)) == ["Notes", "Mail", "Posts"]);
         w.press(Key::ArrowDown, Modifiers::NONE);
         assert_eq!(w.app.search.sel, Some(0));
         assert!(w.texts.iter().any(|t| t.contains("Tab next source, Shift+Tab previous source")), "the hint has the keys: {:?}", w.texts);
         w.press(Key::Tab, Modifiers::NONE);
-        settle(&mut w);
+        settle_until(&mut w, "Tab lists Notes only", |w| groups_of(sidebar_rows(w)) == ["Notes"]);
         assert_eq!(groups_of(sidebar_rows(&w)), ["Notes"]);
         assert_eq!(w.app.search.sel, Some(0), "still browsing, at the first hit of the new list");
         assert!(w.ctx.memory(|m| m.focused().is_none()), "Tab did not move the focus");
         w.press(Key::Tab, Modifiers::NONE);
-        settle(&mut w);
+        settle_until(&mut w, "Tab lists Mail only", |w| groups_of(sidebar_rows(w)) == ["Mail"]);
         assert_eq!(groups_of(sidebar_rows(&w)), ["Mail"]);
         assert_eq!(w.app.search.sel, Some(0));
         w.press(Key::Enter, Modifiers::NONE);

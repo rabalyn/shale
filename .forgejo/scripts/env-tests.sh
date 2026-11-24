@@ -232,7 +232,8 @@ case "${1:-}" in
       ) &
       job_pids="$job_pids $!"
     }
-    nap() { sleep 0.2 2>/dev/null || sleep 1; }
+    # the polling interval; the self-test (scripts/test-env-tests.sh) shortens it with SHALE_ENV_TESTS_NAP (#672)
+    nap() { sleep "${SHALE_ENV_TESTS_NAP:-0.2}" 2>/dev/null || sleep 1; }
     # collect <name>…: waits for the jobs and prints the log of each one when it ended (one after another, never interleaved)
     collect() {
       _pending=$*

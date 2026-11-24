@@ -128,7 +128,10 @@ fn site_064_the_address_follows_the_rules_of_git_sync_and_a_password_in_it_is_re
     let s = |url: &str, branch: &str| PublishSettings { url: url.into(), branch: branch.into(), ..Default::default() };
     assert_eq!(target(&s("https://git.example.org/me/site.git", "")).unwrap(), ("https://git.example.org/me/site.git".into(), "main".into()));
     assert_eq!(target(&s("git@example.org:me/site.git", " pages ")).unwrap().1, "pages");
-    assert_eq!(target(&s("/srv/git/site.git", "main")).unwrap().0, "/srv/git/site.git");
+    // a folder path is absolute on the system it runs on (`/srv/…` has no drive on Windows)
+    let folder = if cfg!(windows) { r"C:\srv\git\site.git" } else { "/srv/git/site.git" };
+    assert_eq!(target(&s(folder, "main")).unwrap().0, folder);
+    assert_eq!(target(&s(r"C:\srv\git\site.git", "main")).unwrap().0, r"C:\srv\git\site.git");
     assert!(target(&s("", "")).unwrap_err().contains("No address"));
     let pw = target(&s("https://me:secret@example.org/site.git", "")).unwrap_err();
     assert!(pw.contains("password") && !pw.contains("secret"), "{pw}");
@@ -477,7 +480,10 @@ fn site_078_a_second_publish_is_refused_while_one_holds_the_lock_and_a_dead_ones
     st.publish().unwrap();
     assert_ne!(st.remote_tip(), tip);
     // and the lock of a finished publish is free again
-    assert!(crate::fsutil::try_lock_file(&st.base.join(&id).join("publish.lock")).unwrap().is_some());
+    // (a child process that another test thread forks at this moment may still hold a copy: #659)
+    let lock_path = st.base.join(&id).join("publish.lock");
+    let free = crate::fsutil::eventually(|| crate::fsutil::try_lock_file(&lock_path).unwrap().is_some());
+    assert!(free, "the lock of a finished publish must be free again");
 }
 
 // spec: SITE-078, SITE-066

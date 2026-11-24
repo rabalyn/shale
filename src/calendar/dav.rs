@@ -274,16 +274,23 @@ struct How<'a> {
     upload: Option<Upload<'a>>,
 }
 
+/// Whether a file path or type can stand in curl's `form` and `data-binary` values unchanged: no
+/// `"`, `;`, `,` (curl's form syntax) and no control character (SEC-026). A backslash, a colon or a
+/// tilde are fine: the config's quoting escapes the backslash (`quote_into`), and curl's form syntax
+/// reads it as plain outside of quotes, so a Windows temp path goes through.
+fn curl_plain(s: &str) -> bool {
+    !s.chars().any(|c| c.is_control() || matches!(c, '"' | ';' | ','))
+}
+
 /// Like [`request_bytes`] with a file as the body (SOC-053). The path must be one Shale made (no
-/// `"`, `;`, `,` or backslash in it). Uploads may take longer than other requests.
+/// `"`, `;`, `,` or control character in it; a backslash is a normal part of a Windows path). Uploads may take longer than other requests.
 pub fn request_upload(method: &str, url: &str, headers: &[&str], upload: Upload, acct: &Account, max_bytes: u64) -> Result<BytesResponse, String> {
-    let plain = |s: &str| !s.chars().any(|c| c.is_control() || matches!(c, '"' | ';' | ',' | '\\'));
     let (path, mime) = match upload {
         Upload::Raw { path } => (path, ""),
         Upload::Form { path, mime, .. } => (path, mime),
     };
     let p = path.to_str().ok_or("the file name is not text")?;
-    if !plain(p) || !plain(mime) {
+    if !curl_plain(p) || !curl_plain(mime) {
         return Err("the file cannot be sent (its name or type has special characters)".into());
     }
     request_bytes_opts(method, url, headers, "", acct, max_bytes, How { follow: true, upload: Some(upload) })
@@ -1246,6 +1253,20 @@ pub(crate) mod tests {
         let odd_mime = Upload::Form { field: "file", path: &file, mime: "image/png;filename=x", fields: &[] };
         assert!(request_upload("POST", &format!("{base}/form"), &hs, odd_mime, &nobody, 1000).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: SEC-026
+    #[test]
+    fn a_windows_path_is_plain_for_curl_and_quoted_in_its_config_and_curl_syntax_is_not() {
+        assert!(curl_plain(r"C:\Users\RUNNER~1\AppData\Local\Temp\shale-1234\pic.png"));
+        assert!(curl_plain("image/png") && curl_plain("/tmp/shale x/pic.png"));
+        for bad in ["a\"b.png", "a;b.png", "a,b.png", "a\nb.png", "a\rb", "image/png;filename=x", "a\0b"] {
+            assert!(!curl_plain(bad), "{bad:?}");
+        }
+        // in the config the backslashes are doubled, so curl reads the path back unchanged
+        let mut cfg = String::new();
+        quote_into(&mut cfg, &["@", r"C:\Users\RUNNER~1\pic.png"]);
+        assert_eq!(cfg, r#""@C:\\Users\\RUNNER~1\\pic.png""#);
     }
 
     /// Like `mock_http`, the handler also returns extra response header lines.
