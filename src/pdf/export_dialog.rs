@@ -39,6 +39,8 @@ pub struct ExportDialog {
     /// The fonts the export will use for this note and what could not be used (PDF-034, PDF-037);
     /// filled by the window once the font scan is in (JOB-040).
     pub fonts: Option<FontsNote>,
+    /// Since when the export waits for the font scan to finish (PDF-037, ADR-0040 §8); none when it does not.
+    pub fonts_wait: Option<std::time::Instant>,
     busy: Busy,
     /// screen rect of every control (used by the UI tests)
     pub rects: Vec<(String, Rect)>,
@@ -100,6 +102,7 @@ impl ExportDialog {
             book: None,
             note: None,
             fonts: None,
+            fonts_wait: None,
             busy: Busy::default(),
             rects: vec![],
         }
@@ -328,6 +331,12 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
     if let Some(book) = d.book.as_deref_mut() {
         book.show(ui, &mut rec);
     }
+    if d.fonts_wait.is_some() {
+        ui.horizontal(|ui| {
+            ui.add(egui::Spinner::new().size(14.0));
+            rec("waiting-for-fonts", ui.label(muted("Looking up fonts… the export starts then. Cancel stops it.")));
+        });
+    }
     if d.note_working() {
         ui.horizontal(|ui| {
             ui.add(egui::Spinner::new().size(14.0));
@@ -348,7 +357,7 @@ pub fn footer(ui: &mut Ui, d: &mut ExportDialog) -> DialogResult {
     // LaTeX needs a TeX, a kind and no export running (TEX-016)
     // the built-in export of a note: none runs, here or in a dialog that was closed while it stopped (JOB-005)
     let note_free = d.latex() || d.book.is_some() || (d.note.is_none() && !d.busy.is_running(&PDF_EXPORT));
-    let ready = (!d.latex() || d.tex.as_ref().is_some_and(|t| t.can_export(&d.busy))) && d.book.as_ref().is_none_or(|b| b.can_export()) && note_free;
+    let ready = (!d.latex() || d.tex.as_ref().is_some_and(|t| t.can_export(&d.busy))) && d.book.as_ref().is_none_or(|b| b.can_export()) && note_free && d.fonts_wait.is_none();
     ui.horizontal(|ui| {
         let mut rec = |k: &str, r: egui::Response| -> egui::Response {
             d.rects.push((k.to_string(), r.rect));

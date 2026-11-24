@@ -18,6 +18,9 @@ mod resolve_tests;
 pub mod scan;
 #[cfg(test)]
 mod scan_tests;
+pub mod sfnt;
+#[cfg(test)]
+mod sfnt_tests;
 #[cfg(test)]
 pub(crate) mod test_fonts;
 
