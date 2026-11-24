@@ -117,8 +117,7 @@ mod tests {
         // the real worker: after settle the list of the search is there
         app.search_worker = Default::default();
         app.search.query = "vault".into();
-        std::thread::sleep(crate::search_all::DEBOUNCE + Duration::from_millis(30));
-        hl.settle(&mut app);
+        hl.settle_until(&mut app, "the list of the search for vault", |_, app| app.search.listed_for() == Some("vault"));
         assert!(!app.search.listed().is_empty(), "the result of the search is in the list");
         let _ = std::fs::remove_dir_all(&d);
     }

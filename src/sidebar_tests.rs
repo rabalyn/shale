@@ -922,8 +922,8 @@ fn lay_024_two_copies_of_a_view_share_one_state() {
     w.click_at(w.app.side.menu.to_other.unwrap().1.center());
     w.app.side.left = crate::app::LeftPanel::Search;
     w.app.search.query = "Welcome".into();
-    // (the list comes from the search worker: wait for its answer, not for a number of frames)
-    w.hl.settle(&mut w.app);
+    // (the list comes from the search worker, after the debounce: wait for it, not for a number of frames, #659)
+    w.hl.settle_until(&mut w.app, "the list of the search for Welcome", |_, app| app.search.listed_for() == Some("Welcome"));
     w.frames(2);
     assert!(w.left_has("Welcome") && w.right_has("Welcome"), "the same search is shown on both sides: {:?}", w.hl.text);
     assert!(w.app.side.layout.on_left(Item::Search) && w.app.side.layout.on_right(Item::Search));
