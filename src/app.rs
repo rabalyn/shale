@@ -855,6 +855,11 @@ impl ShaleApp {
                 self.social.index.add(&demo.account.id, "home", &crate::social::demo::posts());
             }
             Some("tasks") => self.show_view(View::Tasks, false),
+            // the settings file tab with the text of the settings in use (a screenshot run keeps no file, so there is nothing to read)
+            Some("settings-file") => {
+                self.sf.text = self.cfg.file_text();
+                self.show_view(View::SettingsFile, false);
+            }
             Some("keybindings") => self.open_settings(SettingsTab::Keybindings),
             // the Data usage dialog with made-up cache files in the temporary folders
             Some("data-usage") => {

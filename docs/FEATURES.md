@@ -1184,10 +1184,16 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   that tests keep complete.
 
   ![Settings with the search for "cursor" and its results, each with its tab](userguide/z_media/screenshots/settings-find.png)
+
+  ![The Vault tab of Settings](userguide/z_media/screenshots/settings-vault.png)
+
+  ![The Editor tab of Settings](userguide/z_media/screenshots/settings-editor.png)
 - The settings of the program itself are one text file, `~/.config/shale/config.toml`, with a
   description above every setting. "Open settings file" (top right of Settings) opens it in a tab (no note, no
   vault file); saving applies the values at once, a change from another editor is picked up within a
   second, and text with an error is not saved (quitting puts it in the recovery folder instead of losing it). An old `config.json` is moved over at the first start.
+
+  ![The settings file in a tab of its own](userguide/z_media/screenshots/settings-file.png)
 - Each vault keeps its own settings in `.shale/settings.json` (people folder, git sync) and its
   session in `.shale/state.json` (open notes, last import folder, recent tags), so a vault
   behaves the same on every computer. The undo histories of the notes (`u` in vim-style editing)
