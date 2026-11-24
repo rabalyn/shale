@@ -1279,7 +1279,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   second, and text with an error is not saved (quitting puts it in the recovery folder instead of losing it). An old `config.json` is moved over at the first start.
 
   ![The settings file in a tab of its own](userguide/z_media/screenshots/settings-file.png)
-- Each vault keeps its own settings in `.shale/settings.json` (people folder, git sync) and its
+- Each vault keeps its own settings in `.shale/settings.json` (people folder, bibliography, git sync) and its
   session in `.shale/state.json` (open notes, last import folder, recent tags), so a vault
   behaves the same on every computer. The undo histories of the notes (`u` in vim-style editing)
   are kept for 30 days (a setting) in `.shale/undo/`, one file per note; that folder stays on the computer
@@ -1287,6 +1287,16 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   histories are kept outside the vault, in Shale's data folder, so two computers do not overwrite each other's
   tabs, and leftover `.shale-tmp-*` files and `state.sync-conflict-*` copies are removed. Settings of the program itself (appearance, calendars,
   known vaults) stay in `~/.config/shale/config.toml`.
+- **The bibliography of a thesis** (EDIT-122, EDIT-123, CFG-079, #645; the first part of thesis writing, ADR-0039, #642).
+  A note names its literature in the property `bibliography:` (a path in the vault, a file name or `[[refs.bib]]`;
+  a list names several), and **Settings → Vault → Bibliography file** is the default for notes without the
+  property. The file is a BibLaTeX or BibTeX `.bib` file as Zotero (Better BibTeX), JabRef or Citavi export it. Shale
+  reads it in the background into an index of the keys (author, year, title, type), skips and counts an entry
+  that cannot be read, rebuilds the index when the file changes, and says in Settings what the file holds and which
+  keys the open note cites that the file lacks. A file that is missing or has no entry means no bibliography in
+  effect, with a message. The one scanner of `@` (citations `[@key, p. 12]` and `@key`, the labels `{#fig:x}` and the
+  references `@fig:x`) is built and tested, and rules out e-mail addresses, mentions, code, math and links; the editor, the
+  exports and the pickers that use it are the next phases.
 - The files carry a format version and are upgraded on load. A settings file that can't be read
   is kept as `….broken-<date>` and you are told; a file from a newer Shale is used but not
   changed.
@@ -1555,6 +1565,8 @@ Whatever runs longer than a moment says what it does, cannot be started twice an
   the import of a template set, the test compiles and the check, download and install of an update are tasks with their own text. An
   install, an update, the check for a newer git, an import and the check or download of an update can be cancelled (what was downloaded is
   removed); the rest cannot be stopped half way.
+- **The bibliography** (JOB-039, #645): reading a `.bib` file is a task per file ("Reading the bibliography “refs.bib”…", listed after
+  two seconds); it cannot be started twice and is read again when the file changes.
 - **Moved so far:** the git sync and the Git LFS setup, the check of the vault's names (Cancel stops it) the PDF export of a
   folder, of a note and of a drawing (Cancel stops it before the next picture and writes no half file, JOB-017), the export through LaTeX (JOB-018), the export to Word with its new spinner (JOB-019) and the conversion of Word files of the Import dialog (JOB-020); closing such a dialog stops its work (JOB-010). Also the check of the mail index (JOB-015: it starts with the window when a mail account is set up, so the mail view finds the index ready, and the view shows "Checking the mail index…" with a spinner when it is opened earlier). The rebuild of the mail index is a task too, with Cancel between two folders (JOB-016), and so is the sync of each mail account, with its own Cancel between two batches (JOB-021). Sending mail is a task per account too (JOB-031): "Sending mail from ‹account›…" with Cancel, which stops before the next mail is taken from the Outbox and never tears down a mail that is on its way. So is the browser sign-in of a mail account (JOB-032): "Signing in ‹account› in the browser…" with Cancel; closing the account dialog stops it. The load of each CalDAV calendar is a task of its own, "Syncing the calendar “Work”…" (JOB-033; the timer's load is listed after 2 seconds), and so is finding the calendars of an account (JOB-034); both have Cancel at the next request. In the feeds the first page, the next page, the check for new posts and "Load more in between" are tasks per feed with Cancel (JOB-035), saving a post is one too (JOB-036), and so is the sign-in of a feed account, which keeps no token when it is stopped (JOB-037). The other long actions follow; the list of all of them, with what each shows today, is
   [docs/spec/busy-states.md](spec/busy-states.md).

@@ -19,7 +19,7 @@ too: it is plain text with a description above every setting.
 
 ![[settings-vault.png]]
 
-The **Vault** tab is the short page Settings opens on: the vault folder, the button that closes the vault, the people folder and the check of file names for Windows and macOS.
+The **Vault** tab is the short page Settings opens on: the vault folder, the button that closes the vault, the people folder, the bibliography file (the `.bib` file that notes use for citations, see [[Editor#The bibliography of a thesis]]) and the check of file names for Windows and macOS.
 
 ![[settings-editor.png]]
 
@@ -299,6 +299,7 @@ Some behaviour is decided by a note's own properties (front matter) instead of a
 `print-paper`, `print-margins`, `print-font`, `print-font-size`, `print-line-spacing`, `print-paragraph-spacing`, `print-align`,
 `print-heading-color`, `print-heading-weight`, `print-heading-sizes`, `print-break-before`, `print-title`, `print-toc` and `print-toc-page-break` (any of them also switches on the plain paper look of the PDF); each has its values, default and effect in the table of
 [[PDF#Print properties of a note]]. Every one is optional, and a value that cannot be read is ignored.
+`bibliography` names the `.bib` file of the note's citations, or several as a list; it wins over the vault's bibliography file ([[Editor#The bibliography of a thesis]]).
 Shale itself writes `created` and `modified` (full ISO 8601 times) into every Markdown note it saves, and reads an optional `priority` (`highest`, `high`, `medium`, `low`, `lowest`); there is no setting for them (see [[Editor#Created, modified and priority]]).
 
 # Vault settings (`<vault>/.shale/settings.json`)
@@ -307,6 +308,7 @@ Shale itself writes `created` and `modified` (full ISO 8601 times) into every Ma
 |---|---|---|
 | `version` | 1 | written by Shale |
 | `people_dir` | `Adressbuch` | Settings → Vault → People, "People folder" ([[Tags and people]]) |
+| `bibliography` | empty (not in the file while empty; the `.bib` file, as a path in the vault, a file name or `[[refs.bib]]`, that a note without its own `bibliography:` property uses) | Settings → Vault → Bibliography, "Bibliography file" ([[Editor#The bibliography of a thesis]]) |
 | `sync` | the group of the four keys below | Settings → Sync |
 | `sync.enabled` | on (only matters when the vault is a git repository; a folder with its own `.git` asks first when it is opened, "Don't sync" sets it off) | Settings → Sync, "Sync this vault automatically" ([[Git sync]]) |
 | `sync.interval_minutes` | 5 (1 to 1440) | Git sync, "Every … minutes" |

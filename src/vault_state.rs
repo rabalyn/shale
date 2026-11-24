@@ -245,6 +245,10 @@ pub struct VaultSettings {
     pub version: u64,
     /// Folder of the contact notes (for `[[p …` links and people found when importing).
     pub people_dir: String,
+    /// The bibliography (a `.bib` file of the vault) that a note without its own `bibliography:`
+    /// property uses (EDIT-123); empty: none. Left out of the file while it is empty.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub bibliography: String,
     pub sync: SyncSettings,
     /// What is published as a Hugo site (SITE-052); left out of the file while it is all default.
     #[serde(skip_serializing_if = "PublishSettings::is_default")]
@@ -255,7 +259,7 @@ pub struct VaultSettings {
 
 impl Default for VaultSettings {
     fn default() -> Self {
-        VaultSettings { version: Self::CURRENT, people_dir: crate::import::people::DEFAULT_DIR.into(), sync: SyncSettings::default(), publish: PublishSettings::default(), other: Map::new() }
+        VaultSettings { version: Self::CURRENT, people_dir: crate::import::people::DEFAULT_DIR.into(), bibliography: String::new(), sync: SyncSettings::default(), publish: PublishSettings::default(), other: Map::new() }
     }
 }
 

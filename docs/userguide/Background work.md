@@ -54,7 +54,8 @@ and you cannot start it twice by accident.
   saved it, nothing is saved, and an earlier sign-in stays as it was.
 - **Things that happen on their own are listed only when they take long.** Reading the vault folder for
   changes made by other programs ("Reading the vault folder…", on a slow network share), learning which
-  words belong to your tags ("Learning the words of the tags…", **Cancel** stops it) and counting what Shale
+  words belong to your tags ("Learning the words of the tags…", **Cancel** stops it), reading a bibliography
+  file ("Reading the bibliography “refs.bib”…", again when the file changes) and counting what Shale
   keeps on this computer show in the indicator after 2 seconds, not before: a quick one is nothing to look at.
 - **Files you drop on the window** ("Reading the dropped files…"), **media copied into the vault** ("Copying
   media into the vault…", **Cancel** stops it before the next file; the links that were copied stay changed,

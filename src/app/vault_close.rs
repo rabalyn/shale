@@ -91,6 +91,7 @@ impl ShaleApp {
         self.graphs = crate::graph::Graphs::new();
         self.thread = Default::default();
         self.tag_learner = crate::import::tagwords::TagLearner::new();
+        self.bib.reset();
         self.vault_check = Default::default();
         self.history.drop_vault();
         self.sync.drop_vault();

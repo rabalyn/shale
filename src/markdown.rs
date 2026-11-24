@@ -3,6 +3,8 @@
 
 use std::ops::Range;
 
+pub mod citations;
+
 /// A link found in a note: `[[Target]]`, `[[Target|Alias]]`, `[[Target#Heading]]`,
 /// `![[Embed]]` or a markdown link `[text](Target.md)` that points inside the vault, or a `file://`
 /// address of a media file outside it (MEDIA-015).
@@ -703,14 +705,14 @@ pub fn find_math(text: &str) -> Vec<MathSpan> {
                 }
             }
             None if is_fence => {
-                let math = t.starts_with("```") && t[3..].trim().eq_ignore_ascii_case("math");
+                let math = t.starts_with("```") && is_math_info(t[3..].trim());
                 fence = Some(math.then(|| (li, off + line.len() + 1)));
             }
             None if line.trim() == "$$" => {
-                let close = (li + 2..lines.len()).find(|&k| lines[k].1.trim() == "$$");
-                if let Some(k) = close {
+                let close = (li + 2..lines.len()).find_map(|k| closes_display(lines[k].1).map(|end| (k, end)));
+                if let Some((k, end)) = close {
                     let body = off + line.len() + 1;
-                    out.push(MathSpan { range: off..lines[k].0 + lines[k].1.len(), tex: body..lines[k].0 - 1, display: true, block: true, lines: li..k + 1 });
+                    out.push(MathSpan { range: off..lines[k].0 + end, tex: body..lines[k].0 - 1, display: true, block: true, lines: li..k + 1 });
                     li = k;
                 }
             }
@@ -719,6 +721,25 @@ pub fn find_math(text: &str) -> Vec<MathSpan> {
         li += 1;
     }
     out
+}
+
+/// Whether the info string of a fence says math: `math`, or `math {#eq:energy}` with the label of
+/// the equation (EDIT-122, ADR-0039 §2).
+fn is_math_info(info: &str) -> bool {
+    let Some(rest) = info.get(..4).filter(|w| w.eq_ignore_ascii_case("math")).map(|_| &info[4..]) else { return false };
+    let label = rest.trim();
+    rest.is_empty() || (rest.starts_with(' ') && citations::parse_label(label).is_some_and(|(kind, _, len)| kind == citations::Kind::Equation && len == label.len()))
+}
+
+/// Whether `line` closes a `$$` block: where the formula ends in the line, `None` when it does not.
+/// A closing `$$` stands alone or is followed by the label of the equation (`$$ {#eq:energy}`).
+fn closes_display(line: &str) -> Option<usize> {
+    if line.trim() == "$$" {
+        return Some(line.len());
+    }
+    let lead = line.len() - line.trim_start().len();
+    let label = line[lead..].strip_prefix("$$")?.trim();
+    citations::parse_label(label).is_some_and(|(kind, _, len)| kind == citations::Kind::Equation && len == label.len()).then_some(lead + 2)
 }
 
 /// The formulas inside one line (see [`find_math`]).

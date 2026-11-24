@@ -47,9 +47,34 @@ impl ShaleApp {
             .inner
         });
         crate::theme::hint(ui, "Type [[p followed by a name to pick a person from this folder (or make a new contact note).");
+        crate::theme::section(ui, "Bibliography");
+        changed |= anchor(ui, "vault.bibliography", |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Bibliography file");
+                ui.add(egui::TextEdit::singleline(&mut self.vdata.settings.bibliography).hint_text("refs.bib").desired_width(220.0))
+                    .on_hover_text("The .bib file that notes use for citations such as [@key] when they have no property bibliography: of their own.")
+                    .changed()
+            })
+            .inner
+        });
+        crate::theme::hint(ui, "A BibLaTeX or BibTeX file of the vault, as Zotero, JabRef or Citavi export it: a path, a file name or [[refs.bib]]. A note's own property bibliography: wins.");
+        self.bibliography_status_ui(ui);
         self.names_check_ui(ui);
         self.outside_check_ui(ui);
         changed
+    }
+
+    /// What the bibliography of the default and of the open note is: the files, their entries, the
+    /// skipped ones, the keys of the note that the file lacks (EDIT-123).
+    fn bibliography_status_ui(&self, ui: &mut Ui) {
+        let mut lines = if self.vdata.settings.bibliography.trim().is_empty() { vec![] } else { crate::bibliography::report::default_lines(&self.bib_default_effect()) };
+        if let Some((name, text, effect)) = self.bib_note_effect() {
+            lines.extend(crate::bibliography::report::note_lines(&name, &text, &effect));
+        }
+        lines.dedup();
+        for line in lines {
+            crate::theme::hint(ui, &line);
+        }
     }
 
     /// "Check names for Windows and macOS…" and its list (VAULT-028).

@@ -11,6 +11,7 @@ impl ShaleApp {
     pub(crate) fn busy_jobs(&self) -> Vec<&'static str> {
         let jobs = [
             ("the tag learner", self.tag_learner.pending(self.vault.as_ref())),
+            ("the bibliography reader", self.bib.running()),
             ("the loading of a vault", self.vault_load.is_loading()),
             ("the look-up of the vault folders", self.presence.pending()),
             ("the rescan of the vault", self.rescan.in_flight()),
