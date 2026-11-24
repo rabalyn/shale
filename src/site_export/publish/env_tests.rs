@@ -14,22 +14,22 @@ use crate::secret::Secret;
 use crate::site_export::test_support::Fixture;
 
 /// A vault that publishes to `url` on the branch `site`, with these notes.
-fn vault(tag: &str, url: &str, files: &[(&str, &str)]) -> Fixture {
+pub(super) fn vault(tag: &str, url: &str, files: &[(&str, &str)]) -> Fixture {
     let rules = format!("\"all_notes\": true, \"url\": {}, \"branch\": \"site\"", serde_json::to_string(url).unwrap());
     Fixture::with(tag, &rules, files)
 }
 
-fn go(git: &Git, f: &Fixture, base: &Path, take_over: bool) -> Result<Published, Failure> {
+pub(super) fn go(git: &Git, f: &Fixture, base: &Path, take_over: bool) -> Result<Published, Failure> {
     publish(git, &Request { vault: &f.dir, libraries: &[], base, device: "test device", take_over }, &Cancel::default(), &|_| {})
 }
 
-fn with_lfs(st: &Stack) -> Git {
+pub(super) fn with_lfs(st: &Stack) -> Git {
     let mut git = st.git.clone();
     git.env.retain(|(k, _)| k != "SHALE_TEST_NO_GIT_LFS");
     git
 }
 
-fn run_ok(git: &Git, dir: &Path, args: &[&str]) -> String {
+pub(super) fn run_ok(git: &Git, dir: &Path, args: &[&str]) -> String {
     let a: Vec<&OsStr> = args.iter().map(OsStr::new).collect();
     let o = git.run(dir, &a).unwrap();
     assert!(o.ok, "git {args:?}: {}", o.stderr);
@@ -37,7 +37,7 @@ fn run_ok(git: &Git, dir: &Path, args: &[&str]) -> String {
 }
 
 /// The commit of the branch `site` on the server, asked with the same sign-in.
-fn tip(git: &Git, dir: &Path, url: &str) -> String {
+pub(super) fn tip(git: &Git, dir: &Path, url: &str) -> String {
     run_ok(git, dir, &["ls-remote", url, "refs/heads/site"]).split_whitespace().next().unwrap_or("").to_string()
 }
 

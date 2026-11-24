@@ -1,0 +1,23 @@
+name: shale-forgejo-env-runner
+
+# The Forgejo Actions runner of the test stack (SITE-049, #665), started by `forgejo-env.sh runner-up <folder>`, not by
+# `up`: it needs the Forgejo of compose.yaml to be up, builds an image (runner/Containerfile) and is only for the test of
+# the server recipe's workflow. It shares the host's network (Forgejo is on 127.0.0.1:13000 there) and takes its
+# registration token from the administrator's API, so nothing is written down. The label `docker` is a `host` label: the
+# jobs run in this container, with the folder the test names as `/srv/www`, the folder the recipe's workflow writes to.
+services:
+  runner:
+    build: ./runner
+    image: localhost/shale-forgejo-runner:1
+    network_mode: host
+    working_dir: /tmp
+    volumes:
+      - ${SHALE_FORGEJO_WWW:?the folder for /srv/www}:/srv/www:z
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        token=$$(curl -sf -u shale:shale-forgejo-test-1 http://127.0.0.1:13000/api/v1/admin/runners/registration-token | sed 's/.*"token":"\([^"]*\)".*/\1/')
+        forgejo-runner register --no-interactive --instance http://127.0.0.1:13000 --token "$$token" --name shale-env --labels docker:host
+        exec forgejo-runner daemon

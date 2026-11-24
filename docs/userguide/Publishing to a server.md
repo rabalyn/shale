@@ -53,7 +53,7 @@ jobs:
           tar -xzf pagefind.tar.gz pagefind
           ./hugo --minify --destination public
           ./pagefind --site public
-          release="$releases/$(date +%Y%m%d%H%M%S)"
+          release="$releases/$(date +%Y%m%d%H%M%S)-$$"
           mkdir -p "$release"
           cp -a public/. "$release"/
           ln -sfn "$release" /srv/www/notes.next
@@ -85,13 +85,15 @@ branch=site
 releases=/srv/www/notes-releases
 repo=$(pwd)
 unset GIT_DIR
+work=
+trap '[ -z "$work" ] || rm -rf "$work"' EXIT
 while read -r _old _new ref; do
   [ "$ref" = "refs/heads/$branch" ] || continue
   work=$(mktemp -d)
   git clone --quiet --depth 1 --branch "$branch" "file://$repo" "$work/src"
   hugo --minify --source "$work/src" --destination "$work/public"
   pagefind --site "$work/public"
-  release="$releases/$(date +%Y%m%d%H%M%S)"
+  release="$releases/$(date +%Y%m%d%H%M%S)-$$"
   mkdir -p "$releases"
   mv "$work/public" "$release"
   ln -sfn "$release" /srv/www/notes.next
@@ -102,6 +104,8 @@ done
 ```
 
 `hugo` and `pagefind` have to be in the `PATH` of the user who owns the repository. The web server's root is `/srv/www/notes`.
+The process number in the name of a build keeps two builds that start within one second apart; a build that fails changes
+nothing that is served and leaves no folder behind.
 
 # Who may read the site
 
