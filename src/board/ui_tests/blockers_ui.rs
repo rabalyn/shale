@@ -64,7 +64,7 @@ fn board_040_a_blocker_written_as_a_markdown_link_blocks_like_a_wiki_link() {
     assert_eq!(w.dep("X").waiting.len(), 1, "a done blocker no longer holds it");
 }
 
-// spec: BOARD-044
+// spec: BOARD-044, BOARD-042
 #[test]
 fn board_044_the_peek_lists_what_the_card_waits_for_and_what_waits_for_it_and_a_cross_takes_one_away() {
     let mut w = window("blk-lists");
@@ -135,7 +135,7 @@ fn board_044_the_field_offers_the_cards_first_leaves_out_what_is_there_and_esc_c
     assert_eq!(w.plain("D.md"), FILES[4].1, "nothing was written");
 }
 
-// spec: BOARD-041, BOARD-004
+// spec: BOARD-041, BOARD-042, BOARD-004
 #[test]
 fn board_041_a_name_that_wiki_links_cannot_hold_is_written_as_a_markdown_link_that_blocks() {
     let mut w = window("blk-md");

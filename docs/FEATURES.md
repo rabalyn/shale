@@ -632,6 +632,8 @@ The settings stay open until closed (✕, Esc or the ⋯ button; a click outside
 
 ![A selected card with arrows and a lane in dependency order](userguide/z_media/screenshots/board-dependencies.png)
 
+![The peek of a card with its Blocked by and Blocks lines and the field that finds a blocker](userguide/z_media/screenshots/board-blockers.png)
+
 ## Linked notes and the graph
 
 ![Graph](userguide/z_media/screenshots/graph.png)
