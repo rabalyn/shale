@@ -3,22 +3,28 @@
 //! JOB-001), and when the job has ended the note's links point at the copies.
 
 use super::{ShaleApp, View};
+use crate::busy::{Key, Task};
 use crate::media::copy_in::{self, Copied};
 use crate::vault::rel_to_string;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError};
 
+/// The task of the copy of outside media into the vault (MEDIA-021, JOB-023): it can stop between two files.
+pub const OUTSIDE_COPY: Key = Key::new("outside-copy");
+
 /// The copy that runs: the note whose links it is for.
 pub struct OutsideCopy {
     rel: PathBuf,
     job: Receiver<Result<Copied, String>>,
+    // held while the copy runs: listed with the other busy tasks, and gone with the vault's state (VAULT-037)
+    _task: Task,
 }
 
 impl ShaleApp {
     /// Copy the files of the outside links of the note `rel` into the vault: of the one link with
     /// this target (`only`), or of all of them. One copy runs at a time.
     pub fn copy_outside(&mut self, rel: &Path, only: Option<String>) {
-        if self.outside_copy.is_some() {
+        if self.busy.is_running(&OUTSIDE_COPY) {
             self.toast("Files are being copied into the vault already");
             return;
         }
@@ -46,19 +52,20 @@ impl ShaleApp {
         }
         let (root, libraries, date) = (v.root.clone(), v.libraries().to_vec(), crate::media::local_date());
         let ctx = self.ctx.clone();
-        let count = targets.len();
+        let Some(mut task) = self.busy.begin(OUTSIDE_COPY, "Copying media into the vault…") else { return };
+        let cancel = task.cancellable();
         self.outside_copy = Some(OutsideCopy {
             rel: rel.to_path_buf(),
             job: crate::jobs::spawn(
-                move || copy_in::copy_into(&root, &libraries, &targets, date),
+                move || copy_in::copy_into(&root, &libraries, &targets, date, &cancel),
                 move || {
                     if let Some(c) = ctx {
                         c.request_repaint();
                     }
                 },
             ),
+            _task: task,
         });
-        self.toast(format!("Copying {count} {} into the vault…", if count == 1 { "file" } else { "files" }));
     }
 
     /// Every frame: collect a finished copy.

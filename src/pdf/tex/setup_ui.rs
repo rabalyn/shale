@@ -106,10 +106,10 @@ fn tex_step(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig, acts: &mut Vec<Act>
     }
     match st.tex_fact(cfg) {
         TexFact::Looking => {
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label("Looking for TeX on this computer…");
-            });
+            // (no probe task: the state of a page whose own job keeps it from looking again)
+            if !crate::busy::ui::status(ui, &st.busy, &super::settings_ui::TEX_PROBE) {
+                ui.label(super::settings_ui::TEX_PROBE_TEXT);
+            }
         }
         TexFact::Found(what) => {
             done_line(ui, format!("Found: {what} ✓"));

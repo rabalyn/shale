@@ -16,7 +16,7 @@ use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, TryRecvError};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 mod demo;
 pub mod ui;
@@ -80,6 +80,8 @@ struct Entry {
     label: String,
     started: Instant,
     cancel: Option<Cancel>,
+    /// the indicator lists the task only when it has run this long (JOB-022)
+    listed_after: Duration,
 }
 
 #[derive(Default)]
@@ -100,13 +102,21 @@ impl Busy {
     /// Register a task. `None`: a task with this key already runs, and the action must not start
     /// a second time. Whoever holds the [`Task`] keeps it listed.
     pub fn begin(&self, key: Key, label: impl Into<String>) -> Option<Task> {
+        self.begin_listed_after(key, label, Duration::ZERO)
+    }
+
+    /// Like [`Busy::begin`] for work that is usually quick and happens on its own (the rescan of
+    /// the vault folder, the learning of tag words): the indicator lists the task only when it has
+    /// run for `listed_after` (JOB-022). It counts as running at once: the key is taken, and
+    /// [`Busy::info`] finds it.
+    pub fn begin_listed_after(&self, key: Key, label: impl Into<String>, listed_after: Duration) -> Option<Task> {
         let mut tasks = self.tasks();
         if tasks.list.iter().any(|e| e.key == key) {
             return None;
         }
         let id = tasks.next;
         tasks.next += 1;
-        tasks.list.push(Entry { id, key, label: label.into(), started: Instant::now(), cancel: None });
+        tasks.list.push(Entry { id, key, label: label.into(), started: Instant::now(), cancel: None, listed_after });
         Some(Task { busy: self.clone(), id, cancel: None })
     }
 
@@ -132,9 +142,22 @@ impl Busy {
         self.tasks().list.iter().any(|e| e.key == *key)
     }
 
-    /// Every running task, the oldest first.
+    /// Every running task that is to be listed, the oldest first.
+    #[cfg(test)]
     pub fn list(&self) -> Vec<TaskInfo> {
-        self.tasks().list.iter().map(Entry::info).collect()
+        self.list_at(Instant::now())
+    }
+
+    /// [`Busy::list`] at the time `now`: a task that waits to be listed (JOB-022) is left out
+    /// until it has run for its time.
+    pub fn list_at(&self, now: Instant) -> Vec<TaskInfo> {
+        self.tasks().list.iter().filter(|e| e.listed(now)).map(Entry::info).collect()
+    }
+
+    /// How long until the next task that waits to be listed comes into the list at `now`: the
+    /// indicator repaints then.
+    pub fn next_listing(&self, now: Instant) -> Option<Duration> {
+        self.tasks().list.iter().filter(|e| !e.listed(now)).map(|e| (e.started + e.listed_after).saturating_duration_since(now)).min()
     }
 
     /// Ask the task to stop; true when it can be stopped. It stays listed until its job has ended.
@@ -147,6 +170,10 @@ impl Busy {
 }
 
 impl Entry {
+    fn listed(&self, now: Instant) -> bool {
+        now.saturating_duration_since(self.started) >= self.listed_after
+    }
+
     fn info(&self) -> TaskInfo {
         TaskInfo { id: self.id, label: self.label.clone(), started: self.started, cancellable: self.cancel.is_some(), cancelling: self.cancel.as_ref().is_some_and(Cancel::is_cancelled) }
     }

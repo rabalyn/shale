@@ -789,3 +789,56 @@ fn a_click_on_an_outside_link_does_not_stop_the_window_while_the_file_is_handed_
     fx.until("the file is opened", |a| a.outside_opens.is_empty());
     assert!(opened.lock().unwrap().iter().any(|p| p.ends_with("tone.wav")), "{:?}", opened.lock().unwrap());
 }
+
+// spec: MEDIA-017, JOB-023, JOB-005
+#[test]
+fn opening_an_outside_file_is_a_task_per_file_listed_while_it_is_handed_over_and_the_same_file_twice_is_refused() {
+    let o = Outside::new("open-task");
+    o.fixture("tone.wav", "tone.wav").fixture("tone.wav", "more.wav");
+    let gate = Arc::new(crate::media::look::tests::Gate::default());
+    let opened = Arc::new(Mutex::new(Vec::new()));
+    let (g, sink) = (gate.clone(), opened.clone());
+    let _guard = crate::opener::install_test_browser(Box::new(move |t| {
+        g.pass();
+        sink.lock().unwrap().push(t.to_string());
+    }));
+    let mut fx = window("o-open-task", "[[@Media/tone.wav]]\n\n[[@Media/more.wav]]\n", o.library());
+    fx.reading(true);
+    let labels = |fx: &Fx| fx.app.busy.list().iter().map(|t| t.label.clone()).collect::<Vec<_>>();
+    let click = |fx: &mut Fx, text: &str| {
+        fx.hl.frames(&mut fx.app, 2);
+        let at = fx.hl.text.iter().find(|(t, _)| t.contains(text)).map(|(_, p)| *p).unwrap_or_else(|| panic!("{text:?} is not on the screen: {:?}", fx.hl.text));
+        fx.hl.click(&mut fx.app, at + egui::vec2(6.0, 6.0), PointerButton::Primary);
+    };
+    click(&mut fx, "@Media/tone.wav");
+    assert_eq!(labels(&fx), ["Opening tone.wav…"], "the task names the file");
+    assert!(fx.app.busy.list().iter().all(|t| !t.cancellable), "handing a file to a program cannot be taken back, so there is no Cancel");
+    // the same file again: nothing starts; another file runs next to it
+    click(&mut fx, "@Media/tone.wav");
+    assert_eq!(fx.app.outside_opens.len(), 1, "a second click on the same file does nothing while it opens");
+    click(&mut fx, "@Media/more.wav");
+    assert_eq!(labels(&fx), ["Opening tone.wav…", "Opening more.wav…"]);
+    gate.open();
+    fx.until("both are handed over", |a| a.outside_opens.is_empty());
+    assert!(fx.app.busy.list().is_empty(), "the tasks are gone with the jobs");
+}
+
+// spec: MEDIA-021, JOB-023, JOB-006
+#[test]
+fn the_copy_into_the_vault_is_a_task_that_cancel_reaches_and_that_ends_with_the_copy() {
+    use crate::app::OUTSIDE_COPY;
+    let o = Outside::new("copy-task");
+    o.picture("a.png");
+    let mut fx = window("o-copy-task", "![[@Media/a.png]]\n", o.library());
+    let rel = std::path::Path::new("Player.md");
+    fx.app.copy_outside(rel, None);
+    let info = fx.app.busy.info(&OUTSIDE_COPY).expect("the copy is a task");
+    assert_eq!((info.label.as_str(), info.cancellable), ("Copying media into the vault…", true));
+    assert!(fx.app.busy.cancel(info.id), "Cancel reaches the copy");
+    copied(&mut fx);
+    assert!(!fx.app.busy.is_running(&OUTSIDE_COPY), "the task ends with the copy");
+    // stopped before the file or done before Cancel arrived: either way the person is told and the note is consistent
+    assert!(toast_with(&fx, "into the vault"), "{:?}", fx.app.toasts);
+    let text = note_text(&fx);
+    assert!(text == "![[@Media/a.png]]\n" || text.starts_with("![[z_media/"), "{text}");
+}

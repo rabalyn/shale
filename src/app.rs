@@ -182,6 +182,7 @@ mod history_ui;
 mod link_preview;
 mod mail;
 mod outside_copy;
+pub(crate) use outside_copy::OUTSIDE_COPY;
 mod outside_open;
 pub mod panes;
 mod rescan;
@@ -769,6 +770,9 @@ impl ShaleApp {
         };
         // the mail view's check of the index is a task of the window's registry (JOB-015)
         app.mail.busy = app.busy.clone();
+        app.usage.busy = app.busy.clone();
+        app.tex.busy = app.busy.clone();
+        app.word.busy = app.busy.clone();
         // the audio attachments play in the app's one player (MAIL-240, MEDIA-007)
         app.mail.media = app.media.clone();
         if persist {
