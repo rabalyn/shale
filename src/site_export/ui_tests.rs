@@ -169,8 +169,14 @@ fn site_064_an_address_with_a_password_is_refused_on_the_page_and_publish_does_n
 fn site_065_the_button_publishes_in_the_background_and_the_page_says_what_was_published_and_who_published_last() {
     let mut t = T::new("publish", ON, &[("A.md", "a note ![[@Gone/x.png]] and [[B]] and [[Missing]]\n"), ("B.md", "b\n")]);
     assert!(t.shows("Not looked at yet."));
+    // git waits until the test lets it go, so "it runs" is checked while it surely does (a quick publish
+    // on a loaded machine can be over before the test looks, #659)
+    let mut gated = hermetic(false);
+    let gate = crate::gitsync::hold_git(&mut gated, &t.f.root.join("gate"));
+    t.app.sync.git = gated;
     t.click("Publish");
     assert!(t.app.busy.is_running(&PUBLISH), "a task of the registry");
+    std::fs::write(gate, "go").unwrap();
     t.wait();
     assert!(t.shows("Published at "), "{:?}", t.hl.text);
     assert!(t.shows("2 notes, 0 media files and 1 link; 2 links became plain text."));
