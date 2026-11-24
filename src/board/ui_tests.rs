@@ -1140,3 +1140,189 @@ fn board_029_the_preset_adds_my_dependency_chain_lane() {
     // A, Elsewhere and Fin come first; B is due after C; E and G have no due day
     assert_eq!(w.lane("My dependency chain"), strs(&["A", "Elsewhere", "Fin", "C", "B", "E", "G", "D"]));
 }
+
+// Keys and auto-scroll while dragging (BOARD-033, BOARD-034)
+
+/// Which lane shows the card titled `title`, and its place there.
+fn place_of(w: &W, title: &str) -> Option<(usize, usize)> {
+    w.app.boards.shown.lanes().iter().enumerate().find_map(|(l, lane)| lane.cards.iter().position(|c| c.title == title).map(|c| (l, c)))
+}
+
+const ALT_SHIFT: Modifiers = Modifiers { alt: true, shift: true, ..Modifiers::NONE };
+
+/// The flow board with Beta selected with the keys: Down selects Alpha, Right goes to Doing, where Beta is.
+fn flow_with_beta_selected(tag: &str) -> W {
+    let mut w = flow(tag);
+    w.key(Key::ArrowDown, Modifiers::NONE, "");
+    w.key(Key::ArrowRight, Modifiers::NONE, "");
+    assert_eq!(w.app.boards.selected.as_deref(), Some(Path::new("Beta.md")));
+    w
+}
+
+// spec: BOARD-033
+#[test]
+fn board_033_the_keys_move_the_selected_card_to_the_next_and_previous_lane_like_a_drop() {
+    assert_eq!(Action::BoardCardNextLane.def().id, "board.card_next_lane");
+    assert_eq!(Action::BoardCardPrevLane.def().id, "board.card_prev_lane");
+    let mut w = flow_with_beta_selected("key-move");
+    assert_eq!(w.app.keymap.display(Action::BoardCardNextLane), "Alt+Shift+→");
+    // next: Doing to Done, which says status: done
+    w.key(Key::ArrowRight, ALT_SHIFT, "");
+    assert!(w.file("Beta.md").contains("status: done"), "{}", w.file("Beta.md"));
+    assert_eq!(place_of(&w, "Beta"), Some((2, 0)));
+    assert_eq!(w.app.boards.selected.as_deref(), Some(Path::new("Beta.md")), "the card stays selected");
+    assert_eq!(w.board_text(), FLOW, "a lane with a property pins nothing");
+    // next again: Later, whose drop: line says status: later
+    w.key(Key::ArrowRight, ALT_SHIFT, "");
+    assert!(w.file("Beta.md").contains("status: later"));
+    // next: Manual has no property: the card is pinned after the pinned cards, its note stays
+    let note = w.file("Beta.md");
+    w.key(Key::ArrowRight, ALT_SHIFT, "");
+    assert_eq!(w.file("Beta.md"), note);
+    assert!(w.board_text().ends_with("- [[Pinned One]]\n- [[Sketch.excalidraw]]\n- [[Beta]]\n"), "{}", w.board_text());
+    assert_eq!(place_of(&w, "Beta"), Some((4, 2)));
+    // the last lane: nothing more
+    let text = w.board_text();
+    w.key(Key::ArrowRight, ALT_SHIFT, "");
+    assert_eq!((w.board_text(), w.file("Beta.md")), (text, note));
+    // previous: back to Later, unpinned in Manual
+    w.key(Key::ArrowLeft, ALT_SHIFT, "");
+    assert_eq!(w.board_text(), FLOW);
+    assert_eq!(place_of(&w, "Beta"), Some((3, 0)));
+    assert_eq!(w.app.boards.selected.as_deref(), Some(Path::new("Beta.md")));
+}
+
+// spec: BOARD-033
+#[test]
+fn board_033_the_first_lane_has_no_previous_one_and_without_a_selection_nothing_moves() {
+    let mut w = flow("key-edges");
+    w.key(Key::ArrowRight, ALT_SHIFT, "");
+    w.key(Key::ArrowLeft, ALT_SHIFT, "");
+    assert!(w.app.boards.selected.is_none());
+    assert_eq!((w.board_text(), w.file("Alpha.md"), w.file("Beta.md")), (FLOW.to_string(), FLOW_FILES[1].1.to_string(), FLOW_FILES[2].1.to_string()), "no selection: nothing moves");
+    w.key(Key::ArrowDown, Modifiers::NONE, "");
+    assert_eq!(w.app.boards.selected.as_deref(), Some(Path::new("Alpha.md")));
+    w.key(Key::ArrowLeft, ALT_SHIFT, "");
+    assert_eq!((w.file("Alpha.md"), place_of(&w, "Alpha")), (FLOW_FILES[1].1.to_string(), Some((0, 0))), "Alpha is in the first lane");
+}
+
+// spec: BOARD-033
+#[test]
+fn board_033_the_keys_do_nothing_while_a_text_field_or_the_peek_has_the_keyboard() {
+    let mut w = flow_with_beta_selected("key-focus");
+    w.app.boards.view.rename(1, "Doing");
+    w.settle();
+    w.key(Key::ArrowRight, ALT_SHIFT, "");
+    assert!(w.file("Beta.md").contains("status: doing"), "the lane name field has the keyboard");
+    w.key(Key::Escape, Modifiers::NONE, "");
+    w.settle();
+    w.click("Beta");
+    assert!(w.app.boards.peek.is_some(), "a click opens the peek");
+    w.click("---\nstatus: doing\nmodified: 2020-01-01T10:00:00+00:00\n---\nBeta body\n");
+    assert!(w.hl.ctx().memory(|m| m.focused().is_some()), "a click into the peek's editor gives it the keyboard");
+    w.key(Key::ArrowRight, ALT_SHIFT, "");
+    assert!(w.file("Beta.md").contains("status: doing"), "the editor of the peek has the keyboard");
+    assert_eq!(place_of(&w, "Beta"), Some((1, 0)));
+}
+
+// spec: BOARD-033
+#[test]
+fn board_033_the_keys_can_be_changed() {
+    let mut w = flow_with_beta_selected("key-rebind");
+    w.app.keymap.set(Action::BoardCardNextLane, Binding::parse("Alt+Shift+Down").unwrap()).unwrap();
+    w.key(Key::ArrowRight, ALT_SHIFT, "");
+    assert!(w.file("Beta.md").contains("status: doing"), "the old key does nothing now");
+    assert_eq!(w.app.boards.selected.as_deref(), Some(Path::new("Beta.md")), "an unbound Alt+Shift+arrow is no selection move");
+    w.key(Key::ArrowDown, ALT_SHIFT, "");
+    assert!(w.file("Beta.md").contains("status: done"));
+}
+
+/// A board of one manual lane of 30 cards, in a window that shows about half of them.
+fn long_lane(tag: &str) -> W {
+    let mut board = String::from("---\ntype: board\n---\n# Long\n\n## Long\n");
+    let mut files = vec![];
+    for n in 0..30 {
+        board.push_str(&format!("- [[C{n:02}]]\n"));
+        files.push((format!("C{n:02}.md"), format!("card {n}\n")));
+    }
+    files.push(("Board.md".to_string(), board));
+    let refs: Vec<(&str, &str)> = files.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+    let mut w = W::new(tag, &refs);
+    w.hl.set_size(vec2(1500.0, 600.0));
+    w.settle();
+    w
+}
+
+// spec: BOARD-034
+#[test]
+fn board_034_a_card_held_at_the_bottom_of_a_long_lane_scrolls_it_and_drops_below_the_visible_cards() {
+    let mut w = long_lane("auto-vertical");
+    assert!(!w.painted("C29") || w.at("C29").y > 576.0, "the last card is out of view");
+    let from = w.at("C00");
+    let to = Pos2::new(from.x, 555.0);
+    w.drag("C00", to);
+    w.hl.frames(&mut w.app, 60);
+    let offset = w.app.boards.view.lane_offsets[0];
+    assert!(offset > 300.0, "the lane scrolled down while the card was held at its bottom: {offset}");
+    w.drop_at(to);
+    let at = place_of(&w, "C00").expect("still a card").1;
+    assert!(at > 15, "dropped far below the cards that were visible: {at}");
+}
+
+// spec: BOARD-034
+#[test]
+fn board_034_a_card_held_at_the_top_scrolls_back_up_and_one_in_the_middle_scrolls_nothing() {
+    let mut w = long_lane("auto-up");
+    let from = w.at("C00");
+    let low = Pos2::new(from.x, 555.0);
+    w.drag("C00", low);
+    w.hl.frames(&mut w.app, 60);
+    let down = w.app.boards.view.lane_offsets[0];
+    assert!(down > 300.0);
+    let mid = Pos2::new(from.x, 300.0);
+    w.hl.frame(&mut w.app, vec![Event::PointerMoved(mid)]);
+    w.hl.frames(&mut w.app, 20);
+    assert_eq!(w.app.boards.view.lane_offsets[0], down, "away from the edges nothing scrolls");
+    let top = Pos2::new(from.x, w.at("Long").y + 30.0);
+    w.hl.frame(&mut w.app, vec![Event::PointerMoved(top)]);
+    w.hl.frames(&mut w.app, 80);
+    assert!(w.app.boards.view.lane_offsets[0] < down - 200.0, "scrolled up: {}", w.app.boards.view.lane_offsets[0]);
+    w.drop_at(top);
+    assert!(!w.app.boards.view.dragging());
+}
+
+// spec: BOARD-034
+#[test]
+fn board_034_a_card_held_at_the_side_of_the_board_scrolls_it_and_drops_on_a_lane_that_was_out_of_view() {
+    let mut board = String::from("---\ntype: board\n---\n# Wide\n\n## L0\nquery: #a\n");
+    for n in 1..12 {
+        board.push_str(&format!("\n## L{n}\nquery: status:s{n}\n"));
+    }
+    let mut w = W::new("auto-horizontal", &[("Board.md", &board), ("Card.md", "#a\n")]);
+    w.hl.set_size(vec2(1500.0, 600.0));
+    w.settle();
+    assert!(w.app.boards.view.board_offset == 0.0 && !w.painted("L11"), "the last lane is out of view");
+    let from = w.at("Card");
+    let to = Pos2::new(1205.0, from.y);
+    w.drag("Card", to);
+    w.hl.frames(&mut w.app, 80);
+    assert!(w.app.boards.view.board_offset > 400.0, "the board scrolled right: {}", w.app.boards.view.board_offset);
+    // move in from the edge, where the board stops scrolling
+    let to = Pos2::new(1100.0, from.y);
+    w.hl.frame(&mut w.app, vec![Event::PointerMoved(to)]);
+    let (lane, _) = w.app.boards.view.over.expect("over a lane");
+    assert!(lane > 4, "the pointer is over a lane that was out of view: {lane}");
+    w.drop_at(to);
+    assert!(w.file("Card.md").contains(&format!("status: s{lane}")), "{}", w.file("Card.md"));
+}
+
+// spec: BOARD-033
+#[test]
+fn board_033_arrows_with_a_modifier_do_not_move_the_selection_and_bare_arrows_do() {
+    let mut w = flow_with_beta_selected("key-modifiers");
+    w.key(Key::ArrowRight, Modifiers::ALT, "");
+    w.key(Key::ArrowDown, Modifiers::ALT, "");
+    assert_eq!(w.app.boards.selected.as_deref(), Some(Path::new("Beta.md")), "Alt+arrows are back / forward, not selection");
+    w.key(Key::ArrowDown, Modifiers::NONE, "");
+    assert_eq!(w.app.boards.selected.as_deref(), Some(Path::new("Gamma.md")), "a bare arrow still selects");
+}

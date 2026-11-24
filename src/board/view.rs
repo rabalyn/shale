@@ -26,6 +26,11 @@ const THUMB_HEIGHT: f32 = 90.0;
 /// How many tags a card shows before "+n".
 const MAX_TAGS: usize = 3;
 
+/// How close to the edge of a lane or of the board (points) a dragged card makes it scroll (BOARD-034).
+const EDGE: f32 = 56.0;
+/// How fast the scroll is at the very edge (points per second), growing from zero at `EDGE` away from it.
+const EDGE_SPEED: f32 = 900.0;
+
 /// What the user asked for in this frame.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Act {
@@ -200,6 +205,33 @@ pub struct State {
     places: Vec<Place>,
     /// the arrows drawn in this frame (BOARD-025)
     pub(crate) arrows: Vec<Arrow>,
+    /// the scroll of the lanes and of the board as they were drawn, to move them on while a card is dragged (BOARD-034)
+    pub(crate) lane_offsets: Vec<f32>,
+    pub(crate) board_offset: f32,
+    /// the part of the window the lanes scroll in
+    board_view: Option<Rect>,
+    /// how far the drag scrolls in the next frame
+    auto: AutoScroll,
+}
+
+/// The scroll a dragged card at the edge asks for (BOARD-034).
+#[derive(Default, Clone, Copy, Debug, PartialEq)]
+struct AutoScroll {
+    /// the board to the right (negative: left), points
+    board: f32,
+    /// a lane and how far it scrolls down (negative: up), points
+    lane: Option<(usize, f32)>,
+}
+
+/// How far into the edge zone of the span `lo..hi` the position `at` is: from -1 (at or beyond the low edge)
+/// to 1 (at or beyond the high edge), growing towards the edge, zero further than `EDGE` from both.
+fn edge_pull(at: f32, lo: f32, hi: f32) -> f32 {
+    let ramp = |d: f32| ((EDGE - d) / EDGE).clamp(0.0, 1.0);
+    if at - lo < hi - at {
+        -ramp(at - lo)
+    } else {
+        ramp(hi - at)
+    }
 }
 
 impl State {
@@ -272,7 +304,12 @@ pub fn show(ui: &mut Ui, st: &mut State, data: &Data, env: &mut Env) -> Vec<Act>
     }
     let height = ui.available_height();
     st.places.clear();
-    egui::ScrollArea::horizontal().id_salt("board-lanes").auto_shrink([false, false]).show(ui, |ui| {
+    st.lane_offsets.resize(data.lanes.len(), 0.0);
+    let mut area = egui::ScrollArea::horizontal().id_salt("board-lanes").auto_shrink([false, false]);
+    if st.auto.board != 0.0 {
+        area = area.horizontal_scroll_offset((st.board_offset + st.auto.board).max(0.0));
+    }
+    let scrolled = area.show(ui, |ui| {
         ui.horizontal_top(|ui| {
             for (i, lane) in data.lanes.iter().enumerate() {
                 ui.allocate_ui_with_layout(Vec2::new(LANE_WIDTH, height - 14.0), Layout::top_down(Align::Min), |ui| lane_ui(ui, i, lane, st, data, env, &mut acts));
@@ -280,6 +317,9 @@ pub fn show(ui: &mut Ui, st: &mut State, data: &Data, env: &mut Env) -> Vec<Act>
             }
         });
     });
+    st.board_offset = scrolled.state.clamped_offset().x;
+    st.board_view = Some(scrolled.inner_rect);
+    st.auto = AutoScroll::default();
     st.arrows = arrows(&st.places, data);
     for a in &st.arrows {
         paint_arrow(ui, *a);
@@ -287,6 +327,22 @@ pub fn show(ui: &mut Ui, st: &mut State, data: &Data, env: &mut Env) -> Vec<Act>
     drag_end(ui, st, data, &mut acts);
     confirm_delete(ui.ctx(), st, &mut acts);
     acts
+}
+
+/// The scroll of the next frame for a card dragged to `pos` (BOARD-034): the lane under it scrolls up or down near
+/// the top or bottom of its cards, the board left or right near the sides of the window, the faster the closer.
+fn auto_scroll(st: &State, pos: Pos2, dt: f32) -> AutoScroll {
+    let step = EDGE_SPEED * dt.clamp(0.0, 0.1);
+    let mut auto = AutoScroll::default();
+    let Some(view) = st.board_view else { return auto };
+    if pos.y >= view.top() && pos.y <= view.bottom() {
+        auto.board = edge_pull(pos.x, view.left(), view.right()) * step;
+        if let Some((i, p)) = st.places.iter().enumerate().find(|(_, p)| p.lane.contains(pos)) {
+            let dy = edge_pull(pos.y, p.body.top(), p.body.bottom()) * step;
+            auto.lane = (dy != 0.0).then_some((i, dy));
+        }
+    }
+    auto
 }
 
 /// While a card is dragged: the lane and the place it would land in are marked and a ghost of the card
@@ -304,6 +360,10 @@ fn drag_end(ui: &Ui, st: &mut State, data: &Data, acts: &mut Vec<Act>) {
     }
     let pos = ui.input(|i| i.pointer.interact_pos());
     st.over = pos.and_then(|p| target(&st.places, p));
+    st.auto = pos.map_or_else(AutoScroll::default, |p| auto_scroll(st, p, ui.input(|i| i.stable_dt)));
+    if st.auto != AutoScroll::default() {
+        ui.ctx().request_repaint();
+    }
     let ctx = ui.ctx();
     ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
     let pal = theme::palette();
@@ -420,7 +480,11 @@ fn strip(ui: &mut Ui, data: &Data, acts: &mut Vec<Act>) {
 
 /// The arrow keys move the selection between the cards, Enter opens the selected one (BOARD-014).
 fn keys(ui: &Ui, st: &mut State, data: &Data, acts: &mut Vec<Act>) {
-    let (down, up, left, right, enter) = ui.input(|i| (i.key_pressed(Key::ArrowDown), i.key_pressed(Key::ArrowUp), i.key_pressed(Key::ArrowLeft), i.key_pressed(Key::ArrowRight), i.key_pressed(Key::Enter)));
+    // only the bare keys: Alt+arrows are back / forward and the keys of BOARD-033, which are no selection moves
+    let (down, up, left, right, enter) = ui.input(|i| {
+        let bare = |k| i.events.iter().any(|e| matches!(e, egui::Event::Key { key, pressed: true, modifiers, .. } if *key == k && modifiers.is_none()));
+        (bare(Key::ArrowDown), bare(Key::ArrowUp), bare(Key::ArrowLeft), bare(Key::ArrowRight), i.key_pressed(Key::Enter))
+    });
     let at = data.selected.and_then(|s| data.lanes.iter().enumerate().find_map(|(l, lane)| lane.cards.iter().position(|c| c.rel == s).map(|c| (l, c))));
     if enter {
         if let Some(rel) = data.selected {
@@ -458,7 +522,11 @@ fn lane_ui(ui: &mut Ui, i: usize, lane: &LaneView, st: &mut State, data: &Data, 
             theme::problem(ui, e.clone());
         }
         ui.add_space(4.0);
-        let scroll = egui::ScrollArea::vertical().id_salt(("board-lane", i)).auto_shrink([false, false]).show(ui, |ui| {
+        let mut area = egui::ScrollArea::vertical().id_salt(("board-lane", i)).auto_shrink([false, false]);
+        if let Some((_, dy)) = st.auto.lane.filter(|(n, _)| *n == i) {
+            area = area.vertical_scroll_offset((st.lane_offsets[i] + dy).max(0.0));
+        }
+        let scroll = area.show(ui, |ui| {
             ui.set_width(ui.available_width());
             if lane.waiting && lane.cards.is_empty() {
                 theme::hint(ui, "Searching…");
@@ -474,6 +542,7 @@ fn lane_ui(ui: &mut Ui, i: usize, lane: &LaneView, st: &mut State, data: &Data, 
             }
         });
         body = scroll.inner_rect;
+        st.lane_offsets[i] = scroll.state.clamped_offset().y;
     });
     st.places.push(Place { lane: out.response.rect, body, cards });
 }
@@ -716,6 +785,20 @@ mod tests {
 
     fn rect(x: f32, y: f32, w: f32, h: f32) -> Rect {
         Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, h))
+    }
+
+    // spec: BOARD-034
+    #[test]
+    fn board_034_the_pull_grows_towards_the_nearer_edge_and_is_zero_away_from_both() {
+        let (lo, hi) = (100.0, 700.0);
+        assert_eq!(edge_pull(400.0, lo, hi), 0.0);
+        assert_eq!(edge_pull(lo + EDGE, lo, hi), 0.0);
+        assert_eq!(edge_pull(hi - EDGE, lo, hi), 0.0);
+        let (near, nearer) = (edge_pull(hi - EDGE / 2.0, lo, hi), edge_pull(hi - 5.0, lo, hi));
+        assert!(0.0 < near && near < nearer && nearer < 1.0, "{near} {nearer}");
+        assert_eq!(edge_pull(hi + 30.0, lo, hi), 1.0, "beyond the edge: full speed");
+        assert_eq!(edge_pull(lo + 5.0, lo, hi), -nearer, "the low edge pulls the other way");
+        assert_eq!(edge_pull(lo - 30.0, lo, hi), -1.0);
     }
 
     // spec: BOARD-025

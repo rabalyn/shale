@@ -111,6 +111,15 @@ nothing.
   in that earlier lane. The card stays selected and is scrolled into view, so you can see where it went.
 - When the card's note changed since the board drew it, nothing is moved and a message says so.
 
+**With the keys**: with a card selected, **Alt+Shift+→** moves it to the next lane and **Alt+Shift+←** to the previous
+one, as if you had dropped it below the pinned cards of that lane. The card stays selected and in view. At the first or
+last lane nothing happens, and the keys do nothing while a text field or the peek's editor has the keyboard. Change
+them in Settings → Keybindings (Main views).
+
+**Long lanes and wide boards**: while you drag a card, hold it near the top or bottom edge of a lane and the lane
+scrolls, near the left or right edge of the board and the board scrolls, faster the closer you get, so you can drop the
+card further away.
+
 # Dependencies
 
 A note says what it waits for in its front matter: `blocked-by: [[Foundation]], [[Permit]]`, next to `due:` and

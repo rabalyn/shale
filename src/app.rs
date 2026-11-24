@@ -2829,6 +2829,8 @@ impl ShaleApp {
                 Some(KeyAction::NormalSearchAll) => self.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::Everything))),
                 Some(KeyAction::NormalToggleTask) => self.toggle_task_key(ui.ctx(), hovered_task),
                 Some(KeyAction::MainBoards) => self.show_view(View::Boards, false),
+                Some(KeyAction::BoardCardNextLane) => self.board_move_card(ui.ctx(), 1),
+                Some(KeyAction::BoardCardPrevLane) => self.board_move_card(ui.ctx(), -1),
                 Some(KeyAction::NormalLinkPreview) => self.link_preview_key(ui.ctx()),
                 _ => {}
             }
