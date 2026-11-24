@@ -92,7 +92,7 @@ it is found by name, path and links only.
 - The **peek** is a small window next to the card, the size of the link preview (the setting "Link preview size", which dragging its edges also changes):
   a real editor of the note, which saves as the editor does. Drag its title to move it, its edges to resize it. The
   **Priority** control sets `priority:` in the front matter; it changes the front matter only, so `modified:` stays.
-  **Open** shows the note in a tab, **×** or **Esc** closes the peek. With vim-style editing on, Esc first leaves insert
+  **Open** shows the note in a tab, **×** or **Esc** closes the peek, and so does a **click anywhere outside it** (what you typed is saved). A click on another card closes it and opens that card's peek in one go. Dragging a card does not close it, and neither does a click in its menu. The lane settings stay open when you click outside them (they close with ✕ or Esc). With vim-style editing on, Esc first leaves insert
   mode, and **Space Space** ticks the task on the cursor's line.
 
 ![[board-peek.png]]

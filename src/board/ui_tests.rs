@@ -387,6 +387,86 @@ fn board_013_the_peek_is_an_editor_that_saves_with_the_note() {
     assert!(!w.app.notes[rel].dirty);
 }
 
+// spec: BOARD-012
+#[test]
+fn board_012_a_click_outside_the_peek_closes_it_and_saves_what_was_typed() {
+    let mut w = W::board();
+    w.click("Alpha");
+    let r = w.app.boards.peek.as_ref().unwrap().rect.unwrap();
+    w.click_at(Pos2::new(r.min.x + 60.0, r.min.y + 70.0));
+    w.type_text("EDITED ");
+    // on a lane heading: not on a card
+    w.click("Doing");
+    assert!(w.app.boards.peek.is_none(), "a click on the top bar closes the peek");
+    assert!(w.file("Alpha.md").contains("EDITED"), "what was typed is saved: {}", w.file("Alpha.md"));
+    assert!(!w.app.notes[Path::new("Alpha.md")].dirty);
+}
+
+// spec: BOARD-012
+#[test]
+fn board_012_a_click_on_a_lane_heading_or_the_empty_board_closes_the_peek_and_one_click_on_a_card_switches_it() {
+    let mut w = flow("peek-outside");
+    w.click("Beta");
+    assert!(w.app.boards.peek.is_some());
+    w.click("Doing");
+    assert!(w.app.boards.peek.is_none(), "a click on a lane heading closes it");
+    w.click("Beta");
+    assert!(w.app.boards.peek.is_some());
+    // (the peek is right of its card: a card of the same lane is not under it)
+    w.click("Gamma");
+    assert_eq!(w.app.boards.peek.as_ref().map(|p| p.rel.clone()), Some(PathBuf::from("Gamma.md")), "one click on another card switches");
+    assert_eq!(w.app.boards.selected.as_deref(), Some(Path::new("Gamma.md")));
+    let r = w.app.boards.peek.as_ref().unwrap().rect.unwrap();
+    let empty = Pos2::new(2150.0, 800.0);
+    assert!(!r.contains(empty));
+    w.click_at(empty);
+    assert!(w.app.boards.peek.is_none(), "a click on the empty board closes it");
+}
+
+// spec: BOARD-012
+#[test]
+fn board_012_a_click_in_the_peek_its_menu_and_its_title_row_keeps_it_and_x_closes_it() {
+    let mut w = W::board();
+    w.click("Beta");
+    let r = w.app.boards.peek.as_ref().unwrap().rect.unwrap();
+    w.click_at(Pos2::new(r.min.x + 60.0, r.min.y + 70.0));
+    assert!(w.app.boards.peek.is_some(), "a click in the editor");
+    w.click("Priority: high");
+    assert!(w.app.boards.peek.is_some(), "the menu opens");
+    w.click("highest");
+    assert!(w.app.boards.peek.is_some(), "a choice in the menu keeps it (popup layers are not outside)");
+    assert!(w.file("Beta.md").contains("priority: highest"));
+    w.click("×");
+    assert!(w.app.boards.peek.is_none(), "the close button still closes it");
+}
+
+// spec: BOARD-012
+#[test]
+fn board_012_the_start_of_a_card_drag_does_not_close_the_peek() {
+    let mut w = flow("peek-drag");
+    w.click("Gamma");
+    assert!(w.app.boards.peek.is_some());
+    // (to the lane on the left: the peek is right of its card)
+    let to = w.lane_top("Todo");
+    w.drag("Beta", to);
+    assert!(w.app.boards.view.dragging(), "the card is held");
+    assert!(w.app.boards.peek.is_some(), "the peek stays while a card is dragged");
+    w.drop_at(to);
+    assert!(w.board_text().contains("- [[Beta]]"), "the drop worked: {}", w.board_text());
+}
+
+// spec: BOARD-012
+#[test]
+fn board_012_the_lane_settings_stay_open_when_a_click_outside_closes_the_peek() {
+    let mut w = W::board();
+    w.click("Alpha");
+    w.double_click("Doing");
+    assert!(w.painted("Lane “Doing”"));
+    w.click_at(Pos2::new(900.0, 700.0));
+    assert!(w.painted("Lane “Doing”"), "the settings stay (#632)");
+    assert!(w.app.boards.peek.is_none(), "the peek closed");
+}
+
 // spec: BOARD-013
 #[test]
 fn board_013_the_priority_control_writes_the_front_matter_and_not_modified() {
