@@ -117,7 +117,35 @@ pub fn today() -> i64 {
 /// The one clock of the app (UTC seconds): the real time, except in screenshot mode with
 /// `SHALE_FAKE_NOW` set (see `freeze`), so that pictures do not change from day to day.
 pub fn now() -> i64 {
+    #[cfg(test)]
+    if let Some(t) = PINNED.with(std::cell::Cell::get) {
+        return t;
+    }
     FROZEN.get().copied().unwrap_or_else(real_now)
+}
+
+#[cfg(test)]
+thread_local! {
+    static PINNED: std::cell::Cell<Option<i64>> = const { std::cell::Cell::new(None) };
+}
+
+/// Tests only: `now()` answers `secs` on this thread until the guard is dropped, so a test that
+/// builds an expectation at one moment and saves (and stamps `modified:`, `DTSTAMP:`) at another
+/// cannot race a second boundary (#626).
+#[cfg(test)]
+pub(crate) fn pin_now(secs: i64) -> PinGuard {
+    PinGuard(PINNED.with(|p| p.replace(Some(secs))))
+}
+
+/// Ends [`pin_now`].
+#[cfg(test)]
+pub(crate) struct PinGuard(Option<i64>);
+
+#[cfg(test)]
+impl Drop for PinGuard {
+    fn drop(&mut self) {
+        PINNED.with(|p| p.set(self.0));
+    }
 }
 
 fn real_now() -> i64 {
@@ -338,6 +366,27 @@ pub fn long_date(days: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // spec: DEV-007
+    #[test]
+    fn dev_007_a_test_can_pin_the_clock_of_its_thread_just_before_a_second_boundary() {
+        let real = now();
+        {
+            let _outer = pin_now(1_795_000_059);
+            assert_eq!(now(), 1_795_000_059);
+            std::thread::sleep(std::time::Duration::from_millis(1_100));
+            assert_eq!(now(), 1_795_000_059, "a second boundary does not move it");
+            assert_eq!(std::thread::spawn(now).join().unwrap() / 100_000, real / 100_000, "other threads keep the real clock");
+            let stamped = crate::note_props::stamp("a\n", None, now()).unwrap();
+            {
+                let _inner = pin_now(1_795_000_060);
+                assert_eq!(now(), 1_795_000_060);
+            }
+            assert_eq!(now(), 1_795_000_059, "the guard puts the previous pin back");
+            assert_eq!(crate::note_props::stamp("a\n", None, now()).unwrap(), stamped);
+        }
+        assert!(now() >= real);
+    }
 
     // spec: CAL-009
     // spec: DEV-007

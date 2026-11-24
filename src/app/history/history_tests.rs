@@ -208,6 +208,9 @@ fn the_sync_does_not_start_while_a_snapshot_runs() {
 // spec: SYNC-038, SYNC-043
 #[test]
 fn restoring_a_version_into_an_open_note_is_one_undoable_change_with_snapshots_around_it() {
+    // every save stamps `modified:` with the second it happens in; the text typed before the
+    // restore is compared with the text the restore's own save stamped, so the second is pinned (#626)
+    let _clock = crate::calendar::time::pin_now(1_795_000_000);
     let mut t = setup("restore", false);
     t.start();
     t.app.open(Path::new("Note.md"), false);
@@ -239,6 +242,7 @@ fn restoring_a_version_into_an_open_note_is_one_undoable_change_with_snapshots_a
     let mut text = t.app.notes[Path::new("Note.md")].text.clone();
     assert!(t.app.undo.of(Path::new("Note.md")).undo(&mut text).is_some());
     assert_eq!(text, typed, "one undo step brings back the text before the restore");
+    assert!(typed.contains(&format!("modified: {}", crate::note_props::format_timestamp(1_795_000_000))), "the saves are stamped with the pinned second: {typed}");
     // history: the pre-restore snapshot holds the saved text, the restore snapshot names the version
     let after: Vec<String> = t.repo().run_for_test(&["rev-list", "HEAD"]).lines().map(str::to_string).collect();
     assert_eq!(after.len(), 5, "{after:?}");
