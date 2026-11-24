@@ -2,12 +2,13 @@
 
 **IS NOW** = true of the code today (⚠ = known defect) · **SHOULD BE** = agreed target.
 Format: [ADR-0001](../decisions/0001-spec-driven-development.md). Decision:
-[ADR-0034](../decisions/0034-kanban-boards.md). Issues: #596 (epic), #597, #598, #599.
+[ADR-0034](../decisions/0034-kanban-boards.md). Issues: #596 (epic), #597, #598, #599, #631 (autocomplete), #632 (lane settings stay open), #636 (vocabulary off the UI thread).
 
 One query language is read by the board lanes (BOARD-002), the sidebar search (NAV-007) and the
 picker (NAV-022). Every query is checked before it runs, runs on a background worker and ends
 within a budget. The same filter and sort form edits it everywhere. The language, the validator
-and the worker are true now (#597, #598), and so is the form (#599); so are the lanes of a board (#601).
+and the worker are true now (#597, #598), and so is the form (#599); so are the lanes of a board (#601); so is the autocomplete of the value
+fields (#631, #636).
 
 ## The language
 

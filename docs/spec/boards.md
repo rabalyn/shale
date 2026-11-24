@@ -2,10 +2,12 @@
 
 **IS NOW** = true of the code today (⚠ = known defect) · **SHOULD BE** = agreed target.
 Format: [ADR-0001](../decisions/0001-spec-driven-development.md). Decision:
-[ADR-0034](../decisions/0034-kanban-boards.md). Issues: #596 (epic), #601, #602, #603, #604, #605.
+[ADR-0034](../decisions/0034-kanban-boards.md). Issues: #596 (epic), #601…#605, #627 (keyboard move, auto-scroll), #632 (lane settings stay
+open), #637 (pins for any file name), #639 (peek closes on an outside click), #641 (LaTeX
+landscape pages), #663 (a done lane only pins).
 The query language of the lanes is in [search-queries.md](search-queries.md) (QUERY); the note
 properties `created:`, `modified:` and `priority:` are VAULT-045…VAULT-047. Every row here is
-planned work; none is true yet.
+true now.
 
 A board is a Markdown note. Its lanes are made from queries, its cards are notes.
 
