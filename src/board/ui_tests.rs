@@ -434,6 +434,14 @@ fn board_006_adding_renaming_moving_and_removing_lanes_rewrites_the_file() {
     // delete the last lane, with its pinned cards
     let p = more(&w, 2);
     w.click_at(p);
+    w.click("Delete lane…");
+    assert!(w.painted("Delete lane?"), "the question comes first");
+    w.click("Cancel");
+    assert_eq!(names(&w), ["Backlog", "Doing", "Pinned by hand"], "Cancel leaves the lane");
+    assert!(w.board_text().contains("Pinned One"));
+    let p = more(&w, 2);
+    w.click_at(p);
+    w.click("Delete lane…");
     w.click("Delete lane");
     assert_eq!(names(&w), ["Backlog", "Doing"]);
     assert!(w.board_text().ends_with("sort: priority desc, due asc\n"), "{}", w.board_text());
@@ -470,6 +478,7 @@ fn board_006_adding_renaming_moving_and_removing_lanes_rewrites_the_file() {
     // the first lane takes its lines with it
     let p = more(&w, 0);
     w.click_at(p);
+    w.click("Delete lane…");
     w.click("Delete lane");
     assert_eq!(names(&w), ["Check", "Doing"]);
     assert!(!w.board_text().contains("unknown line in the lane") && !w.board_text().contains("query: #todo"), "{}", w.board_text());
@@ -719,4 +728,22 @@ fn board_013_space_space_ticks_the_task_in_the_peek_in_vim_normal_mode_and_esc_l
     w.key(Key::Escape, Modifiers::NONE, "");
     assert!(w.app.boards.peek.is_none());
     assert!(w.file("Tasky.md").contains("- [x] one task"), "saved with the peek");
+}
+
+// spec: BOARD-007, BOARD-008
+#[test]
+fn board_007_the_ribbon_has_a_boards_icon_that_opens_or_shows_the_boards() {
+    use crate::sidebar::Item;
+    let mut w = W::board();
+    assert!(Item::ALL.contains(&Item::Boards) && w.app.side.layout.ribbon.contains(&Item::Boards), "in the default ribbon");
+    assert_eq!(Item::from_id("boards"), Some(Item::Boards));
+    assert!(Item::Boards.tip().contains("Space b"));
+    w.app.show_view(View::Tasks, false);
+    w.settle();
+    let at = w.hl.find_label(&mut w.app, Item::Boards.tip());
+    w.click_at(at.center());
+    assert_eq!(w.view(), View::Boards);
+    let tabs = w.open_tabs().len();
+    w.click_at(at.center());
+    assert_eq!(w.open_tabs().len(), tabs, "the view is shown, not opened twice");
 }

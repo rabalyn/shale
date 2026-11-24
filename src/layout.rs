@@ -16,6 +16,7 @@ pub enum Icon {
     Search,
     Graph,
     Tasks,
+    Boards,
     Drawing,
     Switcher,
     Settings,
@@ -69,6 +70,14 @@ pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
             p.line_segment([a, b], s);
             for q in [a, b, c2] {
                 p.circle_filled(q, w * 0.1, c);
+            }
+        }
+        Icon::Boards => {
+            // three lanes side by side, with cards of different heights
+            for (k, h) in [0.55_f32, 0.35, 0.7].into_iter().enumerate() {
+                let x = cx.x + (k as f32 - 1.0) * w * 0.3;
+                let lane = Rect::from_min_size(Pos2::new(x - w * 0.11, cx.y - w * 0.32), Vec2::new(w * 0.22, h * w * 0.8));
+                p.rect_stroke(lane, CornerRadius::same(1), s, StrokeKind::Inside);
             }
         }
         Icon::LocalGraph => {
@@ -547,6 +556,7 @@ impl ShaleApp {
             Item::Calendar => self.actions.push(Action::ShowView(View::Calendar)),
             Item::Mail => self.actions.push(Action::ShowView(View::Mail)),
             Item::Tasks => self.actions.push(Action::ShowView(View::Tasks)),
+            Item::Boards => self.actions.push(Action::ShowView(View::Boards)),
             Item::Social => self.actions.push(Action::ShowView(View::Social(None))),
             Item::Import => self.open_import(vec![], vec![], None),
             Item::Drawing => {

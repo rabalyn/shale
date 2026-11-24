@@ -10,7 +10,7 @@ A **board** shows your notes as cards in lanes, like a Kanban board. A lane fill
 
 # Open the boards
 
-Press **Space b** (in every main view, as **Space f f**, see [[Keyboard shortcuts]]; you can change the key in
+Click the **Boards** icon of the ribbon (three lanes, after Tasks), or press **Space b** (in every main view, as **Space f f**, see [[Keyboard shortcuts]]; you can change the key in
 Settings → Keybindings, "Show the boards"). The boards are a tab like [[Graph and backlinks]] and [[Tasks]], and
 the tab comes back after a restart with the board it showed ([[Tabs]]).
 
@@ -64,8 +64,8 @@ the view follows.
 
 # Lanes in the view
 
-Each lane has a **⋯** menu: **Settings…**, **Rename**, **Move left**, **Move right** and **Delete lane**. **+ Add lane**
-adds one at the end and lets you name it at once. Every change is written to the board's note. A **double click on the
+Each lane has a **⋯** menu: **Settings…**, **Rename**, **Move left**, **Move right** and **Delete lane…** (it asks first). **+ Add lane**
+(top right) adds one at the end and lets you name it at once. Every change is written to the board's note. A **double click on the
 heading** of a lane opens its settings: the same filter and sort form as in the search ([[Search and pickers]]), with
 the **drop** property (filled in from a query like `status:doing`) and "Cards here are done". The **Board** menu at the
 top right sets "A card in every lane it matches" and which chips the cards show.

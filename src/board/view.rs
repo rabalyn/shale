@@ -96,6 +96,8 @@ pub struct State {
     rename_fresh: bool,
     /// the selected card is scrolled into view when it is next drawn
     reveal: bool,
+    /// the lane that is asked about deleting: its place and name
+    confirm: Option<(usize, String)>,
     /// the popover is to be opened for this lane in this frame (a double click on the heading)
     open_settings: Option<usize>,
 }
@@ -170,14 +172,31 @@ pub fn show(ui: &mut Ui, st: &mut State, data: &Data, env: &mut Env) -> Vec<Act>
                 ui.allocate_ui_with_layout(Vec2::new(LANE_WIDTH, height - 14.0), Layout::top_down(Align::Min), |ui| lane_ui(ui, i, lane, st, data, env, &mut acts));
                 ui.add_space(6.0);
             }
-            ui.allocate_ui_with_layout(Vec2::new(150.0, 40.0), Layout::top_down(Align::Min), |ui| {
-                if ui.button("+ Add lane").on_hover_text("A lane at the end of the board; set its query with its ⋯ menu").clicked() {
-                    acts.push(Act::AddLane);
-                }
-            });
         });
     });
+    confirm_delete(ui.ctx(), st, &mut acts);
     acts
+}
+
+/// The question before a lane is deleted: its lines go with it.
+fn confirm_delete(ctx: &egui::Context, st: &mut State, acts: &mut Vec<Act>) {
+    let Some((i, name)) = st.confirm.clone() else { return };
+    let mut keep = true;
+    let resp = crate::dialog::Dialog::new("board-delete-lane", "Delete lane?").width(400.0).show(ctx, |ui| {
+        theme::paragraph(ui, format!("The lane “{name}” is taken out of the board's note, with its query and its pinned cards. The notes of the cards are not changed."));
+        ui.horizontal(|ui| {
+            if ui.button(RichText::new("Delete lane").color(theme::palette().link_missing)).clicked() {
+                acts.push(Act::RemoveLane(i));
+                keep = false;
+            }
+            if ui.button("Cancel").clicked() {
+                keep = false;
+            }
+        });
+    });
+    if resp.should_close() || !keep {
+        st.confirm = None;
+    }
 }
 
 /// The boards of the vault in a row, the new-board button and the menu of the board itself
@@ -220,6 +239,9 @@ fn strip(ui: &mut Ui, data: &Data, acts: &mut Vec<Act>) {
                         }
                     }
                 });
+                if ui.button("+ Add lane").on_hover_text("A lane at the end of the board; set its query with its ⋯ menu").clicked() {
+                    acts.push(Act::AddLane);
+                }
                 if ui.button("Edit file").on_hover_text("Open the note of the board in a tab").clicked() {
                     acts.push(Act::EditFile);
                 }
@@ -330,8 +352,8 @@ fn header(ui: &mut Ui, i: usize, lane: &LaneView, st: &mut State, data: &Data, e
                     acts.push(Act::MoveLane(i, i + 1));
                     ui.close();
                 }
-                if ui.button("Delete lane").on_hover_text("Takes the lane, its query and its pinned cards out of the file").clicked() {
-                    acts.push(Act::RemoveLane(i));
+                if ui.button("Delete lane…").on_hover_text("Takes the lane, its query and its pinned cards out of the file").clicked() {
+                    st.confirm = Some((i, lane.name.clone()));
                     ui.close();
                 }
             });
