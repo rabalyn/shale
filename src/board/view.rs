@@ -599,6 +599,12 @@ fn header(ui: &mut Ui, i: usize, lane: &LaneView, st: &mut State, data: &Data, e
                 }
             });
             if st.settings.as_ref().is_some_and(|s| s.lane == i) {
+                // the ⋯ button again closes the popover (and not the menu it would open)
+                if more.response.clicked() {
+                    st.settings = None;
+                    egui::Popup::close_all(ui.ctx());
+                    return;
+                }
                 settings(&more.response, st, data, i, env, acts);
             }
         });
@@ -616,11 +622,22 @@ fn settings(anchor: &egui::Response, st: &mut State, data: &Data, i: usize, env:
     let Some(s) = st.settings.as_mut() else { return };
     s.follow(lane);
     let mut asked = Vec::new();
-    Popup::from_response(anchor).id(Id::unique(("board-lane-settings", i))).open_bool(&mut open).close_behavior(PopupCloseBehavior::CloseOnClickOutside).width(380.0).show(|ui| {
-        ui.label(RichText::new(format!("Lane “{}”", lane.name)).strong());
+    let mut closed = false;
+    Popup::from_response(anchor).id(Id::unique(("board-lane-settings", i))).open_bool(&mut open).close_behavior(PopupCloseBehavior::IgnoreClicks).width(380.0).show(|ui| {
+        // Esc closes what is open in the popover first: the list of a field, a menu, a drop-down
+        if ui.input(|i| i.key_pressed(Key::Escape)) && egui::Popup::is_any_open(ui.ctx()) {
+            ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape));
+            egui::Popup::close_all(ui.ctx());
+        }
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(format!("Lane “{}”", lane.name)).strong());
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                closed = ui.small_button("✕").on_hover_text("Close (Esc)").clicked();
+            });
+        });
         ui.add_space(4.0);
         let count = search_form::matches_text(lane.cards.len(), lane.partial);
-        let opts = Opts { prefixes: Prefixes::default(), host_box: false, count: Some(&count) };
+        let opts = Opts { vault: env.vault, prefixes: Prefixes::default(), host_box: false, count: Some(&count) };
         let changed = search_form::show(ui, &mut s.form, &mut s.query, &mut s.cache, env.advanced, Some(&mut s.sort), &opts);
         if changed.query {
             asked.push(Act::SetQuery(i, s.query.clone()));
@@ -649,7 +666,7 @@ fn settings(anchor: &egui::Response, st: &mut State, data: &Data, i: usize, env:
         s.seen = (s.query.clone(), s.sort.clone(), s.drop.clone());
         acts.extend(asked);
     }
-    if !open {
+    if !open || closed {
         st.settings = None;
     }
 }

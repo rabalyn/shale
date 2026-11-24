@@ -530,7 +530,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   and rows (tag is, property is, due, is blocked, is blocking, in folder, links to, text contains), each with a **not** switch, added with **+ Add filter**. It writes the box's
   text and the list follows at once; what you type in the box fills the form. **Advanced** shows the text with the live count of matches; a query that is more than one
   level of AND or OR is "too complex for the form", is left as it is and Advanced stays on. The last Advanced choice is remembered (`search.advanced`). The same
-  widget has sort rows (field, asc or desc, drag to reorder, `dependencies` without a direction) for the lanes of a board. Keyboard: Ctrl+Shift+G opens it, Tab walks it, Esc closes the picker.
+  widget has sort rows (field, asc or desc, drag to reorder, `dependencies` without a direction) for the lanes of a board. Keyboard: Ctrl+Shift+G opens it, Tab walks it, Esc closes an open list or menu first, then the picker. The tag, property name and property value fields suggest the tags, names and values of the vault (QUERY-029, #631): all alphabetically when empty, narrowing as you type, ↓/↑, Enter, Tab or a click take one, Esc closes the list.
   ![The picker with the filter form open: All of / Any of, a tag row and a property row](userguide/z_media/screenshots/picker-form.png)
   ![The sidebar search with the same form](userguide/z_media/screenshots/sidebar-form.png)
 - **Hits of notes are shown rendered** (#483): a found line is drawn with the editor's own inline rendering (bold, italic,
@@ -624,6 +624,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 ![The peek of a card](userguide/z_media/screenshots/board-peek.png)
 
 ![The settings of a lane](userguide/z_media/screenshots/board-lane-settings.png)
+
+The settings stay open until closed (✕, Esc or the ⋯ button; a click outside keeps them, #632), and the tag field shows its suggestions:
+
+![A lane's tag field with the list of the tags of the vault](userguide/z_media/screenshots/board-lane-complete.png)
 
 ![A selected card with arrows and a lane in dependency order](userguide/z_media/screenshots/board-dependencies.png)
 

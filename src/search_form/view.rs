@@ -1,11 +1,13 @@
 //! The window of the form (QUERY-021…QUERY-025): the rows of the filter, the sort rows, and the
 //! Advanced switch that swaps them for the text.
 
+use super::complete::{Complete, Slot, Spec};
 use super::sort::{self, Key};
 use super::{DueCmp, Fit, Mode, Row, State, What};
 use crate::search_all::query::Cache;
 use crate::search_sources::{self, Prefixes};
 use crate::theme;
+use crate::vault::Vault;
 use eframe::egui::{self, Align, Id, Layout, RichText, Sense, Ui};
 
 /// What the user changed in this frame.
@@ -21,6 +23,8 @@ pub struct Changed {
 
 /// What the host of the form says about itself.
 pub struct Opts<'a> {
+    /// the vault, for the lists of the tags and properties it knows (QUERY-029)
+    pub vault: &'a Vault,
     /// the letters of the prefixes (NAV-050); none in a lane
     pub prefixes: Prefixes,
     /// The host has a text box of its own for the query (the picker, the sidebar): Advanced adds
@@ -50,10 +54,20 @@ fn finish(r: egui::Response, value: &mut String) -> bool {
 }
 
 /// The value fields of one row; true when one changed.
-fn fields(ui: &mut Ui, what: &mut What, i: usize) -> bool {
+fn fields(ui: &mut Ui, what: &mut What, i: usize, comp: &mut Complete, vault: &Vault) -> bool {
+    fn spec<'a>(row: usize, slot: Slot, key: &'a str, hint: &'a str, width: f32) -> Spec<'a> {
+        Spec { row, slot, key, hint, width }
+    }
     match what {
-        What::Tag(v) => edit_rest(ui, v, "tag", 100.0),
-        What::Prop { key, value } => edit(ui, key, "name", 90.0) | edit_rest(ui, value, "value", 90.0),
+        What::Tag(v) => {
+            let width = (ui.available_width() - 8.0).max(100.0);
+            comp.field(ui, vault, &spec(i, Slot::Tag, "", "tag", width), v)
+        }
+        What::Prop { key, value } => {
+            let changed = comp.field(ui, vault, &spec(i, Slot::Key, "", "name", 90.0), key);
+            let width = (ui.available_width() - 8.0).max(90.0);
+            changed | comp.field(ui, vault, &spec(i, Slot::Value, key, "value", width), value)
+        }
         What::Due { cmp, day } => {
             let before = *cmp;
             egui::ComboBox::from_id_salt(("due-cmp", i)).selected_text(cmp.label()).width(80.0).show_ui(ui, |ui| {
@@ -74,10 +88,30 @@ fn fields(ui: &mut Ui, what: &mut What, i: usize) -> bool {
     }
 }
 
+/// Take an entry of a list into the field it is for.
+fn take_entry(what: &mut What, slot: Slot, entry: String) {
+    match (what, slot) {
+        (What::Tag(v), Slot::Tag) | (What::Prop { key: v, .. }, Slot::Key) | (What::Prop { value: v, .. }, Slot::Value) => *v = entry,
+        _ => {}
+    }
+}
+
+/// A button that opens a list of choices under it. It is a popup, not a menu: a menu inside the
+/// popover of a lane closes the popover with the choice (#632), and a choice here only closes the list.
+fn add_menu(ui: &mut Ui, label: &str, choices: impl FnOnce(&mut Ui)) {
+    let button = ui.button(label);
+    egui::Popup::from_toggle_button_response(&button).close_behavior(egui::PopupCloseBehavior::CloseOnClick).show(|ui| {
+        ui.set_min_width(110.0);
+        choices(ui);
+    });
+}
+
 /// The filter rows (QUERY-021); true when the rows changed.
-fn filter_rows(ui: &mut Ui, st: &mut State) -> bool {
+fn filter_rows(ui: &mut Ui, st: &mut State, vault: &Vault) -> bool {
     let mut edited = false;
+    st.complete.begin();
     let mut remove = None;
+    let comp = &mut st.complete;
     for (i, row) in st.rows.iter_mut().enumerate() {
         ui.push_id(("filter-row", i), |ui| {
             // (not wrapped: the last field takes the rest of the line)
@@ -87,8 +121,12 @@ fn filter_rows(ui: &mut Ui, st: &mut State) -> bool {
                 }
                 ui.label(RichText::new(row.what.label()).color(theme::palette().muted));
                 edited |= ui.checkbox(&mut row.not, "not").changed();
-                edited |= fields(ui, &mut row.what, i);
+                edited |= fields(ui, &mut row.what, i, comp, vault);
             });
+            if let Some((slot, entry)) = comp.list(ui, i) {
+                take_entry(&mut row.what, slot, entry);
+                edited = true;
+            }
             if let Err(why) = row.term() {
                 ui.label(RichText::new(why).color(theme::palette().muted).size(11.5));
             }
@@ -98,7 +136,7 @@ fn filter_rows(ui: &mut Ui, st: &mut State) -> bool {
         st.rows.remove(i);
         edited = true;
     }
-    ui.menu_button("+ Add filter", |ui| {
+    add_menu(ui, "+ Add filter", |ui| {
         for what in What::blanks() {
             if ui.button(what.label()).clicked() {
                 st.rows.push(Row { not: false, what });
@@ -166,7 +204,7 @@ fn sort_rows(ui: &mut Ui, st: &mut sort::State) -> bool {
     }
     let unused = st.unused();
     if !unused.is_empty() {
-        ui.menu_button("+ Add sort", |ui| {
+        add_menu(ui, "+ Add sort", |ui| {
             for f in unused {
                 if ui.button(f.word()).clicked() {
                     st.keys.push(Key::new(f, false));
@@ -243,7 +281,7 @@ pub fn show(ui: &mut Ui, st: &mut State, text: &mut String, cache: &mut Cache, a
             theme::hint(ui, count);
         }
     } else {
-        let edited = filter_rows(ui, st) | mode_clicked;
+        let edited = filter_rows(ui, st, opts.vault) | mode_clicked;
         if !opts.host_box {
             if let Some(e) = checked.error() {
                 theme::problem(ui, e.reason.clone());
@@ -286,11 +324,14 @@ pub fn show(ui: &mut Ui, st: &mut State, text: &mut String, cache: &mut Cache, a
 
 #[cfg(test)]
 mod tests {
+    use super::super::complete::list_open;
     use super::*;
     use crate::search_all::query::Cache;
     use crate::search_form::sort::{self, Field};
     use crate::search_form::DueCmp;
     use eframe::egui::{accesskit::Role, Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect, Vec2};
+
+    static TEST_VAULTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
     /// The form drawn alone in a window, as the popover of a lane is (QUERY-028): no box of the host, a sort, real pointer and key events.
     struct Host {
@@ -302,6 +343,7 @@ mod tests {
         cache: Cache,
         advanced: bool,
         host_box: bool,
+        vault: Vault,
         with_sort: bool,
         count: Option<String>,
         /// what the frames reported, since the last `take_changed`
@@ -314,8 +356,11 @@ mod tests {
             let ctx = egui::Context::default();
             crate::theme::apply(&ctx);
             ctx.enable_accesskit();
+            let dir = std::env::temp_dir().join(format!("shale-form-{}-{}", std::process::id(), TEST_VAULTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+            std::fs::create_dir_all(&dir).unwrap();
+            let vault = Vault::open(&dir).unwrap();
             let mut h =
-                Host { ctx, t: 0.0, st: State::default(), text: text.into(), sort: String::new(), cache: Cache::default(), advanced: false, host_box: false, with_sort: false, count: None, changed: Changed::default(), nodes: vec![] };
+                Host { vault, ctx, t: 0.0, st: State::default(), text: text.into(), sort: String::new(), cache: Cache::default(), advanced: false, host_box: false, with_sort: false, count: None, changed: Changed::default(), nodes: vec![] };
             h.frames(3);
             h
         }
@@ -330,9 +375,9 @@ mod tests {
         fn frame(&mut self, events: Vec<Event>) {
             self.t += 0.05;
             let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(520.0, 700.0))), time: Some(self.t), events, ..Default::default() };
-            let Host { ctx, st, text, sort, cache, advanced, host_box, with_sort, count, changed, .. } = self;
+            let Host { ctx, st, text, sort, cache, advanced, host_box, with_sort, count, changed, vault, .. } = self;
             let mut out = ctx.run_ui(raw, |ui| {
-                let opts = Opts { prefixes: Prefixes::default(), host_box: *host_box, count: count.as_deref() };
+                let opts = Opts { vault, prefixes: Prefixes::default(), host_box: *host_box, count: count.as_deref() };
                 let c = show(ui, st, text, cache, advanced, with_sort.then_some(sort), &opts);
                 changed.query |= c.query;
                 changed.sort |= c.sort;
@@ -431,8 +476,25 @@ mod tests {
             }
         }
 
+        /// A note of the vault, as the index has it.
+        fn note(&mut self, name: &str, text: &str) {
+            self.vault.set_note_text(std::path::Path::new(name), text);
+            self.frames(2);
+        }
+
+        /// What the open list shows, top to bottom (none: no list).
+        fn listed(&self) -> Vec<String> {
+            self.st.complete.shown_items().map(<[String]>::to_vec).unwrap_or_default()
+        }
+
         fn take_changed(&mut self) -> Changed {
             std::mem::take(&mut self.changed)
+        }
+    }
+
+    impl Drop for Host {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.vault.root);
         }
     }
 
@@ -704,5 +766,125 @@ mod tests {
     fn the_sort_fields_are_the_six_of_the_spec() {
         assert_eq!(Field::ALL.map(Field::word), ["created", "modified", "due", "priority", "title", "dependencies"]);
         assert_eq!(sort::write(&[]), "");
+    }
+
+    fn vault_host() -> Host {
+        let mut h = Host::new("");
+        h.note("a.md", "---\nstatus: Doing\nowner: zoe\ncreated: 2026-01-01 10:00\nmodified: 2026-02-02 11:00\ntags: [x]\n---\n#project/shale #Bug\n");
+        h.note("b.md", "---\nstatus: todo\nowner: Adam\n---\n#alpha #shale-ui\n");
+        h.note("c.md", "---\nstatus: done\npeople:\n  - bob\n  - al\n---\n#beta\n");
+        h
+    }
+
+    fn strings(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    // spec: QUERY-029
+    #[test]
+    fn query_029_an_empty_tag_field_lists_every_tag_of_the_vault_alphabetically() {
+        let mut h = vault_host();
+        h.pick("+ Add filter", "tag is");
+        assert!(h.listed().is_empty(), "no list until the field has the keyboard");
+        let r = h.edits()[0];
+        h.click_at(r.center());
+        assert_eq!(h.listed(), strings(&["alpha", "beta", "Bug", "project/shale", "shale-ui", "x"]), "all, without regard to case");
+        assert!(list_open(&h.ctx));
+        h.vault.set_note_text(std::path::Path::new("d.md"), "#Zed #apple");
+        h.frames(2);
+        assert_eq!(h.listed().first().map(String::as_str), Some("alpha"), "the vocabulary follows the vault");
+        assert!(h.listed().contains(&"Zed".to_string()) && h.listed().contains(&"apple".to_string()), "{:?}", h.listed());
+    }
+
+    // spec: QUERY-029
+    #[test]
+    fn query_029_typing_narrows_prefix_matches_first_then_inside_matches_each_alphabetical() {
+        let mut h = vault_host();
+        h.pick("+ Add filter", "tag is");
+        h.type_into(0, "S");
+        assert_eq!(h.listed(), strings(&["shale-ui", "project/shale"]), "a prefix before an inside match, any case");
+        h.type_into(0, "b");
+        assert_eq!(h.listed(), strings(&["beta", "Bug"]));
+        h.type_into(0, "zzz");
+        assert!(h.listed().is_empty(), "nothing fits");
+    }
+
+    // spec: QUERY-029
+    #[test]
+    fn query_029_the_arrow_keys_choose_and_enter_tab_and_a_click_take_an_entry_into_the_query() {
+        let mut h = vault_host();
+        h.pick("+ Add filter", "tag is");
+        let r = h.edits()[0];
+        h.click_at(r.center());
+        h.key(Key::ArrowDown, Modifiers::NONE);
+        h.key(Key::ArrowDown, Modifiers::NONE);
+        h.key(Key::Enter, Modifiers::NONE);
+        assert_eq!(h.text, "#beta", "down twice, Enter");
+        assert!(h.listed().is_empty(), "taking closes the list");
+        assert!(h.take_changed().query);
+        h.type_into(0, "pro");
+        assert_eq!(h.listed(), strings(&["project/shale"]));
+        h.key(Key::Tab, Modifiers::NONE);
+        assert_eq!(h.text, "#project/shale", "the first entry is chosen while typing; Tab takes it");
+        h.type_into(0, "");
+        h.key(Key::ArrowUp, Modifiers::NONE);
+        h.key(Key::Enter, Modifiers::NONE);
+        assert_eq!(h.text, "#x", "up from nothing is the last entry");
+        h.type_into(0, "");
+        h.click("Bug");
+        assert_eq!(h.text, "#Bug", "a click takes the entry");
+        assert!(h.listed().is_empty());
+        h.type_into(0, "");
+        h.key(Key::J, Modifiers::CTRL);
+        h.key(Key::Enter, Modifiers::NONE);
+        assert_eq!(h.text, "#alpha", "Ctrl+J is down, as in the other lists");
+    }
+
+    // spec: QUERY-029
+    #[test]
+    fn query_029_tab_through_an_empty_field_takes_nothing_and_esc_closes_only_the_list() {
+        let mut h = vault_host();
+        h.pick("+ Add filter", "tag is");
+        let r = h.edits()[0];
+        h.click_at(r.center());
+        h.key(Key::Tab, Modifiers::NONE);
+        assert_eq!(h.text, "", "nothing was chosen, nothing is taken");
+        h.click_at(r.center());
+        assert!(!h.listed().is_empty());
+        h.key(Key::Escape, Modifiers::NONE);
+        assert!(h.listed().is_empty(), "Esc closes the list");
+        assert!(!list_open(&h.ctx));
+        h.type_into(0, "b");
+        assert!(!h.listed().is_empty(), "typing opens it again");
+    }
+
+    // spec: QUERY-029
+    #[test]
+    fn query_029_a_property_lists_the_names_and_then_the_values_of_that_name() {
+        let mut h = vault_host();
+        h.pick("+ Add filter", "property is");
+        let name = h.edits()[0];
+        h.click_at(name.center());
+        assert_eq!(h.listed(), strings(&["owner", "people", "status", "tags"]), "the names, without Shale's stamps created and modified");
+        h.type_into(0, "st");
+        h.key(Key::Enter, Modifiers::NONE);
+        assert_eq!(h.st.rows[0].what, What::Prop { key: "status".into(), value: String::new() });
+        let value = h.edits()[1];
+        h.click_at(value.center());
+        assert_eq!(h.listed(), strings(&["Doing", "done", "todo"]), "the values of status, once each, any case");
+        h.type_into(1, "do");
+        assert_eq!(h.listed(), strings(&["Doing", "done", "todo"]), "todo has it inside");
+        h.key(Key::ArrowDown, Modifiers::NONE);
+        h.key(Key::Enter, Modifiers::NONE);
+        assert_eq!(h.text, "status:done");
+        h.type_into(0, "people");
+        h.type_into(1, "");
+        assert_eq!(h.listed(), strings(&["al", "bob"]), "a list gives an entry for each item");
+        h.type_into(0, "created");
+        h.type_into(1, "");
+        assert!(h.listed().is_empty(), "a time stamp is no value to pick");
+        h.type_into(0, "owner");
+        h.type_into(1, "");
+        assert_eq!(h.listed(), strings(&["Adam", "zoe"]));
     }
 }

@@ -34,6 +34,12 @@ or within, before, on, after or on or after a day: a date, `today` or `+7d`), **
 the query into the box as you go and the list follows at once; what you type in the box fills the form. A row
 that is not complete yet (an empty tag, a property without a value) is not in the query and says what it needs.
 
+**Suggestions.** The tag field, the name of a property and its value suggest what the vault knows: the tags, the
+names of the properties in the notes' front matter, and for the name you chose the values seen with it. Click into an empty
+field and the list shows everything, alphabetically; type and it narrows (what starts with your letters first, then
+what contains them). **↓ / ↑** (or Ctrl+J / Ctrl+K) choose, **Enter** or **Tab** take the entry, a click takes it too,
+and **Esc** closes only the list. A long list scrolls. `created` and `modified` are not suggested.
+
 ![[picker-form.png]]
 
 **Advanced** shows the query as text instead. In the sidebar and the picker the text is the box above, and Advanced adds
@@ -43,7 +49,7 @@ last choice is remembered (**Settings** file, `search.advanced`) and is the same
 A query that does not fit the rows (parentheses inside an `OR`, a `NOT` of a group) is not changed: the form says "This
 query is too complex for the form", Advanced stays on and you edit the text. A `f:`, `m:` or `s:` prefix stays where it is.
 The form is reached with the keyboard: **Ctrl+Shift+G** opens and closes it (the key can be changed in **Settings →
-Keybindings**, "List windows" and "Search results"), **Tab** walks through its widgets, and **Esc** still closes the picker.
+Keybindings**, "List windows" and "Search results"), **Tab** walks through its widgets, and **Esc** closes an open list or menu first and then the picker.
 
 ![[sidebar-form.png]]
 
