@@ -33,6 +33,8 @@ pub enum Act {
     NewBoard,
     /// open the board's note in the editor, in a tab
     EditFile,
+    /// the export dialog of the board: a PDF of the board and its notes (BOARD-030)
+    ExportPdf,
     AddLane,
     RemoveLane(usize),
     RenameLane(usize, String),
@@ -244,6 +246,9 @@ fn strip(ui: &mut Ui, data: &Data, acts: &mut Vec<Act>) {
                 }
                 if ui.button("Edit file").on_hover_text("Open the note of the board in a tab").clicked() {
                     acts.push(Act::EditFile);
+                }
+                if ui.button("Export PDF…").on_hover_text("The board on landscape pages, then the notes of its cards").clicked() {
+                    acts.push(Act::ExportPdf);
                 }
             });
         }

@@ -2,12 +2,13 @@
 //! of `book` one after the other in the layout of a single note's export (`export::Writer`), with
 //! numbered headings, running headers, links between the chapters and nested bookmarks.
 
+use crate::board::resolve::Resolved;
 use crate::busy::Cancel;
 use crate::markdown;
 use crate::pdf::book::{self, Item, Plan};
 use crate::pdf::export::{book_scale, finish_from, fit_text, pdf_image, wrap_pieces, Entry, ExportOptions, Piece, Writer};
 use crate::pdf::write::{text_width, Bookmark, Dest, FontKind, Rgba, TextStyle};
-use crate::vault::Vault;
+use crate::vault::{FileKind, Vault};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -92,7 +93,12 @@ impl Section {
 
 /// The sections of a plan in reading order, with the numbers of the headings worked out (BOOK-006).
 fn sections(vault: &Vault, plan: &Plan, numbered: bool) -> Vec<Section> {
-    let text_of = |rel: &Path| vault.notes.get(rel).map(|n| n.text.clone()).unwrap_or_default();
+    // (a drawing is no note: a board's drawing card is printed as the picture it embeds, BOARD-030)
+    let text_of = |rel: &Path| match vault.notes.get(rel) {
+        Some(n) => n.text.clone(),
+        None if vault.file(rel).is_some_and(|f| f.kind == FileKind::Drawing) => format!("![[{}]]\n", rel.to_string_lossy()),
+        None => String::new(),
+    };
     let mut out = Vec::new();
     if let Some(rel) = &plan.intro {
         out.push(section(Kind::Intro, Some(rel.clone()), 1, None, plan.title.clone(), text_of(rel)));
@@ -254,19 +260,25 @@ impl Writer<'_> {
 pub fn export_book(vault: &Vault, dir: &Path, opts: &ExportOptions, progress: Option<&Progress>) -> Result<Vec<u8>, String> {
     let _flow = tracing::info_span!("flow.book_export", peer = "export").entered();
     let plan = tracing::info_span!("flow.book_export.plan", peer = "vault").in_scope(|| book::plan(vault, dir))?;
-    let secs = tracing::info_span!("flow.book_export.read_notes", peer = "vault").in_scope(|| sections(vault, &plan, opts.numbered_headings));
+    lay_out(vault, &plan, opts, progress, None)
+}
+
+/// The PDF of `plan`, the book of a folder or of a board (BOARD-030): with a `board`, its landscape
+/// pages come after the title page and the contents and before the first note.
+pub(super) fn lay_out(vault: &Vault, plan: &Plan, opts: &ExportOptions, progress: Option<&Progress>, board: Option<&Resolved>) -> Result<Vec<u8>, String> {
+    let secs = tracing::info_span!("flow.book_export.read_notes", peer = "vault").in_scope(|| sections(vault, plan, opts.numbered_headings));
     if let Some(p) = progress {
         p.total.store(secs.len(), Ordering::SeqCst);
     }
     let mut w = Writer::new(&plan.title, opts);
-    w.members = Some(book::members(&plan));
+    w.members = Some(book::members(plan));
     let base = opts.font_pt;
     if opts.title {
-        let logo = logo_picture(vault, &plan).unwrap_or_else(|why| {
+        let logo = logo_picture(vault, plan).unwrap_or_else(|why| {
             tracing::warn!("book title page: {why}; the title page has no picture");
             None
         });
-        w.title_page(&plan, logo.as_ref());
+        w.title_page(plan, logo.as_ref());
         w.new_page();
     }
     // the contents: parts, chapters and the first level of headings inside a chapter (BOOK-007)
@@ -278,12 +290,22 @@ pub fn export_book(vault: &Vault, dir: &Path, opts: &ExportOptions, progress: Op
         listed.push((i, usize::MAX));
         listed.extend(secs[i].heads.iter().enumerate().filter(|(_, h)| h.listed).map(|(n, _)| (i, n)));
     }
+    // a board is the first line of the contents
+    let boarded = board.is_some();
     let slots = if opts.toc && !listed.is_empty() {
-        let gaps: Vec<f32> = listed.iter().enumerate().map(|(n, (i, h))| if *h == usize::MAX && secs[*i].kind == Kind::Part && n > 0 { base * 0.9 } else { 0.0 }).collect();
+        let mut gaps: Vec<f32> = listed.iter().enumerate().map(|(n, (i, h))| if *h == usize::MAX && secs[*i].kind == Kind::Part && (n > 0 || boarded) { base * 0.9 } else { 0.0 }).collect();
+        if boarded {
+            gaps.insert(0, 0.0);
+        }
         w.reserve_contents_gapped(&gaps)
     } else {
         vec![]
     };
+    // the landscape pages of the board, then the text on portrait pages
+    let drawn = board.map(|b| crate::pdf::board::draw_pages(&mut w, vault, b));
+    if drawn.is_some() && !secs.is_empty() {
+        w.new_page();
+    }
     let mut starts: Vec<Option<Dest>> = vec![None; secs.len()];
     let mut places: Vec<HashMap<usize, Dest>> = Vec::new();
     for (i, s) in secs.iter().enumerate() {
@@ -307,18 +329,22 @@ pub fn export_book(vault: &Vault, dir: &Path, opts: &ExportOptions, progress: Op
         places.push(here);
     }
     // the contents list, now that the pages are known
-    let entries: Vec<Entry> = listed
-        .iter()
-        .map(|(i, h)| match h {
+    let board_entry = drawn.as_ref().map(|d| Entry { level: 1, label: "Board".to_string(), dest: Some(Dest { page: d.first, y: w.top }), bold: false });
+    let entries: Vec<Entry> = board_entry
+        .into_iter()
+        .chain(listed.iter().map(|(i, h)| match h {
             h if *h == usize::MAX => Entry { level: secs[*i].level, label: secs[*i].label(), dest: starts[*i], bold: secs[*i].kind == Kind::Part },
             h => {
                 let head = &secs[*i].heads[*h];
                 Entry { level: head.level, label: head.label.clone(), dest: places[*i].get(&head.line).copied(), bold: false }
             }
-        })
+        }))
         .collect();
     w.draw_contents(&entries, &slots);
-    // the bookmarks: every part, chapter and heading, nested by level
+    // the bookmarks: the board, every part, chapter and heading, nested by level
+    if let Some(d) = &drawn {
+        w.doc.bookmarks.push(Bookmark { level: 1, title: "Board".to_string(), to: Dest { page: d.first, y: w.top } });
+    }
     for (i, s) in secs.iter().enumerate() {
         if s.kind != Kind::Intro {
             if let Some(to) = starts[i] {
@@ -340,6 +366,12 @@ pub fn export_book(vault: &Vault, dir: &Path, opts: &ExportOptions, progress: Op
                 m
             });
             by_note.insert(rel.as_path(), (start, heads));
+        }
+    }
+    // the cards of the board are links to their notes
+    for (page, rect, rel) in drawn.iter().flat_map(|d| &d.cards) {
+        if let Some((start, _)) = by_note.get(rel.as_path()) {
+            w.doc.page(*page).jump(rect[0], rect[1], rect[2], rect[3], *start);
         }
     }
     let links = std::mem::take(&mut w.book_links);

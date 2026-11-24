@@ -266,6 +266,11 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   tree; the export is a background job with Cancel.
   `shale --export-pdf <folder> <file.pdf>` does it without a window, and `scripts/userguide-pdf.sh` makes the PDF of this
   user guide (BOOK-001 to BOOK-012, BOOK-019), which every release has as `shale-userguide-<version>.pdf`.
+- **A board as one PDF** (BOARD-030, #604): **Export PDF…** in the board view (and **Export to PDF** of a board note)
+  opens the dialog of a book. The PDF has the board on landscape pages (lanes as columns; more lanes than fit go on
+  the next pages left to right, more cards than fit continue on the next page; a card shows its title and chips, a
+  drawing card its vector drawing), then the notes of the cards in portrait through the book export, lane by lane, a
+  card of several lanes once, with a contents page (the board first), bookmarks and a link from each card to its note.
 - **A folder through a LaTeX template** (#309): the folder's export dialog has the engine choice of a note's.
   With **LaTeX template** and a kind of the article or book family (publication, report, exercise, thesis,
   PhD; slides, letters and posters are greyed) the book is one LaTeX document: in a thesis the subfolders are

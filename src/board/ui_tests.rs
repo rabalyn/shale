@@ -548,6 +548,16 @@ fn board_001_a_board_is_a_normal_note_that_opens_in_the_editor() {
     assert!(w.app.vault.as_ref().unwrap().notes[Path::new("Board.md")].links.iter().any(|l| l.target == "Pinned One"), "its links are indexed like any note's");
 }
 
+// spec: BOARD-030
+#[test]
+fn board_030_the_export_button_of_the_board_opens_the_export_dialog_of_the_open_board() {
+    let mut w = W::board();
+    w.click("Export PDF…");
+    let Some(crate::app::Modal::Export(d)) = &w.app.modal else { panic!("the export dialog opens") };
+    assert_eq!(d.rel, Path::new("Board.md"));
+    assert!(d.book.as_ref().is_some_and(|b| b.board), "the dialog of a board");
+}
+
 // spec: QUERY-012
 #[test]
 fn query_012_a_bad_lane_query_shows_its_error_in_its_header_and_the_rest_works() {
