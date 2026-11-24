@@ -221,6 +221,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   - `print-paper`: `A4`, `A5`, `Letter`, `Legal` or `<W>x<H>mm` (a width larger than the height is landscape)
   - `print-margins`: four numbers in mm, `top right bottom left`
   - `print-font`: `serif` (Liberation Serif, Times-compatible), `sans` (Ubuntu Light) or `mono` (Hack)
+  - `print-font-sans`, `print-font-mono`, and `print-font` with a family name or a vault path to a font file: the export dialog already says which font such a value (or the vault's `print_font*` settings) resolves to and warns about one that is missing or may not be embedded; the exports use these fonts from the next phases of #658
   - `print-font-size`: the body text in points
   - `print-line-spacing`: a factor, 1.0 being the font's own single line height
   - `print-paragraph-spacing`: the space after a body paragraph in points
@@ -1407,7 +1408,10 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   else); any other type is the plain page. A published board note (SITE-045) shows its lanes and cards as they were at
   export time, read-only and scrolling sideways, with the board's chips; a card of a note that is not published is left
   out without a trace, and the lanes' queries and pins are not written. The site has a graph page (`/graph.html`, SITE-040) of the published notes and
-  their links, laid out in the browser by a small script of the theme; nothing is loaded from another site.
+  their links, laid out in the browser by a small script of the theme; nothing is loaded from another site, and a site map page
+  (`/sitemap.html`, SITE-080) that lists the published notes as a tree by folder without a script. The optional
+  **Address of the site** (SITE-081, SITE-082) gives the site a `sitemap.xml` of the published pages (no dates, no tag
+  pages) and a `robots.txt`, and makes a site served below a path such as `https://host/wiki/` link below it.
 - **Search and theme** (SITE-046 to SITE-048): the Shale theme is part of the tree, so the server needs only `hugo` and
   `pagefind`; the pages carry a search box for Pagefind that indexes the notes and nothing else (a test runs Pagefind on a
   built site and looks for a published and an unpublished word). Hugo 0.158 or newer.

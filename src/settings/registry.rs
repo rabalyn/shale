@@ -114,6 +114,7 @@ pub const ENTRIES: &[Entry] = &[
     e("publishing.count", Publishing, "Notes chosen by the rules", &[], "how many list dry run"),
     e("publishing.url", Publishing, "Address of the publish repository", &[], "remote server git url forgejo"),
     e("publishing.branch", Publishing, "Branch to publish to", &[], "git main pages"),
+    e("publishing.site_address", Publishing, "Address of the site (optional)", &[], "sitemap robots url public domain base"),
     e("publishing.publish", Publishing, "Publish", &[], "push snapshot site hugo job cancel"),
     e("publishing.last", Publishing, "Who published last", &[], "device time target check remote lfs"),
     e("calendar.accounts", Calendar, "Calendars", &["calendars"], "caldav ics local accounts add"),
