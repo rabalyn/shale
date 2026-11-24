@@ -324,6 +324,12 @@ the TeX and checks it:
   used and why the other one is not, for example "the TeX of this computer misses roboto,
   xcharter; use the managed one". **Check again** looks again, for example after you installed a
   TeX Live; looking happens in the background and never stops the window.
+- **Citations and references.** A document that cites works from a `.bib` file or refers to its own
+  sections and figures is compiled in several passes: LuaLaTeX, then biber (only when there are
+  citations), then LuaLaTeX again until the numbers and references no longer change, at most four
+  LuaLaTeX runs. A citation key that is not in the `.bib` file is a warning of the export. When biber
+  cannot be started, the PDF is made without a bibliography and the export says so; when biber fails
+  on the file, the error names its log.
 - **TeX to use** (`tex.engine`, see [[Settings reference]]): *Automatic* takes the TeX Live that
   Shale installed if there is one, else the one of your computer if it is complete;
   the other two choices force one of them.

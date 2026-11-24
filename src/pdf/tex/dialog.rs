@@ -37,7 +37,7 @@ pub struct Made {
     pub pdf: Vec<u8>,
     /// The set has no logo yet: the PDF has a placeholder and is not CI-conformant.
     pub placeholder_logo: bool,
-    /// Embeds that were missing, as the writer said.
+    /// Embeds that were missing, as the writer said, then what the compile said (TEX-043).
     pub warnings: Vec<String>,
 }
 
@@ -521,7 +521,10 @@ fn compile_job(engine: &Engine, set: &SetInfo, doc: &Arc<Document>, cancel: Arc<
         Failure { headline: e.headline.clone(), problems: e.problems.iter().map(|p| p.text()).collect(), log_tail: e.log_tail, document: doc.clone(), set_dir: set.dir.clone(), missing: missing.into() }
     };
     match sets::compile_with_set(engine, set, "main.tex", &doc.tex, &files, Options { cancel: Some(cancel), ..Options::default() }) {
-        Ok(out) => Ok(Made { pdf: out.output.pdf, placeholder_logo: out.placeholder_logo, warnings: doc.warnings.clone() }),
+        Ok(out) => {
+            let warnings = doc.warnings.iter().cloned().chain(out.output.warnings).collect();
+            Ok(Made { pdf: out.output.pdf, placeholder_logo: out.placeholder_logo, warnings })
+        }
         Err(e) => Err(Box::new(fail(e))),
     }
 }
