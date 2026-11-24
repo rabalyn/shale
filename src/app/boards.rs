@@ -5,7 +5,7 @@
 use super::{handle_editor_action, ShaleApp, View};
 use crate::board::blockers;
 use crate::board::deps::Graph;
-use crate::board::drag::{self, Dropped};
+use crate::board::drag::{self, Dropped, TreeDropped};
 use crate::board::file::{self, Board, Chip, Key};
 use crate::board::lanes::PRESETS;
 use crate::board::links::{Edit, Lists, Picker};
@@ -159,6 +159,7 @@ impl ShaleApp {
                     peek.picker = Some(Picker::new(worker, blocked));
                 }
             }
+            Act::TreeDrop(d) => self.drop_from_tree(d),
             Act::SaveSettings => self.save_config(),
         }
     }
@@ -171,13 +172,53 @@ impl ShaleApp {
         let Some(text) = vault.notes.get(&board_rel).map(|n| n.text.clone()) else { return };
         let board = Board::parse(&text);
         let Some(plan) = drag::plan(vault, &board_rel, &board, self.boards.shown.lanes(), &d) else { return };
+        if self.carry_out(&d.card, &plan) {
+            // where the card shows now, a search later, is up to the lanes' queries: it is shown
+            self.boards.selected = Some(d.card);
+            self.boards.view.reveal();
+        }
+    }
+
+    /// A note, drawing or folder of the file list was dropped on the board (BOARD-035 to BOARD-037): a
+    /// note or drawing as a card is (BOARD-019 to BOARD-022), a folder pins its notes in the lane or
+    /// makes a lane of its own, and the board file is rewritten once.
+    fn drop_from_tree(&mut self, d: TreeDropped) {
+        let (Some(vault), Some(board_rel)) = (self.vault.as_ref(), self.boards.current.clone()) else { return };
+        let Some(text) = vault.notes.get(&board_rel).map(|n| n.text.clone()) else { return };
+        let board = Board::parse(&text);
+        let Some(todo) = drag::tree(vault, &board_rel, &board, self.boards.shown.lanes(), &d.path, &d.target).todo else { return };
+        if !self.carry_out(&d.path, &todo.plan) {
+            return;
+        }
+        if let Some((name, query)) = &todo.new_lane {
+            self.boards.view.settings = None;
+            self.edit_board(|b| {
+                b.add_lane(name);
+                if let Some(lane) = b.lanes.last_mut() {
+                    lane.set(Key::Query, query);
+                }
+            });
+        }
+        if let Some(notice) = todo.notice {
+            self.toast(notice);
+        }
+        if self.vault.as_ref().is_some_and(|v| v.file(&d.path).is_some()) {
+            self.boards.selected = Some(d.path);
+            self.boards.view.reveal();
+        }
+    }
+
+    /// Write what a drop of the card `card` plans: the property into its note first, then the new pin
+    /// lists into the board file. False when the note cannot be changed (it changed on disk since the
+    /// view drew it): nothing else is then, and the user is told.
+    fn carry_out(&mut self, card: &Path, plan: &drag::Plan) -> bool {
         if let Some((key, value)) = &plan.property {
-            let Some(seen) = vault.notes.get(&d.card).map(|n| n.text.clone()) else { return };
-            self.edit_note_text(&d.card, &seen, |t| Some(note_props::set_property(t, key, value)));
-            let now = self.vault.as_ref().and_then(|v| v.notes.get(&d.card)).map(|n| n.text.clone()).unwrap_or_default();
+            let Some(seen) = self.vault.as_ref().and_then(|v| v.notes.get(card)).map(|n| n.text.clone()) else { return false };
+            self.edit_note_text(card, &seen, |t| Some(note_props::set_property(t, key, value)));
+            let now = self.vault.as_ref().and_then(|v| v.notes.get(card)).map(|n| n.text.clone()).unwrap_or_default();
             if note_props::set_property(&now, key, value) != now {
-                self.toast(format!("“{}” changed in the meantime or cannot be written, so it was not moved", crate::vault::rel_to_string(&d.card)));
-                return;
+                self.toast(format!("“{}” changed in the meantime or cannot be written, so it was not moved", crate::vault::rel_to_string(card)));
+                return false;
             }
         }
         if !plan.pins.is_empty() {
@@ -189,9 +230,7 @@ impl ShaleApp {
                 }
             });
         }
-        // where the card shows now, a search later, is up to the lanes' queries: it is shown
-        self.boards.selected = Some(d.card);
-        self.boards.view.reveal();
+        true
     }
 
     /// `blocker` blocks `waiting` (BOARD-041): its link is added to the `blocked-by:` of the waiting
