@@ -765,6 +765,25 @@ pub(crate) fn bind_unix_socket(path: &Path) -> std::os::unix::net::UnixListener 
     panic!("no short folder to make a link in (/tmp and {} do not work), for the socket {}", std::env::temp_dir().display(), path.display());
 }
 
+/// Test helper: run `check` until it is true, for at most two seconds (every 10 ms); the last
+/// answer. For a lock that was just released (`drop`, the end of a job) and is asked for again.
+///
+/// A `flock` belongs to the open file description, not to the `File` value: a child process that
+/// another test thread is forking at this moment holds a copy of every open descriptor until its
+/// `exec` (CLOEXEC acts only there), so right after the holder dropped its `File` the lock can
+/// still be held for a few milliseconds when all tests run as threads of one process (#659).
+/// Use it only for "the lock is free again"; a check that a HELD lock is refused is not racy.
+#[cfg(test)]
+pub(crate) fn eventually(mut check: impl FnMut() -> bool) -> bool {
+    (0..200).any(|_| {
+        let ok = check();
+        if !ok {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        ok
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
