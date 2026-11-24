@@ -1,4 +1,4 @@
-//! Publishing a vault (SITE-062…SITE-076): the export of the chosen notes is written into a git
+//! Publishing a vault (SITE-062…SITE-078): the export of the chosen notes is written into a git
 //! repository of its own (SITE-063), made one commit with no parent (SITE-068) and force-pushed to
 //! the publish branch. Nothing of the vault but that tree ever leaves the device, and the vault's
 //! own repository is never touched.
@@ -140,6 +140,18 @@ pub fn repo_dir(base: &Path, id: &str) -> PathBuf {
     base.join(id).join("publish")
 }
 
+/// The lock of the publish repository of the vault with this ID (SITE-078): a file next to the
+/// repository (its work tree is emptied by every publish), taken without waiting. A second
+/// publish of the vault stops with a message and changes nothing.
+fn lock(base: &Path, id: &str) -> Result<std::fs::File, Failure> {
+    let path = base.join(id).join("publish.lock");
+    match crate::fsutil::try_lock_file(&path) {
+        Ok(Some(file)) => Ok(file),
+        Ok(None) => Err(Failure::Error("Another publish of this vault is running (in this window, in another Shale or on the command line). Wait until it ends, then publish again.".into())),
+        Err(e) => Err(Failure::Error(format!("could not lock the publish: {e}"))),
+    }
+}
+
 /// A branch name: git's rules for the common cases, so that a typo is said at once.
 pub fn check_branch(branch: &str) -> Result<(), String> {
     let bad = branch.is_empty()
@@ -271,6 +283,8 @@ pub fn publish(git: &Git, req: &Request, cancel: &Cancel, step: &dyn Fn(&str)) -
     let (url, branch) = target(&settings.publish)?;
     refuse_the_sync_remote(git, req.vault, &url)?;
     let id = history::ensure_vault_id(req.vault)?;
+    // held until the publish ends; the system lets go of it when the process ends, so a crash leaves no lock behind (SITE-078)
+    let _lock = lock(req.base, &id)?;
 
     step("Working out the site…");
     let mut vault = Vault::open(req.vault).map_err(|e| format!("could not open {}: {e}", req.vault.display()))?;
