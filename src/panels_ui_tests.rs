@@ -503,7 +503,7 @@ fn the_editing_settings_switch_the_toolbar_and_edit_the_colour_presets() {
     assert_eq!(p.app.cfg.highlight_colours.len(), 4, "the other palette is untouched");
 }
 
-// spec: VAULT-023
+// spec: VAULT-023, CFG-020
 #[test]
 fn panel_settings_dialog_changes_settings_and_closes() {
     let mut p = P::new("settings", &[]);

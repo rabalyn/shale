@@ -574,7 +574,7 @@ fn the_title_line_and_the_tab_hide_the_date_prefix_and_renaming_from_the_title_l
     assert!(w.dir.join("Elsewhere.md").exists());
 }
 
-// spec: LINK-007, LINK-014, LINK-015, CFG-040
+// spec: LINK-007, LINK-014, LINK-015, CFG-042
 #[test]
 fn the_outline_shows_the_numbers_and_a_click_scrolls_the_reading_view_to_the_heading_and_keeps_the_mode() {
     let mut w = W::new("outline-numbers");

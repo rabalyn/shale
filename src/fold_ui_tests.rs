@@ -463,7 +463,7 @@ fn edit_081_a_note_opens_with_its_front_matter_folded_to_a_summary_line() {
     assert_eq!(std::fs::read_to_string(w.dir.join(NOTE)).unwrap(), MAIL);
 }
 
-// spec: EDIT-081
+// spec: EDIT-081, CFG-050
 #[test]
 fn edit_081_the_setting_raw_leaves_the_front_matter_open_and_a_note_without_one_is_not_affected() {
     let mut w = W::new_with("front-raw", MAIL, true, |app| app.cfg.properties_in_editor = crate::config::PropertiesView::Raw);

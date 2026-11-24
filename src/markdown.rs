@@ -960,7 +960,7 @@ pub fn find_heading(text: &str, heading: &str) -> Option<usize> {
 }
 
 /// Whether the headings of this note are numbered: the front matter's `numbered-headings:`
-/// (`true`/`false`, `yes`/`no`) when it has one, else `vault_default` (CFG-040).
+/// (`true`/`false`, `yes`/`no`) when it has one, else `vault_default` (CFG-042).
 pub fn headings_numbered(text: &str, vault_default: bool) -> bool {
     let mut lines = text.lines();
     if lines.next().map(str::trim) != Some("---") {
@@ -1891,7 +1891,7 @@ a
         assert_eq!(relink_to("[a](../Notes/Fresh)", "../Notes/Fresh", "261117_Fresh").as_deref(), Some("[a](../Notes/261117_Fresh)"));
     }
 
-    // spec: CFG-040
+    // spec: CFG-042
     #[test]
     fn front_matter_overrides_the_vault_default_for_numbered_headings() {
         let with = |v: &str| format!("---\nnumbered-headings: {v}\n---\n## A");
