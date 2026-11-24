@@ -364,7 +364,7 @@ fn use_value(req: &Request, cat: &Catalogue, role: Role, raw: &str) -> Result<Op
 /// A vault path to one font file: it gives that face only.
 fn font_file(req: &Request, cat: &Catalogue, raw: &str, target: &str) -> Result<Family, Unusable> {
     let rel = Path::new(target.trim_start_matches("./"));
-    if rel.is_absolute() || rel.components().any(|c| matches!(c, Component::ParentDir | Component::Prefix(_))) {
+    if rel.is_absolute() || rel.has_root() || target.starts_with(['/', '\\']) || rel.components().any(|c| matches!(c, Component::ParentDir | Component::Prefix(_))) {
         return Err(Unusable(format!("the path “{raw}” is outside the vault; it is ignored")));
     }
     if !is_font_file(rel) {

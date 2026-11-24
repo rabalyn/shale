@@ -1,5 +1,5 @@
 {{- /* The snapshot of a board note (SITE-045): lanes and cards as they were when the site was exported, read-only (no script, no form). `data/boards.json` holds only boards that are published and, in them, only cards of published notes (SITE-007, SITE-010). */ -}}
-{{- with .File }}{{ with hugo.Data.boards }}{{ with index . $.File.Path }}
+{{- with .File }}{{ with hugo.Data.boards }}{{ with index . (replace $.File.Path "\\" "/") }}
 <section class="board-snapshot">
 {{- if .unresolved }}
 <p class="board-note">This board could not be shown.</p>

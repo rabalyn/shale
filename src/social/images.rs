@@ -105,7 +105,7 @@ impl ImageCache {
         if url.is_empty() {
             return None;
         }
-        if url.starts_with('/') {
+        if url.starts_with('/') || Path::new(url).is_absolute() {
             return Some(PathBuf::from(url));
         }
         let mut slots = self.slots.lock().unwrap_or_else(|e| e.into_inner());

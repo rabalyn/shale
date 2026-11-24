@@ -266,11 +266,13 @@ mod tests {
     // spec: BOARD-004, BOARD-022
     #[test]
     fn board_004_a_pin_for_any_file_name_is_read_back_as_the_same_file() {
-        let names = ["Plain", "With #hash 1", "a|b", "up^caret", "[brackets]", "100% (done) <x>", "Größe ünï 日本", "50% (a) <b> #1", "Dup"];
+        // Windows cannot hold a file named with `| < >` (nor `: * ? "`), so there those names are left out
+        let all = ["Plain", "With #hash 1", "a|b", "up^caret", "[brackets]", "100% (done) <x>", "Größe ünï 日本", "50% (a) <b> #1", "Dup"];
+        let names: Vec<&str> = all.into_iter().filter(|n| !cfg!(windows) || !n.contains(['|', '<', '>', ':', '*', '?', '"'])).collect();
         let d = std::env::temp_dir().join(format!("shale-board-pin-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(d.join("Sub")).unwrap();
-        for n in names {
+        for n in &names {
             std::fs::write(d.join(format!("{n}.md")), "x\n").unwrap();
         }
         std::fs::write(d.join("Sub/Dup.md"), "x\n").unwrap();
@@ -286,12 +288,15 @@ mod tests {
             pins.push(pin);
         }
         // the ordinary names keep the `[[Name]]` form; the others are markdown links with the path
-        assert_eq!(pins[0], "[[Plain]]");
-        assert_eq!(pins[1], "[With #hash 1](<With %23hash 1.md>)");
-        assert_eq!(pins[5], "[[100% (done) <x>]]");
-        assert_eq!(pins[7], "[50% (a) <b> #1](<50%25 %28a%29 %3Cb%3E %231.md>)");
-        assert_eq!(pins[6], "[[Größe ünï 日本]]");
-        assert_eq!(pins[10], "[Dir #1](<Sub/Dir %231.md>)");
+        let pin_of = |card: &str| cards.iter().position(|c| c == Path::new(card)).map(|i| pins[i].as_str());
+        assert_eq!(pin_of("Plain.md"), Some("[[Plain]]"));
+        assert_eq!(pin_of("With #hash 1.md"), Some("[With #hash 1](<With %23hash 1.md>)"));
+        assert_eq!(pin_of("Größe ünï 日本.md"), Some("[[Größe ünï 日本]]"));
+        assert_eq!(pin_of("Sub/Dir #1.md"), Some("[Dir #1](<Sub/Dir %231.md>)"));
+        if !cfg!(windows) {
+            assert_eq!(pin_of("100% (done) <x>.md"), Some("[[100% (done) <x>]]"));
+            assert_eq!(pin_of("50% (a) <b> #1.md"), Some("[50% (a) <b> #1](<50%25 %28a%29 %3Cb%3E %231.md>)"));
+        }
         // and a board file that holds them gives them back, one pin per line
         let mut b = Board::parse("## M\n");
         b.lanes[0].set_pins(&pins);
