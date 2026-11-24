@@ -33,7 +33,10 @@ struct W {
 
 impl W {
     fn new(tag: &str, files: &[(&str, &str)]) -> W {
-        let dir = std::env::temp_dir().join(format!("shale-boards-{tag}-{}", std::process::id()));
+        // one directory per window: `cargo test` runs the tests as threads of one process, and many share a tag
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("shale-boards-{tag}-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         for (name, text) in files {

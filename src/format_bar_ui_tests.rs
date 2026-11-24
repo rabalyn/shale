@@ -11,11 +11,18 @@ struct Fx {
     app: ShaleApp,
     hl: Headless,
     dir: PathBuf,
+    /// Holds the sync tree lock for the fixture's life, so the 0.8 s autosave does nothing: on a
+    /// loaded machine it would otherwise save the note mid-test and stamp `created:`/`modified:`
+    /// into the buffer, which moves the text and the char offsets the tests select by.
+    _tree: crate::gitsync::TreeGuard,
 }
 
 impl Fx {
     fn new(tag: &str, text: &str) -> Fx {
-        let dir = std::env::temp_dir().join(format!("shale-fbar-{tag}-{}", std::process::id()));
+        // one directory per fixture: `cargo test` runs the tests as threads of one process
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("shale-fbar-{tag}-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         crate::vault::write_sample_vault(&dir).unwrap();
         let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
@@ -26,7 +33,8 @@ impl Fx {
         hl.frames(&mut app, 4);
         app.notes.get_mut(Path::new(NOTE)).unwrap().text = text.to_string();
         hl.frames(&mut app, 3);
-        Fx { app, hl, dir }
+        let _tree = app.sync.tree.try_hold().expect("a new window has the tree lock free");
+        Fx { app, hl, dir, _tree }
     }
 
     fn text(&self) -> String {
