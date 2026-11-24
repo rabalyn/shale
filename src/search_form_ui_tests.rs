@@ -347,6 +347,7 @@ fn query_029_the_picker_form_lists_the_tags_and_esc_closes_the_list_before_the_p
     // typing opens it again; a click on the entry writes the query of the picker
     w.hl.frame(&mut w.app, vec![Event::Text("to".into())]);
     w.hl.frames(&mut w.app, 2);
+    w.hl.settle(&mut w.app);
     assert!(crate::search_form::list_open(w.hl.ctx()));
     w.click("todo");
     assert_eq!(w.picker().query, "#todo");

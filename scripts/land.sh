@@ -13,7 +13,8 @@
 # suites of tests/caldav-env, tests/mail-env and tests/forgejo-env and the LuaLaTeX suite of tests/tex-env, each only when the
 # change touches its code or environment (`.forgejo/scripts/env-tests.sh suites`, #447); --no-env-tests skips them and
 # says so. When they passed, a last step makes the lines-of-code report (DEV-045, `cargo run -q --locked
-# --example loc_report -- --out docs/loc-report.md`) and, when `docs/loc-report.md` changed, commits it on
+# --example loc_report -- --out docs/loc-report.md`) and, when `docs/loc-report.md`, `docs/loc-history.svg`
+# or `docs/loc-history.tsv` (the chart per tag and its counts, DEV-046) changed, commits them on
 # top of the merge as `no-issue: lines-of-code report for <branch> (DEV-045)`; it is pushed with the merge.
 # A report that cannot be made fails the landing like a failed check. A merge conflict is not resolved here: merge `origin/main` into the branch, resolve
 # it there and run land.sh again. After the push the local branch `main` is fast-forwarded to
@@ -248,15 +249,22 @@ checks() {
 
 # The lines-of-code report of DEV-045 on the checked merge in the current folder: made by the
 # report command (LAND_REPORT_CMD replaces it, run by `sh -c` like LAND_CHECK_CMD), committed on top
-# of the merge when docs/loc-report.md differs from it. A failing command fails the landing.
+# of the merge when docs/loc-report.md, docs/loc-history.svg or docs/loc-history.tsv (DEV-046)
+# differ from it. A failing command fails the landing. The chart counts the `v*` tags of this
+# repository, which the landing worktree shares; a tag from the remote is there when `git fetch`
+# below followed it (it does for tags on fetched history, which release tags are).
 report() {
   local b=$1 cmd=${LAND_REPORT_CMD:-cargo run -q --locked --example loc_report -- --out docs/loc-report.md}
+  local files=() f
   step "lines-of-code report (DEV-045)" sh -c "$cmd" || return 1
-  [ ! -e docs/loc-report.md ] || git add docs/loc-report.md
-  if git diff --cached --quiet -- docs/loc-report.md; then
+  for f in docs/loc-report.md docs/loc-history.svg docs/loc-history.tsv; do
+    [ ! -e "$f" ] || files+=("$f")
+  done
+  [ ${#files[@]} -eq 0 ] || git add -- "${files[@]}"
+  if [ ${#files[@]} -eq 0 ] || git diff --cached --quiet -- "${files[@]}"; then
     echo "the lines-of-code report is current, nothing to commit"
   else
-    git commit -q --no-verify -m "no-issue: lines-of-code report for $b (DEV-045)" -- docs/loc-report.md || return 1
+    git commit -q --no-verify -m "no-issue: lines-of-code report for $b (DEV-045)" -- "${files[@]}" || return 1
     echo "committed the lines-of-code report as $(git rev-parse --short HEAD)"
   fi
 }

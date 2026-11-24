@@ -163,6 +163,14 @@ check "dev_045: nothing is pushed when the report fails" "main_is $before"
 check "dev_045: the failed landing is recorded with the report step" 'hist_is failed rep3 "lines-of-code report (DEV-045)"'
 expect "dev_045: the same branch lands when the report works again" 0 "landed rep3" rep3
 
+# DEV-046: the chart and its counts go into the same commit
+branch rep1b r1b.txt r1b
+LAND_REPORT_CMD='mkdir -p docs && printf "report 2\n" > docs/loc-report.md && printf "<svg/>\n" > docs/loc-history.svg && printf "# loc-history rules=1\n" > docs/loc-history.tsv' expect "dev_046: the report, the chart and the counts are committed together" 0 "committed the lines-of-code report" rep1b
+check "dev_046: all three files are in the one report commit, which is pushed" '[ "$(git log -1 --format=%s origin/main)" = "no-issue: lines-of-code report for rep1b (DEV-045)" ] && [ "$(git show --name-only --format= origin/main | sort | tr "\n" " ")" = "docs/loc-history.svg docs/loc-history.tsv docs/loc-report.md " ]'
+branch rep1c r1c.txt r1c
+LAND_REPORT_CMD='printf "<svg/>\nmore\n" > docs/loc-history.svg' expect "dev_046: a changed chart alone makes a report commit" 0 "committed the lines-of-code report" rep1c
+check "dev_046: a changed chart alone is committed on top of the merge" '[ "$(git show --name-only --format= origin/main)" = docs/loc-history.svg ]'
+
 # the TeX Live mirror (DEV-025, #371): the check command prints what it sees of the variables
 branch tex1 t1.txt t1
 export LAND_CHECK_CMD='echo "seen install=[${SHALE_TEX_INSTALL_REPOSITORY-unset}] env=[${SHALE_TEX_ENV_REPOSITORY-unset}]"'
