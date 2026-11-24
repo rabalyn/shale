@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 /// The most runs of LuaLaTeX for one document.
-pub const MAX_RUNS: u32 = 5;
+pub const MAX_RUNS: u32 = 4;
 
 /// How long one run of LuaLaTeX or biber may take.
 pub const RUN_TIMEOUT: Duration = Duration::from_secs(120);
@@ -73,13 +73,16 @@ pub struct Options {
     pub timeout: Duration,
     /// The most runs of LuaLaTeX.
     pub max_runs: u32,
+    /// Bibliography files (`.bib`) copied into the work folder under their own names, for
+    /// `\addbibresource` (TEX-043).
+    pub bib_files: Vec<PathBuf>,
     /// Set to stop the compile: the running program and everything it started are killed.
     pub cancel: Option<Arc<AtomicBool>>,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Options { tex_inputs: vec![], timeout: RUN_TIMEOUT, max_runs: MAX_RUNS, cancel: None }
+        Options { tex_inputs: vec![], timeout: RUN_TIMEOUT, max_runs: MAX_RUNS, bib_files: vec![], cancel: None }
     }
 }
 
@@ -91,6 +94,9 @@ pub struct CompileOutput {
     pub runs: u32,
     /// The font names database was built in this compile (the first run after an install is slow).
     pub font_cache_built: bool,
+    /// What the export should say without failing: a citation key biber did not find, biber
+    /// missing (the PDF has no bibliography), numbers that may be stale after the last run (TEX-043).
+    pub warnings: Vec<String>,
 }
 
 /// One problem found in a log or in what biber said.
@@ -244,6 +250,29 @@ pub fn biber_problems(output: &str) -> Vec<Problem> {
     output.lines().filter_map(|l| l.split_once("ERROR - ").map(|(_, m)| Problem { message: m.trim().to_string(), file: None, line: None, missing: None })).collect()
 }
 
+/// Whether a `.bcf` (biblatex's control file) has citations: a document with only a
+/// `\printbibliography`, or none, gives biber nothing to resolve.
+pub fn bcf_has_citations(bcf: &[u8]) -> bool {
+    String::from_utf8_lossy(bcf).contains("<bcf:citekey")
+}
+
+/// The citation keys biber did not find (`WARN - I didn't find a database entry for 'key' (section 0)`)
+/// as warnings of the export.
+pub fn biber_warnings(output: &str) -> Vec<String> {
+    let mut found: Vec<String> = vec![];
+    for line in output.lines() {
+        if let Some(rest) = line.split_once("I didn't find a database entry for '").map(|(_, r)| r) {
+            if let Some((key, _)) = rest.split_once('\'') {
+                let w = format!("citation key '{key}' was not found in the bibliography");
+                if !found.contains(&w) {
+                    found.push(w);
+                }
+            }
+        }
+    }
+    found
+}
+
 /// Whether the log asks for another run: references, outlines or labels that changed, or a
 /// bibliography that is not made yet.
 pub fn asks_rerun(log: &str) -> bool {
@@ -358,16 +387,31 @@ fn compile_in(engine: &Engine, work: &WorkDir, main_tex: &str, opts: &Options) -
     let stem = &main_tex[..main_tex.len() - 4];
     let base = |program: &str| {
         let mut c = engine.command(program);
-        c.current_dir(work.path()).env("TEXINPUTS", &inputs);
+        c.current_dir(work.path()).env("TEXINPUTS", &inputs).env("BIBINPUTS", &inputs);
         // a document writes only into its own folder (and not into a parent or a dot file)
         c.env("openout_any", "p");
         c
     };
+    for bib in &opts.bib_files {
+        let name = bib.file_name().and_then(|n| n.to_str()).filter(|n| n.ends_with(".bib") && !n.starts_with(['-', '.']));
+        let copied = name.ok_or_else(|| "it has no usable file name".to_string()).and_then(|n| {
+            let bytes = crate::fsutil::read(bib).map_err(|e| e.to_string())?;
+            work.write(n, &bytes).map_err(|e| e.to_string())
+        });
+        copied.map_err(|e| fail(format!("the bibliography {} could not be copied into the work folder ({e})", bib.display()), vec![], String::new()))?;
+    }
+    let cancelled = || opts.cancel.as_deref().is_some_and(|c| c.load(Ordering::SeqCst));
     let read_log = || crate::fsutil::read(work.path().join(format!("{stem}.log"))).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
     let mut runs = 0;
     let mut bcf_seen: Option<u64> = None;
     let mut font_cache_built = false;
+    let mut warnings: Vec<String> = vec![];
+    let mut biber_usable = true;
     loop {
+        // between two runs is a safe point for Cancel (JOB-006)
+        if cancelled() {
+            return Err(fail("the compile was cancelled".into(), vec![], String::new()));
+        }
         let mut cmd = base("lualatex");
         cmd.args(lualatex_args(main_tex));
         runs += 1;
@@ -389,34 +433,54 @@ fn compile_in(engine: &Engine, work: &WorkDir, main_tex: &str, opts: &Options) -
             }
         }
         let mut again = asks_rerun(&log) || watched_before != watched_state(work.path(), stem);
-        if let Ok(bcf) = crate::fsutil::read(work.path().join(format!("{stem}.bcf"))) {
+        let bcf = crate::fsutil::read(work.path().join(format!("{stem}.bcf"))).ok().filter(|b| bcf_has_citations(b));
+        if let (Some(bcf), true) = (bcf, biber_usable) {
             let h = hash_of(&bcf);
             if bcf_seen != Some(h) {
                 bcf_seen = Some(h);
                 let mut cmd = base("biber");
                 cmd.arg(stem);
-                let b = proc::run(cmd, opts.timeout, opts.cancel.as_deref(), |_| {}).map_err(|e| fail(format!("biber could not be started ({e}); check Settings → LaTeX"), vec![], String::new()))?;
-                match b.ending {
-                    Ending::TimedOut => return Err(fail(format!("biber ran for more than {} seconds and was stopped", opts.timeout.as_secs()), vec![], b.tail_text())),
-                    Ending::Cancelled => return Err(fail("the compile was cancelled".into(), vec![], b.tail_text())),
-                    Ending::Exited(Some(0)) => {}
-                    Ending::Exited(_) => {
-                        let mut p = biber_problems(&b.tail_text());
-                        if p.is_empty() {
-                            p.push(Problem { message: "biber stopped without saying why".into(), file: None, line: None, missing: None });
+                match proc::run(cmd, opts.timeout, opts.cancel.as_deref(), |_| {}) {
+                    // biber is not there: no bibliography, but the document is still made
+                    Err(e) => {
+                        biber_usable = false;
+                        warnings.push(format!("biber could not be started ({e}): the PDF has no bibliography. Install biber next to LuaLaTeX, or in Settings → LaTeX the TeX Live that Shale installs."));
+                    }
+                    Ok(b) => {
+                        match b.ending {
+                            Ending::TimedOut => return Err(fail(format!("biber ran for more than {} seconds and was stopped", opts.timeout.as_secs()), vec![], b.tail_text())),
+                            Ending::Cancelled => return Err(fail("the compile was cancelled".into(), vec![], b.tail_text())),
+                            Ending::Exited(Some(0)) => {}
+                            Ending::Exited(_) => {
+                                let blg = crate::fsutil::read(work.path().join(format!("{stem}.blg"))).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
+                                let mut p = biber_problems(&b.tail_text());
+                                if p.is_empty() {
+                                    p.push(Problem { message: "biber stopped without saying why".into(), file: None, line: None, missing: None });
+                                }
+                                let named = if blg.is_empty() { String::new() } else { format!(" (its log is {stem}.blg)") };
+                                return Err(fail(format!("biber stopped with an error{named}"), p, if blg.is_empty() { b.tail_text() } else { tail_of(&blg) }));
+                            }
                         }
-                        return Err(fail("biber stopped with an error".into(), p, b.tail_text()));
+                        for w in biber_warnings(&b.tail_text()) {
+                            if !warnings.contains(&w) {
+                                warnings.push(w);
+                            }
+                        }
+                        again = true;
                     }
                 }
-                again = true;
             }
         }
-        if !again || runs >= opts.max_runs {
+        if !again {
+            break;
+        }
+        if runs >= opts.max_runs {
+            warnings.push(format!("LuaLaTeX was run {runs} times and still asked for another run: the numbers and references in the PDF may be stale"));
             break;
         }
     }
     match crate::fsutil::read(work.path().join(format!("{stem}.pdf"))) {
-        Ok(pdf) if !pdf.is_empty() => Ok(CompileOutput { pdf, runs, font_cache_built }),
+        Ok(pdf) if !pdf.is_empty() => Ok(CompileOutput { pdf, runs, font_cache_built, warnings }),
         _ => Err(fail("LuaLaTeX made no PDF".into(), problems(&read_log()), tail_of(&read_log()))),
     }
 }
