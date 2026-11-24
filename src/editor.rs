@@ -2,6 +2,9 @@
 //! blue (note exists) or red (note missing), follows links on click and suggests note
 //! names after `[[`.
 
+#[cfg(test)]
+mod citation_ui_tests;
+mod cite;
 mod format;
 
 pub(crate) use format::FormatCache;
@@ -640,6 +643,8 @@ pub enum EditorAction {
     /// "Copy into the vault" on the caption of an outside embed: copy the file of this link target
     /// and point the note's links at the copy (MEDIA-021)
     CopyOutside(String),
+    /// "Choose a bibliography file in Settings" in the list of citations that has no bibliography (EDIT-124)
+    OpenVaultSettings,
 }
 
 #[derive(Default)]
@@ -668,6 +673,13 @@ pub struct NoteEditor {
     index: Option<(Arc<Galley>, Arc<crate::galley_index::GalleyIndex>)>,
     /// `[[`, `[[p ` and `[!` helpers of the text box
     pub assist: crate::link_assist::LinkAssist,
+    /// the document of the note (its labels, the bibliography in effect): the citations and
+    /// references are marked, completed and peeked from it (EDIT-124 to EDIT-126)
+    pub thesis: Arc<crate::thesis::View>,
+    /// the citations and references of the text, found again when the text or the document changes
+    cite_cache: cite::Cache,
+    /// the citation or reference whose peek was pinned with Ctrl+click: the byte it stands at and where the pointer was
+    peeked: Option<(usize, Pos2)>,
     /// Put the cursor here (char index) on the next frame and scroll to it.
     pub pending_cursor: Option<usize>,
     /// The next scroll to `pending_cursor` puts its line at the top of the view (a heading link, LINK-015).
@@ -770,6 +782,9 @@ impl NoteEditor {
             layout: Default::default(),
             index: None,
             assist: crate::link_assist::LinkAssist::new(id),
+            thesis: Arc::default(),
+            cite_cache: Default::default(),
+            peeked: None,
             pending_cursor: None,
             scroll_to_top: false,
             numbered_headings: false,
@@ -1302,7 +1317,7 @@ impl NoteEditor {
     /// link's target. `outside` is None for a file of the vault, else whether the outside file is
     /// there: the caption says on hover that it is not synced (MEDIA-023), and of a file that is
     /// there it has "Copy into the vault" at its right end (MEDIA-021).
-    fn paint_caption(ui: &mut Ui, link: &LinkSpan, art: Rect, (base_size, max_w): (f32, f32), id: egui::Id, outside: Option<bool>) -> Option<EditorAction> {
+    fn paint_caption(ui: &mut Ui, link: &LinkSpan, art: Rect, (base_size, max_w): (f32, f32), id: egui::Id, outside: Option<bool>, numbered: Option<&str>) -> Option<EditorAction> {
         let size = crate::caption::size(base_size);
         let font = egui::FontId::proportional(size);
         let width = |t: &str, ui: &Ui| ui.painter().layout_no_wrap(t.to_string(), font.clone(), Color32::WHITE).size().x;
@@ -1310,7 +1325,9 @@ impl NoteEditor {
         let copy = (outside == Some(true)).then(|| ui.painter().layout_no_wrap(crate::media::outside::COPY_LABEL.to_string(), font.clone(), theme::palette().muted));
         let reserved = copy.as_ref().map_or(0.0, |g| g.size().x + 10.0);
         let room = art.width().max(160.0 + reserved).min(max_w);
-        let shown = crate::caption::fit(&crate::caption::text(link), (room - reserved).max(40.0), |t| width(t, ui));
+        let said = crate::caption::text(link);
+        let said = numbered.map_or(said.clone(), |n| format!("{n}: {said}"));
+        let shown = crate::caption::fit(&said, (room - reserved).max(40.0), |t| width(t, ui));
         let galley = ui.painter().layout_no_wrap(shown, font, theme::palette().muted);
         let rect = Rect::from_min_size(Pos2::new(art.min.x, art.max.y + crate::caption::GAP), galley.size());
         // click and drag, as the player's controls: the text box under it would take a plain click
@@ -1564,6 +1581,25 @@ impl NoteEditor {
         shown
     }
 
+    /// The peek that Ctrl+click pinned (EDIT-125): drawn by the mark until Esc or another click closes it.
+    fn show_pinned_peek(&mut self, ui: &Ui, marks: &[cite::CiteMark], clicked_away: bool) {
+        let Some((at, pos)) = self.peeked else { return };
+        let Some(mark) = marks.iter().find(|m| m.range.start == at) else {
+            self.peeked = None;
+            return;
+        };
+        let view = self.thesis.clone();
+        egui::Area::new(self.id.with("peek")).order(egui::Order::Foreground).fixed_pos(pos + Vec2::new(0.0, 14.0)).show(ui.ctx(), |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                cite::peek_ui(ui, mark, &view);
+                ui.label(egui::RichText::new("Esc closes").small().color(theme::palette().faint));
+            });
+        });
+        if clicked_away {
+            self.peeked = None;
+        }
+    }
+
     /// The front matter changed between two frames while the body stayed (a save added `created:` and
     /// `modified:`, VAULT-045): the cursor, the selection and the steps of the text box's undo history
     /// move with the text, and the change is no undo step, so Ctrl+Z does not take the properties away
@@ -1654,6 +1690,10 @@ impl NoteEditor {
 
         // Keys for the `[[` list and the `[!` picker must be taken before the text box sees them.
         self.assist.id = self.id;
+        // Esc closes the peek that Ctrl+click pinned before it closes anything else (EDIT-125)
+        if self.peeked.is_some() && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+            self.peeked = None;
+        }
         let mut keys = self.assist.take_keys(ui, text, vault);
         changed |= keys.changed;
         if keys.action.is_some() {
@@ -1876,6 +1916,13 @@ impl NoteEditor {
                 }
             }
         }
+        // the label of a figure after its embed (`{#fig:x}`, EDIT-128) is part of the picture's row: hidden with the link
+        for (range, ..) in images.iter_mut() {
+            *range = cite::with_label(text, range.clone());
+        }
+        for (range, _) in outside_embeds.iter_mut() {
+            *range = cite::with_label(text, range.clone());
+        }
         // The embeds shown as pictures, by their link text (in order). When typing changes the
         // text in the middle of a frame, the pictures are found again in the new text, so they
         // stay pictures instead of flashing back to link text for a frame.
@@ -1883,6 +1930,9 @@ impl NoteEditor {
         let links = self.cache.links.clone();
         let links_text = text.clone();
         let numbered_default = self.numbered_headings;
+        self.assist.thesis = self.thesis.clone();
+        let thesis = self.thesis.clone();
+        let cite_marks = std::cell::RefCell::new(Arc::new(Vec::<cite::CiteMark>::new()));
         let number_marks = std::cell::RefCell::new(Arc::new(Vec::new()));
         let formula_marks = std::cell::RefCell::new(Arc::new(Vec::new()));
         self.assist.arm(text, media_handled);
@@ -1892,7 +1942,7 @@ impl NoteEditor {
             rel.hash(&mut h);
             h.finish()
         };
-        let (parse, layout_cache) = (&mut self.parse, &mut self.layout);
+        let (parse, layout_cache, cite_cache) = (&mut self.parse, &mut self.layout, &mut self.cite_cache);
         let mut layouter = |ui: &Ui, buf: &dyn egui::TextBuffer, wrap_width: f32| -> Arc<Galley> {
             let s = buf.as_str();
             let mut ranges: Vec<(Range<usize>, f32)> = remap_images(s, &image_keys).into_iter().map(|(r, h, _)| (r, h)).collect();
@@ -1907,7 +1957,10 @@ impl NoteEditor {
             // what the layout depends on, the cursor only by the raw lines it makes (EDIT-105)
             let ctx = ui.ctx();
             let settled = crate::fonts::settled(ctx);
+            let marks = cite_cache.get(s, &thesis);
+            let cite_ranges = cite::ranges(&marks);
             let key = crate::editor_cache::LayoutKey {
+                cites: crate::fold_ui::hash_of(&format!("{cite_ranges:?}")),
                 text: s.to_string(),
                 links: links_key,
                 fonts: fonts.clone(),
@@ -1936,12 +1989,13 @@ impl NoteEditor {
                         .collect::<Vec<_>>();
                     &fresh
                 };
-                let (mut job, formulas) = formats.highlight(s, use_links, fonts, &key.ranges, preview.clone());
+                let (mut job, formulas) = formats.highlight_marked(s, use_links, &cite_ranges, fonts, &key.ranges, preview.clone());
                 let numbers = make_room_for_numbers(ui, &mut job, fonts, numbered_default, preview.as_ref());
                 job.wrap.max_width = wrap_width;
                 let galley = ctx.fonts_mut(|f| f.layout_job(job));
                 crate::editor_cache::Laid { galley, formulas: Arc::new(formulas), numbers: Arc::new(numbers) }
             });
+            *cite_marks.borrow_mut() = marks;
             *formula_marks.borrow_mut() = laid.formulas;
             *number_marks.borrow_mut() = laid.numbers;
             laid.galley
@@ -2085,7 +2139,10 @@ impl NoteEditor {
                 // the link as the caption below the picture; a click on it follows the link (EDIT-053)
                 if let Some(link) = markdown::find_links(&now_text[r.clone()]).into_iter().next() {
                     let found = outside_embeds.iter().find(|(range, _)| *range == images[idx].0).map(|(_, found)| *found);
-                    if let Some(a) = Self::paint_caption(ui, &link, rect, (base_size, max_w), id.with("caption"), found) {
+                    // a figure with a label has its number before the caption (EDIT-127)
+                    let line = now_text[..r.start].matches('\n').count();
+                    let numbered = self.thesis.labels.entries.iter().find(|e| e.kind == crate::markdown::citations::Kind::Figure && e.source == self.thesis.index && e.line == line).map(|e| crate::thesis::caption_label(e, self.thesis.lang));
+                    if let Some(a) = Self::paint_caption(ui, &link, rect, (base_size, max_w), id.with("caption"), found, numbered.as_deref()) {
                         action = Some(a);
                     }
                 }
@@ -2261,12 +2318,21 @@ impl NoteEditor {
         let hover = ui.input(|i| i.pointer.hover_pos());
         let modifiers = ui.input(|i| i.modifiers);
         let follow_ok = !ctrl_to_follow || modifiers.command;
+        let cite_marks_now = cite_marks.borrow().clone();
         if let Some(hp) = hover.filter(|p| resp.rect.contains(*p)) {
             // a painted task box (EDIT-016): a click ticks the task
             let box_ticked = crate::task_box::check_under(&task_boxes, hp).filter(|_| resp.clicked()).is_some_and(|check| markdown::toggle_task_at(text, check));
             changed |= box_ticked;
             if let Some(byte) = char_under(&output.galley, output.galley_pos, hp).map(|c| markdown::char_to_byte(text, c)) {
                 let (link, web) = self.link_at(text, byte, &|r| images.iter().any(|(i, ..)| i == r));
+                // a citation or a reference: its entry or number in a tooltip, and Ctrl+click keeps it open (EDIT-125)
+                if let Some(mark) = cite::at(&cite_marks_now, byte) {
+                    let (shown, view) = (mark.clone(), self.thesis.clone());
+                    resp.clone().on_hover_ui_at_pointer(|ui| cite::peek_ui(ui, &shown, &view));
+                    if resp.clicked() && modifiers.command {
+                        self.peeked = Some((mark.range.start, hp));
+                    }
+                }
                 if let Some(w) = &web {
                     if follow_ok {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -2314,6 +2380,7 @@ impl NoteEditor {
                 }
             }
         }
+        self.show_pinned_peek(ui, &cite_marks_now, resp.clicked() && !modifiers.command);
         // `gt` in vim normal mode: the click's action for the link under vim's cursor (EDIT-023)
         if std::mem::take(&mut self.vim_follow) {
             let byte = markdown::char_to_byte(text, self.vim.cursor);
@@ -2462,11 +2529,13 @@ fn remap_images(text: &str, keys: &[(String, f32)]) -> Vec<(Range<usize>, f32, u
         if j >= keys.len() {
             break;
         }
-        let here = &text[l.range.clone()];
+        // (the label of a figure after the embed is part of it, EDIT-127)
+        let range = cite::with_label(text, l.range.clone());
+        let here = &text[range.clone()];
         // skip keys whose link was removed by the edit
         if let Some(k) = keys[j..].iter().position(|(t, _)| t == here) {
             j += k;
-            out.push((l.range.clone(), keys[j].1, j));
+            out.push((range, keys[j].1, j));
             j += 1;
         }
     }
@@ -2498,12 +2567,12 @@ mod tests {
     use egui::{Event, PointerButton, RawInput};
     use std::path::PathBuf;
 
-    struct Harness {
-        ctx: egui::Context,
-        time: f64,
-        texts: Vec<String>,
+    pub(super) struct Harness {
+        pub(super) ctx: egui::Context,
+        pub(super) time: f64,
+        pub(super) texts: Vec<String>,
         /// where each text of the last frame was painted (to click on it)
-        rects: Vec<(String, Rect)>,
+        pub(super) rects: Vec<(String, Rect)>,
     }
 
     /// The texts painted in the last frame (to see whether line numbers were drawn).
@@ -2536,7 +2605,7 @@ mod tests {
 
     impl Harness {
         /// Frames until the pictures the editor asked for are looked up and decoded (on workers, MEDIA-024).
-        fn settle(&mut self, ed: &mut NoteEditor, text: &mut String, vault: &Vault, rel: &Path) {
+        pub(super) fn settle(&mut self, ed: &mut NoteEditor, text: &mut String, vault: &Vault, rel: &Path) {
             let looks = crate::media::look::Looks::of(&self.ctx);
             let mut idle = 0;
             for _ in 0..500 {
@@ -2550,7 +2619,7 @@ mod tests {
             panic!("the pictures did not load");
         }
 
-        fn frame(&mut self, ed: &mut NoteEditor, text: &mut String, vault: &Vault, rel: &Path, events: Vec<Event>) -> (bool, Option<EditorAction>) {
+        pub(super) fn frame(&mut self, ed: &mut NoteEditor, text: &mut String, vault: &Vault, rel: &Path, events: Vec<Event>) -> (bool, Option<EditorAction>) {
             self.time += 0.05;
             let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 700.0))), time: Some(self.time), events, ..Default::default() };
             let mut changed = false;
@@ -2587,7 +2656,7 @@ mod tests {
         vec![Event::PointerMoved(p), Event::PointerButton { pos: p, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE }]
     }
 
-    fn vault_for_tests(tag: &str) -> (Vault, std::path::PathBuf) {
+    pub(super) fn vault_for_tests(tag: &str) -> (Vault, std::path::PathBuf) {
         let d = std::env::temp_dir().join(format!("shale-ed-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         crate::vault::write_sample_vault(&d).unwrap();
@@ -3958,12 +4027,12 @@ mod tests {
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("see #prj".into())]);
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         assert!(ed.assist.tags.active && ed.assist.is_open());
-        assert_eq!(ed.assist.tags.items[0], "prj-x", "the prefix first");
-        assert!(["projects/shale", "my-projects"].iter().all(|t| ed.assist.tags.items.iter().any(|i| i == t)), "then those with the letters in order: {:?}", ed.assist.tags.items);
+        assert_eq!(ed.assist.tags.items[0].insert, "prj-x", "the prefix first");
+        assert!(["projects/shale", "my-projects"].iter().all(|t| ed.assist.tags.items.iter().any(|i| i.insert == *t)), "then those with the letters in order: {:?}", ed.assist.tags.items);
         // typing on filters
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("e".into())]);
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
-        let (a, b) = (ed.assist.tags.items.iter().position(|t| t == "my-projects"), ed.assist.tags.items.iter().position(|t| t == "projects/shale"));
+        let (a, b) = (ed.assist.tags.items.iter().position(|t| t.insert == "my-projects"), ed.assist.tags.items.iter().position(|t| t.insert == "projects/shale"));
         assert!(a < b && b.is_some(), "equal matches go alphabetically: {:?}", ed.assist.tags.items);
         let sel = b.unwrap();
         // ↓ and ↑ move, Ctrl+J as well, and nothing is typed
@@ -4051,7 +4120,7 @@ mod tests {
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("---\ntags: [a, shale".into())]);
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         assert!(ed.assist.tags.active, "open in the tags property");
-        assert_eq!(ed.assist.tags.items, ["projects/shale"]);
+        assert_eq!(ed.assist.tags.items.iter().map(|c| c.insert.as_str()).collect::<Vec<_>>(), ["projects/shale"]);
         h.frame(&mut ed, &mut text, &v, rel, vec![key(Key::Enter)]);
         assert_eq!(text, "---\ntags: [a, projects/shale");
         // another property has none

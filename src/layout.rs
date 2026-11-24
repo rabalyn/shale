@@ -950,6 +950,8 @@ impl ShaleApp {
         let ctrl = self.cfg.ctrl_to_follow;
         let dark = self.cfg.dark_canvas;
         let active = self.tabbar.active;
+        // the document of the note: its labels, the bibliography in effect, and in the reading view the formatted citations (#646)
+        let thesis = self.thesis_view(&rel, self.tabbar.tabs[active].reading);
         // the title line: the name without `.md` and without the date prefix, which a rename keeps (VAULT-025)
         let (display_name, kept_prefix) = self.vault.as_ref().and_then(|v| v.file(&rel)).map(|f| (f.title(), crate::vault::date_prefix_of(&f.display_name()).unwrap_or_default().to_string())).unwrap_or_default();
         let mut rename_to: Option<String> = None;
@@ -1031,6 +1033,7 @@ impl ShaleApp {
                             scroll_to: tab.reader_line.take(),
                             properties: self.cfg.properties_in_reader,
                             folds: Some(std::cell::RefCell::new(crate::fold_ui::ReaderFolds { ui: &mut tab.editor.fold, props: self.cfg.properties_in_editor })),
+                            thesis: Some(thesis.clone()),
                         };
                         let shown = crate::fonts::with_area(ui, &fonts.rendered, |ui| reader::show(ui, &text, vault, &rel, &mut reader::Caches { scenes: &mut self.scenes, media: &self.media }, (base, dark), &extras));
                         if let Some(a) = shown {
@@ -1038,6 +1041,7 @@ impl ShaleApp {
                         }
                     } else {
                         tab.editor.apply_settings(&self.cfg, &self.vdata.settings.people_dir, &self.media);
+                        tab.editor.thesis = thesis.clone();
                         if let Some(sel) = tab.place.restore_cursor.take() {
                             tab.editor.restore_selection_chars(ui.ctx(), &doc.text, sel);
                         }

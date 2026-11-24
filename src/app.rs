@@ -163,7 +163,7 @@ pub enum RightPanel {
     Thread,
 }
 
-mod bib;
+pub(crate) mod bib;
 mod boards;
 #[cfg(test)]
 mod busy_jobs;
@@ -359,6 +359,8 @@ pub enum Action {
     ShowViewInNewTab(View),
     /// show a day (a day number) in the calendar: the sidebar's, else the big one (EDIT-108)
     OpenCalendarDay(i64),
+    /// the Vault tab of Settings, where the bibliography file is chosen (EDIT-124)
+    OpenVaultSettings,
     /// show an event in the Calendar tab (opened when there is none), from the sidebar's Calendar pane (LAY-033)
     OpenCalendarEvent(Box<crate::calendar::store::Occ>),
     /// open the conversation of a post of the sidebar's Feeds pane in a Feeds tab (opened when there is none, LAY-034)
@@ -486,6 +488,8 @@ pub struct ShaleApp {
     pub tag_learner: crate::import::tagwords::TagLearner,
     /// the `.bib` files that notes ask for, read in the background (EDIT-123)
     pub bib: crate::bibliography::Bibliographies,
+    /// the thesis document of the open note (#646)
+    pub(crate) thesis: bib::ThesisState,
     pub scenes: SceneCache,
     /// the one media player state (MEDIA-007); the players in the views draw from it
     pub media: crate::media::MediaPlayer,
@@ -756,6 +760,7 @@ impl ShaleApp {
             drag: drops::DragState::default(),
             tag_learner: crate::import::tagwords::TagLearner::new(),
             bib: Default::default(),
+            thesis: Default::default(),
             scenes: SceneCache::default(),
             media: crate::media::MediaPlayer::default(),
             modal: None,
@@ -2808,6 +2813,7 @@ impl ShaleApp {
                 Action::ShowView(v) => self.show_view(v, false),
                 Action::ShowViewInNewTab(v) => self.show_view(v, true),
                 Action::OpenCalendarDay(day) => self.open_calendar_day(day),
+                Action::OpenVaultSettings => self.open_settings(SettingsTab::Vault),
                 Action::OpenPost(hit) => self.open_post_hit(&hit),
                 Action::OpenFeedPost { feed, post } => self.open_feed_post(feed, &post),
                 Action::OpenMail(msg) => self.open_mail_hit(*msg),
@@ -3502,6 +3508,7 @@ pub fn handle_editor_action(app_actions: &mut Vec<Action>, a: EditorAction, from
         EditorAction::AskLiftHeadings(text) => app_actions.push(Action::AskLiftHeadings(text)),
         EditorAction::AskOutsideFiles(text) => app_actions.push(Action::AskOutsideFiles(text)),
         EditorAction::CopyOutside(target) => app_actions.push(Action::CopyOutside { rel: from.to_path_buf(), target: Some(target) }),
+        EditorAction::OpenVaultSettings => app_actions.push(Action::OpenVaultSettings),
     }
 }
 

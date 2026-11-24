@@ -52,6 +52,10 @@ pub enum ReaderAction {
     CopyOutside(String),
 }
 
+mod thesis;
+#[cfg(test)]
+mod thesis_tests;
+
 /// What the reading view shows besides the text: the numbers of the headings by line (LINK-014)
 /// and the line of a heading to scroll to (LINK-015).
 #[derive(Default)]
@@ -62,6 +66,8 @@ pub struct Extras<'a> {
     pub properties: crate::config::PropertiesView,
     /// the folds of the note, shared with its editor (EDIT-095)
     pub folds: Option<RefCell<ReaderFolds<'a>>>,
+    /// the document of the note: its numbers, and its citations formatted (EDIT-127)
+    pub thesis: Option<std::sync::Arc<crate::thesis::View>>,
 }
 
 impl Extras<'_> {
@@ -621,12 +627,15 @@ pub(crate) fn paint_pictures(painter: &egui::Painter, galley: &Galley, pos: Pos2
 
 /// A formula alone on its lines: centred in its own row in display style, or its TeX as code with
 /// the reason on hover when it cannot be typeset (EDIT-047, EDIT-049).
-fn math_block(ui: &mut Ui, tex: &str, base: f32) {
+fn math_block(ui: &mut Ui, tex: &str, base: f32, number: Option<&str>) {
     match crate::math::typeset(tex, base * crate::math::DISPLAY_SCALE, true) {
         Ok(f) => {
             let size = crate::math::paint::size(&f);
             let width = ui.available_width();
             let (rect, _) = ui.allocate_exact_size(Vec2::new(width.max(size.x), size.y + base * 0.8), Sense::hover());
+            if let Some(n) = number {
+                thesis::paint_equation_number(ui, rect, n, base);
+            }
             let left = rect.min.x + ((width - size.x) / 2.0).max(0.0);
             let pos = Pos2::new(left, rect.min.y + base * 0.4 + f.layout.ascent);
             crate::math::paint::paint(&ui.painter().with_clip_rect(ui.clip_rect()), &f, pos, theme::palette().text);
@@ -644,7 +653,12 @@ fn math_block(ui: &mut Ui, tex: &str, base: f32) {
 /// Hover and click on the link at byte `byte` of a block's text (if there is one): the pointer,
 /// the tooltip and the action (web links open the browser, notes open or are created).
 fn follow_span(ui: &Ui, resp: &egui::Response, byte: usize, spans: &[(Range<usize>, LinkSpan, bool)], hint: &dyn Fn(&str) -> Option<String>, out: &mut Option<ReaderAction>) {
-    if let Some((kind, label)) = spans.iter().find(|(r, ..)| r.contains(&byte)).and_then(|(_, l, _)| footnote_of(l)) {
+    if let Some(tip) = spans.iter().find(|(r, ..)| r.contains(&byte)).and_then(|(_, l, _)| thesis::tip_of(l)) {
+        // a citation or a reference: its entry or caption, and nothing to follow (EDIT-127)
+        if !tip.is_empty() {
+            resp.clone().on_hover_text(tip);
+        }
+    } else if let Some((kind, label)) = spans.iter().find(|(r, ..)| r.contains(&byte)).and_then(|(_, l, _)| footnote_of(l)) {
         // a footnote mark goes to the other end of its footnote, in the next frame (EDIT-050)
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         resp.clone().on_hover_text(if kind == Foot::Reference { "Go to the footnote" } else { "Back to the text" });
@@ -796,6 +810,13 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
             (l, ok)
         })
         .collect();
+    // the citations, references and labels of the thesis syntax ride along as spans (EDIT-127)
+    let thesis = extras.thesis.as_deref();
+    let all_links = match thesis {
+        Some(view) if text.contains('@') || text.contains("{#") => thesis::merge(all_links, thesis::spans(text, view)),
+        _ => all_links,
+    };
+    let mut bibliography_drawn = false;
     let pictures = pictures_in_lines(
         text,
         &all_links,
@@ -868,13 +889,22 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
                 ui.scroll_to_rect(egui::Rect::from_min_size(ui.cursor().min, Vec2::new(1.0, base * 1.5)), Some(egui::Align::TOP));
             }
             if let Some(b) = tables.iter().find(|b| b.lines.start == i) {
+                // the caption line `: Caption {#tbl:x}` right below the table is drawn as "Table 2: Caption", above or below it
+                let caption = thesis.and_then(|t| thesis::label_on(t, markdown::citations::Kind::Table, b.lines.end).map(|e| (t, e)));
+                let above = caption.is_some_and(|(t, _)| thesis::above(t, markdown::citations::Kind::Table));
+                if let Some((t, e)) = caption.filter(|_| above) {
+                    thesis::caption(ui, e, t, base);
+                }
                 table_block(ui, b, vault, rel, base, &hint, &mut out);
-                i = b.lines.end;
+                if let Some((t, e)) = caption.filter(|_| !above) {
+                    thesis::caption(ui, e, t, base);
+                }
+                i = b.lines.end + usize::from(caption.is_some());
                 break 'line;
             }
             // a formula on lines of its own: `$$` lines, a `math` fence, `$$…$$` alone (EDIT-046)
             if let Some(m) = formulas.iter().find(|m| m.block && m.lines.start == i) {
-                math_block(ui, &text[m.tex.clone()], base);
+                math_block(ui, &text[m.tex.clone()], base, thesis.and_then(|t| thesis::equation_number(t, &m.lines)).as_deref());
                 i = m.lines.end;
                 break 'line;
             }
@@ -945,21 +975,41 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
             let trimmed = line.trim();
             let indent = (line.len() - line.trim_start().len()) as f32 * 7.0;
             // embed on its own line
-            if line_links.len() == 1 && line_links[0].0.embed && trimmed.len() == line_links[0].0.range.len() {
-                let (l, ok) = &line_links[0];
+            // (a label `{#fig:x}` after it is not text: it is hidden and numbers the figure, EDIT-127)
+            let real: Vec<&(LinkSpan, bool)> = line_links.iter().filter(|(l, _)| thesis::tip_of(l).is_none()).collect();
+            let alone = real.len() == 1 && real[0].0.embed && {
+                let mut bare = line.to_string();
+                for (l, _) in line_links.iter().rev().filter(|(l, _)| thesis::tip_of(l).is_some() && l.alias.as_deref() == Some("")) {
+                    bare.replace_range(l.range.clone(), "");
+                }
+                bare.trim().len() == real[0].0.range.len()
+            };
+            let figure = thesis.and_then(|t| thesis::label_on(t, markdown::citations::Kind::Figure, i).map(|e| (t, e)));
+            let caption_above = figure.is_some_and(|(t, _)| thesis::above(t, markdown::citations::Kind::Figure));
+            if alone {
+                let (l, ok) = real[0];
                 if *ok {
                     let shown = vault.look_media(ui.ctx(), &l.target, Some(rel));
                     let outside = matches!(shown, crate::vault::Shown::Outside(_));
                     if let Some((target, abs)) = shown.file(vault) {
                         if crate::media::is_media(&target) {
                             // a sound is a player of its own, without the frame (MEDIA-001)
+                            if let Some((t, e)) = figure.filter(|_| caption_above) {
+                                thesis::caption(ui, e, t, base);
+                            }
                             crate::media::widget::show(ui, caches.media, &abs, rel, l.embed_width());
                             if outside {
                                 outside_row(ui, &l.target, &mut out);
                             }
                             ui.add_space(6.0);
                         } else {
+                            if let Some((t, e)) = figure.filter(|_| caption_above) {
+                                thesis::caption(ui, e, t, base);
+                            }
                             embed(ui, vault, (&target, &abs, outside.then_some(l.target.as_str())), l.embed_width(), caches, (base, dark_canvas), &mut out);
+                        }
+                        if let Some((t, e)) = figure.filter(|_| !caption_above) {
+                            thesis::caption(ui, e, t, base);
                         }
                         i += 1;
                         break 'line;
@@ -987,6 +1037,12 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
                 }
             } else if markdown::is_align_edge(&wrappers, i) {
                 // the tag of a wrapper is not shown (EDIT-110)
+            } else if thesis.is_some() && thesis::is_bibliography_marker(trimmed) {
+                // `<!-- shale: bibliography -->`: the list of references goes here instead of at the end
+                bibliography_drawn = true;
+                if let Some(t) = thesis {
+                    thesis::bibliography(ui, t, base);
+                }
             } else if page_breaks.contains(&i) {
                 // a page-break marker: a dashed rule with its label (EDIT-065)
                 let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), base * 1.6), egui::Sense::hover());
@@ -1067,6 +1123,10 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
         if let Some(h) = &heights {
             h.lock().unwrap_or_else(|e| e.into_inner()).segs.insert(start, (i, ui.cursor().min.y - top));
         }
+    }
+    // the references of a note that stands alone come at its end, unless a marker put them elsewhere; a chapter of a book has them where the book says
+    if let Some(t) = thesis.filter(|t| t.book.is_none() && !bibliography_drawn) {
+        thesis::bibliography(ui, t, base);
     }
     out
 }
@@ -1400,7 +1460,7 @@ mod tests {
         assert!(done.sections.iter().chain(&plain.sections).all(|s| s.format.font_id == FontId::new(14.0, FontFamily::Monospace)), "the same monospace font in both");
     }
 
-    fn shapes_text(shapes: &[egui::epaint::ClippedShape]) -> Vec<(String, Rect)> {
+    pub(super) fn shapes_text(shapes: &[egui::epaint::ClippedShape]) -> Vec<(String, Rect)> {
         fn walk(s: &egui::Shape, out: &mut Vec<(String, Rect)>) {
             match s {
                 egui::Shape::Text(t) => out.push((t.galley.job.text.clone(), t.visual_bounding_rect())),
@@ -1458,7 +1518,7 @@ mod tests {
 
     /// Draw `text` in the reading view of a 700 x 500 window (in a scroll area, like the app's)
     /// for some frames (a scroll is animated); returns the last action and what was painted.
-    fn read(v: &Vault, text: &str, extras: &Extras, frames: Vec<Vec<Event>>) -> (Option<ReaderAction>, Vec<(String, Rect)>) {
+    pub(super) fn read(v: &Vault, text: &str, extras: &Extras, frames: Vec<Vec<Event>>) -> (Option<ReaderAction>, Vec<(String, Rect)>) {
         let (mut scenes, media) = (SceneCache::default(), crate::media::MediaPlayer::default());
         let ctx = egui::Context::default();
         let mut time = 0.0;
@@ -1470,7 +1530,7 @@ mod tests {
             let mut out = ctx.run_ui(raw, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     // the target is asked for in the first frame only, as the app does
-                    let e = Extras { numbers: extras.numbers.clone(), scroll_to: extras.scroll_to.filter(|_| n == 0), properties: extras.properties, folds: None };
+                    let e = Extras { numbers: extras.numbers.clone(), scroll_to: extras.scroll_to.filter(|_| n == 0), properties: extras.properties, folds: None, thesis: extras.thesis.clone() };
                     action = show(ui, text, v, Path::new("Welcome.md"), &mut Caches { scenes: &mut scenes, media: &media }, (15.0, true), &e);
                 });
             });

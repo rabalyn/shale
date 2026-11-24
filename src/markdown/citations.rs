@@ -151,7 +151,7 @@ pub fn reserved_prefix(key: &str) -> Option<Kind> {
 
 /// A `{#kind:id}` at the start of `s`: the kind, the id and the length in bytes. The id holds
 /// letters, digits, `_`, `-`, `.` and `:`.
-pub(super) fn parse_label(s: &str) -> Option<(Kind, String, usize)> {
+pub fn parse_label(s: &str) -> Option<(Kind, String, usize)> {
     let inner = s.strip_prefix("{#")?;
     let close = inner.find('}')?;
     let (kind, id) = inner[..close].split_once(':')?;

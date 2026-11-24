@@ -1,7 +1,7 @@
 //! What Settings says about the bibliography (EDIT-123): the state of the files of the vault's
 //! default and of the open note, and which keys the note cites that the bibliography lacks. The
-//! keys come from the scanner of EDIT-122, which this is the first reader of; the marks in the
-//! editor are #646's.
+//! keys come from the scanner of EDIT-122; the marks in the editor are those of EDIT-126
+//! (`editor/cite.rs`), and this is the same question asked of the whole text, for the status.
 
 use super::reader::Entry;
 use super::Effect;
