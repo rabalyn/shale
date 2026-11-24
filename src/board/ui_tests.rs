@@ -969,52 +969,6 @@ fn board_019_the_drop_line_of_the_lane_wins_over_its_query() {
     assert_eq!(w.lane("Later"), strs(&["Gamma"]));
 }
 
-const DONE_BOARD: &str = "---\ntype: board\n---\n# Flow\n\n## Doing\nquery: status:doing\n\n## Finished\ndone: true\n\n## Done by query\nquery: status:review\ndone: true\n\n## Archive\ndrop: status: archived\ndone: true\n";
-
-fn done_flow(tag: &str) -> W {
-    let files = [("Board.md", DONE_BOARD), ("Beta.md", "---\nstatus: doing\nmodified: 2020-01-01T10:00:00+00:00\n---\nBeta body\n"), ("Gamma.md", "---\nstatus: doing\n---\nGamma body\n")];
-    let mut w = W::new(tag, &files);
-    w.hl.set_size(vec2(2200.0, 900.0));
-    w.settle();
-    w
-}
-
-// spec: BOARD-019, BOARD-024
-#[test]
-fn board_024_a_drop_on_a_done_lane_without_a_drop_line_sets_status_done_and_not_modified() {
-    let mut w = done_flow("drop-done");
-    let to = w.lane_top("Finished");
-    w.drag_drop("Beta", to);
-    let beta = w.file("Beta.md");
-    assert!(beta.contains("status: done") && !beta.contains("status: doing"), "{beta}");
-    assert!(beta.contains("modified: 2020-01-01T10:00:00+00:00"), "a drop does not touch modified (BOARD-020): {beta}");
-    assert_eq!(w.lane("Finished"), strs(&["Beta"]), "pinned in the manual done lane");
-    // a done lane with a simple query: done wins over the property the query says
-    let to = w.lane_top("Done by query");
-    w.drag_drop("Gamma", to);
-    let gamma = w.file("Gamma.md");
-    assert!(gamma.contains("status: done") && !gamma.contains("review"), "{gamma}");
-}
-
-// spec: BOARD-019, BOARD-024
-#[test]
-fn board_024_the_drop_line_of_a_done_lane_wins_over_status_done() {
-    let mut w = done_flow("drop-done-line");
-    let to = w.lane_top("Archive");
-    w.drag_drop("Beta", to);
-    let beta = w.file("Beta.md");
-    assert!(beta.contains("status: archived") && !beta.contains("status: done"), "{beta}");
-}
-
-// spec: BOARD-024
-#[test]
-fn board_024_the_drop_field_of_a_done_lane_shows_status_done_as_its_default() {
-    let mut w = done_flow("drop-done-hint");
-    w.double_click("Finished");
-    assert!(w.painted("When a card is dropped here, set"));
-    assert!(w.painted("status: done"), "{:?}", w.all_text());
-}
-
 // spec: BOARD-019
 #[test]
 fn board_019_the_drag_marks_the_lane_and_the_place_and_a_ghost_follows_the_pointer() {
@@ -1111,6 +1065,48 @@ fn board_021_a_drop_on_a_lane_without_a_property_pins_the_card_and_leaves_its_no
     assert!(w.board_text().contains("## Todo\nquery: #todo\n- [[Beta]]\n"), "{}", w.board_text());
     assert_eq!(w.lane("Todo"), strs(&["Beta", "Alpha"]), "pinned on top, where it was dropped");
     assert_eq!(w.lane("Doing"), strs(&["Gamma"]), "a pinned card is only in the lanes that pin it (BOARD-032)");
+}
+
+const DONE_BOARD: &str = "---\ntype: board\n---\n# Flow\n\n## Doing\nquery: status:doing\n\n## Finished\ndone: true\n\n## Archive\ndrop: status: archived\ndone: true\n";
+
+fn done_flow(tag: &str) -> W {
+    let files = [("Board.md", DONE_BOARD), ("Beta.md", "---\nstatus: doing\nmodified: 2020-01-01T10:00:00+00:00\n---\nBeta body\n"), ("Gamma.md", "---\nstatus: doing\nblocked-by: \"[[Beta]]\"\n---\nGamma body\n")];
+    let mut w = W::new(tag, &files);
+    w.hl.set_size(vec2(2200.0, 900.0));
+    w.settle();
+    w
+}
+
+// spec: BOARD-021, BOARD-024
+#[test]
+fn board_024_a_drop_on_a_manual_done_lane_pins_the_card_and_leaves_its_note_alone() {
+    let mut w = done_flow("drop-done-pin");
+    let before = w.file("Beta.md");
+    let to = w.lane_top("Finished");
+    w.drag_drop("Beta", to);
+    assert_eq!(w.file("Beta.md"), before, "no status: done is written, the note is byte-identical");
+    assert!(w.board_text().contains("## Finished\ndone: true\n- [[Beta]]\n"), "{}", w.board_text());
+    assert_eq!(w.lane("Finished"), strs(&["Beta"]));
+}
+
+// spec: BOARD-024
+#[test]
+fn board_024_a_card_pinned_in_a_done_lane_counts_as_done_on_this_board() {
+    let mut w = done_flow("drop-done-counts");
+    assert_eq!(w.blocked(&["Gamma"]), [true], "Beta is not done yet");
+    let to = w.lane_top("Finished");
+    w.drag_drop("Beta", to);
+    assert_eq!(w.blocked(&["Gamma"]), [false], "Beta is in a done lane, so Gamma is free");
+}
+
+// spec: BOARD-019, BOARD-024
+#[test]
+fn board_024_a_done_lane_with_a_drop_line_writes_that_property() {
+    let mut w = done_flow("drop-done-line");
+    let to = w.lane_top("Archive");
+    w.drag_drop("Beta", to);
+    let beta = w.file("Beta.md");
+    assert!(beta.contains("status: archived") && !beta.contains("status: done"), "{beta}");
 }
 
 // spec: BOARD-022

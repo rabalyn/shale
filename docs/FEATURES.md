@@ -602,7 +602,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - A **board is a note** with `type: board` in its front matter, so it stays searchable, linkable and readable in other
   apps. Its lanes are `##` headings; under a heading `query:` (the query language of the search: `AND`, `OR`, `NOT`,
   `#tag`, `status:doing`, `due:`, `path:`), `sort:` (`priority desc, due asc`), `drop:` (`status: doing`) and
-  `done: true` lines (a drop on a done lane sets `status: done` unless it has a `drop:` line, #638), and `- [[Note]]` lines that pin cards in that order (a file name with `#`, `^`, `|` or brackets is pinned as a link with its path, and a pin that finds no note is named in its lane, #637). `cards: every-lane` shows a card in every lane
+  `done: true` lines, and `- [[Note]]` lines that pin cards in that order (a file name with `#`, `^`, `|` or brackets is pinned as a link with its path, and a pin that finds no note is named in its lane, #637). `cards: every-lane` shows a card in every lane
   it matches (else it is in the first), `card-shows: due, status, priority, tags` chooses the chips of the cards. Lines
   the board does not know stay as they are, and a hand edit of the file changes the view.
 - **Space b** (`main.boards`, definable) opens the boards, a main-area tab with a strip of every board of the vault and
