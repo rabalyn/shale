@@ -163,7 +163,7 @@ pub enum RightPanel {
     Thread,
 }
 
-mod bib;
+pub(crate) mod bib;
 mod boards;
 #[cfg(test)]
 mod busy_jobs;
@@ -359,6 +359,8 @@ pub enum Action {
     ShowViewInNewTab(View),
     /// show a day (a day number) in the calendar: the sidebar's, else the big one (EDIT-108)
     OpenCalendarDay(i64),
+    /// the Vault tab of Settings, where the bibliography file is chosen (EDIT-124)
+    OpenVaultSettings,
     /// show an event in the Calendar tab (opened when there is none), from the sidebar's Calendar pane (LAY-033)
     OpenCalendarEvent(Box<crate::calendar::store::Occ>),
     /// open the conversation of a post of the sidebar's Feeds pane in a Feeds tab (opened when there is none, LAY-034)
@@ -486,6 +488,8 @@ pub struct ShaleApp {
     pub tag_learner: crate::import::tagwords::TagLearner,
     /// the `.bib` files that notes ask for, read in the background (EDIT-123)
     pub bib: crate::bibliography::Bibliographies,
+    /// the thesis document of the open note (#646)
+    pub(crate) thesis: bib::ThesisState,
     pub scenes: SceneCache,
     /// the one media player state (MEDIA-007); the players in the views draw from it
     pub media: crate::media::MediaPlayer,
@@ -665,7 +669,8 @@ impl ShaleApp {
         let default_welcome = dirs::document_dir().or_else(dirs::home_dir).unwrap_or_default().join("Notes");
         // where the data lives: the user's folders, or temporary ones for tests and screenshots
         let n = NEXT_MAIL_ROOT.fetch_add(1, Ordering::SeqCst);
-        // tests: one folder per process (and app); screenshots: a fixed name, emptied first, because
+        // tests: one folder per process (and app; the calendar folder per app too, because a window deletes
+        // it when dropped and local calendar ids are the second they were made in, #659); screenshots: a fixed name, emptied first, because
         // the data usage dialog shows these paths and two runs must give the same picture
         let tag = if screenshot.is_some() { "screenshot".to_string() } else { std::process::id().to_string() };
         let mail_root = if persist {
@@ -676,7 +681,7 @@ impl ShaleApp {
             std::env::temp_dir().join(format!("shale-mail-{tag}-{n}"))
         };
         let social_dir = if persist { dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("social") } else { std::env::temp_dir().join(format!("shale-social-{tag}")) };
-        let calendar_dir = if persist { crate::calendar::store::default_local_dir() } else { std::env::temp_dir().join(format!("shale-calendars-{tag}")) };
+        let calendar_dir = if persist { crate::calendar::store::default_local_dir() } else { std::env::temp_dir().join(if screenshot.is_some() { format!("shale-calendars-{tag}") } else { format!("shale-calendars-{tag}-{n}") }) };
         let recovery_root = if persist { crate::recovery::default_root() } else { std::env::temp_dir().join(format!("shale-recovery-{tag}")) };
         if screenshot.is_some() {
             for d in [&mail_root, &social_dir, &calendar_dir, &recovery_root] {
@@ -758,6 +763,7 @@ impl ShaleApp {
             drag: drops::DragState::default(),
             tag_learner: crate::import::tagwords::TagLearner::new(),
             bib: Default::default(),
+            thesis: Default::default(),
             scenes: SceneCache::default(),
             media: crate::media::MediaPlayer::default(),
             modal: None,
@@ -2811,6 +2817,7 @@ impl ShaleApp {
                 Action::ShowView(v) => self.show_view(v, false),
                 Action::ShowViewInNewTab(v) => self.show_view(v, true),
                 Action::OpenCalendarDay(day) => self.open_calendar_day(day),
+                Action::OpenVaultSettings => self.open_settings(SettingsTab::Vault),
                 Action::OpenPost(hit) => self.open_post_hit(&hit),
                 Action::OpenFeedPost { feed, post } => self.open_feed_post(feed, &post),
                 Action::OpenMail(msg) => self.open_mail_hit(*msg),
@@ -3506,6 +3513,7 @@ pub fn handle_editor_action(app_actions: &mut Vec<Action>, a: EditorAction, from
         EditorAction::AskLiftHeadings(text) => app_actions.push(Action::AskLiftHeadings(text)),
         EditorAction::AskOutsideFiles(text) => app_actions.push(Action::AskOutsideFiles(text)),
         EditorAction::CopyOutside(target) => app_actions.push(Action::CopyOutside { rel: from.to_path_buf(), target: Some(target) }),
+        EditorAction::OpenVaultSettings => app_actions.push(Action::OpenVaultSettings),
     }
 }
 

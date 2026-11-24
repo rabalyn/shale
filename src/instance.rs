@@ -365,9 +365,11 @@ mod tests {
         // nothing at all
         assert!(!try_hand_over(&dir.0, &[]));
         // a crashed Shale's file: a port that is free now
-        let free = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap().local_addr().unwrap().port();
-        std::fs::write(dir.0.join(HANDOVER_FILE), format!("{free}\nsecret\n")).unwrap();
+        // (held closed, not a released port that a parallel test could be handed, #659)
+        let free = crate::calendar::dav::tests::closed_port();
+        std::fs::write(dir.0.join(HANDOVER_FILE), format!("{}\nsecret\n", free.port)).unwrap();
         assert!(!try_hand_over(&dir.0, &[]));
+        drop(free);
         std::fs::write(dir.0.join(HANDOVER_FILE), "garbage").unwrap();
         assert!(!try_hand_over(&dir.0, &[]));
     }

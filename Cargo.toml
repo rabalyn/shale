@@ -42,6 +42,9 @@ unicode-normalization = { version = "0.1", default-features = false }
 rfd = { version = "0.18", default-features = false, features = ["xdg-portal"] }
 # the reader of `.bib` files (EDIT-123, ADR-0039 §6); it is the part of Typst's hayagriva that reads BibLaTeX
 biblatex = "0.12"
+# the formatter of citations and bibliographies with CSL (EDIT-127, ADR-0039 §6): the five named styles and the locales
+# come from its archive; it reads entries through the same `biblatex` crate
+hayagriva = { version = "0.10", default-features = false, features = ["biblatex", "archive"] }
 # the length of a post in graphemes, as Bluesky counts it (SOC-052)
 unicode-segmentation = "1"
 
@@ -116,6 +119,8 @@ security-framework-sys = "2.17"
 # their unmodified sources are kept in vendor/ (licences: MIT / Apache-2.0 / BSD-3-Clause).
 [patch.crates-io]
 brotli = { path = "vendor/brotli-8.0.4" }
+# the CSL reader of hayagriva with quick-xml 0.41 for 0.38.4, which RUSTSEC-2026-0194 and RUSTSEC-2026-0195 hit (#646)
+citationberg = { path = "vendor/citationberg-0.7.0" }
 fearless_simd_07 = { path = "vendor/fearless_simd-0.7.0", package = "fearless_simd" }
 fearless_simd_12 = { path = "vendor/fearless_simd-1.2.0", package = "fearless_simd" }
 glifo = { path = "vendor/glifo-0.4.0" }

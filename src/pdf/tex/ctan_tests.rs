@@ -5,6 +5,7 @@
 use super::archive_tests::{z, zip};
 use super::ctan::fetch;
 use super::install::{Handle, MIRROR_TRIES};
+use crate::calendar::dav::tests::{closed_port, ClosedPort};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::PathBuf;
@@ -50,10 +51,11 @@ fn mirror() -> (String, Arc<Mutex<Vec<String>>>) {
     serve(|| Reply::Body(good_zip()))
 }
 
-/// An address nobody listens on: connecting fails at once.
-fn dead() -> String {
-    let l = TcpListener::bind("127.0.0.1:0").unwrap();
-    format!("http://127.0.0.1:{}", l.local_addr().unwrap().port())
+/// An address nobody listens on: connecting fails at once. The port is held closed while the
+/// second value lives (a released port could be handed to another test's server, #659).
+fn dead() -> (String, ClosedPort) {
+    let held = closed_port();
+    (format!("http://127.0.0.1:{}", held.port), held)
 }
 
 /// A pretend `mirrors.ctan.org`: each request is sent to the next of `mirrors`, in turn.
@@ -83,7 +85,7 @@ fn asked(log: &Arc<Mutex<Vec<String>>>) -> usize {
 #[test]
 fn a_dead_first_mirror_is_left_for_the_second_which_the_import_uses() {
     let (good, got) = mirror();
-    let dead = dead();
+    let (dead, _held) = dead();
     let (red, _) = redirector(vec![dead.clone(), good.clone()]);
     let (r, src) = run(&format!("{red}/macros/tuda-ci.zip"), "second");
     assert_eq!(r, Ok(format!("{good}/tuda-ci.zip")), "the mirror the file came from");
@@ -94,7 +96,7 @@ fn a_dead_first_mirror_is_left_for_the_second_which_the_import_uses() {
 // spec: TEX-006
 #[test]
 fn three_dead_mirrors_give_an_error_that_names_all_three() {
-    let (a, b, c) = (dead(), dead(), dead());
+    let ((a, _ha), (b, _hb), (c, _hc)) = (dead(), dead(), dead());
     let (red, asked_red) = redirector(vec![a.clone(), b.clone(), c.clone()]);
     let (r, _) = run(&format!("{red}/x.zip"), "three-dead");
     let e = r.unwrap_err();
@@ -120,7 +122,8 @@ fn a_mirror_the_redirector_names_again_is_skipped_but_the_try_counts() {
 // spec: TEX-006
 #[test]
 fn a_redirector_that_cannot_be_reached_fails_at_once() {
-    let (r, _) = run(&format!("{}/x.zip", dead()), "no-redirector");
+    let (dead, _held) = dead();
+    let (r, _) = run(&format!("{dead}/x.zip"), "no-redirector");
     let e = r.unwrap_err();
     assert!(e.contains("could not be reached") && !e.contains("mirror"), "{e}");
 }

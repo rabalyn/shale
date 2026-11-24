@@ -448,3 +448,51 @@ fn site_075_targets_on_one_server_and_user_share_one_keyring_entry_and_the_comma
     let program = crate::site_export::cli::device_git(crate::gitsync::managed::GitChoice::Auto);
     assert!(program.env.iter().any(|(k, v)| k == "GIT_ASKPASS" && !v.is_empty()) && program.env.iter().any(|(k, v)| k == ASKPASS_ENV && v == "1"));
 }
+
+// spec: SITE-078
+#[test]
+fn site_078_a_second_publish_is_refused_while_one_holds_the_lock_and_a_dead_ones_lock_does_not_block() {
+    let st = Stack::new("lock", false, &[("A.md", "a\n")]).unwrap();
+    st.publish().unwrap();
+    let id = st.id();
+    let (tip, commits) = (st.remote_tip(), st.remote(&["rev-list", "--count", BRANCH]));
+    let repo = repo_dir(&st.base, &id);
+    let head = run(&st.git, &repo, &["rev-parse", "HEAD"]);
+    let tree = std::fs::read_dir(&repo).unwrap().count();
+    st.f.file("B.md", "b\n");
+    // another publish is running: the second one stops at once and changes nothing
+    let held = crate::fsutil::try_lock_file(&st.base.join(&id).join("publish.lock")).unwrap().expect("the lock is free");
+    let steps = std::cell::RefCell::new(Vec::new());
+    let r = publish(&st.git, &st.request("laptop", false), &Cancel::default(), &|s| steps.borrow_mut().push(s.to_string()));
+    let Err(Failure::Error(why)) = r else { panic!("the publish must be refused") };
+    assert!(why.contains("Another publish of this vault is running"), "{why}");
+    assert!(steps.borrow().is_empty(), "nothing started: {:?}", steps.borrow());
+    assert_eq!((st.remote_tip(), st.remote(&["rev-list", "--count", BRANCH])), (tip.clone(), commits));
+    assert_eq!(run(&st.git, &repo, &["rev-parse", "HEAD"]), head);
+    assert_eq!(std::fs::read_dir(&repo).unwrap().count(), tree);
+    assert!(!repo.join("B.md").exists());
+    // the other one ends (or its process died: the system lets go of the lock): the file stays, the next publish goes through
+    drop(held);
+    assert!(st.base.join(&id).join("publish.lock").exists());
+    st.publish().unwrap();
+    assert_ne!(st.remote_tip(), tip);
+    // and the lock of a finished publish is free again
+    assert!(crate::fsutil::try_lock_file(&st.base.join(&id).join("publish.lock")).unwrap().is_some());
+}
+
+// spec: SITE-078, SITE-066
+#[test]
+fn site_078_the_command_says_why_on_stderr_and_exits_with_1() {
+    use crate::site_export::cli::{publish as run_publish, PublishArgs};
+    let st = Stack::new("lock-cli", false, &[("A.md", "a\n")]).unwrap();
+    st.publish().unwrap();
+    let tip = st.remote_tip();
+    let _held = crate::fsutil::try_lock_file(&st.base.join(st.id()).join("publish.lock")).unwrap().unwrap();
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let r = run_publish(&PublishArgs { vault: st.f.dir.clone(), take_over: false }, &st.git, &[], &st.base, &mut out, &mut err);
+    let why = r.unwrap_err();
+    assert!(why.contains("Another publish of this vault is running") && out.is_empty() && err.is_empty(), "{why}");
+    assert_eq!(st.remote_tip(), tip);
+    // `run` turns an Err into "shale: <reason>" on stderr and exit code 1 (SITE-066)
+    assert_eq!(crate::site_export::cli::run(["--publish".to_string(), st.f.dir.join("missing").to_string_lossy().into_owned()]), 1);
+}
