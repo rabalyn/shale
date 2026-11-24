@@ -6,7 +6,7 @@
 use super::card::{day_text, Card};
 use super::deps::Step;
 use super::drag::{self, Dropped, Target, TreeDropped};
-use super::file::{Board, Chip, Props};
+use super::file::{line_value, Board, Chip, Props};
 use super::lanes::{drop_property, PRESETS};
 use super::{Info, LaneView};
 use crate::note_props::Priority;
@@ -175,25 +175,58 @@ pub struct Settings {
     query: String,
     sort: String,
     drop: String,
-    /// what the lane's lines were when they were last taken over or written: a different text in the
-    /// file is a hand edit, which the popover shows
+    /// what the lane's lines were when they were last taken over or written, as the file says them
+    /// ([`line_value`]): a different text in the file is a hand edit, which the popover shows
     seen: (String, String, String),
+    /// the time (of the egui clock) of the last typing that is not written yet (QUERY-028)
+    pending: Option<f64>,
 }
+
+/// How long the typing in the popover pauses before it is written to the board (QUERY-028), seconds.
+const DEBOUNCE: f64 = 0.5;
 
 impl Settings {
     fn new(lane: usize, v: &LaneView) -> Settings {
         let mut form = search_form::State::default();
         form.focus();
-        Settings { lane, form, cache: Cache::for_lane(), query: v.query.clone(), sort: v.sort.clone(), drop: v.drop.clone(), seen: (v.query.clone(), v.sort.clone(), v.drop.clone()) }
+        Settings { lane, form, cache: Cache::for_lane(), query: v.query.clone(), sort: v.sort.clone(), drop: v.drop.clone(), seen: (line_value(&v.query), line_value(&v.sort), line_value(&v.drop)), pending: None }
     }
 
-    /// The text of the file changed by hand while the popover was open.
+    /// The text of the file changed by hand while the popover was open. Not while there is typing
+    /// that is not written yet: what the user typed is never replaced (QUERY-028).
     fn follow(&mut self, v: &LaneView) {
-        let now = (v.query.clone(), v.sort.clone(), v.drop.clone());
+        if self.pending.is_some() {
+            return;
+        }
+        let now = (line_value(&v.query), line_value(&v.sort), line_value(&v.drop));
         if now != self.seen {
             (self.query, self.sort, self.drop) = now.clone();
             self.seen = now;
         }
+    }
+
+    /// The three boxes as they are typed (tests).
+    #[cfg(test)]
+    pub(super) fn typed(&self) -> (&str, &str, &str) {
+        (&self.query, &self.sort, &self.drop)
+    }
+
+    /// The lines that differ from what the file says, as acts, and the typing is written.
+    fn flush(&mut self) -> Vec<Act> {
+        self.pending = None;
+        let now = (line_value(&self.query), line_value(&self.sort), line_value(&self.drop));
+        let mut acts = Vec::new();
+        if now.0 != self.seen.0 {
+            acts.push(Act::SetQuery(self.lane, self.query.clone()));
+        }
+        if now.1 != self.seen.1 {
+            acts.push(Act::SetSort(self.lane, self.sort.clone()));
+        }
+        if now.2 != self.seen.2 {
+            acts.push(Act::SetDrop(self.lane, self.drop.clone()));
+        }
+        self.seen = now;
+        acts
     }
 }
 
@@ -767,7 +800,9 @@ fn header(ui: &mut Ui, i: usize, lane: &LaneView, st: &mut State, data: &Data, e
 }
 
 /// The settings popover of lane `i` (QUERY-028): the form of the filter and the sort, the `drop:`
-/// property and the `done:` switch. What the form changes is written to the file at once.
+/// property and the `done:` switch. A choice of the form is written to the file at once; typing is
+/// written 500 ms after the last key, when the box loses the keyboard, and when the popover closes
+/// (QUERY-028), so the boxes keep exactly what is typed.
 fn settings(anchor: &egui::Response, st: &mut State, data: &Data, i: usize, env: &mut Env, acts: &mut Vec<Act>) {
     let Some(lane) = data.lanes.get(i) else {
         st.settings = None;
@@ -778,6 +813,7 @@ fn settings(anchor: &egui::Response, st: &mut State, data: &Data, i: usize, env:
     s.follow(lane);
     let mut asked = Vec::new();
     let mut closed = false;
+    let (mut typing, mut urgent) = (false, false);
     Popup::from_response(anchor).id(Id::unique(("board-lane-settings", i))).open_bool(&mut open).close_behavior(PopupCloseBehavior::IgnoreClicks).width(380.0).show(|ui| {
         // Esc closes what is open in the popover first: the list of a field, a menu, a drop-down
         if ui.input(|i| i.key_pressed(Key::Escape)) && egui::Popup::is_any_open(ui.ctx()) {
@@ -794,11 +830,9 @@ fn settings(anchor: &egui::Response, st: &mut State, data: &Data, i: usize, env:
         let count = search_form::matches_text(lane.cards.len(), lane.partial);
         let mut opts = Opts { vault: env.vault, worker: &mut *env.worker, prefixes: Prefixes::default(), host_box: false, count: Some(&count) };
         let changed = search_form::show(ui, &mut s.form, &mut s.query, &mut s.cache, env.advanced, Some(&mut s.sort), &mut opts);
-        if changed.query {
-            asked.push(Act::SetQuery(i, s.query.clone()));
-        }
-        if changed.sort {
-            asked.push(Act::SetSort(i, s.sort.clone()));
+        if changed.query || changed.sort {
+            typing |= changed.typed;
+            urgent |= !changed.typed;
         }
         if changed.advanced {
             asked.push(Act::SaveSettings);
@@ -807,21 +841,28 @@ fn settings(anchor: &egui::Response, st: &mut State, data: &Data, i: usize, env:
         ui.label(RichText::new("When a card is dropped here, set").color(theme::palette().muted));
         let derived = drop_property(&s.query);
         let hint = derived.clone().unwrap_or_else(|| "a property such as status: doing".to_string());
-        let r = ui.add(egui::TextEdit::singleline(&mut s.drop).hint_text(hint).desired_width(f32::INFINITY));
-        if r.changed() {
-            asked.push(Act::SetDrop(i, s.drop.clone()));
-        }
+        let r = ui.add(egui::TextEdit::singleline(&mut s.drop).id(ui.scope_id().with("lane-drop")).hint_text(hint).desired_width(f32::INFINITY));
+        typing |= r.changed();
         let mut done = lane.done;
         if ui.checkbox(&mut done, "Cards here are done").changed() {
             asked.push(Act::SetDone(i, done));
         }
     });
-    if !asked.is_empty() {
-        // what was written is what the file will say next frame
-        s.seen = (s.query.clone(), s.sort.clone(), s.drop.clone());
-        acts.extend(asked);
+    let ctx = &anchor.ctx;
+    let now = ctx.input(|i| i.time);
+    if typing {
+        s.pending = Some(now);
     }
-    if !open || closed {
+    let closing = !open || closed;
+    let waited = s.pending.map(|t| now - t);
+    let idle = waited.is_some() && ctx.memory(|m| m.focused()).is_none();
+    if urgent || closing || idle || waited.is_some_and(|w| w >= DEBOUNCE) {
+        asked.extend(s.flush());
+    } else if let Some(w) = waited {
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64((DEBOUNCE - w).max(0.0)));
+    }
+    acts.extend(asked);
+    if closing {
         st.settings = None;
     }
 }

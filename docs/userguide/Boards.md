@@ -71,7 +71,7 @@ the view follows.
 Each lane has a **⋯** menu: **Settings…**, **Rename**, **Move left**, **Move right** and **Delete lane…** (it asks first). **+ Add lane**
 (top right) adds one at the end and lets you name it at once. Every change is written to the board's note. A **double click on the
 heading** of a lane opens its settings: the same filter and sort form as in the search ([[Search and pickers]]), with
-the **drop** property (filled in from a query like `status:doing`) and "Cards here are done". The settings stay open until you close them: with the **✕** at the top right, with **Esc** (a list or menu that is open closes first), or with the **⋯** button again; a click outside does not close them. The tag and property fields suggest what is in your vault. The **Board** menu at the
+the **drop** property (filled in from a query like `status:doing`) and "Cards here are done". The settings stay open until you close them: with the **✕** at the top right, with **Esc** (a list or menu that is open closes first), or with the **⋯** button again; a click outside does not close them. The tag and property fields suggest what is in your vault. What you type in a box (the Advanced text, the sort, the drop property) is kept exactly as typed, spaces included, and written to the board half a second after your last key, when you leave the box, and when you close the settings; a choice from a menu is written at once. The **Board** menu at the
 top right sets "A card in every lane it matches" and which chips the cards show.
 
 A lane whose query is wrong shows what is wrong in its heading and stays empty; the other lanes work. A lane asks for
