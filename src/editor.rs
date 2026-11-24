@@ -4135,6 +4135,33 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: PPL-001
+    #[test]
+    fn ppl_001_the_people_folder_is_the_setting_not_always_adressbuch() {
+        let (mut v, d) = vault_for_tests("people-setting");
+        std::fs::create_dir_all(d.join("Kontakte/Team")).unwrap();
+        std::fs::create_dir_all(d.join("Adressbuch")).unwrap();
+        std::fs::write(d.join("Kontakte/Hans Müller.md"), "# Hans\n").unwrap();
+        std::fs::write(d.join("Kontakte/Team/Mücke Meier.md"), "# Mücke\n").unwrap();
+        std::fs::write(d.join("Adressbuch/Müller Alt.md"), "# Alt\n").unwrap();
+        v.rescan();
+        let rel = Path::new("Welcome.md");
+        let mut text = String::new();
+        let mut ed = NoteEditor::new(egui::Id::unique("tps"));
+        ed.assist.people_dir = " Kontakte/ ".into();
+        ed.request_focus = true;
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("Met [[p Mü".into())]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        let mut labels = ed.assist.ac_labels.clone();
+        let new_contact = labels.pop().unwrap();
+        labels.sort();
+        assert_eq!(labels, vec!["Hans Müller".to_string(), "Mücke Meier".into()], "the folder of the setting and below it, not Adressbuch");
+        assert_eq!(new_contact, "＋ New contact “Mü” in Kontakte");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     // spec: PPL-001, EDIT-004
     #[test]
     fn double_brackets_p_lists_people() {
@@ -5617,7 +5644,7 @@ mod tests {
         assert_eq!(format_of(&job, text, "\"fooo\"").background, theme::palette().code_bg);
     }
 
-    // spec: EDIT-110
+    // spec: EDIT-110, PDF-028
     #[test]
     fn the_lines_of_an_alignment_wrapper_are_dimmed_markup_and_the_heading_inside_is_still_a_heading() {
         let text = "<div align=\"center\">\n\n## Middle\n\ntext\n\n</div>\n\n<div align=\"right\">\nlost\n";

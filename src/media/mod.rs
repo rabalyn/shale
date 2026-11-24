@@ -659,7 +659,7 @@ mod tests {
         let _ = fs::remove_dir_all(&vault);
     }
 
-    // spec: EDIT-003
+    // spec: EDIT-003, CAL-018
     #[test]
     fn local_date_is_sane() {
         let (y, m, d) = local_date();

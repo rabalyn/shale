@@ -242,7 +242,7 @@ fn pages(bytes: &[u8]) -> usize {
     hayro::hayro_syntax::Pdf::new(bytes.to_vec()).expect("a valid PDF").pages().len()
 }
 
-// spec: BOOK-005
+// spec: BOOK-005, BOOK-008
 #[test]
 fn the_book_has_a_title_page_with_the_title_subtitle_author_and_date_and_no_page_number() {
     let (v, d) = handbook("title-page");
@@ -555,7 +555,7 @@ fn a_missing_or_unreadable_logo_is_skipped_with_a_reason_and_the_export_goes_on(
     clean(&d);
 }
 
-// spec: BOOK-012, BOOK-019
+// spec: BOOK-012, BOOK-019, PDF-010
 #[test]
 fn the_user_guide_is_a_book_with_every_note_once_in_the_order_of_start_here() {
     let guide = Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/userguide");

@@ -510,7 +510,7 @@ fn sync_056_ssh_makes_a_key_shows_the_public_part_with_copy_and_the_provider_pag
     assert!(!config.contains("PRIVATE KEY"), "only the path of the key");
 }
 
-// spec: SYNC-061, SYNC-062
+// spec: SYNC-061, SYNC-062, NET-017
 #[test]
 fn sync_062_a_vault_with_git_inside_a_cloud_folder_is_warned_and_offered_the_move_when_it_has_no_server() {
     let mut t = T::new("warn");

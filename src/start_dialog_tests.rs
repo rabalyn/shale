@@ -132,7 +132,7 @@ fn a_vault_cannot_be_created_where_a_file_is() {
     assert!(w.hl.text.iter().any(|(t, _)| t.contains("Could not create the vault")), "the toast gives the reason");
 }
 
-// spec: VAULT-022
+// spec: VAULT-022, VAULT-006
 #[test]
 fn recent_vaults_are_listed_and_one_click_opens_them() {
     let mut w = W::new();

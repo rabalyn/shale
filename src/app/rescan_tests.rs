@@ -121,6 +121,35 @@ fn net_013_an_outside_change_is_reloaded_by_the_frames_alone() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
+// spec: VAULT-005, NET-013
+#[test]
+fn vault_005_a_scan_starts_when_the_3_seconds_have_passed_and_not_before() {
+    assert_eq!(crate::vault::RESCAN_EVERY, Duration::from_secs(3));
+    let (mut app, d) = app_in("three-seconds", &[("N.md", b"one\n")]);
+    let gates = Gates::new(&mut app);
+    let ctx = egui::Context::default();
+    // a scan has just begun: the frames that follow start none
+    app.rescan.postpone();
+    for _ in 0..3 {
+        frame(&mut app, &ctx);
+    }
+    assert!(!app.rescan.in_flight(), "no scan before the interval is over");
+    // the interval is over: the next frame starts the scan
+    app.rescan.due_now();
+    frame(&mut app, &ctx);
+    assert!(app.rescan.in_flight(), "a scan after the interval");
+    gates.scan_now();
+    assert_eq!(gates.calls.load(Ordering::SeqCst), 1);
+    gates.deliver();
+    frames_until(&mut app, "the scan did not end", |a| !a.rescan.in_flight());
+    // and then it waits again
+    app.rescan.postpone();
+    frame(&mut app, &ctx);
+    assert!(!app.rescan.in_flight());
+    assert_eq!(gates.calls.load(Ordering::SeqCst), 1);
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 // spec: NET-013
 #[test]
 fn net_013_only_one_scan_runs_at_a_time() {

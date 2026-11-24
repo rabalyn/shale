@@ -500,7 +500,7 @@ mod tests {
         assert_eq!(lz_string::decompress_from_base64("not base64 !"), None);
     }
 
-    // spec: DRAW-007
+    // spec: DRAW-007, VAULT-002
     #[test]
     fn plugin_files_are_drawings() {
         for (name, yes) in [("A.excalidraw.md", true), ("a b.Excalidraw.MD", true), ("A.excalidraw", true), ("A.md", false), ("excalidraw.md", false)] {

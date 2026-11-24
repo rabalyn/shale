@@ -523,7 +523,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    // spec: EDIT-022
+    // spec: EDIT-022, VAULT-004
     #[test]
     fn the_history_is_written_and_read_back_after_a_restart() {
         let root = vault("roundtrip");

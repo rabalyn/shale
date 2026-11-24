@@ -1320,6 +1320,16 @@ mod tests {
         assert!(!w.app.notes[Path::new("A.md")].dirty);
     }
 
+    // spec: USE-001
+    #[test]
+    fn use_001_ctrl_shift_d_opens_the_data_usage_dialog() {
+        let mut w = W::new("data-usage-key");
+        settle(&mut w);
+        assert!(w.app.modal.is_none());
+        w.press(Key::D, Modifiers { shift: true, ..CTRL });
+        assert!(matches!(w.app.modal, Some(Modal::DataUsage)), "the command global.data_usage has Ctrl+Shift+D");
+    }
+
     // spec: NAV-001
     #[test]
     fn nav_001_every_tab_has_its_own_history_that_alt_arrows_and_the_mouse_side_buttons_walk() {

@@ -969,6 +969,34 @@ mod tests {
         assert_eq!(ra2.min, Pos2::new(0.0, 0.0));
     }
 
+    // spec: DRAW-004
+    #[test]
+    fn when_a_step_cannot_be_taken_nothing_moves_there_is_no_undo_step_and_a_message_says_why() {
+        let positions = |d: &DrawingDoc| d.scene.elements.iter().map(|e| (e.x, e.y)).collect::<Vec<_>>();
+        // one shape: nothing to arrange or spread
+        let mut d = DrawingDoc::new(PathBuf::from("t.excalidraw"), "");
+        let one = d.new_element("rectangle", Pos2::new(5.0, 5.0));
+        d.scene.elements.push(one);
+        let before = positions(&d);
+        d.auto_arrange();
+        assert_eq!(d.layout_msg.as_deref(), Some("Nothing to arrange: add at least two shapes"));
+        d.spread_shapes(1.25);
+        assert_eq!(d.layout_msg.as_deref(), Some("Select at least two shapes"));
+        assert!(positions(&d) == before && d.undo.is_empty() && !d.dirty, "nothing moved, nothing to undo");
+        // two shapes at the least distance they may have: pulling them together is refused
+        let mut d = DrawingDoc::new(PathBuf::from("t.excalidraw"), "");
+        for x in [0.0, 116.5] {
+            let mut e = d.new_element("rectangle", Pos2::new(x, 0.0));
+            e.width = 100.0;
+            e.height = 60.0;
+            d.scene.elements.push(e);
+        }
+        let before = positions(&d);
+        d.spread_shapes(0.8);
+        assert_eq!(d.layout_msg.as_deref(), Some("Shapes are as close as they can be without overlapping"));
+        assert!(positions(&d) == before && d.undo.is_empty() && !d.dirty, "nothing moved, nothing to undo");
+    }
+
     // spec: DRAW-003
     #[test]
     fn line_endings_and_patterns_are_saved() {

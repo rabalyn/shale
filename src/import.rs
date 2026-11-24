@@ -1105,7 +1105,7 @@ mod tests {
         Vault::open(&d).unwrap()
     }
 
-    // spec: IMP-006
+    // spec: IMP-006, VAULT-018
     #[test]
     fn tags_and_folders() {
         assert_eq!(parse_tags("bau-b, #Beamer  status;Bau-B 2026 projekt/hörsaal"), vec!["bau-b", "Beamer", "status", "projekt/hörsaal"]);

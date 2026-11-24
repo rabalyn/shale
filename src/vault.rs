@@ -1774,6 +1774,20 @@ mod tests {
         crate::drawing::Scene::read_file(&v.abs(Path::new(rel))).unwrap().live().filter_map(|e| e.text.clone()).collect()
     }
 
+    // spec: DRAW-007
+    #[test]
+    fn both_link_forms_of_the_plugin_resolve_to_its_drawing_also_as_embeds() {
+        let (d, v) = vault_with_drawings("plugin-link-forms");
+        let text = "[[Plugin.excalidraw]] [[Plugin.excalidraw.md]] ![[Plugin.excalidraw]] ![[Plugin.excalidraw.md|300]]";
+        let links = crate::markdown::find_links(text);
+        assert_eq!(links.iter().map(|l| l.embed).collect::<Vec<_>>(), [false, false, true, true]);
+        for l in &links {
+            assert_eq!(v.resolve(&l.target, Some(Path::new("Ideas.md"))), Some(PathBuf::from("Plugin.excalidraw.md")), "{}", l.target);
+        }
+        assert_eq!(v.resolve("Plain.excalidraw", None), Some(PathBuf::from("Plain.excalidraw")), "a plain drawing by its name");
+        let _ = fs::remove_dir_all(&d);
+    }
+
     // spec: DRAW-016
     #[test]
     fn drawings_and_canvases_link_like_notes() {
@@ -1854,6 +1868,31 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    // spec: LINK-007
+    #[test]
+    fn link_007_mentions_are_plain_text_names_and_outgoing_links_are_existing_or_missing() {
+        let d = temp_vault("link007");
+        fs::write(d.join("Target note.md"), "# Target note\n\nSee [[Linked only]] and [[Not there]].\n").unwrap();
+        fs::write(d.join("Linked only.md"), "# Linked only\n\nBack to [[Target note]] by link.\n").unwrap();
+        fs::write(d.join("Mentions.md"), "# Mentions\n\nThe target note is discussed here.\nAnother line.\n").unwrap();
+        fs::write(d.join("Both.md"), "# Both\n\n[[Target note]] is linked, nothing else.\n").unwrap();
+        let v = Vault::open(&d).unwrap();
+        let target = Path::new("Target note.md");
+        // a plain-text mention counts (any case, with its line), a link does not, the note itself does not
+        let mentions = v.unlinked_mentions(target);
+        let srcs: Vec<_> = mentions.iter().map(|m| rel_to_string(&m.0)).collect();
+        assert_eq!(srcs, vec!["Mentions.md".to_string()], "{mentions:?}");
+        assert_eq!(mentions[0].1, vec![(2, "The target note is discussed here.".to_string())]);
+        // outgoing: each link with its target, resolved when the note exists and not when it is missing
+        let out = v.outgoing(target);
+        assert_eq!(out.len(), 2, "{out:?}");
+        assert_eq!(out[0].1, "Linked only");
+        assert_eq!(out[0].2, Some(PathBuf::from("Linked only.md")));
+        assert_eq!(out[1].1, "Not there");
+        assert_eq!(out[1].2, None);
+        let _ = fs::remove_dir_all(&d);
+    }
+
     // spec: TASK-003
     #[test]
     fn tasks_across_vault() {
@@ -1892,6 +1931,53 @@ mod tests {
         assert!(!v.exists("Reading list", None));
         assert!(d.join(&gone).exists());
         assert_eq!(gone, Path::new(".trash").join(crate::mail::store::today_string()).join("Reading list.md"));
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-002
+    #[test]
+    fn vault_002_drawings_notes_and_attachments_are_told_apart_by_the_name() {
+        for (name, kind) in [
+            ("A.excalidraw", FileKind::Drawing),
+            ("A.excalidraw.md", FileKind::Drawing),
+            ("Map.canvas", FileKind::Drawing),
+            ("Sub/Plan.Excalidraw.MD", FileKind::Drawing),
+            ("A.md", FileKind::Note),
+            ("A.MD", FileKind::Note),
+            ("excalidraw.md", FileKind::Note),
+            ("notes.canvas.md", FileKind::Note),
+            ("pic.png", FileKind::Other),
+            ("A.txt", FileKind::Other),
+            ("README", FileKind::Other),
+        ] {
+            assert_eq!(kind_of(Path::new(name)), kind, "{name}");
+        }
+        // and the vault lists every file with that kind
+        let (v, d) = vault_with("kinds", &[("a.md", "x"), ("b.excalidraw", "{}"), ("c.excalidraw.md", "x"), ("d.canvas", "{}"), ("e.pdf", "x")]);
+        let kinds: Vec<(String, FileKind)> = v.files.iter().map(|f| (rel_to_string(&f.rel), f.kind)).collect();
+        assert_eq!(kinds, vec![("a.md".into(), FileKind::Note), ("b.excalidraw".into(), FileKind::Drawing), ("c.excalidraw.md".into(), FileKind::Drawing), ("d.canvas".into(), FileKind::Drawing), ("e.pdf".into(), FileKind::Other)]);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-011
+    #[test]
+    fn vault_011_a_taken_name_gets_a_number_for_notes_and_drawings_and_nothing_is_overwritten() {
+        let (mut v, d) = vault_with("numbered", &[("Name.md", "note"), ("Name.excalidraw", "{}"), ("Name.excalidraw.md", "plugin")]);
+        let at = |v: &Vault, name: &str| v.new_note_path(Path::new(""), name);
+        assert_eq!(at(&v, "Name"), PathBuf::from("Name 1.md"));
+        assert_eq!(at(&v, "Name.excalidraw"), PathBuf::from("Name 1.excalidraw"));
+        assert_eq!(at(&v, "Name.excalidraw.md"), PathBuf::from("Name 1.excalidraw.md"));
+        // the numbered names are taken in turn, the next number is the next free one
+        for name in ["Name 1.md", "Name 2.md"] {
+            let p = at(&v, "Name");
+            assert_eq!(p, PathBuf::from(name));
+            v.create_file(&p, "made").unwrap();
+        }
+        assert_eq!(at(&v, "Name"), PathBuf::from("Name 3.md"));
+        // a file is never overwritten, not even when a path is asked for directly
+        assert!(v.create_file(Path::new("Name.md"), "other").is_err());
+        assert_eq!(fs::read_to_string(d.join("Name.md")).unwrap(), "note");
+        assert_eq!(fs::read_to_string(d.join("Name 1.md")).unwrap(), "made");
         let _ = fs::remove_dir_all(&d);
     }
 
@@ -2072,7 +2158,7 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
-    // spec: NET-013
+    // spec: NET-013, VAULT-005
     #[test]
     fn net_013_the_wait_is_at_least_ten_times_the_last_scan_and_never_below_3_s() {
         let ms = Duration::from_millis;
@@ -2085,7 +2171,7 @@ mod tests {
         assert_eq!(rescan_interval(Duration::MAX), Duration::MAX, "no overflow");
     }
 
-    // spec: NET-013, DATA-002
+    // spec: NET-013, DATA-002, VAULT-005
     #[test]
     fn net_013_a_scan_reads_only_the_files_whose_stamp_changed() {
         let d = temp_vault("scan-reads");
@@ -2234,7 +2320,6 @@ mod tests {
         let d = temp_vault("outside");
         write_sample_vault(&d).unwrap();
         let mut v = Vault::open(&d).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(20));
         fs::write(d.join("Daily log.md"), "changed [[New]]").unwrap();
         // force mtime difference on coarse file systems
         if let Some(n) = v.notes.get_mut(Path::new("Daily log.md")).map(Arc::make_mut) {
@@ -2586,7 +2671,7 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
-    // spec: VAULT-014
+    // spec: VAULT-014, VAULT-016
     #[test]
     fn rename_never_replaces_an_existing_file_or_folder() {
         let (mut v, d) = vault_with("noreplace", &[("A.md", "a"), ("B.md", "b")]);
@@ -2639,7 +2724,7 @@ mod tests {
         fsutil::write_atomic(&p, text.as_bytes()).unwrap();
     }
 
-    // spec: VAULT-017
+    // spec: VAULT-017, VAULT-019
     #[test]
     fn trash_keeps_the_original_path_so_same_names_from_different_folders_do_not_mix() {
         let d = temp_vault("trash-origin");
@@ -2703,7 +2788,7 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
-    // spec: VAULT-020
+    // spec: VAULT-020, VAULT-019
     #[test]
     fn restore_brings_a_file_back_and_refuses_when_the_place_is_taken() {
         let d = temp_vault("trash-restore");

@@ -283,7 +283,7 @@ mod tests {
         }
     }
 
-    // spec: DATA-012
+    // spec: DATA-012, NET-004
     #[test]
     fn a_data_folder_that_cannot_be_used_does_not_keep_shale_from_starting() {
         let dir = Dir::new();

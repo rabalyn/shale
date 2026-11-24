@@ -187,7 +187,7 @@ fn sync_060_the_real_inputs_see_a_marker_in_a_real_folder() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-// spec: SYNC-061, SYNC-062
+// spec: SYNC-061, SYNC-062, NET-017
 #[test]
 fn sync_062_the_warnings_name_the_folder_and_what_to_do() {
     assert_eq!(warning(&[]), None);

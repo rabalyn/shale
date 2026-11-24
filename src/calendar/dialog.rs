@@ -1541,7 +1541,7 @@ mod tests {
         panic!("the save did not finish")
     }
 
-    // spec: CAL-005, CAL-008
+    // spec: CAL-005, CAL-008, CAL-031
     #[test]
     fn event_dialog_fields() {
         let dir = std::env::temp_dir().join(format!("shale-evdlg-{}", std::process::id()));
@@ -1671,7 +1671,30 @@ mod tests {
         assert!(store.find(&local.id, "loc1").is_none(), "removed from the old calendar after the new one accepted it");
     }
 
-    // spec: CAL-013, CAL-007
+    // spec: CAL-014
+    #[test]
+    fn a_repeating_event_in_utc_is_shown_on_the_local_clock_and_saved_once_in_the_computers_zone() {
+        let ics = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:old1\r\nSUMMARY:Standup\r\nDTSTART:20260105T080000Z\r\nDTEND:20260105T083000Z\r\nRRULE:FREQ=WEEKLY\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let e = crate::calendar::ics::parse_ics(ics).remove(0);
+        assert!(e.tzid.is_none() && !e.floating, "stored in UTC");
+        // winter and summer: the same time on this computer's clock, as the older Shale showed it
+        let at = |y, m, d| crate::calendar::ics::occurrences(&e, t::days_from_civil(y, m, d) * 86_400, t::days_from_civil(y, m, d + 1) * 86_400);
+        let (jan, jul) = (at(2026, 1, 12), at(2026, 7, 6));
+        assert_eq!((jan.len(), jul.len()), (1, 1));
+        assert_eq!(e.wall(jan[0].start).1, e.wall(jul[0].start).1, "the clock time of this computer stays");
+        // the dialog shows that time, and saving once stores this computer's zone
+        let d = EventDialog::edit("src".into(), e.clone());
+        assert_eq!(d.start_time, t::hhmm(e.wall(e.start).1));
+        let saved = d.event().unwrap();
+        assert_eq!(saved.tzid, t::local_zone_name(), "stored in this computer's zone");
+        assert_eq!(saved.start, e.start, "the event stays where it was");
+        if let Some(zone) = t::local_zone_name() {
+            let out = crate::calendar::ics::to_ics("", &[saved]);
+            assert!(out.contains(&format!("DTSTART;TZID={zone}:")), "{out}");
+        }
+    }
+
+    // spec: CAL-013, CAL-007, CAL-014
     #[test]
     fn event_dialog_repeats_skipped_dates_reminders_and_the_other_fields() {
         let dir = std::env::temp_dir().join(format!("shale-evdlg-series-{}", std::process::id()));
@@ -1888,6 +1911,22 @@ mod tests {
             assert!(start.elapsed() < std::time::Duration::from_secs(20), "the discovery ends");
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
+    }
+
+    // spec: CAL-010
+    #[test]
+    fn a_server_that_cannot_be_reached_is_an_error_in_the_dialog_and_adds_nothing() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let store = CalendarStore::new(vec![], std::env::temp_dir().join(format!("shale-caldlg-unreachable-{}", std::process::id())));
+        let mut d = CalendarDialog::new(vec![], true);
+        // nothing listens on port 1 of this computer: the connection is refused
+        d.dav_url = "http://127.0.0.1:1/".into();
+        d.start_discovery(&store);
+        poll_discovery(&mut d);
+        assert!(d.message.as_deref().unwrap_or("").starts_with("Could not find calendars: "), "{:?}", d.message);
+        assert!(d.found.is_empty() && d.sources.is_empty());
     }
 
     // spec: JOB-034

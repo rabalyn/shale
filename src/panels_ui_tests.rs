@@ -503,7 +503,7 @@ fn the_editing_settings_switch_the_toolbar_and_edit_the_colour_presets() {
     assert_eq!(p.app.cfg.highlight_colours.len(), 4, "the other palette is untouched");
 }
 
-// spec: VAULT-023, CFG-020
+// spec: VAULT-023, CFG-020, VAULT-006
 #[test]
 fn panel_settings_dialog_changes_settings_and_closes() {
     let mut p = P::new("settings", &[]);
@@ -561,6 +561,24 @@ fn panel_settings_dialog_changes_settings_and_closes() {
     p.app.open_settings(SettingsTab::Vault);
     p.click(Show::Modals, "Close this vault (back to the start screen)");
     assert!(p.app.vault.is_none() && p.app.modal.is_none() && p.app.cfg.vault.is_none());
+}
+
+// spec: USE-001
+#[test]
+fn use_001_the_button_in_settings_opens_the_data_usage_dialog_and_the_total_of_the_caches_is_shown() {
+    use crate::data_usage::{CacheId, CacheStats};
+    let mut p = P::new("use-001-button", &[]);
+    p.app.open_settings(SettingsTab::Data);
+    assert!(shown_labels(&mut p).iter().any(|s| s == "caches: not counted yet"), "nothing counted yet");
+    // what was counted last: the total of all caches
+    for id in CacheId::ALL {
+        p.app.usage.stats.insert(id, Ok(CacheStats { bytes: 1024, entries: 1, oldest: None }));
+    }
+    let total = format!("caches: {}", crate::data_usage::human_bytes(1024 * CacheId::ALL.len() as u64));
+    let shown = shown_labels(&mut p);
+    assert!(shown.contains(&total), "{total:?} in {shown:?}");
+    p.click(Show::Modals, "Data usage…");
+    assert!(matches!(p.app.modal, Some(Modal::DataUsage)), "the button opens the dialog");
 }
 
 fn shown_labels(p: &mut P) -> Vec<String> {
@@ -938,7 +956,7 @@ fn panel_task_list_says_so_when_there_are_none() {
     assert!(p.shows(Show::Tasks, "0 open · 0 done"));
 }
 
-// spec: VAULT-024
+// spec: VAULT-024, BOOK-010
 #[test]
 fn panel_file_tree_opens_folds_and_offers_menus() {
     let mut p = P::new("tree", &[("Box/Inner.md", "inner\n")]);

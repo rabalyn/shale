@@ -549,3 +549,92 @@ fn a_rename_never_overwrites_edits_that_could_not_be_saved() {
     assert!(!t.contains("another program"), "{t}");
     let _ = std::fs::remove_dir_all(&d);
 }
+
+// spec: DATA-007
+#[test]
+fn data_007_a_drawing_that_cannot_be_read_or_parsed_opens_with_the_error_and_is_never_written() {
+    let files: [(&str, &[u8]); 3] = [("Broken.excalidraw", b"{not json"), ("Plain.excalidraw.md", b"# just a note\n"), ("Binary.excalidraw", &[0xff, 0xfe, 0xfa, 0x00])];
+    let (mut app, d) = app_in("drawing-broken", &files);
+    let listing = |d: &Path| {
+        let mut v: Vec<String> = std::fs::read_dir(d).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        v.sort();
+        v
+    };
+    let before = listing(&d);
+    for (name, bytes) in files {
+        let rel = Path::new(name);
+        app.open(rel, false);
+        let doc = &app.drawings[rel];
+        assert!(doc.error.as_deref().is_some_and(|e| e.starts_with("Could not read this drawing")), "{name}: {:?}", doc.error);
+        assert!(doc.file_text().is_err(), "{name}: there is no text to write");
+        // even a drawing that is marked as edited is not written, nor saved next to the file
+        let doc = app.drawings.get_mut(rel).unwrap();
+        doc.dirty = true;
+        doc.last_edit = Instant::now() - Duration::from_secs(5);
+        app.autosave();
+        app.save_drawing(rel);
+        assert_eq!(std::fs::read(d.join(name)).unwrap(), bytes, "{name}: the file is as it was");
+    }
+    assert_eq!(listing(&d), before, "no temporary file and no conflict copy");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+// spec: VAULT-015
+#[test]
+fn vault_015_open_tabs_their_back_history_the_undo_history_and_buffers_follow_a_move() {
+    let (mut app, d) = app_in("move-follows", &[("A.md", b"a\n"), ("B.md", b"see [[A]]\n"), ("Dir/Keep.md", b"k\n"), ("Folder/In.md", b"i\n")]);
+    app.open(Path::new("A.md"), false);
+    app.open_link("B", None, Some(PathBuf::from("A.md")), false);
+    let tab = app.tabbar.active;
+    assert_eq!(app.tabbar.tabs[tab].back, vec![View::Note(PathBuf::from("A.md"))], "the tab came from A");
+    app.undo.of(Path::new("A.md")).checkpoint("a\n");
+    app.undo.of(Path::new("A.md")).checkpoint("a b\n");
+    app.move_into(Path::new("A.md"), Path::new("Dir")).unwrap();
+    assert_eq!(app.tabbar.tabs[tab].back, vec![View::Note(PathBuf::from("Dir/A.md"))], "the back history follows");
+    assert!(app.notes.contains_key(Path::new("Dir/A.md")) && !app.notes.contains_key(Path::new("A.md")), "the buffer follows");
+    let mut text = "a b\n".to_string();
+    assert!(app.undo.of(Path::new("Dir/A.md")).undo(&mut text).is_some(), "the undo history follows");
+    assert_eq!(text, "a\n");
+    assert_eq!(app.undo.of(Path::new("A.md")).undo(&mut "a b\n".to_string()), None, "and is no longer at the old path");
+    // a folder: the tab on a note inside it follows
+    app.open(Path::new("Folder/In.md"), true);
+    app.move_into(Path::new("Folder"), Path::new("Dir")).unwrap();
+    assert_eq!(app.current_path(), Some(PathBuf::from("Dir/Folder/In.md")), "the open tab follows");
+    assert!(app.notes.contains_key(Path::new("Dir/Folder/In.md")));
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// Whether a circle of this radius and colour was painted.
+fn has_circle(out: &eframe::egui::FullOutput, radius: f32, fill: eframe::egui::Color32) -> bool {
+    fn walk(s: &eframe::egui::Shape, radius: f32, fill: eframe::egui::Color32) -> bool {
+        match s {
+            eframe::egui::Shape::Circle(c) => c.radius == radius && c.fill == fill,
+            eframe::egui::Shape::Vec(v) => v.iter().any(|s| walk(s, radius, fill)),
+            _ => false,
+        }
+    }
+    out.shapes.iter().any(|c| walk(&c.shape, radius, fill))
+}
+
+// spec: DATA-009
+#[test]
+fn data_009_a_note_that_could_not_be_saved_has_a_red_dot_on_its_tab_and_not_saved_in_the_status_bar() {
+    let (mut app, d) = app_in("red-dot", &[("N.md", b"base\n")]);
+    app.open(Path::new("N.md"), false);
+    let mut hl = crate::ui_test_support::Headless::new();
+    hl.settle(&mut app);
+    let (red, grey) = (crate::theme::palette().link_missing, crate::theme::palette().muted);
+    // edited, not saved yet and nothing wrong: a grey dot and "Saving…" (the edit is "in the future", so no frame saves it)
+    let doc = app.notes.get_mut(Path::new("N.md")).unwrap();
+    doc.dirty = true;
+    doc.last_edit = Instant::now() + Duration::from_secs(3600);
+    let out = hl.frame(&mut app, vec![]);
+    assert!(has_circle(&out, 3.5, grey) && !has_circle(&out, 4.5, red), "a grey dot while the note is only edited");
+    assert!(hl.text.iter().any(|(t, _)| t == "Saving…") && !hl.text.iter().any(|(t, _)| t == "Not saved"), "{:?}", hl.text);
+    // the save failed: a red dot and "Not saved"
+    app.notes.get_mut(Path::new("N.md")).unwrap().save_error = Some("Could not save “N.md”: disk full".into());
+    let out = hl.frame(&mut app, vec![]);
+    assert!(has_circle(&out, 4.5, red) && !has_circle(&out, 3.5, grey), "a red dot on the tab");
+    assert!(hl.text.iter().any(|(t, _)| t == "Not saved"), "{:?}", hl.text);
+    let _ = std::fs::remove_dir_all(&d);
+}

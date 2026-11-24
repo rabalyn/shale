@@ -346,6 +346,9 @@ pub fn save(vault_root: &std::path::Path, tw: &TagWords) -> std::io::Result<()> 
     crate::fsutil::write_atomic(&p, serde_json::to_string_pretty(tw).unwrap_or_default().as_bytes())
 }
 
+/// How long after a learning job started the next one may start (TAG-003).
+const RELEARN_AFTER: std::time::Duration = std::time::Duration::from_secs(120);
+
 /// The learned tag words of the open vault and the background job that learns them again.
 pub struct TagLearner {
     /// words typical for each tag (learned from the vault)
@@ -381,7 +384,12 @@ impl TagLearner {
     /// Whether the vault changed since the last job started and the last one is old enough (or
     /// there was none): the next `tick` starts a job.
     fn due(&self, v: &crate::vault::Vault) -> bool {
-        self.job.is_none() && v.generation != self.generation && self.at.map(|t| t.elapsed() > std::time::Duration::from_secs(120)).unwrap_or(true)
+        self.due_at(v, std::time::Instant::now())
+    }
+
+    /// `due` at a given time, so that the interval can be tested without waiting for it.
+    fn due_at(&self, v: &crate::vault::Vault, now: std::time::Instant) -> bool {
+        self.job.is_none() && v.generation != self.generation && self.at.map(|t| now.duration_since(t) > RELEARN_AFTER).unwrap_or(true)
     }
 
     /// Whether a learning job is running.
@@ -519,6 +527,24 @@ mod tests {
             std::thread::sleep(Duration::from_millis(2));
         }
         assert!(file_in(&d).exists(), "the words are written when the task has ended");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: TAG-003
+    #[test]
+    fn tag_003_words_are_learned_again_only_after_a_change_and_two_minutes() {
+        let (v, d) = vault_with_notes("interval");
+        let mut learner = TagLearner::new();
+        assert!(learner.due_at(&v, std::time::Instant::now()), "a vault not seen yet is learned at once");
+        let started = std::time::Instant::now();
+        learner.generation = v.generation;
+        learner.at = Some(started);
+        let two_minutes = Duration::from_secs(120);
+        assert!(!learner.due_at(&v, started + two_minutes + Duration::from_secs(60)), "no change of the vault: nothing to learn again");
+        learner.generation = v.generation.wrapping_sub(1);
+        assert!(!learner.due_at(&v, started + two_minutes - Duration::from_secs(1)), "changed, but the last job is younger than two minutes");
+        assert!(!learner.due_at(&v, started + two_minutes), "two minutes are not yet more than two minutes");
+        assert!(learner.due_at(&v, started + two_minutes + Duration::from_secs(1)), "changed and older than two minutes");
         let _ = std::fs::remove_dir_all(&d);
     }
 
