@@ -1,0 +1,27 @@
+//! A vault as a Hugo site (SITE, #630): the notes the publishing rules choose are written as a
+//! complete Hugo tree (content, data files, config and the Shale theme) that `hugo` and `pagefind`
+//! build into a wiki. Nothing of a note that is not chosen is ever written (SITE-010).
+//!
+//! The folder has one small module per concern: `rules` (which notes), `slug` (their URLs),
+//! `anchor` (Hugo's heading ids), `front` (front matter), `body` (a note's text: links, embeds,
+//! math), `plan` (everything that is written), `write` (the atomic write and the manifest), `theme`
+//! (the vendored Hugo theme) and `cli` (`shale export-site`).
+
+pub(crate) mod anchor;
+pub(crate) mod body;
+pub(crate) mod cli;
+pub(crate) mod front;
+pub(crate) mod plan;
+pub(crate) mod rules;
+pub(crate) mod slug;
+pub(crate) mod theme;
+pub(crate) mod write;
+
+#[cfg(test)]
+mod cli_tests;
+#[cfg(test)]
+mod export_tests;
+#[cfg(test)]
+mod hugo_tests;
+#[cfg(test)]
+mod test_support;

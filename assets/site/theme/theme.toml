@@ -1,0 +1,4 @@
+name = "Shale"
+license = "GPL-3.0-or-later"
+description = "The theme of a vault published by Shale: pages, sections, tags, backlinks and search."
+min_version = "0.158.0"

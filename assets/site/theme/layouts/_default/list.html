@@ -1,0 +1,13 @@
+{{ define "main" }}
+<article data-pagefind-body>
+<h1>{{ .Title }}</h1>
+<div class="content">{{ .Content }}</div>
+</article>
+{{ if .IsSection }}
+{{ with .Sections.ByTitle }}<h2>Folders</h2><ul class="page-list">{{ range . }}<li><a href="{{ .RelPermalink }}">{{ .Title }}</a></li>{{ end }}</ul>{{ end }}
+{{ with .RegularPages.ByTitle }}<h2>Notes</h2><ul class="page-list">{{ range . }}<li><a href="{{ .RelPermalink }}">{{ .Title }}</a></li>{{ end }}</ul>{{ end }}
+{{ else }}
+{{ with .Pages.ByTitle }}<ul class="page-list">{{ range . }}<li><a href="{{ .RelPermalink }}">{{ .Title }}</a></li>{{ end }}</ul>{{ end }}
+{{ end }}
+{{ partial "backlinks.html" . }}
+{{ end }}

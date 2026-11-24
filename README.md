@@ -48,6 +48,10 @@ markdown files. Notes link to each other with `[[wiki links]]`.
   nothing; the LaTeX export needs a TeX, which Shale installs for you only when you agree (about 100 MB to
   download, 330 MB on disk) unless your computer has one, and the university's logo is not part of the templates
   and must be supplied by you.
+- **A vault as a website**: `shale export-site <vault> <out>` writes the notes your publishing rules choose (off until you turn
+  them on in `.shale/settings.json`) as a Hugo site with the Shale theme, links, backlinks, tags, typeset math and a Pagefind
+  search box, and `--dry-run` lists what it would write. Nothing of a note you did not choose, and no hidden file, is written; the
+  vault is never changed. `hugo` builds the tree (0.158 or newer, see the user guide).
 - **Mail**: read your IMAP mail next to your notes, search it, mark it read, flag, move or delete
   it, write, reply, forward and send mail (plain text, attachments, drafts, an outbox with "undo
   send"), and turn a mail into a note with one key. Shale keeps a local copy of the mail; syncing never

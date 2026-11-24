@@ -1,0 +1,4 @@
+{{- $d := .Destination -}}{{- if and (strings.HasPrefix $d "/") (not (strings.HasPrefix $d "//")) }}{{ $d = relURL $d }}{{ end -}}
+{{- $title := .Title -}}{{- $w := 0 -}}
+{{- if strings.HasPrefix $title "shale:width=" }}{{ $w = int (strings.TrimPrefix "shale:width=" $title) }}{{ $title = "" }}{{ end -}}
+<img src="{{ $d | safeURL }}" alt="{{ .PlainText }}"{{ with $w }} width="{{ . }}"{{ end }}{{ with $title }} title="{{ . }}"{{ end }} loading="lazy">{{- /* no space after the picture */ -}}

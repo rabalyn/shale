@@ -49,7 +49,7 @@ features = ["social"]
 
 [[set]]
 name = "Import & export"
-features = ["import", "docx_export", "pdf", "pandoc_limit", "thread", "xml_limits"]
+features = ["import", "docx_export", "pdf", "site_export", "pandoc_limit", "thread", "xml_limits"]
 
 [[set]]
 name = "Settings, themes & UI shell"

@@ -1,0 +1,8 @@
+{{ define "main" }}
+<article data-pagefind-body{{ with .Params.shale }}{{ with .type }} data-type="{{ . }}"{{ end }}{{ end }}>
+<h1>{{ .Title }}</h1>
+{{ with .GetTerms "tags" }}<p class="tags">{{ range . }}<a class="tag" href="{{ .RelPermalink }}">#{{ .LinkTitle }}</a> {{ end }}</p>{{ end }}
+<div class="content">{{ .Content }}</div>
+</article>
+{{ partial "backlinks.html" . }}
+{{ end }}

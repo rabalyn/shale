@@ -1,0 +1,6 @@
+{{- with .File }}{{ with hugo.Data.backlinks }}{{ with index . $.File.Path }}
+<aside class="backlinks">
+<h2>Linked from</h2>
+<ul>{{ range . }}<li><a href="{{ .url | relURL }}">{{ .title }}</a></li>{{ end }}</ul>
+</aside>
+{{ end }}{{ end }}{{ end -}}
