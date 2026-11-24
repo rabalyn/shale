@@ -71,7 +71,7 @@ fn site_037_a_drawing_that_a_published_note_embeds_is_written_as_an_svg_picture(
     assert!(linked.media.is_empty() && !has(&linked, "static/media/drawings/Map.excalidraw.svg"));
 }
 
-// spec: SITE-037, SITE-007
+// spec: SITE-037, SITE-007, SITE-082
 #[test]
 fn site_037_links_in_a_drawing_follow_the_rule_of_links_in_notes() {
     let f = vault("s037l");
