@@ -131,8 +131,8 @@ mod tests {
         let (mut app, d) = test_app("search-task");
         let mut hl = Headless::new();
         hl.settle(&mut app);
-        // the window's own worker is wired to its registry
-        app.search_worker = crate::search_all::SearchWorker::with_runner(held).with_busy(&app.busy);
+        // the window's own worker, as built, is wired to its registry (only its runner is held back)
+        app.search_worker.set_runner(held);
         app.side.left = crate::app::LeftPanel::Search;
         app.search.query = "markdown".into();
         std::thread::sleep(crate::search_all::DEBOUNCE + Duration::from_millis(30));

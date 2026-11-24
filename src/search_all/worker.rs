@@ -219,6 +219,14 @@ impl SearchWorker {
         SearchWorker { thread: None, run, repaint: egui::Context::default(), next: 0, latest: HashMap::new(), given_up: HashMap::new(), busy: Busy::default(), ready: HashMap::new(), in_flight: 0 }
     }
 
+    /// Tests: another runner for the worker the window was built with, which keeps its registry
+    /// and has not started its thread yet.
+    #[cfg(test)]
+    pub(crate) fn set_runner(&mut self, run: Runner) {
+        assert!(self.thread.is_none(), "the thread has started");
+        self.run = run;
+    }
+
     /// The registry the queries of the picker and the sidebar are listed in (JOB-038).
     pub fn with_busy(mut self, busy: &Busy) -> SearchWorker {
         self.busy = busy.clone();
