@@ -477,7 +477,17 @@ fn site_078_a_second_publish_is_refused_while_one_holds_the_lock_and_a_dead_ones
     st.publish().unwrap();
     assert_ne!(st.remote_tip(), tip);
     // and the lock of a finished publish is free again
-    assert!(crate::fsutil::try_lock_file(&st.base.join(&id).join("publish.lock")).unwrap().is_some());
+    // (a child process that another test thread forks at this moment holds a copy of the file
+    // until its `exec`, like in `lock`: asked for again for a short while, #659)
+    let lock_path = st.base.join(&id).join("publish.lock");
+    let free = (0..200).any(|_| {
+        let got = crate::fsutil::try_lock_file(&lock_path).unwrap().is_some();
+        if !got {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        got
+    });
+    assert!(free, "the lock of a finished publish must be free again");
 }
 
 // spec: SITE-078, SITE-066

@@ -779,6 +779,21 @@ mod tests {
         }
     }
 
+    /// `settle`, then more frames until `done` holds (at most 10 s). `settle` alone is not enough
+    /// for a search: the worker only gets the query after the debounce, measured from the last
+    /// list made, and on a slow or loaded machine (CI, #659) the answer can still be on its way
+    /// when `settle` sees the worker idle.
+    fn settle_until(w: &mut W, what: &str, done: impl Fn(&W) -> bool) {
+        settle(w);
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !done(w) {
+            assert!(std::time::Instant::now() < end, "never reached: {what}");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            w.frame(vec![]);
+        }
+        settle(w);
+    }
+
     /// Vim-style editing on, the open note's editor has the keyboard (normal mode).
     fn vim_note(tag: &str) -> W {
         let mut w = W::new(tag);
@@ -1832,7 +1847,7 @@ mod tests {
         w.app.search.focus = true;
         settle(&mut w);
         std::thread::sleep(std::time::Duration::from_millis(200));
-        settle(&mut w);
+        settle_until(&mut w, "the sidebar lists Posts only", |w| groups_of(sidebar_rows(w)) == ["Posts"]);
         assert_eq!(groups_of(sidebar_rows(&w)), ["Posts"], "the same default selection");
         assert_eq!(button_texts(&w), ["Notes 1", "Mail 1", "Posts 1"]);
         // …and Shift+click there changes it for the picker too
@@ -1864,7 +1879,7 @@ mod tests {
         settle(&mut w);
         w.frame(vec![Event::Text("banana".to_string())]);
         std::thread::sleep(std::time::Duration::from_millis(200));
-        settle(&mut w);
+        settle_until(&mut w, "the sidebar lists the three sources", |w| groups_of(sidebar_rows(w)) == ["Notes", "Mail", "Posts"]);
         assert_eq!(button_texts(&w), ["Notes 1", "Mail 1", "Posts 1"]);
         assert_eq!(groups_of(sidebar_rows(&w)), ["Notes", "Mail", "Posts"]);
         click_source(&mut w, "Posts");
@@ -1878,7 +1893,7 @@ mod tests {
         // a prefix in the box
         w.app.search.query = "s: banana".into();
         std::thread::sleep(std::time::Duration::from_millis(200));
-        settle(&mut w);
+        settle_until(&mut w, "the sidebar lists Posts only", |w| groups_of(sidebar_rows(w)) == ["Posts"]);
         assert_eq!(groups_of(sidebar_rows(&w)), ["Posts"]);
         assert_eq!(button_texts(&w), ["Notes 1", "Mail 1", "Posts 1"]);
     }
