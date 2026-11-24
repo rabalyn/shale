@@ -32,7 +32,7 @@ pub(super) fn hugo_here() -> bool {
 }
 
 /// Whether Pagefind is installed (`scripts/install-pagefind.sh`); says so when not (BUILD-018).
-fn pagefind_here() -> bool {
+pub(super) fn pagefind_here() -> bool {
     let found = crate::program::command("pagefind").arg("--version").output().ok().is_some_and(|o| o.status.success());
     if !found {
         println!("skipping: pagefind is not installed (scripts/install-pagefind.sh)");
@@ -41,7 +41,7 @@ fn pagefind_here() -> bool {
 }
 
 /// The bytes of a file of Pagefind's index: compressed, then its own `pagefind_dcd` marker.
-fn unpack(path: &Path) -> Vec<u8> {
+pub(super) fn unpack(path: &Path) -> Vec<u8> {
     let bytes = std::fs::read(path).unwrap();
     assert_eq!(bytes[..3], [0x1f, 0x8b, 0x08], "{} is compressed", path.display());
     miniz_oxide::inflate::decompress_to_vec(&bytes[10..bytes.len() - 8]).unwrap_or_else(|e| panic!("{}: {e:?}", path.display()))

@@ -8,9 +8,10 @@ use skrifa::instance::{LocationRef, Size};
 use skrifa::metrics::{GlyphMetrics, Metrics};
 use skrifa::outline::{DrawSettings, OutlinePen};
 use skrifa::{FontRef, GlyphId, MetadataProvider, OutlineGlyphCollection};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
-use std::sync::OnceLock;
+use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock, RwLock};
 
 /// Fonts available for text.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, PartialOrd, Ord)]
@@ -23,6 +24,9 @@ pub enum FontKind {
     Hand,
     /// Liberation Serif — embedded, selectable text (a note's `print-font: serif`, PDF-014).
     Serif,
+    /// A face of a font file of the vault or the system that an export chose (PDF-036), by its
+    /// place in the registry of [`register_family`].
+    Custom(u32),
 }
 
 /// A bundled font, parsed once: the charmap, the horizontal advances and the outlines in font
@@ -36,8 +40,8 @@ struct LoadedFont {
 }
 
 impl LoadedFont {
-    fn parse(data: &'static [u8]) -> Self {
-        let font = FontRef::new(data).expect("bundled font");
+    fn parse(data: &'static [u8], index: u32) -> Self {
+        let font = FontRef::from_index(data, index).expect("a font that was checked");
         LoadedFont { data, charmap: font.charmap(), advances: font.glyph_metrics(Size::unscaled(), LocationRef::default()), outlines: font.outline_glyphs(), metrics: font.metrics(Size::unscaled(), LocationRef::default()) }
     }
 
@@ -50,7 +54,115 @@ impl LoadedFont {
     }
 }
 
+/// A face of a chosen font file (PDF-036): the file's bytes are kept for the session (a font is
+/// read once per file and change), so the metrics and outlines are borrowed like the bundled ones.
+struct CustomFont {
+    font: LoadedFont,
+    index: u32,
+    /// the PostScript name, for the font dictionary
+    name: String,
+    /// the family as the resolver names it, for the warnings
+    family: String,
+    bold: bool,
+    italic: bool,
+    /// TrueType outlines: embedded as text; a font with CFF outlines is drawn as outlines
+    glyf: bool,
+    /// the font's licence says it is embedded whole (`fsType` bit 8, PDF-038)
+    whole: bool,
+    /// the faces of the family: regular, bold, italic, bold italic
+    faces: [Option<FontKind>; 4],
+}
+
+static CUSTOM: RwLock<Vec<&'static CustomFont>> = RwLock::new(Vec::new());
+
+fn custom(id: u32) -> &'static CustomFont {
+    CUSTOM.read().unwrap_or_else(|e| e.into_inner())[id as usize]
+}
+
+/// The bytes of a font file, read once while the file stays as it is.
+fn font_bytes(path: &std::path::Path) -> Option<&'static [u8]> {
+    type Stamp = (PathBuf, u64, Option<std::time::SystemTime>);
+    static FILES: Mutex<BTreeMap<Stamp, &'static [u8]>> = Mutex::new(BTreeMap::new());
+    let meta = std::fs::metadata(path).ok()?;
+    let key = (path.to_path_buf(), meta.len(), meta.modified().ok());
+    let mut files = FILES.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(bytes) = files.get(&key) {
+        return Some(bytes);
+    }
+    let bytes: &'static [u8] = Box::leak(crate::fsutil::read(path).ok()?.into_boxed_slice());
+    files.insert(key, bytes);
+    Some(bytes)
+}
+
+/// Make the faces of a family known to the writer (PDF-036): one entry per readable face, in the
+/// order regular, bold, italic, bold italic, each as a file and the index of the face in it.
+/// Gives the regular face's kind; the same family again gives the same kinds. None when the
+/// regular face cannot be read as a font. A face that cannot be read is left out: it is imitated.
+pub fn register_family(family: &str, faces: &[Option<(PathBuf, u32)>; 4], whole: bool) -> Option<FontKind> {
+    // a file that was changed is another font: the key has its size and time
+    type Stamp = Option<(PathBuf, u32, u64, Option<std::time::SystemTime>)>;
+    type Key = (String, [Stamp; 4], bool);
+    static FAMILIES: Mutex<BTreeMap<Key, Option<FontKind>>> = Mutex::new(BTreeMap::new());
+    let stamp = |n: usize| -> Stamp {
+        let (path, index) = faces[n].as_ref()?;
+        let meta = std::fs::metadata(path).ok()?;
+        Some((path.clone(), *index, meta.len(), meta.modified().ok()))
+    };
+    let key: Key = (family.to_string(), std::array::from_fn(stamp), whole);
+    let mut known = FAMILIES.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(kind) = known.get(&key) {
+        return *kind;
+    }
+    let mut registry = CUSTOM.write().unwrap_or_else(|e| e.into_inner());
+    let first = registry.len() as u32;
+    let loaded: [Option<(&'static [u8], u32)>; 4] = std::array::from_fn(|n| faces[n].as_ref().and_then(|(p, i)| font_bytes(p).filter(|d| FontRef::from_index(d, *i).is_ok()).map(|d| (d, *i))));
+    let kinds: [Option<FontKind>; 4] = {
+        let mut next = first;
+        std::array::from_fn(|n| {
+            loaded[n].map(|_| {
+                next += 1;
+                FontKind::Custom(next - 1)
+            })
+        })
+    };
+    for (n, face) in loaded.iter().enumerate() {
+        let Some((data, index)) = face else { continue };
+        let Ok(font) = FontRef::from_index(data, *index) else { continue };
+        let name = font.localized_strings(skrifa::string::StringId::POSTSCRIPT_NAME).english_or_first().map(|s| s.to_string()).filter(|s| !s.is_empty()).unwrap_or_else(|| format!("{}-{n}", family.replace(' ', "")));
+        let name: String = name.chars().filter(|c| c.is_ascii_graphic() && !"()<>[]{}/%".contains(*c)).collect();
+        let loaded_font = LoadedFont::parse(data, *index);
+        let entry = CustomFont { font: loaded_font, index: *index, name, family: family.to_string(), bold: n & 1 == 1, italic: n & 2 == 2, glyf: crate::fonts::sfnt::has_glyf(data, *index), whole, faces: kinds };
+        registry.push(Box::leak(Box::new(entry)));
+    }
+    let regular = kinds[0];
+    known.insert(key, regular);
+    regular
+}
+
+/// The face of a font that draws bold and italic text: the font's own bold and italic face where
+/// the family has one (PDF-036), else the font itself with the flag left for the writer to imitate.
+/// Gives the kind and the bold and italic that are still to be imitated. The bundled fonts have
+/// one face, so they are as they were.
+pub fn restyle(kind: FontKind, bold: bool, italic: bool) -> (FontKind, bool, bool) {
+    let FontKind::Custom(id) = kind else { return (kind, bold, italic) };
+    let c = custom(id);
+    let (bold, italic) = (bold || c.bold, italic || c.italic);
+    let face = |b: bool, i: bool| c.faces[usize::from(b) + 2 * usize::from(i)];
+    if let Some(k) = face(bold, italic) {
+        return (k, false, false);
+    }
+    // the face the family lacks: the nearest one, the rest is imitated
+    match (bold, italic) {
+        (true, true) => face(true, false).map(|k| (k, false, true)).or_else(|| face(false, true).map(|k| (k, true, false))).or_else(|| face(false, false).map(|k| (k, true, true))),
+        (b, i) => face(false, false).map(|k| (k, b, i)),
+    }
+    .unwrap_or((kind, bold, italic))
+}
+
 fn font(kind: FontKind) -> &'static LoadedFont {
+    if let FontKind::Custom(id) = kind {
+        return &custom(id).font;
+    }
     static SANS: OnceLock<LoadedFont> = OnceLock::new();
     static MONO: OnceLock<LoadedFont> = OnceLock::new();
     static HAND: OnceLock<LoadedFont> = OnceLock::new();
@@ -60,15 +172,16 @@ fn font(kind: FontKind) -> &'static LoadedFont {
         FontKind::Mono => (&MONO, epaint_default_fonts::HACK_REGULAR),
         FontKind::Hand => (&HAND, include_bytes!("../../assets/fonts/Virgil.otf")),
         FontKind::Serif => (&SERIF, include_bytes!("../../assets/fonts/LiberationSerif-Regular.ttf")),
+        FontKind::Custom(_) => unreachable!("a chosen font is returned above"),
     };
-    cell.get_or_init(|| LoadedFont::parse(data))
+    cell.get_or_init(|| LoadedFont::parse(data, 0))
 }
 
 /// The emoji and symbols font, a last resort for characters the text fonts lack (arrows come from
 /// Hack, a calendar from here).
 fn symbols() -> &'static LoadedFont {
     static SYMBOLS: OnceLock<LoadedFont> = OnceLock::new();
-    SYMBOLS.get_or_init(|| LoadedFont::parse(epaint_default_fonts::NOTO_EMOJI_REGULAR))
+    SYMBOLS.get_or_init(|| LoadedFont::parse(epaint_default_fonts::NOTO_EMOJI_REGULAR, 0))
 }
 
 /// A character the fonts have no glyph for, as one they have (a heavy cross as a multiplication sign, a check mark as the heavy one).
@@ -102,6 +215,12 @@ pub fn has_glyph(c: char) -> bool {
 pub fn char_width(kind: FontKind, size: f32, c: char) -> f32 {
     let (f, g) = face_for(kind, c);
     f.advances.advance_width(g).unwrap_or(0.0) * size / f.units_per_em()
+}
+
+/// Width of a string in points in the face a style draws it in: the real bold or italic face of a
+/// chosen font has its own widths (PDF-036).
+pub fn styled_width(style: &TextStyle, s: &str) -> f32 {
+    text_width(restyle(style.kind, style.bold, style.italic).0, style.size, s)
 }
 
 /// Width of a string in points.
@@ -213,7 +332,10 @@ pub struct Page {
     ops: String,
     images: BTreeSet<usize>,
     alphas: BTreeSet<u8>,
-    fonts: BTreeSet<FontKind>,
+    /// the fonts used and, of a chosen font, the characters set in it (what a subset keeps)
+    fonts: BTreeMap<FontKind, BTreeSet<char>>,
+    /// chosen fonts drawn with an imitated bold or italic: the face, bold, italic (PDF-036)
+    imitated: BTreeSet<(FontKind, bool, bool)>,
     links: Vec<([f32; 4], String)>,
     /// clickable rectangles that go to a place in the document (PDF-008)
     jumps: Vec<([f32; 4], Dest)>,
@@ -302,7 +424,13 @@ impl Page {
     /// Text on a baseline at (x, y). Returns the width. Embedded fonts give selectable text;
     /// the hand-drawn font and characters outside WinAnsi are drawn as glyph outlines.
     pub fn text(&mut self, style: TextStyle, x: f32, y: f32, s: &str) -> f32 {
-        let TextStyle { kind, size, color, italic, bold } = style;
+        // the real bold and italic face of a chosen font, when it has one (PDF-036)
+        let (kind, bold, italic) = restyle(style.kind, style.bold, style.italic);
+        let TextStyle { size, color, .. } = style;
+        let style = TextStyle { kind, bold, italic, ..style };
+        if matches!(kind, FontKind::Custom(_)) && (bold || italic) && !s.trim().is_empty() {
+            self.imitated.insert((kind, bold, italic));
+        }
         let mut cx = x;
         let mut run = String::new();
         let mut run_x = x;
@@ -311,7 +439,10 @@ impl Page {
             if run.is_empty() {
                 return;
             }
-            page.fonts.insert(kind);
+            let used = page.fonts.entry(kind).or_default();
+            if matches!(kind, FontKind::Custom(_)) {
+                used.extend(run.chars());
+            }
             page.fill_color(color);
             if bold {
                 page.stroke_color(color, size * 0.03);
@@ -322,7 +453,7 @@ impl Page {
         };
         for c in s.chars() {
             let w = char_width(kind, size, c);
-            let embedded = kind != FontKind::Hand && win_ansi(c).is_some() && font(kind).glyph_index(c).is_some();
+            let embedded = kind != FontKind::Hand && embeds_text(kind) && win_ansi(c).is_some() && font(kind).glyph_index(c).is_some();
             if embedded {
                 if run.is_empty() {
                     run_x = cx;
@@ -434,12 +565,22 @@ impl OutlinePen for PathOps {
     }
 }
 
-fn font_res(k: FontKind) -> &'static str {
+fn font_res(k: FontKind) -> String {
     match k {
-        FontKind::Sans => "F1",
-        FontKind::Mono => "F2",
-        FontKind::Hand => "F3",
-        FontKind::Serif => "F4",
+        FontKind::Sans => "F1".into(),
+        FontKind::Mono => "F2".into(),
+        FontKind::Hand => "F3".into(),
+        FontKind::Serif => "F4".into(),
+        FontKind::Custom(id) => format!("FC{id}"),
+    }
+}
+
+/// Whether text in this font is embedded as text: not the hand-drawn font and not a chosen font
+/// with CFF outlines, whose characters are drawn as outlines.
+fn embeds_text(kind: FontKind) -> bool {
+    match kind {
+        FontKind::Custom(id) => custom(id).glyf,
+        _ => true,
     }
 }
 
@@ -466,8 +607,24 @@ fn deflated_font(kind: FontKind, data: &'static [u8]) -> &'static [u8] {
         FontKind::Mono => 1,
         FontKind::Hand => 2,
         FontKind::Serif => 3,
+        FontKind::Custom(_) => unreachable!("a chosen font is cut down for each document"),
     };
     CACHE[slot].get_or_init(|| deflate(data))
+}
+
+/// The six capital letters before the name of a subsetted font (PDF 32000-1, 9.6.4), from what is in it.
+fn subset_tag(id: u32, glyphs: &BTreeSet<u16>) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (id, glyphs).hash(&mut h);
+    let mut v = h.finish();
+    (0..6)
+        .map(|_| {
+            let c = (b'A' + (v % 26) as u8) as char;
+            v /= 26;
+            c
+        })
+        .collect()
 }
 
 fn esc(s: &str) -> String {
@@ -501,12 +658,29 @@ impl Doc {
     }
 
     pub fn add_page(&mut self, width: f32, height: f32) -> usize {
-        self.pages.push(Page { width, height, ops: String::new(), images: BTreeSet::new(), alphas: BTreeSet::new(), fonts: BTreeSet::new(), links: vec![], jumps: vec![] });
+        self.pages.push(Page { width, height, ops: String::new(), images: BTreeSet::new(), alphas: BTreeSet::new(), fonts: BTreeMap::new(), imitated: BTreeSet::new(), links: vec![], jumps: vec![] });
         self.pages.len() - 1
     }
 
     pub fn page(&mut self, i: usize) -> &mut Page {
         &mut self.pages[i]
+    }
+
+    /// The faces of chosen fonts that were drawn imitated, because the family has none of its own
+    /// (PDF-036): the family, bold, italic; each once.
+    pub fn imitated_faces(&self) -> Vec<(String, bool, bool)> {
+        let all: BTreeSet<(FontKind, bool, bool)> = self.pages.iter().flat_map(|p| p.imitated.iter().copied()).collect();
+        let mut out: Vec<(String, bool, bool)> = Vec::new();
+        for (kind, bold, italic) in all {
+            if let FontKind::Custom(id) = kind {
+                let c = custom(id);
+                let face = (c.family.clone(), bold || c.bold, italic || c.italic);
+                if !out.contains(&face) {
+                    out.push(face);
+                }
+            }
+        }
+        out
     }
 
     pub fn add_image(&mut self, img: Image) -> usize {
@@ -575,37 +749,59 @@ impl Doc {
         let catalog = reserve(&mut objs);
         let pages_id = reserve(&mut objs);
         let info = reserve(&mut objs);
-        // fonts actually used
-        let used: BTreeSet<FontKind> = self.pages.iter().flat_map(|p| p.fonts.iter().copied()).collect();
+        // fonts actually used, and of a chosen font the characters it sets
+        let mut used: BTreeMap<FontKind, BTreeSet<char>> = BTreeMap::new();
+        for (kind, chars) in self.pages.iter().flat_map(|p| p.fonts.iter()) {
+            used.entry(*kind).or_default().extend(chars);
+        }
         let mut font_ids: Vec<(FontKind, usize)> = Vec::new();
-        for kind in used {
+        for (kind, chars) in used {
             let lf = font(kind);
             let m = &lf.metrics;
             let upem = lf.units_per_em();
             let file_id = reserve(&mut objs);
-            let compressed = deflated_font(kind, lf.data);
-            let mut fo = format!("<< /Length {} /Length1 {} /Filter /FlateDecode >>\nstream\n", compressed.len(), lf.data.len()).into_bytes();
-            fo.extend_from_slice(compressed);
+            // a bundled font goes in whole; a chosen one is cut down to the characters used, unless its licence says whole (PDF-036, PDF-038)
+            let (name, compressed, length1, italic, bold) = match kind {
+                FontKind::Custom(id) => {
+                    let c = custom(id);
+                    let gids: BTreeSet<u16> = chars.iter().filter_map(|ch| lf.glyph_index(*ch)).map(|g| g.to_u32() as u16).collect();
+                    let cut = if c.whole { None } else { crate::fonts::sfnt::subset(lf.data, c.index, &gids) };
+                    let (bytes, tag) = match cut {
+                        Some(b) => (b, Some(subset_tag(id, &gids))),
+                        None => (crate::fonts::sfnt::whole(lf.data, c.index).unwrap_or_else(|| lf.data.to_vec()), None),
+                    };
+                    let name = tag.map_or_else(|| c.name.clone(), |t| format!("{t}+{}", c.name));
+                    (name, std::borrow::Cow::Owned(deflate(&bytes)), bytes.len(), c.italic, c.bold)
+                }
+                _ => {
+                    let name = match kind {
+                        FontKind::Sans => "UbuntuLight",
+                        FontKind::Mono => "Hack",
+                        FontKind::Hand => "Virgil",
+                        _ => "LiberationSerif",
+                    };
+                    (name.to_string(), std::borrow::Cow::Borrowed(deflated_font(kind, lf.data)), lf.data.len(), false, false)
+                }
+            };
+            let mut fo = format!("<< /Length {} /Length1 {length1} /Filter /FlateDecode >>\nstream\n", compressed.len()).into_bytes();
+            fo.extend_from_slice(&compressed);
             fo.extend(b"\nendstream");
             objs[file_id - 1] = fo;
             let desc_id = reserve(&mut objs);
-            let bb = m.bounds.expect("bundled font has a head table");
-            let name = match kind {
-                FontKind::Sans => "UbuntuLight",
-                FontKind::Mono => "Hack",
-                FontKind::Hand => "Virgil",
-                FontKind::Serif => "LiberationSerif",
-            };
+            let bb = m.bounds.expect("a font has a head table");
             let s = |v: f32| (v * 1000.0 / upem).round() as i32;
             objs[desc_id - 1] = format!(
-                "<< /Type /FontDescriptor /FontName /{name} /Flags 32 /FontBBox [{} {} {} {}] /ItalicAngle 0 /Ascent {} /Descent {} /CapHeight {} /StemV 80 /FontFile2 {file_id} 0 R >>",
+                "<< /Type /FontDescriptor /FontName /{name} /Flags {} /FontBBox [{} {} {} {}] /ItalicAngle {} /Ascent {} /Descent {} /CapHeight {} /StemV {} /FontFile2 {file_id} 0 R >>",
+                if italic { 96 } else { 32 },
                 s(bb.x_min),
                 s(bb.y_min),
                 s(bb.x_max),
                 s(bb.y_max),
+                if italic { -12 } else { 0 },
                 s(m.ascent),
                 s(m.descent),
-                s(m.cap_height.unwrap_or(m.ascent))
+                s(m.cap_height.unwrap_or(m.ascent)),
+                if bold { 140 } else { 80 }
             )
             .into_bytes();
             let widths: Vec<String> = (32u8..=255).map(|b| char_of_win_ansi(b).and_then(|c| lf.glyph_index(c)).and_then(|g| lf.advances.advance_width(g)).map(|a| (a * 1000.0 / upem).round() as i32).unwrap_or(0).to_string()).collect();

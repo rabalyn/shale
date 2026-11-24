@@ -6,8 +6,9 @@
 use crate::busy::{self, Busy, Key};
 use crate::pdf::board::{self, export_board};
 use crate::pdf::book::{self, Plan};
-use crate::pdf::book_export::{export_book, Progress};
+use crate::pdf::book_export::{export_book_made, Progress};
 use crate::pdf::export::ExportOptions;
+use crate::pdf::export_fonts::Made;
 use crate::theme;
 use crate::vault::Vault;
 use eframe::egui::{self, Ui};
@@ -20,7 +21,7 @@ pub const PDF_EXPORT: Key = Key::new("pdf-export");
 
 /// A running export. Dropping it (the dialog closed, or Cancel) stops it between two notes.
 pub struct Job {
-    job: busy::Job<Result<Vec<u8>, String>>,
+    job: busy::Job<Result<Made, String>>,
     progress: Arc<Progress>,
 }
 
@@ -39,17 +40,19 @@ pub struct BookExport {
     /// The reading order, or why there is no book.
     pub plan: Result<Plan, String>,
     pub job: Option<Job>,
+    /// what the export that has just ended said about fonts (PDF-037)
+    warnings: Vec<String>,
     busy: Busy,
 }
 
 impl BookExport {
     pub fn new(vault: &Vault, folder: &Path, busy: &Busy) -> Self {
-        BookExport { folder: folder.to_path_buf(), board: false, plan: book::plan(vault, folder), job: None, busy: busy.clone() }
+        BookExport { folder: folder.to_path_buf(), board: false, plan: book::plan(vault, folder), job: None, warnings: Vec::new(), busy: busy.clone() }
     }
 
     /// The export of the board note `rel`: the board and the notes of its cards (BOARD-030).
     pub fn for_board(vault: &Vault, rel: &Path, busy: &Busy) -> Self {
-        BookExport { folder: rel.to_path_buf(), board: true, plan: board::plan_of(vault, rel), job: None, busy: busy.clone() }
+        BookExport { folder: rel.to_path_buf(), board: true, plan: board::plan_of(vault, rel), job: None, warnings: Vec::new(), busy: busy.clone() }
     }
 
     pub fn working(&self) -> bool {
@@ -78,7 +81,7 @@ impl BookExport {
                 if board {
                     export_board(&vault, &folder, &opts, Some(&p))
                 } else {
-                    export_book(&vault, &folder, &opts, Some(&p))
+                    export_book_made(&vault, &folder, &opts, Some(&p))
                 }
             },
             notify,
@@ -96,7 +99,15 @@ impl BookExport {
     pub fn poll(&mut self) -> Option<Result<Vec<u8>, String>> {
         let got = self.job.as_ref()?.job.try_recv().ok()?;
         self.job = None;
-        Some(got.and_then(|r| r))
+        Some(got.and_then(|r| r).map(|made| {
+            self.warnings = made.warnings;
+            made.bytes
+        }))
+    }
+
+    /// What the export that has just ended has to say about fonts (PDF-037), once.
+    pub fn take_warnings(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.warnings)
     }
 
     /// The notes laid out so far and all of them, while a job runs.

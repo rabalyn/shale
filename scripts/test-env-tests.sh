@@ -14,6 +14,8 @@ export SHALE_ENV_LOCK_FILE="$TMP/env-stacks.lock"
 unset SHALE_ENV_LOCK_TOKEN
 # smb_fuse_env needs /dev/fuse and fusermount3 (NET-018): here a character device that exists everywhere and a fake fusermount3
 export SHALE_FUSE_DEVICE=/dev/null
+# the script polls for its parallel jobs every 0.2 s by default; the fakes end at once, so poll fast (#672)
+export SHALE_ENV_TESTS_NAP=0.02
 
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/cargo" <<'CARGO'
@@ -354,7 +356,7 @@ check "run: every log has a heading with its exit code" '
   printf "%s\n" "$OUT" | grep -q "^===== calendar::env_tests: exit 0" && printf "%s\n" "$OUT" | grep -q "^===== mail_env: exit 0" && printf "%s\n" "$OUT" | grep -q "^===== tex_env: exit 0" && printf "%s\n" "$OUT" | grep -q "^===== forgejo_env: exit 0"'
 
 # one suite fails: the others still end and are reported, and the failing one is named
-par_run "one failing" FAKE_SLEEP=0.2 FAKE_FAIL=mail_env
+par_run "one failing" FAKE_SLEEP=0.1 FAKE_FAIL=mail_env
 check "run: a failing suite fails the run and is named" '[ "$CODE" = 1 ] && printf "%s\n" "$OUT" | grep -q "^FAILED suites: mail_env$"'
 check "run: the other suites still ran to the end and are reported with their results" '
   grep -qx "end calendar::env_tests" "$EVENTS" && grep -qx "end tex_env" "$EVENTS" &&
@@ -377,7 +379,7 @@ check "run: an image that cannot be built fails the run before any suite" '
   [ "$CODE" = 1 ] && printf "%s\n" "$OUT" | grep -q "the TeX image could not be built" && ! grep -q "^start " "$EVENTS"'
 
 # the warm-up (#462): one cargo before any suite, so a fresh toolchain is installed once
-par_run "warm-up" FAKE_SLEEP=0.1
+par_run "warm-up" FAKE_SLEEP=0.05
 check "run: the warm-up cargo test --locked --no-run runs once, before any suite and after the stacks and the image" '
   [ "$CODE" = 0 ] && [ "$(grep -c "^warmup begin$" "$EVENTS")" = 1 ] && [ "$(nopos "warmup end")" -gt 0 ] &&
   [ "$(nopos "finish tex build")" -lt "$(nopos "warmup begin")" ] && [ "$(nopos "finish caldav up")" -lt "$(nopos "warmup begin")" ] &&
@@ -392,7 +394,7 @@ check "run: a failing warm-up fails the run, names the warm-up, shows its log an
 check "run: and the stacks are taken down after a failing warm-up" '[ "$(grep -c "^begin caldav reset" "$EVENTS")" = 2 ] && [ "$(grep -c "^begin mail reset" "$EVENTS")" = 2 ]'
 
 # tex_install and tex_import share one install of TeX Live: one after the other, but beside the other suites
-par_run "install and import" FAKE_SLEEP=0.3 SHALE_ENV_TESTS_SUITES="mail_env" SHALE_ENV_TESTS_TEX_INSTALL=yes SHALE_ENV_TESTS_TEX_IMPORT=yes
+par_run "install and import" FAKE_SLEEP=0.1 SHALE_ENV_TESTS_SUITES="mail_env" SHALE_ENV_TESTS_TEX_INSTALL=yes SHALE_ENV_TESTS_TEX_IMPORT=yes
 check "run: tex_install ends before tex_import starts" '
   [ "$CODE" = 0 ] && [ "$(nopos "end tex_install")" -gt 0 ] && [ "$(nopos "end tex_install")" -lt "$(nopos "start tex_import --test-threads=1")" ]'
 check "run: and they run beside the other suites" '[ "$(nopos "start tex_install --test-threads=1")" -lt "$(nopos "end mail_env")" ] && printf "%s\n" "$OUT" | grep -q "^===== tex_install+tex_import: exit 0"'
@@ -450,7 +452,7 @@ if command -v flock >/dev/null 2>&1; then
   lt_run "$TMP/second.log"
   lt_wait_for "$TMP/second.log.out" "waiting for the podman test stacks, used by another checkout"
   lt_check "dev_034: a second env-tests.sh run says it waits for the stacks" '[ -f "$TMP/second.log.out" ] && grep -Fq "waiting for the podman test stacks, used by another checkout" "$TMP/second.log.out"'
-  sleep 1
+  sleep 0.5
   lt_check "dev_034: and has started nothing while the lock is held elsewhere" '[ ! -s "$TMP/second.log" ] && [ ! -f "$TMP/second.log.rc" ]'
   # the other checkout lets go: the run goes on
   pkill -P "$HOLDER" sleep 2>/dev/null; kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null
@@ -472,8 +474,11 @@ if command -v flock >/dev/null 2>&1; then
   rm -f "$TMP/foreign.log"
   (exec 8>>"$SHALE_ENV_LOCK_FILE"; flock 8; printf 'holder-token\n' > "$SHALE_ENV_LOCK_FILE"; sleep 30) &
   HOLDER=$!
-  sleep 1
-  (LOG="$TMP/foreign.log" SHALE_ENV_LOCK_TOKEN=inherited-token timeout 3 sh "$LT/child.sh" 2> "$TMP/foreign.err")
+  lt_wait_for "$SHALE_ENV_LOCK_FILE" holder-token
+  (LOG="$TMP/foreign.log" SHALE_ENV_LOCK_TOKEN=inherited-token timeout 10 sh "$LT/child.sh" 2> "$TMP/foreign.err") &
+  lt_wait_for "$TMP/foreign.err" "waiting for the podman test stacks"
+  pkill -f "$LT/child.sh" 2>/dev/null
+  wait $!
   lt_check "dev_034: an inherited marker that is not the holder's token still waits for the lock" '[ ! -s "$TMP/foreign.log" ] && grep -Fq "waiting for the podman test stacks" "$TMP/foreign.err"'
   pkill -P "$HOLDER" sleep 2>/dev/null; kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null
 else

@@ -18,6 +18,7 @@ use crate::drawing::Scene;
 use crate::pdf::book::{self, Chapter, Item, Part, Plan};
 use crate::pdf::book_export::{lay_out, Progress};
 use crate::pdf::export::{add_pictures, draw_scene, fit_text, wrap_pieces, ExportOptions, Piece, Writer};
+use crate::pdf::export_fonts::Made;
 use crate::pdf::write::{FontKind, Rgba, TextStyle};
 use crate::vault::{FileKind, Vault};
 use std::path::{Path, PathBuf};
@@ -76,7 +77,7 @@ pub fn plan_of(vault: &Vault, rel: &Path) -> Result<Plan, String> {
 
 /// The PDF of the board note `rel`: the board, then its cards' notes (BOARD-030). `progress`
 /// counts the notes laid out and can stop it.
-pub fn export_board(vault: &Vault, rel: &Path, opts: &ExportOptions, progress: Option<&Progress>) -> Result<Vec<u8>, String> {
+pub fn export_board(vault: &Vault, rel: &Path, opts: &ExportOptions, progress: Option<&Progress>) -> Result<Made, String> {
     let _flow = tracing::info_span!("flow.board_export", peer = "export").entered();
     let board = tracing::info_span!("flow.board_export.resolve", peer = "vault").in_scope(|| resolve(vault, rel))?;
     lay_out(vault, &plan(vault, &board), opts, progress, Some(&board))

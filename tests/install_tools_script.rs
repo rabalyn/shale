@@ -10,7 +10,7 @@ use std::process::{Command, Output};
 const ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
 fn run(script: &str, arch: &str) -> Output {
-    Command::new("sh").arg(Path::new(ROOT).join("scripts").join(script)).arg("--print-url").env("SHALE_ARCH", arch).output().unwrap()
+    Command::new("sh").arg(Path::new(ROOT).join("scripts").join(script)).arg("--print-url").env("SHALE_OS", "Linux").env("SHALE_ARCH", arch).output().unwrap()
 }
 
 fn url(script: &str, arch: &str) -> String {
@@ -44,6 +44,6 @@ fn site_070_an_unsupported_architecture_stops_and_names_it() {
     for script in ["install-hugo.sh", "install-pagefind.sh"] {
         let out = run(script, "riscv64");
         assert!(!out.status.success(), "{script}");
-        assert!(String::from_utf8_lossy(&out.stderr).contains("'riscv64'"), "{script}");
+        assert!(String::from_utf8_lossy(&out.stderr).contains("Linux riscv64"), "{script}");
     }
 }

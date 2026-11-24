@@ -1,0 +1,10 @@
+# The Forgejo Actions runner of the test stack (SITE-049, #665): the official runner binary on a Debian image that has
+# Node.js (the actions are JavaScript) and what the server recipe's workflow needs besides Hugo and Pagefind, which the
+# workflow downloads itself: git, git-lfs, curl. The runner's `host` label runs the jobs in this container, so no nested
+# containers are needed.
+FROM code.forgejo.org/forgejo/runner:6.3.1 AS runner
+FROM docker.io/library/node:20-bookworm-slim
+RUN apt-get update -qq \
+ && apt-get install -y -qq --no-install-recommends git git-lfs curl ca-certificates >/dev/null \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=runner /bin/forgejo-runner /usr/local/bin/forgejo-runner

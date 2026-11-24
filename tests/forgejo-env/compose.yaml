@@ -1,7 +1,7 @@
 name: shale-forgejo-env
 
 services:
-  # a real Forgejo on SQLite: no outside network, no registration, no mail, no actions; its built-in SSH server
+  # a real Forgejo on SQLite: no outside network, no registration, no mail, the Actions of the server recipe (SITE-049, runner/); its built-in SSH server
   # listens on 127.0.0.1:13022 only (SYNC-081)
   forgejo:
     image: codeberg.org/forgejo/forgejo:11.0.16-rootless
@@ -26,7 +26,7 @@ services:
       FORGEJO__service__DISABLE_REGISTRATION: "true"
       FORGEJO__service__REQUIRE_SIGNIN_VIEW: "true"
       FORGEJO__repository__DEFAULT_BRANCH: main
-      FORGEJO__actions__ENABLED: "false"
+      FORGEJO__actions__ENABLED: "true"
       FORGEJO__mailer__ENABLED: "false"
       FORGEJO__log__LEVEL: Warn
       FORGEJO__openid__ENABLE_OPENID_SIGNIN: "false"

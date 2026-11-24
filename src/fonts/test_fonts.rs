@@ -84,6 +84,24 @@ impl Spec {
         out
     }
 
+    /// A font with the outlines and metrics of `base` (a real font file) and the names, weight,
+    /// slant and licence of this spec, to try what the exports do with a font that can be drawn.
+    pub fn on(&self, base: &[u8]) -> Vec<u8> {
+        let own = self.bytes();
+        let mine = super::sfnt::tables(&own, 0).expect("a test font");
+        let mut tables: Vec<([u8; 4], Vec<u8>)> = super::sfnt::tables(base, 0).expect("a font").into_iter().filter(|(t, _)| t != b"name" && t != b"OS/2").map(|(t, d)| (t, d.to_vec())).collect();
+        tables.extend(mine.into_iter().map(|(t, d)| (t, d.to_vec())));
+        super::sfnt::build(tables)
+    }
+
+    /// [`Spec::on`] written as `dir/file`; gives the path.
+    pub fn write_on(&self, base: &[u8], dir: &Path, file: &str) -> PathBuf {
+        let path = dir.join(file);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, self.on(base)).unwrap();
+        path
+    }
+
     /// Write the font as `dir/file` and return the path.
     pub fn write(&self, dir: &Path, file: &str) -> PathBuf {
         let path = dir.join(file);

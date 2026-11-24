@@ -1182,7 +1182,7 @@ impl ShaleApp {
             };
             // a LaTeX export that is running or has just ended (TEX-016), or the book of a folder (BOOK-010)
             let finished = self.tex_export_tick(d, &ctx).or_else(|| self.book_export_tick(d)).or_else(|| self.note_export_tick(d));
-            if d.tex.as_ref().is_some_and(|t| t.working()) || d.book.as_ref().is_some_and(|b| b.working()) || d.note_working() {
+            if d.tex.as_ref().is_some_and(|t| t.working()) || d.book.as_ref().is_some_and(|b| b.working()) || d.note_working() || d.fonts_wait.is_some() {
                 ctx.request_repaint_after(std::time::Duration::from_millis(250));
             }
             let mut st = (&mut **d, crate::pdf::export_dialog::DialogResult::Open);
@@ -1206,6 +1206,9 @@ impl ShaleApp {
                 None => {}
             }
             match result {
+                // an export that waited for the font scan starts when it is in, or after a while (PDF-037)
+                crate::pdf::export_dialog::DialogResult::Cancel if d.fonts_wait.is_some() => d.fonts_wait = None,
+                crate::pdf::export_dialog::DialogResult::Open if d.fonts_wait.is_some() => d.error = if d.book.is_some() { self.start_book_export(d, &ctx) } else { self.start_note_export(d, &ctx) }.err(),
                 // a note's or a folder's export through LaTeX (TEX-016, BOOK-013)
                 crate::pdf::export_dialog::DialogResult::Export if d.latex() => d.error = self.start_tex_export(d, &ctx).err(),
                 crate::pdf::export_dialog::DialogResult::Export if d.book.is_some() => d.error = self.start_book_export(d, &ctx).err(),

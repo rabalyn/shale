@@ -4,10 +4,12 @@
 
 use crate::board::resolve::Resolved;
 use crate::busy::Cancel;
+use crate::fonts::resolve::Values;
 use crate::markdown;
 use crate::pdf::book::{self, Item, Plan};
 use crate::pdf::export::{book_scale, finish_from, fit_text, pdf_image, wrap_pieces, Entry, ExportOptions, Piece, Writer};
-use crate::pdf::write::{text_width, Bookmark, Dest, FontKind, Rgba, TextStyle};
+use crate::pdf::export_fonts::Made;
+use crate::pdf::write::{styled_width, text_width, Bookmark, Dest, Rgba, TextStyle};
 use crate::vault::{FileKind, Vault};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -162,7 +164,7 @@ impl Writer<'_> {
         let (w, h) = (self.w, self.h);
         let cw = self.cw() * 0.85;
         let centred = |page: &mut crate::pdf::write::Page, style: TextStyle, y: f32, s: &str| {
-            let x = (w - text_width(style.kind, style.size, s)) / 2.0;
+            let x = (w - styled_width(&style, s)) / 2.0;
             page.text(style, x, y, s);
         };
         let mut y = h * 0.32;
@@ -175,8 +177,10 @@ impl Writer<'_> {
             let idx = self.doc.add_image(pdf_image(img));
             self.p().image(idx, (w - lw) / 2.0, top, lw, lh);
         }
-        let title = TextStyle { bold: true, ..TextStyle::plain(FontKind::Sans, size, BLACK) };
-        for line in wrap_pieces(&[Piece::plain(&plan.title, size, BLACK, true)], cw) {
+        // the front of a book is set in the book's one font (BOOK-022)
+        let font = self.opts.headings();
+        let title = TextStyle { bold: true, ..TextStyle::plain(font, size, BLACK) };
+        for line in wrap_pieces(&[Piece::plain(&plan.title, size, BLACK, true).in_font(font)], cw) {
             let text: String = line.iter().map(|p| p.text.as_str()).collect();
             centred(self.p(), title, y, text.trim_end());
             y += size * 1.25;
@@ -185,8 +189,8 @@ impl Writer<'_> {
         self.p().rect((w - 56.0) / 2.0, y, 56.0, 2.5, Some(Rgba(105, 65, 198, 255)), None);
         y += 2.5 + size * 0.9;
         if let Some(sub) = &plan.subtitle {
-            let style = TextStyle::plain(FontKind::Sans, 16.0, Rgba(85, 85, 85, 255));
-            for line in wrap_pieces(&[Piece::plain(sub, 16.0, BLACK, false)], cw) {
+            let style = TextStyle::plain(font, 16.0, Rgba(85, 85, 85, 255));
+            for line in wrap_pieces(&[Piece::plain(sub, 16.0, BLACK, false).in_font(font)], cw) {
                 let text: String = line.iter().map(|p| p.text.as_str()).collect();
                 centred(self.p(), style, y, text.trim_end());
                 y += 16.0 * 1.5;
@@ -195,7 +199,7 @@ impl Writer<'_> {
         let mut y = h * 0.8;
         for (text, size) in [(plan.author.as_deref(), 13.0), (plan.date.as_deref(), 11.0)] {
             if let Some(text) = text {
-                centred(self.p(), TextStyle::plain(FontKind::Sans, size, GREY), y, text);
+                centred(self.p(), TextStyle::plain(font, size, GREY), y, text);
                 y += size * 1.6;
             }
         }
@@ -224,9 +228,10 @@ impl Writer<'_> {
         let size = base * book_scale(level);
         let at_top = self.y <= self.top + 0.5;
         self.y += if at_top { base * [0.0, 3.5, 2.5, 1.5, 1.0, 1.0][level.min(5)] } else { base * 1.2 };
-        let mut ps = vec![Piece::plain(title, size, BLACK, true)];
+        let font = self.opts.headings();
+        let mut ps = vec![Piece::plain(title, size, BLACK, true).in_font(font)];
         if let Some(n) = number {
-            ps.insert(0, Piece::plain(&format!("{n}  "), size, NUMBER, false));
+            ps.insert(0, Piece::plain(&format!("{n}  "), size, NUMBER, false).in_font(font));
         }
         self.need(size * 3.0);
         let dest = Dest { page: self.page, y: self.y };
@@ -247,10 +252,11 @@ impl Writer<'_> {
             let Some(title) = self.heads[i].title.clone().filter(|_| !self.heads[i].first) else { continue };
             let width = self.doc.pages[i].width;
             let room = width - left - right;
-            let text = fit_text(FontKind::Sans, &title, size, room);
+            let font = self.opts.headings();
+            let text = fit_text(font, &title, size, room);
             let base = self.top * 0.55;
             let page = self.doc.page(i);
-            page.text(TextStyle::plain(FontKind::Sans, size, GREY), width - right - text_width(FontKind::Sans, size, &text), base, &text);
+            page.text(TextStyle::plain(font, size, GREY), width - right - text_width(font, size, &text), base, &text);
             page.line([left, base + 4.0], [width - right, base + 4.0], Rgba(205, 205, 210, 255), 0.5);
         }
     }
@@ -258,6 +264,11 @@ impl Writer<'_> {
 
 /// The PDF of the book of `dir` (BOOK-005…BOOK-009). `progress` counts the notes laid out and can stop it.
 pub fn export_book(vault: &Vault, dir: &Path, opts: &ExportOptions, progress: Option<&Progress>) -> Result<Vec<u8>, String> {
+    export_book_made(vault, dir, opts, progress).map(|m| m.bytes)
+}
+
+/// [`export_book`] with the warnings about fonts (PDF-037, BOOK-022).
+pub fn export_book_made(vault: &Vault, dir: &Path, opts: &ExportOptions, progress: Option<&Progress>) -> Result<Made, String> {
     let _flow = tracing::info_span!("flow.book_export", peer = "export").entered();
     let plan = tracing::info_span!("flow.book_export.plan", peer = "vault").in_scope(|| book::plan(vault, dir))?;
     lay_out(vault, &plan, opts, progress, None)
@@ -265,7 +276,14 @@ pub fn export_book(vault: &Vault, dir: &Path, opts: &ExportOptions, progress: Op
 
 /// The PDF of `plan`, the book of a folder or of a board (BOARD-030): with a `board`, its landscape
 /// pages come after the title page and the contents and before the first note.
-pub(super) fn lay_out(vault: &Vault, plan: &Plan, opts: &ExportOptions, progress: Option<&Progress>, board: Option<&Resolved>) -> Result<Vec<u8>, String> {
+pub(super) fn lay_out(vault: &Vault, plan: &Plan, opts: &ExportOptions, progress: Option<&Progress>, board: Option<&Resolved>) -> Result<Made, String> {
+    // one font for the whole book: the top folder note's, else the vault's; a chapter's own is ignored (BOOK-022)
+    let note_of = |rel: &Path| vault.notes.get(rel).map(|n| n.text.as_str()).unwrap_or_default();
+    let top = plan.note.as_deref().or(plan.intro.as_deref());
+    let chapters: Vec<(String, Values)> = plan.notes().iter().filter(|rel| Some(rel.as_path()) != top).map(|rel| (rel.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), Values::of_note(note_of(rel)))).collect();
+    let top = top.map(|rel| Values::of_note(note_of(rel))).unwrap_or_default();
+    let (opts, warnings) = crate::pdf::export_fonts::apply(opts, &vault.root, top, Some(chapters));
+    let opts = &opts;
     let secs = tracing::info_span!("flow.book_export.read_notes", peer = "vault").in_scope(|| sections(vault, plan, opts.numbered_headings));
     if let Some(p) = progress {
         p.total.store(secs.len(), Ordering::SeqCst);
@@ -384,7 +402,7 @@ pub(super) fn lay_out(vault: &Vault, plan: &Plan, opts: &ExportOptions, progress
     if let Some(p) = progress {
         p.done.store(secs.len(), Ordering::SeqCst);
     }
-    tracing::info_span!("flow.book_export.write_pdf", peer = "pdf").in_scope(|| finish_from(w.doc, opts, usize::from(opts.title)))
+    tracing::info_span!("flow.book_export.write_pdf", peer = "pdf").in_scope(|| finish_from(w.doc, opts, usize::from(opts.title), warnings))
 }
 
 /// `shale --export-pdf <folder> <file.pdf>` (BOOK-011): the folder, opened as a vault, as one PDF with the
