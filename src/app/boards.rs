@@ -5,6 +5,7 @@
 use super::{handle_editor_action, ShaleApp, View};
 use crate::board::drag::{self, Dropped};
 use crate::board::file::{self, Board, Chip, Key};
+use crate::board::lanes::PRESETS;
 use crate::board::peek::{Peek, With};
 use crate::board::view::{self, Act, Data, Env};
 use crate::link_preview::{clamp_size, size_of};
@@ -84,6 +85,18 @@ impl ShaleApp {
                 self.boards.view.settings = None;
                 let n = self.edit_board(|b| b.add_lane(NEW_LANE)).map_or(0, |b| b.lanes.len());
                 self.boards.view.rename(n.saturating_sub(1), NEW_LANE);
+            }
+            Act::AddPreset(n) => {
+                if let Some(preset) = PRESETS.get(n) {
+                    self.boards.view.settings = None;
+                    self.edit_board(|b| {
+                        b.add_lane(preset.name);
+                        if let Some(lane) = b.lanes.last_mut() {
+                            lane.set(Key::Query, preset.query);
+                            lane.set(Key::Sort, preset.sort);
+                        }
+                    });
+                }
             }
             Act::RemoveLane(i) => {
                 self.boards.view.settings = None;

@@ -79,3 +79,18 @@ fn board_030_only_a_board_note_resolves() {
     assert!(resolve(&v, Path::new("Board.md")).unwrap().lanes.is_empty());
     let _ = std::fs::remove_dir_all(d);
 }
+
+// spec: BOARD-026, BOARD-027, BOARD-024
+#[test]
+fn board_026_a_resolved_board_has_the_dependency_order_the_steps_and_the_done_lane_as_the_view() {
+    let board = "---\ntype: board\n---\n## Chain\nquery: #t\nsort: dependencies\n\n## Done\nquery: #fin\ndone: true\n";
+    let files = [("Board.md", board), ("A.md", "---\nblocked-by: [[Fin]]\ndue: 2030-01-03\n---\n#t\n"), ("B.md", "---\nblocked-by: [[A]]\n---\n#t\n"), ("C.md", "---\nblocked-by: [[A]]\ndue: 2030-01-01\n---\n#t\n"), ("Fin.md", "#fin\n")];
+    let (v, d) = vault("deps", &files);
+    let b = resolve(&v, Path::new("Board.md")).unwrap();
+    assert_eq!(titles(&b.lanes[0].cards), ["A", "C", "B"], "blockers first, C is due before B");
+    let cards = &b.lanes[0].cards;
+    let words: Vec<Vec<String>> = cards.iter().map(|c| c.chip_texts(&[])).collect();
+    // A waits for Fin, which is in the done lane: not blocked; B and C wait for A
+    assert_eq!(words, [vec!["step 1"], vec!["blocked", "step 2a"], vec!["blocked", "step 2b"]]);
+    let _ = std::fs::remove_dir_all(d);
+}

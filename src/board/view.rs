@@ -4,9 +4,10 @@
 //! (`board/app.rs`), so the file and the view cannot disagree (BOARD-006).
 
 use super::card::{day_text, Card};
+use super::deps::Step;
 use super::drag::Dropped;
 use super::file::{Chip, Props};
-use super::lanes::drop_property;
+use super::lanes::{drop_property, PRESETS};
 use super::{Info, LaneView};
 use crate::note_props::Priority;
 use crate::reader::SceneCache;
@@ -37,6 +38,8 @@ pub enum Act {
     /// the export dialog of the board: a PDF of the board and its notes (BOARD-030)
     ExportPdf,
     AddLane,
+    /// a lane from the preset of that place in `lanes::PRESETS` (BOARD-029)
+    AddPreset(usize),
     RemoveLane(usize),
     RenameLane(usize, String),
     /// move lane `from` to the place `to`
@@ -64,7 +67,78 @@ pub enum Act {
 /// Where a lane and its cards were drawn in this frame, to find what a dragged card is over.
 struct Place {
     lane: Rect,
+    /// the part of the lane that shows its cards: a card beyond it is scrolled out of view
+    body: Rect,
     cards: Vec<Rect>,
+}
+
+/// An arrow from a card to the card that waits for it (BOARD-025), in screen space.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Arrow {
+    pub from: Pos2,
+    pub to: Pos2,
+    /// both cards are one above the other: the arrow runs down this x, beside the cards between
+    pub beside: Option<f32>,
+}
+
+/// How far an arrow between cards of one column runs outside their edge.
+const BESIDE: f32 = 6.0;
+
+/// Where an arrow meets the card `card` that is drawn in a lane whose cards show in `body`, when
+/// the other end is at `toward`: on the side of the card that faces it, the right one for a card
+/// in the same column. A card that is scrolled out of the lane is met at the edge of the body,
+/// where it went out.
+fn anchor(body: Rect, card: Rect, toward: Pos2) -> Pos2 {
+    let y = card.center().y.clamp(body.top(), body.bottom());
+    Pos2::new(if toward.x < card.left() { card.left() } else { card.right() }, y)
+}
+
+/// The arrow between two cards, `from` the one that is waited for `to` the one that waits.
+fn arrow(from: (Rect, Rect), to: (Rect, Rect)) -> Arrow {
+    let ((from_body, from), (to_body, to)) = (from, to);
+    let beside = (from.left() < to.right() && to.left() < from.right()).then(|| from.right().max(to.right()) + BESIDE);
+    Arrow { from: anchor(from_body, from, to.center()), to: anchor(to_body, to, from.center()), beside }
+}
+
+/// The arrows of the selected card: from each of its blockers to it, and from it to each card that
+/// names it as a blocker, as far as they are cards of the board. None without a selection.
+fn arrows(places: &[Place], data: &Data) -> Vec<Arrow> {
+    let Some(selected) = data.selected else { return Vec::new() };
+    let find = |rel: &Path| data.lanes.iter().enumerate().find_map(|(l, lane)| lane.cards.iter().position(|c| c.rel == rel).map(|c| (l, c)));
+    let at = |(l, c): (usize, usize)| places.get(l).and_then(|p| p.cards.get(c).map(|r| (p.body, *r)));
+    let Some(((sel_body, sel), card)) = find(selected).and_then(|(l, c)| Some((at((l, c))?, &data.lanes[l].cards[c]))) else { return Vec::new() };
+    let others = |list: &[PathBuf]| list.iter().filter(|r| r.as_path() != selected).filter_map(|r| find(r).and_then(at)).collect::<Vec<_>>();
+    let mut out = Vec::new();
+    for other in others(&card.dep.blockers) {
+        out.push(arrow(other, (sel_body, sel)));
+    }
+    for other in others(&card.dep.dependants) {
+        out.push(arrow((sel_body, sel), other));
+    }
+    out
+}
+
+fn paint_arrow(ui: &Ui, a: Arrow) {
+    let color = theme::palette().accent;
+    let painter = ui.painter();
+    let back = match a.beside {
+        Some(x) => {
+            let corners = [Pos2::new(x, a.from.y), Pos2::new(x, a.to.y)];
+            painter.line_segment([a.from, corners[0]], Stroke::new(1.5, color));
+            painter.line_segment(corners, Stroke::new(1.5, color));
+            painter.line_segment([corners[1], a.to], Stroke::new(1.5, color));
+            Vec2::X
+        }
+        None => {
+            painter.line_segment([a.from, a.to], Stroke::new(1.5, color));
+            (a.from - a.to).normalized()
+        }
+    };
+    for angle in [0.45_f32, -0.45] {
+        let (s, c) = angle.sin_cos();
+        let side = Vec2::new(back.x * c - back.y * s, back.x * s + back.y * c);
+        painter.line_segment([a.to, a.to + side * 9.0], Stroke::new(1.5, color));
+    }
 }
 
 /// The lane and the place among its cards that the pointer at `pos` is over: the number of cards
@@ -124,6 +198,8 @@ pub struct State {
     pub(crate) over: Option<(usize, usize)>,
     /// where the lanes were drawn in this frame
     places: Vec<Place>,
+    /// the arrows drawn in this frame (BOARD-025)
+    pub(crate) arrows: Vec<Arrow>,
 }
 
 impl State {
@@ -204,6 +280,10 @@ pub fn show(ui: &mut Ui, st: &mut State, data: &Data, env: &mut Env) -> Vec<Act>
             }
         });
     });
+    st.arrows = arrows(&st.places, data);
+    for a in &st.arrows {
+        paint_arrow(ui, *a);
+    }
     drag_end(ui, st, data, &mut acts);
     confirm_delete(ui.ctx(), st, &mut acts);
     acts
@@ -314,6 +394,16 @@ fn strip(ui: &mut Ui, data: &Data, acts: &mut Vec<Act>) {
                         }
                     }
                 });
+                ui.menu_button("▾", |ui| {
+                    for (n, preset) in PRESETS.iter().enumerate() {
+                        if ui.button(preset.name).on_hover_text(format!("A lane with query: {} and sort: {}", preset.query, preset.sort)).clicked() {
+                            acts.push(Act::AddPreset(n));
+                            ui.close();
+                        }
+                    }
+                })
+                .response
+                .on_hover_text("Add a lane from a preset");
                 if ui.button("+ Add lane").on_hover_text("A lane at the end of the board; set its query with its ⋯ menu").clicked() {
                     acts.push(Act::AddLane);
                 }
@@ -360,6 +450,7 @@ fn keys(ui: &Ui, st: &mut State, data: &Data, acts: &mut Vec<Act>) {
 
 fn lane_ui(ui: &mut Ui, i: usize, lane: &LaneView, st: &mut State, data: &Data, env: &mut Env, acts: &mut Vec<Act>) {
     let mut cards = Vec::new();
+    let mut body = Rect::NOTHING;
     let out = egui::Frame::new().fill(theme::palette().bg_secondary).stroke(Stroke::new(1.0, theme::palette().border)).corner_radius(CornerRadius::same(8)).inner_margin(Margin::same(8)).show(ui, |ui| {
         ui.set_width(LANE_WIDTH - 18.0);
         header(ui, i, lane, st, data, env, acts);
@@ -367,7 +458,7 @@ fn lane_ui(ui: &mut Ui, i: usize, lane: &LaneView, st: &mut State, data: &Data, 
             theme::problem(ui, e.clone());
         }
         ui.add_space(4.0);
-        egui::ScrollArea::vertical().id_salt(("board-lane", i)).auto_shrink([false, false]).show(ui, |ui| {
+        let scroll = egui::ScrollArea::vertical().id_salt(("board-lane", i)).auto_shrink([false, false]).show(ui, |ui| {
             ui.set_width(ui.available_width());
             if lane.waiting && lane.cards.is_empty() {
                 theme::hint(ui, "Searching…");
@@ -382,8 +473,9 @@ fn lane_ui(ui: &mut Ui, i: usize, lane: &LaneView, st: &mut State, data: &Data, 
                 theme::hint(ui, "The search stopped early: the list is not complete");
             }
         });
+        body = scroll.inner_rect;
     });
-    st.places.push(Place { lane: out.response.rect, cards });
+    st.places.push(Place { lane: out.response.rect, body, cards });
 }
 
 /// The heading of a lane: its name (double-click for the settings), the number of cards and the ⋯ menu.
@@ -502,6 +594,11 @@ fn chip(ui: &mut Ui, text: &str, fg: Color32, bg: Color32, tip: &str) {
     resp.on_hover_text(tip);
 }
 
+/// The names of notes for a tooltip: the file names without folder and extension.
+fn names(rels: &[PathBuf]) -> String {
+    rels.iter().filter_map(|r| r.file_stem()).map(|s| s.to_string_lossy().into_owned()).collect::<Vec<_>>().join(", ")
+}
+
 fn priority_colour(p: Priority) -> (Color32, Color32) {
     let pal = theme::palette();
     match p {
@@ -515,8 +612,26 @@ fn chips(ui: &mut Ui, card: &Card, props: &Props) {
     let pal = theme::palette();
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(4.0, 3.0);
+        // what the dependencies say is always shown, whatever `card-shows:` says (BOARD-023, BOARD-027, BOARD-028)
+        if card.dep.blocked() {
+            chip(ui, "blocked", pal.link_missing, pal.bad_bg, &format!("Waiting for {}", names(&card.dep.waiting)));
+        }
+        match card.dep.step {
+            Some(Step::Circular) => chip(ui, "circular", pal.link_missing, pal.bad_bg, "Part of a cycle of blocked-by: it cannot be put in order"),
+            Some(step) => {
+                if let Some(label) = step.label() {
+                    chip(ui, &format!("step {label}"), pal.accent, pal.widget_bg, "Its place in the dependency order: the cards of a step can run in parallel");
+                }
+            }
+            None => {}
+        }
         for what in &props.shows {
             match what {
+                Chip::Start => {
+                    if let Some(day) = card.start {
+                        chip(ui, &format!("start {}", day_text(day)), pal.text, pal.widget_bg, "Start");
+                    }
+                }
                 Chip::Due => {
                     if let Some(day) = card.due {
                         let (fg, bg) = if card.overdue() { (pal.link_missing, pal.bad_bg) } else { (pal.text, pal.widget_bg) };
@@ -568,6 +683,13 @@ fn card_ui(ui: &mut Ui, lane: usize, card: &Card, data: &Data, st: &mut State, e
             }
         }
         chips(ui, card, data.props);
+        if selected {
+            // a blocker that is no card of the board has no arrow: it is named here (BOARD-025)
+            let off: Vec<PathBuf> = card.dep.blockers.iter().filter(|b| !data.lanes.iter().any(|l| l.cards.iter().any(|c| c.rel == **b))).cloned().collect();
+            if !off.is_empty() {
+                ui.add(egui::Label::new(RichText::new(format!("Also blocked by {} (not on this board)", names(&off))).size(11.0).color(pal.muted)).wrap());
+            }
+        }
     });
     let rect = out.response.rect;
     let resp = ui.interact(rect, ui.scope_id().with(("board-card", &card.rel)), Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -586,4 +708,49 @@ fn card_ui(ui: &mut Ui, lane: usize, card: &Card, data: &Data, st: &mut State, e
         }
     }
     rect
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rect(x: f32, y: f32, w: f32, h: f32) -> Rect {
+        Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, h))
+    }
+
+    // spec: BOARD-025
+    #[test]
+    fn board_025_an_arrow_meets_the_edge_of_the_card_that_faces_the_other_end() {
+        let body = rect(0.0, 100.0, 200.0, 300.0);
+        let card = rect(10.0, 200.0, 180.0, 40.0);
+        assert_eq!(anchor(body, card, Pos2::new(500.0, 220.0)), Pos2::new(190.0, 220.0), "a card to the right: the right edge");
+        assert_eq!(anchor(body, card, Pos2::new(-300.0, 220.0)), Pos2::new(10.0, 220.0), "to the left: the left edge");
+        assert_eq!(anchor(body, card, Pos2::new(100.0, 350.0)), Pos2::new(190.0, 220.0), "below, in the same lane: the right edge too");
+    }
+
+    // spec: BOARD-025
+    #[test]
+    fn board_025_an_arrow_between_cards_of_one_lane_runs_beside_the_cards_between() {
+        let body = rect(0.0, 100.0, 200.0, 300.0);
+        let (upper, lower) = (rect(10.0, 120.0, 180.0, 40.0), rect(10.0, 300.0, 180.0, 40.0));
+        let a = arrow((body, upper), (body, lower));
+        assert_eq!((a.from, a.to, a.beside), (Pos2::new(190.0, 140.0), Pos2::new(190.0, 320.0), Some(190.0 + BESIDE)));
+        // another lane to the right: a straight line from the right edge to the left edge
+        let other = rect(300.0, 120.0, 180.0, 40.0);
+        let b = arrow((body, upper), (rect(290.0, 100.0, 200.0, 300.0), other));
+        assert_eq!((b.from.x, b.to.x, b.beside), (190.0, 300.0, None));
+    }
+
+    // spec: BOARD-025
+    #[test]
+    fn board_025_an_arrow_to_a_card_scrolled_out_of_its_lane_ends_at_the_edge_of_the_lane() {
+        let body = rect(0.0, 100.0, 200.0, 300.0);
+        let above = rect(10.0, 20.0, 180.0, 40.0);
+        let below = rect(10.0, 500.0, 180.0, 40.0);
+        let toward = Pos2::new(500.0, 250.0);
+        assert_eq!(anchor(body, above, toward).y, body.top(), "scrolled out above");
+        assert_eq!(anchor(body, below, toward).y, body.bottom(), "scrolled out below");
+        assert_eq!(anchor(body, below, Pos2::new(100.0, 150.0)).y, body.bottom(), "the same lane too");
+        assert!(body.contains(anchor(body, above, Pos2::new(100.0, 300.0))));
+    }
 }

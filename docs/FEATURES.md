@@ -613,6 +613,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   priority and the tags. Cards sort by `created`, `modified`, `due`, `priority` and `title`; a note without a value comes
   last either way. A pinned card is only in the lane that pins it.
 - **Drag a card onto a lane** (the card follows the pointer, the lane and the place are marked, Esc cancels, a drop outside the lanes does nothing): the lane's `drop:` property, or the one its simple query says (`status:doing`), is written into the card's front matter (`modified:` stays, a checked save, an undo step in an open note). A lane without a drop property pins the card at the place it was dropped (`- [[Note]]`); the order of the `[[links]]` is the manual order, and a card is unpinned in the lane it came from.
+- **Dependencies**: `blocked-by: [[A]], [[B]]` in a card's note (and `due:`, `start:`). A card is **blocked** (a red chip) while a blocker exists and is not done: `status: done`, or a card in a lane marked `done: true` (the query words `blocked` and `blocking` use the status only). Selecting a card draws **arrows** to its blockers and to the cards that wait for it (a blocker that is not on the board is named on the card). `sort: dependencies` is a topological order with **step numbers** (`step 1`, `step 2`, `step 3a`, `step 3b` for parallel cards; ties by earlier due day, higher priority, title); a **cycle** is marked "circular" and listed last. The ▾ menu next to **+ Add lane** has the preset **My dependency chain** (`query: blocked OR blocking`, `sort: dependencies`).
 - A click selects a card and opens its **peek**, an editor of the note in a window the size of the link preview
   (drag the title, resize the edges, Esc closes) with a **Priority** control that changes the front matter only. Ctrl+Click
   or Enter opens the note in a tab; the arrow keys move the selection.
@@ -620,6 +621,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 ![The peek of a card](userguide/z_media/screenshots/board-peek.png)
 
 ![The settings of a lane](userguide/z_media/screenshots/board-lane-settings.png)
+
+![A selected card with arrows and a lane in dependency order](userguide/z_media/screenshots/board-dependencies.png)
 
 ## Linked notes and the graph
 

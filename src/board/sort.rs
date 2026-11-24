@@ -4,11 +4,13 @@
 //!
 //! The pinned cards stay on top in the order of their links (BOARD-022); the others are ordered
 //! by the keys. A card without a value for a key comes after the others in either direction
-//! (BOARD-017). The key `dependencies` is read but orders nothing yet (BOARD-026, #603).
+//! (BOARD-017). The key `dependencies` orders by the places `deps::order` gave (BOARD-026).
 
 use super::card::Card;
 use crate::search_form::sort::{Field, Key};
 use std::cmp::Ordering;
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 /// Compare two optional values: a missing one is last, whatever the direction (BOARD-017).
 fn by<T: Ord>(a: Option<T>, b: Option<T>, desc: bool) -> Ordering {
@@ -25,9 +27,16 @@ fn titles(a: &Card, b: &Card) -> Ordering {
     a.title.to_lowercase().cmp(&b.title.to_lowercase())
 }
 
+/// The order of two cards that are free at the same step of a dependency order (BOARD-026): the
+/// earlier due day, then the higher priority, then the title.
+pub(super) fn tie(a: &Card, b: &Card) -> Ordering {
+    by(a.due, b.due, false).then_with(|| by(a.priority, b.priority, true)).then_with(|| titles(a, b)).then_with(|| a.rel.cmp(&b.rel))
+}
+
 /// Order `cards` by `keys` in order; the cards the keys do not tell apart, and all of them
-/// without keys, come by title (BOARD-018).
-pub fn sort(cards: &mut [Card], keys: &[Key]) {
+/// without keys, come by title (BOARD-018). `places` is the place of each card in the
+/// dependency order of the lane (BOARD-026), for the key `dependencies`.
+pub fn sort(cards: &mut [Card], keys: &[Key], places: &HashMap<PathBuf, usize>) {
     cards.sort_by(|a, b| {
         for key in keys {
             let order = match key.field {
@@ -37,7 +46,7 @@ pub fn sort(cards: &mut [Card], keys: &[Key]) {
                 Field::Priority => by(a.priority, b.priority, key.desc),
                 Field::Title if key.desc => titles(b, a),
                 Field::Title => titles(a, b),
-                Field::Dependencies => Ordering::Equal,
+                Field::Dependencies => by(places.get(&a.rel), places.get(&b.rel), false),
             };
             if order != Ordering::Equal {
                 return order;
@@ -55,11 +64,15 @@ mod tests {
     use std::path::PathBuf;
 
     fn card(title: &str) -> Card {
-        Card { rel: PathBuf::from(format!("{title}.md")), title: title.into(), drawing: false, due: None, status: None, priority: None, tags: vec![], created: None, modified: None }
+        Card { rel: PathBuf::from(format!("{title}.md")), title: title.into(), drawing: false, due: None, status: None, priority: None, tags: vec![], created: None, modified: None, start: None, dep: Default::default() }
     }
 
     fn order(cards: &mut [Card], keys: &str) -> Vec<String> {
-        sort(cards, &parse(keys).unwrap());
+        order_by(cards, keys, &HashMap::new())
+    }
+
+    fn order_by(cards: &mut [Card], keys: &str, places: &HashMap<PathBuf, usize>) -> Vec<String> {
+        sort(cards, &parse(keys).unwrap(), places);
         cards.iter().map(|c| c.title.clone()).collect()
     }
 
@@ -113,7 +126,17 @@ mod tests {
     fn board_018_without_keys_the_cards_come_by_title() {
         let mut cards = deck();
         assert_eq!(order(&mut cards, ""), ["Alpha", "bravo", "Charlie", "Delta"]);
-        // the dependencies key orders nothing yet: the title decides
-        assert_eq!(order(&mut cards, "dependencies"), ["Alpha", "bravo", "Charlie", "Delta"]);
+    }
+
+    // spec: BOARD-015, BOARD-026
+    #[test]
+    fn board_026_the_dependencies_key_orders_by_the_places_of_the_dependency_order() {
+        let mut cards = deck();
+        let places: HashMap<PathBuf, usize> = [("Delta.md", 0), ("Charlie.md", 1), ("bravo.md", 2), ("Alpha.md", 3)].into_iter().map(|(r, p)| (PathBuf::from(r), p)).collect();
+        assert_eq!(order_by(&mut cards, "dependencies", &places), ["Delta", "Charlie", "bravo", "Alpha"]);
+        // a card without a place comes last; the title decides among those
+        assert_eq!(order_by(&mut cards, "dependencies", &HashMap::new()), ["Alpha", "bravo", "Charlie", "Delta"]);
+        // the keys before it come first
+        assert_eq!(order_by(&mut cards, "priority desc, dependencies", &places), ["Charlie", "bravo", "Alpha", "Delta"]);
     }
 }

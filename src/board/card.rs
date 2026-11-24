@@ -2,11 +2,12 @@
 //! values the sort keys compare. A drawing is a card too, with a title and no other fields
 //! (BOARD-011).
 
+use super::deps::{Dep, Step};
 use super::file::Chip;
 use crate::calendar::time::{self, parse_ymd};
 use crate::markdown::front_matter_values;
 use crate::note_props::{self, Priority};
-use crate::search_all::matcher::due_day;
+use crate::search_all::matcher::{day_of, due_day};
 use crate::vault::{FileEntry, FileKind, Vault};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -25,6 +26,10 @@ pub struct Card {
     /// UTC seconds, with the fallbacks of BOARD-016
     pub created: Option<i64>,
     pub modified: Option<i64>,
+    /// the day of `start:` (BOARD-023)
+    pub start: Option<i64>,
+    /// blocked, blockers, dependants and the step in a dependency lane; the lanes fill it (BOARD-023)
+    pub dep: Dep,
 }
 
 fn secs(t: Option<SystemTime>) -> Option<i64> {
@@ -47,9 +52,19 @@ impl Card {
         let file: &FileEntry = vault.file(rel)?;
         match file.kind {
             FileKind::Other => None,
-            FileKind::Drawing => {
-                Some(Card { rel: rel.to_path_buf(), title: file.title(), drawing: true, due: None, status: None, priority: None, tags: Vec::new(), created: secs(file.created.or(file.modified)), modified: secs(file.modified) })
-            }
+            FileKind::Drawing => Some(Card {
+                rel: rel.to_path_buf(),
+                title: file.title(),
+                drawing: true,
+                due: None,
+                status: None,
+                priority: None,
+                tags: Vec::new(),
+                created: secs(file.created.or(file.modified)),
+                modified: secs(file.modified),
+                start: None,
+                dep: Dep::default(),
+            }),
             FileKind::Note => {
                 let note = vault.notes.get(rel)?;
                 let text = note.text.as_str();
@@ -64,6 +79,8 @@ impl Card {
                     tags: note.tags.clone(),
                     created: note_props::created(rel, text, file_time),
                     modified: note_props::modified(text, secs(file.modified)),
+                    start: day_of(text, "start"),
+                    dep: Dep::default(),
                 })
             }
         }
@@ -71,13 +88,24 @@ impl Card {
 
     /// The chips of the card as plain words, in the order `shows` lists them (BOARD-010): the due
     /// day, the status, the priority, the first three tags and `+n` for the rest. What the card has
-    /// not is left out. The exports print these (BOARD-030).
+    /// not is left out. The exports print these (BOARD-030). The dependency chips come first,
+    /// whatever `shows` says, as in the view: `blocked`, then `step 3a` or `circular` (BOARD-023,
+    /// BOARD-027, BOARD-028); `start 2026-12-01` is the start chip.
     pub fn chip_texts(&self, shows: &[Chip]) -> Vec<String> {
         const MAX_TAGS: usize = 3;
         let mut out = Vec::new();
+        if self.dep.blocked() {
+            out.push("blocked".to_string());
+        }
+        match self.dep.step {
+            Some(Step::Circular) => out.push("circular".to_string()),
+            Some(step) => out.extend(step.label().map(|l| format!("step {l}"))),
+            None => {}
+        }
         for chip in shows {
             match chip {
                 Chip::Due => out.extend(self.due.map(day_text)),
+                Chip::Start => out.extend(self.start.map(|d| format!("start {}", day_text(d)))),
                 Chip::Status => out.extend(self.status.clone()),
                 Chip::Priority => out.extend(self.priority.map(|p| p.name().to_string())),
                 Chip::Tags => {
@@ -138,6 +166,23 @@ mod tests {
         assert_eq!(c.chip_texts(&[Chip::Tags, Chip::Status]), ["#a", "#b", "#c", "+2", "doing"], "in the order given");
         assert!(c.chip_texts(&[]).is_empty());
         assert!(Card::of(&v, Path::new("Bare.md")).unwrap().chip_texts(&Chip::ALL).is_empty());
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    // spec: BOARD-023, BOARD-027, BOARD-028
+    #[test]
+    fn board_027_the_chips_as_words_have_the_dependency_chips_first_and_start_when_shown() {
+        let (v, d) = vault("chip-deps", &[("T.md", "---\nstatus: doing\nstart: 2026-12-02\n---\n")]);
+        let mut c = Card::of(&v, Path::new("T.md")).unwrap();
+        assert_eq!(c.chip_texts(&Chip::ALL), ["start 2026-12-02", "doing"]);
+        assert_eq!(c.chip_texts(&[Chip::Status]), ["doing"], "start only when card-shows has it");
+        c.dep.waiting = vec![PathBuf::from("A.md")];
+        c.dep.step = Some(Step::At { n: 3, part: Some(1) });
+        assert_eq!(c.chip_texts(&[Chip::Status]), ["blocked", "step 3b", "doing"], "whatever card-shows says");
+        c.dep.step = Some(Step::Circular);
+        assert_eq!(c.chip_texts(&[]), ["blocked", "circular"]);
+        c.dep.step = Some(Step::Behind);
+        assert_eq!(c.chip_texts(&[]), ["blocked"]);
         let _ = std::fs::remove_dir_all(d);
     }
 

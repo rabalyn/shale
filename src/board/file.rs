@@ -26,18 +26,21 @@ use crate::markdown::{front_matter_lines, front_matter_values};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Chip {
     Due,
+    /// the `start:` day (BOARD-023)
+    Start,
     Status,
     Priority,
     Tags,
 }
 
 impl Chip {
-    pub const ALL: [Chip; 4] = [Chip::Due, Chip::Status, Chip::Priority, Chip::Tags];
+    pub const ALL: [Chip; 5] = [Chip::Due, Chip::Start, Chip::Status, Chip::Priority, Chip::Tags];
 
     /// The word of the `card-shows:` list.
     pub fn word(self) -> &'static str {
         match self {
             Chip::Due => "due",
+            Chip::Start => "start",
             Chip::Status => "status",
             Chip::Priority => "priority",
             Chip::Tags => "tags",
@@ -54,7 +57,7 @@ impl Chip {
 pub struct Props {
     /// `cards: every-lane`: a card is in every lane it matches; the default is the first (BOARD-009)
     pub every_lane: bool,
-    /// the chips of the cards; all four when `card-shows:` is not there
+    /// the chips of the cards; all of them when `card-shows:` is not there
     pub shows: Vec<Chip>,
 }
 

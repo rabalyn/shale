@@ -10,7 +10,7 @@ use crate::ui_test_support::Headless;
 use eframe::egui::{vec2, Event, Key, Modifiers, PointerButton, Pos2};
 use std::path::{Path, PathBuf};
 
-const BOARD: &str = "---\ntype: board\ncard-shows: due, status, priority, tags\n---\n# Sprint\n\nA word about the sprint.\n\n## Backlog\nquery: #todo\nunknown line in the lane\n\n## Doing\nquery: status:doing\nsort: priority desc, due asc\n\n## Pinned by hand\n- [[Pinned One]]\n- [[Sketch.excalidraw]]\n";
+const BOARD: &str = "---\ntype: board\ncard-shows: due, start, status, priority, tags\n---\n# Sprint\n\nA word about the sprint.\n\n## Backlog\nquery: #todo\nunknown line in the lane\n\n## Doing\nquery: status:doing\nsort: priority desc, due asc\n\n## Pinned by hand\n- [[Pinned One]]\n- [[Sketch.excalidraw]]\n";
 
 const FILES: [(&str, &str); 7] = [
     ("Board.md", BOARD),
@@ -277,7 +277,7 @@ fn board_010_a_card_shows_its_chips_as_card_shows_says() {
     assert_ne!(fill_at(&w, fine), Some(bad));
     // card-shows: without the due date and the tags
     w.app.boards.current = Some(PathBuf::from("Board.md"));
-    let text = w.board_text().replace("card-shows: due, status, priority, tags", "card-shows: status");
+    let text = w.board_text().replace("card-shows: due, start, status, priority, tags", "card-shows: status");
     w.app.vault.as_mut().unwrap().set_note_text(Path::new("Board.md"), &text);
     w.settle();
     assert!(w.painted("doing") && !w.painted("2999-01-01") && !w.painted("high") && !w.painted("#todo"), "only the status chip is left");
@@ -289,11 +289,11 @@ fn board_010_the_board_menu_chooses_the_chips() {
     let mut w = W::board();
     w.click("Board");
     w.click("priority");
-    assert!(w.file("Board.md").contains("card-shows: due, status, tags"), "{}", w.file("Board.md"));
+    assert!(w.file("Board.md").contains("card-shows: due, start, status, tags"), "{}", w.file("Board.md"));
     assert!(!w.painted("high"));
     w.click("Board");
     w.click("priority");
-    assert!(!w.file("Board.md").contains("card-shows"), "all four chips are the default: no line");
+    assert!(!w.file("Board.md").contains("card-shows"), "all the chips are the default: no line");
     assert!(w.painted("high"));
 }
 
@@ -987,4 +987,156 @@ fn board_022_a_card_dropped_among_the_pinned_cards_of_a_lane_with_a_property_is_
     assert!(w.file("Eps.md").contains("status: doing"));
     assert!(w.board_text().ends_with("query: status:doing\n- [[Eps]]\n- [[Gamma]]\n"), "{}", w.board_text());
     assert_eq!(w.lane("Doing"), strs(&["Eps", "Gamma", "Beta", "Delta"]));
+}
+
+// Dependencies (BOARD-023 to BOARD-029)
+
+const DEP_BOARD: &str = "---\ntype: board\n---\n# Plan\n\n## Chain\nquery: #t\nsort: dependencies\n\n## Finished\nquery: #fin\ndone: true\n\n## Other\nquery: #o\n";
+
+/// A chain A, then B and C (C is due first), then D; E waits for a note of the done lane; G waits for
+/// a note that is on no lane.
+const DEP_FILES: [(&str, &str); 10] = [
+    ("Board.md", DEP_BOARD),
+    ("A.md", "---\nstatus: doing\ndue: 2030-01-02\n---\n#t\n"),
+    ("B.md", "---\nblocked-by: [[A]]\ndue: 2030-01-05\n---\n#t\n"),
+    ("C.md", "---\nblocked-by: [[A]]\ndue: 2030-01-03\n---\n#t\n"),
+    ("D.md", "---\nblocked-by: [[B]], [[C]]\n---\n#t\n"),
+    ("Fin.md", "#fin\n"),
+    ("E.md", "---\nblocked-by: [[Fin]]\n---\n#o\n"),
+    ("G.md", "---\nblocked-by: [[Elsewhere]]\n---\n#o\n"),
+    ("Elsewhere.md", "Nothing\n"),
+    ("H.md", "#o\n"),
+];
+
+impl W {
+    fn dep(&self, title: &str) -> super::deps::Dep {
+        let lanes = self.app.boards.shown.lanes();
+        lanes.iter().flat_map(|l| &l.cards).find(|c| c.title == title).unwrap_or_else(|| panic!("no card {title}")).dep.clone()
+    }
+
+    fn blocked(&self, titles: &[&str]) -> Vec<bool> {
+        titles.iter().map(|t| self.dep(t).blocked()).collect()
+    }
+
+    fn set_note(&mut self, name: &str, text: &str) {
+        self.app.vault.as_mut().unwrap().set_note_text(Path::new(name), text);
+        self.settle();
+    }
+
+    fn count(&self, text: &str) -> usize {
+        self.main().filter(|(t, _)| t == text).count()
+    }
+}
+
+// spec: BOARD-023, BOARD-024
+#[test]
+fn board_023_a_card_is_blocked_while_a_blocker_is_not_done_by_status_or_by_a_done_lane() {
+    let mut w = W::new("dep-badge", &DEP_FILES);
+    let all = ["A", "B", "C", "D", "E", "G"];
+    // E waits for Fin, which is in the done lane; G for a note that is not done
+    assert_eq!(w.blocked(&all), [false, true, true, true, false, true]);
+    assert_eq!(w.count("blocked"), 4, "the badge is on B, C, D and G: {:?}", w.all_text());
+    // a blocker with status: done
+    w.set_note("A.md", "---\nstatus: done\ndue: 2030-01-02\n---\n#t\n");
+    assert_eq!(w.blocked(&all), [false, false, false, true, false, true], "D still waits for B and C");
+    assert_eq!(w.count("blocked"), 2);
+    // a blocker that comes into the done lane
+    w.set_note("Elsewhere.md", "#fin\n");
+    assert_eq!(w.blocked(&["G"]), [false]);
+    assert_eq!(w.dep("G").blockers.len(), 1, "it still names its blocker, for the arrow");
+    // the lane no longer marked done: E and G wait again
+    let text = w.board_text().replace("done: true\n", "");
+    w.set_note("Board.md", &text);
+    assert_eq!(w.blocked(&["E", "G"]), [true, true]);
+    assert_eq!(w.dep("A").dependants.len(), 2, "B and C name A");
+}
+
+// spec: BOARD-023
+#[test]
+fn board_023_start_is_a_chip_when_card_shows_has_it() {
+    let board = "---\ntype: board\n---\n## L\nquery: #t\n";
+    let mut w = W::new("dep-start", &[("Board.md", board), ("S.md", "---\nstart: 2030-03-04\n---\n#t\n")]);
+    assert!(w.painted("start 2030-03-04"), "{:?}", w.all_text());
+    w.set_note("Board.md", "---\ntype: board\ncard-shows: due\n---\n## L\nquery: #t\n");
+    assert!(!w.painted("start 2030-03-04"));
+}
+
+// spec: BOARD-026, BOARD-027
+#[test]
+fn board_026_a_lane_sorted_by_dependencies_comes_in_order_with_step_numbers() {
+    let w = W::new("dep-order", &DEP_FILES);
+    // C is due before B: it comes first among the cards of step 2
+    assert_eq!(w.lane("Chain"), strs(&["A", "C", "B", "D"]));
+    let steps: Vec<Option<String>> = ["A", "C", "B", "D"].iter().map(|t| w.dep(t).step.and_then(|s| s.label())).collect();
+    assert_eq!(steps, [Some("1".into()), Some("2a".into()), Some("2b".into()), Some("3".into())]);
+    for label in ["step 1", "step 2a", "step 2b", "step 3"] {
+        assert!(w.painted(label), "{label}: {:?}", w.all_text());
+    }
+    assert_eq!(w.dep("E").step, None, "a lane without the sort has no steps");
+}
+
+// spec: BOARD-028
+#[test]
+fn board_028_cards_in_a_cycle_are_marked_and_listed_after_the_ordered_cards() {
+    let board = "---\ntype: board\n---\n## Chain\nquery: #t\nsort: dependencies\n";
+    let w = W::new(
+        "dep-cycle",
+        &[("Board.md", board), ("X.md", "---\nblocked-by: [[Y]]\n---\n#t\n"), ("Y.md", "---\nblocked-by: [[X]]\n---\n#t\n"), ("Z.md", "#t\n"), ("W.md", "---\nblocked-by: [[X]]\n---\n#t\n"), ("V.md", "---\nblocked-by: [[Z]]\n---\n#t\n")],
+    );
+    assert_eq!(w.lane("Chain"), strs(&["Z", "V", "W", "X", "Y"]), "the ordered ones, then the cards that cannot be ordered, by title");
+    assert_eq!(w.count("circular"), 2, "X and Y: {:?}", w.all_text());
+    assert_eq!(w.dep("W").step.and_then(|s| s.label()), None, "W only waits for the cycle: no mark");
+    assert!(w.painted("step 1") && w.painted("step 2"));
+}
+
+// spec: BOARD-025
+#[test]
+fn board_025_the_selected_card_gets_arrows_to_its_blockers_and_dependants() {
+    let mut w = W::new("dep-arrows", &DEP_FILES);
+    assert!(w.app.boards.view.arrows.is_empty(), "nothing selected: no arrows");
+    w.click("B");
+    assert_eq!(w.app.boards.selected.as_deref(), Some(Path::new("B.md")));
+    let arrows = w.app.boards.view.arrows.clone();
+    assert_eq!(arrows.len(), 2, "A to B and B to D: {arrows:?}");
+    let (a, d) = (w.at("A"), w.at("D"));
+    // the cards are in one lane, one above the other (A, C, B, D): the arrows run along the lane
+    assert!(arrows[0].from.y < arrows[0].to.y && arrows[0].from.y > a.y, "{arrows:?} {a:?}");
+    assert!(arrows[1].from.y < arrows[1].to.y && arrows[1].to.y < d.y + 40.0, "{arrows:?} {d:?}");
+    // a card without dependencies gets none
+    w.key(Key::Escape, Modifiers::NONE, "");
+    w.click("H");
+    assert!(w.app.boards.view.arrows.is_empty(), "{:?} {:?}", w.app.boards.selected, w.app.boards.view.arrows);
+    // a blocker in another lane, and the dependant of a card in the done lane
+    w.key(Key::Escape, Modifiers::NONE, "");
+    w.click("E");
+    assert_eq!(w.app.boards.view.arrows.len(), 1);
+    w.key(Key::Escape, Modifiers::NONE, "");
+    w.click("Fin");
+    assert_eq!(w.app.boards.view.arrows.len(), 1);
+}
+
+// spec: BOARD-025
+#[test]
+fn board_025_a_blocker_that_is_not_on_the_board_is_named_on_the_card_and_has_no_arrow() {
+    let mut w = W::new("dep-off", &DEP_FILES);
+    w.key(Key::Escape, Modifiers::NONE, "");
+    w.click("G");
+    assert!(w.app.boards.view.arrows.is_empty());
+    assert!(w.painted("Also blocked by Elsewhere (not on this board)"), "{:?}", w.all_text());
+    w.key(Key::Escape, Modifiers::NONE, "");
+    w.click("E");
+    assert!(!w.painted("Also blocked by"), "Fin is a card of the board");
+}
+
+// spec: BOARD-029
+#[test]
+fn board_029_the_preset_adds_my_dependency_chain_lane() {
+    let board = "---\ntype: board\n---\n# Plan\n\n## Todo\nquery: #x\n";
+    let files: Vec<(&str, &str)> = DEP_FILES.iter().map(|(n, t)| if *n == "Board.md" { (*n, board) } else { (*n, *t) }).collect();
+    let mut w = W::new("dep-preset", &files);
+    w.click("▾");
+    w.click("My dependency chain");
+    assert!(w.board_text().ends_with("## My dependency chain\nquery: blocked OR blocking\nsort: dependencies\n"), "{}", w.board_text());
+    // A, Elsewhere and Fin come first; B is due after C; E and G have no due day
+    assert_eq!(w.lane("My dependency chain"), strs(&["A", "Elsewhere", "Fin", "C", "B", "E", "G", "D"]));
 }
