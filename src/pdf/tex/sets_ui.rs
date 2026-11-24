@@ -165,7 +165,7 @@ impl TexState {
         let Some(vault) = self.sets.vault.clone() else { return };
         let engine = self.detection.as_ref().and_then(|d| d.selected(cfg.engine).ok()).cloned();
         let req = Request { vault: vault.root, what, engine, tree: vault.tree, tree_wait: import::TREE_WAIT };
-        self.start(ctx, TaskKind::Import, move |h, n| import_notice(import::import(&req, h, n)));
+        self.start(ctx, TaskKind::Import, "Importing the template set…", move |h, n| import_notice(import::import(&req, h, n)));
         self.sets.form = Form::None;
     }
 }
@@ -186,15 +186,11 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig) {
             TaskKind::Import => {
                 let p = t.handle.progress();
                 ui.add(egui::ProgressBar::new(p.fraction()).text(p.text()).desired_width(420.0));
-                if ui.button("Cancel import").on_hover_text("Stop; the vault stays as it was").clicked() {
-                    t.handle.cancel();
-                }
+                // what happens, and Cancel: the vault stays as it was
+                crate::busy::ui::status(ui, &st.busy, &super::settings_ui::TEX_JOB);
             }
             TaskKind::TestPage => {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label("Compiling the test page…");
-                });
+                crate::busy::ui::status(ui, &st.busy, &super::settings_ui::TEX_JOB);
             }
             _ => {}
         }
@@ -300,7 +296,8 @@ fn apply(st: &mut TexState, ctx: &Context, cfg: &TexConfig, entries: &[SetEntry]
             match st.detection.as_ref().map(|d| d.selected(cfg.engine)) {
                 Some(Ok(engine)) => {
                     let engine = engine.clone();
-                    st.start(ctx, TaskKind::TestPage, move |_, _| test_page_notice(&engine, &set));
+                    let label = format!("Compiling the test page of “{}”…", set.meta.name);
+                    st.start(ctx, TaskKind::TestPage, label, move |_, _| test_page_notice(&engine, &set));
                 }
                 Some(Err(why)) => st.notice = Some(Notice::new(format!("No TeX can be used for the test page: {why}"), false)),
                 None => st.notice = Some(Notice::new("Shale is still looking for a TeX: try again in a moment.", false)),

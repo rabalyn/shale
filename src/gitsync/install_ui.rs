@@ -7,14 +7,13 @@ use super::install::{self, Env, Handle};
 use super::managed::{self, Detection, GitChoice, GitConfig, GitUpdates, Installed, Origin};
 use super::sources::{GitHelp, Have, Offer, Plan, Platform, Sources};
 use crate::app::ShaleApp;
+use crate::busy::{self, Busy, Key};
 use crate::data_usage::human_bytes;
 use crate::theme;
 use eframe::egui::{self, Context, Ui};
 use std::ffi::OsString;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Receiver;
-use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 /// How long after the start the first check for a new version waits, and how often it runs after that.
@@ -22,6 +21,14 @@ const CHECK_DELAY: Duration = Duration::from_secs(30);
 const CHECK_EVERY: Duration = Duration::from_secs(7 * 24 * 3600);
 /// A failed check is tried again after this.
 const CHECK_RETRY: Duration = Duration::from_secs(3600);
+
+/// Looking for git on this computer (SYNC-023) as a quiet task (JOB-028): the page does it whenever it is shown.
+pub(crate) const GIT_DETECT: Key = Key::new("git-detect");
+/// The install, the update and the removal of Shale's own git (SYNC-025, SYNC-027): one at a time.
+/// An install and an update can stop, and what was downloaded is removed (JOB-006); a removal cannot.
+pub(crate) const GIT_MANAGED: Key = Key::new("git-managed");
+/// The look for a newer git (SYNC-027) as a quiet task that can stop: it also runs by itself, weekly.
+pub(crate) const GIT_CHECK: Key = Key::new("git-check");
 
 /// What the person is told after a job.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -44,14 +51,14 @@ pub enum TaskKind {
     Remove,
 }
 
-/// A running install, update or removal.
+/// A running install, update or removal: its progress (the task of the registry has the text and Cancel).
 pub struct Task {
     pub kind: TaskKind,
     pub handle: Handle,
-    pub(super) rx: Receiver<Result<Notice, String>>,
+    pub(super) job: busy::Job<Notice>,
 }
 
-type CheckJob = Receiver<Result<Result<Option<Plan>, String>, String>>;
+type CheckJob = busy::Job<Result<Option<Plan>, String>>;
 
 /// The git part of the sync page.
 pub struct ManagedState {
@@ -70,7 +77,7 @@ pub struct ManagedState {
     pub detection: Option<Detection>,
     /// The choice the detection was made for.
     detected_for: GitChoice,
-    detecting: Option<Receiver<Result<Detection, String>>>,
+    detecting: Option<busy::Job<Detection>>,
     pub task: Option<Task>,
     pub notice: Option<Notice>,
     /// The person pressed Remove and has not confirmed yet.
@@ -78,7 +85,8 @@ pub struct ManagedState {
     /// A newer release than the installed one, found by the check.
     pub update: Option<Plan>,
     checking: Option<(CheckJob, bool)>,
-    cancel_check: Arc<AtomicBool>,
+    /// The window's registry of running tasks (the window sets it; JOB-003).
+    pub(crate) busy: Busy,
     started: Instant,
     next_check: Option<Instant>,
     /// The choice the window's git was selected for; a different one in the settings selects again.
@@ -107,7 +115,7 @@ impl Default for ManagedState {
             confirm_remove: false,
             update: None,
             checking: None,
-            cancel_check: Arc::default(),
+            busy: Busy::default(),
             started: Instant::now(),
             next_check: None,
             applied: None,
@@ -191,13 +199,25 @@ impl ManagedState {
         self.detected_for = choice;
         let (data, path) = (self.data.clone(), self.path_var.clone());
         let ctx = ctx.clone();
-        self.detecting = Some(crate::jobs::spawn(move || managed::detect(choice, data.as_deref(), path.as_deref()), move || ctx.request_repaint()));
+        self.detecting = self.busy.spawn_quiet(GIT_DETECT, "Looking for git…", move || managed::detect(choice, data.as_deref(), path.as_deref()), move || ctx.request_repaint());
+    }
+
+    /// The dialog that started the work was closed (JOB-010): ask the install, the update and the
+    /// look for a newer git to stop. They end at the next safe point (a removal finishes first),
+    /// and what was downloaded is removed.
+    pub(crate) fn stop_jobs(&self) {
+        if let Some(t) = &self.task {
+            t.job.cancel();
+        }
+        if let Some((job, _)) = &self.checking {
+            job.cancel();
+        }
     }
 
     /// Take what the jobs have finished; call it every frame.
     pub fn poll(&mut self, ctx: &Context) {
-        if let Some(rx) = &self.detecting {
-            if let Ok(r) = rx.try_recv() {
+        if let Some(job) = &self.detecting {
+            if let Ok(r) = job.try_recv() {
                 self.detecting = None;
                 match r {
                     Ok(d) => self.detection = Some(d),
@@ -206,7 +226,7 @@ impl ManagedState {
             }
         }
         if let Some(t) = &self.task {
-            if let Ok(r) = t.rx.try_recv() {
+            if let Ok(r) = t.job.try_recv() {
                 self.task = None;
                 self.notice = Some(r.unwrap_or_else(|e| Notice::new(e, false)));
                 // the install, the update and the removal change what is there and what is in use
@@ -220,14 +240,20 @@ impl ManagedState {
         }
     }
 
-    fn start(&mut self, ctx: &Context, kind: TaskKind, work: impl FnOnce(&Handle, &dyn Fn()) -> Notice + Send + 'static) {
+    /// Start the install, the update or the removal as a task of the registry: an install and an
+    /// update can be stopped, through the flag of their handle.
+    pub(super) fn start(&mut self, ctx: &Context, kind: TaskKind, label: impl Into<String>, work: impl FnOnce(&Handle, &dyn Fn()) -> Notice + Send + 'static) {
         if self.task.is_some() {
             return;
         }
+        let Some(mut task) = self.busy.begin(GIT_MANAGED, label) else { return };
         let handle = Handle::default();
+        if kind != TaskKind::Remove {
+            task.cancellable_with(handle.token());
+        }
         let (h, c1, c2) = (handle.clone(), ctx.clone(), ctx.clone());
-        let rx = crate::jobs::spawn(move || work(&h, &|| c1.request_repaint()), move || c2.request_repaint());
-        self.task = Some(Task { kind, handle, rx });
+        let job = task.run(move || work(&h, &|| c1.request_repaint()), move || c2.request_repaint());
+        self.task = Some(Task { kind, handle, job });
         self.notice = None;
     }
 
@@ -235,14 +261,14 @@ impl ManagedState {
     pub fn begin_install(&mut self, ctx: &Context, plan: Plan) {
         if let Some(data) = self.data.clone() {
             let what = plan.what();
-            self.start(ctx, TaskKind::Install, move |h, n| done_notice(install::install(&Env { data }, &plan, h, n), &format!("The install of {what}")));
+            self.start(ctx, TaskKind::Install, format!("Installing {what}…"), move |h, n| done_notice(install::install(&Env { data }, &plan, h, n), &format!("The install of {what}")));
         }
     }
 
     /// Replace the managed git by the newer release found (SYNC-027).
     pub fn begin_update(&mut self, ctx: &Context) {
         if let (Some(data), Some(plan)) = (self.data.clone(), self.update.clone()) {
-            self.start(ctx, TaskKind::Update, move |h, n| done_notice(install::update(&Env { data }, &plan, h, n), "The update"));
+            self.start(ctx, TaskKind::Update, "Updating Shale's git…", move |h, n| done_notice(install::update(&Env { data }, &plan, h, n), "The update"));
         }
     }
 
@@ -253,10 +279,14 @@ impl ManagedState {
         }
         let Some(installed) = self.data.as_deref().and_then(|d| Installed::read(&managed::managed_root(d))) else { return };
         let (sources, platform) = (self.sources.clone(), self.platform.clone());
-        let cancel = self.cancel_check.clone();
         let ctx = ctx.clone();
-        let rx = crate::jobs::spawn(move || install::check_latest(&sources, &platform, &installed, &|url| install::fetch_api(url, sources.allow_http, &cancel)), move || ctx.request_repaint());
-        self.checking = Some((rx, forced));
+        let job = self.busy.spawn_cancellable_quiet(
+            GIT_CHECK,
+            "Looking for a newer git…",
+            move |cancel| install::check_latest(&sources, &platform, &installed, &|url| install::fetch_api(url, sources.allow_http, &cancel.flag())),
+            move || ctx.request_repaint(),
+        );
+        self.checking = job.map(|job| (job, forced));
     }
 
     /// One frame of the checks (SYNC-027): the answer of a running check is taken, a due check is
@@ -265,8 +295,8 @@ impl ManagedState {
     pub fn tick(&mut self, ctx: &Context, cfg: &GitConfig) -> Option<String> {
         self.poll(ctx);
         let mut message = None;
-        if let Some((rx, forced)) = &self.checking {
-            if let Ok(r) = rx.try_recv() {
+        if let Some((job, forced)) = &self.checking {
+            if let Ok(r) = job.try_recv() {
                 let forced = *forced;
                 self.checking = None;
                 match r.and_then(|x| x) {
@@ -287,7 +317,7 @@ impl ManagedState {
                     Err(e) => {
                         self.next_check = Some(Instant::now() + CHECK_RETRY);
                         if forced {
-                            self.notice = Some(Notice::new(format!("Looking for a new version failed: {e}"), false));
+                            self.notice = Some(if e == "cancelled" { Notice::new("The look for a new version was cancelled.", false) } else { Notice::new(format!("Looking for a new version failed: {e}"), false) });
                         }
                     }
                 }
@@ -336,14 +366,11 @@ pub(crate) fn show(ui: &mut Ui, st: &mut ManagedState, cfg: &mut GitConfig) -> b
     if (st.detection.is_none() || st.detected_for != cfg.choice) && st.detecting.is_none() && st.task.is_none() {
         st.check_again(&ctx, cfg.choice);
     }
-    match (&st.detection, st.detecting.is_some()) {
-        (_, true) | (None, _) => {
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label("Looking for git…");
-            });
+    match &st.detection {
+        Some(d) if st.detecting.is_none() => detection_lines(ui, d),
+        _ => {
+            busy::ui::status(ui, &st.busy, &GIT_DETECT);
         }
-        (Some(d), false) => detection_lines(ui, d),
     }
     crate::settings::anchor::anchor(ui, "sync.git_choice", |ui| {
         ui.label("Git to use");
@@ -353,7 +380,7 @@ pub(crate) fn show(ui: &mut Ui, st: &mut ManagedState, cfg: &mut GitConfig) -> b
             }
         }
         ui.horizontal(|ui| {
-            if ui.add_enabled(st.detecting.is_none() && st.task.is_none(), egui::Button::new("Check again")).on_hover_text("Look for git again").clicked() {
+            if busy::ui::button(ui, &st.busy, &[&GIT_DETECT, &GIT_MANAGED], egui::Button::new("Check again")).on_hover_text("Look for git again").clicked() {
                 st.check_again(&ctx, cfg.choice);
             }
         });
@@ -405,22 +432,13 @@ fn managed_section(ui: &mut Ui, st: &mut ManagedState, cfg: &mut GitConfig, ctx:
     };
     let folder = managed::managed_root(&data);
     if let Some(t) = &st.task {
-        match t.kind {
-            TaskKind::Install | TaskKind::Update => {
-                let p = t.handle.progress();
-                ui.add(egui::ProgressBar::new(p.fraction).text(p.text).desired_width(420.0));
-                let label = if t.kind == TaskKind::Install { "Cancel install" } else { "Cancel update" };
-                if ui.button(label).on_hover_text("Stop; what was downloaded is removed").clicked() {
-                    t.handle.cancel();
-                }
-            }
-            TaskKind::Remove => {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label("Removing Shale's git…");
-                });
-            }
+        if t.kind != TaskKind::Remove {
+            let p = t.handle.progress();
+            ui.add(egui::ProgressBar::new(p.fraction).text(p.text).desired_width(420.0));
         }
+        // what happens, and Cancel for an install and an update: what was downloaded is removed
+        busy::ui::status(ui, &st.busy, &GIT_MANAGED);
+        theme::hint(ui, "Closing this window stops it at the next safe point; a removal finishes first.");
         return;
     }
     let Some(d) = st.detection.clone() else { return };
@@ -441,7 +459,7 @@ fn managed_section(ui: &mut Ui, st: &mut ManagedState, cfg: &mut GitConfig, ctx:
             ui.horizontal(|ui| {
                 if ui.button("Remove Shale's git folder").clicked() {
                     st.confirm_remove = false;
-                    st.start(ctx, TaskKind::Remove, move |_, _| match install::remove(&data) {
+                    st.start(ctx, TaskKind::Remove, "Removing Shale's git…", move |_, _| match install::remove(&data) {
                         Ok(()) => Notice::new("Shale's git was removed.", true),
                         Err(e) => Notice::new(e, false),
                     });
@@ -460,9 +478,10 @@ fn managed_section(ui: &mut Ui, st: &mut ManagedState, cfg: &mut GitConfig, ctx:
         }
     }
     ui.horizontal(|ui| {
-        if d.managed.is_some() && ui.add_enabled(st.checking.is_none(), egui::Button::new("Look for a new version")).on_hover_text("Ask GitHub for the newest release now").clicked() {
+        if d.managed.is_some() && busy::ui::button(ui, &st.busy, &[&GIT_CHECK], egui::Button::new("Look for a new version")).on_hover_text("Ask GitHub for the newest release now").clicked() {
             st.begin_check(ctx, true);
         }
+        busy::ui::status(ui, &st.busy, &GIT_CHECK);
         if ui.button("Remove…").on_hover_text("Delete Shale's git folder").clicked() {
             st.confirm_remove = true;
         }

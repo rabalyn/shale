@@ -677,6 +677,18 @@ pub mod wizard;
 #[cfg(test)]
 const NO_LFS: &str = "SHALE_TEST_NO_GIT_LFS";
 
+/// Tests: make `git` wait. Its program becomes a script that waits until the returned gate file
+/// exists and then runs the real program, so a job that calls git runs (and is listed as a task)
+/// as long as the test wants; the test creates the file to let it go on.
+#[cfg(all(test, unix))]
+pub(crate) fn hold_git(git: &mut Git, dir: &Path) -> PathBuf {
+    let gate = dir.join("git-gate");
+    let script = dir.join("gated-git");
+    crate::test_exec::write_script(&script, &format!("#!/bin/sh\nwhile [ ! -e '{}' ]; do sleep 0.02; done\nexec '{}' \"$@\"\n", gate.display(), git.program.display()));
+    git.program = script;
+    gate
+}
+
 /// Makes a test's git find no git-lfs, also on a computer that has one: `git lfs …` calls fail
 /// (on Windows, Git for Windows ships git-lfs in its own folder, which no PATH entry can shadow),
 /// and a `git-lfs` that fails comes first on the PATH for the filters git starts itself. (An alias

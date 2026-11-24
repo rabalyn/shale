@@ -495,3 +495,31 @@ fn job_022_the_indicator_draws_nothing_for_a_task_that_waits_and_asks_to_be_draw
     let delay = out.viewport_output.values().map(|v| v.repaint_delay).min().expect("a viewport");
     assert!(delay <= Duration::from_secs(3600), "the window comes back when the time has come: {delay:?}");
 }
+
+// spec: JOB-024
+#[test]
+fn job_024_housekeeping_spawns_wait_to_be_listed_and_run_at_once_and_a_token_can_come_from_a_flag() {
+    let busy = Busy::default();
+    let (tx, rx) = channel::<()>();
+    let job = busy.spawn_quiet(SYNC, "Saving a version…", move || rx.recv_timeout(WAIT).is_ok(), || {}).expect("not running yet");
+    assert!(busy.is_running(&SYNC) && busy.info(&SYNC).is_some_and(|i| !i.cancellable));
+    assert!(busy.list().is_empty() && busy.list_at(Instant::now() + LISTED_AFTER).len() == 1, "listed only after its time");
+    assert!(busy.spawn_quiet(SYNC, "again", || (), || {}).is_none(), "and never twice");
+    // a cancellable one, whose token is a flag that other code looks at
+    let flag = Arc::new(AtomicBool::new(false));
+    let mut task = busy.begin_listed_after(OTHER, "Checking…", LISTED_AFTER).unwrap();
+    task.cancellable_with(flag.clone().into());
+    let id = busy.info(&OTHER).unwrap().id;
+    assert!(busy.cancel(id) && flag.load(Ordering::SeqCst), "Cancel sets the flag");
+    drop(task);
+    let (tx2, rx2) = channel::<()>();
+    let seen = busy.spawn_cancellable_quiet(OTHER, "Looking…", move |c| (rx2.recv_timeout(WAIT).is_ok(), c.is_cancelled()), || {}).unwrap();
+    assert!(busy.info(&OTHER).is_some_and(|i| i.cancellable));
+    busy.cancel(busy.info(&OTHER).unwrap().id);
+    tx2.send(()).unwrap();
+    assert_eq!(result(&seen), Ok((true, true)));
+    // a closing window waits for a job a moment
+    assert!(matches!(job.recv_timeout(Duration::from_millis(10)), Err(std::sync::mpsc::RecvTimeoutError::Timeout)));
+    tx.send(()).unwrap();
+    assert_eq!(job.recv_timeout(WAIT), Ok(Ok(true)));
+}

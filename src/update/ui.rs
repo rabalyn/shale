@@ -4,8 +4,9 @@
 //! without a window.
 
 use super::kind::{self, Capability};
-use super::{Action, CheckResult, Phase, UpdateConfig, UpdateMode, UpdateState, ENV};
+use super::{Action, CheckResult, Phase, UpdateConfig, UpdateMode, UpdateState, ENV, UPDATE_CHECK, UPDATE_DOWNLOAD, UPDATE_INSTALL};
 use crate::app::ShaleApp;
+use crate::busy::{self, Key};
 use crate::theme;
 use eframe::egui::{self, Align2, Context, CornerRadius, Margin, Stroke, Ui};
 
@@ -23,6 +24,8 @@ pub struct Notice {
     pub text: String,
     pub error: bool,
     pub buttons: Vec<(&'static str, Press)>,
+    /// The task that is running (a download, an install): the window shows its spinner, its text and Cancel where it can stop.
+    pub task: Option<Key>,
 }
 
 impl UpdateState {
@@ -39,7 +42,8 @@ impl UpdateState {
         }
         let act = |label: &'static str, a: Action| (label, Press::Act(a));
         let cap = self.capability();
-        let notice = |text: String, buttons: Vec<(&'static str, Press)>| Some(Notice { text, error: false, buttons });
+        let notice = |text: String, buttons: Vec<(&'static str, Press)>| Some(Notice { text, error: false, buttons, task: None });
+        let running = |text: String, task: Key| Some(Notice { text, error: false, buttons: vec![], task: Some(task) });
         match &self.phase {
             Phase::Idle => {
                 let mut text = format!("Shale {version} is available.");
@@ -58,7 +62,7 @@ impl UpdateState {
                 buttons.push(act("Later", Action::Later));
                 notice(text, buttons)
             }
-            Phase::Downloading { .. } => notice(format!("Downloading Shale {version}…"), vec![]),
+            Phase::Downloading { .. } => running(format!("Downloading Shale {version}…"), UPDATE_DOWNLOAD),
             Phase::Ready(staged) => match &cap {
                 Capability::Install => {
                     notice(format!("Shale {version} is downloaded and checked, ready to install."), vec![act("Install now", Action::Install), act("At next start", Action::InstallAtStart), act("What's new", Action::ShowNotes)])
@@ -68,11 +72,11 @@ impl UpdateState {
                     notice(format!("Shale {version} is downloaded and checked: {}. {why} To install it, run: {command}", staged.archive.display()), vec![("Copy the command", Press::Copy(command)), act("Dismiss", Action::Dismiss)])
                 }
             },
-            Phase::Installing => notice(format!("Installing Shale {version}…"), vec![]),
+            Phase::Installing => running(format!("Installing Shale {version}…"), UPDATE_INSTALL),
             Phase::Installed(i) => notice(format!("Updated to Shale {}. Restart to use it.", i.version), vec![act("Restart now", Action::RestartNow), act("Later", Action::Later)]),
             Phase::Failed(e) => {
                 let retry = if cap == Capability::Install { Action::Install } else { Action::Download };
-                Some(Notice { text: format!("The update to Shale {version} failed: {e}"), error: true, buttons: vec![act("Try again", retry), act("Dismiss", Action::Dismiss)] })
+                Some(Notice { text: format!("The update to Shale {version} failed: {e}"), error: true, buttons: vec![act("Try again", retry), act("Dismiss", Action::Dismiss)], task: None })
             }
         }
     }
@@ -120,12 +124,16 @@ pub fn settings_page(ui: &mut Ui, state: &mut UpdateState, cfg: &mut UpdateConfi
     let off = state.mode(cfg) == UpdateMode::Off;
     crate::settings::anchor::anchor(ui, "updates.check", |ui| {
         ui.horizontal(|ui| {
-            if ui.add_enabled(!off && !state.check_pending(), egui::Button::new("Check for updates now")).on_disabled_hover_text("Updates are off: Shale makes no request").clicked() {
+            let button = egui::Button::new("Check for updates now");
+            let b = if off || state.force {
+                ui.add_enabled(false, button).on_disabled_hover_text(if off { "Updates are off: Shale makes no request" } else { "A check is about to start" })
+            } else {
+                busy::ui::button(ui, &state.busy, &[&UPDATE_CHECK], button)
+            };
+            if b.clicked() {
                 state.check_now();
             }
-            if state.check_pending() {
-                ui.spinner();
-            }
+            busy::ui::status(ui, &state.busy, &UPDATE_CHECK);
         });
     });
     if let Some(t) = result_text(state, cfg).filter(|_| !off) {
@@ -175,7 +183,11 @@ impl ShaleApp {
         egui::Area::new(egui::Id::unique("update-notice")).order(egui::Order::Tooltip).anchor(Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -48.0)).show(ui.ctx(), |ui| {
             egui::Frame::new().fill(fill).stroke(Stroke::new(1.0, edge)).corner_radius(CornerRadius::same(8)).inner_margin(Margin::symmetric(12, 8)).show(ui, |ui| {
                 ui.set_max_width(460.0);
-                ui.label(egui::RichText::new(&notice.text).color(p.text));
+                // a download or an install that runs: its spinner and text, and Cancel where it can stop
+                let running = notice.task.as_ref().is_some_and(|key| busy::ui::status(ui, &self.busy, key));
+                if !running {
+                    ui.label(egui::RichText::new(&notice.text).color(p.text));
+                }
                 ui.horizontal_wrapped(|ui| {
                     for (label, press) in &notice.buttons {
                         if ui.button(*label).clicked() {

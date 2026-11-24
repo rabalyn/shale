@@ -48,9 +48,16 @@ and you cannot start it twice by accident.
   for a long note with many pictures), the export through LaTeX, the export to Word and the conversion of
   Word files in the Import dialog. Each shows a spinner in its dialog and a line in the indicator.
 - **Cancel** stands next to the spinner where the work can be stopped, for example the check of file names
-  (Settings → Vault), the exports and the conversion of Word files. A PDF that is stopped is never written
+  (Settings → Vault), the exports, the conversion of Word files, the install, update and import of Shale's own git and TeX Live and of template sets, and the check and download of an update of Shale itself (a cancelled download is removed). A PDF that is stopped is never written
   half way: nothing appears in the folder. A git sync has no Cancel: stopping it between
   saving your notes and sending them would leave the repository half way. It is quick, and it finishes.
+
+- **Quick housekeeping stays quiet.** The versions Shale keeps of your notes (see [[File history]]), the look for
+  git or TeX and the daily check for updates run often and are over in a moment: the indicator lists them only when one takes
+  longer than two seconds. The page that shows them (the history panel, Settings) shows them at once.
+- **The "Turn on sync" steps** (signing in, making a key, creating the repository, asking the server) show what they do on the
+  step. They have no Cancel, because a call stopped half way could leave a token or a repository behind; the dialog's own
+  **Cancel** closes the dialog and the call ends by itself.
 
 # The indicator at the top right
 

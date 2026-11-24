@@ -639,3 +639,67 @@ fn an_import_that_rewrites_neighbours_is_one_snapshot_with_the_import_reason() {
     assert_eq!(paths.len(), 3, "{paths:?}");
     assert!(paths.iter().any(|p| p == "Mail/2026-11-16 A.md") && paths.iter().any(|p| p == "Mail/2026-11-18 C.md") && paths.iter().any(|p| p.contains("Middle")), "{paths:?}");
 }
+
+// spec: JOB-025
+#[cfg(unix)]
+#[test]
+fn job_025_a_snapshot_is_a_quiet_task_that_cannot_stop_and_is_gone_when_its_job_ends() {
+    let mut t = setup("job031-snap", true);
+    t.start();
+    let gate = crate::gitsync::hold_git(&mut t.app.sync.git, &t.root);
+    t.app.history_trashed(Path::new("Note.md"));
+    t.app.history_tick(&t.ctx);
+    let task = t.app.busy.info(&HISTORY_SNAPSHOT).expect("the snapshot is a task");
+    assert_eq!((task.label.as_str(), task.cancellable), ("Saving a version of the changed notes…", false));
+    assert!(t.app.busy.list().is_empty(), "a quiet task is not in the indicator in its first two seconds");
+    // a second one waits behind it
+    t.app.history_trashed(Path::new("Note.md"));
+    t.app.history_tick(&t.ctx);
+    assert_eq!(t.app.busy.info(&HISTORY_SNAPSHOT).map(|i| i.id), Some(task.id));
+    std::fs::write(&gate, "").unwrap();
+    t.settle();
+    assert!(!t.app.busy.is_running(&HISTORY_SNAPSHOT) && t.app.busy.list().is_empty());
+}
+
+// spec: JOB-025
+#[cfg(unix)]
+#[test]
+fn job_025_the_thinning_and_a_read_are_tasks_of_their_own() {
+    let mut t = setup("job031-thin", true);
+    t.start();
+    let gate = crate::gitsync::hold_git(&mut t.app.sync.git, &t.root);
+    t.at(5_000);
+    t.app.history_tick(&t.ctx);
+    let thin = t.app.busy.info(&HISTORY_THIN).expect("the thinning is a task");
+    assert_eq!((thin.label.as_str(), thin.cancellable), ("Thinning out the old versions…", false));
+    std::fs::write(&gate, "").unwrap();
+    t.settle();
+    assert!(!t.app.busy.is_running(&HISTORY_THIN));
+    // a read, with the git held back again
+    std::fs::remove_file(&gate).unwrap();
+    t.app.history.queries.push_back(Query::Deleted);
+    t.app.history_tick(&t.ctx);
+    let read = t.app.busy.info(&HISTORY_QUERY).expect("a read is a task");
+    assert_eq!((read.label.as_str(), read.cancellable), ("Reading the history…", false));
+    std::fs::write(&gate, "").unwrap();
+    t.settle();
+    assert!(t.app.busy.list().is_empty() && !t.app.busy.is_running(&HISTORY_QUERY));
+}
+
+// spec: JOB-025
+#[test]
+fn job_025_work_that_finds_its_task_still_listed_waits_for_the_next_frame() {
+    let mut t = setup("job031-again", true);
+    t.start();
+    let snapshot = t.app.busy.begin(HISTORY_SNAPSHOT, "held by the test").unwrap();
+    let query = t.app.busy.begin(HISTORY_QUERY, "held by the test").unwrap();
+    t.app.history_trashed(Path::new("Note.md"));
+    t.app.history.queries.push_back(Query::Deleted);
+    t.app.history_tick(&t.ctx);
+    assert!(t.app.history.job.is_none() && t.app.history.query.is_none(), "nothing starts beside the task that is listed");
+    assert!(t.app.history.queue.len() == 1 && t.app.history.queries.len() == 1, "and nothing is lost");
+    drop((snapshot, query));
+    t.settle();
+    assert!(t.app.history.queue.is_empty() && t.app.history.queries.is_empty());
+    assert!(t.app.busy.list().is_empty());
+}
