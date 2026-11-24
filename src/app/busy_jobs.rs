@@ -117,6 +117,35 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: JOB-038
+    #[test]
+    fn job_038_the_search_of_the_window_is_a_task_of_its_registry() {
+        static RELEASE: AtomicBool = AtomicBool::new(false);
+        fn held(_: &mut crate::search_all::worker::Conns, _: &crate::search_all::Request, _: &AtomicBool) -> Option<crate::search_all::Found> {
+            while !RELEASE.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Some(crate::search_all::Found::default())
+        }
+        let key = crate::search_all::worker::SEARCH.with("sidebar");
+        let (mut app, d) = test_app("search-task");
+        let mut hl = Headless::new();
+        hl.settle(&mut app);
+        // the window's own worker, as built, is wired to its registry (only its runner is held back)
+        app.search_worker.set_runner(held);
+        app.side.left = crate::app::LeftPanel::Search;
+        app.search.query = "markdown".into();
+        std::thread::sleep(crate::search_all::DEBOUNCE + Duration::from_millis(30));
+        hl.frame(&mut app, vec![]);
+        let task = app.busy.info(&key).expect("the query is a task");
+        assert_eq!(task.label, "Searching…");
+        assert!(app.busy.list_at(task.started).is_empty(), "quiet: not listed before 2 s");
+        RELEASE.store(true, Ordering::SeqCst);
+        hl.settle(&mut app);
+        assert!(!app.busy.is_running(&key), "the task is gone when settled");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     // spec: DEV-041
     #[test]
     fn dev_041_a_window_without_a_vault_has_no_job() {

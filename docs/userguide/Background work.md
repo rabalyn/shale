@@ -95,5 +95,6 @@ export dialog the first Cancel stops the running export and a second one closes 
 indicator leaves the dialog open and says why.
 
 [[Git sync]] has the git side, [[PDF]] the export, [[Vault settings]] the check of file names.
-Not every long action is on the indicator yet; they are moved one by one. The search over all notes still
-runs in the window itself.
+The search over all notes runs in the background too: a search that takes longer than two seconds shows
+as "Searching…" with Cancel (the last list stays). Not every long action is on the indicator yet; they
+are moved one by one.

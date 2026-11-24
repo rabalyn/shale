@@ -3,7 +3,7 @@
 **IS NOW** = true of the code today · **SHOULD BE** = agreed target.
 Format: [ADR-0001](../decisions/0001-spec-driven-development.md). Issue: #397.
 
-The rules are JOB-003 to JOB-037 in [engineering.md](engineering.md#background-jobs-job): every action that
+The rules are JOB-003 to JOB-038 in [engineering.md](engineering.md#background-jobs-job): every action that
 loads or runs longer than a moment is a task of the busy registry (`busy::Busy`), shows a spinner and
 what happens, cannot be started twice, offers Cancel where the work can stop (or Close for a dialog
 whose work goes on), and shows in the indicator at the top right of the editor pane while it runs.
@@ -24,7 +24,7 @@ would leave a mess (JOB-006).
 | A close or switch of the vault that waits for a running sync (VAULT-036, VAULT-037) | none: a pending action that `vault_leave_tick` carries on each frame once the sync has ended (30 s at most, counted over frames) | yes: Cancel drops it and keeps the vault open | "Waiting for the sync to finish…" with Cancel in the indicator | **IS NOW**: task `vault-leave-wait` |
 | Rescan of the vault folder (every 3 s or longer, NET-013) | thread (`app/rescan.rs`) | no (the next scan is skipped while one runs) | nothing | **IS NOW** (JOB-022): task `vault-rescan`, "Reading the vault folder…", listed only when a scan takes longer than 2 s (a slow network share); no Cancel |
 | Vault check (names and outside links, VAULT-028, MEDIA-022) | thread | yes, between two folders | spinner and "Checking file names and links…" with Cancel, button off | **IS NOW** (JOB-012) |
-| Search in all notes (sidebar, NAV-024) | UI thread, debounced; once per query and vault state (PERF-004) | no | nothing | planned, split off as #622: the list is to be made on a thread with "Searching…", a newer query dropping the older result; it needs the text of every note (and the mail and post indexes) on the worker, which the vault does not share today (a snapshot per change, or shared texts): a change of its own |
+| Search in all notes (sidebar and picker, NAV-024, QUERY-014) | thread (`search_all/worker.rs`, one per window); a numbered query per queue, a newer one gives up the older (QUERY-017) | yes: Cancel in the indicator gives the running query up (the same flag the next keystroke sets); the last list stays | the last list stays, with a small spinner next to the source buttons (the list's own, QUERY-018) | **IS NOW** (JOB-038): task `search` per queue (picker, sidebar), "Searching…", listed only when a query runs longer than 2 s, with Cancel; the lanes of a board have none |
 | Reading dropped files, looking a mail up in Thunderbird's folders (`app/drops.rs`) | thread | no | the hint at the bottom of the window | **IS NOW** (JOB-023): one task per read, "Reading the dropped files…"; no Cancel |
 | Copy the outside media of a note into the vault (MEDIA-021) | thread (`app/outside_copy.rs`) | yes, between two files (the copied ones keep their new links) | a toast when done | **IS NOW** (JOB-023): task `outside-copy`, "Copying media into the vault…", with Cancel |
 | Open an outside media file with the system's program (MEDIA-017) | thread (`app/outside_open.rs`) | no | a busy card in the player | **IS NOW** (JOB-023): one task per file, "Opening ‹name›…"; no Cancel |
