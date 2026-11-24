@@ -480,7 +480,11 @@ fn strip(ui: &mut Ui, data: &Data, acts: &mut Vec<Act>) {
 
 /// The arrow keys move the selection between the cards, Enter opens the selected one (BOARD-014).
 fn keys(ui: &Ui, st: &mut State, data: &Data, acts: &mut Vec<Act>) {
-    let (down, up, left, right, enter) = ui.input(|i| (i.key_pressed(Key::ArrowDown), i.key_pressed(Key::ArrowUp), i.key_pressed(Key::ArrowLeft), i.key_pressed(Key::ArrowRight), i.key_pressed(Key::Enter)));
+    // only the bare keys: Alt+arrows are back / forward and the keys of BOARD-033, which are no selection moves
+    let (down, up, left, right, enter) = ui.input(|i| {
+        let bare = |k| i.events.iter().any(|e| matches!(e, egui::Event::Key { key, pressed: true, modifiers, .. } if *key == k && modifiers.is_none()));
+        (bare(Key::ArrowDown), bare(Key::ArrowUp), bare(Key::ArrowLeft), bare(Key::ArrowRight), i.key_pressed(Key::Enter))
+    });
     let at = data.selected.and_then(|s| data.lanes.iter().enumerate().find_map(|(l, lane)| lane.cards.iter().position(|c| c.rel == s).map(|c| (l, c))));
     if enter {
         if let Some(rel) = data.selected {

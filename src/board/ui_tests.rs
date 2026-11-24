@@ -1232,8 +1232,7 @@ fn board_033_the_keys_can_be_changed() {
     w.app.keymap.set(Action::BoardCardNextLane, Binding::parse("Alt+Shift+Down").unwrap()).unwrap();
     w.key(Key::ArrowRight, ALT_SHIFT, "");
     assert!(w.file("Beta.md").contains("status: doing"), "the old key does nothing now");
-    // the arrow keys of the view still move the selection with Alt held: select Beta again
-    w.app.boards.selected = Some(PathBuf::from("Beta.md"));
+    assert_eq!(w.app.boards.selected.as_deref(), Some(Path::new("Beta.md")), "an unbound Alt+Shift+arrow is no selection move");
     w.key(Key::ArrowDown, ALT_SHIFT, "");
     assert!(w.file("Beta.md").contains("status: done"));
 }
@@ -1315,4 +1314,15 @@ fn board_034_a_card_held_at_the_side_of_the_board_scrolls_it_and_drops_on_a_lane
     assert!(lane > 4, "the pointer is over a lane that was out of view: {lane}");
     w.drop_at(to);
     assert!(w.file("Card.md").contains(&format!("status: s{lane}")), "{}", w.file("Card.md"));
+}
+
+// spec: BOARD-033
+#[test]
+fn board_033_arrows_with_a_modifier_do_not_move_the_selection_and_bare_arrows_do() {
+    let mut w = flow_with_beta_selected("key-modifiers");
+    w.key(Key::ArrowRight, Modifiers::ALT, "");
+    w.key(Key::ArrowDown, Modifiers::ALT, "");
+    assert_eq!(w.app.boards.selected.as_deref(), Some(Path::new("Beta.md")), "Alt+arrows are back / forward, not selection");
+    w.key(Key::ArrowDown, Modifiers::NONE, "");
+    assert_eq!(w.app.boards.selected.as_deref(), Some(Path::new("Gamma.md")), "a bare arrow still selects");
 }
