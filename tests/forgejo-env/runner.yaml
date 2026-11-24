@@ -7,7 +7,10 @@ name: shale-forgejo-env-runner
 # jobs run in this container, with the folder the test names as `/srv/www`, the folder the recipe's workflow writes to.
 services:
   runner:
-    build: ./runner
+    build:
+      context: ./runner
+      # named: podman-compose 1.2.0 (the CI's) looks for a `Dockerfile` only, newer ones find a Containerfile too
+      dockerfile: Containerfile
     image: localhost/shale-forgejo-runner:1
     network_mode: host
     working_dir: /tmp
