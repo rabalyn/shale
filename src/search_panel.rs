@@ -416,7 +416,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
-    // spec: NAV-007
+    // spec: NAV-007, NAV-009
     #[test]
     fn enter_in_the_box_selects_and_esc_goes_back() {
         let (mut app, d) = browse_app("enter");

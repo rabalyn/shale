@@ -511,7 +511,7 @@ mod tests {
         assert_eq!(sel("f :banana"), None, "no space before the colon");
     }
 
-    // spec: NAV-050, CFG-067
+    // spec: NAV-050, CFG-067, NAV-051
     #[test]
     fn the_letters_are_the_configured_ones() {
         let q = Prefixes { notes: 'n', mail: 'e', posts: 'p' };

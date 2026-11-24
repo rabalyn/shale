@@ -1320,6 +1320,39 @@ mod tests {
         assert!(!w.app.notes[Path::new("A.md")].dirty);
     }
 
+    // spec: NAV-001
+    #[test]
+    fn nav_001_every_tab_has_its_own_history_that_alt_arrows_and_the_mouse_side_buttons_walk() {
+        let mut w = W::new("tab-history");
+        settle(&mut w);
+        let first = w.app.current_path().expect("a note is open");
+        w.app.open_link("Roadmap", None, Some(first.clone()), false);
+        let second = w.app.current_path().expect("the link opened a note");
+        assert_ne!(second, first);
+        // a second tab has a history of its own: it is empty, so back does nothing there
+        w.app.tabbar.new_tab(View::Calendar);
+        settle(&mut w);
+        let alt = Modifiers { alt: true, ..Modifiers::NONE };
+        w.press(Key::ArrowLeft, alt);
+        assert_eq!(w.app.tabbar.tabs[1].view, View::Calendar, "the history of the first tab is not the second tab's");
+        assert_eq!(w.app.tabbar.tabs[0].view, View::Note(second.clone()));
+        // back and forward in the first tab, by the keys
+        w.app.tabbar.active = 0;
+        settle(&mut w);
+        w.press(Key::ArrowLeft, alt);
+        assert_eq!(w.app.current_path(), Some(first.clone()), "Alt+Left goes back");
+        w.press(Key::ArrowRight, alt);
+        assert_eq!(w.app.current_path(), Some(second.clone()), "Alt+Right goes forward");
+        // and by the mouse side buttons
+        let side = |button, pressed| Event::PointerButton { pos: Pos2::new(300.0, 300.0), button, pressed, modifiers: Modifiers::NONE };
+        w.frame(vec![side(egui::PointerButton::Extra1, true)]);
+        w.frame(vec![side(egui::PointerButton::Extra1, false)]);
+        assert_eq!(w.app.current_path(), Some(first), "the back button goes back");
+        w.frame(vec![side(egui::PointerButton::Extra2, true)]);
+        w.frame(vec![side(egui::PointerButton::Extra2, false)]);
+        assert_eq!(w.app.current_path(), Some(second), "the forward button goes forward");
+    }
+
     // spec: NAV-005
     #[test]
     fn nav_005_ctrl_o_opens_the_quick_switcher_that_finds_or_creates_a_note() {
@@ -1648,7 +1681,7 @@ mod tests {
         assert_eq!(w.app.search.sel, Some(0), "↓ goes into the list");
     }
 
-    // spec: NAV-007, NAV-008, NAV-025, NAV-023, SOC-036
+    // spec: NAV-007, NAV-008, NAV-025, NAV-023, SOC-036, NAV-009
     #[test]
     fn the_sidebar_search_lists_notes_mail_and_posts_and_the_keyboard_opens_each() {
         let mut w = W::new("sidebar-all");
@@ -1952,7 +1985,7 @@ mod tests {
         assert!(w.app.cfg.search.sources.len() <= 2);
     }
 
-    // spec: NAV-022
+    // spec: NAV-022, NAV-007
     #[test]
     fn the_sidebar_search_has_no_mail_group_while_the_mail_store_is_closed() {
         let mut w = W::new("sidebar-nomail");

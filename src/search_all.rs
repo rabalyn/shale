@@ -880,7 +880,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // spec: NAV-022, NAV-024
+    // spec: NAV-022, NAV-024, NAV-023
     #[test]
     fn the_groups_come_in_order_with_what_each_index_finds() {
         let (v, dir) = fixture();
@@ -1042,7 +1042,7 @@ mod tests {
         assert_eq!((next_block(&[], 0), prev_block(&[], 0)), (0, 0));
     }
 
-    // spec: NAV-022, NAV-023
+    // spec: NAV-022, NAV-023, NAV-007, NAV-024
     #[test]
     fn the_views_ask_with_their_own_size_of_the_answer() {
         let (v, dir) = fixture();
@@ -1058,6 +1058,23 @@ mod tests {
         let ctx = Ctx { vault: &v, mail: Some(&db), posts: &posts };
         let groups = |q: Query| all_hits(&ctx, &q).iter().map(|h| h.group).collect::<std::collections::BTreeSet<_>>();
         assert_eq!(groups(Query::picker("ban*")), groups(Query::sidebar("ban*")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: NAV-024
+    #[test]
+    fn a_wildcard_pattern_reads_a_line_only_up_to_2000_characters_and_a_plain_word_all_of_it() {
+        let (_, dir) = fixture();
+        let line = format!("{}needle", "x".repeat(MAX_LINE_CHARS + 500));
+        std::fs::write(dir.join("Minified.md"), format!("{line}\nplain needle\n")).unwrap();
+        let v = Vault::open(&dir).unwrap();
+        let lines = |q: &str| note_hits(&v, &Query::sidebar(q)).into_iter().filter(|h| h.detail.starts_with("Minified")).count();
+        assert_eq!(lines("nee*"), 1, "the needle past the 2000th character of the first line is not read: only the short line is found");
+        assert_eq!(lines("needle"), 2, "a plain word is looked up in the whole line");
+        let early = format!("needle{}", "x".repeat(MAX_LINE_CHARS + 500));
+        std::fs::write(dir.join("Minified.md"), early).unwrap();
+        let v = Vault::open(&dir).unwrap();
+        assert_eq!(note_hits(&v, &Query::sidebar("nee*")).into_iter().filter(|h| h.detail.starts_with("Minified")).count(), 1, "inside the first 2000 characters it is found");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
