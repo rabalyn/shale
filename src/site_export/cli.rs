@@ -66,13 +66,7 @@ pub fn summary(e: &plan::Export, dry_run: bool) -> String {
 
 /// "Wrote 2 notes, 0 media files and 1 link; 1 link became plain text." for the verb and the counts.
 pub(super) fn counts(verb: &str, notes: usize, media: usize, links: usize, plain: usize) -> String {
-    format!(
-        "{verb} {}, {} and {}; {} became plain text.",
-        plural(notes, "note", "notes"),
-        plural(media, "media file", "media files"),
-        plural(links, "link", "links"),
-        plural(plain, "link", "links"),
-    )
+    format!("{verb} {}, {} and {}; {} became plain text.", plural(notes, "note", "notes"), plural(media, "media file", "media files"), plural(links, "link", "links"), plural(plain, "link", "links"),)
 }
 
 /// Run the export: the plan, then the listing or the files. Says what it did on `out`, the warnings on `err`.

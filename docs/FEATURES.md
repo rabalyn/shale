@@ -1245,7 +1245,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 ## Settings that travel with the vault
 
 - **Settings** (Ctrl+, or the ribbon button) has a tab per domain in a list on the left: Vault, Editor,
-  Appearance, Fonts, Sync, Calendar, Mail, Feeds, Data, Help and Keybindings. It opens on the short Vault
+  Appearance, Fonts, Sync, Publishing, Calendar, Mail, Feeds, Data, Help and Keybindings. It opens on the short Vault
   page, and later on the tab you used last.
 - **A search over all settings** sits at the top of Settings (Ctrl+F, or `/`, focuses it). It finds a
   setting by its name, its description (the one in the settings file) or its tab, and a key action
@@ -1336,8 +1336,21 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   window; `--dry-run` lists every note and media file it would write and writes nothing. The tree is made next to
   `<out>` and moved in when it is whole, only the files an earlier export wrote (`.shale-export.json`) are replaced or
   removed, the vault is never changed, and the last line says how many notes, media files and links were written and
-  how many links became plain text. `hugo` and then `pagefind --site public` turn the tree into the site. Publishing
-  from the app (a Publish button, a push to a server) and the Settings page for the rules are still to come.
+  how many links became plain text. `hugo` and then `pagefind --site public` turn the tree into the site.
+- **Publish from the app** (#630, SITE-051, SITE-058, SITE-062 to SITE-076): **Settings → Publishing** has the vault's switch
+  (off by default), the rules (all notes, folders, tags, what is never published, the private types), the count of the
+  chosen notes with a button that lists them (the list of `--dry-run`), the address and branch of the publish repository and
+  **Publish**, a background task with its step, Cancel and a summary that lists every warning; the page says from which
+  computer and when the target was published last. A publish writes the site into a repository of its own below Shale's data
+  folder and pushes **one snapshot with no parent** (a note you stop publishing is gone from the branch and its history),
+  with audio and video in Git LFS (not sent again when the server has them). It signs in as git sync does (a token through
+  the keyring, one for each server and user, or an SSH key; the problems are told in the same words), refuses an address with
+  a password or the one the vault syncs with, and asks before it replaces a branch that another vault published to
+  (`--take-over` on the command line). `shale export-site --publish <vault>` does the same without a window. A recipe in the
+  user guide (a Forgejo Actions workflow, a post-receive hook) builds and serves the site on your own server; access control
+  is the web server's.
+
+  ![Settings → Publishing](userguide/z_media/screenshots/settings-publishing.png)
 - **Opt-in and private by default** (SITE-001 to SITE-010, SITE-051 to SITE-057): a vault publishes nothing until
   `publish.enabled` is on in its `.shale/settings.json`. The rules choose notes by folder, by tag (a nested tag
   matches its parent) or all notes; an exclude rule wins; "all notes" leaves out mail, events, posts and people unless
@@ -1353,7 +1366,8 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   copied when it resolves on this computer, else a placeholder names it. Folders become sections (a folder note is
   the section's text), every page has a backlinks panel, and the index page lists the sections and the latest notes.
 - **Search and theme** (SITE-046 to SITE-048): the Shale theme is part of the tree, so the server needs only `hugo` and
-  `pagefind`; the pages carry a search box for Pagefind that indexes the notes and nothing else. Hugo 0.158 or newer.
+  `pagefind`; the pages carry a search box for Pagefind that indexes the notes and nothing else (a test runs Pagefind on a
+  built site and looks for a published and an unpublished word). Hugo 0.158 or newer.
 
 ## Git sync
 

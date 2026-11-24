@@ -54,6 +54,9 @@ would leave a mess (JOB-006).
 | PDF export through LaTeX (TEX-016) | thread (compile) | yes (flag ends the process) | spinner "Compiling with LuaLaTeX… Cancel stops it." | **IS NOW** (JOB-018): "Exporting “Notes” to PDF with LaTeX…"; the dialog keeps Cancel (JOB-010) |
 | Export to Word (DOCX-002) | thread (pandoc) | yes (flag ends the process) | spinner and "Exporting to Word… Cancel stops it." | **IS NOW** (JOB-019): "Exporting “Notes” to Word…"; the dialog keeps Cancel (JOB-010) |
 | `shale --export-pdf` (BOOK-011) | the main thread, no window | no | the terminal | out of scope (no window) |
+| Publish the vault as a site (`site_export/publish.rs`, SITE-065) | thread (`site_export/job.rs`), git as child processes | yes: Cancel kills the running git; the remote's branch is changed only by the last push | spinner, "Publishing the site…", the step ("Writing the site…", "Uploading the media files…") and Cancel; the button is off | **IS NOW**: task `site-publish` |
+| Look at who published the target last (SITE-072) | thread | yes | spinner and "Looking at the publish target…" in Settings → Publishing; listed in the indicator after 2 s | **IS NOW** (JOB-022): task `site-publish-look` |
+| `shale export-site --publish` (SITE-066) | the main thread, no window | no | the terminal: the steps on stderr | out of scope (no window) |
 
 ## Import
 

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "publish": {
+    "enabled": true,
+    "include_folders": ["Garden"],
+    "include_tags": ["public"],
+    "exclude_tags": ["draft"],
+    "url": "https://git.example.org/ada/garden-site.git",
+    "branch": "site"
+  }
+}
