@@ -11,10 +11,10 @@
 //!   manual, when it has no drop property (the pin is all a drop can do), when it is dropped among
 //!   the pinned cards on top, or when the drop is inside the lane the card came from.
 
-use super::file::{pin_target, Board};
+use super::file::{pin_item, pin_target, Board};
 use super::{lanes, LaneView};
 use crate::markdown;
-use crate::vault::{rel_to_string, FileKind, Vault};
+use crate::vault::{rel_to_string, Vault};
 use std::path::{Path, PathBuf};
 
 /// A card dropped: the card, the lane it was taken from and the one it was dropped on, and the place in the
@@ -32,7 +32,7 @@ pub struct Dropped {
 pub struct Plan {
     /// the property to set in the card's note, `status` and `doing`
     pub property: Option<(String, String)>,
-    /// the new list of pinned cards of the lanes whose list changes, as the text inside `[[ ]]`
+    /// the new list of pinned cards of the lanes whose list changes, as links (`[[Name]]`)
     pub pins: Vec<(usize, Vec<String>)>,
 }
 
@@ -44,23 +44,19 @@ pub fn property(query: &str, drop: &str) -> Option<(String, String)> {
     (!key.is_empty() && !value.is_empty() && !key.contains(char::is_whitespace)).then(|| (key.to_string(), value.to_string()))
 }
 
-/// The text of a link to `card` for a pin: its name when that finds it from the board, else its path.
+/// The link to `card` for a pin (BOARD-004): its name when that finds it from the board, else its
+/// path; a name or path that `[[ ]]` cannot hold (`#`, `|`, `^`, brackets) is a markdown link with
+/// the path, see [`pin_item`].
 fn pin_text(vault: &Vault, board: &Path, card: &Path) -> String {
-    let strip = |s: String| match vault.file(card).map(|f| f.kind) {
-        Some(FileKind::Note | FileKind::Drawing) => markdown::strip_md_ext(&s).to_string(),
-        _ => s,
-    };
-    let name = strip(card.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
-    if vault.resolve(&name, Some(board)).as_deref() == Some(card) {
-        name
-    } else {
-        strip(rel_to_string(card))
-    }
+    let name = card.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let by_name = vault.resolve(markdown::strip_md_ext(&name), Some(board)).as_deref() == Some(card) || vault.resolve(&name, Some(board)).as_deref() == Some(card);
+    // (a drawing keeps its extension in the link, a note does not: `strip_md_ext` leaves it)
+    pin_item(&name, &rel_to_string(card), by_name)
 }
 
 /// The pins of a lane, each with the note it links to.
 fn entries(vault: &Vault, board_rel: &Path, board: &Board, lane: usize) -> Vec<(String, Option<PathBuf>)> {
-    board.lanes[lane].pins().into_iter().map(|p| (p.to_string(), vault.resolve(pin_target(p), Some(board_rel)))).collect()
+    board.lanes[lane].pins().into_iter().map(|p| (p.to_string(), vault.resolve(&pin_target(p), Some(board_rel)))).collect()
 }
 
 /// What dropping `d` changes, or none when it changes nothing. `lanes` is what the view showed,
@@ -115,5 +111,42 @@ mod tests {
         assert_eq!(p("", "nonsense"), None);
         assert_eq!(p("", "status:"), None);
         assert_eq!(p("", "two words: x"), None);
+    }
+
+    // spec: BOARD-004, BOARD-022
+    #[test]
+    fn board_004_a_pin_for_any_file_name_is_read_back_as_the_same_file() {
+        let names = ["Plain", "With #hash 1", "a|b", "up^caret", "[brackets]", "100% (done) <x>", "Größe ünï 日本", "50% (a) <b> #1", "Dup"];
+        let d = std::env::temp_dir().join(format!("shale-board-pin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("Sub")).unwrap();
+        for n in names {
+            std::fs::write(d.join(format!("{n}.md")), "x\n").unwrap();
+        }
+        std::fs::write(d.join("Sub/Dup.md"), "x\n").unwrap();
+        std::fs::write(d.join("Sub/Dir #1.md"), "x\n").unwrap();
+        std::fs::write(d.join("Board.md"), "---\ntype: board\n---\n## M\n").unwrap();
+        let v = Vault::open(&d).unwrap();
+        let mut cards: Vec<PathBuf> = names.iter().map(|n| PathBuf::from(format!("{n}.md"))).collect();
+        cards.extend([PathBuf::from("Sub/Dup.md"), PathBuf::from("Sub/Dir #1.md")]);
+        let mut pins = Vec::new();
+        for c in &cards {
+            let pin = pin_text(&v, Path::new("Board.md"), c);
+            assert_eq!(v.resolve(&pin_target(&pin), Some(Path::new("Board.md"))).as_deref(), Some(c.as_path()), "{pin}");
+            pins.push(pin);
+        }
+        // the ordinary names keep the `[[Name]]` form; the others are markdown links with the path
+        assert_eq!(pins[0], "[[Plain]]");
+        assert_eq!(pins[1], "[With #hash 1](<With %23hash 1.md>)");
+        assert_eq!(pins[5], "[[100% (done) <x>]]");
+        assert_eq!(pins[7], "[50% (a) <b> #1](<50%25 %28a%29 %3Cb%3E %231.md>)");
+        assert_eq!(pins[6], "[[Größe ünï 日本]]");
+        assert_eq!(pins[10], "[Dir #1](<Sub/Dir %231.md>)");
+        // and a board file that holds them gives them back, one pin per line
+        let mut b = Board::parse("## M\n");
+        b.lanes[0].set_pins(&pins);
+        let again = Board::parse(&b.write());
+        assert_eq!(again.lanes[0].pins(), pins.iter().map(String::as_str).collect::<Vec<_>>());
+        let _ = std::fs::remove_dir_all(d);
     }
 }

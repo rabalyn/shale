@@ -521,6 +521,9 @@ fn lane_ui(ui: &mut Ui, i: usize, lane: &LaneView, st: &mut State, data: &Data, 
         if let Some(e) = &lane.error {
             theme::problem(ui, e.clone());
         }
+        if !lane.missing.is_empty() {
+            theme::problem(ui, format!("Not found in the vault: {}", lane.missing.join(", ")));
+        }
         ui.add_space(4.0);
         let mut area = egui::ScrollArea::vertical().id_salt(("board-lane", i)).auto_shrink([false, false]);
         if let Some((_, dy)) = st.auto.lane.filter(|(n, _)| *n == i) {

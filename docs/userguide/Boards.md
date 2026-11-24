@@ -55,6 +55,9 @@ drop: status: doing
 - `done: true` marks a lane of finished cards.
 - `- [[Note]]` lines **pin** cards to a lane, in that order, above the others. A pinned card is only in the lane that
   pins it, even when the query of another lane matches it.
+  A file name that `[[ ]]` cannot hold (with `#`, `^`, `|`, `[` or `]`) is pinned as a link with its path,
+  `- [Invoice #12](<Mail/Invoice %2312.md>)`; Shale writes that for you when you drop such a card. A pin that finds no note is
+  named under the lane's heading ("Not found in the vault: …").
 - `cards: every-lane` in the front matter shows a card in every lane that matches it. Without it a card is in the first
   lane that matches. The note of the board is never one of its cards.
 - `card-shows: due, start, status, priority, tags` chooses what a card shows besides its title (all of them without the line).

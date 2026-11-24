@@ -65,6 +65,8 @@ pub struct LaneView {
     pub cards: Vec<Card>,
     /// how many of the cards are pinned
     pub pinned: usize,
+    /// the pinned links that point to no note of the vault, as written (BOARD-004): the lane says so
+    pub missing: Vec<String>,
 }
 
 /// The lanes of `board` as they are shown now: the matches of every lane placed (BOARD-009,
@@ -77,7 +79,8 @@ pub fn lane_views(vault: &Vault, rel: &Path, board: &Board, every_lane: bool, ru
 /// The lanes of `board` from what each lane's search answered, `searches[i]` for lane `i`: the
 /// one step that the view ([`lane_views`]) and the exports ([`resolve`]) share.
 pub(crate) fn arrange(vault: &Vault, rel: &Path, board: &Board, every_lane: bool, searches: &[Search]) -> Vec<LaneView> {
-    let pins: Vec<Vec<PathBuf>> = board.lanes.iter().map(|l| l.pins().into_iter().filter_map(|p| vault.resolve(file::pin_target(p), Some(rel))).collect()).collect();
+    let pins: Vec<Vec<PathBuf>> = board.lanes.iter().map(|l| l.pins().into_iter().filter_map(|p| vault.resolve(&file::pin_target(p), Some(rel))).collect()).collect();
+    let missing: Vec<Vec<String>> = board.lanes.iter().map(|l| l.pins().into_iter().filter(|p| vault.resolve(&file::pin_target(p), Some(rel)).is_none()).map(String::from).collect()).collect();
     let none = Vec::new();
     let found: Vec<&[PathBuf]> = searches
         .iter()
@@ -98,7 +101,8 @@ pub(crate) fn arrange(vault: &Vault, rel: &Path, board: &Board, every_lane: bool
         .iter()
         .zip(searches)
         .zip(cards)
-        .map(|((lane, search), cards)| {
+        .zip(missing)
+        .map(|(((lane, search), cards), missing)| {
             let sort_keys = form_sort::parse(lane.sort());
             let (keys, sort_error) = match sort_keys {
                 Ok(k) => (k, None),
@@ -133,6 +137,7 @@ pub(crate) fn arrange(vault: &Vault, rel: &Path, board: &Board, every_lane: bool
                 partial: matches!(search, Search::Found { partial: true, .. }),
                 cards: pinned,
                 pinned: count,
+                missing,
             }
         })
         .collect()

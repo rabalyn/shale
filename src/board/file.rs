@@ -20,7 +20,7 @@
 //! - [[Release notes 0.9]]
 //! ```
 
-use crate::markdown::{front_matter_lines, front_matter_values};
+use crate::markdown::{self, front_matter_lines, front_matter_values};
 
 /// What a card shows besides its title (BOARD-010), as `card-shows:` names them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -113,16 +113,60 @@ fn key_line(line: &str) -> Option<(Key, &str)> {
     Some((key, value.trim()))
 }
 
-/// The inner text of a pinned card, `- [[Name]]`: the whole item is one link (BOARD-004).
+/// A pinned card, `- [[Name]]` or `- [Name](<Folder/Name.md>)`: the whole list item is one link,
+/// and the answer is that link as written (BOARD-004). The second form is for the names the
+/// first cannot hold (see [`pin_item`]).
 fn pin_line(line: &str) -> Option<&str> {
     let item = line.trim_end().strip_prefix("- ")?.trim();
-    let inner = item.strip_prefix("[[")?.strip_suffix("]]")?;
-    (!inner.is_empty() && !inner.contains("[[") && !inner.contains("]]")).then_some(inner)
+    if let Some(inner) = item.strip_prefix("[[").and_then(|i| i.strip_suffix("]]")) {
+        return (!inner.is_empty() && !inner.contains("[[") && !inner.contains("]]")).then_some(item);
+    }
+    let links = markdown::find_links(item);
+    (links.len() == 1 && links[0].markdown_style && !links[0].embed && links[0].range == (0..item.len()) && !links[0].target.is_empty()).then_some(item)
 }
 
-/// The name a pin (`Name`, `Folder/Name#Heading|alias`) links to, as the link resolver takes it.
-pub fn pin_target(pin: &str) -> &str {
-    pin.split('|').next().unwrap_or_default().split('#').next().unwrap_or_default().trim()
+/// The name or path a pin (`[[Name]]`, `[[Folder/Name#Heading|alias]]`, `[Name](<Folder/Name.md>)`)
+/// links to, as the link resolver takes it.
+pub fn pin_target(item: &str) -> String {
+    let item = item.trim();
+    markdown::find_links(item).first().map(|l| markdown::written_target(item, l)).unwrap_or_default().trim().to_string()
+}
+
+/// Can a `[[ ]]` link hold `name`? `#`, `^` and `|` have a meaning inside it (heading, block,
+/// alias), `[` and `]` end it, and a line break ends the list item.
+fn wiki_safe(name: &str) -> bool {
+    !name.contains(['#', '^', '|', '[', ']', '\n', '\r'])
+}
+
+/// The pin of the note or file at `path` (a vault path, `Folder/Name.md`): `[[name]]` when
+/// `by_name` (the caller checked that the name finds the file) and the link can hold it, else
+/// `[[path]]` when that can, else a markdown link with the vault path in `<…>`, which any name
+/// fits (BOARD-004): `%`, `#`, parentheses and angle brackets are percent-encoded, as the links of
+/// Shale's own link insertion are.
+pub fn pin_item(name: &str, path: &str, by_name: bool) -> String {
+    let wiki = |t: &str| format!("[[{}]]", markdown::strip_md_ext(t));
+    if by_name && wiki_safe(name) {
+        return wiki(name);
+    }
+    if wiki_safe(path) {
+        return wiki(path);
+    }
+    let mut target = String::new();
+    for c in path.chars() {
+        match c {
+            '%' => target.push_str("%25"),
+            '#' => target.push_str("%23"),
+            '(' => target.push_str("%28"),
+            ')' => target.push_str("%29"),
+            '<' => target.push_str("%3C"),
+            '>' => target.push_str("%3E"),
+            '\n' => target.push_str("%0A"),
+            '\r' => target.push_str("%0D"),
+            c => target.push(c),
+        }
+    }
+    let title: String = markdown::strip_md_ext(name).chars().filter(|c| !matches!(c, '[' | ']' | '\n' | '\r')).collect();
+    format!("[{title}](<{target}>)")
 }
 
 /// One lane: its heading and the lines under it.
@@ -170,7 +214,7 @@ impl Lane {
         self.value(Key::Done).is_some_and(|v| v.eq_ignore_ascii_case("true"))
     }
 
-    /// The pinned cards, the text inside `[[ ]]`, in the order of the lines (BOARD-022).
+    /// The pinned cards as links (`[[Name]]`), in the order of the lines (BOARD-022).
     pub fn pins(&self) -> Vec<&str> {
         self.body.iter().filter_map(|l| pin_line(l)).collect()
     }
@@ -197,7 +241,7 @@ impl Lane {
         self.set(Key::Done, if done { "true" } else { "" });
     }
 
-    /// Replace the pinned cards by `pins` (the text inside `[[ ]]`), at the place of the first
+    /// Replace the pinned cards by `pins` (links, see [`pin_item`]), at the place of the first
     /// old one, or after the lines of the keys; the other lines stay (BOARD-022). A drop writes the
     /// manual order with it (`drag.rs`).
     pub fn set_pins(&mut self, pins: &[String]) {
@@ -208,7 +252,7 @@ impl Lane {
         let at = first.or(after_keys).unwrap_or(end).min(self.body.len());
         let eol = eol(self.crlf);
         for (n, pin) in pins.iter().enumerate() {
-            self.body.insert(at + n, format!("- [[{pin}]]{eol}"));
+            self.body.insert(at + n, format!("- {pin}{eol}"));
         }
     }
 }
@@ -389,13 +433,13 @@ mod tests {
     #[test]
     fn board_004_a_list_of_links_is_the_pinned_cards_and_no_query_is_a_manual_lane() {
         let b = Board::parse(SAMPLE);
-        assert_eq!(b.lanes[2].pins(), ["Release notes 0.9", "Kanban sketch.excalidraw", "Folder/Name#Head|alias"]);
+        assert_eq!(b.lanes[2].pins(), ["[[Release notes 0.9]]", "[[Kanban sketch.excalidraw]]", "[[Folder/Name#Head|alias]]"]);
         assert_eq!(b.lanes[2].query(), "", "a manual lane");
-        assert_eq!(pin_target("Folder/Name#Head|alias"), "Folder/Name");
-        assert_eq!(pin_target(" Plain "), "Plain");
+        assert_eq!(pin_target("[[Folder/Name#Head|alias]]"), "Folder/Name");
+        assert_eq!(pin_target("[[ Plain ]]"), "Plain");
         // a link with text around it, an embed and an empty link are no pins
         let b = Board::parse("## L\n- [[A]] and more\n- ![[B]]\n- [[]]\n* [[C]]\n- [[D]]\n");
-        assert_eq!(b.lanes[0].pins(), ["D"]);
+        assert_eq!(b.lanes[0].pins(), ["[[D]]"]);
     }
 
     // spec: BOARD-005
@@ -474,15 +518,15 @@ mod tests {
     #[test]
     fn board_006_the_pins_are_replaced_in_place() {
         let mut b = Board::parse("## L\nquery: x\nsome text\n- [[A]]\nmiddle\n- [[B]]\n\n## M\n");
-        b.lanes[0].set_pins(&["B".into(), "C|c".into(), "A".into()]);
+        b.lanes[0].set_pins(&["[[B]]".into(), "[[C|c]]".into(), "[[A]]".into()]);
         assert_eq!(b.write(), "## L\nquery: x\nsome text\n- [[B]]\n- [[C|c]]\n- [[A]]\nmiddle\n\n## M\n");
         b.lanes[0].set_pins(&[]);
         assert_eq!(b.write(), "## L\nquery: x\nsome text\nmiddle\n\n## M\n");
         // the first pins come after the keys, and before the blank line that ends the lane
-        b.lanes[0].set_pins(&["N".into()]);
+        b.lanes[0].set_pins(&["[[N]]".into()]);
         assert_eq!(b.write(), "## L\nquery: x\n- [[N]]\nsome text\nmiddle\n\n## M\n");
         let mut m = Board::parse("## M\n\n## N\n");
-        m.lanes[0].set_pins(&["X".into()]);
+        m.lanes[0].set_pins(&["[[X]]".into()]);
         assert_eq!(m.write(), "## M\n- [[X]]\n\n## N\n");
     }
 
@@ -563,7 +607,7 @@ mod tests {
                 }
                 5 if n > 0 => {
                     let i = pick % n;
-                    let pins: Vec<String> = name.split(' ').filter(|p| !p.is_empty() && !p.contains(['[', ']'])).map(String::from).collect();
+                    let pins: Vec<String> = name.split(' ').filter(|p| !p.is_empty() && !p.contains(['[', ']'])).map(|p| format!("[[{p}]]")).collect();
                     b.lanes[i].set_pins(&pins);
                     expect[i].5 = pins;
                 }

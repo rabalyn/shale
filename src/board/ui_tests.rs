@@ -37,6 +37,7 @@ impl W {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         for (name, text) in files {
+            std::fs::create_dir_all(dir.join(name).parent().unwrap()).unwrap();
             std::fs::write(dir.join(name), text).unwrap();
         }
         let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
@@ -995,6 +996,38 @@ fn board_022_a_drop_inside_a_manual_lane_rewrites_its_link_list() {
     let to = w.at("Sketch");
     w.drag_drop("Sketch", to);
     assert_eq!(w.board_text(), text);
+}
+
+const RECEIPT: &str = "ABLAGE/Rechnungen/2026-11-12 Your receipt from Anthropic Ireland, Limited #2583-3353-7982.md";
+const RECEIPT_TEXT: &str = "---\ntype: email\nsubject: \"Your receipt from Anthropic Ireland, Limited #2583-3353-7982\"\nfrom: \"\\\"Anthropic Ireland, Limited\\\" <invoice+statements+acct_1REyrSBNUnCSzfs9@stripe.com>\"\nto: \"someone@example.org\"\ndate: 2026-11-12 09:56\nmessage-id: \"<0100abc@email.amazonses.com>\"\ntags: [rechnungen, abo, AI]\n---\nThanks for your payment.\n";
+
+// spec: BOARD-004, BOARD-022
+#[test]
+fn board_022_a_card_whose_file_name_has_a_hash_is_pinned_and_shown_again_also_when_open_in_a_tab() {
+    let board = "---\ntype: board\n---\n# Mail\n\n## Inbox\nquery: type:email\n\n## Manual\n";
+    let mut w = W::new("drop-hash", &[("Board.md", board), (RECEIPT, RECEIPT_TEXT), ("Other.md", "x\n")]);
+    w.hl.set_size(vec2(2200.0, 900.0));
+    w.app.open(Path::new(RECEIPT), true);
+    w.app.show_view(View::Boards, false);
+    w.settle();
+    let title = w.lane("Inbox").pop().expect("the receipt is a card");
+    let to = w.lane_top("Manual");
+    // (the open tab is named like the card: the card is the one that is lowest)
+    let from = w.main().filter(|(t, _)| *t == title).max_by(|a, b| a.1.y.total_cmp(&b.1.y)).map(|(_, p)| *p + vec2(6.0, 6.0)).unwrap();
+    w.hl.press_and_move(&mut w.app, from, &Headless::steps(from, to, 8));
+    w.drop_at(to);
+    assert_eq!(w.lane("Manual"), vec![title.clone()], "pinned and read back: {}", w.board_text());
+    assert_eq!(w.lane("Inbox"), Vec::<String>::new());
+    assert_eq!(w.file(RECEIPT), RECEIPT_TEXT, "the note is not changed");
+}
+
+// spec: BOARD-004
+#[test]
+fn board_004_a_pinned_link_that_finds_no_note_is_named_in_the_lane() {
+    let board = "---\ntype: board\n---\n# Mail\n\n## Manual\n- [[Other]]\n- [[Gone #1]]\n";
+    let w = W::new("pin-missing", &[("Board.md", board), ("Other.md", "x\n")]);
+    assert_eq!(w.lane("Manual"), strs(&["Other"]));
+    assert!(w.painted("Not found in the vault: [[Gone #1]]"), "{:?}", w.all_text());
 }
 
 // spec: BOARD-022
