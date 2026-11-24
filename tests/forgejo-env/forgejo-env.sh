@@ -81,6 +81,7 @@ case "${1:-}" in
   job-log)
     # the log of the Actions jobs of a repository (owner/name), for a test that failed; needs zstd on this machine
     [ -n "${2:-}" ] || { echo "usage: $0 job-log <owner/repo>" >&2; exit 2; }
+    command -v zstd >/dev/null || { echo "zstd is not installed on this machine (the job logs are zstd files)" >&2; exit 1; }
     $COMPOSE -f compose.yaml exec -T forgejo sh -c "cat /var/lib/gitea/actions_log/$2/*/*.log.zst" | zstd -dc
     ;;
   runner-down) SHALE_FORGEJO_WWW=/tmp $COMPOSE -f runner.yaml down 7>&- ;;
