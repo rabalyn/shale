@@ -1018,7 +1018,7 @@ mod tests {
         assert!(lock.hold_for(Duration::from_millis(20)).is_some());
     }
 
-    // spec: CFG-006, SYNC-015
+    // spec: CFG-005, CFG-006, SYNC-015
     #[test]
     fn vault_settings_and_state_live_in_the_vault() {
         let root = std::env::temp_dir().join(format!("shale-app-vdata-{}", std::process::id()));
@@ -1027,11 +1027,12 @@ mod tests {
         crate::fsutil::write_atomic(&root.join("One.md"), b"1\n").unwrap();
         std::fs::create_dir_all(root.join(".shale")).unwrap();
         crate::fsutil::write_atomic(&root.join(".shale/settings.json"), br#"{"version": 1, "people_dir": "Kontakte", "sync": {"interval_minutes": 2}}"#).unwrap();
-        crate::fsutil::write_atomic(&root.join(".shale/state.json"), br#"{"version": 1, "open_files": ["One.md"]}"#).unwrap();
+        crate::fsutil::write_atomic(&root.join(".shale/state.json"), br#"{"version": 1, "open_files": ["One.md"], "last_import_folder": "Inbox"}"#).unwrap();
         let mut app = app_on(&root);
         assert_eq!(app.vdata.settings.people_dir, "Kontakte");
         assert_eq!(app.vdata.settings.sync.interval(), Duration::from_secs(120));
         assert_eq!(app.current_path().as_deref(), Some(Path::new("One.md")));
+        assert_eq!(app.vdata.state.last_import_folder, "Inbox");
         app.vdata.state.recent_tags = vec!["t".into()];
         app.vdata.save().unwrap();
         let text = crate::fsutil::read_to_string(root.join(".shale/state.json")).unwrap();
