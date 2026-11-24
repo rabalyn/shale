@@ -86,6 +86,8 @@ pub struct Complete {
     moved: bool,
     /// where the list was drawn
     rect: Option<Rect>,
+    /// a field was typed in since `begin` (a pick from the list is no typing)
+    pub(super) typed: bool,
 }
 
 /// Put the cursor of the text box `id` behind `chars` characters.
@@ -100,6 +102,7 @@ impl Complete {
     /// was needed once is built again, in the background, when the vault changed (QUERY-030).
     pub(super) fn begin(&mut self, vault: &Vault, worker: &mut SearchWorker) {
         self.was = std::mem::take(&mut self.shown);
+        self.typed = false;
         if self.vocab.is_some() || self.asked.is_some() {
             self.sync(vault, worker);
         }
@@ -181,6 +184,7 @@ impl Complete {
             value.retain(|c| c != '"');
         }
         changed |= r.changed();
+        self.typed |= r.changed();
         if r.changed() || r.gained_focus() || r.clicked() {
             self.field = Some((id, spec.row, spec.slot));
             self.closed = false;
