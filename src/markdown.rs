@@ -4,6 +4,7 @@
 use std::ops::Range;
 
 pub mod citations;
+pub mod labels;
 
 /// A link found in a note: `[[Target]]`, `[[Target|Alias]]`, `[[Target#Heading]]`,
 /// `![[Embed]]` or a markdown link `[text](Target.md)` that points inside the vault, or a `file://`
@@ -773,7 +774,9 @@ fn inline_math(line: &str, off: usize, li: usize, out: &mut Vec<MathSpan>) {
         } else if b.get(i + 1) == Some(&b'$') {
             match find(i + 2, "$$").filter(|&j| !line[i + 2..j].trim().is_empty()) {
                 Some(j) => {
-                    let alone = line.trim() == &line[i..j + 2];
+                    // alone on its line: nothing before it, and nothing after it but the label of an equation (EDIT-128)
+                    let after = line[j + 2..].trim();
+                    let alone = line[..i].trim().is_empty() && (after.is_empty() || citations::parse_label(after).is_some_and(|(kind, _, len)| kind == citations::Kind::Equation && len == after.len()));
                     out.push(MathSpan { range: off + i..off + j + 2, tex: off + i + 2..off + j, display: true, block: alone, lines: li..li + 1 });
                     i = j + 2;
                 }

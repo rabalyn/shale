@@ -1287,16 +1287,30 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   histories are kept outside the vault, in Shale's data folder, so two computers do not overwrite each other's
   tabs, and leftover `.shale-tmp-*` files and `state.sync-conflict-*` copies are removed. Settings of the program itself (appearance, calendars,
   known vaults) stay in `~/.config/shale/config.toml`.
-- **The bibliography of a thesis** (EDIT-122, EDIT-123, CFG-079, #645; the first part of thesis writing, ADR-0039, #642).
-  A note names its literature in the property `bibliography:` (a path in the vault, a file name or `[[refs.bib]]`;
-  a list names several), and **Settings → Vault → Bibliography file** is the default for notes without the
-  property. The file is a BibLaTeX or BibTeX `.bib` file as Zotero (Better BibTeX), JabRef or Citavi export it. Shale
-  reads it in the background into an index of the keys (author, year, title, type), skips and counts an entry
-  that cannot be read, rebuilds the index when the file changes, and says in Settings what the file holds and which
-  keys the open note cites that the file lacks. A file that is missing or has no entry means no bibliography in
-  effect, with a message. The one scanner of `@` (citations `[@key, p. 12]` and `@key`, the labels `{#fig:x}` and the
-  references `@fig:x`) is built and tested, and rules out e-mail addresses, mentions, code, math and links; the editor, the
-  exports and the pickers that use it are the next phases.
+- **The bibliography of a thesis** (EDIT-122 to EDIT-128, CFG-079, #645, #646; the first parts of thesis writing,
+  ADR-0039, #642). A note names its literature in the property `bibliography:` (a path in the vault, a file name or
+  `[[refs.bib]]`; a list names several), and **Settings → Vault → Bibliography file** is the default for notes without
+  the property; a thesis that is a folder of notes (a book) takes the properties of its folder's note, for every chapter.
+  The file is a BibLaTeX or BibTeX `.bib` file as Zotero (Better BibTeX), JabRef or Citavi export it. Shale reads it
+  in the background into an index of the keys (author, year, title, type), skips and counts an entry that cannot be
+  read, rebuilds the index when the file changes, and says in Settings what the file holds and which keys the open
+  note cites that the file lacks. Citations are written as in Pandoc (`[@key, p. 12]`, `[see @a; @b]`, `[-@key]`,
+  `@key`), figures, tables, equations and sections carry labels (`{#fig:results}`) and are referred to as
+  `@fig:results`; one scanner reads all of it and rules out e-mail addresses, mentions, code, math and links.
+  **In the editor**, after `[@`, `; @` or `@` a list offers the keys with authors, year and title (the tag list of
+  EDIT-120, with the same keys), and after `@fig:`, `@tbl:`, `@eq:` and `@sec:` the labels with number and caption;
+  the pointer on a key shows its entry and on a reference its number and caption (Ctrl+click keeps it open); an unknown
+  key, a reference to a label that does not exist and a label used twice are red like a broken link. **In the reading
+  view** a citation is drawn as the chosen style writes it (`citation-style:` `numeric`, `authoryear`, `alphabetic`,
+  `ieee` or `apa`, formatted with the CSL engine `hayagriva`), a reference as its word and number in the language of the
+  note (`language:` `de` or `en`: "Abbildung 3", "Figure 3"), figures, tables and equations with their number and caption
+  (above or below as `figure-caption:` and `table-caption:` say; continuous or per chapter as `float-numbering:` says,
+  the chapters of a book counted in reading order, appendix chapters lettered), and the list of references at the end or
+  at `<!-- shale: bibliography -->`. The exports (LaTeX, PDF, site, Word) are the next phases.
+
+  ![Completion of a citation key in the editor](userguide/z_media/screenshots/thesis-editor.png)
+  ![A thesis note in the reading view](userguide/z_media/screenshots/thesis-reading.png)
+
 - The files carry a format version and are upgraded on load. A settings file that can't be read
   is kept as `….broken-<date>` and you are told; a file from a newer Shale is used but not
   changed.

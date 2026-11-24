@@ -64,6 +64,8 @@ pub struct LayoutKey {
     pub pixels_per_point: u32,
     pub wrap_width: u32,
     pub numbered_default: bool,
+    /// the citations and references of the text and whether each is fine (EDIT-126)
+    pub cites: u64,
     /// the footnotes the note being drawn has (the scope of [`crate::markdown::DefinedFootnotes`])
     pub scope: HashSet<String>,
     /// the raw lines of the preview, none when it is off
@@ -171,6 +173,7 @@ mod tests {
             pixels_per_point: 1.0f32.to_bits(),
             wrap_width: 500.0f32.to_bits(),
             numbered_default: false,
+            cites: 0,
             scope: HashSet::new(),
             raw: Some(0..1),
             ranges: vec![(0..1, 0.0)],

@@ -239,11 +239,14 @@ With the Markdown preview on, a formula takes the place of its TeX; the line wit
 # The bibliography of a thesis
 
 For a thesis or a paper, a note can name a **bibliography**: a BibLaTeX or BibTeX `.bib` file in the vault, as
-Zotero (with Better BibTeX), JabRef or Citavi export it. This is the first part of thesis writing; what Shale
-does with it so far is to read it and to check the keys.
+Zotero (with Better BibTeX), JabRef or Citavi export it. The editor and the reading view work with it; the exports
+follow in the next parts of thesis writing.
 
 - **Which file.** The property `bibliography:` of the note (a path in the vault, a file name or `[[refs.bib]]`; a list
   names several), or, for a note without it, the **Bibliography file** of Settings → Vault ([[Settings reference]]).
+  A thesis of several notes is a folder (a book, see [[PDF]]): the notes of the folder are its chapters, and the
+  properties of the folder's note (`bibliography:`, `citation-style:`, `float-numbering:`, `language:`, `figure-caption:`
+  and `table-caption:`) are the thesis's, for every chapter.
 - **What Shale reads.** The file is read in the background ([[Background work]]) into an index of the keys with their
   authors, year, title and type, and read again when the file changes. An entry that cannot be read is skipped and
   counted; a file that is missing or holds no entry means no bibliography, and Settings says why.
@@ -251,9 +254,33 @@ does with it so far is to read it and to check the keys.
   the note you have open, the file it uses and which keys it cites that the file does not have.
 - **How a citation is written.** In Pandoc's way: `[@key]`, `[@key, p. 12]`, `[see @key, p. 12]`, `[@a; @b]`,
   `[-@key]`, and `@key` in the text when the author is the subject (a bare `@key` counts only when the bibliography
-  has the key, so `@todo` and `@name@host.social` stay plain text). Figures, tables, equations and sections get a
-  label `{#fig:results}` and are referred to as `@fig:results`. Nothing in code, math, links, addresses or mails
-  is read as a citation. The editor does not colour these yet.
+  has the key, so `@todo` and `@name@host.social` stay plain text). Nothing in code, math, links, addresses or mails
+  is read as a citation.
+- **Labels and references.** A figure, a table, an equation or a section gets a label, and is referred to by it:
+  `![[plot.png|Results of run 2]]{#fig:results}` (the alias is the caption), a line `: Caption {#tbl:runs}` right
+  below a table, `$$ E = mc^2 $$ {#eq:energy}`, and `## Method {#sec:method}`. `@fig:results` then reads "Figure 3"
+  (or "Abbildung 3": the property `language:` of the note says `de` or `en`), `@eq:energy` "Equation (2.1)", and
+  `[-@fig:results]` the number alone. The numbers are worked out, never written into the file: they run through the
+  note, or start again in each chapter of a book (`float-numbering: continuous` or `chapter`). A table's caption
+  stands above it and a figure's below it, unless `table-caption:` or `figure-caption:` says `above` or `below`.
+- **Finding a key while you type.** After `[@`, `; @` or `@` the editor lists the keys that match, each with its
+  authors, year and title; a word of the author or the title finds a key too. ↑ ↓ choose, Enter or Tab pick, Esc
+  closes it. After `@fig:`, `@tbl:`, `@eq:` or `@sec:` it lists the labels of the document with their number and
+  caption. Without a bibliography the list says so and links to Settings.
+- **Peek and marks.** Hold the pointer on a key to see its entry (authors, year, title, venue), or on a reference to see
+  its number and caption; Ctrl+click keeps the peek open until Esc. A key the bibliography does not have, a reference
+  to a label that does not exist and a label that is used twice are drawn red, like a link to a note that is not
+  there, and say why when the pointer rests on them.
+![[thesis-editor.png]]
+
+- **The reading view** draws the thesis as it is exported: a citation as the style writes it (`(Knuth 1984, 12)`,
+  `[3]`; the property `citation-style:` is `numeric`, `authoryear` (the default), `alphabetic`, `ieee` or `apa`), a
+  reference as its word and number, the labels hidden, a numbered caption with each figure and table, an equation's
+  number at the right margin, and the list of references at the end of the note, or where a line of its own,
+  `<!-- shale: bibliography -->`, puts it. In a book the list belongs to the book, so a chapter shows it only at that
+  marker.
+
+![[thesis-reading.png]]
 
 # Code
 
