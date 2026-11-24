@@ -15,6 +15,16 @@ A value of the wrong shape in the file loads as its default; fields Shale does n
 The "Where" column says which window changes a value. The global file is meant to be edited
 too: it is plain text with a description above every setting.
 
+# The Vault and Editor tabs
+
+![[settings-vault.png]]
+
+The **Vault** tab is the short page Settings opens on: the vault folder, the button that closes the vault, the people folder and the check of file names for Windows and macOS.
+
+![[settings-editor.png]]
+
+The **Editor** tab holds the settings of the editor (cursor, links, drawings, the formatting toolbar and its colours); the tables below say which key each one is.
+
 # Finding a setting
 
 ![[settings-find.png]]
@@ -32,6 +42,8 @@ used for all) pulses the control that makes it appear instead.
 On the Keybindings tab the field of the tab filters the list, see [[Keyboard shortcuts]].
 
 # The settings file
+
+![[settings-file.png]]
 
 **Settings → Open settings file** opens `config.toml` in a tab of its own. It is not a note: it
 is not in the file tree, not in any vault and not in the lists of recent files. Change a value,
