@@ -8,6 +8,7 @@ use crate::busy::{self, Busy, Cancel};
 use crate::drawing::Scene;
 use crate::pdf::book_dialog::PDF_EXPORT;
 use crate::pdf::export::{self, ExportOptions};
+use crate::pdf::export_fonts::Made;
 use crate::vault::Vault;
 use std::path::PathBuf;
 
@@ -29,7 +30,7 @@ pub enum What {
 }
 
 /// A running export. Dropping it (the dialog closed, or Cancel) stops it before the next picture.
-pub struct NoteExport(busy::Job<Result<Vec<u8>, String>>);
+pub struct NoteExport(busy::Job<Result<Made, String>>, std::cell::RefCell<Vec<String>>);
 
 impl Drop for NoteExport {
     fn drop(&mut self) {
@@ -43,16 +44,25 @@ impl NoteExport {
     pub fn start(busy: &Busy, work: Work, notify: impl FnOnce() + Send + 'static) -> Option<NoteExport> {
         let mut task = busy.begin(PDF_EXPORT, format!("Exporting “{}” to PDF…", work.name))?;
         let cancel = task.cancellable();
-        Some(NoteExport(task.run(move || make(&work, &cancel), notify)))
+        Some(NoteExport(task.run(move || make(&work, &cancel), notify), Default::default()))
     }
 
     /// What the finished job made, once: the PDF or why not.
     pub fn poll(&self) -> Option<Result<Vec<u8>, String>> {
-        self.0.try_recv().ok().map(|r| r.and_then(|r| r))
+        let done = self.0.try_recv().ok().map(|r| r.and_then(|r| r))?;
+        Some(done.map(|made| {
+            *self.1.borrow_mut() = made.warnings;
+            made.bytes
+        }))
+    }
+
+    /// What the export that has just ended has to say about fonts (PDF-037), once.
+    pub fn take_warnings(&self) -> Vec<String> {
+        std::mem::take(&mut self.1.borrow_mut())
     }
 }
 
-fn make(work: &Work, cancel: &Cancel) -> Result<Vec<u8>, String> {
+fn make(work: &Work, cancel: &Cancel) -> Result<Made, String> {
     let stop = || if cancel.is_cancelled() { Err(export::CANCELLED.to_string()) } else { Ok(()) };
     stop()?;
     let vault = Vault::open(&work.root).map_err(|e| format!("Could not read the vault: {e}"))?;
@@ -62,7 +72,7 @@ fn make(work: &Work, cancel: &Cancel) -> Result<Vec<u8>, String> {
         What::Drawing(scene) => {
             let pictures = crate::drawing::pictures::images(scene, &vault, &work.rel);
             stop()?;
-            export::export_drawing(scene, &work.name, &work.opts, &pictures)
+            export::export_drawing(scene, &work.name, &work.opts, &pictures).map(|bytes| Made { bytes, warnings: Vec::new() })
         }
     }
 }
@@ -119,7 +129,7 @@ mod tests {
         let plain = export::export_note_until(&v, Path::new("Pics.md"), "# Pics\n\nNo pictures.\n", &ExportOptions::for_note(), Some(&stopped));
         assert_eq!(plain.unwrap_err(), export::CANCELLED);
         let free = Cancel::default();
-        let made = export::export_note_until(&v, Path::new("Pics.md"), &text, &ExportOptions::for_note(), Some(&free)).unwrap();
+        let made = export::export_note_until(&v, Path::new("Pics.md"), &text, &ExportOptions::for_note(), Some(&free)).unwrap().bytes;
         assert!(made.starts_with(b"%PDF"));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -149,10 +159,10 @@ mod tests {
         // a drawing that is stopped is not laid out, and a vault that cannot be read is an error
         let cancel = Cancel::default();
         cancel.cancel();
-        assert_eq!(make(&work(&dir, What::Drawing(Box::new(scene.clone())), "Map"), &cancel).unwrap_err(), export::CANCELLED);
+        assert_eq!(make(&work(&dir, What::Drawing(Box::new(scene.clone())), "Map"), &cancel).err().unwrap(), export::CANCELLED);
         let live = Cancel::default();
         let gone = make(&Work { root: dir.join("Pics.md"), ..work(&dir, What::Drawing(Box::new(scene)), "Map") }, &live);
-        assert!(gone.unwrap_err().starts_with("Could not read the vault"));
+        assert!(gone.err().unwrap().starts_with("Could not read the vault"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

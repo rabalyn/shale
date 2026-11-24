@@ -228,6 +228,25 @@ section 1 for its own fonts, so it comes after phase 4 for that key. #644 and #6
 fonts. The thesis of ADR-0039 is one of the places where a required typeface is set, which is why
 the one font per book (BOOK-022) is decided here.
 
+### Subsetting (phase 3, evaluated)
+
+Typst's `subsetter` 0.2.6 (MIT OR Apache-2.0, TrueType and CFF) was evaluated against our own
+`fonts/sfnt.rs` (179 lines, TrueType only, no dependency). It is not used:
+
+- It **removes the `cmap` and renumbers the glyphs**, and says that the font must be written as a CID
+  font. The PDF writer's fonts are simple WinAnsi TrueType fonts whose text is written in the content
+  stream before the subset is known. Using the crate means a Type0 font with `Identity-H`, a
+  `CIDToGIDMap` or a CFF charset, a `/W` array and a `ToUnicode` map, and content that is written
+  only when the glyph numbers are final: a rewrite of the text path, not a swap of one function.
+- It adds 5 crates to `Cargo.lock` (`subsetter`, `write-fonts`, and a second `read-fonts` 0.39,
+  `skrifa` 0.42 and `font-types` beside the vendored `skrifa` 0.49 / `read-fonts` 0.46 that the
+  app is patched to), 32 lines of `cargo tree`, about 128 kB of source. `cargo audit` shows nothing
+  new for it.
+- What it would buy is CFF fonts as selectable text; today a font with CFF outlines is drawn as
+  outlines (PDF-036). That can be revisited together with the CID rewrite.
+
+`sfnt.rs` keeps the glyph numbers and the `cmap`, so the existing text path is unchanged.
+
 ### 10. Alternatives considered
 
 - **Bundle more fonts** (Liberation Sans, a Times-like serif with bold and italic): fixes the
