@@ -89,7 +89,7 @@ impl ShaleApp {
         if !std::mem::take(&mut self.tex.setup.run_test) {
             return;
         }
-        let failed = |headline: String| Outcome::Failed(Failure { headline, problems: vec![], log_tail: String::new(), document: Default::default(), set_dir: PathBuf::new() });
+        let failed = |headline: String| Outcome::Failed(Failure::said(headline));
         let engine = match self.tex.detection.as_ref().map(|d| d.selected(self.cfg.tex.engine)) {
             Some(Ok(e)) => e.clone(),
             Some(Err(why)) => {

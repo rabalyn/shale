@@ -143,13 +143,31 @@ pub const CHECKED: &[(&str, &str)] = &[
     ("pdfx", "pdfx.sty"),
     // what the writer of the export adds to a document (TEX-008)
     ("ulem", "ulem.sty"),
-    // the landscape pages of a board (BOARD-031)
-    ("pdflscape", "pdflscape.sty"),
+    // the landscape pages of a board (BOARD-031): its table (`tools` brings longtable) and its paper (geometry, above)
+    ("tools", "longtable.sty"),
     ("booktabs", "booktabs.sty"),
     ("amsmath", "amsmath.sty"),
     ("amsfonts", "amssymb.sty"),
     ("xltabular", "xltabular.sty"),
 ];
+
+/// The packages of `packages.txt` a document needs besides what every document has, by what it is:
+/// a board stands on `geometry` for its landscape pages and on `longtable` (the TeX Live package `tools`)
+/// for its columns of cards (BOARD-031). A managed TeX Live that was installed without one of them
+/// lacks it, and then the compile would fail (TEX-052).
+pub const BOARD_NEEDS: &[&str] = &["geometry", "tools"];
+
+/// The package of the list that brings this file (`geometry.sty` is `geometry`, `scrartcl.cls` is
+/// `koma-script`): one of [`CHECKED`], else a package that is called like the file. None for a file
+/// that is no package of Shale's list.
+pub fn package_of_file(file: &str) -> Option<&'static str> {
+    let name = file.rsplit(['/', '\\']).next().unwrap_or(file);
+    if let Some((pkg, _)) = CHECKED.iter().find(|(_, f)| *f == name) {
+        return Some(pkg);
+    }
+    let stem = name.rsplit_once('.').map_or(name, |(s, _)| s);
+    super::install::packages().into_iter().find(|p| *p == stem)
+}
 
 /// What detection found out (TEX-001).
 #[derive(Clone, Debug)]
@@ -293,9 +311,14 @@ pub fn probe(mut engine: Engine) -> Result<Engine, String> {
         _ => return Err("biber was not found next to lualatex".to_string()),
     }
     // the packages
-    let mut kpse = engine.command("kpsewhich");
-    kpse.args(CHECKED.iter().map(|(_, file)| file)).current_dir(work.path());
-    let run = proc::run(kpse, PROBE_TIMEOUT, None, |_| {}).map_err(|e| format!("kpsewhich could not be started ({e})"))?;
-    engine.missing = missing_packages(&run.tail_text());
+    engine.missing = missing_in(&engine, work.path())?;
     Ok(engine)
+}
+
+/// The packages of [`CHECKED`] that this engine lacks: `kpsewhich` run in `dir` looks for their files.
+pub fn missing_in(engine: &Engine, dir: &Path) -> Result<Vec<String>, String> {
+    let mut kpse = engine.command("kpsewhich");
+    kpse.args(CHECKED.iter().map(|(_, file)| file)).current_dir(dir);
+    let run = proc::run(kpse, PROBE_TIMEOUT, None, |_| {}).map_err(|e| format!("kpsewhich could not be started ({e})"))?;
+    Ok(missing_packages(&run.tail_text()))
 }

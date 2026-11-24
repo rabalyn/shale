@@ -36,6 +36,11 @@ fn at(tex: &str, what: &str) -> usize {
     tex.find(what).unwrap_or_else(|| panic!("{what} is not in\n{tex}"))
 }
 
+/// The groups of lanes of the board: each is a table of its own.
+fn board_tables(tex: &str) -> usize {
+    tex.matches("\\begin{longtable}").count()
+}
+
 const SPRINT: &str = "---\ntype: board\n---\n# Sprint\n\n## Todo\nquery: status:todo\n\n## Doing\nquery: status:doing\n";
 
 fn sprint() -> Vec<(&'static str, &'static [u8])> {
@@ -47,18 +52,21 @@ fn sprint() -> Vec<(&'static str, &'static [u8])> {
 fn board_031_the_board_is_on_landscape_pages_and_the_cards_notes_follow_as_parts_and_chapters() {
     let (v, d) = vault("order", &sprint());
     let tex = tex_of(&v, "thesis");
-    // pdflscape is loaded, the board is inside one landscape environment before the contents and the parts
-    assert!(tex.contains("\\usepackage{pdflscape}"), "{tex}");
-    assert_eq!(tex.matches("\\begin{landscape}").count(), 1);
-    assert_eq!(tex.matches("\\end{landscape}").count(), 1);
-    let (begin, end, toc, todo, doing) = (at(&tex, "\\begin{landscape}"), at(&tex, "\\end{landscape}"), at(&tex, "\\tableofcontents"), at(&tex, "\\part{Todo}"), at(&tex, "\\part{Doing}"));
+    // the board is between the switch to landscape and the one back, before the contents and the parts
+    assert_eq!(tex.matches("\n\\shaleLandscape\n").count(), 1);
+    assert_eq!(tex.matches("\n\\shalePortrait\n").count(), 1);
+    let (begin, end, toc, todo, doing) = (at(&tex, "\n\\shaleLandscape\n"), at(&tex, "\n\\shalePortrait\n"), at(&tex, "\\tableofcontents"), at(&tex, "\\part{Todo}"), at(&tex, "\\part{Doing}"));
     assert!(at(&tex, "\\maketitle") < begin && begin < end && end < toc && toc < todo && todo < doing, "{tex}");
     // the lanes are columns with their cards, the chips of card-shows follow the title
     let board = &tex[begin..end];
     assert!(board.contains("{\\large\\bfseries Board}"), "{board}");
-    assert_eq!(board.matches("\\begin{minipage}[t]{0.32\\linewidth}").count(), 2, "{board}");
-    assert!(board.contains("{\\bfseries Todo}") && board.contains("{\\bfseries Doing}"), "{board}");
-    assert!(board.find("Alpha").unwrap() < board.find("{\\bfseries Doing}").unwrap(), "{board}");
+    // one table, a column for each lane, the head of the first page and the head of the next ones
+    assert_eq!(board.matches("\\begin{longtable}{@{}p{0.32\\linewidth}@{\\hspace{0.02\\linewidth}}p{0.32\\linewidth}@{}}").count(), 1, "{board}");
+    assert!(board.contains("{\\bfseries Todo}") && board.contains("{\\bfseries Doing}") && board.contains("{\\bfseries Todo (continued)}"), "{board}");
+    assert!(at(board, "\\endfirsthead") < at(board, "\\endhead") && at(board, "\\endhead") < at(board, "Alpha"), "{board}");
+    assert!(at(board, "{\\bfseries Doing}") < at(board, "\\endfirsthead"), "{board}");
+    // row 1: the first card of each lane
+    assert!(at(board, "Alpha") < at(board, "Beta") && !board[at(board, "Alpha")..at(board, "Beta")].contains("\\\\"), "{board}");
     assert!(board.contains("todo \\textperiodcentered{} high") || board.contains("todo") && board.contains("high"), "{board}");
     // the cards link to their chapters; the note left out with export: false stays on the board only
     assert!(board.contains("\\hyperlink{shale-2}{Alpha}") && board.contains("\\hyperlink{shale-4}{Beta}"), "{board}");
@@ -75,10 +83,10 @@ fn board_031_the_board_is_on_landscape_pages_and_the_cards_notes_follow_as_parts
 fn board_031_an_article_has_the_board_in_the_contents_as_a_section_and_the_lanes_as_sections() {
     let (v, d) = vault("article", &sprint());
     let tex = tex_of(&v, "report");
-    assert!(tex.contains("\\addcontentsline{toc}{section}{Board}") && tex.contains("\\begin{landscape}"), "{tex}");
+    assert!(tex.contains("\\addcontentsline{toc}{section}{Board}") && tex.contains("\n\\shaleLandscape\n"), "{tex}");
     let opts = ExportOptions { toc: false, ..ExportOptions::for_note() };
     let tex = write_as(&v, "report", &opts).unwrap().tex;
-    assert!(!tex.contains("\\addcontentsline{toc}{section}{Board}") && !tex.contains("\\tableofcontents") && tex.contains("\\begin{landscape}"), "{tex}");
+    assert!(!tex.contains("\\addcontentsline{toc}{section}{Board}") && !tex.contains("\\tableofcontents") && tex.contains("\n\\shaleLandscape\n"), "{tex}");
     let _ = std::fs::remove_dir_all(d);
 }
 
@@ -102,7 +110,7 @@ fn board_031_everything_that_comes_from_the_vault_is_escaped() {
     let board = "---\ntype: board\ncard-shows: status\n---\n# Q&A\n\n## 50% {done} #1 \\input{x}\nquery: status:a_b\n";
     let (v, d) = vault("escape", &[("Board.md", board.as_bytes()), ("R&D_plan $5 ~ ^.md", b"---\nstatus: a_b\n---\ntext\n")]);
     let tex = tex_of(&v, "thesis");
-    let page = &tex[at(&tex, "\\begin{landscape}")..at(&tex, "\\end{landscape}")];
+    let page = &tex[at(&tex, "\n\\shaleLandscape\n")..at(&tex, "\n\\shalePortrait\n")];
     assert!(page.contains("50\\% \\{done\\} \\#1 \\textbackslash{}input\\{x\\}"), "{page}");
     assert!(page.contains("{R\\&D\\_plan \\$5 \\textasciitilde{} \\textasciicircum{}}"), "{page}");
     assert!(page.contains("{\\footnotesize a\\_b}"), "{page}");
@@ -116,7 +124,7 @@ fn board_031_a_lane_whose_query_fails_shows_the_reason_and_has_no_cards() {
     let board = "---\ntype: board\n---\n# Sprint\n\n## Broken\nquery: (status:doing\n\n## Good\nquery: status:todo\n";
     let (v, d) = vault("broken", &[("Board.md", board.as_bytes()), ("Alpha.md", b"---\nstatus: todo\n---\nalphabody\n")]);
     let tex = tex_of(&v, "thesis");
-    let page = &tex[at(&tex, "\\begin{landscape}")..at(&tex, "\\end{landscape}")];
+    let page = &tex[at(&tex, "\n\\shaleLandscape\n")..at(&tex, "\n\\shalePortrait\n")];
     let broken = &page[at(page, "{\\bfseries Broken}")..at(page, "{\\bfseries Good}")];
     assert!(broken.contains("\\itshape Query: ") && !broken.contains("\\fbox"), "{broken}");
     assert!(!tex.contains("\\part{Broken}") && tex.contains("\\part{Good}"), "{tex}");
@@ -129,7 +137,7 @@ fn board_031_a_board_without_lanes_or_cards_is_the_board_page_only() {
     let (v, d) = vault("nolanes", &[("Board.md", b"---\ntype: board\n---\n# Empty\n")]);
     let tex = tex_of(&v, "thesis");
     assert!(tex.contains("This board has no lanes.") && tex.contains("{\\large\\bfseries Board}") && !tex.contains("\\chapter") && !tex.contains("\\part"), "{tex}");
-    assert_eq!(tex.matches("\\begin{landscape}").count(), 1);
+    assert_eq!(board_tables(&tex), 0, "no lanes, no table");
     let (v2, d2) = vault("nocards", &[("Board.md", b"---\ntype: board\n---\n# Empty\n\n## Todo\nquery: status:todo\n")]);
     let tex = tex_of(&v2, "thesis");
     assert!(tex.contains("{\\bfseries Todo}") && !tex.contains("\\chapter") && !tex.contains("\\part"), "{tex}");
@@ -149,8 +157,9 @@ fn board_031_more_than_three_lanes_make_more_groups_of_landscape_pages() {
     files.extend(notes.iter().map(|(n, b)| (n.as_str(), b.as_slice())));
     let (v, d) = vault("groups", &files);
     let tex = tex_of(&v, "thesis");
-    assert_eq!(tex.matches("\\begin{landscape}").count(), 2, "three lanes and two");
-    assert!(tex.contains("{\\large\\bfseries Board}\\par") && tex.contains("{\\large\\bfseries Board (continued)}"), "{tex}");
+    assert_eq!(board_tables(&tex), 2, "three lanes and two");
+    assert!(tex.contains("{\\large\\bfseries Board}") && tex.contains("{\\large\\bfseries Board (continued)}"), "{tex}");
+    assert_eq!(tex.matches("\n\\clearpage\n").count(), 1, "the second group starts a page");
     assert!(at(&tex, "Lane3") < at(&tex, "Lane4"), "{tex}");
     assert_eq!(tex.matches("\\addcontentsline{toc}{chapter}{Board}").count(), 1, "the board is listed once");
     let _ = std::fs::remove_dir_all(d);
@@ -158,7 +167,7 @@ fn board_031_more_than_three_lanes_make_more_groups_of_landscape_pages() {
 
 // spec: BOARD-031
 #[test]
-fn board_031_cards_that_do_not_fit_a_page_go_on_the_next_landscape_page_with_continued_lanes() {
+fn board_031_the_cards_of_a_group_are_the_rows_of_one_table_that_latex_breaks_with_continued_heads() {
     let mut board = String::from("---\ntype: board\n---\n# Long\n\n## Many\nquery: status:many\nsort: title\n\n## Few\nquery: status:few\n");
     board.push('\n');
     let mut notes: Vec<(String, Vec<u8>)> = (1..=30).map(|n| (format!("Card {n:02}.md"), b"---\nstatus: many\n---\nx\n".to_vec())).collect();
@@ -167,12 +176,18 @@ fn board_031_cards_that_do_not_fit_a_page_go_on_the_next_landscape_page_with_con
     files.extend(notes.iter().map(|(n, b)| (n.as_str(), b.as_slice())));
     let (v, d) = vault("long", &files);
     let tex = tex_of(&v, "thesis");
-    let pages = tex.matches("\\begin{landscape}").count();
-    assert!(pages >= 2, "{pages} pages\n{tex}");
-    assert_eq!(tex.matches("\\end{landscape}").count(), pages);
-    assert_eq!(tex.matches("{\\bfseries Many (continued)}").count(), pages - 1, "{tex}");
-    assert_eq!(tex.matches("{\\bfseries Few}").count(), 1, "the group goes on with the same columns");
-    assert_eq!(tex.matches("{\\bfseries Few (continued)}").count(), pages - 1);
+    // no page height is estimated: one table, 30 rows (the shorter lane has empty cells), LaTeX breaks it
+    assert_eq!(board_tables(&tex), 1, "{tex}");
+    let table = &tex[at(&tex, "\\begin{longtable}")..at(&tex, "\\end{longtable}")];
+    let body = &table[at(table, "\\endhead") + 8..];
+    assert_eq!(body.matches("\\\\[12pt]\n").count(), 30, "{body}");
+    assert!(!table.contains("\\clearpage"), "{table}");
+    assert_eq!(table.matches("{\\bfseries Many}").count(), 1, "the first head");
+    assert_eq!(table.matches("{\\bfseries Many (continued)}").count(), 1, "the head of the next pages");
+    assert_eq!(table.matches("{\\bfseries Few}").count(), 1);
+    assert_eq!(table.matches("{\\bfseries Few (continued)}").count(), 1);
+    assert_eq!(table.matches("{\\large\\bfseries Board}").count(), 1);
+    assert_eq!(table.matches("{\\large\\bfseries Board (continued)}").count(), 1);
     // every card is on the board exactly once, and in order
     for n in 1..=30 {
         assert_eq!(tex.matches(&format!("{{Card {n:02}}}")).count(), 2, "Card {n}: its link on the board and its chapter");
@@ -207,9 +222,18 @@ fn board_031_a_kind_that_cannot_hold_a_book_and_a_note_that_is_no_board_are_refu
     let _ = std::fs::remove_dir_all(d2);
 }
 
-// spec: BOARD-031, TEX-022
+// spec: BOARD-031
 #[test]
-fn board_031_pdflscape_is_in_the_package_list_and_in_what_the_probe_looks_for() {
-    assert!(crate::pdf::tex::install::packages().contains(&"pdflscape"));
-    assert!(crate::pdf::tex::engine::CHECKED.contains(&("pdflscape", "pdflscape.sty")));
+fn board_031_the_landscape_comes_from_geometry_for_every_class_and_pdflscape_is_not_used() {
+    let (v, d) = vault("geometry", &sprint());
+    for kind in ["thesis", "report"] {
+        let tex = tex_of(&v, kind);
+        // geometry is there (the class's own, or loaded with `pass`, which leaves the layout alone), the page box is
+        // set along with the paper, and the layout of the class comes back
+        assert!(tex.contains("\\IfPackageLoadedTF{geometry}{}{\\usepackage[pass]{geometry}}"), "{tex}");
+        assert!(tex.contains("\\newgeometry") && tex.contains("\\loadgeometry{shale-portrait}") && tex.contains("\\pagewidth=\\paperwidth \\pageheight=\\paperheight"), "{tex}");
+        assert!(!tex.contains("pdflscape") && !tex.contains("{landscape}"), "{tex}");
+        assert!(at(&tex, "\n\\shaleLandscape\n") < at(&tex, "\n\\shalePortrait\n"));
+    }
+    let _ = std::fs::remove_dir_all(d);
 }

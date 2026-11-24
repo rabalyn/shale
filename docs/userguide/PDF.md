@@ -340,7 +340,16 @@ the TeX and checks it:
   The folder is built under another name and renamed when it is complete, so a half-finished install is never
   used. It takes a few minutes. On Linux and macOS the installer needs `perl`; if there is none, the
   page says "install perl first" (for example `sudo apt install perl`) before downloading anything.
-- **Update** brings Shale's TeX Live and its packages up to date (`tlmgr update --self --all`).
+- **Update** brings Shale's TeX Live and its packages up to date (`tlmgr update --self --all`), and
+  then installs the packages Shale needs that your TeX Live lacks.
+- **The managed TeX Live misses: …** appears (in red, with an **Install** button) when the TeX Live
+  Shale installed earlier lacks a package that a later version of Shale needs, for example
+  `geometry` for the landscape pages of a board. **Install** runs `tlmgr install` for exactly those
+  packages, with a progress bar and **Cancel**, and looks for TeX again, so the line disappears. The
+  same line and button are in the LaTeX export dialog. A board that needs a missing package cannot
+  be exported until it is installed; other documents can. When an export fails because such a
+  package is missing, the dialog says so and points to the button. Nothing is downloaded until you
+  press it.
   **Remove…** asks first, naming the folder and its size, and deletes that folder and nothing else.
 - **Download address** (`tex.repository`) is the TeX Live repository the install and update use;
   the default is CTAN's mirror redirector. Only `https://` (and `http://`) addresses are accepted.

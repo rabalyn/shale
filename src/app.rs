@@ -2530,8 +2530,31 @@ impl ShaleApp {
             Some(Ok(e)) => TexStatus::Ready(format!("Using {} (LaTeX kernel {})", crate::pdf::tex::settings_ui::engine_name(e), e.kernel)),
             Some(Err(why)) => TexStatus::Missing(why),
         };
+        // the packages of the list the managed TeX Live lacks, and what a board needs of them (TEX-052)
+        let (managed, missing) = match self.tex.detection.as_ref().map(|det| det.selected(self.cfg.tex.engine)) {
+            Some(Ok(e)) if e.kind == crate::pdf::tex::engine::Kind::Managed => (true, e.missing.clone()),
+            _ => (false, vec![]),
+        };
+        let board = d.book.as_ref().is_some_and(|b| b.board);
+        let installing = self.tex.task.as_ref().filter(|t| t.kind == crate::pdf::tex::settings_ui::TaskKind::Packages).map(|t| t.handle.progress().text());
         let tex = d.tex.as_mut()?;
         tex.status = status;
+        (tex.managed, tex.missing) = (managed, missing);
+        tex.needs = if board { crate::pdf::tex::engine::BOARD_NEEDS.iter().map(|n| n.to_string()).collect() } else { vec![] };
+        if tex.installing.is_some() && installing.is_none() {
+            // the install of the packages ended: the look for TeX is done again, a failure stays in the dialog
+            match self.tex.notice.as_ref() {
+                Some(n) if !n.ok => tex.install_error = Some(n.text.clone()),
+                _ => tex.failure = None,
+            }
+        }
+        tex.installing = installing;
+        if std::mem::take(&mut tex.install_requested) {
+            tex.install_error = None;
+            let names = tex.wanted_packages();
+            self.tex.begin_packages(ctx, &self.cfg.tex, names);
+            tex.installing = self.tex.task.as_ref().filter(|t| t.kind == crate::pdf::tex::settings_ui::TaskKind::Packages).map(|t| t.handle.progress().text());
+        }
         let made = tex.poll()?;
         let saved = self.save_pdf(&d.path, &made.pdf);
         if saved.is_ok() {
@@ -2560,6 +2583,9 @@ impl ShaleApp {
         let v = self.vault.as_ref().ok_or("No vault is open")?;
         let busy = d.busy().clone();
         let tex = d.tex.as_mut().ok_or("This note has no LaTeX choices")?;
+        if let Some(n) = tex.blocked_by().first() {
+            return Err(format!("The managed TeX Live misses the package {n}, which this document needs: press Install, then export"));
+        }
         let (set, kind) = (tex.current_set().ok_or("Choose a template set first: import one in Settings → LaTeX")?, tex.current_kind().ok_or("Choose a kind of document")?);
         let doc = match &d.book {
             // a folder: its book as it is in the vault now, which has the saved notes (BOOK-014)

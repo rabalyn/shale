@@ -566,9 +566,53 @@ pub fn update(env: &Env, handle: &Handle, notify: &dyn Fn()) -> Result<Done, Str
         tlmgr
     })?;
     add_mirror(&mut mirrors, &used);
+    // the packages of the list the installation lacks, such as one that was put on the list after it was made (TEX-053)
+    let lacking = WorkDir::new().map_err(|e| format!("no temporary folder ({e})")).and_then(|w| engine::missing_in(&engine, w.path())).unwrap_or_default();
+    if !lacking.is_empty() {
+        let used = install_on_mirror(&engine, handle, notify, repo, mirror_of(&mirrors), &lacking)?;
+        add_mirror(&mut mirrors, &used);
+    }
     // a new TeX Live may have new fonts and a new kernel: the database again, and the test document
     let warning = fonts_after(Ok(engine), handle, notify, repo, &mut mirrors, "updated");
     Ok(Done { warning, mirrors })
+}
+
+/// The mirror the last step used.
+fn mirror_of(mirrors: &[String]) -> String {
+    mirrors.last().cloned().unwrap_or_default()
+}
+
+/// `tlmgr install` of these packages of the list on `mirror` (and on fresh ones as in [`tlmgr_on_mirror`]);
+/// the mirror that worked.
+fn install_on_mirror(engine: &Engine, handle: &Handle, notify: &dyn Fn(), repo: &str, mirror: String, names: &[String]) -> Result<String, String> {
+    tlmgr_on_mirror(handle, notify, Stage::Packages, repo, mirror, |m| {
+        let mut tlmgr = engine.command(tlmgr_name());
+        tlmgr.args(["--repository", m, "install"]).args(names);
+        tlmgr
+    })
+}
+
+/// Install the packages of the list that the managed TeX Live lacks (TEX-052): `tlmgr install` of
+/// exactly these names, from one mirror, the way the install does it. Only names of
+/// `assets/tex/packages.txt` are taken, so that nothing else can be put on a command line.
+pub fn install_missing(env: &Env, names: &[String], handle: &Handle, notify: &dyn Fn()) -> Result<Done, String> {
+    let known = packages();
+    if names.is_empty() {
+        return Err("there is no package to install".into());
+    }
+    if let Some(bad) = names.iter().find(|n| !known.contains(&n.as_str())) {
+        return Err(format!("{bad} is not a package of Shale's list"));
+    }
+    let repo = check_repository(&env.repository)?;
+    let engine = managed_engine(&managed_root(&env.data))?;
+    check_perl()?;
+    handle.stage(Stage::Packages);
+    notify();
+    let mirror = resolve_mirror(handle, repo)?;
+    let used = install_on_mirror(&engine, handle, notify, repo, mirror.clone(), names)?;
+    let mut mirrors = vec![mirror];
+    add_mirror(&mut mirrors, &used);
+    Ok(Done { warning: None, mirrors })
 }
 
 // ---------------------------------------------------------------- remove
