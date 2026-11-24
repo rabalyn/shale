@@ -13,7 +13,7 @@ and files they show.
 
 # Nothing is published unless you say so
 
-Publishing is **off** for every vault. A vault that has not turned it on, or that has no chosen note, writes a site with one **hello-world page** (it says it was published with Shale and that no notes are chosen yet, with the time, and nothing of your vault), so you can see that publishing and your server's build work. You turn it on, choose
+Publishing is **off** for every vault. A vault that has not turned it on, or that has no chosen note, writes a site with one **hello-world page** (it says it was published with Shale and that no notes are chosen yet, with the time, how to publish notes and a link to this note, and nothing of your vault), so you can see that publishing and your server's build work. You turn it on, choose
 the notes and say where to publish in **Settings → Publishing** (below). All of it is the vault's own setting in
 `<vault>/.shale/settings.json` (it travels with the vault, [[Vault settings]]), in a `publish` section, which you can
 also edit by hand:

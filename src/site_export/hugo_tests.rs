@@ -292,5 +292,6 @@ fn site_001_the_hello_world_page_is_the_index_of_a_site_without_a_note() {
     let (public, _) = build(&f);
     let index = html(&public, "");
     assert!(index.contains("Hello from Shale") && index.contains("This page was published with Shale.") && index.contains("No notes are chosen for publishing yet."), "{index}");
+    assert!(index.contains("open Settings → Publishing in Shale") && index.contains(&format!("href=\"{}\"", super::plan::HELLO_GUIDE)), "{index}");
     assert!(!index.contains("Plan") && !index.contains("Folders") && !index.contains("Recently changed"), "{index}");
 }

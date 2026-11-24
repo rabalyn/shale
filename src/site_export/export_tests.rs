@@ -35,6 +35,11 @@ fn site_001_a_vault_with_no_chosen_note_writes_the_hello_world_page_and_nothing_
     assert!(has(&e, "hugo.toml") && has(&e, "data/backlinks.json"), "still a complete site");
     let page = text(&e, "content/_index.md");
     assert!(page.contains("Hello from Shale") && page.contains("published with Shale") && page.contains("No notes are chosen for publishing yet.") && page.contains(" UTC."), "{page}");
+    assert!(page.contains("open Settings → Publishing in Shale") && page.contains("`publish: true` in a note") && page.contains(&format!("]({})", super::plan::HELLO_GUIDE)), "{page}");
+    // the link names a note of the guide that exists
+    let file = super::plan::HELLO_GUIDE.rsplit('/').next().unwrap().replace("%20", " ");
+    assert!(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/userguide").join(&file).is_file(), "{file} is not in the user guide");
+    assert!(super::plan::HELLO_GUIDE.starts_with("https://github.com/rabalyn/shale/blob/main/docs/userguide/") && !super::plan::HELLO_GUIDE.contains(' '));
     // nothing of the vault, its notes or this computer is in any file of the tree (SITE-010)
     let all = everything(&e);
     for secret in ["Plan", "Nothing is tagged", f.root.to_str().unwrap(), &crate::gitsync::host_name(), "shale-site-s001"] {
