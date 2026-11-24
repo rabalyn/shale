@@ -1,10 +1,16 @@
 # The Hugo site of a Shale vault (SITE-047, SITE-070): written by `shale export-site`, built with
 # `hugo` and then `pagefind --site public`. Do not edit: the next export writes it again.
-baseURL = "/"
 locale = "en"
 theme = "shale"
-# a page for every note, section and tag; no feed or sitemap, whose URLs need a real base URL
-disableKinds = ["RSS", "sitemap", "robotsTXT"]
+# `baseURL` and `disableKinds` are written before this file by `site_export/theme.rs` (SITE-082):
+# a page for every note, section and tag; no feed; a sitemap.xml and a robots.txt only when the
+# vault has an address of the site (SITE-081)
+
+# the site map page (SITE-080) is a second output of the home page too: /sitemap.html
+[outputFormats.SiteTree]
+  mediaType = "text/html"
+  baseName = "sitemap"
+  notAlternative = true
 
 # the graph page (SITE-040) is a second output of the home page: /graph.html, so that no note's URL can clash with it
 [outputFormats.Graph]
@@ -12,7 +18,7 @@ disableKinds = ["RSS", "sitemap", "robotsTXT"]
   baseName = "graph"
   notAlternative = true
 [outputs]
-  home = ["HTML", "Graph"]
+  home = ["HTML", "Graph", "SiteTree"]
 
 # Hugo takes the Markdown settings of the site, not of a theme (a theme's `markup` is ignored).
 [markup]

@@ -117,6 +117,10 @@ location / {
 }
 ```
 
+A site served below a path, such as `https://host.example/wiki/`, needs the **Address of the site** in Settings → Publishing
+([[Publishing a vault]]) set to that address, so that its links go below the path; the same address gives the site its
+`sitemap.xml`.
+
 The search runs in the visitor's browser over files in the same folder, so the password protects the search too.
 Keep the publish repository **private** on your server as well: whoever can read it can read the notes in it, with or
 without the password of the site.

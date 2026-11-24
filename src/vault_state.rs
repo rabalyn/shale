@@ -228,6 +228,9 @@ pub struct PublishSettings {
     /// The publish remote (SITE-064) and its branch; stored, nothing pushes yet.
     pub url: String,
     pub branch: String,
+    /// The public address of the built site (SITE-080, SITE-081): with it the site has a
+    /// `sitemap.xml` and a `robots.txt`; empty for none.
+    pub site_address: String,
     #[serde(flatten)]
     pub other: Map<String, Value>,
 }

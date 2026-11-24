@@ -1,0 +1,5 @@
+{{- /* sitemap.xml (SITE-081, SITE-082): the address of every published page, nothing else (no tag pages, no lastmod). Used only when the site has an address. */ -}}
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+{{ range where site.Pages "Kind" "in" (slice "home" "section" "page") }}  <url><loc>{{ .Permalink | htmlEscape }}</loc></url>
+{{ end }}</urlset>
