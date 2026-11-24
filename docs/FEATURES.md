@@ -1382,13 +1382,16 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   chosen is written, not its text, name, tags, links or backlinks; a link to one is its text. Hidden files,
   conflict copies, sync debris and mail originals are never written, and a picture or file is written only when a
   chosen note embeds or links it.
-- **The pages** (SITE-017 to SITE-043): wiki and Markdown links become links between the pages, a heading link lands on
+- **The pages** (SITE-017 to SITE-044): wiki and Markdown links become links between the pages, a heading link lands on
   the anchor Hugo makes; the title is the title line, tags are Hugo tags and the properties of the note are page
   parameters. Highlights, colours, `<sub>`/`<sup>`/`<u>` and aligned blocks stay, math is typeset when the site is
   built (no script in the browser), tables, footnotes, task lists and code blocks show as in the editor, and a
-  picture keeps its width and alt text. Audio, video and PDFs are a link to the file; a file outside the vault is
+  picture keeps its width and alt text. Audio, video and PDFs show a player (with a link to the file inside); a drawing (`.excalidraw`, `.excalidraw.md`, `.canvas`) that a note embeds is drawn to an SVG picture, its links to published notes working; a file outside the vault is
   copied when it resolves on this computer, else a placeholder names it. Folders become sections (a folder note is
   the section's text), every page has a backlinks panel, and the index page lists the sections and the latest notes.
+  Notes of type `email`, `event`, `post` and `person` show a header with their fields (as written in the note, nothing
+  else); any other type is the plain page. The site has a graph page (`/graph.html`, SITE-040) of the published notes and
+  their links, laid out in the browser by a small script of the theme; nothing is loaded from another site.
 - **Search and theme** (SITE-046 to SITE-048): the Shale theme is part of the tree, so the server needs only `hugo` and
   `pagefind`; the pages carry a search box for Pagefind that indexes the notes and nothing else (a test runs Pagefind on a
   built site and looks for a published and an unpublished word). Hugo 0.158 or newer.

@@ -23,3 +23,23 @@ math[display="block"] { display: block; margin: 1em 0; overflow-x: auto; }
 .backlinks { margin-top: 48px; padding: 4px 18px; background: var(--panel); border-radius: 8px; }
 .backlinks h2 { font-size: 1em; color: var(--muted); }
 .backlinks ul { padding-left: 1.2em; }
+.site-link { color: var(--muted); text-decoration: none; }
+.muted { color: var(--muted); }
+audio.player { display: block; width: 100%; max-width: 100%; margin: 8px 0; }
+video.player { display: block; max-width: 100%; height: auto; margin: 8px 0; }
+object.pdf { display: block; width: 100%; max-width: 100%; aspect-ratio: 3 / 4; margin: 8px 0; border: 1px solid var(--line); }
+object.drawing { display: block; max-width: 100%; height: auto; margin: 8px 0; background: #fff; border-radius: 6px; }
+.graph { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.graph-svg { display: block; width: 100%; height: auto; max-height: 75vh; touch-action: none; cursor: grab; }
+.graph-link { stroke: var(--line); stroke-width: 1; }
+.graph-link.near { stroke: var(--link); stroke-width: 1.8; }
+.graph-node circle { fill: var(--link); }
+.graph-node text { fill: var(--fg); font-size: 11px; pointer-events: none; }
+.graph-quiet .graph-node text { display: none; }
+.graph-quiet .graph-node:hover text { display: inline; }
+.note-header { margin: 0 0 24px; padding: 10px 16px; background: var(--panel); border-radius: 8px; border-left: 4px solid var(--link); }
+.note-header dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; margin: 0; }
+.note-header dt { color: var(--muted); font-size: 0.85em; }
+.note-header dd { margin: 0; overflow-wrap: anywhere; }
+.note-header .kind { color: var(--muted); font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 4px; }
+.note-header ul { margin: 0; padding-left: 1.1em; }

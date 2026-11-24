@@ -477,18 +477,22 @@ fn site_033_a_picture_embed_shows_its_picture_with_its_width_and_alias() {
     assert!(matches!(&e.files.iter().find(|f| f.path == "static/media/files/x.png").unwrap().content, Content::Copy(p) if p.ends_with("x.png")));
 }
 
-// spec: SITE-035
+// spec: SITE-035, SITE-034
 #[test]
-fn site_035_audio_video_and_pdf_embeds_are_a_link_to_the_file_in_phase_1() {
-    let f = Fixture::with("s035", "\"all_notes\": true", &[("N.md", "![[song.mp3]] ![[clip.mp4|The clip]] ![[doc.pdf]] ![](doc.pdf)\n")]);
-    for n in ["song.mp3", "clip.mp4", "doc.pdf"] {
+fn site_035_audio_video_and_pdf_embeds_show_a_player_and_a_link_is_a_link() {
+    let f = Fixture::with("s035", "\"all_notes\": true", &[("N.md", "![[song.mp3]] ![[clip.mp4|The clip|480]] ![[doc.pdf]] ![](doc.pdf) ![[doc.pdf|300]] ![[data.csv]] [[song.mp3]] [spoken](clip.mp4)\n")]);
+    for n in ["song.mp3", "clip.mp4", "doc.pdf", "data.csv"] {
         f.bytes(n, b"data");
     }
     let e = f.export();
     let b = body(&page(&e, "n.md"));
-    assert_eq!(b.trim(), "[song.mp3](/media/files/song.mp3) [The clip](/media/files/clip.mp4) [doc.pdf](/media/files/doc.pdf) [doc.pdf](/media/files/doc.pdf)");
-    assert_eq!(e.media.len(), 3);
-    assert_eq!(e.links, 4);
+    assert_eq!(
+        b.trim(),
+        "![](/media/files/song.mp3 \"shale:player=audio\") ![The clip](/media/files/clip.mp4 \"shale:player=video;width=480\") ![](/media/files/doc.pdf \"shale:player=pdf\") ![](/media/files/doc.pdf \"shale:player=pdf\") ![](/media/files/doc.pdf \"shale:player=pdf;width=300\") [data.csv](/media/files/data.csv) [song.mp3](/media/files/song.mp3) [spoken](/media/files/clip.mp4)",
+        "a player for a sound, a video and a PDF, with the width of SITE-034; any other file and any plain link is a link"
+    );
+    assert_eq!(e.media, ["static/media/files/clip.mp4", "static/media/files/data.csv", "static/media/files/doc.pdf", "static/media/files/song.mp3"], "only the files a note names are written (SITE-006), once each");
+    assert_eq!(e.links, 3, "a player is not a link");
 }
 
 // spec: SITE-036
@@ -509,7 +513,7 @@ fn site_036_off_vault_media_are_copied_when_they_resolve_here_and_a_placeholder_
     let pic = e.media.iter().find(|m| m.ends_with("/pic.png")).expect("the picture is copied");
     assert!(pic.starts_with("static/media/outside/") && !pic.contains("library"), "a stable path that says nothing of this computer: {pic}");
     assert!(b.contains(&format!("![]({} \"shale:width=200\")", pic.replacen("static", "", 1))), "{b}");
-    assert!(b.contains("](/media/outside/") && b.contains("song.mp3]"), "{b}");
+    assert!(b.contains("/song.mp3 \"shale:player=audio\")"), "{b}");
     assert_eq!(e.media.len(), 3, "{:?}", e.media);
     assert!(e.media.iter().any(|m| m.ends_with("/My Own.png")), "a file link that resolves here is copied too: {:?}", e.media);
     assert_eq!(b.matches("*(media not available: ").count(), 3, "{b}");

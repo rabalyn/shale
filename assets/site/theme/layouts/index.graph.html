@@ -1,0 +1,8 @@
+{{- /* The graph page (SITE-040): /graph.html, from data/graph.json (the published notes only). It holds its data itself and loads nothing from another site. */ -}}
+{{ define "main" }}
+<h1>Graph</h1>
+<p class="muted">The notes of this site and the links between them. Click a dot to open the note.</p>
+<div class="graph" id="graph" data-base="{{ "/" | relURL }}" data-graph="{{ hugo.Data.graph | jsonify }}"></div>
+<noscript><ul class="page-list">{{ range hugo.Data.graph.nodes }}<li><a href="{{ .url | relURL }}">{{ .title }}</a></li>{{ end }}</ul></noscript>
+<script src="{{ "shale-graph.js" | relURL }}"></script>
+{{ end }}

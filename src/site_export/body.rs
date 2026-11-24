@@ -6,6 +6,8 @@
 
 use super::anchor::{self, Anchor};
 use super::slug::{encode_url, Layout};
+use super::svg;
+use crate::drawing::{self, ElementLink, Scene};
 use crate::markdown::{self, LinkSpan};
 use crate::media::outside::{self, Outside};
 use crate::media::{media_kind, Kind};
@@ -29,6 +31,8 @@ pub struct State {
     pub vault_media: BTreeSet<PathBuf>,
     /// off-vault files that resolve on this device (SITE-036): their path below `static/` and the file
     pub outside_media: BTreeMap<String, PathBuf>,
+    /// the drawings that pages embed (SITE-037): the drawing in the vault and its SVG picture
+    pub drawings: BTreeMap<PathBuf, (String, (u32, u32))>,
     pub warnings: Vec<String>,
     /// links written as links, and links written as plain text
     pub links: usize,
@@ -41,6 +45,11 @@ pub struct State {
 /// Where a vault file is copied to, below `static/`, and its URL (SITE-036 says `stable path`).
 pub fn vault_media_path(rel: &Path) -> String {
     format!("media/files/{}", crate::vault::rel_to_string(rel))
+}
+
+/// Where the picture of a drawing is written, below `static/` (SITE-037): the drawing's name and `.svg`.
+pub fn drawing_path(rel: &Path) -> String {
+    format!("media/drawings/{}.svg", crate::vault::rel_to_string(rel))
 }
 
 /// Where an off-vault file is copied to: below a folder named by a hash of the link, so the path
@@ -71,8 +80,10 @@ pub fn is_conflict_copy(rel: &Path) -> bool {
 enum Target {
     /// a published note: its URL
     Page { note: PathBuf, url: String },
-    /// a file that is written: its URL, whether it is a picture, its name
-    File { url: String, picture: bool, name: String },
+    /// a file that is written: its URL, what kind of media it is (none: some other file), its name
+    File { url: String, kind: Option<Kind>, name: String },
+    /// a drawing that is written as an SVG picture (SITE-037): its URL, its size and its name
+    Drawing { url: String, size: (u32, u32) },
     /// nothing that is written: the link becomes its text
     Plain,
     /// an off-vault file that does not resolve here (SITE-036): the name of the placeholder
@@ -95,12 +106,13 @@ fn resolve_target(env: &Env, st: &mut State, from: &Path, l: &LinkSpan) -> Targe
             Some(FileKind::Note) => env.layout.notes.get(&rel).map_or(Target::Plain, |p| Target::Page { note: rel, url: p.url.clone() }),
             Some(FileKind::Other) if file_allowed(&rel) => {
                 let url = format!("/{}", encode_url(&vault_media_path(&rel)));
-                let picture = media_kind(&rel) == Some(Kind::Image);
+                let kind = media_kind(&rel);
                 let name = rel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                 st.vault_media.insert(rel);
-                Target::File { url, picture, name }
+                Target::File { url, kind, name }
             }
-            // a drawing is a picture in phase 2 (SITE-037); until then it is its text
+            // an embedded drawing is a picture (SITE-037); a link to one is its text
+            Some(FileKind::Drawing) if l.embed && file_allowed(&rel) => drawing_target(env, st, from, &rel),
             _ => Target::Plain,
         },
         Shown::Outside(Outside::Found { abs, kind }) => {
@@ -108,7 +120,7 @@ fn resolve_target(env: &Env, st: &mut State, from: &Path, l: &LinkSpan) -> Targe
             let name = abs.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let url = format!("/{}", encode_url(&path));
             st.outside_media.insert(path, abs);
-            Target::File { url, picture: kind == Kind::Image, name }
+            Target::File { url, kind: Some(kind), name }
         }
         Shown::Outside(other) => {
             st.warnings.push(format!("{}: {} is not published: {}", crate::vault::rel_to_string(from), l.target, other.notice().unwrap_or_default()));
@@ -116,6 +128,48 @@ fn resolve_target(env: &Env, st: &mut State, from: &Path, l: &LinkSpan) -> Targe
         }
         _ => Target::Plain,
     }
+}
+
+/// The address a link of a drawing gets in its picture (SITE-037, SITE-007): a published note, with
+/// its heading when it has one, or a web address; none for a note that is not published, does
+/// not exist or is ambiguous, which is then only its text.
+fn drawing_href(env: &Env, drawing: &Path, link: &ElementLink) -> Option<String> {
+    match link {
+        ElementLink::Url(u) => ["http://", "https://", "mailto:"].iter().any(|p| u.to_ascii_lowercase().starts_with(p)).then(|| u.clone()),
+        ElementLink::Note { target, heading } => {
+            let note = env.vault.resolve(target, Some(drawing)).filter(|_| !target.is_empty() && env.vault.ambiguity(target, Some(drawing)).is_none())?;
+            let url = env.layout.notes.get(&note)?.url.clone();
+            let id = heading.as_deref().and_then(|h| anchor::id_in(&anchor::anchors(&env.vault.notes.get(&note)?.text), h));
+            Some(id.map_or(url.clone(), |id| format!("{url}#{}", encode_url(&id))))
+        }
+    }
+}
+
+/// The picture of the drawing `rel`, embedded by the note `from` (SITE-037): drawn once, written
+/// below `static/media/drawings/`. A drawing that cannot be read or is empty is a placeholder and a warning.
+fn drawing_target(env: &Env, st: &mut State, from: &Path, rel: &Path) -> Target {
+    let name = rel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    if !st.drawings.contains_key(rel) {
+        let drawn = Scene::read_file(&env.vault.abs(rel)).and_then(|scene| {
+            let size = svg::size(&scene).ok_or("it is empty")?;
+            let pictures = drawing::pictures::images(&scene, env.vault, rel);
+            let svg = svg::scene_svg(&scene, &pictures, &|link| drawing_href(env, rel, link)).ok_or("it is empty")?;
+            Ok((svg, size))
+        });
+        match drawn {
+            Ok(d) => {
+                st.drawings.insert(rel.to_path_buf(), d);
+            }
+            Err(why) => {
+                let w = format!("{}: the drawing {} is not published: {why}", crate::vault::rel_to_string(from), name);
+                if !st.warnings.contains(&w) {
+                    st.warnings.push(w);
+                }
+                return Target::Missing { name };
+            }
+        }
+    }
+    Target::Drawing { url: format!("/{}", encode_url(&drawing_path(rel))), size: st.drawings[rel].1 }
 }
 
 /// `s` as literal text in Markdown (and nothing Hugo would take for math or a shortcode).
@@ -151,6 +205,16 @@ fn page_text(l: &LinkSpan, title: &str) -> String {
     }
 }
 
+/// An embed for the theme's render hook (SITE-034, SITE-035, SITE-037): the title tells it how the
+/// file is shown (`player=audio|video|pdf`, `drawing=WxH`) and how wide (`width=N`), separated by `;`.
+fn embed(alt: &str, url: &str, parts: &[String]) -> String {
+    if parts.is_empty() {
+        format!("![{}]({url})", escape(alt))
+    } else {
+        format!("![{}]({url} \"shale:{}\")", escape(alt), parts.join(";"))
+    }
+}
+
 /// The Markdown that stands for one link.
 fn render_link(env: &Env, st: &mut State, from: &Path, l: &LinkSpan) -> String {
     let (alt, width) = if l.embed { embed_parts(l) } else { (String::new(), None) };
@@ -169,10 +233,20 @@ fn render_link(env: &Env, st: &mut State, from: &Path, l: &LinkSpan) -> String {
             let text = if l.embed && !alt.is_empty() { alt } else { page_text(l, &title) };
             format!("[{}]({dest})", label(&text))
         }
-        Target::File { url, picture: true, .. } if l.embed => match width {
-            Some(w) => format!("![{}]({url} \"shale:width={w}\")", escape(&alt)),
-            None => format!("![{}]({url})", escape(&alt)),
-        },
+        Target::File { url, kind: Some(kind), .. } if l.embed => {
+            let player = match kind {
+                Kind::Image => None,
+                Kind::Audio => Some("audio"),
+                Kind::Video => Some("video"),
+                Kind::Pdf => Some("pdf"),
+            };
+            let parts: Vec<String> = player.map(|p| format!("player={p}")).into_iter().chain(width.map(|w| format!("width={w}"))).collect();
+            embed(&alt, &url, &parts)
+        }
+        Target::Drawing { url, size: (w, h) } => {
+            let parts: Vec<String> = [format!("drawing={w}x{h}")].into_iter().chain(width.map(|w| format!("width={w}"))).collect();
+            embed(&alt, &url, &parts)
+        }
         Target::File { url, name, .. } => {
             st.links += 1;
             let text = if l.embed {

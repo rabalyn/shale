@@ -1,4 +1,29 @@
+{{- /* The embeds of a note (SITE-033 to SITE-037). The exporter's title says how the file is shown: `shale:` and `;`-separated `width=N`, `player=audio|video|pdf`, `drawing=WxH`. */ -}}
 {{- $d := .Destination -}}{{- if and (strings.HasPrefix $d "/") (not (strings.HasPrefix $d "//")) }}{{ $d = relURL $d }}{{ end -}}
-{{- $title := .Title -}}{{- $w := 0 -}}
-{{- if strings.HasPrefix $title "shale:width=" }}{{ $w = int (strings.TrimPrefix "shale:width=" $title) }}{{ $title = "" }}{{ end -}}
-<img src="{{ $d | safeURL }}" alt="{{ .PlainText }}"{{ with $w }} width="{{ . }}"{{ end }}{{ with $title }} title="{{ . }}"{{ end }} loading="lazy">{{- /* no space after the picture */ -}}
+{{- $title := .Title -}}{{- $w := 0 -}}{{- $player := "" -}}{{- $drawing := "" -}}
+{{- if strings.HasPrefix $title "shale:" }}
+{{- range split (strings.TrimPrefix "shale:" $title) ";" }}
+{{- $kv := split . "=" }}
+{{- if eq (len $kv) 2 }}
+{{- if eq (index $kv 0) "width" }}{{ $w = int (index $kv 1) }}{{ end }}
+{{- if eq (index $kv 0) "player" }}{{ $player = index $kv 1 }}{{ end }}
+{{- if eq (index $kv 0) "drawing" }}{{ $drawing = index $kv 1 }}{{ end }}
+{{- end }}
+{{- end }}
+{{- $title = "" }}
+{{- end -}}
+{{- $label := .PlainText -}}{{- if not $label }}{{ $label = path.Base (urls.Parse .Destination).Path }}{{ end -}}
+{{- if eq $player "audio" -}}
+<audio class="player" controls preload="none" src="{{ $d | safeURL }}"{{ with $w }} style="width: {{ . }}px"{{ end }}><a href="{{ $d | safeURL }}">{{ $label }}</a></audio>
+{{- else if eq $player "video" -}}
+<video class="player" controls preload="metadata" src="{{ $d | safeURL }}"{{ with $w }} width="{{ . }}"{{ end }}><a href="{{ $d | safeURL }}">{{ $label }}</a></video>
+{{- else if eq $player "pdf" -}}
+<object class="player pdf" data="{{ $d | safeURL }}" type="application/pdf"{{ with $w }} style="width: {{ . }}px"{{ end }}><a href="{{ $d | safeURL }}" download>{{ $label }}</a></object>
+{{- else if $drawing -}}
+{{- $size := split $drawing "x" -}}{{- $dw := int (index $size 0) -}}{{- $dh := int (index $size 1) -}}
+{{- $shown := $w | default $dw -}}
+<object class="drawing" data="{{ $d | safeURL }}" type="image/svg+xml" width="{{ $shown }}" height="{{ div (mul $shown $dh) (cond (gt $dw 0) $dw 1) }}"><img src="{{ $d | safeURL }}" alt="{{ .PlainText }}" loading="lazy"></object>
+{{- else -}}
+<img src="{{ $d | safeURL }}" alt="{{ .PlainText }}"{{ with $w }} width="{{ . }}"{{ end }}{{ with $title }} title="{{ . }}"{{ end }} loading="lazy">
+{{- end -}}
+{{- /* no space after the embed */ -}}

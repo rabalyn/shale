@@ -1,7 +1,10 @@
 {{ define "main" }}
-<article data-pagefind-body{{ with .Params.shale }}{{ with .type }} data-type="{{ . }}"{{ end }}{{ end }}>
+{{- /* the type of the note (`type:` is `shale.type`, SITE-024): a note of a type with a layout gets its header (SITE-044), any other the plain page */ -}}
+{{- $type := "" }}{{ $raw := "" }}{{ with .Params.shale }}{{ with .type }}{{ $raw = . }}{{ $type = lower (printf "%v" .) }}{{ end }}{{ end -}}
+<article data-pagefind-body{{ with $raw }} data-type="{{ . }}"{{ end }}>
 <h1>{{ .Title }}</h1>
 {{ with .GetTerms "tags" }}<p class="tags">{{ range . }}<a class="tag" href="{{ .RelPermalink }}">#{{ .LinkTitle }}</a> {{ end }}</p>{{ end }}
+{{ if in (slice "email" "event" "post" "social-post" "person") $type }}{{ partial "type-header.html" (dict "page" . "type" $type) }}{{ end }}
 <div class="content">{{ .Content }}</div>
 </article>
 {{ partial "backlinks.html" . }}
