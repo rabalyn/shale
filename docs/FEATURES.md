@@ -1322,6 +1322,32 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
   ![The Updates tab of Settings](userguide/z_media/screenshots/settings-updates.png)
 
+## A vault as a website (Hugo)
+
+- **`shale export-site <vault> <out>`** (#630, SITE-011 to SITE-016) writes the notes a vault chooses to publish as a
+  complete [Hugo](https://gohugo.io) site tree (content, data files, config and the Shale theme) and exits without a
+  window; `--dry-run` lists every note and media file it would write and writes nothing. The tree is made next to
+  `<out>` and moved in when it is whole, only the files an earlier export wrote (`.shale-export.json`) are replaced or
+  removed, the vault is never changed, and the last line says how many notes, media files and links were written and
+  how many links became plain text. `hugo` and then `pagefind --site public` turn the tree into the site. Publishing
+  from the app (a Publish button, a push to a server) and the Settings page for the rules are still to come.
+- **Opt-in and private by default** (SITE-001 to SITE-010, SITE-051 to SITE-057): a vault publishes nothing until
+  `publish.enabled` is on in its `.shale/settings.json`. The rules choose notes by folder, by tag (a nested tag
+  matches its parent) or all notes; an exclude rule wins; "all notes" leaves out mail, events, posts and people unless
+  their type is ticked; a note's own `publish: true` or `false` wins over every rule. Nothing of a note that is not
+  chosen is written, not its text, name, tags, links or backlinks; a link to one is its text. Hidden files,
+  conflict copies, sync debris and mail originals are never written, and a picture or file is written only when a
+  chosen note embeds or links it.
+- **The pages** (SITE-017 to SITE-043): wiki and Markdown links become links between the pages, a heading link lands on
+  the anchor Hugo makes; the title is the title line, tags are Hugo tags and the properties of the note are page
+  parameters. Highlights, colours, `<sub>`/`<sup>`/`<u>` and aligned blocks stay, math is typeset when the site is
+  built (no script in the browser), tables, footnotes, task lists and code blocks show as in the editor, and a
+  picture keeps its width and alt text. Audio, video and PDFs are a link to the file; a file outside the vault is
+  copied when it resolves on this computer, else a placeholder names it. Folders become sections (a folder note is
+  the section's text), every page has a backlinks panel, and the index page lists the sections and the latest notes.
+- **Search and theme** (SITE-046 to SITE-048): the Shale theme is part of the tree, so the server needs only `hugo` and
+  `pagefind`; the pages carry a search box for Pagefind that indexes the notes and nothing else. Hugo 0.158 or newer.
+
 ## Git sync
 
 - Needs `git`; without it Shale can install one (see the next point). **Turn on sync** (Settings → Sync) is a short wizard that

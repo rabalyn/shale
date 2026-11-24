@@ -1,0 +1,9 @@
+{{ define "main" }}
+<article data-pagefind-body>
+<h1>{{ .Title }}</h1>
+<div class="content">{{ .Content }}</div>
+</article>
+{{ with .Sections.ByTitle }}<h2>Folders</h2><ul class="page-list">{{ range . }}<li><a href="{{ .RelPermalink }}">{{ .Title }}</a></li>{{ end }}</ul>{{ end }}
+{{ with first 10 site.RegularPages.ByLastmod.Reverse }}<h2>Recently changed</h2><ul class="page-list">{{ range . }}<li><a href="{{ .RelPermalink }}">{{ .Title }}</a>{{ if not .Lastmod.IsZero }} <span class="date">{{ .Lastmod.Format "2006-01-02" }}</span>{{ end }}</li>{{ end }}</ul>{{ end }}
+{{ partial "backlinks.html" . }}
+{{ end }}
