@@ -7,21 +7,29 @@
 # Windows, BUILD-039).
 #
 #   scripts/install-pagefind.sh [folder]     the folder for the program, /usr/local/bin if left out
+#   scripts/install-pagefind.sh --print-url  only prints the download URL (SHALE_OS and SHALE_ARCH
+#                                            override `uname -s` and `uname -m`, for the test)
 #
-# The asset is chosen by system and CPU: Linux x86_64 (musl), macOS arm64 and x86_64, Windows
+# The asset is chosen by system and CPU: Linux x86_64 and aarch64 (musl; the CI runner's job
+# containers are arm64, #683), macOS arm64 and x86_64, Windows
 # (Git Bash) x86_64, which gives `pagefind.exe`. Without Pagefind the tests that run it skip with a
 # printed note (BUILD-018).
 set -eu
 
 VERSION=1.6.0
-dest=${1:-/usr/local/bin}
+os=${SHALE_OS:-$(uname -s)}
+arch=${SHALE_ARCH:-$(uname -m)}
 base="https://github.com/Pagefind/pagefind/releases/download/v${VERSION}"
 exe=pagefind
 
-case "$(uname -s)-$(uname -m)" in
-  Linux-x86_64)
+case "$os-$arch" in
+  Linux-x86_64 | Linux-amd64)
     target=x86_64-unknown-linux-musl
     sha256=004d40c9a644c995dadc42b8031196c6f17e7a6dacf9a6c15c63286dd6ead5f2
+    ;;
+  Linux-aarch64 | Linux-arm64)
+    target=aarch64-unknown-linux-musl
+    sha256=ad286f25e3109a2c6c740bb46998f75e1eae93df41f64c4699f0c2bc8db101ce
     ;;
   Darwin-arm64)
     target=aarch64-apple-darwin
@@ -37,11 +45,16 @@ case "$(uname -s)-$(uname -m)" in
     exe=pagefind.exe
     ;;
   *)
-    echo "No Pagefind release is known for $(uname -s) $(uname -m)." >&2
+    echo "No Pagefind release is known for $os $arch." >&2
     exit 1
     ;;
 esac
 name="pagefind-v${VERSION}-${target}.tar.gz"
+if [ "${1:-}" = "--print-url" ]; then
+  echo "$base/$name"
+  exit 0
+fi
+dest=${1:-/usr/local/bin}
 
 # macOS has no sha256sum
 if command -v sha256sum >/dev/null 2>&1; then

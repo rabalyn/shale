@@ -293,14 +293,14 @@ fn build_039_main_check_installs_the_pinned_hugo_and_pagefind_on_macos_and_windo
     assert!(!mc.contains("0.170") && !mc.contains("1.6.0"), "the versions live in the scripts only");
     let hugo = &scripts[0];
     assert!(hugo.contains("VERSION=0.170.1") && scripts[1].contains("VERSION=1.6.0"));
-    for asset in ["linux-amd64.tar.gz", "darwin-universal.pkg", "windows-amd64.zip"] {
+    for asset in ["linux-amd64.tar.gz", "linux-arm64.tar.gz", "darwin-universal.pkg", "windows-amd64.zip"] {
         assert!(hugo.contains(asset), "install-hugo.sh: {asset}");
     }
-    for target in ["x86_64-unknown-linux-musl", "aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-pc-windows-msvc"] {
+    for target in ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl", "aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-pc-windows-msvc"] {
         assert!(scripts[1].contains(target), "install-pagefind.sh: {target}");
     }
-    assert_eq!(hugo.matches("sha256=").count(), 3, "a pinned hash per Hugo asset");
-    assert_eq!(scripts[1].matches("sha256=").count(), 4, "a pinned hash per Pagefind asset");
+    assert_eq!(hugo.matches("sha256=").count(), 4, "a pinned hash per Hugo asset");
+    assert_eq!(scripts[1].matches("sha256=").count(), 5, "a pinned hash per Pagefind asset");
     for l in scripts.iter().flat_map(|s| s.lines()).filter(|l| l.trim_start().starts_with("sha256=")) {
         let h = l.trim_start().trim_start_matches("sha256=");
         assert!(h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit()), "not a SHA-256: {l}");
