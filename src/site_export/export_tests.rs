@@ -535,7 +535,7 @@ fn site_036_off_vault_media_are_copied_when_they_resolve_here_and_a_placeholder_
     let own = f.root.join("elsewhere");
     std::fs::create_dir_all(&own).unwrap();
     std::fs::write(own.join("My Own.png"), b"a file link").unwrap();
-    let n = std::fs::read_to_string(f.dir.join("N.md")).unwrap().replace("FILE_LINK", &format!("file://{}", own.join("My Own.png").display()));
+    let n = std::fs::read_to_string(f.dir.join("N.md")).unwrap().replace("FILE_LINK", &crate::media::testdata::file_address(&own.join("My Own.png")));
     f.file("N.md", &n);
     let lib = f.root.join("library");
     std::fs::create_dir_all(lib.join("a")).unwrap();

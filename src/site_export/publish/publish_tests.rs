@@ -128,7 +128,10 @@ fn site_064_the_address_follows_the_rules_of_git_sync_and_a_password_in_it_is_re
     let s = |url: &str, branch: &str| PublishSettings { url: url.into(), branch: branch.into(), ..Default::default() };
     assert_eq!(target(&s("https://git.example.org/me/site.git", "")).unwrap(), ("https://git.example.org/me/site.git".into(), "main".into()));
     assert_eq!(target(&s("git@example.org:me/site.git", " pages ")).unwrap().1, "pages");
-    assert_eq!(target(&s("/srv/git/site.git", "main")).unwrap().0, "/srv/git/site.git");
+    // a folder path is absolute on the system it runs on (`/srv/…` has no drive on Windows)
+    let folder = if cfg!(windows) { r"C:\srv\git\site.git" } else { "/srv/git/site.git" };
+    assert_eq!(target(&s(folder, "main")).unwrap().0, folder);
+    assert_eq!(target(&s(r"C:\srv\git\site.git", "main")).unwrap().0, r"C:\srv\git\site.git");
     assert!(target(&s("", "")).unwrap_err().contains("No address"));
     let pw = target(&s("https://me:secret@example.org/site.git", "")).unwrap_err();
     assert!(pw.contains("password") && !pw.contains("secret"), "{pw}");
