@@ -665,7 +665,8 @@ impl ShaleApp {
         let default_welcome = dirs::document_dir().or_else(dirs::home_dir).unwrap_or_default().join("Notes");
         // where the data lives: the user's folders, or temporary ones for tests and screenshots
         let n = NEXT_MAIL_ROOT.fetch_add(1, Ordering::SeqCst);
-        // tests: one folder per process (and app); screenshots: a fixed name, emptied first, because
+        // tests: one folder per process (and app; the calendar folder per app too, because a window deletes
+        // it when dropped and local calendar ids are the second they were made in, #659); screenshots: a fixed name, emptied first, because
         // the data usage dialog shows these paths and two runs must give the same picture
         let tag = if screenshot.is_some() { "screenshot".to_string() } else { std::process::id().to_string() };
         let mail_root = if persist {
@@ -676,7 +677,7 @@ impl ShaleApp {
             std::env::temp_dir().join(format!("shale-mail-{tag}-{n}"))
         };
         let social_dir = if persist { dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("social") } else { std::env::temp_dir().join(format!("shale-social-{tag}")) };
-        let calendar_dir = if persist { crate::calendar::store::default_local_dir() } else { std::env::temp_dir().join(format!("shale-calendars-{tag}")) };
+        let calendar_dir = if persist { crate::calendar::store::default_local_dir() } else { std::env::temp_dir().join(if screenshot.is_some() { format!("shale-calendars-{tag}") } else { format!("shale-calendars-{tag}-{n}") }) };
         let recovery_root = if persist { crate::recovery::default_root() } else { std::env::temp_dir().join(format!("shale-recovery-{tag}")) };
         if screenshot.is_some() {
             for d in [&mail_root, &social_dir, &calendar_dir, &recovery_root] {
