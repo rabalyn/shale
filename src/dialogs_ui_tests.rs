@@ -440,6 +440,33 @@ fn dialogs_export_writes_the_pdf_where_asked_and_says_when_it_cannot() {
     assert!(p.app.modal.is_none() && !p.dir.join("in-the-way/out.pdf").exists());
 }
 
+// spec: PDF-019, PDF-034, PDF-037, JOB-040
+#[test]
+fn pdf_019_the_export_dialog_says_which_fonts_the_note_gets_and_why_one_is_not_used() {
+    let mut p = P::new("export-fonts", &[("Fonty.md", "---\nprint-font: Zzz Missing Face\nprint-font-mono: fonts/Mono.ttf\n---\nText\n")]);
+    crate::fonts::test_fonts::Spec::new("Vault Serif", 400, false).write(&p.dir, "fonts/VaultSerif.ttf");
+    crate::fonts::test_fonts::Spec::new("Tiny Mono", 400, false).write(&p.dir, "fonts/Mono.ttf");
+    p.app.vdata.settings.print_font = "Vault Serif".into();
+    p.app.vault.as_mut().unwrap().rescan();
+    p.app.open_export_dialog(Path::new("Fonty.md"));
+    // the scan is a task: the dialog says so until the fonts are in, then what the note gets
+    until(&mut p, Show::Modals, "the fonts are looked up and the dialog says which it uses", |p| matches!(&p.app.modal, Some(Modal::Export(d)) if d.fonts.as_ref().is_some_and(|f| !f.pending && !f.line.is_empty())));
+    let Some(Modal::Export(d)) = &p.app.modal else { panic!("the dialog closed") };
+    let fonts = d.fonts.clone().unwrap();
+    assert_eq!(fonts.line, "text Vault Serif (vault, VaultSerif.ttf, bold and italic imitated) (from the vault's settings), code Tiny Mono (vault, Mono.ttf, bold and italic imitated) (from the note)");
+    assert_eq!(fonts.warnings.len(), 1, "{:?}", fonts.warnings);
+    assert!(fonts.warnings[0].starts_with("`print-font`: the font “Zzz Missing Face” was not found; using Vault Serif"), "{:?}", fonts.warnings);
+    assert!(p.shows(Show::Modals, &fonts.warnings[0]) && p.shows(Show::Modals, "Fonts"), "the dialog shows the line and the warning");
+    assert!(!p.app.busy.is_running(&crate::fonts::scan::FONT_SCAN) && !p.app.busy_jobs().contains(&"the font scan"));
+    // a note without font properties and a vault without a setting: nothing to say
+    p.app.vdata.settings.print_font.clear();
+    p.app.open_export_dialog(Path::new("Welcome.md"));
+    until(&mut p, Show::Modals, "the fonts line is made", |p| matches!(&p.app.modal, Some(Modal::Export(d)) if d.fonts.is_some()));
+    let Some(Modal::Export(d)) = &p.app.modal else { panic!("the dialog closed") };
+    assert!(d.fonts.as_ref().is_some_and(|f| f.line.is_empty() && f.warnings.is_empty() && !f.pending));
+    assert!(!p.shows(Show::Modals, "Fonts"));
+}
+
 // spec: IMP-002, IMP-056
 #[test]
 fn dialogs_import_makes_the_notes_and_stays_open_on_a_wrong_folder() {

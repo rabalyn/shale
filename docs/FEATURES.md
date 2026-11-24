@@ -221,6 +221,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   - `print-paper`: `A4`, `A5`, `Letter`, `Legal` or `<W>x<H>mm` (a width larger than the height is landscape)
   - `print-margins`: four numbers in mm, `top right bottom left`
   - `print-font`: `serif` (Liberation Serif, Times-compatible), `sans` (Ubuntu Light) or `mono` (Hack)
+  - `print-font-sans`, `print-font-mono`, and `print-font` with a family name or a vault path to a font file: the export dialog already says which font such a value (or the vault's `print_font*` settings) resolves to and warns about one that is missing or may not be embedded; the exports use these fonts from the next phases of #658
   - `print-font-size`: the body text in points
   - `print-line-spacing`: a factor, 1.0 being the font's own single line height
   - `print-paragraph-spacing`: the space after a body paragraph in points

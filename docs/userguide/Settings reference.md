@@ -309,6 +309,7 @@ Shale itself writes `created` and `modified` (full ISO 8601 times) into every Ma
 | `version` | 1 | written by Shale |
 | `people_dir` | `Adressbuch` | Settings → Vault → People, "People folder" ([[Tags and people]]) |
 | `bibliography` | empty (not in the file while empty; the `.bib` file, as a path in the vault, a file name or `[[refs.bib]]`, that a note without its own `bibliography:` property uses) | Settings → Vault → Bibliography, "Bibliography file" ([[Editor#The bibliography of a thesis]]) |
+| `print_font`, `print_font_sans`, `print_font_mono` | empty (not in the file while empty; a font family name or a vault path such as `fonts/Garamond.otf`: the font of the text, of headings and of code for a note without its own `print-font`, `print-font-sans`, `print-font-mono`) | the settings file only for now; the note's export dialog shows, in its Fonts row, which font such a value gives and why one is not used |
 | `sync` | the group of the four keys below | Settings → Sync |
 | `sync.enabled` | on (only matters when the vault is a git repository; a folder with its own `.git` asks first when it is opened, "Don't sync" sets it off) | Settings → Sync, "Sync this vault automatically" ([[Git sync]]) |
 | `sync.interval_minutes` | 5 (1 to 1440) | Git sync, "Every … minutes" |

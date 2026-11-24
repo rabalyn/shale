@@ -673,6 +673,8 @@ impl ShaleApp {
     }
 
     pub fn modals(&mut self, ui: &mut Ui) {
+        // the font scan of the exports runs whether or not a dialog is open (JOB-040)
+        self.font_scan_tick(ui.ctx());
         let Some(mut modal) = self.modal.take() else { return };
         let mut keep = true;
         let mut open_calendars = false;
@@ -1172,6 +1174,7 @@ impl ShaleApp {
             }
         }
         if let Modal::Export(d) = &mut modal {
+            self.export_fonts_tick(d);
             let title = match d.book.as_deref() {
                 Some(b) if b.board => format!("Export the board “{}” to PDF", d.name),
                 Some(_) => format!("Export the folder “{}” to PDF", d.name),
