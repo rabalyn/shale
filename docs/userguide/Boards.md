@@ -134,6 +134,25 @@ A note says what it waits for in its front matter: `blocked-by: [[Foundation]], 
   `query: blocked OR blocking` and `sort: dependencies`. Put it as the last lane: a card is in the first lane that
   matches it.
 
+# Export as a PDF
+
+**Export PDF…** (top right of the board view, or **Export to PDF** in the menu of the board's note) opens the export
+dialog of a book ([[PDF#A folder as one PDF]]): paper, text size, title page, contents, each note on a new page, where to
+save. The PDF has
+
+- the **board** on landscape pages, the lanes as columns with their cards: the title and the chips the board shows. A
+  drawing card shows its drawing as vector lines. A lane whose query is wrong has the reason under its name. When
+  more lanes than fit the width of a page, the next lanes follow on the next page, left to right; when a column has more
+  cards than fit the height, the cards go on the next page with the same columns ("continued"). A card is never cut in two.
+- then the **notes of the cards** on portrait pages, lane by lane and card by card (the order of the view), each lane a
+  part of the book and each card a chapter. A card in several lanes (the setting "A card in every lane it matches")
+  is printed once, in the first lane that has it. A card whose note says `export: false` stays on the board page and is
+  not printed.
+- a **contents** page whose first line is the board; each card on the board page is a link to its note, and the PDF has
+  bookmarks for the board, the lanes and the cards.
+
+The LaTeX engine is not offered for a board yet.
+
 # Try it
 
 This guide has a board of its own, [[Guide board]]: its lanes are made from the tags of the guide's notes. Open it with

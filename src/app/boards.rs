@@ -76,6 +76,11 @@ impl ShaleApp {
                     self.open(&rel, true);
                 }
             }
+            Act::ExportPdf => {
+                if let Some(rel) = self.boards.current.clone() {
+                    self.open_export_board_dialog(&rel);
+                }
+            }
             Act::AddLane => {
                 self.boards.view.settings = None;
                 let n = self.edit_board(|b| b.add_lane(NEW_LANE)).map_or(0, |b| b.lanes.len());

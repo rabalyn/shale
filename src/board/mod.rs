@@ -17,9 +17,12 @@ pub mod drag;
 pub mod file;
 pub mod lanes;
 pub mod peek;
+pub mod resolve;
 pub mod sort;
 pub mod view;
 
+#[cfg(test)]
+mod resolve_tests;
 #[cfg(test)]
 mod ui_tests;
 
@@ -67,11 +70,19 @@ pub struct LaneView {
 /// The lanes of `board` as they are shown now: the matches of every lane placed (BOARD-009,
 /// BOARD-032) and the cards of each sorted (BOARD-015, BOARD-018).
 pub fn lane_views(vault: &Vault, rel: &Path, board: &Board, every_lane: bool, runs: &lanes::Runs) -> Vec<LaneView> {
+    let searches: Vec<Search> = (0..board.lanes.len()).map(|i| runs.search(i)).collect();
+    arrange(vault, rel, board, every_lane, &searches)
+}
+
+/// The lanes of `board` from what each lane's search answered, `searches[i]` for lane `i`: the
+/// one step that the view ([`lane_views`]) and the exports ([`resolve`]) share.
+pub(crate) fn arrange(vault: &Vault, rel: &Path, board: &Board, every_lane: bool, searches: &[Search]) -> Vec<LaneView> {
     let pins: Vec<Vec<PathBuf>> = board.lanes.iter().map(|l| l.pins().into_iter().filter_map(|p| vault.resolve(file::pin_target(p), Some(rel))).collect()).collect();
     let none = Vec::new();
-    let found: Vec<&[PathBuf]> = (0..board.lanes.len())
-        .map(|i| match runs.search(i) {
-            Search::Found { notes, .. } => notes,
+    let found: Vec<&[PathBuf]> = searches
+        .iter()
+        .map(|s| match s {
+            Search::Found { notes, .. } => *notes,
             _ => none.as_slice(),
         })
         .collect();
@@ -85,15 +96,14 @@ pub fn lane_views(vault: &Vault, rel: &Path, board: &Board, every_lane: bool, ru
     board
         .lanes
         .iter()
-        .enumerate()
+        .zip(searches)
         .zip(cards)
-        .map(|((i, lane), cards)| {
+        .map(|((lane, search), cards)| {
             let sort_keys = form_sort::parse(lane.sort());
             let (keys, sort_error) = match sort_keys {
                 Ok(k) => (k, None),
                 Err(e) => (Vec::new(), Some(e)),
             };
-            let search = runs.search(i);
             let (mut pinned, mut rest): (Vec<Card>, Vec<Card>) = (Vec::new(), Vec::new());
             for (c, is_pinned) in cards {
                 if is_pinned { &mut pinned } else { &mut rest }.push(c);
@@ -119,7 +129,7 @@ pub fn lane_views(vault: &Vault, rel: &Path, board: &Board, every_lane: bool, ru
                     Search::Invalid(e) => Some(e.reason.clone()),
                     _ => sort_error,
                 },
-                waiting: search == Search::Waiting,
+                waiting: *search == Search::Waiting,
                 partial: matches!(search, Search::Found { partial: true, .. }),
                 cards: pinned,
                 pinned: count,
