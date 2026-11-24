@@ -109,7 +109,7 @@ pub fn plan(vault: &Vault, board_rel: &Path, board: &Board, lanes: &[LaneView], 
 mod tests {
     use super::*;
 
-    // spec: BOARD-019
+    // spec: BOARD-019, BOARD-024
     #[test]
     fn board_019_the_property_is_the_drop_line_or_the_one_a_simple_query_says() {
         let p = |q: &str, d: &str| property(q, d, false);
