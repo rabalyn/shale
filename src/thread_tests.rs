@@ -448,7 +448,7 @@ fn soc_071_a_post_is_matched_by_the_post_it_replies_to_the_root_and_a_self_threa
     let (inside, _) = save_post(&mut v, saved_post("40", 16, None, None), "Deep/Posts", |_| {});
     let mut items = post_items(vec![saved_post("41", 17, Some("40"), Some("40"))]);
     import::find_continues(&v, &mut items);
-    assert_eq!(import::continued_folder(&items).as_deref(), inside.parent().and_then(|p| p.to_str()));
+    assert_eq!(import::continued_folder(&items).as_deref(), inside.parent().map(crate::vault::rel_to_string).as_deref());
 }
 
 // spec: SOC-072

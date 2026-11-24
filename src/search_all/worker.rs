@@ -719,6 +719,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         std::fs::write(d.join("Fruit.md"), "banana bread\n").unwrap();
+        let d = crate::known_vaults::canonical(&d); // macOS: /var is /private/var, which SQLite reports
         let v = Vault::open(&d).unwrap();
         let mail = Connection::open(mail_file(&d)).unwrap();
         let mut posts = PostIndex::open(&d.join("posts.db")).unwrap();
