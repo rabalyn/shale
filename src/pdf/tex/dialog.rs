@@ -67,7 +67,7 @@ pub const TEX_EXPORT: Key = Key::new("tex-export");
 
 /// A running export of the dialog, a task of the registry. Dropping it (the dialog closed, or
 /// Cancel) stops LuaLaTeX.
-pub struct ExportJob(pub(super) busy::Job<Result<Made, Failure>>);
+pub struct ExportJob(pub(super) busy::Job<Result<Made, Box<Failure>>>);
 
 impl Drop for ExportJob {
     fn drop(&mut self) {
@@ -77,7 +77,7 @@ impl Drop for ExportJob {
 
 /// A running compile of the guided setup's test page. Dropping it stops LuaLaTeX.
 pub struct Job {
-    pub(super) rx: Receiver<Result<Result<Made, Failure>, String>>,
+    pub(super) rx: Receiver<Result<Result<Made, Box<Failure>>, String>>,
     pub(super) cancel: Arc<AtomicBool>,
 }
 
@@ -311,7 +311,7 @@ impl TexExport {
         match got {
             Ok(Ok(made)) => Some(made),
             Ok(Err(f)) => {
-                self.failure = Some(f);
+                self.failure = Some(*f);
                 None
             }
             Err(crash) => {
@@ -509,7 +509,7 @@ pub fn spawn_compile(engine: Engine, set: SetInfo, doc: Arc<Document>, notify: i
 }
 
 /// Compile a written document against a set and turn the answer into what the dialog needs.
-fn compile_job(engine: &Engine, set: &SetInfo, doc: &Arc<Document>, cancel: Arc<AtomicBool>) -> Result<Made, Failure> {
+fn compile_job(engine: &Engine, set: &SetInfo, doc: &Arc<Document>, cancel: Arc<AtomicBool>) -> Result<Made, Box<Failure>> {
     let files: Vec<(&str, &[u8])> = doc.files.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();
     let fail = |e: CompileError| {
         let mut missing: Vec<String> = vec![];
@@ -522,7 +522,7 @@ fn compile_job(engine: &Engine, set: &SetInfo, doc: &Arc<Document>, cancel: Arc<
     };
     match sets::compile_with_set(engine, set, "main.tex", &doc.tex, &files, Options { cancel: Some(cancel), ..Options::default() }) {
         Ok(out) => Ok(Made { pdf: out.output.pdf, placeholder_logo: out.placeholder_logo, warnings: doc.warnings.clone() }),
-        Err(e) => Err(fail(e)),
+        Err(e) => Err(Box::new(fail(e))),
     }
 }
 

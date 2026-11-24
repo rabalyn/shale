@@ -891,7 +891,7 @@ fn a_job_that_crashed_is_an_error_in_the_dialog_and_a_dropped_job_asks_the_compi
             std::thread::sleep(Duration::from_millis(5));
         }
     };
-    let job = busy.spawn(TEX_EXPORT, "x", || -> Result<super::dialog::Made, super::dialog::Failure> { panic!("boom") }, || {}).unwrap();
+    let job = busy.spawn(TEX_EXPORT, "x", || -> Result<super::dialog::Made, Box<super::dialog::Failure>> { panic!("boom") }, || {}).unwrap();
     tex.job = Some(ExportJob(job));
     wait_idle();
     assert!(tex.poll().is_none() && !tex.working());
@@ -904,7 +904,7 @@ fn a_job_that_crashed_is_an_error_in_the_dialog_and_a_dropped_job_asks_the_compi
     let cancel = task.cancellable();
     let (hold, wait) = std::sync::mpsc::channel::<()>();
     let job = task.run(
-        move || -> Result<super::dialog::Made, super::dialog::Failure> {
+        move || -> Result<super::dialog::Made, Box<super::dialog::Failure>> {
             let _ = wait.recv();
             flag.store(cancel.is_cancelled(), std::sync::atomic::Ordering::SeqCst);
             Ok(super::dialog::Made { pdf: vec![], placeholder_logo: false, warnings: vec![] })

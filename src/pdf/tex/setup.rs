@@ -443,7 +443,7 @@ impl TexState {
                 self.setup.job = None;
                 self.setup.outcome = Some(match got {
                     Ok(Ok(made)) => made_outcome(made),
-                    Ok(Err(f)) => Outcome::Failed(f),
+                    Ok(Err(f)) => Outcome::Failed(*f),
                     Err(crash) => Outcome::Failed(dialog::Failure::said(crash)),
                 });
             }
