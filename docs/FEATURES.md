@@ -340,13 +340,13 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   `recipient:` and so on), switch the table of contents, and Export compiles the note with LuaLaTeX in
   the background (a spinner, Cancel). Headings become sections, chapters, slides or poster boxes by how
   they are nested; emphasis, code in colours, lists, tasks, tables with their column sizes, quotes,
-  links, colours, pictures, drawings (as vector graphics) and PDF pages are written, with every special
+  links, colours, pictures, drawings (as vector graphics), PDF pages and the player cards of sounds and videos (#623, as in the built-in export) are written, quotes with their bar, tags in violet and emoji in a bundled emoji font, with every special
   character kept as text; code sits on a light box, a picture inside a line is as high as the line, and a
   link to a heading of the note jumps there in the PDF (links to other notes are link-coloured text). A failure shows the file and line of the error or the package that is missing,
   and **Save the .tex** writes the document and its pictures into a folder for debugging with your own
   TeX. The dialog remembers the last engine, set and kind per vault, and a note can name its template
   with `latex-template: tuda/thesis`; a template the vault does not have, or a kind a folder's book cannot use, is said in the dialog (TEX-008 to
-  TEX-016, TEX-018, TEX-019, TEX-030 to TEX-033).
+  TEX-016, TEX-018, TEX-019, TEX-030 to TEX-033, TEX-041, TEX-042).
 
   ![The export dialog with the LaTeX template engine](userguide/z_media/screenshots/pdf-export-dialog-latex.png)
 

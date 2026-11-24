@@ -578,9 +578,13 @@ Also exported: emphasis, strong, ~~strike-through~~, inline code, block quotes, 
 the column widths you set in the editor), fenced code in its syntax colours on a light grey box (a long block goes on on the next page in
 documents; on slides and posters it stays in one piece), web links (clickable), the highlights and colours of [[Editor]] as exact colours, and
 `![[…]]` embeds on a line of their own: a picture as wide in proportion to the text as in the
-note, a drawing as a vector graphic, all pages of a PDF, each with its caption; a file that is
-missing is a red line `[missing: name]` in the PDF and a note in the message afterwards, and a sound
-or video is such a line too. A **picture inside a line** of text (`an icon ![[icon.png]] here`, also in a
+note, a drawing as a vector graphic, all pages of a PDF, a sound or a video as its player card (the cover or the
+first frame, the play button, the name and the empty bar with `0:00` and the length, as in the built-in export;
+without ffmpeg a video is a grey tile with its name), each with its caption; a file that is
+missing is a red line `[missing: name]` in the PDF and a note in the message afterwards. Block quotes have the violet
+bar of the built-in export (a note with `print-*` properties has the plain indent, as there), tags are violet on a light
+field, and emoji such as the 📅 of a task's due date are set in an emoji font that Shale puts next to the document
+(the same Noto Emoji the built-in export draws with), not as an empty box. A **picture inside a line** of text (`an icon ![[icon.png]] here`, also in a
 table cell) is drawn in the line, as high as the line, like a letter; a missing one is the red
 `[missing: name]` in the line. Other embeds inside a line (a drawing, a PDF) stay their link text.
 
