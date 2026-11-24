@@ -14,6 +14,7 @@
 //!   (QUERY-018), and [`SearchWorker::busy`] tells `Headless::settle` that a query is on its way
 //!   (QUERY-020).
 
+use super::matcher::{Budget, Run, Stop};
 use super::query::Checked;
 use super::{search_in, Ctx, Found, Query, Snapshot};
 use crate::mail::db;
@@ -37,11 +38,21 @@ impl Slot {
     pub const PICKER: Slot = Slot(0);
     /// the search of the left sidebar
     pub const SIDEBAR: Slot = Slot(1);
+    /// the first lane of the open board; lane `n` is `Slot(Slot::LANES + n)` (QUERY-019)
+    pub const LANES: u64 = 16;
+
+    /// The queue of lane number `n` of the board.
+    pub fn lane(n: usize) -> Slot {
+        Slot(Slot::LANES + n as u64)
+    }
 }
 
 /// What one query is given: everything the search reads, owned, so that it can go to the thread.
 pub struct Request {
-    snapshot: Snapshot,
+    /// shared: the lanes of a board ask about the same notes (QUERY-019)
+    snapshot: Arc<Snapshot>,
+    /// a lane: the notes the checked query matches, as a whole each, and no hits (QUERY-004)
+    lane: bool,
     text: String,
     note_lines: usize,
     limit: usize,
@@ -60,7 +71,8 @@ impl Request {
         // (a mail connection that is not a file has nothing another connection could read)
         let mail = ctx.mail.and_then(|c| c.path()).filter(|p| !p.is_empty()).map(PathBuf::from);
         Request {
-            snapshot: Snapshot::of(ctx.vault),
+            snapshot: Arc::new(Snapshot::of(ctx.vault)),
+            lane: false,
             text: query.text.to_string(),
             note_lines: query.note_lines,
             limit: query.limit,
@@ -70,6 +82,12 @@ impl Request {
             mail,
             posts: ctx.posts.home().clone(),
         }
+    }
+
+    /// The question one lane of a board asks (QUERY-019): the notes of `snapshot` that `checked`
+    /// matches. The snapshot is shared by the lanes of one vault state.
+    pub fn lane(snapshot: Arc<Snapshot>, checked: Checked) -> Request {
+        Request { snapshot, lane: true, text: checked.text.clone(), note_lines: 0, limit: 0, prefixes: Prefixes::default(), shown: Selection::ALL, checked: Some(checked), mail: None, posts: Home::Memory("lane".into()) }
     }
 
     fn query(&self) -> Query<'_> {
@@ -102,10 +120,25 @@ fn post_reader<'a>(kept: &'a mut Option<(Home, PostIndex)>, home: &Home) -> Opti
 
 /// Run one request with the connections of the thread. None when it was given up (QUERY-017).
 fn run_search(conns: &mut Conns, req: &Request, cancel: &AtomicBool) -> Option<Found> {
+    if req.lane {
+        return run_lane(req, cancel);
+    }
     let Conns { mail, posts } = conns;
     let mail = req.mail.as_deref().and_then(|p| mail_reader(mail, p));
     let posts = post_reader(posts, &req.posts);
     search_in(&req.snapshot, mail, posts, &req.query(), cancel)
+}
+
+/// Run a lane: the notes its query matches (QUERY-004), in the order of the vault. A query that did
+/// not pass the check matches nothing (QUERY-012). None when it was given up (QUERY-017).
+fn run_lane(req: &Request, cancel: &AtomicBool) -> Option<Found> {
+    let Some(expr) = req.checked.as_ref().and_then(Checked::expr) else { return Some(Found::default()) };
+    let mut run = Run::new(&req.snapshot, cancel, Budget::standard());
+    let lane = run.match_notes(expr);
+    match run.stopped {
+        Some(Stop::Cancelled) => None,
+        stopped => Some(Found { lane, stopped_early: stopped == Some(Stop::Budget), ..Found::default() }),
+    }
 }
 
 /// What the thread runs for a request (tests put their own in).
@@ -269,7 +302,7 @@ mod tests {
 
     /// A request that searches nothing: the runners of the tests only read its text.
     fn bare(text: &str) -> Request {
-        Request { snapshot: Snapshot::default(), text: text.into(), note_lines: 3, limit: 20, prefixes: Prefixes::default(), shown: Selection::ALL, checked: None, mail: None, posts: Home::Memory("none".into()) }
+        Request { snapshot: Arc::default(), lane: false, text: text.into(), note_lines: 3, limit: 20, prefixes: Prefixes::default(), shown: Selection::ALL, checked: None, mail: None, posts: Home::Memory("none".into()) }
     }
 
     fn titles(f: &Found) -> Vec<String> {

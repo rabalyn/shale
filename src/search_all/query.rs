@@ -171,8 +171,7 @@ impl Checked {
         Checked { text: text.to_string(), prefix: parsed.prefix, body, tree: parse(text, body) }
     }
 
-    /// Check the text of a board lane (the lanes of #601 hold this and its error, QUERY-012): notes only, so a prefix is an error (QUERY-005).
-    #[cfg(test)]
+    /// Check the text of a board lane (a lane holds this and its error, QUERY-012): notes only, so a prefix is an error (QUERY-005).
     pub fn lane(text: &str, prefixes: Prefixes) -> Checked {
         let parsed = prefixes.parse(text);
         if parsed.prefix.is_some() {
@@ -202,6 +201,8 @@ impl Checked {
 /// The result of checking the text of one view, kept with the text (QUERY-013).
 #[derive(Default)]
 pub struct Cache {
+    /// the texts are those of board lanes: [`Checked::lane`] checks them
+    lane: bool,
     made_for: Option<(String, Prefixes)>,
     checked: Option<Checked>,
     /// how often the text was parsed (tests)
@@ -210,12 +211,17 @@ pub struct Cache {
 }
 
 impl Cache {
+    /// A cache for the lane of a board (QUERY-028): its texts are checked with [`Checked::lane`].
+    pub fn for_lane() -> Cache {
+        Cache { lane: true, ..Cache::default() }
+    }
+
     /// The check of `text`: made when the text, or the letters of the prefixes, are not the ones
     /// of the last call.
     pub fn get(&mut self, text: &str, prefixes: Prefixes) -> &Checked {
         if self.made_for.as_ref().is_none_or(|(t, p)| t != text || *p != prefixes) {
             self.made_for = Some((text.to_string(), prefixes));
-            self.checked = Some(Checked::search(text, prefixes));
+            self.checked = Some(if self.lane { Checked::lane(text, prefixes) } else { Checked::search(text, prefixes) });
             #[cfg(test)]
             {
                 self.parses += 1;

@@ -578,6 +578,7 @@ impl ShaleApp {
             View::Empty => "New tab".into(),
             View::Tasks => "Tasks".into(),
             View::Graph => "Graph".into(),
+            View::Boards => "Boards".into(),
             View::Calendar => "Calendar".into(),
             View::Mail => "Mail".into(),
             View::SettingsFile => "Settings file".into(),
@@ -859,6 +860,7 @@ impl ShaleApp {
                 }
             }
             View::Tasks => self.tasks_view(ui),
+            View::Boards => self.boards_view(ui),
             View::SettingsFile => self.settings_file_view(ui),
             View::Social(f) => self.social_view(ui, f.clone()),
             View::Calendar => {
@@ -1018,21 +1020,7 @@ impl ShaleApp {
                             handle_reader_action(&mut self.actions, a, &rel);
                         }
                     } else {
-                        tab.editor.inline_images = self.cfg.inline_images;
-                        tab.editor.line_numbers = self.cfg.line_numbers;
-                        tab.editor.numbered_headings = self.cfg.numbered_headings;
-                        tab.editor.live_preview = self.cfg.live_preview;
-                        tab.editor.preview_raw_lines = self.cfg.preview_raw_lines;
-                        tab.editor.properties_view = self.cfg.properties_in_editor;
-                        tab.editor.table_cell_edit = self.cfg.table_cell_edit;
-                        tab.editor.vim_enabled = self.cfg.vim_mode;
-                        tab.editor.cursor_style = crate::cursor_style::CursorStyle { shape: self.cfg.cursor_shape, normal_shape: self.cfg.normal_cursor_shape, blink: self.cfg.cursor_blink };
-                        tab.editor.esc_cursor = self.cfg.esc_cursor;
-                        tab.editor.assist.people_dir = self.vdata.settings.people_dir.clone();
-                        tab.editor.assist.numbered_headings = self.cfg.numbered_headings;
-                        tab.editor.assist.outside = self.cfg.outside_files;
-                        tab.editor.dark_canvas = self.cfg.dark_canvas;
-                        tab.editor.media = self.media.clone();
+                        tab.editor.apply_settings(&self.cfg, &self.vdata.settings.people_dir, &self.media);
                         if let Some(sel) = tab.place.restore_cursor.take() {
                             tab.editor.restore_selection_chars(ui.ctx(), &doc.text, sel);
                         }

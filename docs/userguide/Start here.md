@@ -29,6 +29,7 @@ Writing and finding:
 Organising:
 
 - [[Tasks]]: every to-do of the vault in one list.
+- [[Boards]]: Kanban boards, lanes made from queries, cards that are notes.
 - [[Drawings]]: sketches, Obsidian drawings and canvases.
 - [[Graph and backlinks]]: how your notes connect.
 - [[Window layout]]: ribbon, sidebars and dialogs.

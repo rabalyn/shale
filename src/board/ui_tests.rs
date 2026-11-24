@@ -1,0 +1,722 @@
+//! The board view in the whole window (BOARD-006 to BOARD-014, BOARD-032, QUERY-012, QUERY-019,
+//! QUERY-028), driven with real pointer and key events (DEV-041).
+
+use super::file::{props, Board};
+use super::LaneView;
+use crate::app::{Options, ShaleApp, View};
+use crate::keys::{Action, Binding};
+use crate::search_all::SearchWorker;
+use crate::ui_test_support::Headless;
+use eframe::egui::{Event, Key, Modifiers, PointerButton, Pos2};
+use std::path::{Path, PathBuf};
+
+const BOARD: &str = "---\ntype: board\ncard-shows: due, status, priority, tags\n---\n# Sprint\n\nA word about the sprint.\n\n## Backlog\nquery: #todo\nunknown line in the lane\n\n## Doing\nquery: status:doing\nsort: priority desc, due asc\n\n## Pinned by hand\n- [[Pinned One]]\n- [[Sketch.excalidraw]]\n";
+
+const FILES: [(&str, &str); 7] = [
+    ("Board.md", BOARD),
+    ("Alpha.md", "Alpha body #todo\n"),
+    ("Beta.md", "---\nstatus: doing\npriority: high\ndue: 2999-01-01\nmodified: 2020-01-01T10:00:00+00:00\n---\nBeta body\n"),
+    ("Gamma.md", "---\nstatus: doing\npriority: low\ndue: 2000-01-01\n---\nGamma body\n"),
+    ("Pinned One.md", "---\nstatus: doing\n---\nPinned #todo\n"),
+    ("Unrelated.md", "Nothing here\n"),
+    ("Sketch.excalidraw", crate::drawing::SAMPLE_SCENE),
+];
+
+/// The left edge of the main area (the ribbon and the left sidebar are left of it).
+const MAIN_LEFT: f32 = 305.0;
+
+struct W {
+    app: ShaleApp,
+    hl: Headless,
+    dir: PathBuf,
+}
+
+impl W {
+    fn new(tag: &str, files: &[(&str, &str)]) -> W {
+        let dir = std::env::temp_dir().join(format!("shale-boards-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, text) in files {
+            std::fs::write(dir.join(name), text).unwrap();
+        }
+        let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
+        app.cfg.date_prefix_new_notes = false;
+        // a peek of this size fits to the right of a card in the window of the tests
+        (app.cfg.link_preview_width, app.cfg.link_preview_height) = (400, 400);
+        let mut w = W { app, hl: Headless::new(), dir };
+        w.hl.settle(&mut w.app);
+        w.app.show_view(View::Boards, false);
+        w.settle();
+        w
+    }
+
+    fn board() -> W {
+        W::new("board", &FILES)
+    }
+
+    /// Frames until the lanes have their answers and are drawn.
+    fn settle(&mut self) {
+        self.hl.settle(&mut self.app);
+        self.hl.frames(&mut self.app, 3);
+        self.hl.settle(&mut self.app);
+    }
+
+    fn lanes(&self) -> Vec<(String, Vec<String>)> {
+        self.app.boards.shown.lanes().iter().map(|l: &LaneView| (l.name.clone(), l.cards.iter().map(|c| c.title.clone()).collect())).collect()
+    }
+
+    fn lane(&self, name: &str) -> Vec<String> {
+        self.lanes().into_iter().find(|(n, _)| n == name).unwrap_or_else(|| panic!("no lane {name}: {:?}", self.lanes())).1
+    }
+
+    fn file(&self, name: &str) -> String {
+        std::fs::read_to_string(self.dir.join(name)).unwrap()
+    }
+
+    fn board_text(&self) -> String {
+        self.app.vault.as_ref().unwrap().notes[Path::new("Board.md")].text.clone()
+    }
+
+    /// What is painted in the main area: the sidebars (the file list names every note too) are left of it.
+    fn main(&self) -> impl Iterator<Item = &(String, Pos2)> {
+        self.hl.text.iter().filter(|(_, p)| p.x >= MAIN_LEFT)
+    }
+
+    /// The place of the text `text` of the main area, the rightmost one when it is painted more than once.
+    fn at(&self, text: &str) -> Pos2 {
+        let found = self.main().filter(|(t, _)| t == text).max_by(|a, b| a.1.x.total_cmp(&b.1.x));
+        let (_, p) = found.unwrap_or_else(|| panic!("{text:?} is not painted; painted: {:?}", self.main().map(|(t, _)| t.as_str()).collect::<Vec<_>>()));
+        *p + eframe::egui::vec2(6.0, 6.0)
+    }
+
+    fn painted(&self, what: &str) -> bool {
+        self.main().any(|(t, _)| t.contains(what))
+    }
+
+    fn all_text(&self) -> Vec<&str> {
+        self.main().map(|(t, _)| t.as_str()).collect()
+    }
+
+    fn click_at(&mut self, p: Pos2) {
+        self.hl.click(&mut self.app, p, PointerButton::Primary);
+        self.settle();
+    }
+
+    fn click(&mut self, text: &str) {
+        let p = self.at(text);
+        self.click_at(p);
+    }
+
+    fn double_click(&mut self, text: &str) {
+        let p = self.at(text);
+        self.hl.frame(&mut self.app, vec![Event::PointerMoved(p)]);
+        for _ in 0..2 {
+            self.hl.frame(&mut self.app, vec![Headless::button(p, PointerButton::Primary, true)]);
+            self.hl.frame(&mut self.app, vec![Headless::button(p, PointerButton::Primary, false)]);
+        }
+        self.settle();
+    }
+
+    fn key(&mut self, key: Key, modifiers: Modifiers, text: &str) {
+        let ev = |pressed| Event::Key { key, physical_key: None, pressed, repeat: false, modifiers };
+        let mut down = vec![ev(true)];
+        if !text.is_empty() {
+            down.push(Event::Text(text.to_string()));
+        }
+        self.hl.frame(&mut self.app, down);
+        self.hl.frame(&mut self.app, vec![ev(false)]);
+        self.settle();
+    }
+
+    fn type_text(&mut self, text: &str) {
+        self.hl.frame(&mut self.app, vec![Event::Text(text.to_string())]);
+        self.settle();
+    }
+
+    fn view(&self) -> View {
+        self.app.tabbar.tabs[self.app.tabbar.active].view.clone()
+    }
+
+    fn open_tabs(&self) -> Vec<View> {
+        self.app.tabbar.tabs.iter().map(|t| t.view.clone()).collect()
+    }
+}
+
+impl Drop for W {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+fn strs(v: &[&str]) -> Vec<String> {
+    v.iter().map(|s| s.to_string()).collect()
+}
+
+// spec: BOARD-007
+#[test]
+fn board_007_the_view_is_a_main_area_tab_with_a_strip_of_every_board() {
+    let w = W::new("strip", &[("Board.md", BOARD), ("Other board.md", "---\ntype: board\n---\n## Only\nquery: #x\n"), ("Plain.md", "---\ntype: note\n---\n## Not a lane\n"), ("Alpha.md", "#todo\n")]);
+    assert_eq!(w.view(), View::Boards);
+    assert_eq!(w.app.tab_title(&View::Boards), "Boards");
+    assert!(w.painted("Board") && w.painted("Other board"), "both boards are in the strip");
+    assert!(!w.painted("Plain"), "a note without type: board is no board");
+    assert_eq!(w.app.boards.current.as_deref(), Some(Path::new("Board.md")), "the first board opens");
+    let mut w = w;
+    w.click("Other board");
+    assert_eq!(w.app.boards.current.as_deref(), Some(Path::new("Other board.md")), "one click switches");
+    assert_eq!(w.lanes().iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["Only"]);
+    // the board of the tab is saved with it
+    let saved = w.app.saved_panes();
+    assert_eq!(saved[0].tabs.iter().find(|t| t.view.as_deref() == Some("boards")).and_then(|t| t.board.clone()).as_deref(), Some("Other board.md"));
+}
+
+// spec: BOARD-007
+#[test]
+fn board_007_a_saved_boards_tab_comes_back_with_its_board() {
+    let mut w = W::new("restore", &[("Board.md", BOARD), ("Other board.md", "---\ntype: board\n---\n## Only\n")]);
+    let saved = crate::vault_state::SavedTab { view: Some("boards".into()), board: Some("Other board.md".into()), ..Default::default() };
+    w.app.restore_view_tab("boards", &saved, true);
+    assert_eq!(w.view(), View::Boards);
+    assert_eq!(w.app.boards.current.as_deref(), Some(Path::new("Other board.md")));
+    let none = crate::vault_state::SavedTab { view: Some("boards".into()), ..Default::default() };
+    w.app.boards.current = None;
+    w.app.restore_view_tab("boards", &none, false);
+    w.settle();
+    assert_eq!(w.app.boards.current.as_deref(), Some(Path::new("Board.md")), "without a saved board the first one is shown");
+}
+
+// spec: BOARD-008
+#[test]
+fn board_008_space_b_opens_the_boards_and_the_key_can_be_changed() {
+    let mut w = W::new("key", &FILES);
+    w.app.show_view(View::Tasks, false);
+    w.settle();
+    assert_eq!(Action::MainBoards.def().id, "main.boards");
+    assert_eq!(w.app.keymap.display(Action::MainBoards), "Space b");
+    w.key(Key::Space, Modifiers::NONE, " ");
+    assert_eq!(w.view(), View::Tasks, "half a sequence opens nothing");
+    w.key(Key::B, Modifiers::NONE, "b");
+    assert_eq!(w.view(), View::Boards);
+    w.app.show_view(View::Tasks, false);
+    w.settle();
+    w.app.keymap.set(Action::MainBoards, Binding::parse("Space y").unwrap()).unwrap();
+    w.key(Key::Space, Modifiers::NONE, " ");
+    w.key(Key::B, Modifiers::NONE, "b");
+    assert_eq!(w.view(), View::Tasks, "the old key does nothing now");
+    w.key(Key::Space, Modifiers::NONE, " ");
+    w.key(Key::Y, Modifiers::NONE, "y");
+    assert_eq!(w.view(), View::Boards);
+}
+
+// spec: BOARD-009, BOARD-018, BOARD-032
+#[test]
+fn board_009_a_card_is_in_the_first_lane_that_matches_and_a_pinned_card_wins() {
+    let w = W::board();
+    // Pinned One matches both queries and is pinned in the third lane: only there
+    assert_eq!(w.lane("Backlog"), strs(&["Alpha"]));
+    assert_eq!(w.lane("Doing"), strs(&["Beta", "Gamma"]));
+    assert_eq!(w.lane("Pinned by hand"), strs(&["Pinned One", "Sketch"]), "the links come in their order, a drawing is a card");
+    for t in ["Alpha", "Beta", "Gamma", "Pinned One", "Sketch"] {
+        assert!(w.painted(t), "{t} is drawn");
+    }
+    assert!(!w.painted("Unrelated") && !w.painted("Sprint"), "what no lane matches is not a card, nor is the board");
+}
+
+// spec: BOARD-005, BOARD-009
+#[test]
+fn board_009_cards_every_lane_shows_a_card_in_every_lane_it_matches() {
+    let mut w = W::new("every", &[("Board.md", "---\ntype: board\n---\n## A\nquery: #x\n## B\nquery: #x OR #y\n"), ("One.md", "#x\n"), ("Two.md", "#y\n")]);
+    assert_eq!((w.lane("A"), w.lane("B")), (strs(&["One"]), strs(&["Two"])), "exclusive by default");
+    // the switch in the Board menu writes the front matter
+    w.click("Board");
+    w.click("A card in every lane it matches");
+    assert!(props(&w.board_text()).every_lane && w.file("Board.md").contains("cards: every-lane"));
+    w.settle();
+    assert_eq!((w.lane("A"), w.lane("B")), (strs(&["One"]), strs(&["One", "Two"])));
+}
+
+// spec: BOARD-010
+#[test]
+fn board_010_a_card_shows_its_chips_as_card_shows_says() {
+    let mut w = W::board();
+    for chip in ["2999-01-01", "doing", "high", "#todo", "2000-01-01", "low"] {
+        assert!(w.painted(chip), "{chip} is drawn: {:?}", w.all_text());
+    }
+    // overdue is red: the chip of Gamma has the fill of a bad status, the chip of Beta has not
+    let bad = crate::theme::palette().bad_bg;
+    let (overdue, fine) = (w.at("2000-01-01"), w.at("2999-01-01"));
+    let fill_at = |w: &W, p: Pos2| w.hl.rects.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, c)| *c);
+    assert_eq!(fill_at(&w, overdue), Some(bad), "an overdue date is red");
+    assert_ne!(fill_at(&w, fine), Some(bad));
+    // card-shows: without the due date and the tags
+    w.app.boards.current = Some(PathBuf::from("Board.md"));
+    let text = w.board_text().replace("card-shows: due, status, priority, tags", "card-shows: status");
+    w.app.vault.as_mut().unwrap().set_note_text(Path::new("Board.md"), &text);
+    w.settle();
+    assert!(w.painted("doing") && !w.painted("2999-01-01") && !w.painted("high") && !w.painted("#todo"), "only the status chip is left");
+}
+
+// spec: BOARD-005, BOARD-010
+#[test]
+fn board_010_the_board_menu_chooses_the_chips() {
+    let mut w = W::board();
+    w.click("Board");
+    w.click("priority");
+    assert!(w.file("Board.md").contains("card-shows: due, status, tags"), "{}", w.file("Board.md"));
+    assert!(!w.painted("high"));
+    w.click("Board");
+    w.click("priority");
+    assert!(!w.file("Board.md").contains("card-shows"), "all four chips are the default: no line");
+    assert!(w.painted("high"));
+}
+
+// spec: BOARD-011
+#[test]
+fn board_011_a_drawing_is_a_card_found_by_name_and_has_a_picture() {
+    let mut w = W::new("drawing", &[("Board.md", "---\ntype: board\n---\n## Drawings\nquery: path:Sketch\n"), ("Sketch.excalidraw", crate::drawing::SAMPLE_SCENE), ("Note.md", "Sketch\n")]);
+    assert_eq!(w.lane("Drawings"), strs(&["Sketch"]), "found by its path");
+    assert!(w.app.boards.shown.lanes()[0].cards[0].drawing);
+    w.hl.frames(&mut w.app, 2);
+    assert!(w.painted("Sketch"));
+    // (a click on a drawing opens it in a tab: it has no text to edit in the peek)
+    let p = w.at("Sketch");
+    w.click_at(p);
+    assert!(w.app.boards.peek.is_none());
+    assert!(w.open_tabs().contains(&View::Drawing(PathBuf::from("Sketch.excalidraw"))));
+}
+
+// spec: BOARD-012
+#[test]
+fn board_012_a_click_selects_the_card_and_opens_the_peek_and_esc_closes_it() {
+    let mut w = W::board();
+    w.click("Beta");
+    assert_eq!(w.app.boards.selected.as_deref(), Some(Path::new("Beta.md")));
+    let peek = w.app.boards.peek.as_ref().expect("the peek is open");
+    assert_eq!(peek.rel, Path::new("Beta.md"));
+    assert_eq!(w.view(), View::Boards, "the board stays");
+    assert!(w.painted("Beta body"), "the note is in the peek");
+    w.click("Alpha");
+    assert_eq!(w.app.boards.peek.as_ref().map(|p| p.rel.clone()), Some(PathBuf::from("Alpha.md")), "another card: another peek");
+    w.key(Key::Escape, Modifiers::NONE, "");
+    assert!(w.app.boards.peek.is_none(), "Esc closes the peek");
+    assert_eq!(w.app.boards.selected.as_deref(), Some(Path::new("Alpha.md")), "the card stays selected");
+    assert_eq!(w.view(), View::Boards);
+}
+
+// spec: BOARD-012
+#[test]
+fn board_012_the_peek_has_the_size_of_the_link_preview_and_is_resized_by_its_edges() {
+    let mut w = W::board();
+    w.click("Beta");
+    let size = w.app.boards.peek.as_ref().unwrap().rect.expect("drawn").size();
+    assert_eq!((size.x.round() as u32, size.y.round() as u32), (w.app.cfg.link_preview_width, w.app.cfg.link_preview_height), "EDIT-037");
+    // dragging the bottom right corner makes it bigger and the size is kept as the setting
+    let r = w.app.boards.peek.as_ref().unwrap().rect.unwrap();
+    let from = r.right_bottom();
+    w.hl.press_and_move(&mut w.app, from, &Headless::steps(from, from + eframe::egui::vec2(40.0, 30.0), 4));
+    w.hl.release(&mut w.app, from + eframe::egui::vec2(40.0, 30.0));
+    w.settle();
+    let bigger = w.app.boards.peek.as_ref().unwrap().rect.unwrap().size();
+    assert!(bigger.x > size.x + 20.0 && bigger.y > size.y + 10.0, "{size:?} -> {bigger:?}");
+    assert_eq!(w.app.cfg.link_preview_width, bigger.x.round() as u32);
+}
+
+// spec: BOARD-012
+#[test]
+fn board_012_the_peek_is_moved_by_its_title() {
+    let mut w = W::board();
+    w.click("Beta");
+    let before = w.app.boards.peek.as_ref().unwrap().rect.unwrap();
+    // the title of the note is in the peek, right of the card with the same name
+    let from = w.at("Beta");
+    assert!(before.contains(from));
+    let to = from + eframe::egui::vec2(-60.0, 50.0);
+    w.hl.press_and_move(&mut w.app, from, &Headless::steps(from, to, 5));
+    w.hl.release(&mut w.app, to);
+    w.settle();
+    let after = w.app.boards.peek.as_ref().unwrap().rect.unwrap();
+    assert!((after.min.x - before.min.x + 60.0).abs() < 2.0 && (after.min.y - before.min.y - 50.0).abs() < 2.0, "{before:?} -> {after:?}");
+    assert_eq!(after.size(), before.size(), "only moved");
+    assert!(w.app.boards.peek.is_some(), "a drag on the title keeps it open");
+}
+
+// spec: BOARD-013
+#[test]
+fn board_013_the_peek_is_an_editor_that_saves_with_the_note() {
+    let mut w = W::board();
+    w.click("Alpha");
+    let r = w.app.boards.peek.as_ref().unwrap().rect.unwrap();
+    // a click in the text gives the editor the keyboard; typing changes the note's buffer
+    w.click_at(Pos2::new(r.min.x + 60.0, r.min.y + 70.0));
+    w.type_text("EDITED ");
+    let rel = Path::new("Alpha.md");
+    assert!(w.app.notes[rel].text.contains("EDITED"), "{:?}", w.app.notes[rel].text);
+    assert!(w.app.vault.as_ref().unwrap().notes[rel].text.contains("EDITED"), "the index follows at once");
+    w.key(Key::Escape, Modifiers::NONE, "");
+    assert!(w.app.boards.peek.is_none());
+    let saved = w.file("Alpha.md");
+    assert!(saved.contains("EDITED") && saved.contains("modified:") && saved.contains("created:"), "closing saves like the editor does (a checked save): {saved}");
+    assert!(!w.app.notes[rel].dirty);
+}
+
+// spec: BOARD-013
+#[test]
+fn board_013_the_priority_control_writes_the_front_matter_and_not_modified() {
+    let mut w = W::board();
+    w.click("Beta");
+    assert!(w.painted("Priority: high"));
+    w.click("Priority: high");
+    w.click("highest");
+    let saved = w.file("Beta.md");
+    assert!(saved.contains("priority: highest") && !saved.contains("priority: high\n"), "{saved}");
+    assert!(saved.contains("modified: 2020-01-01T10:00:00+00:00"), "the body is the same, `modified:` stays: {saved}");
+    assert!(saved.contains("Beta body"));
+    assert_eq!(w.lane("Doing"), strs(&["Beta", "Gamma"]));
+    // none takes the property out
+    w.click("Priority: highest");
+    w.click("none");
+    assert!(!w.file("Beta.md").contains("priority:"), "{}", w.file("Beta.md"));
+    assert!(w.painted("Priority: none"));
+}
+
+// spec: BOARD-014
+#[test]
+fn board_014_ctrl_click_and_enter_open_the_note_in_a_tab() {
+    let mut w = W::board();
+    let p = w.at("Gamma");
+    w.hl.frame(&mut w.app, vec![Event::PointerMoved(p)]);
+    w.hl.frame(&mut w.app, vec![Event::ModifiersChanged(Modifiers::CTRL), Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::CTRL }]);
+    w.hl.frame(&mut w.app, vec![Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::CTRL }]);
+    w.hl.frame(&mut w.app, vec![Event::ModifiersChanged(Modifiers::NONE)]);
+    w.settle();
+    assert!(w.open_tabs().contains(&View::Note(PathBuf::from("Gamma.md"))), "{:?}", w.open_tabs());
+    assert!(w.open_tabs().contains(&View::Boards), "the board has its own tab");
+    assert!(w.app.boards.peek.is_none(), "Ctrl+Click opens no peek");
+    // Enter on the selected card
+    let mut w = W::board();
+    w.click("Alpha");
+    w.key(Key::Escape, Modifiers::NONE, "");
+    w.key(Key::Enter, Modifiers::NONE, "");
+    assert!(w.open_tabs().contains(&View::Note(PathBuf::from("Alpha.md"))), "{:?}", w.open_tabs());
+    assert!(w.open_tabs().contains(&View::Boards));
+}
+
+// spec: BOARD-012, BOARD-014
+#[test]
+fn board_014_the_arrow_keys_move_the_selection_between_the_cards() {
+    let mut w = W::board();
+    w.app.boards.selected = None;
+    w.key(Key::ArrowDown, Modifiers::NONE, "");
+    assert_eq!(w.app.boards.selected.as_deref(), Some(Path::new("Alpha.md")), "the first card of the first lane");
+    w.key(Key::ArrowRight, Modifiers::NONE, "");
+    assert_eq!(w.app.boards.selected.as_deref(), Some(Path::new("Beta.md")));
+    w.key(Key::ArrowDown, Modifiers::NONE, "");
+    assert_eq!(w.app.boards.selected.as_deref(), Some(Path::new("Gamma.md")));
+    w.key(Key::ArrowDown, Modifiers::NONE, "");
+    assert_eq!(w.app.boards.selected.as_deref(), Some(Path::new("Gamma.md")), "the last stays");
+    w.key(Key::ArrowUp, Modifiers::NONE, "");
+    w.key(Key::ArrowLeft, Modifiers::NONE, "");
+    assert_eq!(w.app.boards.selected.as_deref(), Some(Path::new("Alpha.md")));
+    assert!(w.app.boards.peek.is_none(), "the keys select, they do not open the peek");
+}
+
+// spec: BOARD-006
+#[test]
+fn board_006_adding_renaming_moving_and_removing_lanes_rewrites_the_file() {
+    let mut w = W::board();
+    let names = |w: &W| w.lanes().iter().map(|(n, _)| n.clone()).collect::<Vec<_>>();
+    // the ⋯ button of lane `i`, the lanes left to right
+    let more = |w: &W, i: usize| -> Pos2 {
+        let mut dots: Vec<Pos2> = w.main().filter(|(t, _)| t == "⋯").map(|(_, p)| *p + eframe::egui::vec2(4.0, 6.0)).collect();
+        dots.sort_by(|a, b| a.x.total_cmp(&b.x));
+        dots[i]
+    };
+    // delete the last lane, with its pinned cards
+    let p = more(&w, 2);
+    w.click_at(p);
+    w.click("Delete lane");
+    assert_eq!(names(&w), ["Backlog", "Doing"]);
+    assert!(w.board_text().ends_with("sort: priority desc, due asc\n"), "{}", w.board_text());
+    assert!(!w.board_text().contains("Pinned One") && w.file("Board.md").contains("A word about the sprint."));
+    // a lane at the end, named at once
+    w.click("+ Add lane");
+    assert!(w.board_text().ends_with("sort: priority desc, due asc\n\n## New lane\n"), "{}", w.board_text());
+    w.type_text("Review");
+    w.key(Key::Enter, Modifiers::NONE, "");
+    assert!(w.board_text().ends_with("\n## Review\n"), "{}", w.board_text());
+    assert_eq!(names(&w), ["Backlog", "Doing", "Review"]);
+    // the lane menu: move left, rename
+    let p = more(&w, 2);
+    w.click_at(p);
+    w.click("Move left");
+    assert_eq!(names(&w), ["Backlog", "Review", "Doing"]);
+    let t = w.board_text();
+    assert!(t.contains("unknown line in the lane\n\n## Review\n\n## Doing\nquery: status:doing\nsort: priority desc, due asc\n"), "{t}");
+    assert!(t.contains("A word about the sprint.") && t.contains("type: board"), "lines the view does not know stay");
+    let p = more(&w, 1);
+    w.click_at(p);
+    w.click("Rename");
+    w.type_text("Check");
+    w.key(Key::Enter, Modifiers::NONE, "");
+    assert_eq!(names(&w), ["Backlog", "Check", "Doing"]);
+    assert!(w.board_text().contains("\n## Check\n"), "{}", w.board_text());
+    // Esc leaves the name as it was
+    let p = more(&w, 1);
+    w.click_at(p);
+    w.click("Rename");
+    w.type_text("Nope");
+    w.key(Key::Escape, Modifiers::NONE, "");
+    assert_eq!(names(&w), ["Backlog", "Check", "Doing"]);
+    // the first lane takes its lines with it
+    let p = more(&w, 0);
+    w.click_at(p);
+    w.click("Delete lane");
+    assert_eq!(names(&w), ["Check", "Doing"]);
+    assert!(!w.board_text().contains("unknown line in the lane") && !w.board_text().contains("query: #todo"), "{}", w.board_text());
+    assert_eq!(Board::parse(&w.file("Board.md")).lanes.len(), 2, "and the file on disk agrees");
+}
+
+// spec: BOARD-006
+#[test]
+fn board_006_a_hand_edit_of_the_file_changes_the_view() {
+    let mut w = W::board();
+    let text = w.board_text().replace("## Doing\nquery: status:doing", "## Underway\nquery: status:doing OR #todo").replace("- [[Sketch.excalidraw]]\n", "");
+    w.app.vault.as_mut().unwrap().set_note_text(Path::new("Board.md"), &text);
+    w.settle();
+    assert_eq!(w.lane("Underway"), strs(&["Beta", "Gamma"]), "Alpha is in the first lane that matches: Backlog");
+    assert_eq!(w.lane("Pinned by hand"), strs(&["Pinned One"]));
+    assert!(w.painted("Underway") && !w.painted("Doing"));
+    // and an edit of the open note in its tab (the buffer) does the same
+    w.app.open(Path::new("Board.md"), true);
+    w.settle();
+    let edited = w.app.notes[Path::new("Board.md")].text.replace("Underway", "Busy");
+    w.app.notes.get_mut(Path::new("Board.md")).unwrap().text = edited.clone();
+    w.app.vault.as_mut().unwrap().set_note_text(Path::new("Board.md"), &edited);
+    w.app.show_view(View::Boards, false);
+    w.settle();
+    assert!(w.painted("Busy"));
+}
+
+// spec: BOARD-006
+#[test]
+fn board_006_a_change_in_the_view_while_the_note_is_open_in_a_tab_goes_through_its_buffer() {
+    let mut w = W::board();
+    w.app.open(Path::new("Board.md"), true);
+    w.app.show_view(View::Boards, false);
+    w.settle();
+    w.click("+ Add lane");
+    let buffer = w.app.notes[Path::new("Board.md")].text.clone();
+    assert!(buffer.contains("## New lane"), "the open buffer has the change: {buffer}");
+    w.key(Key::Escape, Modifiers::NONE, "");
+    w.app.save_note(Path::new("Board.md"));
+    assert!(w.file("Board.md").contains("## New lane") && w.file("Board.md").contains("unknown line in the lane"));
+}
+
+// spec: BOARD-001, BOARD-006
+#[test]
+fn board_001_new_board_makes_a_note_with_type_board_and_one_lane() {
+    let mut w = W::new("new", &[("Alpha.md", "#todo\n")]);
+    assert!(w.painted("No board in this vault yet"));
+    w.click("New board");
+    let made = w.file("Board.md");
+    assert_eq!(made, "---\ntype: board\n---\n# Board\n\n## To do\nquery: #todo\n");
+    assert!(super::file::is_board(&made));
+    assert_eq!(w.app.boards.current.as_deref(), Some(Path::new("Board.md")));
+    assert_eq!(w.lane("To do"), strs(&["Alpha"]));
+    w.click("+ New board");
+    assert_eq!(w.app.boards.listing(w.app.vault.as_ref().unwrap()).len(), 2, "a second one is made next to it");
+    assert!(w.dir.join("Board 1.md").exists() || w.dir.join("Board 2.md").exists());
+}
+
+// spec: BOARD-001
+#[test]
+fn board_001_a_board_is_a_normal_note_that_opens_in_the_editor() {
+    let mut w = W::board();
+    w.click("Edit file");
+    assert!(w.open_tabs().contains(&View::Note(PathBuf::from("Board.md"))));
+    assert!(w.app.notes[Path::new("Board.md")].text.contains("## Doing"));
+    w.app.open(Path::new("Board.md"), false);
+    assert!(w.app.vault.as_ref().unwrap().notes[Path::new("Board.md")].links.iter().any(|l| l.target == "Pinned One"), "its links are indexed like any note's");
+}
+
+// spec: QUERY-012
+#[test]
+fn query_012_a_bad_lane_query_shows_its_error_in_its_header_and_the_rest_works() {
+    let mut w = W::new("bad", &[("Board.md", "---\ntype: board\n---\n## Broken\nquery: (#todo AND\n## Prefix\nquery: f: #todo\n## Fine\nquery: #todo\n"), ("Alpha.md", "#todo\n")]);
+    let lanes = w.app.boards.shown.lanes().to_vec();
+    assert!(lanes[0].error.is_some() && lanes[0].cards.is_empty(), "{:?}", lanes[0]);
+    assert!(lanes[1].error.as_deref().is_some_and(|e| e.contains("notes only")), "a prefix is an error in a lane: {:?}", lanes[1].error);
+    assert!(lanes[2].error.is_none());
+    assert_eq!(w.lane("Fine"), strs(&["Alpha"]));
+    assert!(w.painted(lanes[0].error.as_deref().unwrap()), "the reason is drawn in the header");
+    assert!(w.painted("Alpha"));
+    // a bad sort says so in the same place
+    w.app.vault.as_mut().unwrap().set_note_text(Path::new("Board.md"), "---\ntype: board\n---\n## Lane\nquery: #todo\nsort: size desc\n");
+    w.settle();
+    assert!(w.app.boards.shown.lanes()[0].error.as_deref().is_some_and(|e| e.contains("not a sort field")));
+    assert_eq!(w.lane("Lane"), strs(&["Alpha"]), "the cards stay, by title");
+}
+
+// spec: QUERY-019
+#[test]
+fn query_019_lanes_search_on_the_worker_and_the_view_shows_it_while_waiting() {
+    fn never(_: &mut crate::search_all::worker::Conns, _: &crate::search_all::Request, cancel: &std::sync::atomic::AtomicBool) -> Option<crate::search_all::Found> {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while !cancel.load(std::sync::atomic::Ordering::Relaxed) && std::time::Instant::now() < end {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        None
+    }
+    let mut w = W::new("wait", &FILES);
+    w.app.search_worker = SearchWorker::with_runner(never);
+    w.app.boards.runs = Default::default();
+    w.hl.frames(&mut w.app, 3);
+    assert!(w.app.boards.shown.lanes()[..2].iter().all(|l| l.waiting && l.cards.is_empty()), "no answer yet");
+    assert!(w.painted("Searching…"), "the frame is drawn at once, the answer comes later");
+    assert!(w.app.search_worker.busy(), "the window did not wait for it");
+    w.app.search_worker = Default::default();
+    w.app.boards.runs = Default::default();
+    w.settle();
+    assert_eq!(w.lane("Backlog"), strs(&["Alpha"]));
+}
+
+// spec: QUERY-019
+#[test]
+fn query_019_a_change_asks_again_only_the_lanes_it_can_change() {
+    let mut w = W::board();
+    let asked = |w: &W| w.app.boards.runs.asked;
+    let base = asked(&w);
+    assert_eq!(base, 2, "one search per lane that has a query, at the start (the pinned lane has none)");
+    w.hl.frames(&mut w.app, 5);
+    assert_eq!(asked(&w), base, "nothing changed: nothing is asked");
+    // (a change on disk and in the index, as a save makes it)
+    let set = |w: &mut W, rel: &str, text: &str| {
+        w.app.vault.as_mut().unwrap().edit_note(Path::new(rel), |_| Some(text.to_string())).unwrap();
+        w.settle();
+    };
+    // a note no lane matches, still matching none
+    set(&mut w, "Unrelated.md", "Still nothing\n");
+    assert_eq!(asked(&w), base, "a note that is in no lane and matches none changes no lane");
+    // it starts to match the first lane
+    set(&mut w, "Unrelated.md", "#todo now\n");
+    assert_eq!(asked(&w), base + 1, "only the lane that matches it now asks");
+    assert_eq!(w.lane("Backlog"), strs(&["Alpha", "Unrelated"]));
+    // a note of the second lane leaves it
+    set(&mut w, "Gamma.md", "---\nstatus: done\n---\nGamma body\n");
+    assert_eq!(asked(&w), base + 2, "only the lane the note was in asks");
+    assert_eq!(w.lane("Doing"), strs(&["Beta"]));
+    // a note of a lane changes in a way that keeps it there: the lane asks again (its cards may differ)
+    set(&mut w, "Beta.md", "---\nstatus: doing\npriority: low\n---\nBeta body\n");
+    assert_eq!(asked(&w), base + 3);
+    // a new note: the vault finds the links of every note again, so every lane asks
+    w.app.vault.as_mut().unwrap().create_file(Path::new("Fresh.md"), "---\nstatus: doing\n---\n").unwrap();
+    w.settle();
+    assert_eq!(asked(&w), base + 5);
+    assert_eq!(w.lane("Doing"), strs(&["Beta", "Fresh"]));
+    // many notes at once: every lane asks
+    for i in 0..10 {
+        w.app.vault.as_mut().unwrap().create_file(Path::new(&format!("Bulk{i}.md")), "bulk\n").unwrap();
+    }
+    w.settle();
+    assert_eq!(asked(&w), base + 5 + 2);
+}
+
+// spec: QUERY-019
+#[test]
+fn query_019_a_lane_that_reads_other_notes_asks_for_every_change() {
+    let mut w = W::new("deps", &[("Board.md", "---\ntype: board\n---\n## Blocked\nquery: blocked\n## Plain\nquery: #x\n"), ("A.md", "---\nblocked-by: [[B]]\n---\n"), ("B.md", "b\n"), ("C.md", "c\n")]);
+    assert_eq!(w.lane("Blocked"), strs(&["A"]));
+    let base = w.app.boards.runs.asked;
+    w.app.vault.as_mut().unwrap().set_note_text(Path::new("B.md"), "---\nstatus: done\n---\n");
+    w.settle();
+    assert_eq!(w.app.boards.runs.asked, base + 1, "the blocked lane asks, the plain lane does not");
+    assert_eq!(w.lane("Blocked"), Vec::<String>::new(), "B is done, A is free");
+}
+
+// spec: QUERY-028
+#[test]
+fn query_028_a_double_click_on_the_heading_opens_the_settings_that_write_the_file() {
+    let mut w = W::board();
+    w.double_click("Doing");
+    assert!(w.painted("Lane “Doing”"), "the popover is open");
+    assert!(w.painted("When a card is dropped here, set"));
+    assert!(w.painted("status: doing"), "the drop property is filled from the filter as a hint: {:?}", w.all_text());
+    // the drop property is editable: it is a line of the lane
+    let p = w.at("status: doing");
+    w.click_at(p);
+    w.type_text("status: review");
+    assert!(w.board_text().contains("query: status:doing\nsort: priority desc, due asc\ndrop: status: review\n"), "{}", w.board_text());
+    // Advanced shows the text of the query and counts the cards; changing it changes the lane
+    w.click("Advanced");
+    assert!(w.painted("2 matches"), "the form counts the cards of the lane");
+    let p = w.at("status:doing");
+    w.click_at(p);
+    w.key(Key::A, Modifiers::COMMAND, "");
+    w.type_text("#todo");
+    assert!(w.board_text().contains("## Doing\nquery: #todo\nsort: priority desc, due asc\ndrop: status: review\n"), "{}", w.board_text());
+    assert!(w.app.cfg.search.advanced, "the switch is a setting (QUERY-026)");
+    w.settle();
+    assert!(w.painted("Lane “Doing”"), "the popover stays open while it is edited");
+    assert_eq!(w.lane("Doing"), Vec::<String>::new(), "#todo is in the first lane, Pinned One is pinned");
+    // Esc or a click outside closes it
+    w.key(Key::Escape, Modifiers::NONE, "");
+    w.click_at(Pos2::new(900.0, 700.0));
+    assert!(!w.painted("Lane “Doing”"));
+    w.app.cfg.search.advanced = false;
+}
+
+// spec: QUERY-028
+#[test]
+fn query_028_the_menu_opens_the_settings_and_the_form_edits_sort_and_done() {
+    let mut w = W::board();
+    let mut dots: Vec<Pos2> = w.hl.text.iter().filter(|(t, _)| t == "⋯").map(|(_, p)| *p + eframe::egui::vec2(4.0, 6.0)).collect();
+    dots.sort_by(|a, b| a.x.total_cmp(&b.x));
+    w.click_at(dots[1]);
+    w.click("Settings…");
+    assert!(w.painted("Lane “Doing”"));
+    // the sort of the lane is in the form, as rows
+    assert!(w.painted("Sort") && w.painted("priority"), "{:?}", w.all_text());
+    w.click("Cards here are done");
+    assert!(w.board_text().contains("## Doing\nquery: status:doing\nsort: priority desc, due asc\ndone: true\n"), "{}", w.board_text());
+    w.click("Cards here are done");
+    assert!(!w.board_text().contains("done: true"));
+    // a query that is no simple property has no derived drop property
+    assert_eq!(super::lanes::drop_property("status:doing"), Some("status: doing".into()));
+    assert_eq!(super::lanes::drop_property("Status:\"In Progress\""), Some("Status: In Progress".into()));
+    assert_eq!(super::lanes::drop_property("#todo"), None);
+    assert_eq!(super::lanes::drop_property("status:doing AND #todo"), None);
+    assert_eq!(super::lanes::drop_property("status:doing OR status:todo"), None);
+    assert_eq!(super::lanes::drop_property("(status:"), None);
+    assert_eq!(super::lanes::drop_property(""), None);
+}
+
+// spec: BOARD-013, KEY-045
+#[test]
+fn board_013_space_space_ticks_the_task_in_the_peek_in_vim_normal_mode_and_esc_leaves_insert_first() {
+    let mut w = W::new("vim", &[("Board.md", "---\ntype: board\n---\n## Todo\nquery: #todo\n"), ("Tasky.md", "#todo\n- [ ] one task\n")]);
+    w.app.cfg.vim_mode = true;
+    w.click("Tasky");
+    let r = w.app.boards.peek.as_ref().unwrap().rect.unwrap();
+    // a click in the text gives the peek's editor the keyboard; vim starts in normal mode
+    w.click_at(Pos2::new(r.min.x + 80.0, r.min.y + 70.0));
+    assert!(w.app.boards.peek.as_ref().unwrap().editor.vim_normal_keys(w.hl.ctx()), "vim normal mode in the peek");
+    // put the cursor on the task line, as a click would, and tick it
+    let id = w.app.boards.peek.as_ref().unwrap().editor.id;
+    let mut st = eframe::egui::text_edit::TextEditState::load(w.hl.ctx(), id).unwrap_or_default();
+    let at = w.app.notes[Path::new("Tasky.md")].text.find("one task").unwrap();
+    st.cursor.set_char_range(Some(eframe::egui::text::CCursorRange::one(eframe::egui::text::CCursor::new(at))));
+    st.store(w.hl.ctx(), id);
+    w.hl.frames(&mut w.app, 2);
+    w.key(Key::Space, Modifiers::NONE, " ");
+    w.key(Key::Space, Modifiers::NONE, " ");
+    assert!(w.app.notes[Path::new("Tasky.md")].text.contains("- [x] one task"), "{:?}", w.app.notes[Path::new("Tasky.md")].text);
+    // Esc in insert mode leaves it and keeps the peek; in normal mode it closes the peek
+    w.key(Key::I, Modifiers::NONE, "i");
+    assert_eq!(w.app.boards.peek.as_ref().unwrap().editor.vim.mode, crate::vim::Mode::Insert);
+    w.key(Key::Escape, Modifiers::NONE, "");
+    assert!(w.app.boards.peek.is_some(), "the first Esc is the editor's");
+    assert_eq!(w.app.boards.peek.as_ref().unwrap().editor.vim.mode, crate::vim::Mode::Normal);
+    w.key(Key::Escape, Modifiers::NONE, "");
+    assert!(w.app.boards.peek.is_none());
+    assert!(w.file("Tasky.md").contains("- [x] one task"), "saved with the peek");
+}

@@ -114,9 +114,8 @@ impl<'a> Run<'a> {
     }
 
     /// The notes of the snapshot that match, in its order, as a lane of a board lists them
-    /// (QUERY-004, used by the lanes of #601 and by the tests until then): the text and the other terms match a note as a whole, not a line. The search
+    /// (QUERY-004): the text and the other terms match a note as a whole, not a line. The search
     /// may end early; [`Run::stopped`] says so, and the notes found so far are returned.
-    #[cfg(test)]
     pub fn match_notes(&mut self, expr: &Expr) -> Vec<std::path::PathBuf> {
         let snapshot = self.snapshot;
         let mut out = Vec::new();
@@ -221,7 +220,7 @@ impl<'a> Run<'a> {
 
 /// The day of the `due:` property of a note: the date at the start of its value (a time after it
 /// is left out).
-fn due_day(text: &str) -> Option<i64> {
+pub(crate) fn due_day(text: &str) -> Option<i64> {
     let values = markdown::front_matter_values(text);
     let (_, values) = values.iter().find(|(k, _)| k == "due")?;
     let value = values.first()?.trim();

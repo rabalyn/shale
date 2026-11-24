@@ -39,6 +39,8 @@ pub enum View {
     Drawing(PathBuf),
     Tasks,
     Graph,
+    /// the Kanban boards of the vault (BOARD-007); the board shown is `ShaleApp::boards.current`
+    Boards,
     Calendar,
     Mail,
     /// Mastodon / Bluesky feeds: the feed of this tab (None: not chosen yet, the last one is shown)
@@ -161,6 +163,7 @@ pub enum RightPanel {
     Thread,
 }
 
+mod boards;
 #[cfg(test)]
 mod busy_jobs;
 #[cfg(test)]
@@ -440,6 +443,8 @@ pub struct ShaleApp {
     pub search: SearchBox,
     /// the thread that searches for the picker and the sidebar (QUERY-014)
     pub search_worker: crate::search_all::SearchWorker,
+    /// the Kanban boards view: the open board, the selected card and the peek (BOARD-007)
+    pub boards: crate::board::Boards,
     pub tasks: TasksFilter,
     /// the graph of the whole vault and the local one in the side panel
     pub graphs: Graphs,
@@ -697,6 +702,7 @@ impl ShaleApp {
             tree: FileTree::default(),
             search: SearchBox::default(),
             search_worker: Default::default(),
+            boards: Default::default(),
             tasks: TasksFilter::default(),
             graphs: Graphs::new(),
             calendar: {
@@ -840,6 +846,7 @@ impl ShaleApp {
                 self.open_data_usage();
             }
             Some("graph") => self.show_view(View::Graph, false),
+            Some("boards") => self.show_view(View::Boards, false),
             // the feed view with made-up posts (no network); "social-import": and the dialog for saving some of them
             Some(v @ ("social" | "social-import")) => {
                 let demo = crate::social::demo::account();
@@ -1096,7 +1103,7 @@ impl ShaleApp {
     /// hand, with the place it was left at (NAV-045 to NAV-047). The mail view and the calendar
     /// are one each in the window, so their place is the one of the first such tab. A kind that is
     /// not known is skipped.
-    fn restore_view_tab(&mut self, kind: &str, st: &crate::vault_state::SavedTab, new_tab: bool) {
+    pub(crate) fn restore_view_tab(&mut self, kind: &str, st: &crate::vault_state::SavedTab, new_tab: bool) {
         use crate::vault_state::SavedTab;
         let view = match kind {
             SavedTab::MAIL => {
@@ -1127,6 +1134,12 @@ impl ShaleApp {
                     self.graphs.global.show_orphans = !g.hide_orphans;
                 }
                 View::Graph
+            }
+            SavedTab::BOARDS => {
+                if let Some(b) = st.board.as_deref().filter(|b| !b.is_empty()) {
+                    self.boards.current = Some(PathBuf::from(b));
+                }
+                View::Boards
             }
             SavedTab::SETTINGS_FILE => View::SettingsFile,
             _ => return,
@@ -1185,26 +1198,7 @@ impl ShaleApp {
         }
         match f.kind {
             FileKind::Note => {
-                // a buffer without edits that is behind the index (the file was replaced since it
-                // was loaded) takes the index text instead of showing a stale one
-                if let (Some(doc), Some(n)) = (self.notes.get_mut(rel), self.vault.as_ref().and_then(|v| v.notes.get(rel))) {
-                    if !doc.dirty && (doc.unreadable != n.unreadable || doc.base != crate::vault::Stamp::of(&n.text)) {
-                        doc.reload(n.text.clone(), n.unreadable.clone());
-                    }
-                }
-                if !self.notes.contains_key(rel) {
-                    // red path links whose file name exists exactly once are fixed (LINK-012);
-                    // there is no buffer for this note yet, so nothing unsaved is in the way
-                    let fixed = self.vault.as_mut().map(|v| v.auto_fix_links(rel));
-                    // a note that could not be read opens read-only, never as an empty note (DATA-008)
-                    let (text, unreadable) = self.vault.as_ref().and_then(|v| v.notes.get(rel)).map(|n| (n.text.clone(), n.unreadable.clone())).unwrap_or_default();
-                    self.notes.insert(rel.to_path_buf(), NoteDoc::loaded(text, unreadable));
-                    match fixed {
-                        Some(Ok(n)) if n > 0 => self.toast(format!("Fixed {n} link(s) whose note had moved")),
-                        Some(Err(e)) => self.toast(format!("Could not fix links: {e}")),
-                        _ => {}
-                    }
-                }
+                self.ensure_buffer(rel);
                 self.show_view(View::Note(rel.to_path_buf()), new_tab);
                 // the folds it had when it was left (EDIT-079)
                 if let (Some(saved), Some(t)) = (self.vdata.state.folds.get(&rel_to_string(rel)), self.tabbar.tabs.get_mut(self.tabbar.active)) {
@@ -1243,6 +1237,32 @@ impl ShaleApp {
             }
         }
         self.remember_open_files();
+    }
+
+    /// Make sure the note `rel` has a buffer that is the file as it is now: one without edits that is
+    /// behind the index (the file was replaced since it was loaded) takes the index text, and a note that
+    /// has none is loaded. Opening a note in a tab and the peek of a card both start here.
+    pub(crate) fn ensure_buffer(&mut self, rel: &Path) {
+        // a buffer without edits that is behind the index (the file was replaced since it
+        // was loaded) takes the index text instead of showing a stale one
+        if let (Some(doc), Some(n)) = (self.notes.get_mut(rel), self.vault.as_ref().and_then(|v| v.notes.get(rel))) {
+            if !doc.dirty && (doc.unreadable != n.unreadable || doc.base != crate::vault::Stamp::of(&n.text)) {
+                doc.reload(n.text.clone(), n.unreadable.clone());
+            }
+        }
+        if !self.notes.contains_key(rel) {
+            // red path links whose file name exists exactly once are fixed (LINK-012);
+            // there is no buffer for this note yet, so nothing unsaved is in the way
+            let fixed = self.vault.as_mut().map(|v| v.auto_fix_links(rel));
+            // a note that could not be read opens read-only, never as an empty note (DATA-008)
+            let (text, unreadable) = self.vault.as_ref().and_then(|v| v.notes.get(rel)).map(|n| (n.text.clone(), n.unreadable.clone())).unwrap_or_default();
+            self.notes.insert(rel.to_path_buf(), NoteDoc::loaded(text, unreadable));
+            match fixed {
+                Some(Ok(n)) if n > 0 => self.toast(format!("Fixed {n} link(s) whose note had moved")),
+                Some(Err(e)) => self.toast(format!("Could not fix links: {e}")),
+                _ => {}
+            }
+        }
     }
 
     /// Show an Obsidian canvas read-only (no question asked).
@@ -1509,7 +1529,7 @@ impl ShaleApp {
     /// The key `normal.toggle_task` (KEY-045): tick or untick the task on the cursor's line of the editor
     /// (vim normal mode), or the task row under the pointer in the reading view and the task list, as a
     /// click on its checkbox does (TASK-003). Without a task it says so.
-    fn toggle_task_key(&mut self, hovered: Option<(Option<PathBuf>, usize)>) {
+    fn toggle_task_key(&mut self, ctx: &egui::Context, hovered: Option<(Option<PathBuf>, usize)>) {
         let Some(tab) = self.tabbar.tabs.get(self.tabbar.active) else { return };
         let editor = matches!((&tab.view, tab.reading), (View::Note(_), false));
         let (rel, offset) = match (&tab.view, tab.reading) {
@@ -1520,6 +1540,15 @@ impl ShaleApp {
             }
             (View::Note(rel), true) => (Some(rel.clone()), hovered.and_then(|(r, o)| r.is_none().then_some(o))),
             (View::Tasks, _) => hovered.and_then(|(r, o)| r.map(|r| (Some(r), Some(o)))).unwrap_or((None, None)),
+            // the peek of a card of a board (BOARD-013): its editor, in vim normal mode, as a note in a tab
+            (View::Boards, _) => match self.boards.peek.as_ref().filter(|p| p.editor.vim_normal_keys(ctx)) {
+                Some(p) => {
+                    let text = self.notes.get(&p.rel).map(|d| d.text.as_str()).unwrap_or_default();
+                    let line = crate::editor_preview::line_of(text, markdown::char_to_byte(text, p.editor.vim.cursor));
+                    (Some(p.rel.clone()), markdown::find_tasks(text).into_iter().find(|t| t.line == line).map(|t| t.check_offset))
+                }
+                None => (None, None),
+            },
             _ => (None, None),
         };
         let (Some(rel), Some(offset)) = (rel, offset) else {
@@ -2497,6 +2526,8 @@ impl ShaleApp {
         match tab.view {
             View::Note(_) if !tab.reading => tab.editor.vim_normal_keys(ctx),
             View::Mail | View::Drawing(_) => false,
+            // the editor of the peek of a card has the keyboard in normal mode (BOARD-013)
+            View::Boards if self.boards.peek.as_ref().is_some_and(|p| p.editor.vim_normal_keys(ctx)) => true,
             _ => ctx.memory(|m| m.focused().is_none()),
         }
     }
@@ -2513,6 +2544,7 @@ impl ShaleApp {
         match tab.view {
             View::Note(_) if !tab.reading => tab.editor.vim_normal_keys(ctx) || ctx.memory(|m| m.focused().is_none()),
             View::Drawing(_) => false,
+            View::Boards if self.boards.peek.as_ref().is_some_and(|p| p.editor.vim_normal_keys(ctx)) => true,
             View::Mail => self.mail.compose.is_none() && !self.mail.away && !ctx.text_edit_focused(),
             // another widget with the keyboard (a player after a click, a button after Tab) keeps Space
             _ => ctx.memory(|m| m.focused().is_none()),
@@ -2743,6 +2775,8 @@ impl ShaleApp {
         }
         // the keys of the open link preview come before everything the editor reads (EDIT-035)
         self.link_preview_keys(ui);
+        // Esc closes the peek of a card, also while its editor has the keyboard (BOARD-012)
+        self.boards_keys(ui);
         // the Alt keys of the buttons of a note, with the keyboard in its text or not (KEY-014, KEY-015)
         if self.note_keys_active(ui.ctx()) {
             if let Some(a) = ui.input_mut(|i| self.keymap.poll(i, Scope::NoteView)) {
@@ -2763,7 +2797,8 @@ impl ShaleApp {
                 Some(KeyAction::NormalAlternate) => self.swap_alternate(),
                 Some(KeyAction::NormalFindFile) => self.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::FileNames))),
                 Some(KeyAction::NormalSearchAll) => self.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::Everything))),
-                Some(KeyAction::NormalToggleTask) => self.toggle_task_key(hovered_task),
+                Some(KeyAction::NormalToggleTask) => self.toggle_task_key(ui.ctx(), hovered_task),
+                Some(KeyAction::MainBoards) => self.show_view(View::Boards, false),
                 Some(KeyAction::NormalLinkPreview) => self.link_preview_key(ui.ctx()),
                 _ => {}
             }
