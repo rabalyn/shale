@@ -499,6 +499,8 @@ pub struct ShaleApp {
     pub busy: crate::busy::Busy,
     /// the check of the vault's names for other systems (VAULT-028)
     pub vault_check: crate::vault_check::VaultCheck,
+    /// Settings → Publishing: the publish of the vault as a site and its page (SITE-065).
+    pub publishing: crate::site_export::job::PublishState,
     /// the LaTeX page of the settings: the TeX found, the managed TeX Live and its jobs (TEX-001)
     pub tex: crate::pdf::tex::settings_ui::TexState,
     /// the check for new releases, their download and install (UPD)
@@ -781,6 +783,7 @@ impl ShaleApp {
             outside_opens: Vec::new(),
             busy: Default::default(),
             vault_check: Default::default(),
+            publishing: Default::default(),
             tex: crate::pdf::tex::settings_ui::TexState::new(persist, &tag),
             update: if persist { crate::update::UpdateState::for_running_program() } else { Default::default() },
             word: Default::default(),
@@ -2872,7 +2875,7 @@ impl ShaleApp {
     /// own keys (Enter, Tab, text, Esc, the key capture of the Keybindings tab) are no keymap
     /// action and are not affected.
     pub(crate) fn shortcuts_blocked(&self) -> bool {
-        self.modal.is_some() || self.repo_ask_shown()
+        self.modal.is_some() || self.repo_ask_shown() || self.publish_ask_shown()
     }
 
     fn shortcuts(&mut self, ui: &Ui) {
@@ -3388,6 +3391,7 @@ impl ShaleApp {
         self.update_tick(&ctx);
         self.take_handover(&ctx);
         self.sync_tick(&ctx);
+        self.publish_tick(&ctx);
         self.vault_leave_tick();
         self.history_tick(&ctx);
         self.mail_tick(&ctx);

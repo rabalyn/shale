@@ -1,6 +1,6 @@
 Every setting you can change, its default, and where it lives. Back to [[Start here]]; how the
 files work is in [[Vault settings]]. Open the Settings window with **Ctrl+,** or the settings
-button of the ribbon; it has a tab per domain (Vault, Editor, Appearance, Fonts, Sync, Calendar, Mail, Feeds, Import, Data, LaTeX, Updates, Help) and **Keybindings**, and the button
+button of the ribbon; it has a tab per domain (Vault, Editor, Appearance, Fonts, Sync, Publishing, Calendar, Mail, Feeds, Import, Data, LaTeX, Updates, Help) and **Keybindings**, and the button
 **Open settings file** at the top right (see below). The tab list is as wide as its longest name at any font size; drag its border to change the width, double-click the border to make it automatic again.
 
 Two files hold settings:
@@ -315,13 +315,13 @@ Shale itself writes `created` and `modified` (full ISO 8601 times) into every Ma
 | `sync.commit_prefix` | empty | Git sync, "Commit message prefix" |
 | `sync.commit_suffix` | empty | Git sync, "suffix" |
 | `sync.lfs_download` | `on_demand` (a media file stored with Git LFS is downloaded when you play or open it; `always`: after every sync) | Git sync, "Download media files after every sync" (shown only when `git-lfs` is installed) |
-| `publish` | the group of the keys below; it is not in the file while all of them are default | the file only, for now ([[Publishing a vault]]) |
-| `publish.enabled` | off (nothing is published; `shale export-site` writes an empty site) | the file only |
-| `publish.all_notes` | off (on: every note but the private types) | the file only |
-| `publish.include_folders`, `publish.include_tags` | empty lists (the notes in these folders, the notes with these tags) | the file only |
-| `publish.exclude_folders`, `publish.exclude_tags` | empty lists (never published, they win over the include rules) | the file only |
-| `publish.private_types` | empty (`email`, `event`, `post`, `person` notes stay out of "all notes" unless named here) | the file only |
-| `publish.url`, `publish.branch` | empty (the server the site will be pushed to, kept for later) | the file only |
+| `publish` | the group of the keys below; it is not in the file while all of them are default | Settings → Publishing ([[Publishing a vault]]) |
+| `publish.enabled` | off (nothing is published; `shale export-site` writes only the hello-world page) | Settings → Publishing, "Publish this vault as a website" |
+| `publish.all_notes` | off (on: every note but the private types) | Settings → Publishing, "All notes" |
+| `publish.include_folders`, `publish.include_tags` | empty lists (the notes in these folders, the notes with these tags) | Settings → Publishing, "Publish the notes in these folders" and "… with these tags" |
+| `publish.exclude_folders`, `publish.exclude_tags` | empty lists (never published, they win over the include rules) | Settings → Publishing, "Never publish the notes in these folders" and "… with these tags" |
+| `publish.private_types` | empty (`email`, `event`, `post`, `person` notes stay out of "all notes" unless named here) | Settings → Publishing, "Also publish" |
+| `publish.url`, `publish.branch` | empty (the repository the site is pushed to, and its branch, `main` when empty; an address with a password is not kept) | Settings → Publishing, "Address of the publish repository" and "Branch" |
 
 Settings → Sync starts with **Turn on sync…** ([[Turn on sync]]), which sets up the history, a folder another app syncs, or a git server; the
 address field and **Connect** are under **Advanced**. The wizard adds no setting of its own: it turns `history.enabled` on, and for a server it

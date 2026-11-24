@@ -93,6 +93,8 @@ impl ShaleApp {
         self.tag_learner = crate::import::tagwords::TagLearner::new();
         self.bib.reset();
         self.vault_check = Default::default();
+        self.publishing.stop();
+        self.publishing = Default::default();
         self.history.drop_vault();
         self.sync.drop_vault();
         self.rescan.reset();

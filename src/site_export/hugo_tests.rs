@@ -31,6 +31,22 @@ fn hugo_here() -> bool {
     }
 }
 
+/// Whether Pagefind is installed (`scripts/install-pagefind.sh`); says so when not (BUILD-018).
+fn pagefind_here() -> bool {
+    let found = crate::program::command("pagefind").arg("--version").output().ok().is_some_and(|o| o.status.success());
+    if !found {
+        println!("skipping: pagefind is not installed (scripts/install-pagefind.sh)");
+    }
+    found
+}
+
+/// The bytes of a file of Pagefind's index: compressed, then its own `pagefind_dcd` marker.
+fn unpack(path: &Path) -> Vec<u8> {
+    let bytes = std::fs::read(path).unwrap();
+    assert_eq!(bytes[..3], [0x1f, 0x8b, 0x08], "{} is compressed", path.display());
+    miniz_oxide::inflate::decompress_to_vec(&bytes[10..bytes.len() - 8]).unwrap_or_else(|e| panic!("{}: {e:?}", path.display()))
+}
+
 /// Export `f` to its `out/` and build it; the folder `public/` and Hugo's messages.
 fn build(f: &Fixture) -> (PathBuf, String) {
     let args = Args { vault: f.dir.clone(), out: f.out(), dry_run: false };
@@ -234,4 +250,48 @@ fn site_048_the_pages_have_the_search_box_for_pagefind_and_only_the_notes_are_in
     assert!(body.contains("Marks:") && !body.contains("Linked from") && !body.contains("id=\"search\""));
     // nothing is loaded from another site
     assert!(!plan.contains("src=\"http") && !plan.contains("href=\"http"), "{plan}");
+}
+
+// spec: SITE-048
+#[test]
+fn site_048_pagefind_finds_the_words_of_a_published_note_and_no_word_of_an_unpublished_one() {
+    if !hugo_here() || !pagefind_here() {
+        return;
+    }
+    let f = Fixture::with("s048p", "\"all_notes\": true", &[("Harbour.md", "Zebrafish swim in the harbour.\n"), ("Closed.md", "---\npublish: false\n---\nQuokka secrets of the closed note.\n")]);
+    let (public, _) = build(&f);
+    let run = crate::program::command("pagefind").arg("--site").arg(&public).output().unwrap();
+    assert!(run.status.success(), "pagefind failed:\n{}{}", String::from_utf8_lossy(&run.stdout), String::from_utf8_lossy(&run.stderr));
+    let index = public.join("pagefind");
+    let mut parts = Vec::new();
+    for dir in ["fragment", "index"] {
+        for e in std::fs::read_dir(index.join(dir)).unwrap().flatten() {
+            parts.push((dir, unpack(&e.path())));
+        }
+    }
+    let text = |dir: &str| parts.iter().filter(|(d, _)| *d == dir).map(|(_, b)| String::from_utf8_lossy(b).into_owned()).collect::<Vec<_>>().join("\n");
+    // the page of the note is in the index with its words, and its word is a word of the search index
+    let (fragments, words) = (text("fragment"), text("index"));
+    assert!(fragments.contains("\"url\":\"/harbour/\"") && fragments.contains("Zebrafish swim in the harbour."), "{fragments}");
+    assert!(words.contains("zebrafish"), "the word is in the index");
+    // nothing of the note that is not published is
+    for gone in ["quokka", "closed", "secrets"] {
+        assert!(!fragments.to_lowercase().contains(gone) && !words.contains(gone), "{gone} is in the index");
+    }
+    // the header and the backlinks are not indexed: only what is in the page's body
+    assert!(!fragments.contains("Linked from"), "{fragments}");
+}
+
+// spec: SITE-001
+#[test]
+fn site_001_the_hello_world_page_is_the_index_of_a_site_without_a_note() {
+    if !hugo_here() {
+        return;
+    }
+    let f = Fixture::with("s001h", "\"include_tags\": [\"public\"]", &[("Plan.md", "Nothing is tagged.\n")]);
+    let (public, _) = build(&f);
+    let index = html(&public, "");
+    assert!(index.contains("Hello from Shale") && index.contains("This page was published with Shale.") && index.contains("No notes are chosen for publishing yet."), "{index}");
+    assert!(index.contains("open Settings → Publishing in Shale") && index.contains(&format!("href=\"{}\"", super::plan::HELLO_GUIDE)), "{index}");
+    assert!(!index.contains("Plan") && !index.contains("Folders") && !index.contains("Recently changed"), "{index}");
 }

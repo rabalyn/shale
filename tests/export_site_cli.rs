@@ -6,7 +6,7 @@ use std::process::{Command, Output};
 fn shale(dir: &Path) -> Command {
     let mut c = Command::new(env!("CARGO_BIN_EXE_shale"));
     // no display at all: a run that tried to open a window would fail; and the settings of this computer are not read
-    c.env_remove("DISPLAY").env_remove("WAYLAND_DISPLAY").env("XDG_CONFIG_HOME", dir.join("config")).env("HOME", dir.join("home"));
+    c.env_remove("DISPLAY").env_remove("WAYLAND_DISPLAY").env("XDG_CONFIG_HOME", dir.join("config")).env("XDG_DATA_HOME", dir.join("data")).env("HOME", dir.join("home"));
     c
 }
 
@@ -70,10 +70,41 @@ fn export_site_says_why_it_failed_and_exits_with_1_and_writes_nothing() {
         assert_eq!(run.status.code(), Some(1));
         assert!(stderr(&run).contains("usage: shale export-site"), "{}", stderr(&run));
     }
-    // publishing from the command line is a later step: no option of that name is accepted
-    let run = shale(&dir).arg("export-site").arg("--publish").arg(dir.join("vault")).output().unwrap();
+    // --take-over belongs to --publish
+    let run = shale(&dir).args(["export-site", "--take-over"]).arg(dir.join("vault")).arg(&out).output().unwrap();
     assert_eq!(run.status.code(), Some(1));
-    assert!(stderr(&run).contains("unknown option --publish"), "{}", stderr(&run));
+    assert!(stderr(&run).contains("unknown option --take-over"), "{}", stderr(&run));
     assert!(!out.exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// spec: SITE-066, SITE-076
+#[test]
+fn export_site_publish_pushes_the_site_to_the_target_of_the_settings_and_says_why_it_cannot() {
+    let dir = vault("publish");
+    let remote = dir.join("remote.git");
+    let init = Command::new("git").args(["init", "--quiet", "--bare"]).arg(&remote).output().unwrap();
+    assert!(init.status.success());
+    // without an address the command says so and pushes nothing
+    let run = shale(&dir).args(["export-site", "--publish"]).arg(dir.join("vault")).output().unwrap();
+    assert_eq!(run.status.code(), Some(1));
+    assert!(stderr(&run).contains("No address is set to publish to"), "{}", stderr(&run));
+    // with one it pushes: the summary on stdout, one commit on the branch of the settings
+    let settings = serde_json::json!({"version": 1, "publish": {"enabled": true, "include_tags": ["pub"], "url": remote.to_string_lossy(), "branch": "site"}});
+    std::fs::write(dir.join("vault/.shale/settings.json"), settings.to_string()).unwrap();
+    let run = shale(&dir).args(["export-site", "--publish"]).arg(dir.join("vault")).output().unwrap();
+    assert!(run.status.success(), "{}", stderr(&run));
+    assert_eq!(stdout(&run).lines().last(), Some("Published 2 notes, 0 media files and 1 link; 1 link became plain text."));
+    assert!(stderr(&run).contains("shale: Publishing…"), "{}", stderr(&run));
+    let log = Command::new("git").arg("-C").arg(&remote).args(["log", "--format=%s", "site"]).output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&log.stdout).lines().collect::<Vec<_>>(), ["Publish vault: 2 notes"]);
+    let files = Command::new("git").arg("-C").arg(&remote).args(["ls-tree", "-r", "--name-only", "site"]).output().unwrap();
+    let files = String::from_utf8_lossy(&files.stdout).into_owned();
+    assert!(files.contains("content/open.md") && !files.contains("closed"), "{files}");
+    assert!(!dir.join("vault/.git").exists(), "the vault is no repository");
+    // a folder that is not there: the reason and the exit code
+    let run = shale(&dir).args(["export-site", "--publish"]).arg(dir.join("nothing")).output().unwrap();
+    assert_eq!(run.status.code(), Some(1));
+    assert!(stderr(&run).contains("is not a folder") && stderr(&run).contains("usage: shale export-site"), "{}", stderr(&run));
     let _ = std::fs::remove_dir_all(&dir);
 }

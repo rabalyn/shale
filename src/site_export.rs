@@ -5,13 +5,16 @@
 //! The folder has one small module per concern: `rules` (which notes), `slug` (their URLs),
 //! `anchor` (Hugo's heading ids), `front` (front matter), `body` (a note's text: links, embeds,
 //! math), `plan` (everything that is written), `write` (the atomic write and the manifest), `theme`
-//! (the vendored Hugo theme) and `cli` (`shale export-site`).
+//! (the vendored Hugo theme), `publish` (the push to the publish remote, SITE-062…SITE-076) and `cli`
+//! (`shale export-site`).
 
 pub(crate) mod anchor;
 pub(crate) mod body;
 pub(crate) mod cli;
 pub(crate) mod front;
+pub(crate) mod job;
 pub(crate) mod plan;
+pub(crate) mod publish;
 pub(crate) mod rules;
 pub(crate) mod slug;
 pub(crate) mod theme;
@@ -25,3 +28,5 @@ mod export_tests;
 mod hugo_tests;
 #[cfg(test)]
 mod test_support;
+#[cfg(all(test, unix))]
+mod ui_tests;

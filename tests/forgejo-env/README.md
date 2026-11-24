@@ -25,6 +25,11 @@ What the suite checks (`src/gitsync/wizard/forgejo_env_tests.rs`):
   script, in the test only); without it the failure is told as "locked" or "no agent". The clone address is
   `ssh://git@127.0.0.1:13022/<owner>/<repo>.git` and the tests trust the host in a `known_hosts` file of their own.
 
+- the publish of a vault as a Hugo site (SITE-062 to SITE-075, `src/site_export/publish/env_tests.rs`): over HTTPS with a token and
+  over SSH one parentless snapshot replaces the last one (an unpublished note is in no commit of the server), a wrong token or a
+  missing repository changes nothing and is told in plain words, a branch of another vault is taken over only when confirmed, and
+  media go to the server's LFS store (`LFS_START_SERVER` in `compose.yaml`) once.
+
 The tests find the Shale executable that cargo built (`target/debug/shale`; `SHALE_ENV_TESTS_BIN` names another).
 The container image is `codeberg.org/forgejo/forgejo:11.0.16-rootless`, pinned. With Docker the compose command is
 `SHALE_FORGEJO_ENV_COMPOSE="docker compose"`. `up`, `down` and `reset` take the machine-wide lock of the podman stacks

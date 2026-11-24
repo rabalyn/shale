@@ -5,6 +5,7 @@
 //!   shale --vault <folder>      open a specific folder as vault
 //!   shale --export-pdf <folder> <file.pdf>   write the notes of a folder as one PDF (a book), without a window
 //!   shale export-site <vault> <out> [--dry-run]   write the notes a vault publishes as a Hugo site (SITE-011), without a window
+//!   shale export-site --publish <vault> [--take-over]   push that site to the vault's publish remote (SITE-066), without a window
 //!   shale --screenshot out.png  start with a demo vault, draw ~120 frames, save a picture, exit
 //!   shale --screenshot out.png --view tasks|graph|drawing|reading|calendar|mail   (same, other view)
 //!   shale --screenshot out.png --keys 'click:@Sync|waitfor:@Compose'   (scripted input, see script.rs)
@@ -230,7 +231,7 @@ fn window(size: [f32; 2]) -> egui::ViewportBuilder {
     egui::ViewportBuilder::default().with_title("Shale").with_app_id("shale").with_icon(icon()).with_inner_size(size).with_min_inner_size(MIN_WINDOW)
 }
 
-const USAGE: &str = "usage: shale [<folder> | --vault <folder>] [(--screenshot <file.png> | --record <file.webm>) [--view <name>] [--size WIDTHxHEIGHT] [--keys <script>]]\n       shale --export-pdf <folder> <file.pdf>\n       shale export-site <vault folder> <output folder> [--dry-run]";
+const USAGE: &str = "usage: shale [<folder> | --vault <folder>] [(--screenshot <file.png> | --record <file.webm>) [--view <name>] [--size WIDTHxHEIGHT] [--keys <script>]]\n       shale --export-pdf <folder> <file.pdf>\n       shale export-site <vault folder> <output folder> [--dry-run]\n       shale export-site --publish <vault folder> [--take-over]";
 
 /// What the command line asked for.
 #[derive(Debug, PartialEq)]

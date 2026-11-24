@@ -20,6 +20,9 @@ services:
       FORGEJO__server__SSH_PORT: "13022"
       FORGEJO__server__SSH_LISTEN_HOST: 0.0.0.0
       FORGEJO__server__SSH_LISTEN_PORT: "2222"
+      # the LFS store the publish uploads media to (SITE-069); the secret is a throw-away value of this test server
+      FORGEJO__server__LFS_START_SERVER: "true"
+      FORGEJO__server__LFS_JWT_SECRET: "shale-test-lfs-secret-not-for-use-anywhere0"
       FORGEJO__service__DISABLE_REGISTRATION: "true"
       FORGEJO__service__REQUIRE_SIGNIN_VIEW: "true"
       FORGEJO__repository__DEFAULT_BRANCH: main

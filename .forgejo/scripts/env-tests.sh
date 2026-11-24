@@ -2,7 +2,7 @@
 # The CI job "env-tests" (DEV-005, CALENV-004): runs the real-server suites of the CalDAV and mail
 # test environments and the LuaLaTeX suite of the TeX environment (TEX-020). The fourth suite, `forgejo_env`
 # (SYNC-066), runs the sync wizard's server path against a real Forgejo (`tests/forgejo-env/`): `suites` names it
-# for `src/gitsync/wizard/`, `src/gitsync/credentials.rs`, `tests/forgejo-env/` and `tests/askpass`; `run` starts
+# for `src/gitsync/wizard/`, `src/gitsync/credentials.rs`, `src/gitsync/lfs.rs`, `src/site_export/publish` (the publish of a vault, SITE-062), `tests/forgejo-env/` and `tests/askpass`; `run` starts
 # the Forgejo stack for it (SHALE_FORGEJO_ENV_SH) and takes it down again. Usage:
 #   env-tests.sh suites <base> <head>
 #       prints the suites the change from <base> to <head> needs, space separated (empty: none):
@@ -82,7 +82,7 @@ case "${1:-}" in
     if printf '%s\n' "$files" | grep -Eq '^(src/calendar/|tests/caldav-env/)'; then out="$out calendar::env_tests"; fi
     if printf '%s\n' "$files" | grep -Eq '^(src/mail|tests/mail-env/)'; then out="$out mail_env"; fi
     if printf '%s\n' "$files" | grep -Eq '^(src/pdf/tex|assets/tex/|tests/tex-env/)'; then out="$out tex_env"; fi
-    if printf '%s\n' "$files" | grep -Eq '^(src/gitsync/wizard/|src/gitsync/credentials\.rs|tests/forgejo-env/|tests/askpass)'; then out="$out forgejo_env"; fi
+    if printf '%s\n' "$files" | grep -Eq '^(src/gitsync/wizard/|src/gitsync/credentials\.rs|src/gitsync/lfs\.rs|src/site_export/publish|tests/forgejo-env/|tests/askpass)'; then out="$out forgejo_env"; fi
     if printf '%s\n' "$files" | grep -Eq '^(src/netshare_env_tests\.rs|src/fsutil\.rs|src/vault\.rs|tests/smb-env/)'; then out="$out smb_fuse_env"; fi
     echo "${out# }"
     ;;

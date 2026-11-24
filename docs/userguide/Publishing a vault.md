@@ -6,14 +6,17 @@ Your notes can be a website: a wiki that you can read in a browser, with links b
 tags, math and a search box. Shale writes the pages; [Hugo](https://gohugo.io) builds them. Back to
 [[Start here]].
 
-This is the first step: Shale writes the site into a folder with a command. The **Settings → Publishing** page and
-a button that pushes the site to your server come later, until then the rules are in a file.
+Shale can write the site into a folder (a command), and it can **publish** it: write it and push it to a
+repository on your own server, where a small job builds it with Hugo and Pagefind and serves it
+([[Publishing to a server]]). The vault itself never goes to the server, only the notes you chose and the pictures
+and files they show.
 
 # Nothing is published unless you say so
 
-Publishing is **off** for every vault. A vault that has not turned it on writes an empty site. The switch and the
-rules live in the vault's own `<vault>/.shale/settings.json` (they travel with the vault, [[Vault settings]]), in a
-`publish` section:
+Publishing is **off** for every vault. A vault that has not turned it on, or that has no chosen note, writes a site with one **hello-world page** (it says it was published with Shale and that no notes are chosen yet, with the time, how to publish notes and a link to this note, and nothing of your vault), so you can see that publishing and your server's build work. You turn it on, choose
+the notes and say where to publish in **Settings → Publishing** (below). All of it is the vault's own setting in
+`<vault>/.shale/settings.json` (it travels with the vault, [[Vault settings]]), in a `publish` section, which you can
+also edit by hand:
 
 ```
 {
@@ -35,7 +38,7 @@ rules live in the vault's own `<vault>/.shale/settings.json` (they travel with t
 | `include_tags` | the notes with one of these tags, in the text or in the properties; `a` also takes `a/b` |
 | `exclude_folders`, `exclude_tags` | notes that are never published; they win over every include rule |
 | `private_types` | types that `all_notes` takes in as well; without them mail (`email`), `event`, `post` and `person` notes stay out |
-| `url`, `branch` | where the site will be published later; Shale only keeps them for now |
+| `url`, `branch` | the repository the site is pushed to and its branch (`main` when empty) |
 
 The rules combine: a note is published when any include rule matches and no exclude rule does. A note can also
 decide for itself with a property, which wins over every rule: `publish: true` or `publish: false`.
@@ -67,16 +70,59 @@ Changing a rule changes no note. Shale reads the rules and your notes and never 
   or a note named like the folder) is the text of that page. The home page lists the folders and the latest notes. A
   page shows the notes that link to it in a panel below the text.
 
+# Publish from Shale
+
+Open **Settings → Publishing**. With the switch off the page shows only the switch. With it on:
+
+![[settings-publishing.png]]
+
+- **Which notes**: all notes, the notes in folders, the notes with tags, and what is never published (one entry per
+  line); the e-mails, events, posts and contacts that "all notes" leaves out can be ticked in. The page says how
+  many notes the rules choose now, and **List the notes** shows them, the same list as `--dry-run` below.
+- **Where to publish**: the address of a repository of its own, and its branch. Use a repository that is only for
+  the site, never the one this vault syncs with: Shale refuses that address, because a publish replaces everything on
+  the branch. A password in the address is refused too; sign in as for git sync ([[Turn on sync]]): a **token** for an
+  `https://` address (Shale keeps one token for each server and user name, so two vaults on the same server use the
+  same sign-in) or an **SSH key**. When the sign-in does not work, the page says why in the words of
+  [[Git sync sign-in problems]] with a link **How to fix this**.
+- **Publish** writes the site and pushes it, in the background, with the step it is at and **Cancel**. When it is
+  done the page says how many notes and media files were published and how many links became plain text, and lists
+  every warning, for example each file outside the vault that was not found on this computer. A publish that is
+  cancelled or fails leaves the repository as it was. The same is `shale export-site --publish <vault folder>` on
+  the command line (it prints the same summary; see below).
+- **Who published last**: the page reads the branch's last commit and says from which computer and when it was
+  published. **Check the target** asks again.
+
+Every publish is **one snapshot**: a single commit with no parent that replaces the branch. A note that you stop
+publishing is therefore gone from the branch and from its history at the next publish, and the repository stays small.
+Two computers can publish to the same repository without telling each other: the last publish wins. The commit's
+message names the computer, the time, the vault and its name.
+
+**Another vault's target.** Before it pushes, Shale reads the branch's last commit. When another vault published
+there, or the branch was not made by Shale, a question says so and asks whether this vault takes the target over;
+nothing is pushed until you answer. A branch that does not exist yet is taken without asking. On the command line the
+answer is `--take-over`.
+
+**Pictures, sound and video.** The audio and video files go to the server's **Git LFS** store, the way git sync does it
+([[Git sync]]), so Git LFS has to be installed on this computer; a file that is already in the server's store is not
+sent again. A file that you stop publishing stays in the store until the server collects what nothing uses any more.
+Pictures and PDFs are ordinary files of the snapshot.
+
+Shale keeps the repository it pushes from in its own data folder, one for each vault (`<data folder>/shale/vaults/<vault
+id>/publish`), never in the vault; the vault gets one small file, `.shale/history-id`, its ID, if it has none yet.
+
 # Write the site and build it
 
 ```
 shale export-site <vault folder> <output folder>
 shale export-site --dry-run <vault folder> <output folder>
+shale export-site --publish <vault folder> [--take-over]
 ```
 
 The first writes the site; the second only lists every note and media file it would write. The last line says how
 many notes, media files and links were written and how many links became plain text; a problem goes to the error
-output with a warning or a reason and the exit code 1. The folder is written next to the output folder first and
+output with a warning or a reason and the exit code 1. The third form publishes the vault, with the settings of
+the vault (switch, rules, address and branch) and the sign-in of this computer; it names one vault, never all of them. The folder is written next to the output folder first and
 moved into place when it is whole, and later runs replace only the files an earlier run wrote (they are listed in
 `.shale-export.json`), so a file of your own in that folder stays.
 
@@ -91,4 +137,5 @@ npx pagefind --site public
 
 The result is in `public/`: serve that folder with any web server. The pages have a search box that works once
 Pagefind has run, and that finds the words of the published notes and of nothing else. The site has no login: if it must
-not be public, put a password in front of it with your web server.
+not be public, put a password in front of it with your web server. How a server builds the site by itself whenever
+you publish is in [[Publishing to a server]].

@@ -56,17 +56,39 @@ fn flagged(text: &str) -> bool {
     markdown::front_matter_values(text).iter().any(|(k, v)| k == "folder-note" && v.first().is_some_and(|v| v.trim().eq_ignore_ascii_case("true")))
 }
 
-fn vault_name(vault: &Vault) -> String {
+/// The name of the vault: its folder's name.
+pub fn vault_name(vault: &Vault) -> String {
     vault.root.file_name().map(|n| n.to_string_lossy().into_owned()).filter(|n| !n.is_empty()).unwrap_or_else(|| "Vault".to_string())
 }
 
-/// The site without a note: the config, the theme and empty data files.
-fn empty_site(vault: &Vault, why: String) -> Export {
-    let mut files = theme::files(&vault_name(vault)).into_iter().map(|(path, text)| OutFile { path, content: Content::Text(text) }).collect::<Vec<_>>();
+/// The text of the hello-world page of a site without a note (SITE-001): fixed, nothing of the
+/// vault, its notes or this computer is in it (SITE-010).
+const HELLO_TITLE: &str = "Hello from Shale";
+
+/// The user guide note about publishing, on the project's web page (the program has no other base
+/// address of the guide); a test checks that the file exists.
+pub const HELLO_GUIDE: &str = "https://github.com/rabalyn/shale/blob/main/docs/userguide/Publishing%20a%20vault.md";
+
+fn hello_page(exported: i64) -> String {
+    let (days, sod) = (exported.div_euclid(86_400), exported.rem_euclid(86_400));
+    let (y, m, d) = crate::calendar::time::civil_from_days(days);
+    let page = Page { title: HELLO_TITLE, tags: &[], lastmod: None };
+    format!(
+        "{}This page was published with Shale. It shows that publishing and the build of the site work.\n\nNo notes are chosen for publishing yet.\n\nTo publish notes, open Settings → Publishing in Shale for your vault, turn publishing on, choose notes (all notes, folders or tags, or `publish: true` in a note) and publish again. [How publishing works]({HELLO_GUIDE})\n\nExported at {y:04}-{m:02}-{d:02} {} UTC.\n",
+        front::front_matter(&page, "", &|v| v.to_string()),
+        crate::calendar::time::hhmm(sod)
+    )
+}
+
+/// The site without a note: the config, the theme, empty data files and the hello-world page. The
+/// site is called after Shale, not after the vault, so that nothing of the vault is in it.
+fn empty_site(why: String) -> Export {
+    let mut files = theme::files("Shale site").into_iter().map(|(path, text)| OutFile { path, content: Content::Text(text) }).collect::<Vec<_>>();
     for name in ["backlinks", "graph"] {
         let text = if name == "graph" { "{\"nodes\": [], \"links\": []}\n" } else { "{}\n" };
         files.push(OutFile { path: format!("data/{name}.json"), content: Content::Text(text.into()) });
     }
+    files.push(OutFile { path: "content/_index.md".into(), content: Content::Text(hello_page(crate::calendar::time::now())) });
     files.sort_by(|a, b| a.path.cmp(&b.path));
     Export { files, notes: vec![], media: vec![], links: 0, plain: 0, warnings: vec![], empty_because: Some(why) }
 }
@@ -91,11 +113,11 @@ pub fn chosen_notes(vault: &Vault, settings: &crate::vault_state::VaultSettings)
 pub fn build(vault: &Vault) -> Result<Export, String> {
     let settings = rules::read_settings(&vault.root)?;
     if !settings.publish.enabled {
-        return Ok(empty_site(vault, "Publishing is off for this vault (publish.enabled in .shale/settings.json), so the site has no note".into()));
+        return Ok(empty_site("Publishing is off for this vault (publish.enabled in .shale/settings.json), so the site has no note".into()));
     }
     let published = chosen_notes(vault, &settings);
     if published.is_empty() {
-        return Ok(empty_site(vault, "No note is chosen for publishing by the rules of this vault, so the site has no note".into()));
+        return Ok(empty_site("No note is chosen for publishing by the rules of this vault, so the site has no note".into()));
     }
     let text_of = |rel: &Path| vault.notes.get(rel).map_or("", |n| n.text.as_str());
     let name = vault_name(vault);

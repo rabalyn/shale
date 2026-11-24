@@ -18,17 +18,17 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-const PORT: u16 = 13000;
-const PASSWORD: &str = "shale-forgejo-test-1";
-const PASSPHRASE: &str = "correct horse battery staple";
+pub(crate) const PORT: u16 = 13000;
+pub(crate) const PASSWORD: &str = "shale-forgejo-test-1";
+pub(crate) const PASSPHRASE: &str = "correct horse battery staple";
 
-fn server() -> Server {
+pub(crate) fn server() -> Server {
     Server { kind: Kind::Forgejo, scheme: "http".into(), host: format!("127.0.0.1:{PORT}") }
 }
 
 /// The Shale executable that cargo built for the tests: a bin target is built in a folder above the
 /// test binary (`target/debug/shale`); `SHALE_ENV_TESTS_BIN` names another.
-fn shale_binary() -> PathBuf {
+pub(crate) fn shale_binary() -> PathBuf {
     if let Some(p) = std::env::var_os("SHALE_ENV_TESTS_BIN") {
         return PathBuf::from(p);
     }
@@ -37,13 +37,13 @@ fn shale_binary() -> PathBuf {
     exe.ancestors().skip(1).map(|d| d.join(name)).find(|c| c.is_file() && *c != exe).unwrap_or_else(|| panic!("the shale executable is not built above {} (cargo test builds it)", exe.display()))
 }
 
-fn unique(prefix: &str) -> String {
+pub(crate) fn unique(prefix: &str) -> String {
     let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
     format!("{prefix}-{}-{n}", std::process::id())
 }
 
 /// A new access token of the seeded administrator, made through the API with the password.
-fn make_token() -> Secret {
+pub(crate) fn make_token() -> Secret {
     let account = Account { url: String::new(), username: "shale".into(), password: Secret::new(PASSWORD) };
     let body = serde_json::json!({ "name": unique("t"), "scopes": ["all"] }).to_string();
     let r = dav::request_with("POST", &format!("http://127.0.0.1:{PORT}/api/v1/users/shale/tokens"), &["Content-Type: application/json", "Accept: application/json"], &body, &account)
@@ -54,13 +54,13 @@ fn make_token() -> Secret {
 }
 
 /// A hermetic git whose askpass is the Shale executable and whose keyring is a pretend `secret-tool`.
-struct Stack {
-    root: PathBuf,
-    git: Git,
+pub(crate) struct Stack {
+    pub(crate) root: PathBuf,
+    pub(crate) git: Git,
 }
 
 impl Stack {
-    fn new(tag: &str) -> Stack {
+    pub(crate) fn new(tag: &str) -> Stack {
         let root = std::env::temp_dir().join(unique(&format!("shale-forgejo-{tag}")));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("bin")).unwrap();
@@ -77,7 +77,7 @@ impl Stack {
     }
 
     /// Keep `token` for `user` the way the keyring would hold it for the helper.
-    fn keep(&self, user: &str, token: &str) {
+    pub(crate) fn keep(&self, user: &str, token: &str) {
         let key = credentials::server_key(&server().base()).unwrap();
         let mut c = Command::new(self.root.join("bin/secret-tool"));
         c.args(["store", "--label", "test", "application", "shale-git", "server", &key, "user", user]).env("FAKE_SECRET_DIR", self.root.join("secrets")).stdin(Stdio::piped());
@@ -86,7 +86,7 @@ impl Stack {
         assert!(child.wait().unwrap().success());
     }
 
-    fn vault(&self, name: &str) -> PathBuf {
+    pub(crate) fn vault(&self, name: &str) -> PathBuf {
         let v = self.root.join(name);
         std::fs::create_dir_all(&v).unwrap();
         v
@@ -187,10 +187,10 @@ fn forgejo_env_a_wrong_token_a_missing_repository_and_no_server_are_told_in_plai
 
 // ---------------------------------------------------------------- SSH (SYNC-081, SYNC-083)
 
-const SSH_PORT: u16 = 13022;
+pub(crate) const SSH_PORT: u16 = 13022;
 
 /// Register a public key with the seeded administrator through the API (SYNC-081).
-fn register_key(public: &str) {
+pub(crate) fn register_key(public: &str) {
     let account = Account { url: String::new(), username: "shale".into(), password: Secret::new(PASSWORD) };
     let body = serde_json::json!({ "title": unique("k"), "key": public }).to_string();
     let r = dav::request_with("POST", &format!("http://127.0.0.1:{PORT}/api/v1/user/keys"), &["Content-Type: application/json", "Accept: application/json"], &body, &account)
@@ -198,14 +198,14 @@ fn register_key(public: &str) {
     assert_eq!(r.status, 201, "{}", r.body);
 }
 
-fn ssh_remote(repo: &str) -> String {
+pub(crate) fn ssh_remote(repo: &str) -> String {
     format!("ssh://git@127.0.0.1:{SSH_PORT}/shale/{repo}.git")
 }
 
 impl Stack {
     /// A git that signs in over SSH with `key` (the command of the wizard, SYNC-056) and this agent
     /// socket; a `known_hosts` file of the test keeps the real one of the person untouched.
-    fn ssh_git(&self, key: &Path, sock: &Path) -> Git {
+    pub(crate) fn ssh_git(&self, key: &Path, sock: &Path) -> Git {
         let mut git = self.git.clone();
         let hosts = self.root.join("known_hosts");
         let cmd = format!("{} -o 'UserKnownHostsFile={}'", ssh::ssh_command(Some(key), true).unwrap(), hosts.display());
@@ -223,7 +223,7 @@ impl Stack {
 }
 
 /// A new private repository of the administrator.
-fn new_repo(prefix: &str) -> String {
+pub(crate) fn new_repo(prefix: &str) -> String {
     let name = unique(prefix);
     api::create(&server(), &make_token(), &name, "made by a test").unwrap();
     name

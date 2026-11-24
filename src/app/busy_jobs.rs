@@ -20,6 +20,7 @@ impl ShaleApp {
             ("the file history", self.history.busy()),
             ("a close or switch waiting for the sync", self.pending_leave.is_some()),
             ("git sync", self.sync.running() || self.sync.lfs_job_running()),
+            ("the publish of the site", self.publishing.running()),
             ("the pandoc look-up", self.word.running()),
             ("the update check", self.update.busy()),
             ("the copy of outside files", self.outside_copy.is_some()),

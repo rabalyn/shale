@@ -589,13 +589,14 @@ fn shown_labels(p: &mut P) -> Vec<String> {
 #[test]
 fn set_001_every_tab_of_the_settings_shows_the_settings_of_its_domain() {
     let mut p = P::new("settings-tabs", &[]);
-    let wants: [(SettingsTab, &[&str]); 13] = [
+    let wants: [(SettingsTab, &[&str]); 14] = [
         (SettingsTab::Vault, &["Vault folder", "People folder"]),
         (SettingsTab::Editor, &["Cursor while typing", "Blinking cursor", "Show line numbers in the editor", "Update links in other notes when renaming", "Font colours"]),
         (SettingsTab::Vim, &["Vim-style editing", "Cursor in normal mode", "Esc from insert mode", "Link preview size"]),
         (SettingsTab::Appearance, &["Readable line length", "Dark drawing canvas"]),
         (SettingsTab::Fonts, &["Use the same font and size everywhere", "Font and size"]),
         (SettingsTab::Sync, &["Git sync"]),
+        (SettingsTab::Publishing, &["Publish this vault as a website"]),
         (SettingsTab::Calendar, &["Calendars…", "Calendar weeks start on Monday (otherwise Sunday)"]),
         (SettingsTab::Mail, &["Mail accounts…", "Fetch new mail every"]),
         (SettingsTab::Social, &["Feed accounts…", "Look for new posts every", "Post search index"]),
