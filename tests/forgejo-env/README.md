@@ -2,7 +2,7 @@
 
 A real Forgejo (SQLite) in one container, for the server path of the sync wizard (SYNC-066, rabalyn/shale#469).
 It listens on `127.0.0.1:13000` (web and API) and `127.0.0.1:13022` (Forgejo's built-in SSH server, SYNC-081) only, has
-no registration, no mail and no actions, and one seeded administrator: user `shale`, password `shale-forgejo-test-1` (a test account of a throw-away server). The tests make
+no registration and no mail, Actions enabled (no runner unless a test starts one, see below), and one seeded administrator: user `shale`, password `shale-forgejo-test-1` (a test account of a throw-away server). The tests make
 their own access tokens through the API (`POST /api/v1/users/shale/tokens`).
 
 ```sh
@@ -29,6 +29,15 @@ What the suite checks (`src/gitsync/wizard/forgejo_env_tests.rs`):
   over SSH one parentless snapshot replaces the last one (an unpublished note is in no commit of the server), a wrong token or a
   missing repository changes nothing and is told in plain words, a branch of another vault is taken over only when confirmed, and
   media go to the server's LFS store (`LFS_START_SERVER` in `compose.yaml`) once.
+
+- the Forgejo Actions workflow of the server recipe in the user guide (SITE-049, #665, `src/site_export/publish/recipe_env_tests.rs`): the
+  test starts a runner (`forgejo-env.sh runner-up <folder>`, `runner.yaml`, an image of `runner/Containerfile`: the official runner on Debian
+  with Node.js, git, git-lfs and curl; its `docker` label is a `host` label, so the jobs run in the runner's container and no nested containers
+  are needed; it registers with a token from the administrator's API and has the folder as `/srv/www`), pushes the note's own workflow to a
+  second repository, publishes a vault with a song to the first, presses *Run workflow* through the API and checks the folder the workflow
+  built: the page, the LFS file itself (not its pointer), the Pagefind index, the atomic swap, and that a press with nothing new builds nothing.
+  The first run builds the image (a few minutes), and the workflow downloads Hugo and Pagefind from GitHub, as it would on a server.
+  `forgejo-env.sh job-log <owner/repo>` prints the jobs' log (needs `zstd`); the test prints it when a run fails.
 
 The tests find the Shale executable that cargo built (`target/debug/shale`; `SHALE_ENV_TESTS_BIN` names another).
 The container image is `codeberg.org/forgejo/forgejo:11.0.16-rootless`, pinned. With Docker the compose command is
