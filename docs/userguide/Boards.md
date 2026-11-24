@@ -52,7 +52,8 @@ drop: status: doing
   `created` and `modified` are the properties Shale keeps (see [[Notes and links]]), else the date in the file's name
   and the file's time.
 - `drop:` is the property a card gets when it is dropped on the lane (`drop: status: doing` sets `status: doing`).
-- `done: true` marks a lane of finished cards.
+- `done: true` marks a lane of finished cards. A card dropped on it gets `status: done` (unless the lane has a `drop:`
+  line of its own, which wins). A card that leaves a done lane keeps its `status: done` until you change it.
 - `- [[Note]]` lines **pin** cards to a lane, in that order, above the others. A pinned card is only in the lane that
   pins it, even when the query of another lane matches it.
   A file name that `[[ ]]` cannot hold (with `#`, `^`, `|`, `[` or `]`) is pinned as a link with its path,
