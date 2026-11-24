@@ -22,6 +22,8 @@ impl W {
         let dir = std::env::temp_dir().join(format!("shale-startdlg-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
+        // as the app stores a vault's folder (VAULT-029): macOS's /var is /private/var, Windows has 8.3 names
+        let dir = crate::known_vaults::canonical(&dir);
         let app = ShaleApp::build(Options { screenshot: None, vault: None, view: None, keys: None }, false);
         let mut w = W { app, hl: Headless::new(), dir };
         w.hl.frames(&mut w.app, 3);

@@ -205,7 +205,7 @@ fn vault_with(tag: &str, files: &[(&str, &str)]) -> (Vault, PathBuf) {
 }
 
 fn names(w: &resolve::Wanted) -> Vec<String> {
-    w.files.iter().map(|f| f.to_string_lossy().into_owned()).collect()
+    w.files.iter().map(|f| crate::vault::rel_to_string(f)).collect()
 }
 
 // spec: EDIT-123
