@@ -1,6 +1,6 @@
 # ADR-0039: Thesis writing: Pandoc citations, labelled figures, tables, equations and sections, a BibTeX bibliography, and three engines
 
-- **Status**: Accepted (2026-11-24; owner: "sounds kinda fine", with the changes of §3, caption positions, and §9, the toolbar). Only the points of "To confirm" at the end are open.
+- **Status**: Accepted (2026-11-24; owner: "sounds kinda fine", with the changes of §3, caption positions, and §9, the toolbar, which the owner confirmed on 2026-11-24). Only the points of "To confirm" at the end are open. The reader of `.bib` files was decided in #645 (§6).
 - **Date**: 2026-11-24
 - **Specs**: TEX-043 to TEX-051 ([`docs/spec/tex-export.md`](../spec/tex-export.md)), BOOK-020, BOOK-021 ([`docs/spec/book-export.md`](../spec/book-export.md)), EDIT-122 to EDIT-132, CFG-078 ([`docs/spec/links-and-editor.md`](../spec/links-and-editor.md)), PDF-032, PDF-033 ([`docs/spec/features.md`](../spec/features.md)), SITE-077 ([`docs/spec/site-export.md`](../spec/site-export.md)), DOCX-014 ([`docs/spec/word-export.md`](../spec/word-export.md))
 - **Issues**: #642 (epic), #643 (this ADR); phases #644 to #654; #656 (toolbar)
@@ -154,7 +154,7 @@ mentions, SOC-*), and as plain words (`@todo`). The rules, applied by one scanne
 | Export | Engine | Why |
 |---|---|---|
 | TeX | **biblatex with biber**, and `cleveref`, `caption`, `glossaries-extra` | the standard of theses; biber is in the managed TeX Live. TEX-004's compile becomes multi-pass: LuaLaTeX, biber when the run wrote citations, LuaLaTeX until labels are stable (at most 4 runs). (#644) |
-| Built-in PDF and site | **the `hayagriva` crate** (Rust, MIT or Apache-2.0, used by Typst), reading the `.bib` and formatting with CSL | no TeX needed. **Confirmed in #645**: its licence, its dependencies, and how well it reads real exports of Zotero, JabRef and Citavi. **If it fails that evaluation**: the `biblatex` crate for reading plus `citationberg` for the CSL styles (both Typst's, the parts hayagriva is made of), and as the last resort a small reader of our own with the five styles written by hand. The syntax and the numbering do not change. |
+| Built-in PDF and site | **the `biblatex` crate for reading** (#645, below) and **the `hayagriva` crate for formatting** with CSL (both Typst's, MIT or Apache-2.0; hayagriva is built on biblatex) | no TeX needed. **Decided in #645**: the key index and the reader of `.bib` files use `biblatex` 0.12 directly; `hayagriva` is added where the formatting is built (#648), with its `biblatex` feature, which uses the same reader, so the entries are the same. The syntax and the numbering do not change. See "The evaluation of hayagriva" below. |
 | Word | **pandoc `--citeproc`** with the same `.bib` and the CSL file of the chosen style, on top of #487 | pandoc is already the user's program (BUILD-018). Cross-references through Shale's own Lua filter (DOCX-004 to DOCX-006), as pandoc-crossref would be a second program to install; confirmed in #650. |
 
 The editor and the reading view use the same reader and index as the built-in export (#645, #646).
@@ -193,6 +193,8 @@ program; confirmed in #652, fallback `acro`).
 
 ### 9. The toolbar for the thesis syntax: hidden by default (#656)
 
+The owner confirmed the recommendation (option A, including that the properties show the bar by themselves) on 2026-11-24.
+
 The owner wants toolbar actions for the new syntax, but thesis writing is a specialised use, so
 the default interface must not grow. What the formatting toolbar (EDIT-026, EDIT-066, EDIT-111)
 holds today: about 25 buttons in groups: inline styles (bold, italic, strikethrough, highlight,
@@ -227,6 +229,30 @@ still has every action as a definable action with an Alt key (KEY-015), and the 
 has **Thesis tools**. What costs no interface stays on with the bar off: the scanner, the
 colouring and the broken-key mark of citations, the peek, the reading view and all exports. Rows:
 EDIT-130 to EDIT-132, CFG-078.
+
+### The evaluation of hayagriva (#645, 2026-11-24)
+
+Tested with `hayagriva` 0.10.1 (feature `biblatex` only; `from_biblatex_str`) and `biblatex` 0.12.0 on
+hand-written files in the style of Zotero with Better BibTeX, JabRef and Citavi
+(`src/testdata/bib/`: braces, `{\"u}` escapes, `@string`, `crossref`, `and others`, `date` against
+`year`, UTF-8 and Japanese names, a Windows path in `file`, an entry without a year, a broken entry).
+
+- **Licence**: both are MIT OR Apache-2.0; their dependencies are MIT, Apache-2.0, Unicode-3.0 (the ICU data
+  of `hayagriva`), Zlib, 0BSD or CC0, Unlicense, BSL-1.0, all compatible with GPL-3.0-or-later. The project has no `deny.toml`. `cargo audit` reports one new warning for either crate: `paste` is unmaintained (RUSTSEC-2024-0436, a proc-macro crate that only generates identifiers at build time); `biblatex` depends on it, so `hayagriva` does too. It is no vulnerability and fails nothing (BUILD-009), but the report of BUILD-021 will open an issue for it.
+- **Reading**: every good file is read, by both, as it should be (`hayagriva` is `biblatex` plus a conversion).
+  Two things count against using `hayagriva` for the *index*: **one broken entry fails the whole file** (an
+  `Err` and no entries; a missing brace swallows the entries after it as well), and `and others` becomes a
+  person named "others" in the author list. Both are fixed in our code, which works the same on top of either
+  crate: the file is cut at the lines that start an entry and each entry is read on its own, so a bad entry is
+  skipped and counted (EDIT-123).
+- **Size** (release build, stripped, an empty program of 343 KB as the base): `biblatex` alone adds **13 crates**
+  (7 of them already in Shale's `Cargo.lock`; **7 new**), 7 s wall time and 214 KB; `hayagriva` adds **74 crates**
+  (the ICU collator and its data, `serde_yaml` (deprecated), `citationberg`, `url`, `idna`, …), 21 s wall and
+  103 s CPU, and 791 KB. No build warnings in either (they are dependencies, so the workspace lints do not apply to them).
+- **Decision**: the reader and the index use `biblatex`. `hayagriva` is not a dependency of the index; it is
+  needed when the built-in export formats citations with CSL (#648), and it is added there with its `biblatex`
+  feature, so it costs what is stated above only in the build that formats. The fallback of §6 (`biblatex` plus
+  `citationberg`) stays open for that phase if the size of `hayagriva` is a problem then.
 
 ## Alternatives considered
 
@@ -264,10 +290,5 @@ EDIT-130 to EDIT-132, CFG-078.
 
 ## To confirm
 
-- The toolbar split of §9: a separate thesis bar (option A) that appears by the setting, by the
-  note's properties or by a per-tab toggle, and that **no existing button moves**; against a
-  "More" menu (B), a group in the one bar (C) or a split of the existing bar (D).
-- That the properties `bibliography:`, `thesis-part:`, `float-numbering:` and `latex-template:`
-  show the thesis bar by themselves.
 - The earlier points of the Consequences (language order, numbering and style defaults, names of
   properties and markers, a label as the opt-in for numbering).

@@ -40,6 +40,8 @@ unicode-normalization = { version = "0.1", default-features = false }
 # the native file dialog of the compose box (SOC-058): the xdg-desktop-portal on Linux (no GTK, and no
 # Wayland handle code: the dialog has no parent window), the system dialog on macOS and Windows
 rfd = { version = "0.18", default-features = false, features = ["xdg-portal"] }
+# the reader of `.bib` files (EDIT-123, ADR-0039 §6); it is the part of Typst's hayagriva that reads BibLaTeX
+biblatex = "0.12"
 # the length of a post in graphemes, as Bluesky counts it (SOC-052)
 unicode-segmentation = "1"
 

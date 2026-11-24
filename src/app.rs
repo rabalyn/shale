@@ -163,6 +163,7 @@ pub enum RightPanel {
     Thread,
 }
 
+mod bib;
 mod boards;
 #[cfg(test)]
 mod busy_jobs;
@@ -478,6 +479,8 @@ pub struct ShaleApp {
     pub(crate) drag: drops::DragState,
     /// the tag words learned from the vault, and the job that learns them (see tagwords)
     pub tag_learner: crate::import::tagwords::TagLearner,
+    /// the `.bib` files that notes ask for, read in the background (EDIT-123)
+    pub bib: crate::bibliography::Bibliographies,
     pub scenes: SceneCache,
     /// the one media player state (MEDIA-007); the players in the views draw from it
     pub media: crate::media::MediaPlayer,
@@ -747,6 +750,7 @@ impl ShaleApp {
             ctx: None,
             drag: drops::DragState::default(),
             tag_learner: crate::import::tagwords::TagLearner::new(),
+            bib: Default::default(),
             scenes: SceneCache::default(),
             media: crate::media::MediaPlayer::default(),
             modal: None,
@@ -3400,6 +3404,7 @@ impl ShaleApp {
         self.update_dialogs(ui.ctx());
         self.handle_drops(ui);
         self.learn_tags_tick();
+        self.bib_tick(ui.ctx());
         self.usage_tick();
         self.paint_toasts(ui);
         self.paint_recovery_notice(ui);

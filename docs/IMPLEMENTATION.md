@@ -13,7 +13,7 @@ are `src/<feature>/<child>.rs`, with their tests next to them. The feature folde
 `mail/`, `drawing/`, `import/` and `pdf/`; `app/`, `social/`, `data_usage/`, `secrets/` and `gitsync/`
 are folders of the same kind. `ShaleApp` (`src/app.rs`, 34 fields) owns its sub-states, each defined
 beside its feature: `drag: DragState` (`app/drops.rs`), `cal: CalendarUi` (`calendar/ui.rs`),
-`tag_learner: TagLearner` (`import/tagwords.rs`), `script: ScriptRun` (`script.rs`),
+`tag_learner: TagLearner` (`import/tagwords.rs`), `bib: Bibliographies` (`bibliography/state.rs`), `script: ScriptRun` (`script.rs`),
 `tabbar: TabBar` (`app/tabs.rs`), `search: SearchBox` (`search_panel.rs`) and `tree: FileTree` (`panels.rs`),
 `graphs: Graphs` (`graph.rs`), `shot: ScreenshotRun` (`app/screenshot.rs`) and
 `recovery: RecoveryState` (`recovery.rs`). The shown left panel is `side.left` (`SideState`,
@@ -88,6 +88,8 @@ both pace by it.
 | `src/import/wl_drop.rs` | Drag and drop from other programs on Wayland (Linux only; macOS and Windows deliver dropped files through the window toolkit), on the window's own Wayland connection; reads every useful kind a drop offers. The protocol-free part (`Drag`, `Landing`, `is_repeat`) is plain state that tests and the `--keys` `drop:` step feed without a compositor (DEV-012). |
 | `src/import/tb_store.rs` | Finding a dragged message in Thunderbird's own folders on this computer (profiles, accounts from prefs.js, mbox and maildir folders, Thunderbird's folder index `.msf` in its "Mork" format: message key/UID → Message-ID and position; local folders by position, subject as the last resort). |
 | `src/markdown.rs` | Pure parsing: links, tasks, tags, headings, link renaming, fuzzy matching. |
+| `src/markdown/citations.rs` | The one scanner for citations `[@key]`, labels `{#fig:x}` and references `@fig:x`, with the clash rules for `@` (EDIT-122). |
+| `src/bibliography.rs`, `src/bibliography/` | The `.bib` bibliography of a note or the vault: `resolve.rs` (which files), `reader.rs` (a file to the key index, bad entries skipped), `state.rs` (`Bibliographies` in `ShaleApp::bib`, read in a background task), `report.rs` (what Settings says). |
 | `src/vault.rs` | Folder scanning, link index (resolution, backlinks, unlinked mentions, outgoing links), tasks, tags, search, create, rename (with link rewriting), trash, graph data, sample vault. |
 | `src/drawing.rs` | Excalidraw-compatible scene model (serde, unknown fields kept), hand-drawn renderer, canvas editor (tools, selection, resize, undo and redo, properties panel). |
 | `src/drawing/layout.rs`, `src/drawing/connect.rs` | Connection anchors and automatic arrangement (pure geometry); labels, connections, line endings and the style panel of the editor. |
