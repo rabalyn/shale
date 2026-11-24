@@ -778,6 +778,7 @@ impl ShaleApp {
             pending_leave: None,
         };
         // the mail view's check of the index is a task of the window's registry (JOB-015)
+        app.search_worker = std::mem::take(&mut app.search_worker).with_busy(&app.busy);
         app.mail.busy = app.busy.clone();
         app.calendar.busy = app.busy.clone();
         app.social.busy = app.busy.clone();

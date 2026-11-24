@@ -17,6 +17,7 @@
 use super::matcher::{Budget, Run, Stop};
 use super::query::Checked;
 use super::{search_in, Ctx, Found, Query, Snapshot};
+use crate::busy::{self, Busy, Cancel, Key, Task};
 use crate::mail::db;
 use crate::search_sources::{Prefixes, Selection};
 use crate::social::post_index::{Home, PostIndex};
@@ -41,10 +42,32 @@ impl Slot {
     /// the first lane of the open board; lane `n` is `Slot(Slot::LANES + n)` (QUERY-019)
     pub const LANES: u64 = 16;
 
+    /// The task of this queue in the busy registry (JOB-038): the picker and the sidebar have
+    /// one each, the lanes of a board none (the board shows its own state).
+    fn key(self) -> Option<Key> {
+        match self {
+            Slot::PICKER => Some(SEARCH.with("picker")),
+            Slot::SIDEBAR => Some(SEARCH.with("sidebar")),
+            _ => None,
+        }
+    }
+
     /// The queue of lane number `n` of the board.
     pub fn lane(n: usize) -> Slot {
         Slot(Slot::LANES + n as u64)
     }
+}
+
+/// The task of a search in the busy registry, once per queue (JOB-038).
+pub const SEARCH: Key = Key::new("search");
+
+/// The newest query of a queue.
+struct Latest {
+    id: u64,
+    cancel: Arc<AtomicBool>,
+    /// "Searching…" in the registry while the query is on its way (JOB-038): the task of the
+    /// queue, passed on to a newer query; Cancel of the registry sets `cancel`
+    task: Option<Task>,
 }
 
 /// What one query is given: everything the search reads, owned, so that it can go to the thread.
@@ -174,7 +197,11 @@ pub struct SearchWorker {
     repaint: egui::Context,
     next: u64,
     /// the number and the cancel flag of the newest query of each slot
-    latest: HashMap<Slot, (u64, Arc<AtomicBool>)>,
+    latest: HashMap<Slot, Latest>,
+    /// the newest queries that ended without an answer because they were given up (Cancel of the
+    /// registry), by slot
+    given_up: HashMap<Slot, u64>,
+    busy: Busy,
     /// the answers that are the newest of their slot and not taken yet
     ready: HashMap<Slot, (u64, Found)>,
     /// queries whose reply has not been read yet
@@ -189,7 +216,13 @@ impl Default for SearchWorker {
 
 impl SearchWorker {
     pub(crate) fn with_runner(run: Runner) -> SearchWorker {
-        SearchWorker { thread: None, run, repaint: egui::Context::default(), next: 0, latest: HashMap::new(), ready: HashMap::new(), in_flight: 0 }
+        SearchWorker { thread: None, run, repaint: egui::Context::default(), next: 0, latest: HashMap::new(), given_up: HashMap::new(), busy: Busy::default(), ready: HashMap::new(), in_flight: 0 }
+    }
+
+    /// The registry the queries of the picker and the sidebar are listed in (JOB-038).
+    pub fn with_busy(mut self, busy: &Busy) -> SearchWorker {
+        self.busy = busy.clone();
+        self
     }
 
     /// The window the thread wakes when an answer is ready; read the replies that are in.
@@ -204,9 +237,16 @@ impl SearchWorker {
         let Some(thread) = &self.thread else { return };
         while let Ok(r) = thread.replies.try_recv() {
             self.in_flight -= 1;
-            let newest = self.latest.get(&r.slot).is_some_and(|(id, _)| *id == r.id);
-            if let (true, Some(found)) = (newest, r.found) {
-                self.ready.insert(r.slot, (r.id, found));
+            let Some(latest) = self.latest.get_mut(&r.slot).filter(|l| l.id == r.id) else { continue };
+            // (the task ends before the answer can be taken)
+            latest.task = None;
+            match r.found {
+                Some(found) => {
+                    self.ready.insert(r.slot, (r.id, found));
+                }
+                None => {
+                    self.given_up.insert(r.slot, r.id);
+                }
             }
         }
     }
@@ -217,10 +257,20 @@ impl SearchWorker {
         let id = self.next;
         self.next += 1;
         let cancel = Arc::new(AtomicBool::new(false));
-        if let Some((_, old)) = self.latest.insert(slot, (id, cancel.clone())) {
-            old.store(true, Ordering::Relaxed);
+        let mut task = None;
+        if let Some(old) = self.latest.remove(&slot) {
+            old.cancel.store(true, Ordering::Relaxed);
+            task = old.task;
         }
+        // one task per queue: a newer query takes it over, and Cancel stops the newer query
+        let task = task.or_else(|| slot.key().and_then(|k| self.busy.begin_listed_after(k, "Searching…", busy::LISTED_AFTER)));
+        let task = task.map(|mut t| {
+            t.cancellable_with(Cancel::from(cancel.clone()));
+            t
+        });
+        self.latest.insert(slot, Latest { id, cancel: cancel.clone(), task });
         self.ready.remove(&slot);
+        self.given_up.remove(&slot);
         let run = self.run;
         let thread = self.thread.get_or_insert_with(|| spawn(run));
         self.in_flight += 1;
@@ -231,10 +281,19 @@ impl SearchWorker {
 
     /// Give up the query of the slot that is on its way, if any: its answer is dropped.
     pub fn cancel(&mut self, slot: Slot) {
-        if let Some((_, flag)) = self.latest.remove(&slot) {
-            flag.store(true, Ordering::Relaxed);
+        if let Some(latest) = self.latest.remove(&slot) {
+            latest.cancel.store(true, Ordering::Relaxed);
         }
         self.ready.remove(&slot);
+        self.given_up.remove(&slot);
+    }
+
+    /// Did query `id` of `slot`, still the newest, end without an answer because it was given up
+    /// (Cancel in the indicator)? The view then keeps its last list and does not ask again for
+    /// the same text.
+    pub fn gave_up(&mut self, slot: Slot, id: u64) -> bool {
+        self.pump();
+        self.given_up.get(&slot) == Some(&id)
     }
 
     /// The answer to query `id` of `slot`, once, if it is in and still the newest.
@@ -257,8 +316,8 @@ impl Drop for SearchWorker {
     /// A window that closes gives up the queries on their way, so that the thread ends with the
     /// channel.
     fn drop(&mut self) {
-        for (_, flag) in self.latest.values() {
-            flag.store(true, Ordering::Relaxed);
+        for latest in self.latest.values() {
+            latest.cancel.store(true, Ordering::Relaxed);
         }
     }
 }
@@ -386,11 +445,11 @@ mod tests {
     fn a_newer_query_of_a_slot_gives_up_the_older_one_and_leaves_the_other_slots() {
         let mut w = SearchWorker::with_runner(hold_or_echo);
         let first = w.submit(Slot::PICKER, bare("hold"));
-        assert!(!w.latest[&Slot::PICKER].1.load(Ordering::Relaxed));
+        assert!(!w.latest[&Slot::PICKER].cancel.load(Ordering::Relaxed));
         let second = w.submit(Slot::PICKER, bare("hold"));
         assert_ne!(first, second, "every query has a number");
         assert!(second > first);
-        assert!(!w.latest[&Slot::PICKER].1.load(Ordering::Relaxed), "the flag of the newest query is not set");
+        assert!(!w.latest[&Slot::PICKER].cancel.load(Ordering::Relaxed), "the flag of the newest query is not set");
         // the older ones are given up: the thread (there is one) comes free for the next jobs
         let third = w.submit(Slot::PICKER, bare("last"));
         let side = w.submit(Slot::SIDEBAR, bare("hold"));
@@ -403,10 +462,94 @@ mod tests {
         assert!(w.take(Slot::PICKER, first).is_none() && w.take(Slot::PICKER, second).is_none(), "an older query has no answer");
         assert!(titles(&w.take(Slot::PICKER, third).unwrap())[0].starts_with("last:"));
         // the query of the sidebar was not touched by those of the picker: it is given up on its own
-        assert!(w.busy() && !w.latest[&Slot::SIDEBAR].1.load(Ordering::Relaxed));
+        assert!(w.busy() && !w.latest[&Slot::SIDEBAR].cancel.load(Ordering::Relaxed));
         w.cancel(Slot::SIDEBAR);
         drain(&mut w);
         assert!(w.take(Slot::SIDEBAR, side).is_none(), "a query that was cancelled is dropped");
+    }
+
+    /// Wait until the answer of `slot` is in.
+    fn drain_slot(w: &mut SearchWorker, slot: Slot) {
+        let end = Instant::now() + Duration::from_secs(10);
+        while !w.ready.contains_key(&slot) {
+            assert!(Instant::now() < end, "never answered");
+            std::thread::sleep(Duration::from_millis(1));
+            w.pump();
+        }
+    }
+
+    fn search_key(slot: &str) -> Key {
+        SEARCH.with(slot)
+    }
+
+    // spec: JOB-038
+    #[test]
+    fn job_038_a_query_is_a_task_that_is_listed_after_the_wait_and_gone_with_its_answer() {
+        let busy = Busy::default();
+        let mut w = SearchWorker::with_runner(hold_or_echo).with_busy(&busy);
+        let key = search_key("sidebar");
+        assert!(!busy.is_running(&key));
+        let held = w.submit(Slot::SIDEBAR, bare("hold"));
+        let info = busy.info(&key).expect("a task while the query runs");
+        assert_eq!(info.label, "Searching…");
+        assert!(info.cancellable && !info.cancelling);
+        let t = info.started;
+        assert!(busy.list_at(t).is_empty(), "quiet: not listed at first");
+        assert!(busy.list_at(t + busy::LISTED_AFTER - Duration::from_millis(1)).is_empty());
+        assert_eq!(busy.list_at(t + busy::LISTED_AFTER).len(), 1, "listed after the wait");
+        // the picker is another queue with its own task; a lane of a board has none
+        w.submit(Slot::PICKER, bare("hold"));
+        assert!(busy.is_running(&search_key("picker")) && busy.is_running(&key));
+        w.cancel(Slot::PICKER);
+        assert!(!busy.is_running(&search_key("picker")) && busy.is_running(&key));
+        assert!(Slot::lane(0).key().is_none());
+        w.cancel(Slot::SIDEBAR);
+        assert!(!busy.is_running(&key), "the task ends with the query that is given up");
+        assert!(w.take(Slot::SIDEBAR, held).is_none());
+        // an answered query ends its task before the answer can be taken
+        let id = w.submit(Slot::SIDEBAR, bare("quick"));
+        drain(&mut w);
+        assert!(!busy.is_running(&key));
+        assert!(w.take(Slot::SIDEBAR, id).is_some());
+    }
+
+    // spec: JOB-038
+    #[test]
+    fn job_038_a_newer_query_keeps_the_one_task() {
+        let busy = Busy::default();
+        let mut w = SearchWorker::with_runner(hold_or_echo).with_busy(&busy);
+        let key = search_key("sidebar");
+        let first = w.submit(Slot::SIDEBAR, bare("hold"));
+        let id = busy.info(&key).unwrap().id;
+        let second = w.submit(Slot::SIDEBAR, bare("hold"));
+        assert_eq!(busy.info(&key).map(|t| t.id), Some(id), "the same task");
+        assert_eq!(busy.list_at(Instant::now() + busy::LISTED_AFTER).len(), 1, "one task, not two");
+        // the newer query is the one that Cancel stops
+        assert!(!w.latest[&Slot::SIDEBAR].cancel.load(Ordering::Relaxed));
+        let third = w.submit(Slot::SIDEBAR, bare("last"));
+        drain_slot(&mut w, Slot::SIDEBAR);
+        assert!(!busy.is_running(&key), "the task ended with the newest answer");
+        assert!(w.take(Slot::SIDEBAR, first).is_none() && w.take(Slot::SIDEBAR, second).is_none(), "the older results are dropped");
+        assert!(w.take(Slot::SIDEBAR, third).is_some());
+    }
+
+    // spec: JOB-038
+    #[test]
+    fn job_038_cancel_of_the_registry_gives_the_query_up_and_the_last_list_stays() {
+        let busy = Busy::default();
+        let mut w = SearchWorker::with_runner(hold_or_echo).with_busy(&busy);
+        let key = search_key("picker");
+        let id = w.submit(Slot::PICKER, bare("hold"));
+        let task = busy.info(&key).unwrap();
+        assert!(busy.cancel(task.id), "the registry offers Cancel");
+        assert!(w.latest[&Slot::PICKER].cancel.load(Ordering::Relaxed), "it is the flag of the query");
+        let end = Instant::now() + Duration::from_secs(10);
+        while !w.gave_up(Slot::PICKER, id) {
+            assert!(Instant::now() < end, "the query was not stopped");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(!busy.is_running(&key) && !w.busy());
+        assert!(w.take(Slot::PICKER, id).is_none(), "no answer: the view keeps its last list");
     }
 
     // spec: QUERY-017

@@ -496,11 +496,20 @@ pub struct Results {
     pending: Option<Pending>,
 }
 
-/// A query that is on the worker.
+/// A query that is on the worker, or was stopped with Cancel (JOB-038): then its number is
+/// [`Pending::GIVEN_UP`], the last list stays and the same text is asked again only by Enter.
 struct Pending {
     id: u64,
     text: String,
     stamp: (u64, u64),
+}
+
+impl Pending {
+    const GIVEN_UP: u64 = u64::MAX;
+
+    fn given_up(&self) -> bool {
+        self.id == Pending::GIVEN_UP
+    }
 }
 
 /// What a view asks of its [`Results`] in one frame.
@@ -543,17 +552,24 @@ impl Results {
             let p = self.pending.take().expect("a pending query was taken");
             self.keep(found, p.text, p.stamp, listed);
             delivered = true;
+        } else if self.pending.as_ref().is_some_and(|p| worker.gave_up(ask.slot, p.id)) {
+            // Cancel in the indicator (JOB-038): the last list stays, and the same text is not asked again
+            if let Some(p) = self.pending.as_mut() {
+                p.id = Pending::GIVEN_UP;
+            }
         }
         if ask.invalid {
             // (what is on its way is for an older text that was valid: it may still arrive)
-            return match (self.pending.is_some(), delivered) {
+            return match (self.is_pending(), delivered) {
                 (true, _) => Refreshed::Waits,
                 (false, true) => Refreshed::Made,
                 (false, false) => Refreshed::Unchanged,
             };
         }
         let current = self.made_for.as_ref().is_some_and(|(t, s)| t == ask.text && *s == ask.stamp);
-        let queued = self.pending.as_ref().is_some_and(|p| p.text == ask.text && p.stamp == ask.stamp);
+        let stopped = self.pending.as_ref().is_some_and(Pending::given_up);
+        let queued = self.pending.as_ref().is_some_and(|p| p.text == ask.text && p.stamp == ask.stamp) && !(stopped && ask.now);
+        let cancelled = stopped && queued;
         if !current && ask.blank {
             // (what is on its way is not wanted any more)
             worker.cancel(ask.slot);
@@ -583,6 +599,7 @@ impl Results {
         }
         let current = self.made_for.as_ref().is_some_and(|(t, s)| t == ask.text && *s == ask.stamp);
         match (current, relisted) {
+            (false, _) if cancelled => Refreshed::Unchanged,
             (false, _) => Refreshed::Waits,
             (true, true) => Refreshed::Relisted,
             (true, false) if delivered => Refreshed::Made,
@@ -602,7 +619,7 @@ impl Results {
 
     /// Is a query on the worker whose list has not arrived (the view shows a spinner)?
     pub fn is_pending(&self) -> bool {
-        self.pending.is_some()
+        self.pending.as_ref().is_some_and(|p| !p.given_up())
     }
 
     pub fn hits(&self) -> &[Hit] {
@@ -867,6 +884,52 @@ mod tests {
         assert_eq!(r.refresh(&mut w, &ask("b", (1, 1), false, true, Selection::ALL), queue), Refreshed::Waits);
         assert!(r.is_pending());
         assert_eq!(r.refresh(&mut w, &invalid, never), Refreshed::Waits, "it is still on its way");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: JOB-038
+    #[test]
+    fn job_038_a_search_stopped_with_cancel_keeps_the_last_list_and_is_asked_again_only_by_enter() {
+        fn hold(_: &mut worker::Conns, _: &Request, cancel: &std::sync::atomic::AtomicBool) -> Option<Found> {
+            let end = Instant::now() + Duration::from_secs(10);
+            while !cancel.load(std::sync::atomic::Ordering::Relaxed) && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            None
+        }
+        let busy = crate::busy::Busy::default();
+        let mut w = SearchWorker::with_runner(hold).with_busy(&busy);
+        let mut r = Results::default();
+        let hits = || Found { hits: vec![hit(NOTES, "a")], ..Default::default() };
+        r.refresh(&mut w, &ask("a", (1, 1), false, false, Selection::ALL), here(hits));
+        let (v, dir) = fixture();
+        let posts = PostIndex::in_memory();
+        let ctx = Ctx { vault: &v, mail: None, posts: &posts };
+        let asked = std::cell::Cell::new(0);
+        let queue = |w: &mut SearchWorker| {
+            asked.set(asked.get() + 1);
+            Start::Queued(w.submit(Slot::PICKER, Request::new(&ctx, &Query::picker("b"))))
+        };
+        assert_eq!(r.refresh(&mut w, &ask("b", (1, 1), false, false, Selection::ALL), queue), Refreshed::Waits);
+        assert!(r.is_pending());
+        let task = busy.info(&worker::SEARCH.with("picker")).expect("the query is a task");
+        assert!(busy.cancel(task.id));
+        let end = Instant::now() + Duration::from_secs(10);
+        while r.is_pending() {
+            assert!(Instant::now() < end, "Cancel did not end the query");
+            std::thread::sleep(Duration::from_millis(1));
+            r.refresh(&mut w, &ask("b", (1, 1), false, false, Selection::ALL), queue);
+        }
+        assert_eq!(asked.get(), 1, "the stopped query is not asked again");
+        assert_eq!(r.hits().len(), 1, "the last valid list stays");
+        assert!(!busy.is_running(&worker::SEARCH.with("picker")));
+        assert_eq!(r.refresh(&mut w, &ask("b", (1, 1), false, false, Selection::ALL), queue), Refreshed::Unchanged);
+        assert_eq!(asked.get(), 1);
+        // Enter asks again
+        r.refresh(&mut w, &ask("b", (1, 1), false, true, Selection::ALL), queue);
+        assert_eq!(asked.get(), 2);
+        assert!(r.is_pending());
+        w.cancel(Slot::PICKER);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
