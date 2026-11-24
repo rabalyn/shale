@@ -1,15 +1,17 @@
-//! Kanban boards (ADR-0034, BOARD-001…BOARD-018, BOARD-032): a board is a note, its lanes are
+//! Kanban boards (ADR-0034, BOARD-001…BOARD-022, BOARD-032): a board is a note, its lanes are
 //! made from queries, its cards are notes.
 //!
 //! * [`file`] reads and writes the board file and keeps what it does not know.
 //! * [`lanes`] says which cards a lane shows and asks the search worker for the lanes.
 //! * [`card`] and [`sort`] are what a card knows of its note and the order of a lane.
+//! * [`drag`] says what dropping a card on a lane changes.
 //! * [`view`] draws the board; [`peek`] is the editor that opens on a card.
 //! * `app/boards.rs` is what the window does for them: the tab, the rewrite of the file, the peek.
 //!
 //! The state of the view is one field of the window, [`Boards`].
 
 pub mod card;
+pub mod drag;
 pub mod file;
 pub mod lanes;
 pub mod peek;
@@ -154,8 +156,7 @@ struct Made {
 pub struct Shown(Option<(Made, Vec<LaneView>)>);
 
 impl Shown {
-    /// The lanes as last made (tests).
-    #[cfg(test)]
+    /// The lanes as last made: what the user saw when they dropped a card on one.
     pub fn lanes(&self) -> &[LaneView] {
         self.0.as_ref().map_or(&[], |(_, l)| l)
     }

@@ -4,6 +4,7 @@
 //! (`board/app.rs`), so the file and the view cannot disagree (BOARD-006).
 
 use super::card::{day_text, Card};
+use super::drag::Dropped;
 use super::file::{Chip, Props};
 use super::lanes::drop_property;
 use super::{Info, LaneView};
@@ -14,7 +15,7 @@ use crate::search_form::{self, Opts};
 use crate::search_sources::Prefixes;
 use crate::theme;
 use crate::vault::Vault;
-use eframe::egui::{self, Align, Color32, CornerRadius, Id, Key, Layout, Margin, Popup, PopupCloseBehavior, Rect, RichText, Sense, Stroke, Ui, Vec2};
+use eframe::egui::{self, Align, Color32, CornerRadius, Id, Key, LayerId, Layout, Margin, Modifiers, Order, Popup, PopupCloseBehavior, Pos2, Rect, RichText, Sense, Stroke, Ui, Vec2};
 use std::path::{Path, PathBuf};
 
 /// The width of a lane (points).
@@ -52,8 +53,23 @@ pub enum Act {
     Peek(PathBuf, Rect),
     /// open the card's note in a tab (BOARD-014)
     OpenTab(PathBuf),
+    /// a card was dropped on a lane (BOARD-019 to BOARD-022)
+    Drop(Dropped),
     /// the Advanced switch of the form is a setting (QUERY-026)
     SaveSettings,
+}
+
+/// Where a lane and its cards were drawn in this frame, to find what a dragged card is over.
+struct Place {
+    lane: Rect,
+    cards: Vec<Rect>,
+}
+
+/// The lane and the place among its cards that the pointer at `pos` is over: the number of cards
+/// whose middle is above it.
+fn target(places: &[Place], pos: Pos2) -> Option<(usize, usize)> {
+    let (i, p) = places.iter().enumerate().find(|(_, p)| p.lane.contains(pos))?;
+    Some((i, p.cards.iter().filter(|r| r.center().y < pos.y).count()))
 }
 
 /// The settings popover of one lane (QUERY-028): the form edits copies of the lane's lines.
@@ -100,6 +116,12 @@ pub struct State {
     confirm: Option<(usize, String)>,
     /// the popover is to be opened for this lane in this frame (a double click on the heading)
     open_settings: Option<usize>,
+    /// the card that is being dragged and the lane it was taken from (BOARD-019)
+    drag: Option<(PathBuf, usize)>,
+    /// where the dragged card would land now: the lane and the place among its cards
+    pub(crate) over: Option<(usize, usize)>,
+    /// where the lanes were drawn in this frame
+    places: Vec<Place>,
 }
 
 impl State {
@@ -112,6 +134,11 @@ impl State {
     pub fn rename(&mut self, i: usize, name: &str) {
         self.rename = Some((i, name.to_string()));
         self.rename_fresh = true;
+    }
+
+    /// Is a card being dragged? Esc then cancels the drag and nothing else.
+    pub fn dragging(&self) -> bool {
+        self.drag.is_some()
     }
 
     /// A card was selected with the keys: show it.
@@ -166,6 +193,7 @@ pub fn show(ui: &mut Ui, st: &mut State, data: &Data, env: &mut Env) -> Vec<Act>
         }
     }
     let height = ui.available_height();
+    st.places.clear();
     egui::ScrollArea::horizontal().id_salt("board-lanes").auto_shrink([false, false]).show(ui, |ui| {
         ui.horizontal_top(|ui| {
             for (i, lane) in data.lanes.iter().enumerate() {
@@ -174,8 +202,53 @@ pub fn show(ui: &mut Ui, st: &mut State, data: &Data, env: &mut Env) -> Vec<Act>
             }
         });
     });
+    drag_end(ui, st, data, &mut acts);
     confirm_delete(ui.ctx(), st, &mut acts);
     acts
+}
+
+/// While a card is dragged: the lane and the place it would land in are marked and a ghost of the card
+/// follows the pointer. Letting go on a lane drops the card there, Esc and letting go elsewhere do
+/// nothing (BOARD-019).
+fn drag_end(ui: &Ui, st: &mut State, data: &Data, acts: &mut Vec<Act>) {
+    let Some((rel, from)) = st.drag.clone() else {
+        st.over = None;
+        return;
+    };
+    if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+        st.drag = None;
+        st.over = None;
+        return;
+    }
+    let pos = ui.input(|i| i.pointer.interact_pos());
+    st.over = pos.and_then(|p| target(&st.places, p));
+    let ctx = ui.ctx();
+    ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+    let pal = theme::palette();
+    let painter = ctx.layer_painter(LayerId::new(Order::Tooltip, Id::unique("board-drag")));
+    if let Some((to, index)) = st.over {
+        let place = &st.places[to];
+        painter.rect_stroke(place.lane, CornerRadius::same(8), Stroke::new(2.0, pal.accent), egui::StrokeKind::Inside);
+        let y = match (place.cards.get(index), place.cards.last()) {
+            (Some(r), _) => r.top() - 2.0,
+            (None, Some(r)) => r.bottom() + 2.0,
+            (None, None) => place.lane.top() + 44.0,
+        };
+        painter.line_segment([Pos2::new(place.lane.left() + 10.0, y), Pos2::new(place.lane.right() - 10.0, y)], Stroke::new(3.0, pal.accent));
+    }
+    if let (Some(p), Some(card)) = (pos, data.lanes.get(from).and_then(|l| l.cards.iter().find(|c| c.rel == rel))) {
+        let galley = painter.layout_no_wrap(card.title.clone(), egui::FontId::proportional(13.0), pal.text_strong);
+        let rect = Rect::from_min_size(p + Vec2::new(12.0, 8.0), galley.size() + Vec2::new(16.0, 10.0));
+        painter.rect(rect, CornerRadius::same(6), pal.bg_primary.gamma_multiply(0.9), Stroke::new(1.0, pal.accent), egui::StrokeKind::Inside);
+        painter.galley(rect.min + Vec2::new(8.0, 5.0), galley, pal.text_strong);
+    }
+    if ui.input(|i| i.pointer.any_released()) {
+        if let Some((to, index)) = st.over {
+            acts.push(Act::Drop(Dropped { card: rel, from, to, index }));
+        }
+        st.drag = None;
+        st.over = None;
+    }
 }
 
 /// The question before a lane is deleted: its lines go with it.
@@ -281,7 +354,8 @@ fn keys(ui: &Ui, st: &mut State, data: &Data, acts: &mut Vec<Act>) {
 }
 
 fn lane_ui(ui: &mut Ui, i: usize, lane: &LaneView, st: &mut State, data: &Data, env: &mut Env, acts: &mut Vec<Act>) {
-    egui::Frame::new().fill(theme::palette().bg_secondary).stroke(Stroke::new(1.0, theme::palette().border)).corner_radius(CornerRadius::same(8)).inner_margin(Margin::same(8)).show(ui, |ui| {
+    let mut cards = Vec::new();
+    let out = egui::Frame::new().fill(theme::palette().bg_secondary).stroke(Stroke::new(1.0, theme::palette().border)).corner_radius(CornerRadius::same(8)).inner_margin(Margin::same(8)).show(ui, |ui| {
         ui.set_width(LANE_WIDTH - 18.0);
         header(ui, i, lane, st, data, env, acts);
         if let Some(e) = &lane.error {
@@ -296,7 +370,7 @@ fn lane_ui(ui: &mut Ui, i: usize, lane: &LaneView, st: &mut State, data: &Data, 
                 theme::hint(ui, "No cards");
             }
             for card in &lane.cards {
-                card_ui(ui, card, data, st, env, acts);
+                cards.push(card_ui(ui, i, card, data, st, env, acts));
                 ui.add_space(4.0);
             }
             if lane.partial {
@@ -304,6 +378,7 @@ fn lane_ui(ui: &mut Ui, i: usize, lane: &LaneView, st: &mut State, data: &Data, 
             }
         });
     });
+    st.places.push(Place { lane: out.response.rect, cards });
 }
 
 /// The heading of a lane: its name (double-click for the settings), the number of cards and the ⋯ menu.
@@ -468,8 +543,9 @@ fn chips(ui: &mut Ui, card: &Card, props: &Props) {
 }
 
 /// One card (BOARD-010): the title, the chips, the picture of a drawing. A click selects it and
-/// opens the peek, Ctrl+Click opens the note in a tab (BOARD-012, BOARD-014).
-fn card_ui(ui: &mut Ui, card: &Card, data: &Data, st: &mut State, env: &mut Env, acts: &mut Vec<Act>) {
+/// opens the peek, Ctrl+Click opens the note in a tab (BOARD-012, BOARD-014), a drag takes it to a
+/// lane (BOARD-019). Gives where it was drawn.
+fn card_ui(ui: &mut Ui, lane: usize, card: &Card, data: &Data, st: &mut State, env: &mut Env, acts: &mut Vec<Act>) -> Rect {
     let pal = theme::palette();
     let selected = data.selected == Some(card.rel.as_path());
     let stroke = if selected { Stroke::new(2.0, pal.accent) } else { Stroke::new(1.0, pal.border) };
@@ -489,10 +565,13 @@ fn card_ui(ui: &mut Ui, card: &Card, data: &Data, st: &mut State, env: &mut Env,
         chips(ui, card, data.props);
     });
     let rect = out.response.rect;
-    let resp = ui.interact(rect, ui.scope_id().with(("board-card", &card.rel)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+    let resp = ui.interact(rect, ui.scope_id().with(("board-card", &card.rel)), Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::PointingHand);
     if selected && st.reveal {
         st.reveal = false;
         ui.scroll_to_rect(rect, None);
+    }
+    if resp.drag_started() {
+        st.drag = Some((card.rel.clone(), lane));
     }
     if resp.clicked() {
         if ui.input(|i| i.modifiers.ctrl || i.modifiers.command) {
@@ -501,4 +580,5 @@ fn card_ui(ui: &mut Ui, card: &Card, data: &Data, st: &mut State, env: &mut Env,
             acts.push(Act::Peek(card.rel.clone(), rect));
         }
     }
+    rect
 }

@@ -604,6 +604,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - A **card** is a note (or a drawing, with its picture) with chips: the due date (red when past), the status, the
   priority and the tags. Cards sort by `created`, `modified`, `due`, `priority` and `title`; a note without a value comes
   last either way. A pinned card is only in the lane that pins it.
+- **Drag a card onto a lane** (the card follows the pointer, the lane and the place are marked, Esc cancels, a drop outside the lanes does nothing): the lane's `drop:` property, or the one its simple query says (`status:doing`), is written into the card's front matter (`modified:` stays, a checked save, an undo step in an open note). A lane without a drop property pins the card at the place it was dropped (`- [[Note]]`); the order of the `[[links]]` is the manual order, and a card is unpinned in the lane it came from.
 - A click selects a card and opens its **peek**, an editor of the note in a window the size of the link preview
   (drag the title, resize the edges, Esc closes) with a **Priority** control that changes the front matter only. Ctrl+Click
   or Enter opens the note in a tab; the arrow keys move the selection.
