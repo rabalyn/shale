@@ -257,6 +257,10 @@ impl FontScan {
         }
         let Some(task) = busy.begin_listed_after(FONT_SCAN, "Looking up fonts...", LISTED_AFTER) else { return };
         let dirs = self.system_dirs.clone();
+        // a test never reads the machine's fonts (a scan takes seconds and every test that opens an
+        // export dialog would start one, in parallel): it reads the folders it names, or none
+        #[cfg(test)]
+        let dirs = Some(dirs.unwrap_or_default());
         self.job = Some(task.run(
             move || Scanned {
                 system: need_system.then(|| scan_system(dirs.as_deref())),
