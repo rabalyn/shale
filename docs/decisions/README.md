@@ -45,6 +45,7 @@ way it is. They are append-only. *What* Shale does today is in the living specs 
 | [0035](0035-windowed-editor.md) | A windowed editor for very long notes: stitched block layouts first, a window over the text only if that is not enough | Proposed |
 | [0036](0036-browser-extension-clipper.md) | A companion browser extension saves web pages into the vault (native messaging into a spool folder, allowlist capture, images only from the browser) | Proposed |
 | [0037](0037-signed-release-files.md) | Release files are signed by the owner with an SSH ed25519 key (SSHSIG, namespace per file), the public key is built into Shale and the updater requires the signature | Accepted |
+| [0039](0039-thesis-citations-and-references.md) | Thesis writing: Pandoc citations, `{#fig:x}` labels with `@fig:x` references for figures, tables, equations and sections, a BibTeX `.bib` bibliography, biblatex+biber in TeX, hayagriva for the built-in PDF and site, pandoc `--citeproc` for Word | Proposed |
 
 Format: Context, Decision, Consequences (and Alternatives if any). Statuses: *Proposed* →
 *Accepted* → (*Superseded by NNNN*). An accepted ADR is not edited; a new one supersedes it.
