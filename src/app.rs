@@ -648,7 +648,7 @@ impl ShaleApp {
                 let _ = vault::write_sample_vault(&d);
                 Some(d)
             }
-            (None, None) => cfg.vault.clone().filter(|p| p.is_dir()),
+            (None, None) => last_vault(&cfg),
         };
         let default_welcome = dirs::document_dir().or_else(dirs::home_dir).unwrap_or_default().join("Notes");
         // where the data lives: the user's folders, or temporary ones for tests and screenshots
@@ -3397,6 +3397,12 @@ impl ShaleApp {
 /// After a rename or move that could not update the links in every note (VAULT-016): exactly
 /// which notes were updated and which were not. `None` when all went well.
 /// The clock the undo histories use: unix seconds.
+/// The vault a start without `--vault` reopens (VAULT-006): the one opened last, when its folder is
+/// still there. A folder that is gone is not made again (VAULT-038): the start dialog shows.
+fn last_vault(cfg: &Config) -> Option<PathBuf> {
+    cfg.vault.clone().filter(|p| p.is_dir())
+}
+
 fn unix_now() -> u64 {
     crate::calendar::time::now().max(0) as u64
 }
@@ -3497,7 +3503,7 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
-    // spec: USE-001, USE-006, USE-012, USE-015
+    // spec: USE-001, USE-006, USE-012, USE-015, USE-003, USE-017
     #[test]
     fn the_data_usage_dialog_opens_counts_and_clears_and_the_mail_index_waits_for_the_store() {
         use crate::data_usage::{dialog::Ask, CacheId};
@@ -4041,6 +4047,27 @@ pub(crate) mod tests {
         let msg = &app.toasts.last().unwrap().0;
         assert!(msg.contains("updated links in") && msg.contains("“Overview.canvas”") && msg.contains("canvases are never changed"), "{msg}");
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-006
+    #[test]
+    fn vault_006_the_vault_opened_last_is_reopened_at_start_when_its_folder_is_there() {
+        let base = std::env::temp_dir().join(format!("shale-last-vault-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (one, two) = (base.join("one"), base.join("two"));
+        std::fs::create_dir_all(&one).unwrap();
+        std::fs::create_dir_all(&two).unwrap();
+        let mut cfg = Config::default();
+        assert_eq!(last_vault(&cfg), None, "a first start has none");
+        cfg.remember_vault(one.clone());
+        cfg.remember_vault(two.clone());
+        assert_eq!(last_vault(&cfg), Some(two.clone()), "the one opened last");
+        cfg.remember_vault(one.clone());
+        assert_eq!(last_vault(&cfg), Some(one), "also when it was in the list before");
+        std::fs::remove_dir_all(&two).unwrap();
+        cfg.remember_vault(two);
+        assert_eq!(last_vault(&cfg), None, "a folder that is gone is not made again");
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     // spec: VAULT-013, VAULT-042

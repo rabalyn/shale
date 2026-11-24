@@ -148,7 +148,7 @@ fn hist_001_two_notes_side_by_side_have_the_panel_in_the_sidebar_even_in_a_wide_
     assert!(right.contains_rect(w.panel_rect("deleted")), "the list of the focused note is in the sidebar");
 }
 
-// spec: HIST-003, SYNC-045
+// spec: HIST-003, SYNC-045, HIST-002
 #[test]
 fn hist_003_the_margin_column_is_hidden_with_its_button_and_the_choice_is_remembered() {
     let mut w = W::new("hide", WIDE);
@@ -306,7 +306,7 @@ fn hist_014_next_and_previous_change_move_through_the_changes() {
     assert_eq!(w.t.app.history.changes.current, n - 1);
 }
 
-// spec: HIST-014
+// spec: HIST-014, HIST-008
 #[test]
 fn hist_014_the_slider_moves_the_older_end_and_the_to_list_the_newer_one() {
     let mut w = compare("slider");
@@ -365,7 +365,7 @@ fn hist_014_copy_text_and_read_only_use_the_actions_of_the_app() {
     assert!(w.t.app.history.changes.alone.is_none());
 }
 
-// spec: HIST-015
+// spec: HIST-015, HIST-006
 #[test]
 fn hist_015_a_binary_version_is_changed_with_two_placeholders() {
     let mut t = setup("binary", false);

@@ -1377,7 +1377,7 @@ mod move_tests {
     use crate::app::{Options, ShaleApp};
     use std::path::{Path, PathBuf};
 
-    // spec: VAULT-015, VAULT-042
+    // spec: VAULT-015, VAULT-042, VAULT-016
     #[test]
     fn moving_notes_and_folders_into_folders() {
         let d = std::env::temp_dir().join(format!("shale-move-{}", std::process::id()));

@@ -562,7 +562,7 @@ fn the_schedule_coalesces_saves_and_asks_again_after_idle_and_close() {
     assert!(!s.has_pending());
 }
 
-// spec: CFG-066
+// spec: CFG-066, HIST-003
 #[test]
 fn the_history_settings_default_to_on_load_from_old_files_round_trip_and_stay_in_range() {
     let c = crate::config::Config::default();

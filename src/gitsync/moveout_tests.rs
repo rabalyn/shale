@@ -21,7 +21,7 @@ fn vault_with_repo(env: &Env) -> (PathBuf, PathBuf) {
     (v, env.folder("data/history"))
 }
 
-// spec: SYNC-063
+// spec: SYNC-063, NET-017
 #[test]
 fn sync_063_the_repository_moves_out_checked_and_the_history_goes_on_there() {
     let env = Env::new("moveout-ok");

@@ -175,7 +175,7 @@ fn the_mail_index_is_rebuilt_through_the_open_store() {
     let _ = fs::remove_dir_all(&d);
 }
 
-// spec: USE-022
+// spec: USE-022, USE-014
 #[test]
 fn each_prune_follows_its_retention_settings() {
     let (p, d) = places_with_caches("prune");
@@ -244,7 +244,7 @@ fn clear_asks_first_only_for_the_mail_index_the_damaged_copies_and_the_undo_hist
     let _ = fs::remove_dir_all(&d);
 }
 
-// spec: USE-023
+// spec: USE-023, USE-024
 #[test]
 fn the_cleanup_runs_a_minute_after_the_start_then_daily_and_after_a_setting_settles() {
     let d = temp("schedule");
@@ -316,6 +316,9 @@ fn saved_counts_the_vault_by_kind_its_largest_parts_and_the_data_outside() {
     write(&v.join(".obsidian/app.json"), b"{}");
     write(&p.mail_root.join("drafts/acct1/x.json"), b"{}");
     write(&p.recovery.join("2026-11-15/Note.md"), b"saved");
+    write(&p.mail_root.join(".trash/gone.eml"), b"Subject: gone\r\n\r\n");
+    write(&p.calendars.join("Home.ics"), b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n");
+    write(&p.calendar_trash.join("old.ics"), b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n");
     let s = scan::saved(&p);
     let line = |label: &str| s.vault.iter().find(|l| l.label.starts_with(label)).map(|l| (l.files, l.bytes));
     assert_eq!(line("Notes"), Some((1, 4)));
@@ -329,6 +332,7 @@ fn saved_counts_the_vault_by_kind_its_largest_parts_and_the_data_outside() {
     assert_eq!(s.largest_folders[0], (PathBuf::from("Projects"), 2_300));
     let out = |label: &str| s.outside.iter().find(|l| l.label == label).map(|l| l.files);
     assert_eq!((out("Mail of acct1"), out("Mail drafts"), out("Recovered notes"), out("Mail outbox")), (Some(1), Some(1), Some(1), Some(0)));
+    assert_eq!((out("Mail trash"), out("Local calendars"), out("Calendar trash")), (Some(1), Some(1), Some(1)), "the mail trash, the local calendars and the calendar trash are listed too");
     assert!(s.outside.iter().all(|l| l.problem.is_none()), "a folder that is not there yet is no problem");
     p.vault = None;
     assert!(scan::saved(&p).vault.is_empty());
@@ -346,6 +350,25 @@ fn saved_counts_the_vault_by_kind_its_largest_parts_and_the_data_outside() {
     assert!(u.saved.as_ref().is_some_and(|s| s.is_ok()));
     assert_eq!(u.stats[&CacheId::SocialPictures], Ok(CacheStats { bytes: 150, entries: 2, oldest: u.stats[&CacheId::SocialPictures].as_ref().unwrap().oldest }));
     assert!(u.total().unwrap() >= 150 + 20 + 20 + 30);
+    let _ = fs::remove_dir_all(&d);
+}
+
+// spec: USE-003
+#[test]
+fn use_003_only_the_ten_largest_files_and_the_ten_largest_folders_are_listed_largest_first() {
+    let (p, d) = places_with_caches("largest-ten");
+    let v = p.vault.clone().unwrap();
+    for i in 1..=12usize {
+        write(&v.join(format!("dir{i:02}/file.md")), &vec![b'x'; i * 100]);
+    }
+    let s = scan::saved(&p);
+    assert_eq!((s.largest_files.len(), s.largest_folders.len()), (10, 10));
+    assert_eq!(s.largest_files[0], (PathBuf::from("dir12/file.md"), 1_200));
+    assert_eq!(s.largest_folders[0], (PathBuf::from("dir12"), 1_200));
+    for list in [&s.largest_files, &s.largest_folders] {
+        assert!(list.windows(2).all(|w| w[0].1 >= w[1].1), "largest first: {list:?}");
+    }
+    assert!(!s.largest_files.iter().any(|f| f.0 == Path::new("dir01/file.md") || f.0 == Path::new("dir02/file.md")), "the two smallest are left out");
     let _ = fs::remove_dir_all(&d);
 }
 

@@ -857,7 +857,7 @@ mod tests {
         assert_eq!(bad.toolbar_colours(), [DEFAULT_HIGHLIGHT, DEFAULT_FONT]);
     }
 
-    // spec: CFG-006
+    // spec: CFG-006, VAULT-004
     #[test]
     fn vault_files_round_trip_and_unchanged_files_are_not_rewritten() {
         let root = tmp("roundtrip");
