@@ -271,6 +271,9 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   the next pages left to right, more cards than fit continue on the next page; a card shows its title and chips, a
   drawing card its vector drawing), then the notes of the cards in portrait through the book export, lane by lane, a
   card of several lanes once, with a contents page (the board first), bookmarks and a link from each card to its note.
+  The dialog also offers the **LaTeX template** engine (BOARD-031, #605): the same order through the book templates,
+  the board on `pdflscape` landscape pages (three lanes side by side, more go on further pages, "(continued)"), the
+  lanes as parts and the cards as chapters.
 - **A folder through a LaTeX template** (#309): the folder's export dialog has the engine choice of a note's.
   With **LaTeX template** and a kind of the article or book family (publication, report, exercise, thesis,
   PhD; slides, letters and posters are greyed) the book is one LaTeX document: in a thesis the subfolders are

@@ -979,7 +979,7 @@ fn book_010_a_folder_without_notes_says_so_and_cannot_be_exported() {
     assert!(p.app.modal.is_none());
 }
 
-// spec: BOARD-030
+// spec: BOARD-030, BOARD-031
 #[test]
 fn board_030_the_export_of_a_board_note_opens_the_dialog_of_the_board_and_saves_the_pdf_where_asked() {
     let mut p = P::with_files("board-export", &[("Board.md", "---\ntype: board\n---\n## Todo\nquery: status:todo\n"), ("Alpha.md", "---\nstatus: todo\n---\nalphabody\n"), ("Ideas.md", "# Ideas\n\nA plain note.\n")]);
@@ -991,9 +991,9 @@ fn board_030_the_export_of_a_board_note_opens_the_dialog_of_the_board_and_saves_
     p.look(Show::Modals);
     assert!(p.shows(Show::Modals, "Export the board “Board” to PDF"));
     let Some(Modal::Export(d)) = &p.app.modal else { panic!("the export dialog opens") };
-    assert!(d.book.as_ref().is_some_and(|b| b.board && b.plan.is_ok()) && d.tex.is_none() && !d.latex(), "the built-in engine only");
+    assert!(d.book.as_ref().is_some_and(|b| b.board && b.plan.is_ok()) && d.tex.is_some() && !d.latex(), "the built-in engine until the person chooses LaTeX (BOARD-031)");
     assert_eq!(Path::new(&d.path), p.dir.join("exports/Board.pdf"));
-    assert!(!p.shows(Show::Modals, "LaTeX template"), "no engine choice yet (BOARD-031)");
+    assert!(p.shows(Show::Modals, "LaTeX template"), "the engine choice (BOARD-031)");
     p.click(Show::Modals, "Reading order");
     for line in ["1  Todo", "1.1  Alpha"] {
         assert!(p.shows(Show::Modals, line), "{line}");
