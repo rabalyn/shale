@@ -281,3 +281,16 @@ fn site_048_pagefind_finds_the_words_of_a_published_note_and_no_word_of_an_unpub
     // the header and the backlinks are not indexed: only what is in the page's body
     assert!(!fragments.contains("Linked from"), "{fragments}");
 }
+
+// spec: SITE-001
+#[test]
+fn site_001_the_hello_world_page_is_the_index_of_a_site_without_a_note() {
+    if !hugo_here() {
+        return;
+    }
+    let f = Fixture::with("s001h", "\"include_tags\": [\"public\"]", &[("Plan.md", "Nothing is tagged.\n")]);
+    let (public, _) = build(&f);
+    let index = html(&public, "");
+    assert!(index.contains("Hello from Shale") && index.contains("This page was published with Shale.") && index.contains("No notes are chosen for publishing yet."), "{index}");
+    assert!(!index.contains("Plan") && !index.contains("Folders") && !index.contains("Recently changed"), "{index}");
+}

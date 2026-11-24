@@ -110,7 +110,10 @@ fn site_015_the_summary_counts_with_singular_and_plural_and_warnings_go_to_stder
     r.unwrap();
     assert!(lines[0].starts_with("Publishing is off for this vault"), "{lines:?}");
     assert_eq!(lines.last().unwrap(), "Wrote 0 notes, 0 media files and 0 links; 0 links became plain text.");
-    assert!(empty.out().join("hugo.toml").is_file() && !empty.out().join("content").exists());
+    assert!(empty.out().join("hugo.toml").is_file() && empty.out().join("content/_index.md").is_file() && std::fs::read_dir(empty.out().join("content")).unwrap().count() == 1);
+    // the dry run lists the generated page
+    let (_, lines, _) = run(&Args { vault: empty.dir.clone(), out: empty.out(), dry_run: true });
+    assert!(lines.contains(&"page content/_index.md".to_string()), "{lines:?}");
 }
 
 // spec: SITE-014

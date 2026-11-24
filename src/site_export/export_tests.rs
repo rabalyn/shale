@@ -26,13 +26,26 @@ fn written_notes(e: &super::plan::Export) -> Vec<&str> {
 
 // spec: SITE-001
 #[test]
-fn site_001_a_vault_with_no_chosen_note_writes_an_empty_site_and_says_so() {
+fn site_001_a_vault_with_no_chosen_note_writes_the_hello_world_page_and_nothing_of_the_vault() {
     let f = Fixture::with("s001", "\"include_tags\": [\"public\"]", &[("Plan.md", "Nothing is tagged.\n")]);
     let e = f.export();
     assert!(e.notes.is_empty() && e.media.is_empty());
     assert!(e.empty_because.as_deref().is_some_and(|w| w.contains("No note is chosen")), "{:?}", e.empty_because);
-    assert!(!paths(&e).iter().any(|p| p.starts_with("content/")), "no page: {:?}", paths(&e));
+    assert_eq!(paths(&e).into_iter().filter(|p| p.starts_with("content/")).collect::<Vec<_>>(), ["content/_index.md"], "one page, the index");
     assert!(has(&e, "hugo.toml") && has(&e, "data/backlinks.json"), "still a complete site");
+    let page = text(&e, "content/_index.md");
+    assert!(page.contains("Hello from Shale") && page.contains("published with Shale") && page.contains("No notes are chosen for publishing yet.") && page.contains(" UTC."), "{page}");
+    // nothing of the vault, its notes or this computer is in any file of the tree (SITE-010)
+    let all = everything(&e);
+    for secret in ["Plan", "Nothing is tagged", f.root.to_str().unwrap(), &crate::gitsync::host_name(), "shale-site-s001"] {
+        assert!(!all.contains(secret), "{secret:?} is in the site");
+    }
+    assert!(text(&e, "hugo.toml").starts_with("title = \"Shale site\""));
+    // with a chosen note there is no hello-world page
+    f.file("Plan.md", "#public Now chosen.\n");
+    let e = f.export();
+    assert_eq!(written_notes(&e), ["Plan.md"]);
+    assert!(!everything(&e).contains("Hello from Shale"));
 }
 
 // spec: SITE-002, SITE-051

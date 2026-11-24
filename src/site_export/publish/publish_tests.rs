@@ -325,6 +325,23 @@ fn site_067_the_summary_counts_and_lists_every_warning_among_them_the_off_vault_
     assert!(empty.summary.empty_because.is_some_and(|w| w.contains("No note is chosen")));
 }
 
+// spec: SITE-001
+#[test]
+fn site_001_an_empty_publish_pushes_the_hello_world_page() {
+    let st = Stack::new("hello", false, &[("A.md", "a note\n")]).unwrap();
+    st.rules(&format!("\"url\": {}, \"branch\": \"{BRANCH}\"", serde_json::to_string(&st.url()).unwrap()));
+    let done = st.publish().unwrap();
+    assert_eq!(done.summary.notes, 0);
+    assert_eq!(st.remote_files().iter().filter(|f| f.starts_with("content/")).collect::<Vec<_>>(), ["content/_index.md"]);
+    let page = st.remote(&["show", &format!("{BRANCH}:content/_index.md")]);
+    assert!(page.contains("No notes are chosen for publishing yet.") && !page.contains("laptop") && !page.contains(&st.id()), "{page}");
+    // a note chosen later replaces the page
+    st.f.file("A.md", "#pub a note\n");
+    st.rules(&format!("\"include_tags\": [\"pub\"], \"url\": {}, \"branch\": \"{BRANCH}\"", serde_json::to_string(&st.url()).unwrap()));
+    st.publish().unwrap();
+    assert!(!st.remote(&["show", &format!("{BRANCH}:content/_index.md")]).contains("Hello from Shale"));
+}
+
 // spec: SITE-069, SITE-071, SITE-036
 #[test]
 fn site_069_media_go_to_lfs_are_uploaded_once_and_without_git_lfs_the_publish_says_so() {

@@ -314,7 +314,7 @@ Shale itself writes `created` and `modified` (full ISO 8601 times) into every Ma
 | `sync.commit_suffix` | empty | Git sync, "suffix" |
 | `sync.lfs_download` | `on_demand` (a media file stored with Git LFS is downloaded when you play or open it; `always`: after every sync) | Git sync, "Download media files after every sync" (shown only when `git-lfs` is installed) |
 | `publish` | the group of the keys below; it is not in the file while all of them are default | Settings → Publishing ([[Publishing a vault]]) |
-| `publish.enabled` | off (nothing is published; `shale export-site` writes an empty site) | Settings → Publishing, "Publish this vault as a website" |
+| `publish.enabled` | off (nothing is published; `shale export-site` writes only the hello-world page) | Settings → Publishing, "Publish this vault as a website" |
 | `publish.all_notes` | off (on: every note but the private types) | Settings → Publishing, "All notes" |
 | `publish.include_folders`, `publish.include_tags` | empty lists (the notes in these folders, the notes with these tags) | Settings → Publishing, "Publish the notes in these folders" and "… with these tags" |
 | `publish.exclude_folders`, `publish.exclude_tags` | empty lists (never published, they win over the include rules) | Settings → Publishing, "Never publish the notes in these folders" and "… with these tags" |

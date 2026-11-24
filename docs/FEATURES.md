@@ -1351,7 +1351,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   is the web server's.
 
   ![Settings → Publishing](userguide/z_media/screenshots/settings-publishing.png)
-- **Opt-in and private by default** (SITE-001 to SITE-010, SITE-051 to SITE-057): a vault publishes nothing until
+- **Opt-in and private by default** (SITE-001 to SITE-010, SITE-051 to SITE-057): a vault publishes no note (only a generated hello-world page, with nothing of the vault, to show that publishing works) until
   `publish.enabled` is on in its `.shale/settings.json`. The rules choose notes by folder, by tag (a nested tag
   matches its parent) or all notes; an exclude rule wins; "all notes" leaves out mail, events, posts and people unless
   their type is ticked; a note's own `publish: true` or `false` wins over every rule. Nothing of a note that is not

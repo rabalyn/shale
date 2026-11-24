@@ -94,6 +94,12 @@ pub fn export(args: &Args, libraries: &[Library], out: &mut dyn Write, err: &mut
         for media in &export.media {
             let _ = writeln!(out, "media {media}");
         }
+        // a site without a note has the generated hello-world page (SITE-001)
+        if export.notes.is_empty() {
+            for f in export.files.iter().filter(|f| f.path.starts_with("content/")) {
+                let _ = writeln!(out, "page {}", f.path);
+            }
+        }
     } else {
         write::write(&export, &args.out)?;
     }
