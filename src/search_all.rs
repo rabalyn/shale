@@ -335,6 +335,8 @@ pub struct Found {
     pub lane: Vec<std::path::PathBuf>,
     /// the sources the query was not asked of, because it has a field they lack (QUERY-006)
     pub skipped: Vec<Skipped>,
+    /// The tags and properties of the notes, for a vocabulary request (QUERY-030); no hits.
+    pub vocab: Option<std::sync::Arc<crate::search_form::vocab::Vocab>>,
 }
 
 /// What a source with only text and a few fields takes of a query: its terms side by side, as
@@ -403,7 +405,7 @@ pub fn search_within(notes: &Snapshot, mail: Option<&Connection>, posts: Option<
             Err(what) => skipped.push(Skipped { kind: Kind::Posts, what }),
         }
     }
-    (!cancel.load(Ordering::Relaxed)).then_some(Found { hits, counts: Some(counts), stopped_early: run.stopped == Some(Stop::Budget), lane: Vec::new(), skipped })
+    (!cancel.load(Ordering::Relaxed)).then_some(Found { hits, counts: Some(counts), stopped_early: run.stopped == Some(Stop::Budget), lane: Vec::new(), skipped, vocab: None })
 }
 
 /// [`search_in`] of what a [`Ctx`] reads, here and now (tests).

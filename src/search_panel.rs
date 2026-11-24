@@ -161,8 +161,8 @@ impl ShaleApp {
         let mut save = save;
         if self.search.form_open {
             let count = self.search.results.counts().map(|c| c.matches_text(listed, search_all::SIDEBAR_GROUP_LIMIT));
-            let opts = crate::search_form::Opts { vault: v, prefixes, host_box: true, count: count.as_deref() };
-            let changed = crate::search_form::show(ui, &mut self.search.form, &mut self.search.query, &mut self.search.check, &mut self.cfg.search.advanced, None, &opts);
+            let mut opts = crate::search_form::Opts { vault: v, worker: &mut self.search_worker, prefixes, host_box: true, count: count.as_deref() };
+            let changed = crate::search_form::show(ui, &mut self.search.form, &mut self.search.query, &mut self.search.check, &mut self.cfg.search.advanced, None, &mut opts);
             save |= changed.advanced;
             if changed.query {
                 // what the form wrote is searched like what was typed: when the typing has settled

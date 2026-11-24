@@ -260,6 +260,8 @@ impl State {
 /// What the view reads of the window.
 pub struct Env<'a> {
     pub vault: &'a Vault,
+    /// the search worker, for the vocabulary of the form (QUERY-030)
+    pub worker: &'a mut crate::search_all::SearchWorker,
     pub scenes: &'a mut SceneCache,
     pub dark: bool,
     /// the Advanced switch of the form (QUERY-026)
@@ -637,8 +639,8 @@ fn settings(anchor: &egui::Response, st: &mut State, data: &Data, i: usize, env:
         });
         ui.add_space(4.0);
         let count = search_form::matches_text(lane.cards.len(), lane.partial);
-        let opts = Opts { vault: env.vault, prefixes: Prefixes::default(), host_box: false, count: Some(&count) };
-        let changed = search_form::show(ui, &mut s.form, &mut s.query, &mut s.cache, env.advanced, Some(&mut s.sort), &opts);
+        let mut opts = Opts { vault: env.vault, worker: &mut *env.worker, prefixes: Prefixes::default(), host_box: false, count: Some(&count) };
+        let changed = search_form::show(ui, &mut s.form, &mut s.query, &mut s.cache, env.advanced, Some(&mut s.sort), &mut opts);
         if changed.query {
             asked.push(Act::SetQuery(i, s.query.clone()));
         }

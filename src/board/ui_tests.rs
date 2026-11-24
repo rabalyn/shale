@@ -777,12 +777,14 @@ fn query_029_the_lane_popover_lists_the_tags_and_esc_closes_the_list_before_the_
     w.click("+ Add filter");
     w.click("tag is");
     w.click("tag");
+    w.hl.settle(&mut w.app);
     assert!(crate::search_form::list_open(w.hl.ctx()), "the list of the tags of the vault is open");
     w.key(Key::Escape, Modifiers::NONE, "");
     assert!(!crate::search_form::list_open(w.hl.ctx()), "Esc closes the list");
     assert!(w.painted("Lane “Doing”"), "and not the popover");
     assert!(w.app.boards.peek.is_none());
     w.click("tag");
+    w.hl.settle(&mut w.app);
     w.click("todo");
     assert!(w.board_text().contains("#todo"), "a click takes the tag into the lane: {}", w.board_text());
     assert!(w.painted("Lane “Doing”"), "the click in the list does not close the popover");
