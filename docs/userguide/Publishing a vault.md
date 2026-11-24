@@ -76,6 +76,14 @@ Changing a rule changes no note. Shale reads the rules and your notes and never 
 - Notes whose `type` is `email`, `event`, `post` (a saved post) or `person` show a header with their properties (an
   e-mail: from, to, date; an event: when, where, who; a post: author, date, source; a contact: e-mail, phone,
   organization), as they are written in the note and nothing else. Notes of any other type look like every page.
+- A **board** (a note with `type: board`) that is chosen for publishing shows its lanes as columns, side by side (they
+  scroll sideways), with the cards as they were when you published: the lane names, the cards in the order the board
+  shows them, and the chips the board shows (due day, status, priority, tags). It is a fixed picture: nothing can be
+  dragged or edited. A card of a published note links to that note's page. **A card of a note that is not published is
+  left out altogether**, with no title, no count and no gap, so the page gives no hint that it exists; the lanes'
+  queries and pinned links are not written either. The page's own text is what stands above the first lane. A lane that
+  cannot be worked out (a query with an error) shows a short note instead of cards, and the publish summary lists it as
+  a warning.
 - The site has a **Graph** page (`graph.html`, linked in the header of every page) with the published notes as dots and
   the links between them as lines: zoom with the wheel, drag a dot or the background, click a dot to open the note. It
   needs no server and loads nothing from another site.

@@ -1,6 +1,7 @@
 //! Everything an export writes (SITE-001, SITE-002, SITE-009): worked out in memory from the vault,
 //! so a dry run lists it and a real run writes it without having to decide anything more.
 
+use super::boards;
 use super::body::{self, Env, State};
 use super::front::{self, Page};
 use super::rules::{self, Candidate};
@@ -142,14 +143,24 @@ pub fn build(vault: &Vault) -> Result<Export, String> {
     let mut st = State::default();
     let mut files: Vec<OutFile> = Vec::new();
     let mut notes = Vec::new();
+    let mut board_data: BTreeMap<String, Value> = BTreeMap::new();
     for rel in &published {
         let text = text_of(rel);
         let place = &layout.notes[rel];
         let lastmod = crate::note_props::modified(text, secs(vault.file(rel).and_then(|f| f.modified))).map(crate::note_props::format_timestamp);
-        let tags = &vault.notes[rel].tags;
-        let page = Page { title: &titles[rel], tags, lastmod };
+        // a board's page has its own words as the text and its lanes as the snapshot (SITE-045); the
+        // tags in its lanes' queries are not its tags (they could be those of unpublished notes)
+        let is_board = boards::is_board(text);
+        let intro = if is_board { boards::intro(text) } else { String::new() };
+        let tags = if is_board { boards::tags(text, &intro) } else { vault.notes[rel].tags.clone() };
+        let page = Page { title: &titles[rel], tags: &tags, lastmod };
         let head = front::front_matter(&page, text, &|v| body::flatten_links(&env, rel, v));
-        let converted = body::convert(&env, &mut st, rel, body_of(text));
+        let converted = body::convert(&env, &mut st, rel, if is_board { &intro } else { body_of(text) });
+        if is_board {
+            let (snap, warnings) = boards::snapshot(&env, rel);
+            board_data.insert(place.content.clone(), snap);
+            st.warnings.extend(warnings);
+        }
         files.push(OutFile { path: format!("content/{}", place.content), content: Content::Text(format!("{head}{converted}")) });
         notes.push((rel_to_string(rel), place.content.clone()));
     }
@@ -161,6 +172,7 @@ pub fn build(vault: &Vault) -> Result<Export, String> {
         }
     }
     files.extend(data_files(&layout, &titles, &st.edges));
+    files.push(OutFile { path: "data/boards.json".into(), content: Content::Text(format!("{}\n", serde_json::to_string_pretty(&json!(board_data)).unwrap_or_default())) });
     let mut media = Vec::new();
     for rel in &st.vault_media {
         let path = format!("static/{}", body::vault_media_path(rel));

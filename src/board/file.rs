@@ -312,6 +312,16 @@ impl Board {
         Board { head, lanes, final_newline, crlf }
     }
 
+    /// The text above the first lane without the front matter: the board's own words (the site
+    /// export shows them as the page's text; the lanes' queries and pins stay out of it, SITE-045).
+    pub fn intro(&self) -> String {
+        let head = self.head.join("\n");
+        let skip = front_matter_lines(&head).min(self.head.len());
+        let mut text = self.head[skip..].join("\n");
+        text.push('\n');
+        text
+    }
+
     /// The text of the file.
     pub fn write(&self) -> String {
         let mut lines: Vec<&str> = self.head.iter().map(String::as_str).collect();

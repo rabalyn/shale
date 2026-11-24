@@ -9,6 +9,7 @@
 //! (`shale export-site`).
 
 pub(crate) mod anchor;
+pub(crate) mod boards;
 pub(crate) mod body;
 pub(crate) mod cli;
 pub(crate) mod front;
@@ -21,6 +22,8 @@ pub(crate) mod svg;
 pub(crate) mod theme;
 pub(crate) mod write;
 
+#[cfg(test)]
+mod boards_tests;
 #[cfg(test)]
 mod cli_tests;
 #[cfg(test)]
