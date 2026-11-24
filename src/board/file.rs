@@ -195,9 +195,8 @@ impl Lane {
     }
 
     /// Replace the pinned cards by `pins` (the text inside `[[ ]]`), at the place of the first
-    /// old one, or after the lines of the keys; the other lines stay (BOARD-022). The drag of #602
-    /// writes the manual order with it; until then only the tests do.
-    #[cfg(test)]
+    /// old one, or after the lines of the keys; the other lines stay (BOARD-022). A drop writes the
+    /// manual order with it (`drag.rs`).
     pub fn set_pins(&mut self, pins: &[String]) {
         let first = self.body.iter().position(|l| pin_line(l).is_some());
         self.body.retain(|l| pin_line(l).is_none());

@@ -91,6 +91,24 @@ it is found by name, path and links only.
 
 ![[board-peek.png]]
 
+# Moving cards
+
+**Drag a card** onto a lane to move it. The card follows the pointer as a small ghost, the lane it would land in gets an
+outline and a line shows the place among its cards. **Esc** cancels the drag, and letting go outside the lanes does
+nothing.
+
+- A lane with a `drop:` line, or with a query that is one property such as `status:doing`, **sets that property** in the
+  card's note (`status: doing`). Only the front matter changes: `modified:` stays, the change is a normal checked save
+  and, when the note is open, a step you can undo in it. The lane then searches again and shows the card.
+- A lane **without** a drop property (`query: #todo`, or none) cannot change the note. The drop **pins** the card there,
+  at the place you dropped it: a `- [[Note]]` line is added to the lane in the board's note.
+- **Manual order** is the list of `- [[Note]]` lines: dropping a card inside its lane, or on a manual lane, rewrites that
+  list. In a lane with a property, a card dropped among its pinned cards on top is pinned there too.
+- A card that was pinned in the lane it comes from is unpinned there, otherwise it would stay in that lane.
+- Lanes are exclusive (see above): when a lane before the target matches the card's new property too, the card shows
+  in that earlier lane. The card stays selected and is scrolled into view, so you can see where it went.
+- When the card's note changed since the board drew it, nothing is moved and a message says so.
+
 # Try it
 
 This guide has a board of its own, [[Guide board]]: its lanes are made from the tags of the guide's notes. Open it with

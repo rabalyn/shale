@@ -7,7 +7,7 @@ use crate::app::{Options, ShaleApp, View};
 use crate::keys::{Action, Binding};
 use crate::search_all::SearchWorker;
 use crate::ui_test_support::Headless;
-use eframe::egui::{Event, Key, Modifiers, PointerButton, Pos2};
+use eframe::egui::{vec2, Event, Key, Modifiers, PointerButton, Pos2};
 use std::path::{Path, PathBuf};
 
 const BOARD: &str = "---\ntype: board\ncard-shows: due, status, priority, tags\n---\n# Sprint\n\nA word about the sprint.\n\n## Backlog\nquery: #todo\nunknown line in the lane\n\n## Doing\nquery: status:doing\nsort: priority desc, due asc\n\n## Pinned by hand\n- [[Pinned One]]\n- [[Sketch.excalidraw]]\n";
@@ -131,6 +131,33 @@ impl W {
     fn type_text(&mut self, text: &str) {
         self.hl.frame(&mut self.app, vec![Event::Text(text.to_string())]);
         self.settle();
+    }
+
+    /// Press on the card titled `from` and drag to `to`, staying there with the button down.
+    fn drag(&mut self, from: &str, to: Pos2) {
+        let p = self.at(from);
+        self.hl.press_and_move(&mut self.app, p, &Headless::steps(p, to, 8));
+    }
+
+    /// Let go at `at` and settle.
+    fn drop_at(&mut self, at: Pos2) {
+        self.hl.release(&mut self.app, at);
+        self.settle();
+    }
+
+    fn drag_drop(&mut self, from: &str, to: Pos2) {
+        self.drag(from, to);
+        self.drop_at(to);
+    }
+
+    /// An empty place in the lane named `lane`, below its header.
+    fn lane_top(&self, lane: &str) -> Pos2 {
+        self.at(lane) + vec2(0.0, 12.0)
+    }
+
+    /// Below the card titled `last`, which is the last of its lane.
+    fn lane_end(&self, last: &str) -> Pos2 {
+        self.at(last) + vec2(0.0, 90.0)
     }
 
     fn view(&self) -> View {
@@ -746,4 +773,208 @@ fn board_007_the_ribbon_has_a_boards_icon_that_opens_or_shows_the_boards() {
     let tabs = w.open_tabs().len();
     w.click_at(at.center());
     assert_eq!(w.open_tabs().len(), tabs, "the view is shown, not opened twice");
+}
+
+const FLOW: &str = "---\ntype: board\n---\n# Flow\n\n## Todo\nquery: #todo\n\n## Doing\nquery: status:doing\n\n## Done\nquery: status:done\n\n## Later\nquery: #later OR status:later\ndrop: status: later\n\n## Manual\n- [[Pinned One]]\n- [[Sketch.excalidraw]]\n";
+
+const FLOW_FILES: [(&str, &str); 6] = [
+    ("Board.md", FLOW),
+    ("Alpha.md", "Alpha body #todo\n"),
+    ("Beta.md", "---\nstatus: doing\nmodified: 2020-01-01T10:00:00+00:00\n---\nBeta body\n"),
+    ("Gamma.md", "---\nstatus: doing\n---\nGamma body\n"),
+    ("Pinned One.md", "---\nstatus: doing\n---\nPinned #todo\n"),
+    ("Sketch.excalidraw", crate::drawing::SAMPLE_SCENE),
+];
+
+fn flow(tag: &str) -> W {
+    let mut w = W::new(tag, &FLOW_FILES);
+    w.hl.set_size(vec2(2200.0, 900.0));
+    w.settle();
+    w
+}
+
+// spec: BOARD-019
+#[test]
+fn board_019_a_drop_on_a_lane_with_a_simple_query_sets_that_property() {
+    let mut w = flow("drop-derived");
+    assert_eq!(w.lane("Doing"), strs(&["Beta", "Gamma"]));
+    let to = w.lane_top("Done");
+    w.drag_drop("Beta", to);
+    let beta = w.file("Beta.md");
+    assert!(beta.contains("status: done") && !beta.contains("status: doing"), "{beta}");
+    assert!(beta.contains("Beta body"), "the rest of the note stays: {beta}");
+    assert_eq!(w.lane("Done"), strs(&["Beta"]), "the lane searched again and shows the card");
+    assert_eq!(w.lane("Doing"), strs(&["Gamma"]));
+    assert_eq!(w.board_text(), FLOW, "no pin is written for a lane with a property");
+    assert!(w.app.boards.view.over.is_none() && !w.app.boards.view.dragging());
+}
+
+// spec: BOARD-019
+#[test]
+fn board_019_the_drop_line_of_the_lane_wins_over_its_query() {
+    let mut w = flow("drop-line");
+    let to = w.lane_top("Later");
+    w.drag_drop("Gamma", to);
+    assert!(w.file("Gamma.md").contains("status: later"), "{}", w.file("Gamma.md"));
+    assert_eq!(w.lane("Later"), strs(&["Gamma"]));
+}
+
+// spec: BOARD-019
+#[test]
+fn board_019_the_drag_marks_the_lane_and_the_place_and_a_ghost_follows_the_pointer() {
+    let mut w = flow("drag-feedback");
+    let before = w.main().filter(|(t, _)| t == "Gamma").count();
+    // above the first card of Doing
+    let to = w.at("Beta");
+    w.drag("Gamma", to);
+    assert!(w.app.boards.view.dragging());
+    assert_eq!(w.app.boards.view.over, Some((1, 0)), "lane Doing, above its first card");
+    assert_eq!(w.main().filter(|(t, _)| t == "Gamma").count(), before + 1, "the ghost shows the title at the pointer");
+    let to = w.lane_end("Gamma");
+    w.hl.frame(&mut w.app, vec![Event::PointerMoved(to)]);
+    assert_eq!(w.app.boards.view.over, Some((1, 2)), "below its last card");
+    let to = w.lane_top("Done");
+    w.hl.frame(&mut w.app, vec![Event::PointerMoved(to)]);
+    assert_eq!(w.app.boards.view.over, Some((2, 0)), "the empty lane Done");
+    // nothing is written until the drop
+    assert!(w.file("Gamma.md").contains("status: doing"));
+    w.drop_at(to);
+    assert!(w.file("Gamma.md").contains("status: done"));
+}
+
+// spec: BOARD-019
+#[test]
+fn board_019_esc_cancels_a_drag_and_a_drop_outside_the_lanes_does_nothing() {
+    let mut w = flow("drag-cancel");
+    let to = w.lane_top("Done");
+    w.drag("Beta", to);
+    assert!(w.app.boards.view.dragging());
+    w.key(Key::Escape, Modifiers::NONE, "");
+    assert!(!w.app.boards.view.dragging() && w.app.boards.view.over.is_none());
+    w.drop_at(to);
+    assert!(w.file("Beta.md").contains("status: doing"), "the drop after Esc does nothing");
+    assert!(w.app.boards.peek.is_none(), "a drag is no click");
+    // outside: above the lanes, on the strip of boards
+    let strip = w.at("+ New board");
+    w.drag("Beta", strip);
+    assert_eq!(w.app.boards.view.over, None);
+    w.drop_at(strip);
+    assert!(w.file("Beta.md").contains("status: doing"));
+    assert_eq!(w.board_text(), FLOW);
+    assert_eq!(w.lane("Doing"), strs(&["Beta", "Gamma"]));
+}
+
+// spec: BOARD-020
+#[test]
+fn board_020_a_drop_does_not_move_modified_on_disk_or_in_an_open_note_and_is_an_undo_step() {
+    let mut w = flow("drop-modified");
+    let to = w.lane_top("Done");
+    w.drag_drop("Beta", to);
+    let beta = w.file("Beta.md");
+    assert!(beta.contains("modified: 2020-01-01T10:00:00+00:00") && beta.contains("status: done"), "{beta}");
+    // a note that is open in a buffer is changed there and saved the checked way
+    w.app.open(Path::new("Gamma.md"), true);
+    w.app.show_view(View::Boards, false);
+    w.settle();
+    let to = w.lane_top("Later");
+    w.drag_drop("Gamma", to);
+    let doc = &w.app.notes[Path::new("Gamma.md")];
+    assert!(doc.text.contains("status: later") && !doc.dirty, "saved: {:?}", doc.text);
+    assert!(w.file("Gamma.md").contains("status: later"));
+    assert!(!w.file("Gamma.md").contains("modified:"), "the body is the same: {}", w.file("Gamma.md"));
+    let mut t = doc.text.clone();
+    assert!(w.app.undo.of(Path::new("Gamma.md")).undo(&mut t).is_some());
+    assert!(t.contains("status: doing"), "the drop is an undo step of the note: {t:?}");
+}
+
+// spec: BOARD-020
+#[test]
+fn board_020_a_note_that_changed_since_the_view_drew_it_is_not_moved() {
+    let mut w = flow("drop-conflict");
+    w.app.open(Path::new("Beta.md"), true);
+    w.app.show_view(View::Boards, false);
+    w.settle();
+    // the buffer says something else than the index the view was drawn from
+    w.app.notes.get_mut(Path::new("Beta.md")).unwrap().text.push_str("typed meanwhile\n");
+    let to = w.lane_top("Done");
+    w.drag_drop("Beta", to);
+    assert!(w.file("Beta.md").contains("status: doing"));
+    assert!(!w.app.notes[Path::new("Beta.md")].text.contains("status: done"));
+    assert_eq!(w.board_text(), FLOW, "the board is not changed either");
+    assert!(w.app.toasts.iter().any(|(t, _)| t.contains("not moved")), "the user is told");
+}
+
+// spec: BOARD-021
+#[test]
+fn board_021_a_drop_on_a_lane_without_a_property_pins_the_card_and_leaves_its_note_alone() {
+    let mut w = flow("drop-pin-only");
+    let before = w.file("Beta.md");
+    let to = w.lane_top("Todo");
+    w.drag_drop("Beta", to);
+    assert_eq!(w.file("Beta.md"), before, "the note is not changed");
+    assert!(w.board_text().contains("## Todo\nquery: #todo\n- [[Beta]]\n"), "{}", w.board_text());
+    assert_eq!(w.lane("Todo"), strs(&["Beta", "Alpha"]), "pinned on top, where it was dropped");
+    assert_eq!(w.lane("Doing"), strs(&["Gamma"]), "a pinned card is only in the lanes that pin it (BOARD-032)");
+}
+
+// spec: BOARD-022
+#[test]
+fn board_022_a_drop_inside_a_manual_lane_rewrites_its_link_list() {
+    let mut w = flow("drop-reorder");
+    assert_eq!(w.lane("Manual"), strs(&["Pinned One", "Sketch"]));
+    let to = w.at("Pinned One");
+    w.drag_drop("Sketch", to);
+    assert_eq!(w.lane("Manual"), strs(&["Sketch", "Pinned One"]));
+    assert!(w.board_text().ends_with("## Manual\n- [[Sketch.excalidraw]]\n- [[Pinned One]]\n"), "{}", w.board_text());
+    // dropping a card where it is changes nothing
+    let text = w.board_text();
+    let to = w.at("Sketch");
+    w.drag_drop("Sketch", to);
+    assert_eq!(w.board_text(), text);
+}
+
+// spec: BOARD-022
+#[test]
+fn board_022_a_card_from_another_lane_is_inserted_where_it_is_dropped_and_its_note_stays() {
+    let mut w = flow("drop-manual");
+    let before = w.file("Alpha.md");
+    let to = w.at("Sketch");
+    w.drag_drop("Alpha", to);
+    assert_eq!(w.lane("Manual"), strs(&["Pinned One", "Alpha", "Sketch"]));
+    assert!(w.board_text().ends_with("- [[Pinned One]]\n- [[Alpha]]\n- [[Sketch.excalidraw]]\n"), "{}", w.board_text());
+    assert_eq!(w.file("Alpha.md"), before, "a manual lane has no property to write");
+    assert_eq!(w.lane("Todo"), Vec::<String>::new(), "the card is in the lane that pins it only");
+}
+
+// spec: BOARD-022, BOARD-019
+#[test]
+fn board_022_a_card_taken_out_of_a_lane_that_pins_it_is_unpinned_there() {
+    let mut w = flow("drop-unpin");
+    let to = w.lane_top("Done");
+    w.drag_drop("Pinned One", to);
+    assert!(w.file("Pinned One.md").contains("status: done"), "{}", w.file("Pinned One.md"));
+    assert!(!w.board_text().contains("Pinned One]]"), "no pin is left in the lane it came from: {}", w.board_text());
+    assert_eq!(w.lane("Manual"), strs(&["Sketch"]));
+    // it matches Todo (#todo) too, and the first lane that matches takes a card (BOARD-009)
+    assert_eq!(w.lane("Todo"), strs(&["Alpha", "Pinned One"]));
+    assert_eq!(w.lane("Done"), Vec::<String>::new());
+}
+
+// spec: BOARD-022
+#[test]
+fn board_022_a_card_dropped_among_the_pinned_cards_of_a_lane_with_a_property_is_pinned_there_too() {
+    let board = "---\ntype: board\n---\n# Flow\n\n## Todo\nquery: status:todo\n\n## Doing\nquery: status:doing\n- [[Gamma]]\n";
+    let mut w = W::new("drop-among", &[("Board.md", board), ("Beta.md", "---\nstatus: doing\n---\nB\n"), ("Gamma.md", "---\nstatus: doing\n---\nG\n"), ("Delta.md", "---\nstatus: todo\n---\nD\n"), ("Eps.md", "---\nstatus: todo\n---\nE\n")]);
+    assert_eq!(w.lane("Doing"), strs(&["Gamma", "Beta"]));
+    // below the pinned card: the property only
+    let to = w.at("Beta") + vec2(0.0, 60.0);
+    w.drag_drop("Delta", to);
+    assert!(w.file("Delta.md").contains("status: doing"));
+    assert_eq!(w.board_text(), board, "dropped below the pinned cards: not pinned");
+    // on the pinned card: the property and the pin, in front of it
+    let to = w.at("Gamma");
+    w.drag_drop("Eps", to);
+    assert!(w.file("Eps.md").contains("status: doing"));
+    assert!(w.board_text().ends_with("query: status:doing\n- [[Eps]]\n- [[Gamma]]\n"), "{}", w.board_text());
+    assert_eq!(w.lane("Doing"), strs(&["Eps", "Gamma", "Beta", "Delta"]));
 }

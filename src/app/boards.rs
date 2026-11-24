@@ -3,6 +3,7 @@
 //! when the view changes it. The pieces are in `src/board/`.
 
 use super::{handle_editor_action, ShaleApp, View};
+use crate::board::drag::{self, Dropped};
 use crate::board::file::{self, Board, Chip, Key};
 use crate::board::peek::{Peek, With};
 use crate::board::view::{self, Act, Data, Env};
@@ -111,8 +112,40 @@ impl ShaleApp {
                 self.boards.selected = Some(rel.clone());
                 self.open(&rel, true);
             }
+            Act::Drop(d) => self.drop_card(d),
             Act::SaveSettings => self.save_config(),
         }
+    }
+
+    /// A card was dropped on a lane (BOARD-019 to BOARD-022): its note gets the property of the lane
+    /// first, then the board file the new lists of pinned cards. When the note cannot be changed
+    /// (it changed on disk since the view drew it) nothing else is, and the user is told.
+    fn drop_card(&mut self, d: Dropped) {
+        let (Some(vault), Some(board_rel)) = (self.vault.as_ref(), self.boards.current.clone()) else { return };
+        let Some(text) = vault.notes.get(&board_rel).map(|n| n.text.clone()) else { return };
+        let board = Board::parse(&text);
+        let Some(plan) = drag::plan(vault, &board_rel, &board, self.boards.shown.lanes(), &d) else { return };
+        if let Some((key, value)) = &plan.property {
+            let Some(seen) = vault.notes.get(&d.card).map(|n| n.text.clone()) else { return };
+            self.edit_note_text(&d.card, &seen, |t| Some(note_props::set_property(t, key, value)));
+            let now = self.vault.as_ref().and_then(|v| v.notes.get(&d.card)).map(|n| n.text.clone()).unwrap_or_default();
+            if note_props::set_property(&now, key, value) != now {
+                self.toast(format!("“{}” changed in the meantime or cannot be written, so it was not moved", crate::vault::rel_to_string(&d.card)));
+                return;
+            }
+        }
+        if !plan.pins.is_empty() {
+            self.edit_board(|b| {
+                for (lane, pins) in &plan.pins {
+                    if let Some(l) = b.lanes.get_mut(*lane) {
+                        l.set_pins(pins);
+                    }
+                }
+            });
+        }
+        // where the card shows now, a search later, is up to the lanes' queries: it is shown
+        self.boards.selected = Some(d.card);
+        self.boards.view.reveal();
     }
 
     /// Set the `key:` line of lane `i` (the form of the lane, QUERY-028).
@@ -269,6 +302,9 @@ impl ShaleApp {
         if self.tabbar.tabs.get(self.tabbar.active).map(|t| &t.view) != Some(&View::Boards) {
             self.boards.view.settings = None;
             self.close_peek();
+            return;
+        }
+        if self.boards.view.dragging() {
             return;
         }
         let Some(peek) = self.boards.peek.as_ref() else { return };
