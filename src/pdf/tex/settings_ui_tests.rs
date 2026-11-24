@@ -370,3 +370,23 @@ fn the_end_of_an_install_or_update_says_which_mirror_it_came_from() {
     assert_eq!(done_notice(Err("cancelled".into()), "The install").text, "The install was cancelled; nothing of it is left.");
     assert_eq!(done_notice(Err("boom".into()), "The update").text, "The update failed: boom");
 }
+
+// spec: TEX-001, JOB-023
+#[test]
+fn the_look_for_tex_is_a_task_that_ends_with_the_look_and_never_runs_twice() {
+    let mut t = T::new("probe-task", found(Err("none"), Err("none"), None));
+    let ctx = eframe::egui::Context::default();
+    t.app.tex.check_again(&ctx);
+    let info = t.app.busy.info(&TEX_PROBE).expect("the look is a task of the window's list");
+    assert_eq!((info.label.as_str(), info.cancellable), (TEX_PROBE_TEXT, false));
+    assert!(t.app.tex.detection.is_none(), "the old answer is gone while it looks again");
+    t.app.tex.check_again(&ctx);
+    assert_eq!(t.app.busy.list().len(), 1, "a second look does not start next to the first");
+    let start = std::time::Instant::now();
+    while t.app.tex.detecting.is_some() {
+        assert!(start.elapsed() < Duration::from_secs(60), "the look ends");
+        t.app.tex.poll(&ctx);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(t.app.tex.detection.is_some() && !t.app.busy.is_running(&TEX_PROBE), "the task is gone when the answer is in");
+}

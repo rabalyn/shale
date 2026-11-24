@@ -268,3 +268,49 @@ fn net_013_a_result_from_before_a_rename_is_dropped_and_the_next_scan_shows_the_
     assert!(v.notes.contains_key(Path::new("B.md")) && !v.notes.contains_key(Path::new("A.md")), "the old file list did not come back");
     let _ = std::fs::remove_dir_all(&d);
 }
+
+// spec: NET-013, JOB-022
+#[test]
+fn net_013_a_scan_is_a_task_that_is_listed_only_when_it_takes_two_seconds() {
+    use super::rescan::VAULT_RESCAN;
+    let (mut app, d) = app_in("listed", &[("N.md", b"one\n")]);
+    let gates = Gates::new(&mut app);
+    app.rescan.due_now();
+    frame(&mut app, &egui::Context::default());
+    assert!(app.rescan.in_flight());
+    let info = app.busy.info(&VAULT_RESCAN).expect("the scan is a task from its start");
+    assert_eq!((info.label.as_str(), info.cancellable), ("Reading the vault folder…", false));
+    // the clock is given: the scan is held by the gate, nothing waits for two seconds
+    assert!(app.busy.list_at(info.started).is_empty(), "a scan that has just begun is nothing to show");
+    assert!(app.busy.list_at(info.started + Duration::from_millis(1999)).is_empty());
+    let after = app.busy.list_at(info.started + Duration::from_secs(2));
+    assert_eq!(after.iter().map(|t| t.label.as_str()).collect::<Vec<_>>(), ["Reading the vault folder…"], "listed once it takes two seconds");
+    gates.scan_now();
+    gates.deliver();
+    frames_until(&mut app, "the scan did not end", |a| !a.rescan.in_flight());
+    assert!(app.busy.info(&VAULT_RESCAN).is_none() && app.busy.list_at(info.started + Duration::from_secs(60)).is_empty(), "gone with the scan");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+// spec: NET-013, JOB-022, VAULT-037
+#[test]
+fn net_013_the_task_of_a_scan_ends_when_the_vault_is_dropped_and_the_new_vault_can_be_scanned() {
+    use super::rescan::VAULT_RESCAN;
+    let (mut app, d) = app_in("task-switch", &[("N.md", b"one\n")]);
+    let gates = Gates::new(&mut app);
+    app.rescan.due_now();
+    frame(&mut app, &egui::Context::default());
+    assert!(app.busy.is_running(&VAULT_RESCAN));
+    app.drop_vault_state();
+    assert!(!app.busy.is_running(&VAULT_RESCAN), "the old vault's scan is no task of the window any more");
+    // the new vault's scan begins though the old worker still holds on
+    app.rescan.due_now();
+    frame(&mut app, &egui::Context::default());
+    assert!(app.busy.is_running(&VAULT_RESCAN) && app.rescan.in_flight());
+    gates.scan_now();
+    gates.scan_now();
+    gates.deliver();
+    gates.deliver();
+    frames_until(&mut app, "the scan did not end", |a| !a.rescan.in_flight());
+    let _ = std::fs::remove_dir_all(&d);
+}

@@ -15,7 +15,7 @@ pub mod dialog;
 pub mod files;
 pub mod scan;
 
-use crate::busy::Cancel;
+use crate::busy::{Busy, Cancel, Key, Task};
 use crate::config::CacheRetention;
 use crate::mail::store::MailStore;
 use serde::{Deserialize, Serialize};
@@ -73,6 +73,24 @@ impl CacheId {
             CacheId::MailBroken => Some("The damaged copies of the mail index are deleted. They cannot be made again; Shale never needs them, they were kept in case you want to look into them."),
             CacheId::UndoHistories => Some("The undo history of every note of this vault is deleted, with the damaged copies of history files. u has nothing to undo afterwards, in the open notes too. They cannot be made again."),
             _ => None,
+        }
+    }
+
+    /// The task of a clear or prune of this cache: one at a time per cache (USE-007, JOB-005).
+    /// The rebuild of the mail index is the task of the mail view (JOB-016, `MAIL_REBUILD`), with Cancel.
+    pub fn key(self) -> crate::busy::Key {
+        match self {
+            CacheId::MailIndex => crate::mail::ui::MAIL_REBUILD,
+            _ => crate::busy::Key::new("data-usage-clear").with(&(self as u64).to_string()),
+        }
+    }
+
+    /// What a clear or prune of this cache does, as the text of its task (JOB-004).
+    pub fn working_text(self, kind: Kind) -> String {
+        match (self, kind) {
+            (CacheId::MailIndex, Kind::Clear) => "Rebuilding the mail index…".to_string(),
+            (_, Kind::Clear) => format!("Clearing the {}…", self.name().to_lowercase()),
+            (_, Kind::Prune) => format!("Cleaning up the {}…", self.name().to_lowercase()),
         }
     }
 
@@ -343,17 +361,33 @@ pub const SETTLE: Duration = Duration::from_secs(2);
 
 /// What a cache-statistics job sends back: every cache's numbers, or why the job died.
 type StatsResult = Result<Vec<(CacheId, Result<CacheStats, String>)>, String>;
-/// A running clear or prune: what it does and where its result arrives.
-type ClearJob = (Kind, Receiver<Result<Result<Freed, String>, String>>);
+/// A running clear or prune: what it does, where its result arrives, and the task that lists it.
+struct ClearJob {
+    kind: Kind,
+    rx: Receiver<Result<Result<Freed, String>, String>>,
+    _task: Option<Task>,
+}
+
+/// The task of counting the files that Shale keeps (USE-005).
+fn count_files() -> Key {
+    Key::new("data-usage-count").with("files")
+}
+/// The task of measuring the caches (USE-005).
+fn count_caches() -> Key {
+    Key::new("data-usage-count").with("caches")
+}
+/// The counting and the scheduled prune are listed in the busy indicator only when they take this
+/// long: they happen on their own and are usually over in a moment (JOB-023).
+pub const LISTED_AFTER: Duration = Duration::from_secs(2);
 
 /// The sub-state of the window: the dialog's numbers, the running jobs, the schedule.
 pub struct DataUsage {
     pub places: Places,
     /// what the last count found (None: still counting)
     pub saved: Option<Result<scan::Saved, String>>,
-    saved_job: Option<Receiver<Result<scan::Saved, String>>>,
+    saved_job: Option<(Receiver<Result<scan::Saved, String>>, Task)>,
     pub stats: HashMap<CacheId, Result<CacheStats, String>>,
-    stats_job: Option<Receiver<StatsResult>>,
+    stats_job: Option<(Receiver<StatsResult>, Task)>,
     jobs: HashMap<CacheId, ClearJob>,
     pub record: cleanup::Record,
     /// a cache asked about before it is cleared (USE-008)
@@ -365,6 +399,8 @@ pub struct DataUsage {
     last_cleanup: Option<Instant>,
     /// a problem loading the record file, to tell once
     pub problem: Option<String>,
+    /// the registry that lists the jobs (the window's, set by `ShaleApp`)
+    pub busy: Busy,
 }
 
 impl DataUsage {
@@ -383,6 +419,7 @@ impl DataUsage {
             started: Instant::now(),
             last_cleanup: None,
             problem: loaded.problem,
+            busy: Busy::default(),
         }
     }
 
@@ -390,13 +427,16 @@ impl DataUsage {
     pub fn refresh(&mut self, notify: impl Fn() + Send + Clone + 'static) {
         let places = self.places.clone();
         self.saved = None;
-        self.saved_job = Some(crate::jobs::spawn(move || scan::saved(&places), notify.clone()));
+        // the count that is superseded ends its task before the new one begins
+        self.saved_job = None;
+        self.saved_job = self.busy.begin_listed_after(count_files(), "Counting what Shale keeps on this computer…", LISTED_AFTER).map(|task| (crate::jobs::spawn(move || scan::saved(&places), notify.clone()), task));
         self.refresh_stats(notify);
     }
 
     fn refresh_stats(&mut self, notify: impl Fn() + Send + 'static) {
         let places = self.places.clone();
-        self.stats_job = Some(crate::jobs::spawn(move || CacheId::ALL.iter().map(|id| (*id, stats(*id, &places))).collect(), notify));
+        self.stats_job = None;
+        self.stats_job = self.busy.begin_listed_after(count_caches(), "Measuring the caches…", LISTED_AFTER).map(|task| (crate::jobs::spawn(move || CacheId::ALL.iter().map(|id| (*id, stats(*id, &places))).collect(), notify), task));
     }
 
     /// Whether a clear or prune of this cache runs (its button is disabled, USE-007).
@@ -413,6 +453,18 @@ impl DataUsage {
         if self.running(id) {
             return false;
         }
+        // a clear was asked for by the person and is listed at once; a prune is the cleanup that
+        // runs on its own, and is listed when it takes long
+        let listed_after = if kind == Kind::Clear { Duration::ZERO } else { LISTED_AFTER };
+        // (a rebuild of the mail index brings its own task, which the job holds)
+        let task = if mail.is_some() {
+            None
+        } else {
+            match self.busy.begin_listed_after(id.key(), id.working_text(kind), listed_after) {
+                Some(t) => Some(t),
+                None => return false,
+            }
+        };
         let places = self.places.clone();
         let r = retention.clone();
         let now = crate::calendar::time::now();
@@ -427,7 +479,7 @@ impl DataUsage {
             },
             notify,
         );
-        self.jobs.insert(id, (kind, rx));
+        self.jobs.insert(id, ClearJob { kind, rx, _task: task });
         true
     }
 
@@ -457,13 +509,13 @@ impl DataUsage {
     /// Collect what ended: the counts, and the clears and prunes (recorded, USE-024). A clear
     /// or prune that ended counts the caches again.
     pub fn poll(&mut self, notify: impl Fn() + Send + 'static) -> Vec<Finished> {
-        if let Some(rx) = &self.saved_job {
+        if let Some((rx, _)) = &self.saved_job {
             if let Ok(r) = rx.try_recv() {
                 self.saved = Some(r);
                 self.saved_job = None;
             }
         }
-        if let Some(rx) = &self.stats_job {
+        if let Some((rx, _)) = &self.stats_job {
             if let Ok(r) = rx.try_recv() {
                 match r {
                     Ok(v) => self.stats.extend(v),
@@ -473,9 +525,9 @@ impl DataUsage {
             }
         }
         let mut done = vec![];
-        self.jobs.retain(|id, (kind, rx)| match rx.try_recv() {
+        self.jobs.retain(|id, job| match job.rx.try_recv() {
             Ok(r) => {
-                done.push(Finished { id: *id, kind: *kind, result: r.and_then(|r| r) });
+                done.push(Finished { id: *id, kind: job.kind, result: r.and_then(|r| r) });
                 false
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => true,
