@@ -1501,20 +1501,23 @@ mod pretend_browser_tests {
         // one of them can be given this very port the moment Shale lets go of it, and keep it for its whole run (#659). So
         // "bind fails" does not say that Shale still listens. `sign_in` drops its listener before it returns, i.e. before
         // the job's result is sent; what is checked is that Shale's own socket is gone (a later holder of the port is
-        // another socket). Where the sockets cannot be listed (not Linux) `mine` is empty and the port is bound again
-        // instead, which can only fail when another test took it first, so that bind is retried for a bounded time.
+        // another socket). Even then the socket can outlive the drop for a moment: the other tests of this binary spawn
+        // child processes (curl, the pretend browser), and a child forked in that instant holds a copy of every open fd
+        // (CLOEXEC only closes it at its `exec`), which under heavy load can take a while (#659). So the check is
+        // retried for a bounded time. Where the sockets cannot be listed (not Linux) `mine` is empty and the port is bound
+        // again instead, which can only fail when another test took it first.
         assert!(mine.len() <= 1, "only Shale's listener holds the port while it waits: {mine:?}");
-        if mine.is_empty() {
-            let freed = (0..200).any(|_| {
-                TcpListener::bind(("127.0.0.1", port)).is_ok() || {
-                    std::thread::sleep(Duration::from_millis(25));
-                    false
-                }
-            });
-            assert!(freed, "Cancel freed the redirect port");
-        } else {
-            assert!(!listening_sockets(port).contains(&mine[0]), "Cancel freed the redirect port");
-        }
+        let freed = (0..400).any(|_| {
+            let gone = match mine.first() {
+                Some(inode) => !listening_sockets(port).contains(inode),
+                None => TcpListener::bind(("127.0.0.1", port)).is_ok(),
+            };
+            gone || {
+                std::thread::sleep(Duration::from_millis(25));
+                false
+            }
+        });
+        assert!(freed, "Cancel freed the redirect port");
         drop(guard);
         // Cancel that comes while the code is traded for tokens: the tokens are dropped, nothing is kept, not even in memory
         let (guard, log) = pretend_browser(Visit::Approve);
