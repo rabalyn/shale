@@ -25,6 +25,7 @@ impl ShaleApp {
             ("the opening of outside files", !self.outside_opens.is_empty()),
             ("the search", self.search_worker.busy()),
             ("the opening of the mail index", matches!(self.mail.store, crate::mail::ui::StoreState::Opening)),
+            ("the loading of the calendars", self.calendar.is_loading()),
         ];
         jobs.into_iter().filter(|(_, busy)| *busy).map(|(name, _)| name).collect()
     }

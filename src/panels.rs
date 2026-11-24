@@ -46,6 +46,15 @@ impl ShaleApp {
                     self.actions.push(Action::OpenMail(Box::new(m)));
                 }
             }
+            // a click on an event shows it in the Calendar tab (LAY-033)
+            crate::sidebar::Item::Calendar => {
+                let monday = self.cfg.week_starts_monday;
+                let font = self.fonts.area(crate::fonts::Area::Calendar);
+                let clicked = crate::fonts::with_area(ui, &font, |ui| self.side.panes.calendar.show(ui, &self.calendar, monday));
+                if let Some(o) = clicked {
+                    self.actions.push(Action::OpenCalendarEvent(Box::new(o)));
+                }
+            }
             _ => {}
         }
     }

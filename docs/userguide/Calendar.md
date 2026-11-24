@@ -9,6 +9,9 @@ views in three sizes. In a narrow sidebar the buttons move to a line below the m
 
 ![[calendar-sidebar.png]]
 
+The **Calendar** icon of the ribbon can also be placed in the right sidebar (drag it there or right-click it, see [[Window layout]]):
+there it is a compact companion of this tab, a small month and the agenda of the next 14 days. A click on an event opens it here.
+
 The calendar tab comes back after a restart in the mode (month, week or day) and on the day you left it ([[Tabs]]).
 
 # Calendars

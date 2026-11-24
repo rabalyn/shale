@@ -358,6 +358,8 @@ pub enum Action {
     ShowViewInNewTab(View),
     /// show a day (a day number) in the calendar: the sidebar's, else the big one (EDIT-108)
     OpenCalendarDay(i64),
+    /// show an event in the Calendar tab (opened when there is none), from the sidebar's Calendar pane (LAY-033)
+    OpenCalendarEvent(Box<crate::calendar::store::Occ>),
     /// open a post found by the search in its feed, in a new tab (SOC-035)
     OpenPost(Box<crate::social::post_index::PostHit>),
     /// open a mail found by the search in the mail view (NAV-025)
@@ -2209,6 +2211,20 @@ impl ShaleApp {
         }
     }
 
+    /// Show an event of the sidebar's Calendar pane in the Calendar tab (LAY-033): the tab is
+    /// opened when there is none, shows the month of the event with its day selected and its
+    /// details popup open.
+    pub fn open_calendar_event(&mut self, occ: crate::calendar::store::Occ) {
+        let day = occ.start_day();
+        self.show_view(View::Calendar, false);
+        let view = &mut self.cal.main;
+        view.mode = crate::calendar::ui::Mode::Month;
+        view.anchor = day;
+        view.selected = day;
+        let at = self.ctx.as_ref().map(|c| c.content_rect().center()).unwrap_or_default();
+        view.open_popup(occ, at);
+    }
+
     /// Do what the calendar panel asked for.
     pub fn calendar_action(&mut self, a: crate::calendar::ui::CalAction) {
         use crate::calendar::ui::CalAction;
@@ -2759,6 +2775,7 @@ impl ShaleApp {
                 Action::OpenCalendarDay(day) => self.open_calendar_day(day),
                 Action::OpenPost(hit) => self.open_post_hit(&hit),
                 Action::OpenMail(msg) => self.open_mail_hit(*msg),
+                Action::OpenCalendarEvent(occ) => self.open_calendar_event(*occ),
                 Action::CloseTab(i) => self.close_tab(i),
                 Action::SplitTabRight { pane, tab } => {
                     self.focus_pane(pane);

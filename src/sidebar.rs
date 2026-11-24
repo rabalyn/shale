@@ -59,10 +59,10 @@ impl Item {
     }
 
     /// The views that can be in the ribbon, in a right view or in both (LAY-020, LAY-028,
-    /// ADR-0033, ADR-0038): Files, Search and Tags, and Mail. Calendar and Feeds follow with
-    /// their compact panes (rabalyn/shale#610): until then they are refused on the right.
+    /// ADR-0033, ADR-0038): Files, Search and Tags, and Mail and Calendar. Feeds follows with
+    /// its compact pane (rabalyn/shale#610): until then it is refused on the right.
     pub fn is_movable(self) -> bool {
-        matches!(self, Item::Files | Item::Search | Item::Tags | Item::Mail)
+        matches!(self, Item::Files | Item::Search | Item::Tags | Item::Mail | Item::Calendar)
     }
 
     /// Can a right menubar take this icon: a panel or a movable view (LAY-006, LAY-020).
@@ -700,11 +700,11 @@ mod tests {
 
     // spec: LAY-020
     #[test]
-    fn lay_020_files_search_tags_and_mail_fit_a_right_menubar_and_the_other_ribbon_items_do_not() {
-        for item in [Item::Files, Item::Search, Item::Tags, Item::Mail] {
+    fn lay_020_files_search_tags_mail_and_calendar_fit_a_right_menubar_and_the_other_ribbon_items_do_not() {
+        for item in [Item::Files, Item::Search, Item::Tags, Item::Mail, Item::Calendar] {
             assert!(item.is_movable() && item.fits_right() && !item.is_panel(), "{item:?}");
         }
-        for item in [Item::Calendar, Item::Graph, Item::Tasks, Item::Social, Item::Switcher, Item::Import, Item::Drawing, Item::NewNote] {
+        for item in [Item::Graph, Item::Tasks, Item::Social, Item::Switcher, Item::Import, Item::Drawing, Item::NewNote] {
             assert!(!item.fits_right(), "{item:?} is a main view or a command");
             let mut l = two_views();
             let before = l.clone();
@@ -862,18 +862,74 @@ mod tests {
 
     // spec: LAY-029
     #[test]
-    fn lay_029_calendar_and_feeds_have_no_pane_yet_so_the_right_sidebar_refuses_them_and_a_stored_one_goes_back_to_the_ribbon() {
-        for item in [Item::Calendar, Item::Social] {
-            assert!(!item.is_movable() && !item.fits_right(), "{item:?}");
-            let mut l = two_views();
-            let before = l.clone();
-            assert_eq!(l.apply(item, Dest::NewView { at: 0 }, Side::Left, Mode::Move), Err(Refused));
-            assert_eq!(l, before);
-        }
-        let l = Layout::from_config(&cfg_with(&["files"], &[(&["calendar", "social", "panel:outline"], "calendar")]));
+    fn lay_029_calendar_is_moved_or_copied_to_the_right_sidebar_and_back_like_mail() {
+        // move: it leaves the ribbon and is the active icon of the view it lands in
+        let mut l = two_views();
+        l.apply(Item::Calendar, Dest::Bar { view: 1, at: 1 }, Side::Left, Mode::Move).unwrap();
+        assert!(!l.on_left(Item::Calendar) && l.views[1].icons[1] == Item::Calendar && l.views[1].active == Item::Calendar);
+        every_icon_once(&l);
+        // back to the ribbon at the place of the drop
+        l.apply(Item::Calendar, Dest::Ribbon(0), Side::Right, Mode::Move).unwrap();
+        assert_eq!((l.ribbon[0], l.on_right(Item::Calendar)), (Item::Calendar, false));
+        // copy to a new view: the ribbon keeps it
+        let mut l = two_views();
+        l.apply(Item::Calendar, Dest::NewView { at: 2 }, Side::Left, Mode::Copy).unwrap();
+        assert_eq!((l.ribbon.clone(), l.views[2].clone()), (Layout::default().ribbon, View::new(vec![Item::Calendar], Item::Calendar)));
+        // a copy dragged back: nothing is added, the copy leaves the view (a view without an icon goes)
+        l.apply(Item::Calendar, Dest::Ribbon(3), Side::Right, Mode::Move).unwrap();
+        assert_eq!(l, two_views());
+        // the Calendar panel (a panel of the right sidebar) is another icon and is not touched
+        assert!(l.on_right(p(Calendar)) && !l.on_right(Item::Calendar));
+        // removing it from the view only takes that side; from both it is hidden and restore puts it in the ribbon
+        l.apply(Item::Calendar, Dest::Bar { view: 0, at: 0 }, Side::Left, Mode::Copy).unwrap();
+        assert!(l.hide(Item::Calendar, Side::Right) && l.on_left(Item::Calendar) && l.hidden.is_empty());
+        l.apply(Item::Calendar, Dest::Bar { view: 0, at: 0 }, Side::Left, Mode::Move).unwrap();
+        assert!(l.hide(Item::Calendar, Side::Right));
+        assert_eq!(l.hidden, [Item::Calendar]);
+        assert!(l.restore(Item::Calendar) && l.on_left(Item::Calendar));
+        every_icon_once(&l);
+    }
+
+    // spec: LAY-029
+    #[test]
+    fn lay_029_calendar_in_a_right_view_is_stored_with_the_same_id_and_an_old_layout_loads_unchanged() {
+        // an old layout has Calendar in the ribbon only: it loads as it was
+        let l = Layout::from_config(&cfg_with(&["files", "calendar", "tags"], &[(&["panel:outline"], "panel:outline")]));
+        assert_eq!(&l.ribbon[..3], [Item::Files, Item::Calendar, Item::Tags]);
+        assert!(!l.on_right(Item::Calendar));
+        // a copy is in both lists, a moved one only in the view
+        let l = Layout::from_config(&cfg_with(&["files", "calendar"], &[(&["panel:outline", "calendar"], "calendar")]));
+        assert!(l.on_left(Item::Calendar) && l.on_right(Item::Calendar), "a copy stays");
+        let l = Layout::from_config(&cfg_with(&["files"], &[(&["calendar", "panel:calendar"], "calendar")]));
+        assert!(!l.on_left(Item::Calendar) && l.on_right(Item::Calendar), "a moved one stays moved");
+        let mut c = Config::default();
+        l.store(&mut c);
+        assert_eq!(&c.sidebars.right[0].icons[..2], ["calendar", "panel:calendar"], "stored under its own id, apart from the panel");
+        assert_eq!(Layout::from_config(&c), l, "what is stored comes back");
+        // repair: a double goes, one in no list comes back to the ribbon, a hidden one stays hidden
+        let l = Layout::from_config(&cfg_with(&["calendar", "calendar"], &[(&["calendar", "panel:outline", "calendar"], "calendar"), (&["calendar"], "calendar")]));
+        assert_eq!(l.ribbon.iter().filter(|i| **i == Item::Calendar).count(), 1);
+        assert_eq!(l.views.iter().flat_map(|v| v.icons.iter()).filter(|i| **i == Item::Calendar).count(), 1, "doubles on the right side go");
+        let l = Layout::from_config(&cfg_with(&["files"], &[(&["panel:outline"], "panel:outline")]));
+        assert!(l.on_left(Item::Calendar), "in no list: back in the ribbon");
+        let mut c = cfg_with(&["files"], &[(&["panel:outline"], "panel:outline")]);
+        c.sidebars.hidden = vec!["calendar".into()];
+        let l = Layout::from_config(&c);
+        assert_eq!((l.hidden.clone(), l.on_left(Item::Calendar) || l.on_right(Item::Calendar)), (vec![Item::Calendar], false));
+    }
+
+    // spec: LAY-035
+    #[test]
+    fn lay_035_feeds_has_no_pane_yet_so_the_right_sidebar_refuses_it_and_a_stored_one_goes_back_to_the_ribbon() {
+        let item = Item::Social;
+        assert!(!item.is_movable() && !item.fits_right(), "{item:?}");
+        let mut l = two_views();
+        let before = l.clone();
+        assert_eq!(l.apply(item, Dest::NewView { at: 0 }, Side::Left, Mode::Move), Err(Refused));
+        assert_eq!(l, before);
+        let l = Layout::from_config(&cfg_with(&["files"], &[(&["social", "panel:outline"], "social")]));
         assert_eq!(l.views[0].icons[0], p(Outline));
-        assert!(!l.on_right(Item::Calendar) && !l.on_right(Item::Social));
-        assert!(l.on_left(Item::Calendar) && l.on_left(Item::Social));
+        assert!(!l.on_right(Item::Social) && l.on_left(Item::Social));
     }
 
     // spec: LAY-027
