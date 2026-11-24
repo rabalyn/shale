@@ -264,7 +264,7 @@ mod tests {
         run.today = time::parse_ymd("2026-11-23").unwrap();
         let found = run.match_notes(expr);
         assert_eq!(run.stopped, None);
-        let mut found: Vec<String> = found.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+        let mut found: Vec<String> = found.iter().map(|p| crate::vault::rel_to_string(p)).collect();
         found.sort();
         found
     }

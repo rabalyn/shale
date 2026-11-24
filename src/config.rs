@@ -1354,11 +1354,14 @@ mod tests {
     #[test]
     fn recent_list_is_unique() {
         let mut c = Config::default();
-        c.remember_vault("/a".into());
-        c.remember_vault("/b".into());
-        c.remember_vault("/a".into());
-        assert_eq!(c.vaults.entries().iter().map(|e| e.path.clone()).collect::<Vec<_>>(), vec![PathBuf::from("/a"), PathBuf::from("/b")]);
-        assert_eq!(c.vault, Some(PathBuf::from("/a")), "the vault opened last");
+        // folders that exist nowhere keep their path as it is, on every system ("/a" is "D:\\a" on a
+        // Windows runner that has one)
+        let (a, b) = (std::env::temp_dir().join("shale-recent-nowhere-a"), std::env::temp_dir().join("shale-recent-nowhere-b"));
+        c.remember_vault(a.clone());
+        c.remember_vault(b.clone());
+        c.remember_vault(a.clone());
+        assert_eq!(c.vaults.entries().iter().map(|e| e.path.clone()).collect::<Vec<_>>(), vec![a.clone(), b]);
+        assert_eq!(c.vault, Some(a), "the vault opened last");
     }
 
     // spec: CFG-075
