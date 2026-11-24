@@ -30,7 +30,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /// A queue of the worker: a newer query of a slot gives up the older one of the same slot, and
 /// queries of other slots are not touched.
@@ -62,9 +62,21 @@ impl Slot {
 
     /// A queue of its own for the vocabulary of one form (QUERY-030), above the lanes: a newer
     /// request of a form gives up its older one and no other queue.
-    pub fn vocabulary() -> Slot {
+    fn vocabulary() -> Slot {
         static NEXT: AtomicU64 = AtomicU64::new(1 << 32);
         Slot(NEXT.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+/// A queue of one owner, handed out by [`SearchWorker::lease`].
+pub struct Lease {
+    pub slot: Slot,
+    retired: Arc<Mutex<Vec<Slot>>>,
+}
+
+impl Drop for Lease {
+    fn drop(&mut self) {
+        self.retired.lock().unwrap_or_else(|e| e.into_inner()).push(self.slot);
     }
 }
 
@@ -240,6 +252,8 @@ pub struct SearchWorker {
     ready: HashMap<Slot, (u64, Found)>,
     /// queries whose reply has not been read yet
     in_flight: usize,
+    /// the queues whose owner is gone, to forget with the next frame (QUERY-030)
+    retired: Arc<Mutex<Vec<Slot>>>,
 }
 
 impl Default for SearchWorker {
@@ -250,7 +264,7 @@ impl Default for SearchWorker {
 
 impl SearchWorker {
     pub(crate) fn with_runner(run: Runner) -> SearchWorker {
-        SearchWorker { thread: None, run, repaint: egui::Context::default(), next: 0, latest: HashMap::new(), given_up: HashMap::new(), busy: Busy::default(), ready: HashMap::new(), in_flight: 0 }
+        SearchWorker { thread: None, run, repaint: egui::Context::default(), next: 0, latest: HashMap::new(), given_up: HashMap::new(), busy: Busy::default(), ready: HashMap::new(), in_flight: 0, retired: Arc::default() }
     }
 
     /// Tests: another runner for the worker the window was built with, which keeps its registry
@@ -276,6 +290,10 @@ impl SearchWorker {
 
     /// Read the replies: keep the newest of each slot, drop the others (QUERY-017).
     fn pump(&mut self) {
+        let retired = std::mem::take(&mut *self.retired.lock().unwrap_or_else(|e| e.into_inner()));
+        for slot in retired {
+            self.forget(slot);
+        }
         let Some(thread) = &self.thread else { return };
         while let Ok(r) = thread.replies.try_recv() {
             self.in_flight -= 1;
@@ -319,6 +337,23 @@ impl SearchWorker {
         // (the thread ends only when this side is dropped: a send does not fail)
         let _ = thread.jobs.send(Job { slot, id, request, cancel, repaint: self.repaint.clone() });
         id
+    }
+
+    /// A queue of its own, for as long as the lease lives (QUERY-030): when it is dropped the
+    /// worker forgets the queue with its next frame, and gives up its query on its way.
+    pub fn lease(&self) -> Lease {
+        Lease { slot: Slot::vocabulary(), retired: self.retired.clone() }
+    }
+
+    /// Give up the query of the slot and drop everything the worker keeps for it.
+    fn forget(&mut self, slot: Slot) {
+        self.cancel(slot);
+    }
+
+    /// How many queues the worker keeps something for (tests).
+    #[cfg(test)]
+    pub fn queues(&self) -> usize {
+        self.latest.len() + self.ready.len() + self.given_up.len()
     }
 
     /// Give up the query of the slot that is on its way, if any: its answer is dropped.

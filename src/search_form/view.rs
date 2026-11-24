@@ -1001,4 +1001,43 @@ mod tests {
         let stamp = (h.vault.uid, h.vault.generation);
         assert_eq!(h.st.complete.vocab_stamp(), Some(stamp));
     }
+
+    // spec: QUERY-030
+    #[test]
+    fn query_030_a_form_that_is_dropped_gives_its_queue_back_and_cancels_its_build() {
+        use std::sync::atomic::Ordering;
+        static SAW_CANCEL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        static STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        fn noting(_: &mut crate::search_all::worker::Conns, _: &crate::search_all::Request, cancel: &std::sync::atomic::AtomicBool) -> Option<crate::search_all::Found> {
+            STARTED.store(true, Ordering::SeqCst);
+            while !cancel.load(Ordering::SeqCst) {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            SAW_CANCEL.store(true, Ordering::SeqCst);
+            None
+        }
+        let mut h = vault_host();
+        h.worker = SearchWorker::with_runner(noting);
+        h.wait = false;
+        for _ in 0..4 {
+            // a form is opened (as a lane popover is) and its build is on its way ...
+            h.st = State::default();
+            h.pick("+ Add filter", "tag is");
+            let r = h.edits()[0];
+            h.click_at(r.center());
+            assert!(h.worker.busy());
+            while !STARTED.swap(false, Ordering::SeqCst) {
+                std::thread::yield_now();
+            }
+            // ... and the form is dropped: the build is given up and the queue is forgotten
+            h.st = State::default();
+            h.frames(2);
+            while h.worker.busy() {
+                h.worker.begin_frame(&h.ctx);
+                std::thread::yield_now();
+            }
+            assert!(SAW_CANCEL.swap(false, Ordering::SeqCst), "the build was told to stop");
+            assert_eq!(h.worker.queues(), 0, "no queue is left behind");
+        }
+    }
 }

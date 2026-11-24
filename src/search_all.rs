@@ -37,7 +37,7 @@ pub mod worker;
 use matcher::{Budget, Run, Stop};
 use query::{Checked, Expr, TermKind};
 pub use snapshot::Snapshot;
-pub use worker::{Request, SearchWorker, Slot};
+pub use worker::{Lease, Request, SearchWorker, Slot};
 
 /// How many hits one group of the picker lists at most.
 pub const GROUP_LIMIT: usize = 20;

@@ -6,7 +6,7 @@
 
 use super::vocab::Vocab;
 use crate::link_assist::{down_key, up_key};
-use crate::search_all::{Request, SearchWorker, Slot as Queue, Snapshot};
+use crate::search_all::{Lease, Request, SearchWorker, Snapshot};
 use crate::theme;
 use crate::vault::Vault;
 use eframe::egui::{self, Id, Key, Modifiers, Rect, RichText, Ui};
@@ -69,7 +69,7 @@ pub struct Complete {
     /// the request on the search worker (QUERY-030): for which state of the vault, and its number
     asked: Option<((u64, u64), u64)>,
     /// the queue of this form on the worker
-    queue: Option<Queue>,
+    queue: Option<Lease>,
     /// the field the list belongs to: the id of its text box, the row, which of its fields
     field: Option<(Id, usize, Slot)>,
     /// Esc or a pick closed it; typing in the field or coming back to it opens it
@@ -109,7 +109,7 @@ impl Complete {
     /// vault is replaced at once by the new one, so its answer is never used.
     fn sync(&mut self, vault: &Vault, worker: &mut SearchWorker) {
         let stamp = (vault.uid, vault.generation);
-        let queue = *self.queue.get_or_insert_with(Queue::vocabulary);
+        let queue = self.queue.get_or_insert_with(|| worker.lease()).slot;
         if self.asked.is_some_and(|(at, _)| at != stamp) || (self.asked.is_none() && self.vocab.as_ref().map(|v| v.0) != Some(stamp)) {
             let id = worker.submit(queue, Request::vocabulary(Snapshot::of(vault)));
             self.asked = Some((stamp, id));
