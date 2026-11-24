@@ -734,7 +734,7 @@ mod tests {
     }
 
     // spec: SOC-024
-    // spec: NAV-026
+    // spec: NAV-026, NAV-016
     #[test]
     fn an_old_state_file_with_two_lists_loads_as_one_ordered_tab_list() {
         let old = br#"{"version": 1, "open_files": ["a.md", "b.md", "c.md"], "pinned_files": ["b.md"],
@@ -783,7 +783,7 @@ mod tests {
         assert!(String::from_utf8(to_bytes(&chosen)).unwrap().contains("\"latex_export\""));
     }
 
-    // spec: CFG-007
+    // spec: CFG-007, NAV-026
     #[test]
     fn unknown_fields_in_a_saved_tab_are_kept() {
         let (s, _) = parse::<VaultState>(br#"{"version": 2, "tabs": [{"file": "a.md", "zoom": 4}]}"#).unwrap();

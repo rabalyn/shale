@@ -386,7 +386,7 @@ mod tests {
     use crate::social::post_index::PostIndex;
     use crate::vault::Vault;
 
-    // spec: NAV-020
+    // spec: NAV-020, NAV-021
     #[test]
     fn file_names_are_matched_fuzzy_and_nothing_else() {
         let dir = std::env::temp_dir().join(format!("shale-picker-{}", std::process::id()));
@@ -408,6 +408,31 @@ mod tests {
         let hit = Source::FileNames.hits(&ctx, "roadm").remove(0);
         assert_eq!(hit.detail, "projects");
         assert!(matches!(hit.action, Action::Open { ref rel, new_tab: false } if rel == std::path::Path::new("projects/Roadmap.md")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: NAV-020, NAV-021
+    #[test]
+    fn a_source_gives_hits_of_a_group_a_title_a_detail_and_an_action_and_the_file_names_stop_at_14() {
+        let dir = std::env::temp_dir().join(format!("shale-picker-sources-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for i in 0..20 {
+            std::fs::write(dir.join(format!("Plan {i:02}.md")), "the plan\n").unwrap();
+        }
+        let v = Vault::open(&dir).unwrap();
+        let posts = PostIndex::in_memory();
+        let ctx = Ctx { vault: &v, mail: None, posts: &posts };
+        assert_eq!(Source::FileNames.hits(&ctx, "plan").len(), 14, "at most 14 names");
+        // two sources, one kind of hit: the window and the keys do not depend on the source
+        let names = Source::FileNames.hits(&ctx, "plan 01").remove(0);
+        let text = Source::Everything.hits(&ctx, "the plan").remove(0);
+        assert_eq!((names.group, names.title.as_str()), ("", "Plan 01"));
+        assert_eq!(text.group, "Notes");
+        for h in [&names, &text] {
+            assert!(matches!(h.action, Action::Open { .. } | Action::GotoMatch { .. }), "a pick opens the note: {:?}", h.title);
+        }
+        assert_ne!((Source::FileNames.title(), Source::FileNames.hint()), (Source::Everything.title(), Source::Everything.hint()), "a source has its own title and hint");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

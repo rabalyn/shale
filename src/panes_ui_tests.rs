@@ -172,7 +172,7 @@ fn a_press_in_a_pane_focuses_it_and_global_actions_work_on_the_focused_pane() {
 }
 
 // spec: KEY-002
-// spec: NAV-032
+// spec: NAV-032, NAV-033
 #[test]
 fn the_keys_move_the_focus_between_the_panes_and_close_one() {
     let mut w = W::new("keys");
