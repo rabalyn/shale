@@ -1,0 +1,5 @@
+{{- /* The folders and notes below a section or the home page, as a nested list (SITE-080); a folder links to its folder note. */ -}}
+{{ if or .Sections .RegularPages }}<ul class="page-list">
+{{ range .Sections.ByTitle }}<li><a href="{{ .RelPermalink }}">{{ .Title }}</a>{{ partial "sitetree.html" . }}</li>
+{{ end }}{{ range .RegularPages.ByTitle }}<li><a href="{{ .RelPermalink }}">{{ .Title }}</a></li>
+{{ end }}</ul>{{ end }}

@@ -61,7 +61,7 @@ fn site_037_a_drawing_is_a_picture_on_the_page_and_its_svg_is_in_the_site() {
     assert!(page.contains("<img src=\"/media/drawings/Map.excalidraw.svg\" alt=\"Our map\" loading=\"lazy\"></object>"), "the picture itself when the browser has no object: {page}");
     assert!(page.contains("<object class=\"drawing\" data=\"/media/drawings/Plugin.excalidraw.md.svg\" type=\"image/svg+xml\" width=\"260\" height=\""), "the width of SITE-034: {page}");
     let svg = std::fs::read_to_string(public.join("media/drawings/Map.excalidraw.svg")).unwrap();
-    assert!(svg.starts_with("<svg ") && svg.contains("<a href=\"/public/\" target=\"_top\">") && svg.contains("A public note and a friend"), "{svg}");
+    assert!(svg.starts_with("<svg ") && svg.contains("<a href=\"../../public/\" target=\"_top\">") && svg.contains("A public note and a friend"), "{svg}");
     assert!(!svg.contains("idden") && !page.contains("idden"), "nothing of the note that is not published");
     // the width and the height of the object keep the picture's proportions
     let (w, h): (f32, f32) = {

@@ -674,3 +674,35 @@ fn dev_029_dataflow_of_a_note_export() {
     clean(&d);
     crate::dataflow::verify(&dataflow_doc("pdf-export.md"), "pdf_export", &crate::dataflow::render_mermaid(&flow));
 }
+
+// spec: BOOK-022, PDF-036, PDF-037
+#[test]
+fn book_022_a_book_has_one_font_the_top_notes_and_a_chapters_own_is_ignored_with_a_warning() {
+    use crate::pdf::book_export::export_book_made;
+    use crate::pdf::export_fonts_tests::{base_fonts, family, font_of, Env, FOUR};
+    let e = Env::new("book");
+    let fonts = e.root.join("fonts");
+    family(&fonts, "Test Serif", &FOUR);
+    family(&fonts, "Test Sans", &[(400, false), (700, false)]);
+    family(&fonts, "Test Mono", &[(400, false)]);
+    std::fs::create_dir_all(e.root.join("Book")).unwrap();
+    let files =
+        [("Book/index.md", "---\ntitle: Zbook\nsubtitle: Zsub\nprint-font: Test Serif\nprint-font-mono: Test Mono\n---\nZintro\n"), ("Book/One.md", "---\nprint-font: Test Sans\n---\nZone\n\n```\nZcode\n```\n"), ("Book/Two.md", "Ztwo\n")];
+    for (name, text) in files {
+        std::fs::write(e.root.join(name), text).unwrap();
+    }
+    let vault = Vault::open(&e.root).unwrap();
+    let opts = e.opts(crate::fonts::resolve::Values::default());
+    let made = export_book_made(&vault, Path::new("Book"), &ExportOptions { title: true, toc: true, ..opts }, None).unwrap();
+    // the chapter's font is ignored, once, and says so
+    assert_eq!(made.warnings.len(), 1, "{:?}", made.warnings);
+    assert!(made.warnings[0].contains("“One”") && made.warnings[0].contains("ignored"), "{:?}", made.warnings);
+    // the chapters, the intro, the front and the contents are in the book's font; code in its mono font
+    for text in ["Zintro", "Zone", "Ztwo", "Zsub"] {
+        assert!(font_of(&made.bytes, text).ends_with("TestSerif-400"), "{text}");
+    }
+    assert!(font_of(&made.bytes, "Zcode").ends_with("TestMono-400"), "code of a chapter is in the top note's mono font");
+    assert!(font_of(&made.bytes, "Zbook").ends_with("TestSerif-700"), "the title page");
+    assert!(font_of(&made.bytes, "Contents").ends_with("TestSerif-700"), "the contents");
+    assert!(!base_fonts(&made.bytes).iter().any(|n| n.contains("TestSans")), "the chapter's font is not embedded");
+}

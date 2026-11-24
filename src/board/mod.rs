@@ -11,11 +11,13 @@
 //!
 //! The state of the view is one field of the window, [`Boards`].
 
+pub mod blockers;
 pub mod card;
 pub mod deps;
 pub mod drag;
 pub mod file;
 pub mod lanes;
+pub mod links;
 pub mod peek;
 pub mod resolve;
 pub mod sort;

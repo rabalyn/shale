@@ -1,12 +1,17 @@
 //! A board as one PDF (BOARD-030, #604): the landscape pages of the board, then the notes of its
 //! cards as a book.
 
-use crate::pdf::board::{export_board, plan_of};
+use crate::pdf::board::{export_board as export_board_made, plan_of};
 use crate::pdf::book::Item;
 use crate::pdf::export::tests::{contents, hex, page_ids_and_link_targets, page_streams};
 use crate::pdf::export::ExportOptions;
 use crate::vault::Vault;
 use std::path::{Path, PathBuf};
+
+/// The PDF of a board export without what it has to say.
+fn export_board_bytes(vault: &Vault, rel: &Path, opts: &ExportOptions, progress: Option<&crate::pdf::book_export::Progress>) -> Result<Vec<u8>, String> {
+    export_board_made(vault, rel, opts, progress).map(|m| m.bytes)
+}
 
 fn vault_with(tag: &str, files: &[(&str, &str)]) -> (Vault, PathBuf) {
     let dir = std::env::temp_dir().join(format!("shale-board-pdf-{tag}-{}", std::process::id())).join("vault");
@@ -58,7 +63,7 @@ fn sprint() -> Vec<(&'static str, &'static str)> {
 #[test]
 fn board_030_the_board_comes_on_a_landscape_page_then_the_notes_of_the_cards_in_lane_and_card_order() {
     let (v, d) = vault_with("order", &sprint());
-    let bytes = export_board(&v, Path::new("Board.md"), &opts(), None).unwrap();
+    let bytes = export_board_bytes(&v, Path::new("Board.md"), &opts(), None).unwrap();
     let sizes = boxes(&bytes);
     assert_eq!(landscape(&bytes), [2], "the title page and the contents, then the board on one landscape page");
     assert_eq!(sizes[2], (842.0, 595.0));
@@ -83,7 +88,7 @@ fn board_030_the_board_comes_on_a_landscape_page_then_the_notes_of_the_cards_in_
 #[test]
 fn board_030_the_contents_start_with_the_board_then_the_lanes_and_their_cards_and_the_cards_are_links() {
     let (v, d) = vault_with("toc", &sprint());
-    let bytes = export_board(&v, Path::new("Board.md"), &opts(), None).unwrap();
+    let bytes = export_board_bytes(&v, Path::new("Board.md"), &opts(), None).unwrap();
     let toc = &page_streams(&bytes)[1];
     let place = |w: &str| toc.find(&hex(w)).unwrap_or_else(|| panic!("{w} is in the contents"));
     assert!(place("Board") < place("Todo") && place("Todo") < place("Alpha") && place("Alpha") < place("Beta") && place("Beta") < place("Doing") && place("Doing") < place("Gamma"));
@@ -100,7 +105,7 @@ fn board_030_the_contents_start_with_the_board_then_the_lanes_and_their_cards_an
         assert_eq!(targets.iter().filter(|t| **t == pages[page]).count(), 2, "the contents and the card of the board link to the page of {word}");
     }
     // without a table of contents there is no line for the board either
-    let plain = export_board(&v, Path::new("Board.md"), &ExportOptions { toc: false, ..opts() }, None).unwrap();
+    let plain = export_board_bytes(&v, Path::new("Board.md"), &ExportOptions { toc: false, ..opts() }, None).unwrap();
     assert!(!contents(&plain).contains(&hex("Contents")));
     assert_eq!(landscape(&plain), [1], "the title page, then the board");
     clean(&d);
@@ -111,11 +116,11 @@ fn board_030_the_contents_start_with_the_board_then_the_lanes_and_their_cards_an
 fn board_030_the_options_of_the_dialog_apply_the_board_is_landscape_whatever_the_paper_is() {
     let (v, d) = vault_with("paper", &sprint());
     let o = ExportOptions { paper: crate::pdf::export::Paper::A5, title: false, toc: false, page_numbers: false, ..opts() };
-    let bytes = export_board(&v, Path::new("Board.md"), &o, None).unwrap();
+    let bytes = export_board_bytes(&v, Path::new("Board.md"), &o, None).unwrap();
     assert_eq!(boxes(&bytes)[0], (595.0, 420.0), "the board is the first page, A5 landscape");
     assert!(boxes(&bytes)[1..].iter().all(|s| *s == (420.0, 595.0)));
     let tall = ExportOptions { landscape: true, ..o };
-    let bytes = export_board(&v, Path::new("Board.md"), &tall, None).unwrap();
+    let bytes = export_board_bytes(&v, Path::new("Board.md"), &tall, None).unwrap();
     assert!(boxes(&bytes).iter().all(|s| *s == (595.0, 420.0)), "a landscape export has them all so");
     clean(&d);
 }
@@ -125,7 +130,7 @@ fn board_030_the_options_of_the_dialog_apply_the_board_is_landscape_whatever_the
 fn board_030_a_card_in_several_lanes_is_on_the_board_in_each_and_has_its_note_once() {
     let board = "---\ntype: board\ncards: every-lane\n---\n## Todo\nquery: status:todo\n\n## Also\nquery: priority:high\n";
     let (v, d) = vault_with("every", &[("Board.md", board), ("Alpha.md", "---\nstatus: todo\n---\nalphabody\n"), ("Beta.md", "---\nstatus: todo\npriority: high\n---\nbetabody\n")]);
-    let bytes = export_board(&v, Path::new("Board.md"), &opts(), None).unwrap();
+    let bytes = export_board_bytes(&v, Path::new("Board.md"), &opts(), None).unwrap();
     let streams = page_streams(&bytes);
     let board_page = &streams[landscape(&bytes)[0]];
     assert_eq!(board_page.matches(&hex("Beta")).count(), 2, "both lanes show the card");
@@ -150,7 +155,7 @@ fn board_030_more_lanes_than_fit_go_on_further_pages_left_to_right() {
     let width = 842.0 - o.margins()[1] - o.margins()[3];
     let fit = ((width + 10.0) / 200.0).floor() as usize;
     assert!((2..8).contains(&fit), "{fit} columns fit");
-    let bytes = export_board(&v, Path::new("Board.md"), &o, None).unwrap();
+    let bytes = export_board_bytes(&v, Path::new("Board.md"), &o, None).unwrap();
     let groups = 8usize.div_ceil(fit);
     let pages = landscape(&bytes);
     assert_eq!(pages, (0..groups).collect::<Vec<_>>(), "a page for each group of columns, before the notes");
@@ -175,7 +180,7 @@ fn board_030_more_cards_than_fit_a_page_go_on_the_next_page_of_the_same_columns(
     let refs: Vec<(&str, &str)> = files.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
     let (v, d) = vault_with("cards", &refs);
     let o = ExportOptions { title: false, toc: false, ..opts() };
-    let bytes = export_board(&v, Path::new("Board.md"), &o, None).unwrap();
+    let bytes = export_board_bytes(&v, Path::new("Board.md"), &o, None).unwrap();
     let pages = landscape(&bytes);
     assert_eq!(pages, (0..pages.len()).collect::<Vec<_>>(), "the board pages come first");
     assert!((3..=10).contains(&pages.len()), "{} pages", pages.len());
@@ -200,8 +205,8 @@ fn board_030_a_drawing_card_is_a_vector_picture_on_the_board_and_its_note_page_h
     let plain = "---\ntype: board\n---\n## Pinned\n- [[Note]]\n";
     let (v, d) = vault_with("drawing", &[("Board.md", board), ("Sketch.excalidraw", crate::drawing::SAMPLE_SCENE), ("Note.md", "words\n")]);
     let (v2, d2) = vault_with("drawing-plain", &[("Board.md", plain), ("Sketch.excalidraw", crate::drawing::SAMPLE_SCENE), ("Note.md", "words\n")]);
-    let with = export_board(&v, Path::new("Board.md"), &opts(), None).unwrap();
-    let without = export_board(&v2, Path::new("Board.md"), &opts(), None).unwrap();
+    let with = export_board_bytes(&v, Path::new("Board.md"), &opts(), None).unwrap();
+    let without = export_board_bytes(&v2, Path::new("Board.md"), &opts(), None).unwrap();
     let paths = |bytes: &[u8]| page_streams(bytes)[landscape(bytes)[0]].matches(" m ").count();
     assert!(paths(&with) > paths(&without) + 3, "the drawing is made of paths: {} against {}", paths(&with), paths(&without));
     assert!(!String::from_utf8_lossy(&with).contains("/Subtype /Image"), "no raster picture");
@@ -218,7 +223,7 @@ fn board_030_a_drawing_card_is_a_vector_picture_on_the_board_and_its_note_page_h
 fn board_030_a_lane_with_a_bad_query_shows_the_reason_and_has_no_cards_and_no_part() {
     let board = "---\ntype: board\n---\n## Broken\nquery: (status:todo\n\n## Good\nquery: status:todo\n";
     let (v, d) = vault_with("bad", &[("Board.md", board), ("Alpha.md", "---\nstatus: todo\n---\nalphabody\n")]);
-    let bytes = export_board(&v, Path::new("Board.md"), &opts(), None).unwrap();
+    let bytes = export_board_bytes(&v, Path::new("Board.md"), &opts(), None).unwrap();
     let streams = page_streams(&bytes);
     let board_page = &streams[landscape(&bytes)[0]];
     assert!(board_page.contains(&hex("Broken")) && board_page.contains(&hex("Query: ")), "the column has the reason");
@@ -232,16 +237,16 @@ fn board_030_a_lane_with_a_bad_query_shows_the_reason_and_has_no_cards_and_no_pa
 fn board_030_a_board_without_lanes_or_cards_is_a_page_without_notes() {
     let (v, d) = vault_with("empty", &[("None.md", "---\ntype: board\n---\n# Nothing yet\n"), ("Cards.md", "---\ntype: board\n---\n## Todo\nquery: status:todo\n\n## Blank\n"), ("Plain.md", "not a board\n")]);
     let o = ExportOptions { page_numbers: false, ..opts() };
-    let none = export_board(&v, Path::new("None.md"), &o, None).unwrap();
+    let none = export_board_bytes(&v, Path::new("None.md"), &o, None).unwrap();
     assert_eq!(boxes(&none).len(), 2, "the title page and the board");
     assert!(page_streams(&none)[1].contains(&hex("This board has no lanes.")));
-    let cards = export_board(&v, Path::new("Cards.md"), &o, None).unwrap();
+    let cards = export_board_bytes(&v, Path::new("Cards.md"), &o, None).unwrap();
     assert_eq!(boxes(&cards).len(), 2, "no cards: no notes and no contents");
     assert_eq!(landscape(&cards), [1]);
     for word in ["Todo", "Blank"] {
         assert!(page_streams(&cards)[1].contains(&hex(word)), "the empty lane has its column");
     }
-    assert!(export_board(&v, Path::new("Plain.md"), &o, None).unwrap_err().contains("not a board"));
+    assert!(export_board_bytes(&v, Path::new("Plain.md"), &o, None).unwrap_err().contains("not a board"));
     let plan = plan_of(&v, Path::new("Cards.md")).unwrap();
     assert!(plan.items.is_empty());
     clean(&d);
@@ -252,7 +257,7 @@ fn board_030_a_board_without_lanes_or_cards_is_a_page_without_notes() {
 fn board_030_the_cards_show_the_chips_card_shows_chooses_and_a_note_with_export_false_is_not_printed() {
     let board = "---\ntype: board\ncard-shows: status\n---\n## Todo\nquery: status:todo\n";
     let (v, d) = vault_with("shows", &[("Board.md", board), ("Beta.md", "---\nstatus: todo\npriority: high\ndue: 2026-12-01\n---\nbetabody\n"), ("Hidden.md", "---\nstatus: todo\nexport: false\n---\nhiddenbody\n")]);
-    let bytes = export_board(&v, Path::new("Board.md"), &opts(), None).unwrap();
+    let bytes = export_board_bytes(&v, Path::new("Board.md"), &opts(), None).unwrap();
     let streams = page_streams(&bytes);
     let board_page = &streams[landscape(&bytes)[0]];
     assert!(board_page.contains(&hex("todo")) && !board_page.contains(&hex("2026-12-01")) && !board_page.contains(&hex("high")), "the status only");
@@ -266,12 +271,12 @@ fn board_030_the_cards_show_the_chips_card_shows_chooses_and_a_note_with_export_
 fn board_030_the_export_counts_its_notes_and_can_be_stopped() {
     let (v, d) = vault_with("progress", &sprint());
     let progress = crate::pdf::book_export::Progress::default();
-    export_board(&v, Path::new("Board.md"), &opts(), Some(&progress)).unwrap();
+    export_board_bytes(&v, Path::new("Board.md"), &opts(), Some(&progress)).unwrap();
     // two parts and three cards
     assert_eq!((progress.total.load(std::sync::atomic::Ordering::SeqCst), progress.done.load(std::sync::atomic::Ordering::SeqCst)), (5, 5));
     let stopped = crate::pdf::book_export::Progress::default();
     stopped.cancel.cancel();
-    assert!(export_board(&v, Path::new("Board.md"), &opts(), Some(&stopped)).unwrap_err().contains("cancelled"));
+    assert!(export_board_bytes(&v, Path::new("Board.md"), &opts(), Some(&stopped)).unwrap_err().contains("cancelled"));
     let plan = plan_of(&v, Path::new("Board.md")).unwrap();
     assert!(matches!(&plan.items[0], Item::Part(p) if p.title == "Todo" && p.items.len() == 2));
     clean(&d);

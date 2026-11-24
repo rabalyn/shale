@@ -524,8 +524,9 @@ impl ShaleApp {
             self.paint_hint_text(&ctx, p, "Reading the dropped message…");
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
-        // a file or folder dragged in the file list
-        if let (Some(drag), Some(p)) = (egui::DragAndDrop::payload::<crate::panels::TreeDrag>(&ctx), pointer_now(&ctx)) {
+        // a file or folder dragged in the file list (over the board it is the board's, BOARD-035)
+        let over_board = self.boards.view.claims_tree_drag(&ctx);
+        if let (Some(drag), Some(p), false) = (egui::DragAndDrop::payload::<crate::panels::TreeDrag>(&ctx), pointer_now(&ctx), over_board) {
             let target = self.drag.tree_targets.iter().filter(|(r, _, _)| r.contains(p)).min_by(|a, b| a.0.area().total_cmp(&b.0.area())).cloned();
             let from = drag.0.clone();
             let name = from.file_name().map(|n| crate::markdown::strip_md_ext(&n.to_string_lossy()).to_string()).unwrap_or_default();

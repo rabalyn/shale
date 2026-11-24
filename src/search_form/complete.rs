@@ -1,5 +1,5 @@
-//! The autocomplete of the value fields of the form (QUERY-029): the tag of a "tag is" row, and the
-//! name and the value of a "property is" row. A list of what the vault knows opens under the field
+//! The autocomplete of the value fields of the form (QUERY-029): the tag of a "tag is" row, the folder
+//! of an "in folder" row, and the name and the value of a "property is" row. A list of what the vault knows opens under the field
 //! while it has the keyboard; it narrows as the field is typed in. The list is part of the form (it
 //! is laid out below the row, not in a window of its own), so it is inside the popover of a lane and
 //! the window of the picker, and a click on it is a click in the form.
@@ -20,6 +20,7 @@ const MAX_HEIGHT: f32 = 170.0;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Slot {
     Tag,
+    Folder,
     Key,
     Value,
 }

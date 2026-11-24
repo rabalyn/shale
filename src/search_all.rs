@@ -643,6 +643,12 @@ impl Results {
         self.skipped.iter().filter(move |s| listed.contains(s.kind))
     }
 
+    /// The text the list on show was made for (tests: a debounced query is no job of the worker, DEV-041).
+    #[cfg(test)]
+    pub fn made_for_text(&self) -> Option<&str> {
+        self.made_for.as_ref().map(|(t, _)| t.as_str())
+    }
+
     /// Has a list been made at all (an empty one is "nothing found")?
     pub fn is_made(&self) -> bool {
         self.made_for.is_some()

@@ -9,7 +9,8 @@
 use crate::busy::Cancel;
 use crate::drawing::{self, Element, Scene, View};
 use crate::markdown;
-use crate::pdf::write::{Bookmark, Dest, Doc, FontKind, Image, Page, Rgba, TextStyle};
+use crate::pdf::export_fonts::{FontsAsk, Made};
+use crate::pdf::write::{restyle, Bookmark, Dest, Doc, FontKind, Image, Page, Rgba, TextStyle};
 use crate::theme;
 use crate::vault::{FileKind, Vault};
 use eframe::egui::{self, Color32, Pos2, Shape, Vec2};
@@ -93,6 +94,13 @@ pub struct ExportOptions {
     pub column: Option<f32>,
     /// notes: the font of the text (a note's `print-font`, PDF-014): Sans, Serif or Mono
     pub font: FontKind,
+    /// notes: the font of headings, the title, the contents and the page numbers (`print-font-sans`,
+    /// PDF-034); none: the text font
+    pub head_font: Option<FontKind>,
+    /// notes: the font of code (`print-font-mono`, PDF-034): Hack
+    pub code_font: FontKind,
+    /// notes: what the fonts of PDF-034 are looked up in; none: only the words `sans`, `serif` and `mono`
+    pub fonts: Option<std::sync::Arc<FontsAsk>>,
     /// notes: the line height as a factor of the font's natural line height (`print-line-spacing`,
     /// PDF-015); None: the look of the export before this option, 1.45 text sizes
     pub line_spacing: Option<f32>,
@@ -142,6 +150,9 @@ impl ExportOptions {
             numbered_headings: true,
             column: None,
             font: FontKind::Sans,
+            head_font: None,
+            code_font: FontKind::Mono,
+            fonts: None,
             line_spacing: None,
             paragraph_spacing: None,
             justify: false,
@@ -173,6 +184,9 @@ impl ExportOptions {
             numbered_headings: false,
             column: None,
             font: FontKind::Sans,
+            head_font: None,
+            code_font: FontKind::Mono,
+            fonts: None,
             line_spacing: None,
             paragraph_spacing: None,
             justify: false,
@@ -186,6 +200,10 @@ impl ExportOptions {
             background: Background::White,
             fill_page: true,
         }
+    }
+    /// The font of headings, the title, the contents and the page numbers: `print-font-sans`, else the text's.
+    pub(super) fn headings(&self) -> FontKind {
+        self.head_font.unwrap_or(self.font)
     }
     /// The editor's text column the sizes of the embeds are worked out for.
     pub(crate) fn column(&self) -> f32 {
@@ -526,6 +544,12 @@ struct LinePicture {
 }
 
 impl Piece {
+    /// The piece in another font.
+    pub(super) fn in_font(mut self, kind: FontKind) -> Piece {
+        self.kind = kind;
+        self
+    }
+
     /// Plain sans text of a colour, bold or not.
     pub(super) fn plain(text: &str, size: f32, color: Rgba, bold: bool) -> Piece {
         Piece { text: text.to_string(), kind: FontKind::Sans, size, color, bg: None, italic: false, bold, underline: false, strike: false, link: None, script: 0, jump: None, math: None, picture: None }
@@ -582,6 +606,8 @@ pub(super) fn wrap_pieces(pieces: &[Piece], avail: f32) -> Vec<Vec<Piece>> {
     let mut lines: Vec<Vec<Piece>> = vec![vec![]];
     let mut line_w = 0.0;
     for mut wd in words {
+        // the real bold and italic face of a chosen font has its own widths (PDF-036)
+        (wd.kind, wd.bold, wd.italic) = restyle(wd.kind, wd.bold, wd.italic);
         if let Some(pic) = wd.picture.as_mut().filter(|pic| pic.w > avail) {
             // a picture is never wider than its line: scaled down with its proportions (PDF-030)
             let k = avail / pic.w;
@@ -771,7 +797,7 @@ impl<'a> Writer<'a> {
         }
         let head = vec![Piece {
             text: "Contents".into(),
-            kind: self.opts.font,
+            kind: self.opts.headings(),
             size: base * 1.5,
             color: Rgba(0, 0, 0, 255),
             bg: None,
@@ -811,7 +837,7 @@ impl<'a> Writer<'a> {
     /// right-aligned; the whole line is a link to that page.
     pub(super) fn draw_contents(&mut self, entries: &[Entry], slots: &[(usize, f32)]) {
         let size = self.opts.font_pt;
-        let kind = self.opts.font;
+        let kind = self.opts.headings();
         let ink = Rgba(30, 30, 30, 255);
         let grey = Rgba(120, 120, 120, 255);
         let (left, right) = (self.left, self.left + self.cw());
@@ -823,7 +849,7 @@ impl<'a> Writer<'a> {
             let style = |c| TextStyle { bold: e.bold, ..TextStyle::plain(kind, size, c) };
             let room = right - x - nw - size * 1.5;
             let label = fit_text(kind, &e.label, size, room);
-            let lw = crate::pdf::write::text_width(kind, size, &label) + if e.bold { size * 0.3 } else { 0.0 };
+            let lw = crate::pdf::write::styled_width(&style(ink), &label) + if e.bold && restyle(kind, true, false).1 { size * 0.3 } else { 0.0 };
             let base = top + size * 1.08;
             let unit = crate::pdf::write::text_width(kind, size, ". ");
             let dots = (((right - nw - size * 0.5) - (x + lw + size * 0.5)) / unit).floor().max(0.0) as usize;
@@ -903,7 +929,7 @@ impl<'a> Writer<'a> {
                         least[c] = least[c].max(piece_width(p));
                     }
                     for word in p.text.split_whitespace() {
-                        least[c] = least[c].max(crate::pdf::write::text_width(p.kind, p.size, word));
+                        least[c] = least[c].max(crate::pdf::write::text_width(restyle(p.kind, p.bold, p.italic).0, p.size, word));
                     }
                 }
             }
@@ -1195,6 +1221,9 @@ impl<'a> Writer<'a> {
                 };
                 let mut ps = self.pieces(vault, rel, line[level..].trim_start(), base * scale, theme::Palette::shale().heading, false);
                 for p in &mut ps {
+                    if p.kind == opts.font {
+                        p.kind = opts.headings();
+                    }
                     p.bold = opts.heading_bold || p.bold;
                     p.color = opts.heading_color.unwrap_or(Rgba(0, 0, 0, 255));
                 }
@@ -1203,7 +1232,7 @@ impl<'a> Writer<'a> {
                         0,
                         Piece {
                             text: format!("{n} "),
-                            kind: opts.font,
+                            kind: opts.headings(),
                             size: base * scale,
                             color: opts.heading_color.unwrap_or(Rgba(130, 130, 130, 255)),
                             bg: None,
@@ -1414,6 +1443,7 @@ impl<'a> Writer<'a> {
     fn kind_of(&self, family: &egui::FontFamily) -> FontKind {
         match font_kind(family) {
             FontKind::Sans => self.opts.font,
+            FontKind::Mono => self.opts.code_font,
             other => other,
         }
     }
@@ -1566,7 +1596,7 @@ impl<'a> Writer<'a> {
                 let mut cut = rest.len();
                 let mut acc = 0.0;
                 for (n, (c, _)) in rest.iter().enumerate() {
-                    acc += crate::pdf::write::char_width(FontKind::Mono, size, *c);
+                    acc += crate::pdf::write::char_width(self.opts.code_font, size, *c);
                     if acc > cw - 12.0 {
                         cut = n.max(1);
                         break;
@@ -1582,7 +1612,8 @@ impl<'a> Writer<'a> {
                     let colour = now[n].1;
                     let run: String = now[n..].iter().take_while(|(_, k)| *k == colour).map(|(c, _)| *c).collect();
                     n += run.chars().count();
-                    x += self.p().text(TextStyle::plain(FontKind::Mono, size, colour), x, y + size * 1.05, &run);
+                    let code = self.opts.code_font;
+                    x += self.p().text(TextStyle::plain(code, size, colour), x, y + size * 1.05, &run);
                 }
                 self.y += lh;
                 if later.is_empty() {
@@ -1730,7 +1761,7 @@ fn natural_size(w: u32, h: u32) -> Vec2 {
 /// ([`ExportOptions::with_note_properties`]).
 #[cfg(test)]
 pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) -> Result<Vec<u8>, String> {
-    export_note_until(vault, rel, text, opts, None)
+    export_note_until(vault, rel, text, opts, None).map(|m| m.bytes)
 }
 
 /// What an export that was stopped says (a book's export says the same).
@@ -1738,14 +1769,15 @@ pub const CANCELLED: &str = "The export was cancelled";
 
 /// [`export_note`] as a task: `cancel` is looked at before each picture, and a note that was stopped
 /// is an error, never a half-made PDF (JOB-017).
-pub fn export_note_until(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions, cancel: Option<&Cancel>) -> Result<Vec<u8>, String> {
+pub fn export_note_until(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions, cancel: Option<&Cancel>) -> Result<Made, String> {
     let _flow = tracing::info_span!("flow.pdf_export", peer = "export").entered();
     // the paper always has Shale's colours, whatever the theme of the window (CFG-061, PDF-007)
     theme::with_palette(theme::Palette::shale(), || export_note_in_shale(vault, rel, text, opts, cancel))
 }
 
-fn export_note_in_shale(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions, cancel: Option<&Cancel>) -> Result<Vec<u8>, String> {
-    let opts = &opts.clone().with_note_text_properties(text);
+fn export_note_in_shale(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions, cancel: Option<&Cancel>) -> Result<Made, String> {
+    let (opts, warnings) = crate::pdf::export_fonts::apply(&opts.clone().with_note_text_properties(text), &vault.root, crate::fonts::resolve::Values::of_note(text), None);
+    let opts = &opts;
     // the title line's text: no `.md`, no date prefix (VAULT-025)
     let name = vault.file(rel).map(|f| f.title()).unwrap_or_else(|| crate::vault::title_of(&rel.to_string_lossy()).to_string());
     let mut w = Writer::new(&name, opts);
@@ -1757,7 +1789,7 @@ fn export_note_in_shale(vault: &Vault, rel: &Path, text: &str, opts: &ExportOpti
     if opts.title && !said_by_heading {
         let pieces = vec![Piece {
             text: name.clone(),
-            kind: opts.font,
+            kind: opts.headings(),
             size: base * 2.0,
             color: Rgba(0, 0, 0, 255),
             bg: None,
@@ -1796,7 +1828,7 @@ fn export_note_in_shale(vault: &Vault, rel: &Path, text: &str, opts: &ExportOpti
             w.doc.bookmarks.push(Bookmark { level: *level, title: label(*line, title), to: *to });
         }
     }
-    tracing::info_span!("flow.pdf_export.write_pdf", peer = "pdf").in_scope(|| finish(w.doc, opts))
+    tracing::info_span!("flow.pdf_export.write_pdf", peer = "pdf").in_scope(|| finish(w.doc, opts, warnings))
 }
 
 pub(crate) fn list_marker(line: &str) -> Option<(String, usize)> {
@@ -1812,22 +1844,23 @@ pub(crate) fn list_marker(line: &str) -> Option<(String, usize)> {
     None
 }
 
-fn finish(doc: Doc, opts: &ExportOptions) -> Result<Vec<u8>, String> {
-    finish_from(doc, opts, 0)
+fn finish(doc: Doc, opts: &ExportOptions, warnings: Vec<String>) -> Result<Made, String> {
+    finish_from(doc, opts, 0, warnings)
 }
 
 /// The document's bytes, the pages from `first` on with their numbers (a book has none on its title page).
-pub(super) fn finish_from(mut doc: Doc, opts: &ExportOptions, first: usize) -> Result<Vec<u8>, String> {
+pub(super) fn finish_from(mut doc: Doc, opts: &ExportOptions, first: usize, mut warnings: Vec<String>) -> Result<Made, String> {
     if opts.page_numbers {
         let n = doc.pages.len();
         for i in first..n {
             let (pw, ph) = (doc.pages[i].width, doc.pages[i].height);
             let label = format!("{} / {n}", i + 1);
-            let tw = crate::pdf::write::text_width(opts.font, 9.0, &label);
-            doc.page(i).text(TextStyle::plain(opts.font, 9.0, Rgba(120, 120, 120, 255)), (pw - tw) / 2.0, ph - (opts.margins()[2] * 0.5).max(12.0), &label);
+            let tw = crate::pdf::write::text_width(opts.headings(), 9.0, &label);
+            doc.page(i).text(TextStyle::plain(opts.headings(), 9.0, Rgba(120, 120, 120, 255)), (pw - tw) / 2.0, ph - (opts.margins()[2] * 0.5).max(12.0), &label);
         }
     }
-    Ok(doc.finish())
+    warnings.extend(crate::pdf::export_fonts::imitation_warnings(&doc.imitated_faces()));
+    Ok(Made { bytes: doc.finish(), warnings })
 }
 
 // ---------------------------------------------------------------- drawings
@@ -1989,7 +2022,7 @@ pub fn export_drawing(scene: &Scene, title: &str, opts: &ExportOptions, pictures
     }
     let pics = add_pictures(&mut doc, pictures);
     draw_scene(doc.page(p), scene, [left + (aw - dw) / 2.0, top + (ah - dh) / 2.0, dw, dh], dark, None, &pics);
-    finish(doc, &ExportOptions { page_numbers: false, ..opts.clone() })
+    finish(doc, &ExportOptions { page_numbers: false, ..opts.clone() }, Vec::new()).map(|m| m.bytes)
 }
 
 #[cfg(test)]
@@ -1997,7 +2030,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::pdf::write::inflate;
 
-    fn render(bytes: &[u8]) -> Vec<(u32, u32, Vec<u8>)> {
+    pub(crate) fn render(bytes: &[u8]) -> Vec<(u32, u32, Vec<u8>)> {
         let pdf = hayro::hayro_syntax::Pdf::new(bytes.to_vec()).expect("valid PDF");
         let cache = hayro::RenderCache::new();
         pdf.pages()

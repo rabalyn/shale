@@ -122,6 +122,19 @@ jobs:
       - name: ffmpeg
         run: brew install ffmpeg
 
+      # Hugo and Pagefind: the tests of the site export build and index a site with them (SITE-070,
+      # SITE-048); the same pinned, checksum-checked releases as Forgejo's (the scripts pick the asset
+      # of the system, #666). Without them those tests skip with a note (BUILD-018). The folder goes on
+      # the path of the steps after this one.
+      - name: Hugo and Pagefind
+        shell: bash
+        run: |
+          bin="$RUNNER_TEMP/site-tools"
+          if command -v cygpath >/dev/null 2>&1; then bin=$(cygpath -u "$bin"); fi
+          sh scripts/install-hugo.sh "$bin"
+          sh scripts/install-pagefind.sh "$bin"
+          if command -v cygpath >/dev/null 2>&1; then cygpath -w "$bin" >> "$GITHUB_PATH"; else echo "$bin" >> "$GITHUB_PATH"; fi
+
       - name: Test
         run: cargo test --release --locked
 
@@ -153,6 +166,19 @@ jobs:
       - name: ffmpeg
         continue-on-error: true
         run: choco install ffmpeg -y --no-progress
+
+      # Hugo and Pagefind: the tests of the site export build and index a site with them (SITE-070,
+      # SITE-048); the same pinned, checksum-checked releases as Forgejo's (the scripts pick the asset
+      # of the system, #666). Without them those tests skip with a note (BUILD-018). The folder goes on
+      # the path of the steps after this one.
+      - name: Hugo and Pagefind
+        shell: bash
+        run: |
+          bin="$RUNNER_TEMP/site-tools"
+          if command -v cygpath >/dev/null 2>&1; then bin=$(cygpath -u "$bin"); fi
+          sh scripts/install-hugo.sh "$bin"
+          sh scripts/install-pagefind.sh "$bin"
+          if command -v cygpath >/dev/null 2>&1; then cygpath -w "$bin" >> "$GITHUB_PATH"; else echo "$bin" >> "$GITHUB_PATH"; fi
 
       - name: Test
         run: cargo test --release --locked

@@ -2445,9 +2445,13 @@ impl ShaleApp {
     pub fn start_book_export(&mut self, d: &mut crate::pdf::export_dialog::ExportDialog, ctx: &egui::Context) -> Result<(), String> {
         self.flush_all();
         let root = self.vault.as_ref().ok_or("No vault is open")?.root.clone();
+        // the fonts are those of the top folder note (BOOK-022)
+        let top = d.book.as_ref().and_then(|b| b.plan.as_ref().ok()).and_then(|p| p.note.clone().or_else(|| p.intro.clone()));
+        let top = top.map(|rel| crate::fonts::resolve::Values::of_note(&self.note_text(&rel))).unwrap_or_default();
+        let Some(fonts) = self.export_fonts_ask(d, top) else { return Ok(()) };
         let book = d.book.as_mut().ok_or("This is not the export of a folder")?;
         let ctx = ctx.clone();
-        if !book.start(root, d.opts.clone(), move || ctx.request_repaint()) {
+        if !book.start(root, crate::pdf::export::ExportOptions { fonts: Some(fonts), ..d.opts.clone() }, move || ctx.request_repaint()) {
             return Err("Another PDF export is still running".into());
         }
         self.remember_export_engine(false, d);
@@ -2457,6 +2461,9 @@ impl ShaleApp {
     /// Where a folder's export is: when the job has ended, the PDF is saved (or why not).
     pub fn book_export_tick(&mut self, d: &mut crate::pdf::export_dialog::ExportDialog) -> Option<Result<PathBuf, String>> {
         let made = d.book.as_mut()?.poll()?;
+        for w in d.book.as_mut().map(|b| b.take_warnings()).unwrap_or_default() {
+            self.toast(w);
+        }
         Some(made.and_then(|bytes| self.save_pdf(&d.path, &bytes)))
     }
 
@@ -2470,6 +2477,14 @@ impl ShaleApp {
     pub fn start_note_export(&mut self, d: &mut crate::pdf::export_dialog::ExportDialog, ctx: &egui::Context) -> Result<(), String> {
         use crate::pdf::note_export::{NoteExport, What, Work};
         self.flush_all();
+        let fonts = if d.drawing {
+            None
+        } else {
+            match self.export_fonts_ask(d, crate::fonts::resolve::Values::of_note(&self.note_text(&d.rel))) {
+                Some(fonts) => Some(fonts),
+                None => return Ok(()),
+            }
+        };
         let v = self.vault.as_ref().ok_or("No vault is open")?;
         let (what, opts) = if d.drawing {
             let scene = match self.drawings.get(&d.rel) {
@@ -2478,7 +2493,7 @@ impl ShaleApp {
             };
             (What::Drawing(Box::new(scene)), d.opts.clone())
         } else {
-            (What::Note(self.note_text(&d.rel)), crate::pdf::export::ExportOptions { column: self.editor_column(&d.rel), ..d.opts.clone() })
+            (What::Note(self.note_text(&d.rel)), crate::pdf::export::ExportOptions { column: self.editor_column(&d.rel), fonts, ..d.opts.clone() })
         };
         let work = Work { root: v.root.clone(), rel: d.rel.clone(), name: d.name.clone(), opts, what };
         let ctx = ctx.clone();
@@ -2490,6 +2505,10 @@ impl ShaleApp {
     /// Where a note's or drawing's export is: when the job has ended, the PDF is saved (or why not).
     pub fn note_export_tick(&mut self, d: &mut crate::pdf::export_dialog::ExportDialog) -> Option<Result<PathBuf, String>> {
         let made = d.note.as_ref()?.poll()?;
+        // what the export says about fonts is told after it (PDF-037)
+        for w in d.note.as_ref().map(|n| n.take_warnings()).unwrap_or_default() {
+            self.toast(w);
+        }
         d.note = None;
         Some(made.and_then(|bytes| self.save_pdf(&d.path, &bytes)))
     }
@@ -4204,6 +4223,31 @@ mod export_tests {
             assert!(std::time::Instant::now() < end, "the task ends with its job");
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
+    }
+
+    // spec: PDF-037, JOB-040
+    #[test]
+    fn pdf_037_an_export_that_may_need_an_installed_font_waits_for_the_scan_and_tells_its_warnings_after() {
+        let (mut app, d) = test_app("fontwait");
+        std::fs::write(d.join("Fonty.md"), "---\nprint-font: Nowhere Sans\n---\nSome text\n").unwrap();
+        app.vault.as_mut().unwrap().rescan();
+        app.open_export_dialog(Path::new("Fonty.md"));
+        let Some(Modal::Export(mut dialog)) = app.modal.take() else { panic!("the export dialog opens") };
+        let ctx = egui::Context::default();
+        // the installed fonts are not looked up yet: the export does not start, the dialog waits
+        app.start_note_export(&mut dialog, &ctx).unwrap();
+        assert!(dialog.fonts_wait.is_some() && !dialog.note_working(), "the export waits for the scan");
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while !app.font_scan.catalogue().system_ready {
+            app.font_scan_tick(&ctx);
+            assert!(std::time::Instant::now() < end, "the scan ends");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        // the scan is in: the export starts, and the font that is nowhere is a warning after it
+        let out = export_now(&mut app, &mut dialog).unwrap();
+        assert!(dialog.fonts_wait.is_none() && out.is_file());
+        assert!(app.toasts.iter().any(|(m, _)| m.contains("`print-font`") && m.contains("Nowhere Sans") && m.contains("was not found")), "{:?}", app.toasts);
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     // spec: PDF-003

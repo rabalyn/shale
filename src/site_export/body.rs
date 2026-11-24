@@ -132,7 +132,8 @@ fn resolve_target(env: &Env, st: &mut State, from: &Path, l: &LinkSpan) -> Targe
 
 /// The address a link of a drawing gets in its picture (SITE-037, SITE-007): a published note, with
 /// its heading when it has one, or a web address; none for a note that is not published, does
-/// not exist or is ambiguous, which is then only its text.
+/// not exist or is ambiguous, which is then only its text. The address of a note is relative to the
+/// picture (`../../public/`), which has no way to know the path the site is served below (SITE-082).
 fn drawing_href(env: &Env, drawing: &Path, link: &ElementLink) -> Option<String> {
     match link {
         ElementLink::Url(u) => ["http://", "https://", "mailto:"].iter().any(|p| u.to_ascii_lowercase().starts_with(p)).then(|| u.clone()),
@@ -140,7 +141,9 @@ fn drawing_href(env: &Env, drawing: &Path, link: &ElementLink) -> Option<String>
             let note = env.vault.resolve(target, Some(drawing)).filter(|_| !target.is_empty() && env.vault.ambiguity(target, Some(drawing)).is_none())?;
             let url = env.layout.notes.get(&note)?.url.clone();
             let id = heading.as_deref().and_then(|h| anchor::id_in(&anchor::anchors(&env.vault.notes.get(&note)?.text), h));
-            Some(id.map_or(url.clone(), |id| format!("{url}#{}", encode_url(&id))))
+            let up = "../".repeat(drawing_path(drawing).matches('/').count());
+            let url = url.trim_start_matches('/');
+            Some(id.map_or(format!("{up}{url}"), |id| format!("{up}{url}#{}", encode_url(&id))))
         }
     }
 }

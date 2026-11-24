@@ -8,8 +8,9 @@
 </head>
 <body>
 <header class="site-header">
-<a class="site-title" href="{{ "/" | relURL }}">{{ site.Title }}</a>
+<a class="site-title" href="{{ "" | relURL }}">{{ site.Title }}</a>
 <a class="site-link" href="{{ "graph.html" | relURL }}">Graph</a>
+<a class="site-link" href="{{ "sitemap.html" | relURL }}">Site map</a>
 {{ partial "search.html" . }}
 </header>
 <main>

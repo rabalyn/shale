@@ -62,7 +62,9 @@ when you export. Every key is optional, and a value Shale cannot read is ignored
 | --- | --- | --- | --- |
 | `print-paper` | `A4`, `A5`, `Letter`, `Legal`, or `<W>x<H>mm` such as `148x210mm`; a width larger than the height is landscape | `A4` | The paper size, and so its orientation. |
 | `print-margins` | four numbers in mm: `top right bottom left` | `20 20 20 20` | The white space around the text. |
-| `print-font` | `serif`, `sans`, `mono` | `sans` | The body font: `serif` is Liberation Serif (metric-compatible with Times New Roman), `sans` is Ubuntu Light, `mono` is Hack. |
+| `print-font` | `serif`, `sans`, `mono`, the name of a font family (installed, or in the vault's `fonts/` folder), or a vault path to a font file such as `fonts/Garamond.otf` | `sans` | The body font: `serif` is Liberation Serif (metric-compatible with Times New Roman), `sans` is Ubuntu Light, `mono` is Hack. A family is set with its own bold and italic faces; a face it lacks is imitated, and the export says so. A font that is not found, cannot be read or may not be embedded (its licence) is told as a warning and the next choice is used; the PDF is made anyway. Only the characters the PDF uses are embedded. |
+| `print-font-sans` | a family name or a vault path | the body font | The font of headings, the title, the contents and the page numbers. |
+| `print-font-mono` | a family name or a vault path | Hack | The font of code. |
 | `print-font-size` | the body size in points, such as `12` | `11` | The size of the body text; headings and code keep their proportion to it. |
 | `print-line-spacing` | a factor, such as `1.3` | built-in (1.45 of the text size) | The distance between lines; `1.0` is the font's own single line height. |
 | `print-paragraph-spacing` | points, such as `8` | the built-in gap | The space after a body paragraph. |
