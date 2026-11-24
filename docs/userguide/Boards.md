@@ -115,6 +115,17 @@ nothing.
   in that earlier lane. The card stays selected and is scrolled into view, so you can see where it went.
 - When the card's note changed since the board drew it, nothing is moved and a message says so.
 
+**From the file list**: drag a **note or drawing** from the file list onto a lane and it is dropped like a card: a lane
+with a property sets it in the note's front matter (`modified:` stays), any other lane pins the note at the place you
+dropped it. A note that is a card of another lane moves there instead of showing twice. A drawing has no front matter, so
+it is only pinned (a message says so on a lane with a property). Drag a **folder** onto a lane and every note and drawing
+in it, also in its subfolders and in path order, is pinned there at that place: a snapshot that writes nothing into the
+notes, one step to undo in the board's note. Notes that are cards already, and the board's own note, are skipped. Drag a
+folder onto the empty part of the board, or onto **+ Add lane**, and a new lane at the end follows the folder with
+`query: path:Folder/` (in quotes when the name has spaces or brackets). While you drag, the lane and the place are marked
+and a text at the pointer says what the drop does; **Esc** cancels. Over the file list itself a drag still moves the file
+into a folder.
+
 **With the keys**: with a card selected, **Alt+Shift+→** moves it to the next lane and **Alt+Shift+←** to the previous
 one, as if you had dropped it below the pinned cards of that lane. The card stays selected and in view. At the first or
 last lane nothing happens, and the keys do nothing while a text field or the peek's editor has the keyboard. Change

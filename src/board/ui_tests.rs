@@ -1540,3 +1540,5 @@ fn board_033_arrows_with_a_modifier_do_not_move_the_selection_and_bare_arrows_do
     w.key(Key::ArrowDown, Modifiers::NONE, "");
     assert_eq!(w.app.boards.selected.as_deref(), Some(Path::new("Gamma.md")), "a bare arrow still selects");
 }
+
+mod tree_drop;
