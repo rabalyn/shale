@@ -2600,8 +2600,8 @@ impl ShaleApp {
         let text = self.note_text(&d.rel);
         let column = self.editor_column(&d.rel);
         // the fonts the window knows and the vault's own choice (TEX-059)
-        let fonts = crate::pdf::tex::fonts::FontInput { catalogue: self.font_scan.catalogue(), vault: crate::fonts::resolve::Values::of_settings(&self.vdata.settings) };
         let v = self.vault.as_ref().ok_or("No vault is open")?;
+        let fonts = crate::pdf::tex::fonts::FontInput { catalogue: self.font_scan.catalogue_for(v), vault: crate::fonts::resolve::Values::of_settings(&self.vdata.settings) };
         let busy = d.busy().clone();
         let tex = d.tex.as_mut().ok_or("This note has no LaTeX choices")?;
         if let Some(n) = tex.blocked_by().first() {

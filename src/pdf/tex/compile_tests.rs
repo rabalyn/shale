@@ -694,18 +694,32 @@ if [ -f "$S/toc.$n" ]; then cp "$S/toc.$n" "$stem.toc"; fi"#,
 
     // spec: TEX-057
     #[test]
-    fn tex_057_there_is_one_retry_only_and_no_other_error_is_retried() {
-        // a second missing font after the retry: the export fails as any error does
-        let f = Fake::new("fontonce");
+    fn tex_057_two_missing_fonts_are_two_retries_and_a_font_already_dropped_is_not_retried_again() {
+        // fontspec stops at the first missing font: the second is found by the next run, still a PDF
+        let f = Fake::new("fonttwo");
         f.lualatex();
         f.put("log.1", &font_error("Foo Serif"));
         f.put("log.2", &font_error("Bar Mono"));
         f.put("exit.1", "1");
         f.put("exit.2", "1");
+        f.put("log.last", "clean log\n");
+        let (work, fonts) = work_with_fonts();
+        let out = compile(&f.engine(), work, "main.tex", &Options { fonts, ..Options::default() }).unwrap();
+        assert_eq!((f.get("count").trim(), out.runs), ("3", 3));
+        assert_eq!(out.warnings, ["the font “Foo Serif” was not found by TeX; the template's font is used", "the font “Bar Mono” was not found by TeX; the template's font is used"]);
+        let last = f.get("main.3");
+        assert!(!last.contains("setmainfont") && !last.contains("setmonofont") && last.contains("\\begin{document}"), "{last}");
+        // the error of a font that is out already, or of one that is not a line, ends the compile
+        let f = Fake::new("fontonce");
+        f.lualatex();
+        f.put("log.1", &font_error("Foo Serif"));
+        f.put("log.2", &font_error("Foo Serif"));
+        f.put("exit.1", "1");
+        f.put("exit.2", "1");
         let (work, fonts) = work_with_fonts();
         let e = compile(&f.engine(), work, "main.tex", &Options { fonts, ..Options::default() }).unwrap_err();
-        assert_eq!(f.get("count").trim(), "2", "one retry");
-        assert!(e.problems.iter().any(|p| p.text().contains("Bar Mono")), "{e}");
+        assert_eq!(f.get("count").trim(), "2", "no endless retries");
+        assert!(e.problems.iter().any(|p| p.text().contains("Foo Serif")), "{e}");
         // another error of the first run
         let f = Fake::new("fontother");
         f.lualatex();

@@ -382,6 +382,14 @@ fn tex_env_a_vault_font_is_embedded_a_texlive_font_compiles_and_an_unknown_one_w
     assert!(out.output.pdf.starts_with(b"%PDF") && !pdf_has(&out.output.pdf, "No_Such"), "{:?}", font_names(&out.output.pdf));
     assert!(pdf_has(&out.output.pdf, "LiberationSerif"), "the mono font that was found stays: {:?}", font_names(&out.output.pdf));
 
+    // two unknown names: fontspec stops at the first, so each costs a run, and the export is still a PDF with two warnings
+    let note = "---\nprint-font: No Such Text\nprint-font-sans: No Such Sans\n---\n# Plan\n\ntext\n";
+    let doc = write_font_note(&v, &input, &set, note);
+    let out = compile_font_doc(&doc, &set).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(out.output.warnings.len(), 2, "{:?}", out.output.warnings);
+    assert_eq!(out.output.runs, 3);
+    assert!(out.output.pdf.starts_with(b"%PDF"));
+
     // a book: the top folder note sets one font for all of it, and a chapter's own is ignored
     let book_files: Vec<(&str, &[u8])> =
         vec![("Book/index.md", b"---\ntitle: Handbook\nprint-font: Liberation Serif\n---\nIntro text\n"), ("Book/One.md", b"---\nprint-font: XCharter\n---\n# One\nFirst chapter\n"), ("Book/Two.md", b"# Two\nSecond chapter\n")];

@@ -1187,3 +1187,24 @@ fn tex_056_the_emoji_face_is_written_before_the_overrides_and_its_font_travels_w
     // the override does not take the face over: it is its own font file
     assert!(!out.tex.contains("{shale-emoji.ttf}[Path=./, "), "{}", out.tex);
 }
+
+// spec: TEX-055, PDF-035
+#[test]
+fn tex_055_an_export_started_before_the_font_scan_is_in_still_gets_the_fonts_of_the_vault() {
+    use crate::fonts::scan::FontScan;
+    let (v, dir) = temp_vault("early", &[("Plan.md", font_note(&[("print-font", "Garamond")]).as_bytes())]);
+    for (name, spec) in garamond_faces() {
+        spec.write(&dir, &format!("fonts/{name}"));
+    }
+    // no tick, no scan: the catalogue the window has is empty, the one for the export has the vault's fonts
+    let scan = FontScan::default();
+    assert!(scan.catalogue().vault.is_empty() && !scan.catalogue().system_ready);
+    let input = FontInput { catalogue: scan.catalogue_for(&v), vault: Values::default() };
+    let note = font_note(&[("print-font", "Garamond")]);
+    let set = tuda_set(SetSettings::default());
+    let out = write(&Request { vault: &v, rel: Path::new("Plan.md"), text: &note, opts: &ExportOptions::for_note(), set: &set, kind: kind(&set, "pub"), fields: &fields(&[("author", "Ada")]), fonts: Some(&input) }).unwrap();
+    assert!(out.tex.contains("\\setmainfont{Garamond-Regular.ttf}[Path=./, BoldFont=Garamond-Bold.ttf"), "{}", out.tex);
+    assert_eq!(out.files.len(), 4);
+    assert!(out.warnings.is_empty(), "{:?}", out.warnings);
+    let _ = std::fs::remove_dir_all(dir);
+}

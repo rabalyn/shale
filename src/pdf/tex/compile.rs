@@ -417,8 +417,10 @@ fn compile_in(engine: &Engine, work: &WorkDir, main_tex: &str, opts: &Options) -
     let mut font_cache_built = false;
     let mut warnings: Vec<String> = vec![];
     let mut biber_usable = true;
-    // fontspec's "cannot be found" is answered once, by compiling without the fonts it names (TEX-057)
-    let mut font_retried = false;
+    // fontspec's "cannot be found" is answered by compiling without the fonts it names, once for
+    // each override line there is (TEX-057)
+    let mut font_lines = opts.fonts.clone();
+    let mut font_retries = 0u32;
     loop {
         // between two runs is a safe point for Cancel (JOB-006)
         if cancelled() {
@@ -438,9 +440,9 @@ fn compile_in(engine: &Engine, work: &WorkDir, main_tex: &str, opts: &Options) -
             Ending::Exited(Some(0)) => {}
             Ending::Exited(code) => {
                 let mut p = problems(&log_text);
-                if !font_retried && !opts.fonts.is_empty() {
-                    if let Some(made) = drop_missing_fonts(work, main_tex, &opts.fonts, &log_text) {
-                        font_retried = true;
+                if !font_lines.is_empty() {
+                    if let Some(made) = drop_missing_fonts(work, main_tex, &mut font_lines, &log_text) {
+                        font_retries += 1;
                         warnings.extend(made);
                         continue;
                     }
@@ -494,7 +496,7 @@ fn compile_in(engine: &Engine, work: &WorkDir, main_tex: &str, opts: &Options) -
             break;
         }
         // the run that stopped on a missing font was not one of the runs the references need
-        if runs >= opts.max_runs + u32::from(font_retried) {
+        if runs >= opts.max_runs + font_retries {
             warnings.push(format!("LuaLaTeX was run {runs} times and still asked for another run: the numbers and references in the PDF may be stale"));
             break;
         }
@@ -508,7 +510,7 @@ fn compile_in(engine: &Engine, work: &WorkDir, main_tex: &str, opts: &Options) -
 /// The compile stopped with fontspec's "cannot be found" for a font of the writer's lines: write
 /// `main.tex` again without those lines (TEX-057). The warnings for the fonts taken out; none when
 /// the error is another one, or names a font that is not one of the lines (the template's own).
-fn drop_missing_fonts(work: &WorkDir, main_tex: &str, lines: &[FontOverride], log: &str) -> Option<Vec<String>> {
+fn drop_missing_fonts(work: &WorkDir, main_tex: &str, lines: &mut Vec<FontOverride>, log: &str) -> Option<Vec<String>> {
     let missing = fonts::missing_fonts(log);
     if missing.is_empty() {
         return None;
@@ -516,6 +518,8 @@ fn drop_missing_fonts(work: &WorkDir, main_tex: &str, lines: &[FontOverride], lo
     let source = String::from_utf8_lossy(&crate::fsutil::read(work.path().join(main_tex)).ok()?).into_owned();
     let (text, warnings) = fonts::without_missing(&source, lines, &missing)?;
     work.replace(main_tex, text.as_bytes()).ok()?;
+    // every retry takes out at least one line, so there are at most as many as the lines
+    lines.retain(|o| text.contains(&format!("{}\n", o.line)));
     Some(warnings)
 }
 
