@@ -1854,6 +1854,31 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    // spec: LINK-007
+    #[test]
+    fn link_007_mentions_are_plain_text_names_and_outgoing_links_are_existing_or_missing() {
+        let d = temp_vault("link007");
+        fs::write(d.join("Target note.md"), "# Target note\n\nSee [[Linked only]] and [[Not there]].\n").unwrap();
+        fs::write(d.join("Linked only.md"), "# Linked only\n\nBack to [[Target note]] by link.\n").unwrap();
+        fs::write(d.join("Mentions.md"), "# Mentions\n\nThe target note is discussed here.\nAnother line.\n").unwrap();
+        fs::write(d.join("Both.md"), "# Both\n\n[[Target note]] is linked, nothing else.\n").unwrap();
+        let v = Vault::open(&d).unwrap();
+        let target = Path::new("Target note.md");
+        // a plain-text mention counts (any case, with its line), a link does not, the note itself does not
+        let mentions = v.unlinked_mentions(target);
+        let srcs: Vec<_> = mentions.iter().map(|m| rel_to_string(&m.0)).collect();
+        assert_eq!(srcs, vec!["Mentions.md".to_string()], "{mentions:?}");
+        assert_eq!(mentions[0].1, vec![(2, "The target note is discussed here.".to_string())]);
+        // outgoing: each link with its target, resolved when the note exists and not when it is missing
+        let out = v.outgoing(target);
+        assert_eq!(out.len(), 2, "{out:?}");
+        assert_eq!(out[0].1, "Linked only");
+        assert_eq!(out[0].2, Some(PathBuf::from("Linked only.md")));
+        assert_eq!(out[1].1, "Not there");
+        assert_eq!(out[1].2, None);
+        let _ = fs::remove_dir_all(&d);
+    }
+
     // spec: TASK-003
     #[test]
     fn tasks_across_vault() {
