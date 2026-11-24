@@ -90,8 +90,14 @@ fn site_049_the_hook_of_the_recipe_parses_and_builds_with_hugo_and_pagefind_and_
 #[test]
 fn site_049_the_recipe_names_the_versions_that_ci_installs_and_the_lfs_and_the_snapshot() {
     let note = note();
-    assert!(note.contains(&format!("hugo_extended_{0}_linux-$hugo_cpu", version_of("install-hugo.sh"))) && note.contains("hugo_cpu=arm64") && note.contains("hugo_cpu=amd64") && note.contains(&format!("/v{}/", version_of("install-hugo.sh"))), "the Hugo of the recipe is the pinned one");
-    assert!(note.contains(&format!("pagefind-v{0}-$pagefind_cpu-unknown-linux-musl", version_of("install-pagefind.sh"))) && note.contains("pagefind_cpu=aarch64") && note.contains("pagefind_cpu=x86_64"), "the Pagefind of the recipe is the pinned one");
+    assert!(
+        note.contains(&format!("hugo_extended_{0}_linux-$hugo_cpu", version_of("install-hugo.sh"))) && note.contains("hugo_cpu=arm64") && note.contains("hugo_cpu=amd64") && note.contains(&format!("/v{}/", version_of("install-hugo.sh"))),
+        "the Hugo of the recipe is the pinned one"
+    );
+    assert!(
+        note.contains(&format!("pagefind-v{0}-$pagefind_cpu-unknown-linux-musl", version_of("install-pagefind.sh"))) && note.contains("pagefind_cpu=aarch64") && note.contains("pagefind_cpu=x86_64"),
+        "the Pagefind of the recipe is the pinned one"
+    );
     // what a person is told before they rely on it
     for said in ["Git LFS", "one snapshot", "Shale writes no login", "public", "private"] {
         assert!(note.contains(said), "the note does not say {said:?}");
