@@ -33,6 +33,19 @@ and you cannot start it twice by accident.
   meanwhile, and keeps the mails after it waiting in the Outbox; nothing is sent again by itself until you
   queue, retry or send one again. A mail the server refuses stays in the Outbox as failed with the server's
   words, and the view says "A mail was not sent: …".
+- **Calendars** ([[Calendar]]): every CalDAV calendar that loads is a task of its own, "Syncing the calendar
+  “Work”…", with its text and **Cancel** under the calendar's line in Settings → Calendar → Calendars…, and "Find
+  calendars" shows "Looking for the calendars of ‹server›…". Cancel takes effect at the next request, the
+  calendar then keeps what it showed ("sync stopped") and the next sync loads it normally. The timer's load
+  shows in the indicator only when it takes longer than two seconds; a load you ask for ("Sync now", a new
+  calendar) shows at once. Closing the calendar dialog stops the look for calendars.
+- **Feeds** ([[Feeds]]): the first page of a feed ("Loading “Home” of @name…"), the next page while you scroll
+  (listed after two seconds), "Check now" and the timer's look for new posts ("Checking the feed of @name…",
+  the timer's listed after two seconds), "Load more in between" and **Save to vault** ("Saving the post of
+  @name…") are tasks, each with **Cancel** in the indicator (the feed also shows it where its spinner was). A
+  stopped page keeps the list as it was and offers Retry; a stopped check is not a failure; a stopped save
+  writes nothing. Signing in to a feed account in **Accounts…** is a task too, with **Cancel** in the dialog:
+  nothing is stored for a sign-in that is stopped, and closing the dialog stops it.
 - **Signing in to a mail account in the browser is a task per account**: "Signing in ‹account› in the browser…"
   shows in the indicator, in the mail view above the account's name, and as "Waiting for the browser…" in the
   account dialog, each with **Cancel**. Cancel, or closing the account dialog (Done, Cancel, Esc), stops

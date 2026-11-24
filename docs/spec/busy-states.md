@@ -3,7 +3,7 @@
 **IS NOW** = true of the code today · **SHOULD BE** = agreed target.
 Format: [ADR-0001](../decisions/0001-spec-driven-development.md). Issue: #397.
 
-The rules are JOB-003 to JOB-030 in [engineering.md](engineering.md#background-jobs-job): every action that
+The rules are JOB-003 to JOB-037 in [engineering.md](engineering.md#background-jobs-job): every action that
 loads or runs longer than a moment is a task of the busy registry (`busy::Busy`), shows a spinner and
 what happens, cannot be started twice, offers Cancel where the work can stop (or Close for a dialog
 whose work goes on), and shows in the indicator at the top right of the editor pane while it runs.
@@ -89,10 +89,13 @@ would leave a mess (JOB-006).
 
 | Action | Runs today | Stop | Shows today | Registry |
 |---|---|---|---|---|
-| CalDAV load and sync of a calendar (CAL) | thread (`calendar/store.rs`) | no | status text "syncing…" in the sidebar and dialog, spinner | planned: a task per calendar: "Syncing the calendar “Work”…" |
-| CalDAV account discovery (`calendar/dialog.rs`) | thread | no | "Looking for calendars…" with a spinner | planned |
-| Social feeds: refresh, load more, save a post (SOC) | thread (`social/state.rs`) | no | spinner on "Check now", "Save to vault", "Load more in between" | planned: "Checking the feed of @name…" |
-| Social accounts: sign-in, test, secrets (`social/accounts_ui.rs`) | thread | no | "Talking to the server…" | planned |
+| CalDAV load and sync of a calendar (CAL) | thread per calendar (`calendar/store.rs`) | yes: before the state request, between it and the events request, and the answer is dropped when Cancel came meanwhile; nothing is written by the load | the task with its text and Cancel under the calendar's status line in the settings; a small spinner in the calendar header | **IS NOW** (JOB-033): "Syncing the calendar “Work”…", one task per calendar; the timer's load is listed after 2 s, a load a person asked for at once |
+| CalDAV account discovery (`calendar/dialog.rs`) | thread | yes: before each request; closing the dialog stops it | the task with its text and Cancel under the CalDAV fields | **IS NOW** (JOB-034): "Looking for the calendars of ‹server›…" |
+| Social feeds: refresh, load more, check, fill a gap (SOC) | thread (`social/state.rs`) | yes: before the request, its answer is dropped when Cancel came meanwhile (the list stays as it was) | the task with its text and Cancel in the row of the check and at the end of the list; spinners inside the buttons | **IS NOW** (JOB-035): "Loading “Home” of @name…", "Loading more posts of “Home”…" (after 2 s), "Checking the feed of @name…" (the timer's after 2 s), "Loading the posts missing in “Home”…" |
+| Social feeds: save a post (SOC) | thread (`social/state.rs`, `social/note.rs`) | yes: before the thread and before each file; nothing is kept | spinner inside "Save to vault" | **IS NOW** (JOB-036): "Saving the post of @name…" |
+| Social accounts: opening the sign-in page, sign-in, new sign-in (`social/accounts_ui.rs`) | thread | yes: before each request and before the secret is stored; no partial token is kept; closing the dialog stops it | the task with its text and Cancel in the dialog's footer | **IS NOW** (JOB-037): "Opening the sign-in page of ‹server›…", "Signing in to ‹server›…" |
+| Social: list of feeds, a conversation, marking notifications read, reactions, votes, sending, scheduled posts (SOC) | thread | no | spinner in the card, box or list that asked | not tasks: they belong to their card or box (SOC-045, SOC-050, SOC-055, SOC-062, SOC-064) |
+| CalDAV: saving, moving or deleting an event (CAL-003) | thread (`calendar/store.rs`) | no | spinner in the event dialog | not a task: it belongs to the event dialog |
 | Social images (`social/images.rs`) | worker threads | no | a placeholder | not a task: it belongs to its picture |
 
 ## How a planned row is done

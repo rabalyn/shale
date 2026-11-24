@@ -12,6 +12,7 @@ use super::post_index::PostIndex;
 use super::schedule::{Scheduled, ScheduledState};
 use super::thread::{ThreadStatus, Threads};
 use super::{Client, Feed, FeedRef, Fresh, Network, Page, Post, Since, SocialAccountEntry, ThreadView};
+use crate::busy::{Busy, Cancel, Key, Task, LISTED_AFTER};
 use eframe::egui::{Context, Rect};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -19,12 +20,45 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+/// The tasks of the feeds (JOB-035, JOB-036): the first page or the next page of a feed, a check
+/// for new posts, filling a gap, and fetching a post for saving. One of each per feed (per post).
+pub const FEED_LOAD: Key = Key::new("social-feed-load");
+pub const FEED_CHECK: Key = Key::new("social-feed-check");
+pub const FEED_GAP: Key = Key::new("social-feed-gap");
+pub const POST_SAVE: Key = Key::new("social-post-save");
+
+/// What a request that Cancel stopped reports instead of a result.
+pub const STOPPED: &str = "stopped";
+
+/// The subject of the task of a feed of an account.
+pub fn feed_subject(account: &str, feed: &str) -> String {
+    format!("{account}\u{1e}{feed}")
+}
+
+/// The request `f`, unless Cancel was asked for before it starts; and its result is dropped when
+/// Cancel came while it ran: the only safe points of one request are before and after it.
+pub(super) fn unless_stopped<T>(cancel: &Cancel, f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    if cancel.is_cancelled() {
+        return Err(STOPPED.into());
+    }
+    let r = f();
+    if cancel.is_cancelled() {
+        Err(STOPPED.into())
+    } else {
+        r
+    }
+}
+
 /// How many posts may wait to be shown; then the checks pause (SOC-026).
 pub const MAX_WAITING: usize = 1000;
 
 /// Where the posts come from when it is not a real account: screenshots (`demo`) and tests plug
 /// in a pretend one. The jobs ask it instead of a `Client`.
 pub trait Source: Send + Sync {
+    /// The thread and the files of a post for saving; `None` when `stop` says so at a safe point (JOB-036).
+    fn save(&self, post: &Post, _stop: &dyn Fn() -> bool) -> Option<SavedPost> {
+        Some(super::demo::saved(post))
+    }
     fn page(&self, feed: &Feed, cursor: Option<&str>) -> Result<Page, String>;
     fn newer(&self, feed: &Feed, since: &Since) -> Result<Fresh, String>;
     /// One post by its id (SOC-039).
@@ -233,6 +267,8 @@ pub struct SocialState {
     pub feed_of: HashMap<String, String>,
     pub feeds: HashMap<String, FeedsState>,
     pub timelines: HashMap<(String, String), Timeline>,
+    /// what runs in the background: the window's registry (JOB-035)
+    pub busy: Busy,
     /// posts being fetched for saving (see `post_key`)
     pub saving: HashSet<String>,
     /// posts whose content warning was opened
@@ -313,6 +349,21 @@ pub(super) fn run(ctx: &Context, tx: &Sender<Msg>, job: impl FnOnce() -> Msg + S
     });
 }
 
+/// [`run`] under a task of the busy registry that Cancel can stop (JOB-035): the task ends before
+/// the message is sent, so a result that has arrived always finds the action idle.
+pub(super) fn run_task(ctx: &Context, tx: &Sender<Msg>, mut task: Task, job: impl FnOnce(&Cancel) -> Msg + Send + 'static, fail: impl FnOnce(String) -> Msg + Send + 'static) {
+    let (ctx, tx, cancel) = (ctx.clone(), tx.clone(), task.cancellable());
+    crate::jobs::run(
+        move || job(&cancel),
+        move |r| {
+            drop(task);
+            let msg = r.unwrap_or_else(fail);
+            let _ = tx.send(msg);
+            ctx.request_repaint();
+        },
+    );
+}
+
 impl SocialState {
     pub fn new(cache_dir: PathBuf) -> SocialState {
         let (tx, rx) = channel();
@@ -320,6 +371,7 @@ impl SocialState {
             feed_of: HashMap::new(),
             feeds: HashMap::new(),
             timelines: HashMap::new(),
+            busy: Busy::default(),
             saving: HashSet::new(),
             revealed: HashSet::new(),
             demo: false,
@@ -515,24 +567,31 @@ impl SocialState {
     }
 
     /// Load a page of a feed: the first (`cursor` None; `replace` the posts when it arrives) or the next.
+    /// The first page is a task listed at once, the next one (it follows the scrolling) after 2 s (JOB-035).
     fn load(&mut self, ctx: &Context, e: &SocialAccountEntry, feed: &Feed, cursor: Option<String>, replace: bool) {
         let key = (e.account.id.clone(), feed.id.clone());
-        let t = self.timelines.entry(key.clone()).or_default();
-        if t.loading {
+        if self.timelines.get(&key).is_some_and(|t| t.loading) {
             return;
         }
+        let (label, wait) = match cursor {
+            Some(_) => (format!("Loading more posts of “{}”…", feed.title), LISTED_AFTER),
+            None => (format!("Loading “{}” of @{}…", feed.title, e.account.handle), Duration::ZERO),
+        };
+        let Some(task) = self.busy.begin_listed_after(FEED_LOAD.with(&feed_subject(&key.0, &key.1)), label, wait) else { return };
+        let t = self.timelines.entry(key.clone()).or_default();
         t.loading = true;
         t.error = None;
         let (client, src, feed, key2) = (self.client_source(e), self.source.clone(), feed.clone(), key.clone());
-        run(
+        run_task(
             ctx,
             &self.tx,
-            move || {
+            task,
+            move |cancel| {
                 let (client, result) = match src {
-                    Some(s) => (None, s.page(&feed, cursor.as_deref())),
+                    Some(s) => (None, unless_stopped(cancel, || s.page(&feed, cursor.as_deref()))),
                     None => {
                         let mut c = client();
-                        let r = c.timeline(&feed, cursor.as_deref());
+                        let r = unless_stopped(cancel, || c.timeline(&feed, cursor.as_deref()));
                         (Some(c), r)
                     }
                 };
@@ -577,6 +636,12 @@ impl SocialState {
     /// the list: they wait (`Timeline::waiting`). False when nothing was started (no list yet, a
     /// page or a check is running, too many posts wait).
     pub fn check(&mut self, ctx: &Context, e: &SocialAccountEntry, feed: &Feed) -> bool {
+        self.check_as(ctx, e, feed, false)
+    }
+
+    /// [`SocialState::check`]; `quiet`: the timer asked, so the indicator lists the task only
+    /// when it runs longer than 2 s (JOB-035).
+    fn check_as(&mut self, ctx: &Context, e: &SocialAccountEntry, feed: &Feed, quiet: bool) -> bool {
         if self.demo && self.source.is_none() {
             return false;
         }
@@ -585,19 +650,22 @@ impl SocialState {
         if !t.loaded || t.loading || t.checking || t.waiting.len() >= MAX_WAITING {
             return false;
         }
+        let wait = if quiet { LISTED_AFTER } else { Duration::ZERO };
+        let Some(task) = self.busy.begin_listed_after(FEED_CHECK.with(&feed_subject(&key.0, &key.1)), format!("Checking the feed of @{}…", e.account.handle), wait) else { return false };
         t.checking = true;
         // the keys of the entries and, for notifications, the ids of each notification they hold
         let since = Since { top: t.top.clone(), known: t.posts.iter().chain(&t.waiting).flat_map(|p| std::iter::once(post_key(p)).chain(p.notice.iter().flat_map(|n| n.ids.clone()))).collect() };
         let (client, src, feed, key2) = (self.client_source(e), self.source.clone(), feed.clone(), key.clone());
-        run(
+        run_task(
             ctx,
             &self.tx,
-            move || {
+            task,
+            move |cancel| {
                 let (client, result) = match src {
-                    Some(s) => (None, s.newer(&feed, &since)),
+                    Some(s) => (None, unless_stopped(cancel, || s.newer(&feed, &since))),
                     None => {
                         let mut c = client();
-                        let r = c.newer(&feed, &since);
+                        let r = unless_stopped(cancel, || c.newer(&feed, &since));
                         (Some(c), r)
                     }
                 };
@@ -624,7 +692,7 @@ impl SocialState {
                 None => t.next_check = Some(now + self.check_every),
                 Some(at) if now >= at => {
                     // a check that cannot start now (a page is loading) is tried again next frame
-                    self.check(ctx, e, &feed);
+                    self.check_as(ctx, e, &feed, true);
                 }
                 _ => {}
             }
@@ -691,17 +759,19 @@ impl SocialState {
         if t.filling {
             return;
         }
+        let Some(task) = self.busy.begin(FEED_GAP.with(&feed_subject(&key.0, &key.1)), format!("Loading the posts missing in “{}”…", feed.title)) else { return };
         t.filling = true;
         let (client, src, feed, key2, above2) = (self.client_source(e), self.source.clone(), feed.clone(), key.clone(), above.to_string());
-        run(
+        run_task(
             ctx,
             &self.tx,
-            move || {
+            task,
+            move |cancel| {
                 let (client, result) = match src {
-                    Some(s) => (None, s.page(&feed, Some(&gap.cursor))),
+                    Some(s) => (None, unless_stopped(cancel, || s.page(&feed, Some(&gap.cursor)))),
                     None => {
                         let mut c = client();
-                        let r = c.timeline(&feed, Some(&gap.cursor));
+                        let r = unless_stopped(cancel, || c.timeline(&feed, Some(&gap.cursor)));
                         (Some(c), r)
                     }
                 };
@@ -745,17 +815,27 @@ impl SocialState {
     /// Fetch the thread and the media of a post for the Import dialog.
     pub fn save(&mut self, ctx: &Context, e: &SocialAccountEntry, feed: &str, post: &Post) {
         let key = post_key(post);
-        if !self.saving.insert(key.clone()) {
+        if self.saving.contains(&key) {
             return;
         }
-        let (client, post, label, demo, key2) = (self.client_source(e), post.clone(), e.account.network.label(), self.demo, key.clone());
+        let Some(task) = self.busy.begin(POST_SAVE.with(&key), format!("Saving the post of @{}…", post.author.handle)) else { return };
+        self.saving.insert(key.clone());
+        let (client, src, post, label, demo, key2) = (self.client_source(e), self.source.clone(), post.clone(), e.account.network.label(), self.demo, key.clone());
         let (account, feed) = (e.account.id.clone(), feed.to_string());
         let (account2, feed2) = (account.clone(), feed.clone());
-        run(
+        run_task(
             ctx,
             &self.tx,
-            move || {
-                let result = if demo { Ok(super::demo::saved(&post)) } else { Ok(client().save(&post)) };
+            task,
+            move |cancel| {
+                // Cancel is looked at before the thread and before each file; nothing is kept when it stops (JOB-036)
+                let stop = || cancel.is_cancelled();
+                let result = match src {
+                    Some(s) => s.save(&post, &stop),
+                    None if demo => Some(super::demo::saved(&post)),
+                    None => client().save(&post, &stop),
+                };
+                let result = result.filter(|_| !stop()).ok_or_else(|| STOPPED.to_string());
                 Msg::Saved { post: key, account, feed, label, result }
             },
             move |m| Msg::Saved { post: key2, account: account2, feed: feed2, label, result: Err(m) },
@@ -819,6 +899,7 @@ impl SocialState {
                             t.loaded = true;
                             t.last_checked.get_or_insert_with(Instant::now);
                         }
+                        Err(e) if e == STOPPED => t.error = Some("loading was stopped".into()),
                         Err(e) => t.error = Some(e),
                     }
                 }
@@ -843,6 +924,8 @@ impl SocialState {
                             t.next_check = Some(Instant::now() + every);
                             t.absorb(fresh);
                         }
+                        // a check that was stopped is not a failure: the next one comes on time
+                        Err(e) if e == STOPPED => t.next_check = Some(Instant::now() + every),
                         Err(e) => {
                             t.failures += 1;
                             t.check_error = Some(e);
@@ -864,6 +947,7 @@ impl SocialState {
                     t.filling = false;
                     match result {
                         Ok(page) => t.fill(&above, page),
+                        Err(e) if e == STOPPED => {}
                         Err(e) => t.check_error = Some(e),
                     }
                 }
@@ -876,6 +960,7 @@ impl SocialState {
                             self.index.add(&account, &feed, &all);
                             self.saved.push((s, label));
                         }
+                        Err(e) if e == STOPPED => self.messages.push("Saving the post was stopped.".into()),
                         Err(e) => self.messages.push(format!("Could not save the post: {e}")),
                     }
                 }
@@ -1053,6 +1138,22 @@ mod tests {
         newer_calls: Mutex<Vec<(String, Since)>>,
         page_calls: AtomicUsize,
         gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+        /// holds a page or a save until the test lets it go
+        page_gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+        /// tells the test that a request has arrived (one message each)
+        arrived: Mutex<Option<std::sync::mpsc::Sender<()>>>,
+    }
+
+    impl Fake {
+        /// The request is here; hold it while the gate of the test is shut.
+        fn hold(&self, gate: &Mutex<Option<std::sync::mpsc::Receiver<()>>>) {
+            if let Some(tx) = self.arrived.lock().unwrap().as_ref() {
+                let _ = tx.send(());
+            }
+            if let Some(rx) = gate.lock().unwrap().as_ref() {
+                let _ = rx.recv_timeout(Duration::from_secs(20));
+            }
+        }
     }
 
     impl Source for Fake {
@@ -1062,15 +1163,18 @@ mod tests {
         fn thread(&self, _post: &Post) -> Result<ThreadView, String> {
             Err("no such post".into())
         }
+        fn save(&self, post: &Post, _stop: &dyn Fn() -> bool) -> Option<SavedPost> {
+            self.hold(&self.page_gate);
+            Some(crate::social::demo::saved(post))
+        }
         fn page(&self, _feed: &Feed, cursor: Option<&str>) -> Result<Page, String> {
             self.page_calls.fetch_add(1, Ordering::SeqCst);
+            self.hold(&self.page_gate);
             Ok(self.pages.lock().unwrap().get(cursor.unwrap_or("")).cloned().unwrap_or_default())
         }
         fn newer(&self, feed: &Feed, since: &Since) -> Result<Fresh, String> {
             self.newer_calls.lock().unwrap().push((feed.id.clone(), since.clone()));
-            if let Some(rx) = self.gate.lock().unwrap().as_ref() {
-                let _ = rx.recv();
-            }
+            self.hold(&self.gate);
             let mut q = self.newer.lock().unwrap();
             if q.is_empty() {
                 Ok(Fresh::default())
@@ -1289,5 +1393,171 @@ mod tests {
         st.poll();
         let t = &st.timelines[&key];
         assert_eq!((ids(&t.posts), t.waiting.len(), t.top.as_deref()), (vec!["fresh", "old"], 1, Some("9")));
+    }
+
+    /// Wait (bounded) until the pretend server has a request in hand.
+    fn arrival(rx: &std::sync::mpsc::Receiver<()>) {
+        rx.recv_timeout(Duration::from_secs(20)).expect("the request is on its way");
+    }
+
+    fn labels(st: &SocialState) -> Vec<String> {
+        st.busy.list().into_iter().map(|t| t.label).collect()
+    }
+
+    // spec: JOB-035
+    #[test]
+    fn job_035_a_check_is_a_task_per_feed_that_cancel_stops_without_counting_as_a_failure_and_the_next_one_completes() {
+        let (mut st, e, fake, ctx) = ready();
+        let key = home_key(&e);
+        let (arrived, rx) = std::sync::mpsc::channel();
+        *fake.arrived.lock().unwrap() = Some(arrived);
+        let (release, gate) = std::sync::mpsc::channel();
+        *fake.gate.lock().unwrap() = Some(gate);
+        assert!(st.check(&ctx, &e, &home_feed()));
+        arrival(&rx);
+        assert_eq!(labels(&st), [format!("Checking the feed of @{}…", e.account.handle)]);
+        assert!(st.timelines[&key].checking);
+        // a second check of the feed is refused, the other feed's is not
+        assert!(!st.check(&ctx, &e, &home_feed()) && st.busy.list().len() == 1);
+        // Cancel stops it; the list stays as it was and it does not count as a failure
+        let task = st.busy.info(&FEED_CHECK.with(&feed_subject(&key.0, &key.1))).unwrap();
+        assert!(task.cancellable && st.busy.cancel(task.id));
+        release.send(()).unwrap();
+        wait(&mut st, |s| !s.timelines[&key].checking);
+        let t = &st.timelines[&key];
+        assert!((t.failures, t.check_error.as_deref(), t.waiting.len(), t.posts.len()) == (0, None, 0, 2), "{:?}", (t.failures, &t.check_error));
+        assert!(st.busy.list().is_empty());
+        // the next check completes and finds the new post
+        fake.newer.lock().unwrap().push(Ok(fresh(&["n1"])));
+        drop(release);
+        assert!(st.check(&ctx, &e, &home_feed()));
+        wait(&mut st, |s| !s.timelines[&key].checking);
+        assert_eq!(ids(&st.timelines[&key].waiting), ["n1"]);
+        assert!(st.busy.list().is_empty());
+    }
+
+    // spec: JOB-035
+    #[test]
+    fn job_035_the_timer_starts_a_quiet_check_that_the_indicator_lists_only_after_two_seconds() {
+        let (mut st, e, fake, ctx) = ready();
+        let key = home_key(&e);
+        let (arrived, rx) = std::sync::mpsc::channel();
+        *fake.arrived.lock().unwrap() = Some(arrived);
+        let (release, gate) = std::sync::mpsc::channel();
+        *fake.gate.lock().unwrap() = Some(gate);
+        st.check_every = Duration::from_secs(60);
+        let t0 = Instant::now();
+        st.timelines.get_mut(&key).unwrap().next_check = Some(t0);
+        st.tick(&ctx, std::slice::from_ref(&e), &[FeedRef::new(e.account.id.clone(), "home")], t0 + Duration::from_secs(1));
+        arrival(&rx);
+        let task = FEED_CHECK.with(&feed_subject(&key.0, &key.1));
+        assert!(st.busy.info(&task).is_some(), "it runs");
+        assert!(st.busy.list().is_empty(), "but the indicator does not list it yet");
+        assert_eq!(st.busy.list_at(Instant::now() + LISTED_AFTER).len(), 1, "after two seconds it does");
+        drop(release);
+        wait(&mut st, |s| !s.timelines[&key].checking);
+        assert!(st.busy.list().is_empty());
+    }
+
+    // spec: JOB-035
+    #[test]
+    fn job_035_a_first_page_is_a_task_listed_at_once_the_next_page_after_two_seconds_and_cancel_keeps_the_list() {
+        let (mut st, e, fake, ctx) = ready();
+        let key = home_key(&e);
+        let (arrived, rx) = std::sync::mpsc::channel();
+        *fake.arrived.lock().unwrap() = Some(arrived);
+        let (release, gate) = std::sync::mpsc::channel();
+        *fake.page_gate.lock().unwrap() = Some(gate);
+        let feed = home_feed();
+        // Reload from the top: the first page
+        st.reload(&ctx, &e, &feed);
+        arrival(&rx);
+        assert_eq!(labels(&st), [format!("Loading “{}” of @{}…", feed.title, e.account.handle)]);
+        // a second start is refused
+        st.reload(&ctx, &e, &feed);
+        assert_eq!(st.busy.list().len(), 1);
+        let task = st.busy.info(&FEED_LOAD.with(&feed_subject(&key.0, &key.1))).unwrap();
+        assert!(task.cancellable && st.busy.cancel(task.id));
+        release.send(()).unwrap();
+        wait(&mut st, |s| !s.timelines[&key].loading);
+        let t = &st.timelines[&key];
+        assert_eq!((t.error.as_deref(), t.posts.len(), t.reloads), (Some("loading was stopped"), 2, 0), "the list is as it was");
+        assert!(st.busy.list().is_empty());
+        // Retry completes
+        drop(release);
+        st.reload(&ctx, &e, &feed);
+        wait(&mut st, |s| !s.timelines[&key].loading);
+        assert!(st.timelines[&key].error.is_none() && st.timelines[&key].loaded);
+        while rx.try_recv().is_ok() {}
+        // the next page follows the scrolling: running, not listed before two seconds
+        let (release, gate) = std::sync::mpsc::channel();
+        *fake.page_gate.lock().unwrap() = Some(gate);
+        st.timelines.get_mut(&key).unwrap().cursor = Some("c2".into());
+        st.load_more(&ctx, &e, &feed);
+        arrival(&rx);
+        assert!(st.busy.info(&FEED_LOAD.with(&feed_subject(&key.0, &key.1))).is_some_and(|t| t.label.starts_with("Loading more posts")));
+        assert!(st.busy.list().is_empty() && st.busy.list_at(Instant::now() + LISTED_AFTER).len() == 1);
+        drop(release);
+        wait(&mut st, |s| !s.timelines[&key].loading);
+    }
+
+    // spec: JOB-035
+    #[test]
+    fn job_035_filling_a_gap_is_a_task_and_cancel_leaves_the_gap_for_a_later_try() {
+        let (mut st, e, fake, ctx) = ready();
+        let key = home_key(&e);
+        let (arrived, rx) = std::sync::mpsc::channel();
+        *fake.arrived.lock().unwrap() = Some(arrived);
+        let (release, gate) = std::sync::mpsc::channel();
+        *fake.page_gate.lock().unwrap() = Some(gate);
+        let above = post_key(&st.timelines[&key].posts[0]);
+        st.timelines.get_mut(&key).unwrap().gaps = vec![Gap { above: above.clone(), cursor: "c".into() }];
+        let feed = home_feed();
+        st.fill_gap(&ctx, &e, &feed, &above);
+        arrival(&rx);
+        assert_eq!(labels(&st), [format!("Loading the posts missing in “{}”…", feed.title)]);
+        st.fill_gap(&ctx, &e, &feed, &above);
+        assert_eq!(st.busy.list().len(), 1, "never two at once");
+        let task = st.busy.info(&FEED_GAP.with(&feed_subject(&key.0, &key.1))).unwrap();
+        assert!(task.cancellable && st.busy.cancel(task.id));
+        release.send(()).unwrap();
+        wait(&mut st, |s| !s.timelines[&key].filling);
+        let t = &st.timelines[&key];
+        assert_eq!((t.gaps.len(), t.check_error.as_deref()), (1, None), "the gap is still there, no error");
+        assert!(st.busy.list().is_empty());
+        drop(release);
+        st.fill_gap(&ctx, &e, &feed, &above);
+        wait(&mut st, |s| !s.timelines[&key].filling);
+        assert!(st.timelines[&key].gaps.is_empty(), "the next try filled it");
+    }
+
+    // spec: JOB-036
+    #[test]
+    fn job_036_saving_a_post_is_a_task_that_cancel_stops_and_keeps_nothing_and_the_next_save_completes() {
+        let (mut st, e, fake, ctx) = ready();
+        let (arrived, rx) = std::sync::mpsc::channel();
+        *fake.arrived.lock().unwrap() = Some(arrived);
+        let (release, gate) = std::sync::mpsc::channel();
+        *fake.page_gate.lock().unwrap() = Some(gate);
+        let p = post("p1", "bob", 1, None);
+        st.save(&ctx, &e, "home", &p);
+        arrival(&rx);
+        assert_eq!(labels(&st), ["Saving the post of @bob@m.test…"]);
+        assert!(st.saving.contains(&post_key(&p)));
+        // a second save of the same post is refused
+        st.save(&ctx, &e, "home", &p);
+        assert_eq!(st.busy.list().len(), 1);
+        let task = st.busy.info(&POST_SAVE.with(&post_key(&p))).unwrap();
+        assert!(task.cancellable && st.busy.cancel(task.id));
+        release.send(()).unwrap();
+        wait(&mut st, |s| s.saving.is_empty());
+        assert_eq!(st.messages, ["Saving the post was stopped."]);
+        assert!(st.saved.is_empty(), "nothing was kept for the Import dialog");
+        assert!(st.busy.list().is_empty());
+        // the next save completes
+        drop(release);
+        st.save(&ctx, &e, "home", &p);
+        wait(&mut st, |s| s.saving.is_empty());
+        assert_eq!(st.saved.len(), 1);
     }
 }

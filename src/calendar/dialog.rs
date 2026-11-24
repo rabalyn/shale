@@ -1,15 +1,27 @@
 //! Calendar settings dialog (local calendars, CalDAV accounts and their sync intervals) and
 //! the event dialog (new events and changes, saved to any configured calendar).
 
+use crate::busy::{Job as BusyJob, Key};
 use crate::calendar::dav::{self, Account, FoundCalendar};
 use crate::calendar::ics::{self, Alarm, Event, Freq, Repeat, RepeatEnd};
-use crate::calendar::store::{job_result, CalendarSource, CalendarStore, Job, SourceKind, DEFAULT_SYNC_MINUTES, PALETTE};
+use crate::calendar::store::{job_result, CalendarSource, CalendarStore, Job, SourceKind, CAL_SYNC, DEFAULT_SYNC_MINUTES, PALETTE};
 use crate::calendar::time as t;
 use crate::theme;
 use eframe::egui::{self, Rect, Sense, Ui, Vec2};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::TryRecvError;
 
-type Discovery = Arc<Mutex<Option<Result<Vec<FoundCalendar>, String>>>>;
+/// The task of "Find calendars": one at a time (JOB-034).
+pub const DISCOVER: Key = Key::new("calendar-discover");
+
+/// The look for the calendars of an account. Dropping it, with the dialog, stops it at the next
+/// request (JOB-010, JOB-034).
+struct Discovery(BusyJob<Result<Vec<FoundCalendar>, String>>);
+
+impl Drop for Discovery {
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
+}
 
 pub struct CalendarDialog {
     /// the calendars being edited (saved with "Done")
@@ -54,25 +66,33 @@ impl CalendarDialog {
         CalendarDialog { sources, week_monday, new_local_name: String::new(), dav_url: String::new(), dav_user: String::new(), dav_pass: Default::default(), found: vec![], discovering: None, message: None, edit: None, rects: vec![] }
     }
 
-    fn start_discovery(&mut self) {
+    fn start_discovery(&mut self, store: &CalendarStore) {
         if let Err(e) = dav::check_url(self.dav_url.trim()) {
             self.message = Some(format!("Can't use this address: {e}"));
             return;
         }
         let acct = Account { url: self.dav_url.trim().to_string(), username: self.dav_user.clone(), password: self.dav_pass.clone() };
-        let slot: Discovery = Arc::new(Mutex::new(None));
-        let s2 = slot.clone();
-        crate::jobs::run(move || dav::discover(&acct), move |r| *s2.lock().unwrap() = Some(r.and_then(|r| r)));
-        self.discovering = Some(slot);
-        self.message = Some("Looking for calendars…".into());
+        let label = format!("Looking for the calendars of {}…", dav::host_of(&acct.url));
+        match store.busy.spawn_cancellable(DISCOVER, label, move |cancel| dav::discover_until(&acct, cancel).and_then(|found| if cancel.is_cancelled() { Err(dav::STOPPED.into()) } else { Ok(found) }), || {}) {
+            Some(job) => {
+                self.discovering = Some(Discovery(job));
+                self.message = None;
+            }
+            None => self.message = Some("The look for calendars is still running.".into()),
+        }
     }
 
     /// Take a finished discovery. True if it finished this time.
     pub fn poll(&mut self) -> bool {
-        let Some(slot) = &self.discovering else { return false };
-        let Some(r) = slot.lock().unwrap().take() else { return false };
+        let Some(Discovery(job)) = &self.discovering else { return false };
+        let r = match job.try_recv() {
+            Err(TryRecvError::Empty) => return false,
+            Ok(r) => r.and_then(|r| r),
+            Err(TryRecvError::Disconnected) => Err("the look for calendars stopped unexpectedly".into()),
+        };
         self.discovering = None;
         match r {
+            Err(e) if e == dav::STOPPED => self.message = Some("The look for calendars was stopped.".into()),
             Ok(list) => {
                 self.message = Some(format!("Found {} calendar{}. Tick the ones to add.", list.len(), if list.len() == 1 { "" } else { "s" }));
                 self.found = list.into_iter().map(|c| (c, true)).collect();
@@ -173,7 +193,11 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
                 SourceKind::Caldav { url, .. } => ("CalDAV".to_string(), url.clone()),
             };
             let status = store.status.get(&s.id).cloned().unwrap_or_default();
-            ui.label(muted(&format!("{kind}{}", if status.is_empty() { String::new() } else { format!(" · {status}") }))).on_hover_text(detail);
+            ui.vertical(|ui| {
+                ui.label(muted(&format!("{kind}{}", if status.is_empty() { String::new() } else { format!(" · {status}") }))).on_hover_text(detail);
+                // a load of this calendar runs: its text and Cancel (JOB-033)
+                crate::busy::ui::status(ui, &store.busy, &CAL_SYNC.with(&s.id));
+            });
             ui.horizontal(|ui| {
                 if s.is_local() && rec(format!("sample:{i}"), ui.small_button("Add sample events")).on_hover_text("Fill it with test events around today").clicked() {
                     sample = Some(s.id.clone());
@@ -275,7 +299,7 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
     ui.horizontal(|ui| {
         let busy = d.discovering.is_some();
         if rec("dav-find".into(), ui.add_enabled(!busy && !d.dav_url.trim().is_empty(), egui::Button::new("Find calendars"))).on_hover_text("Ask the server which calendars this account has").clicked() {
-            d.start_discovery();
+            d.start_discovery(store);
         }
         if rec("dav-add-url".into(), ui.add_enabled(!busy && !d.dav_url.trim().is_empty(), egui::Button::new("Add this address as one calendar"))).clicked() {
             let url = d.dav_url.trim().to_string();
@@ -289,10 +313,8 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
                 Err(e) => d.message = Some(format!("Can't use this address: {e}")),
             }
         }
-        if busy {
-            ui.spinner();
-        }
     });
+    crate::busy::ui::status(ui, &store.busy, &DISCOVER);
     if !d.found.is_empty() {
         let entered = d.dav_url.trim().to_string();
         for (i, (c, on)) in d.found.iter_mut().enumerate() {
@@ -1842,5 +1864,132 @@ mod tests {
         h.click(rect(&d.rects, "pick:start-date"), |ui| show_event_all(ui, &mut d, &mut store));
         let first = rect(&d.rects, "pick-day:2026-11-29").min.x;
         assert!(d.rects.iter().filter(|r| r.0.starts_with("pick-day:")).all(|r| r.1.min.x >= first - 0.5), "Sunday is the first column");
+    }
+
+    /// A pretend server whose first PROPFIND waits for the test: it says it is there and answers
+    /// (one calendar) when `release` is used or dropped.
+    fn held_discovery() -> (String, std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
+        let (entered_tx, entered) = std::sync::mpsc::channel::<()>();
+        let (release, gate) = std::sync::mpsc::channel::<()>();
+        let first = std::sync::atomic::AtomicBool::new(true);
+        let (base, _h) = crate::calendar::dav::tests::mock_http(20, move |_, _, _, _| {
+            if first.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                let _ = entered_tx.send(());
+                let _ = gate.recv_timeout(std::time::Duration::from_secs(20));
+            }
+            (207, r#"<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:href>/dav/work/</d:href><d:propstat><d:prop><d:displayname>Work</d:displayname><d:resourcetype><d:collection/><c:calendar/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"#.to_string())
+        });
+        (base, entered, release)
+    }
+
+    fn poll_discovery(d: &mut CalendarDialog) {
+        let start = std::time::Instant::now();
+        while !d.poll() {
+            assert!(start.elapsed() < std::time::Duration::from_secs(20), "the discovery ends");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    // spec: JOB-034
+    #[test]
+    fn job_034_finding_calendars_is_a_task_that_cancel_stops_between_requests_and_the_next_one_completes() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let store = CalendarStore::new(vec![], std::env::temp_dir().join(format!("shale-job034-{}", std::process::id())));
+        let busy = store.busy.clone();
+        let (base, entered, release) = held_discovery();
+        let mut d = CalendarDialog::new(vec![], true);
+        d.dav_url = format!("{base}/");
+        d.start_discovery(&store);
+        entered.recv_timeout(std::time::Duration::from_secs(20)).expect("the first request is on its way");
+        let labels: Vec<String> = busy.list().into_iter().map(|t| t.label).collect();
+        assert_eq!(labels, ["Looking for the calendars of 127.0.0.1…"]);
+        // a second start is refused: one task, and the message says so
+        d.start_discovery(&store);
+        assert_eq!((busy.list().len(), d.message.as_deref()), (1, Some("The look for calendars is still running.")));
+        // Cancel: the request that runs is finished, its answer is dropped
+        let task = busy.info(&DISCOVER).unwrap();
+        assert!(task.cancellable && busy.cancel(task.id));
+        release.send(()).unwrap();
+        poll_discovery(&mut d);
+        assert_eq!(d.message.as_deref(), Some("The look for calendars was stopped."));
+        assert!(d.found.is_empty() && busy.list().is_empty());
+        // the next look completes
+        d.start_discovery(&store);
+        poll_discovery(&mut d);
+        assert_eq!(d.found.len(), 1, "{:?}", d.message);
+        assert!(busy.list().is_empty());
+    }
+
+    // spec: JOB-034, JOB-010
+    #[test]
+    fn job_034_closing_the_dialog_stops_the_look_for_calendars() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let store = CalendarStore::new(vec![], std::env::temp_dir().join(format!("shale-job034-close-{}", std::process::id())));
+        let busy = store.busy.clone();
+        let (base, entered, release) = held_discovery();
+        let mut d = CalendarDialog::new(vec![], true);
+        d.dav_url = format!("{base}/");
+        d.start_discovery(&store);
+        entered.recv_timeout(std::time::Duration::from_secs(20)).expect("the first request is on its way");
+        drop(d);
+        assert!(busy.info(&DISCOVER).is_some_and(|t| t.cancelling), "closing asked it to stop; it stays listed until it has");
+        release.send(()).unwrap();
+        let start = std::time::Instant::now();
+        while busy.is_running(&DISCOVER) {
+            assert!(start.elapsed() < std::time::Duration::from_secs(20), "the task ends");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    // spec: JOB-033, JOB-034
+    #[test]
+    fn job_033_the_dialog_shows_the_sync_of_a_calendar_and_the_look_for_calendars_with_cancel_where_it_had_a_spinner() {
+        let src = CalendarSource {
+            id: "w".into(),
+            name: "Work".into(),
+            color: "#1971c2".into(),
+            enabled: true,
+            sync_minutes: 15,
+            kind: SourceKind::Caldav { url: "https://dav.example.com/w/".into(), username: "ada".into(), password: Default::default() },
+        };
+        let store = CalendarStore::new(vec![src.clone()], std::env::temp_dir().join(format!("shale-job033-view-{}", std::process::id())));
+        let mut d = CalendarDialog::new(vec![src], true);
+        let ctx = egui::Context::default();
+        let mut t = 0.0;
+        let mut texts = |d: &mut CalendarDialog| {
+            t += 0.05;
+            let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 1000.0))), time: Some(t), ..Default::default() };
+            let mut out = ctx.run_ui(raw, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    show(ui, d, &store);
+                });
+            });
+            out.textures_delta.clear();
+            fn collect(s: &egui::Shape, out: &mut Vec<String>) {
+                match s {
+                    egui::Shape::Text(t) => out.push(t.galley.text().to_string()),
+                    egui::Shape::Vec(v) => v.iter().for_each(|s| collect(s, out)),
+                    _ => {}
+                }
+            }
+            let mut texts = vec![];
+            for s in &out.shapes {
+                collect(&s.shape, &mut texts);
+            }
+            texts
+        };
+        assert!(!texts(&mut d).iter().any(|t| t == "Cancel"), "idle: nothing to cancel");
+        let mut sync = store.busy.begin(CAL_SYNC.with("w"), "Syncing the calendar “Work”…").unwrap();
+        sync.cancellable();
+        let mut find = store.busy.begin(DISCOVER, "Looking for the calendars of dav.example.com…").unwrap();
+        find.cancellable();
+        let shown = texts(&mut d);
+        assert!(shown.iter().any(|t| t == "Syncing the calendar “Work”…") && shown.iter().any(|t| t == "Looking for the calendars of dav.example.com…"), "{shown:?}");
+        assert_eq!(shown.iter().filter(|t| *t == "Cancel").count(), 2, "{shown:?}");
+        drop((sync, find));
     }
 }

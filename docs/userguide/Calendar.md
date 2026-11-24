@@ -15,7 +15,8 @@ The calendar tab comes back after a restart in the mode (month, week or day) and
 
 Settings → Calendar → Calendars… adds local calendars (`.ics` files) or CalDAV accounts (for
 example Nextcloud; "Find calendars" asks the server), chooses colours, shows or hides calendars
-and sets the sync interval per calendar (15 minutes by default).
+and sets the sync interval per calendar (15 minutes by default). While a calendar loads, its line shows
+"Syncing the calendar …" with **Cancel**; "Find calendars" shows the same (see [[Background work]]).
 
 **Edit** on a CalDAV calendar changes its address, user name or password without removing it: leave
 the password empty to keep the saved one. A new user name or password also goes to your other
