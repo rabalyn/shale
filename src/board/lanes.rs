@@ -69,6 +69,17 @@ pub fn drop_property(query: &str) -> Option<String> {
     }
 }
 
+/// A lane to start from, in the menu next to "+ Add lane" (BOARD-029).
+pub struct Preset {
+    pub name: &'static str,
+    pub query: &'static str,
+    pub sort: &'static str,
+}
+
+/// The lane presets: "My dependency chain" is every note that waits or is waited for, in
+/// dependency order (BOARD-029, BOARD-026).
+pub const PRESETS: [Preset; 1] = [Preset { name: "My dependency chain", query: "blocked OR blocking", sort: "dependencies" }];
+
 /// What a lane shows of its search.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Search<'a> {

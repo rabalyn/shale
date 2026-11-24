@@ -221,8 +221,13 @@ impl<'a> Run<'a> {
 /// The day of the `due:` property of a note: the date at the start of its value (a time after it
 /// is left out).
 pub(crate) fn due_day(text: &str) -> Option<i64> {
+    day_of(text, "due")
+}
+
+/// The day of the date property `key` of a note (`due:`, `start:`).
+pub(crate) fn day_of(text: &str, key: &str) -> Option<i64> {
     let values = markdown::front_matter_values(text);
-    let (_, values) = values.iter().find(|(k, _)| k == "due")?;
+    let (_, values) = values.iter().find(|(k, _)| k == key)?;
     let value = values.first()?.trim();
     time::parse_ymd(value.get(..10).unwrap_or(value))
 }

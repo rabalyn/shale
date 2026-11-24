@@ -67,7 +67,7 @@ is underlined with its reason below the box, nothing is searched and the last li
 | `due:<+7d`, `due:>-3d` | due before 7 days from today, after 3 days ago. `<=` and `>=` include the day. `due:<today` works too |
 | `due:overdue` | due before today |
 | `links:[[Note]]` | notes that link to Note |
-| `blocked` | the note has `blocked-by: [[A]], [[B]]` and one of them exists and is not `status: done` |
+| `blocked` | the note has `blocked-by: [[A]], [[B]]` and one of them exists and is not `status: done` (on a board the cards in a done lane do not count as done here, see [[Boards]]) |
 | `blocking` | the note is not done and another note that is not done names it in `blocked-by:` |
 | `"AND"` | a quoted word is text: `"AND"`, `"#not a tag"`, `"blocked"` |
 

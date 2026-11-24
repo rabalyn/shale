@@ -2,10 +2,11 @@
 //! values the sort keys compare. A drawing is a card too, with a title and no other fields
 //! (BOARD-011).
 
+use super::deps::Dep;
 use crate::calendar::time::{self, parse_ymd};
 use crate::markdown::front_matter_values;
 use crate::note_props::{self, Priority};
-use crate::search_all::matcher::due_day;
+use crate::search_all::matcher::{day_of, due_day};
 use crate::vault::{FileEntry, FileKind, Vault};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -24,6 +25,10 @@ pub struct Card {
     /// UTC seconds, with the fallbacks of BOARD-016
     pub created: Option<i64>,
     pub modified: Option<i64>,
+    /// the day of `start:` (BOARD-023)
+    pub start: Option<i64>,
+    /// blocked, blockers, dependants and the step in a dependency lane; the lanes fill it (BOARD-023)
+    pub dep: Dep,
 }
 
 fn secs(t: Option<SystemTime>) -> Option<i64> {
@@ -46,9 +51,19 @@ impl Card {
         let file: &FileEntry = vault.file(rel)?;
         match file.kind {
             FileKind::Other => None,
-            FileKind::Drawing => {
-                Some(Card { rel: rel.to_path_buf(), title: file.title(), drawing: true, due: None, status: None, priority: None, tags: Vec::new(), created: secs(file.created.or(file.modified)), modified: secs(file.modified) })
-            }
+            FileKind::Drawing => Some(Card {
+                rel: rel.to_path_buf(),
+                title: file.title(),
+                drawing: true,
+                due: None,
+                status: None,
+                priority: None,
+                tags: Vec::new(),
+                created: secs(file.created.or(file.modified)),
+                modified: secs(file.modified),
+                start: None,
+                dep: Dep::default(),
+            }),
             FileKind::Note => {
                 let note = vault.notes.get(rel)?;
                 let text = note.text.as_str();
@@ -63,6 +78,8 @@ impl Card {
                     tags: note.tags.clone(),
                     created: note_props::created(rel, text, file_time),
                     modified: note_props::modified(text, secs(file.modified)),
+                    start: day_of(text, "start"),
+                    dep: Dep::default(),
                 })
             }
         }

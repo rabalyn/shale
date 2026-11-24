@@ -2,7 +2,8 @@
 //! note names its blockers in its front matter, `blocked-by: [[A]], [[B]]` (a comma-separated
 //! list of links, or a list of `- [[A]]` lines); the links are read by name, as the vault does
 //! (the folder, `#heading` and `|alias` of a link are left out). The rules of what is blocked
-//! are here and nowhere else, so that the board (#603) extends [`is_done`] and not the search.
+//! are here and nowhere else: the board (BOARD-024) builds [`Deps`] over its notes with the
+//! lanes that hold finished cards, and does not repeat them.
 
 use super::Snapshot;
 use crate::markdown::front_matter_values;
@@ -20,6 +21,10 @@ pub fn link_key(name: &str) -> String {
 /// The keys of the notes `blocked-by:` of the front matter of `text` names.
 pub fn blocked_by(text: &str) -> Vec<String> {
     let mut out = Vec::new();
+    // (most notes name no blockers: their front matter is read only when the word is there)
+    if !text.contains("blocked-by") {
+        return out;
+    }
     for (key, values) in front_matter_values(text) {
         if key != "blocked-by" {
             continue;
@@ -32,36 +37,56 @@ pub fn blocked_by(text: &str) -> Vec<String> {
     out
 }
 
-/// Is the note done, so that it blocks nothing? Today: it has `status: done`.
-pub fn is_done(text: &str) -> bool {
-    front_matter_values(text).iter().any(|(key, values)| key == "status" && values.iter().any(|v| v.trim().eq_ignore_ascii_case("done")))
+/// Is the note done, so that it blocks nothing? It has `status: done`, or it is in a lane of a
+/// board that holds finished cards (`in_done_lane`, BOARD-024). Outside a board there are no
+/// lanes: the search passes `false`.
+pub fn is_done(text: &str, in_done_lane: bool) -> bool {
+    in_done_lane || front_matter_values(text).iter().any(|(key, values)| key == "status" && values.iter().any(|v| v.trim().eq_ignore_ascii_case("done")))
 }
 
-/// What the notes of a snapshot block, by the index of the note in the snapshot.
+/// What the notes block, by the index of the note in the list the [`Deps`] were made from.
 pub struct Deps {
+    /// the notes each note names as blockers that exist, each once
+    blockers: Vec<Vec<usize>>,
+    done: Vec<bool>,
     blocked: Vec<bool>,
     blocking: Vec<bool>,
 }
 
 impl Deps {
-    /// A note is blocked while a blocker it names exists and is not done. A note is blocking
-    /// while it is not done and a note that is not done names it.
+    /// The notes of a snapshot; no lane of a board makes a note done here.
     pub fn of(snapshot: &Snapshot) -> Deps {
-        let notes = &snapshot.notes;
+        let items: Vec<(String, Option<&str>)> = snapshot.notes.iter().map(|n| (n.file.display_name(), n.note.as_ref().map(|n| n.text.as_str()))).collect();
+        Deps::build(&items, &vec![false; items.len()])
+    }
+
+    /// The rules of QUERY-002 and BOARD-023 over `notes`: the name and the text of each (a file
+    /// that is no note has no text and is not named by a link) and for each whether it is in a
+    /// lane that holds finished cards. A note is blocked while a blocker it names exists and is
+    /// not done. A note is blocking while it is not done and a note that is not done names it.
+    pub fn build(notes: &[(String, Option<&str>)], in_done_lane: &[bool]) -> Deps {
         let mut names: HashMap<String, Vec<usize>> = HashMap::new();
-        for (i, n) in notes.iter().enumerate().filter(|(_, n)| n.note.is_some()) {
-            names.entry(link_key(&n.file.display_name())).or_default().push(i);
+        for (i, (name, _)) in notes.iter().enumerate().filter(|(_, (_, text))| text.is_some()) {
+            names.entry(link_key(name)).or_default().push(i);
         }
-        let done: Vec<bool> = notes.iter().map(|n| n.note.as_ref().is_some_and(|n| is_done(&n.text))).collect();
+        let done: Vec<bool> = notes.iter().zip(in_done_lane).map(|((_, text), lane)| text.is_some_and(|t| is_done(t, *lane))).collect();
+        let blockers: Vec<Vec<usize>> = notes
+            .iter()
+            .map(|(_, text)| {
+                let mut found: Vec<usize> = text.map(blocked_by).unwrap_or_default().iter().filter_map(|k| names.get(k)).flatten().copied().collect();
+                found.sort_unstable();
+                found.dedup();
+                found
+            })
+            .collect();
         let (mut blocked, mut blocking) = (vec![false; notes.len()], vec![false; notes.len()]);
-        for (i, n) in notes.iter().enumerate() {
-            let Some(n) = &n.note else { continue };
-            for blocker in blocked_by(&n.text).iter().filter_map(|k| names.get(k)).flatten().copied().filter(|j| !done[*j]) {
+        for (i, list) in blockers.iter().enumerate() {
+            for blocker in list.iter().copied().filter(|j| !done[*j]) {
                 blocked[i] = true;
                 blocking[blocker] |= !done[i];
             }
         }
-        Deps { blocked, blocking }
+        Deps { blockers, done, blocked, blocking }
     }
 
     pub fn is_blocked(&self, note: usize) -> bool {
@@ -70,6 +95,16 @@ impl Deps {
 
     pub fn is_blocking(&self, note: usize) -> bool {
         self.blocking[note]
+    }
+
+    /// The blockers of `note` that exist, done or not.
+    pub fn blockers(&self, note: usize) -> &[usize] {
+        &self.blockers[note]
+    }
+
+    /// The blockers of `note` that are not done: what it waits for.
+    pub fn waiting(&self, note: usize) -> impl Iterator<Item = usize> + '_ {
+        self.blockers[note].iter().copied().filter(|j| !self.done[*j])
     }
 }
 
@@ -102,9 +137,30 @@ mod tests {
     // spec: QUERY-002
     #[test]
     fn a_note_is_done_with_status_done() {
-        assert!(is_done("---\nstatus: Done\n---\n"));
-        assert!(!is_done("---\nstatus: doing\n---\n"));
-        assert!(!is_done("status: done\n"), "outside the front matter it is text");
-        assert!(!is_done("# Note\n"));
+        assert!(is_done("---\nstatus: Done\n---\n", false));
+        assert!(!is_done("---\nstatus: doing\n---\n", false));
+        assert!(!is_done("status: done\n", false), "outside the front matter it is text");
+        assert!(!is_done("# Note\n", false));
+    }
+
+    // spec: BOARD-024
+    #[test]
+    fn board_024_a_note_in_a_done_lane_is_done_whatever_its_status() {
+        assert!(is_done("---\nstatus: doing\n---\n", true));
+        assert!(is_done("# Note\n", true));
+    }
+
+    // spec: BOARD-023, BOARD-024
+    #[test]
+    fn board_024_a_blocker_in_a_done_lane_blocks_nothing() {
+        let a = "---\nstatus: doing\n---\n";
+        let b = "---\nblocked-by: [[A]]\n---\n";
+        let notes = [("A".to_string(), Some(a)), ("B".to_string(), Some(b)), ("pic.png".to_string(), None)];
+        let open = Deps::build(&notes, &[false; 3]);
+        assert!(open.is_blocked(1) && open.is_blocking(0) && !open.is_blocked(0));
+        assert_eq!((open.blockers(1), open.waiting(1).collect::<Vec<_>>()), (&[0][..], vec![0]));
+        let lane = Deps::build(&notes, &[true, false, false]);
+        assert!(!lane.is_blocked(1) && !lane.is_blocking(0), "A is in a done lane");
+        assert_eq!((lane.blockers(1), lane.waiting(1).count()), (&[0][..], 0), "the arrow stays, the waiting is over");
     }
 }

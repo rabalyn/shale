@@ -1,8 +1,9 @@
-//! Kanban boards (ADR-0034, BOARD-001…BOARD-022, BOARD-032): a board is a note, its lanes are
+//! Kanban boards (ADR-0034, BOARD-001…BOARD-029, BOARD-032): a board is a note, its lanes are
 //! made from queries, its cards are notes.
 //!
 //! * [`file`] reads and writes the board file and keeps what it does not know.
 //! * [`lanes`] says which cards a lane shows and asks the search worker for the lanes.
+//! * [`deps`] says which cards are blocked and puts a lane in dependency order.
 //! * [`card`] and [`sort`] are what a card knows of its note and the order of a lane.
 //! * [`drag`] says what dropping a card on a lane changes.
 //! * [`view`] draws the board; [`peek`] is the editor that opens on a card.
@@ -11,6 +12,7 @@
 //! The state of the view is one field of the window, [`Boards`].
 
 pub mod card;
+pub mod deps;
 pub mod drag;
 pub mod file;
 pub mod lanes;
@@ -24,8 +26,10 @@ mod ui_tests;
 use crate::search_form::sort as form_sort;
 use crate::vault::{FileKind, Vault};
 use card::Card;
+use deps::Graph;
 use file::Board;
 use lanes::{LaneIn, Search};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// A board of the vault, for the strip at the top of the view (BOARD-007).
@@ -73,12 +77,17 @@ pub fn lane_views(vault: &Vault, rel: &Path, board: &Board, every_lane: bool, ru
         .collect();
     let input: Vec<LaneIn> = found.iter().zip(&pins).map(|(m, p)| LaneIn { matches: m, pins: p }).collect();
     let placed = lanes::place(rel, &input, every_lane);
+    // the cards of every lane first: which notes are in a done lane decides which are blocked (BOARD-024)
+    let mut cards: Vec<Vec<(Card, bool)>> = placed.into_iter().map(|lane| lane.into_iter().filter_map(|p| Card::of(vault, &p.rel).map(|c| (c, p.pinned))).collect()).collect();
+    let in_done_lane: HashSet<PathBuf> = board.lanes.iter().zip(&cards).filter(|(l, _)| l.done()).flat_map(|(_, c)| c.iter().map(|(c, _)| c.rel.clone())).collect();
+    let graph = Graph::new(vault, &in_done_lane);
+    cards.iter_mut().flatten().for_each(|(c, _)| c.dep = graph.dep(&c.rel));
     board
         .lanes
         .iter()
         .enumerate()
-        .zip(placed)
-        .map(|((i, lane), placed)| {
+        .zip(cards)
+        .map(|((i, lane), cards)| {
             let sort_keys = form_sort::parse(lane.sort());
             let (keys, sort_error) = match sort_keys {
                 Ok(k) => (k, None),
@@ -86,13 +95,18 @@ pub fn lane_views(vault: &Vault, rel: &Path, board: &Board, every_lane: bool, ru
             };
             let search = runs.search(i);
             let (mut pinned, mut rest): (Vec<Card>, Vec<Card>) = (Vec::new(), Vec::new());
-            for p in placed {
-                if let Some(c) = Card::of(vault, &p.rel) {
-                    let into = if p.pinned { &mut pinned } else { &mut rest };
-                    into.push(c);
+            for (c, is_pinned) in cards {
+                if is_pinned { &mut pinned } else { &mut rest }.push(c);
+            }
+            let mut places = HashMap::new();
+            if keys.iter().any(|k| k.field == form_sort::Field::Dependencies) {
+                // (the order is of the cards the keys sort: the pinned ones keep their places)
+                for (place, (c, step)) in deps::order(&rest, &graph.edges(&rest)).into_iter().enumerate() {
+                    places.insert(rest[c].rel.clone(), place);
+                    rest[c].dep.step = Some(step);
                 }
             }
-            sort::sort(&mut rest, &keys);
+            sort::sort(&mut rest, &keys, &places);
             let count = pinned.len();
             pinned.extend(rest);
             LaneView {

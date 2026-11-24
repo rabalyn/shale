@@ -47,7 +47,7 @@ drop: status: doing
   `due:`, `path:` and more). A lane matches whole notes, not lines. A lane without a query, with links, is a manual
   lane.
 - `sort:` orders the cards: `priority desc, due asc`. The keys are `created`, `modified`, `due`, `priority` and `title`, each
-  `asc` (the default) or `desc`. A note without a value for a key comes last, in either direction. Without a
+  `asc` (the default) or `desc`, and `dependencies` (see "Dependencies" below). A note without a value for a key comes last, in either direction. Without a
   `sort:` line the cards come by title. `due` is the `due:` property, else the earliest open task date of the note;
   `created` and `modified` are the properties Shale keeps (see [[Notes and links]]), else the date in the file's name
   and the file's time.
@@ -57,7 +57,7 @@ drop: status: doing
   pins it, even when the query of another lane matches it.
 - `cards: every-lane` in the front matter shows a card in every lane that matches it. Without it a card is in the first
   lane that matches. The note of the board is never one of its cards.
-- `card-shows: due, status, priority, tags` chooses what a card shows besides its title (all four without the line).
+- `card-shows: due, start, status, priority, tags` chooses what a card shows besides its title (all of them without the line).
 
 Lines the board does not know stay where they are when the view changes the file, and you can edit the file by hand:
 the view follows.
@@ -77,8 +77,10 @@ its cards on a background thread, so the window keeps drawing; when a note chang
 
 ![[board-lane-settings.png]]
 
-A card shows the note's title and chips: the **due** date (red when it is past), the **status**, the **priority**
-(`priority:` in the front matter, from `highest` to `lowest`) and the **tags**. A drawing is a card too, with its picture;
+A card shows the note's title and chips: the **due** date (red when it is past), the **start** date (`start:`), the
+**status**, the **priority** (`priority:` in the front matter, from `highest` to `lowest`) and the **tags**. A card
+that waits for another note also shows a red **blocked** chip, and in a lane sorted by dependencies its **step**,
+whatever `card-shows:` says. A drawing is a card too, with its picture;
 it is found by name, path and links only.
 
 - **Click** selects a card and opens its **peek**. **Ctrl+Click**, or **Enter** on the selected card, opens the note in
@@ -108,6 +110,29 @@ nothing.
 - Lanes are exclusive (see above): when a lane before the target matches the card's new property too, the card shows
   in that earlier lane. The card stays selected and is scrolled into view, so you can see where it went.
 - When the card's note changed since the board drew it, nothing is moved and a message says so.
+
+# Dependencies
+
+A note says what it waits for in its front matter: `blocked-by: [[Foundation]], [[Permit]]`, next to `due:` and
+`start:`. The links are read by name, like links in the vault.
+
+![[board-dependencies.png]]
+
+- A card is **blocked** while a note it names exists and is not done. A note is done with `status: done`, or when
+  it is a card in a lane marked `done: true` on the board. (The query words `blocked` and `blocking` of
+  [[Search syntax]] use `status: done` only: a lane's cards come from its query, so the query cannot know the lanes.)
+- **Select a card** and arrows show what it waits for and what waits for it: from the blocker to the card that waits.
+  Cards in one lane are joined beside the cards between them. A blocker that is not on the board has no arrow; the
+  selected card names it ("Also blocked by … (not on this board)").
+- `sort: dependencies` puts the lane in **dependency order**: every card after the cards it waits for (those that are
+  cards of the same lane). The cards get a step: **step 1** waits for nothing, **step 2** only for step 1, and so
+  on; cards that can run side by side share a step and are lettered, **step 3a** and **step 3b**. Within a step the
+  earlier due day comes first, then the higher priority, then the title. Pinned cards stay on top.
+- Cards in a **cycle** (A waits for B, B for A) cannot be ordered. They are marked **circular** and listed after
+  the others, with the cards that only wait for them.
+- The **▾** menu next to **+ Add lane** has the preset **My dependency chain**: a lane with
+  `query: blocked OR blocking` and `sort: dependencies`. Put it as the last lane: a card is in the first lane that
+  matches it.
 
 # Try it
 
