@@ -673,7 +673,7 @@ mod tests {
         assert_eq!(h.click("cancel", &mut d, &folders, &tags), Some(ImportAction::Cancel));
     }
 
-    // spec: IMP-052
+    // spec: IMP-052, IMP-058
     #[test]
     fn the_header_list_box_is_off_and_only_there_for_messages_events_and_posts() {
         let mut d = ImportDialog::new(vec![import::eml_item(crate::mail::tests::sample_eml(), None)], vec![], String::new(), String::new(), None, false);

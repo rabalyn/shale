@@ -493,7 +493,7 @@ fn a_note_that_cannot_be_written_takes_the_import_folder_out_again() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// spec: IMP-040, IMP-041, IMP-042, IMP-044, IMP-046, IMP-039
+// spec: IMP-040, IMP-041, IMP-042, IMP-044, IMP-046, IMP-039, IMP-045
 #[test]
 fn a_styled_word_file_keeps_its_page_its_body_its_colours_and_its_title() {
     let Some((v, done)) = import_fixture("styled", "styled.docx", true) else { return };

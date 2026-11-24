@@ -1111,9 +1111,12 @@ mod tests {
         assert_eq!(parse_tags("bau-b, #Beamer  status;Bau-B 2026 projekt/hörsaal"), vec!["bau-b", "Beamer", "status", "projekt/hörsaal"]);
         assert_eq!(clean_folder("/Projekte/ Neubau B /").unwrap(), PathBuf::from("Projekte/Neubau B"));
         assert!(clean_folder("../x").is_err());
+        assert!(clean_folder("a/../../x").is_err(), "also in the middle");
+        assert!(clean_folder("C:\\Users\\x").is_err(), "a drive is no folder of the vault");
+        assert!(clean_folder("~/x").is_err(), "a home folder is no folder of the vault");
     }
 
-    // spec: IMP-003, IMP-004, IMP-005, TAG-001
+    // spec: IMP-003, IMP-004, IMP-005, TAG-001, IMP-011, IMP-050, IMP-051
     #[test]
     fn an_email_becomes_a_tagged_note_with_its_attachments() {
         let mut v = temp_vault("mail");
@@ -1167,7 +1170,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // spec: IMP-003
+    // spec: IMP-003, IMP-050
     #[test]
     fn events_and_files() {
         let mut v = temp_vault("ev");
@@ -1207,6 +1210,24 @@ mod tests {
         assert!(f.contains("type: files") && f.contains(".txt]]"), "{f}");
         let _ = std::fs::remove_file(&src);
         let _ = std::fs::remove_file(&txt);
+    }
+
+    // spec: IMP-005
+    #[test]
+    fn an_event_imported_before_is_marked_by_its_uid_and_its_date() {
+        let mut v = temp_vault("ev-dup");
+        let day = t::days_from_civil(2026, 12, 2);
+        let mk = |rec: Option<i64>| Event { uid: "ev-9@x".into(), summary: "Jour fixe".into(), start: t::local_to_utc(day, 10 * 3600), end: t::local_to_utc(day, 11 * 3600), recurrence_id: rec, ..Default::default() };
+        let first = event_item(mk(None), "Work".into(), None);
+        let o = Options { folder: PathBuf::from("Projekte"), tags: vec![], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false, cut: Default::default() };
+        let Imported { notes: made, errors, .. } = import(&mut v, std::slice::from_ref(&first), &o);
+        assert!(errors.is_empty(), "{errors:?}");
+        v.rescan();
+        let mut items = vec![event_item(mk(None), "Work".into(), None), event_item(mk(Some(day * 86400)), "Work".into(), None)];
+        mark_duplicates(&v, &mut items);
+        assert_eq!(items[0].already.as_deref(), Some(made[0].as_path()), "the same event is spotted");
+        assert!(!items[0].include, "and unticked");
+        assert!(items[1].already.is_none() && items[1].include, "another date of a repeating event is a new one");
     }
 
     fn full_event() -> Event {
@@ -1286,7 +1307,7 @@ mod tests {
         assert_eq!(got[0].1, items);
     }
 
-    // spec: IMP-050, IMP-052, IMP-054
+    // spec: IMP-050, IMP-052, IMP-054, IMP-051, IMP-055
     #[test]
     fn an_email_goes_from_its_properties_to_the_title_the_attachments_and_the_message() {
         let mail = Mail { subject: "Plan".into(), from: "A <a@x>".into(), to: "B <b@x>".into(), date_raw: "Thu, 13 Nov 2026 10:22:33 +0100".into(), text: "Hallo  \r\n\r\n\r\n\r\nWelt\n-- \nAnna\n".into(), ..Default::default() };
@@ -1305,7 +1326,7 @@ mod tests {
     }
 
     // spec: SOC-020
-    // spec: SOC-011, SOC-012
+    // spec: SOC-011, SOC-012, IMP-058
     #[test]
     fn a_saved_post_becomes_a_note_with_pictures_and_a_second_import_is_spotted() {
         use crate::social::demo;
