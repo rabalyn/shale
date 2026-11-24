@@ -254,6 +254,35 @@ hand-written files in the style of Zotero with Better BibTeX, JabRef and Citavi
   feature, so it costs what is stated above only in the build that formats. The fallback of §6 (`biblatex` plus
   `citationberg`) stays open for that phase if the size of `hayagriva` is a problem then.
 
+### The formatter: hayagriva with its archive (#646, 2026-11-24)
+
+The reading view needed the formatting before the built-in PDF (#648), so it is built here as `src/bibliography/format.rs`
+and #648 takes it unchanged. The owner confirmed on 2026-11-24: **`biblatex` reads, `hayagriva` formats.** The index keeps,
+for each entry, the entry as `hayagriva` converts it from the `biblatex` one (with `and others` taken out of the list of
+authors, where `hayagriva` would make it a person named "others"), so the two crates read a file once.
+
+- **Features**: `default-features = false, features = ["biblatex", "archive"]` (0.10.1). The `archive` feature is the CSL
+  styles and the locales that come with the crate; without it the five styles and two locale files would have to be shipped
+  as XML, with the licence notice of the CSL styles (CC BY-SA 3.0).
+- **The five styles** (ADR §5) are archive styles: `numeric` is Springer Mathphys (`[1]`), `authoryear` Chicago author-date
+  (`(Knuth 1984, 12)`), `alphabetic` the label style of Typst (`[Knu84]`; it has no list of references, so the list is
+  Chicago's with the labels, sorted by label), `ieee` the IEEE and `apa` the APA. The locale of the document (German,
+  English) is passed to the engine.
+- **Size**: a release build of a program that reads a `.bib` file and formats with the archive, stripped, is **6.3 MB**
+  (an empty program: 343 KB); `hayagriva` code is the 0.8 MB of the evaluation above and the archive (its 91 styles and 64 locales, 3.5 MB as files)
+  and the ICU data the rest. The Shale release binary is 95 MB, so it grows by about 6 %. In Shale's `Cargo.lock` it adds 23 crates (the others were there);
+  building them gives no warning and takes about 11 s on 20 cores.
+- **`cargo audit`**: `hayagriva` 0.10.1 needs `citationberg` 0.7.0, which needs `quick-xml` 0.38, and that has two
+  vulnerabilities (RUSTSEC-2026-0194, quadratic time on duplicate attribute names, and RUSTSEC-2026-0195, unbounded
+  namespace declarations; both fixed in 0.41). The program never parses XML with it (the styles and locales of the archive
+  are binary and come with the program), so neither can be reached; still, `citationberg` is vendored in `vendor/citationberg-0.7.0`
+  with one line changed, `quick-xml = "0.41"` in its `Cargo.toml` (`[patch.crates-io]`), which builds with no change of its code,
+  so that the audit stays clean of vulnerabilities (the `paste` and `unsafe-libyaml` warnings of unmaintained crates remain).
+  Drop the patch when `citationberg` releases a version on `quick-xml` 0.41.
+- **If the size matters**: ship the five styles and the two locales as XML in `assets/` and read them with `citationberg`
+  (a direct dependency then), with `default-features = false` and no `archive`: about 0.3 MB, at the price of the licence
+  notice. The API of `format.rs` does not change.
+
 ## Alternatives considered
 
 - **CSL-JSON as the bibliography**: Zotero and Pandoc read it, but the owner chose BibLaTeX only;

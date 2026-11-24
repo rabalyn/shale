@@ -77,7 +77,11 @@ pub struct LinkAssist {
     ac_people: bool,
     pub(crate) media: MediaPicker,
     /// the tag list for `#ta` and `tags:` (EDIT-120)
-    pub(crate) tags: crate::tag_assist::TagAssist,
+    pub(crate) tags: crate::tag_assist::ListAssist,
+    /// the list of citation keys and labels after `@` (EDIT-124)
+    pub(crate) cites: crate::tag_assist::ListAssist,
+    /// the document of the note, which the list of citations reads from
+    pub(crate) thesis: std::sync::Arc<crate::thesis::View>,
     /// this frame: the `[[` entry picked by keyboard
     ac_pick: Option<usize>,
     /// this frame: the text going into the text box, and the picker state then
@@ -112,6 +116,8 @@ impl LinkAssist {
             ac_people: false,
             media: MediaPicker::default(),
             tags: Default::default(),
+            cites: Default::default(),
+            thesis: Default::default(),
             ac_pick: None,
             text_before: String::new(),
             picker_before: None,
@@ -125,7 +131,7 @@ impl LinkAssist {
 
     /// Is a suggestion list or the file picker open?
     pub fn is_open(&self) -> bool {
-        self.media.active || self.ac_active || self.tags.active
+        self.media.active || self.ac_active || self.tags.active || self.cites.is_open()
     }
 
     /// Short description of the picker state (testing aid).
@@ -178,7 +184,8 @@ impl LinkAssist {
             });
         }
         self.tags.take_keys(ui);
-        out.picking = self.ac_pick.is_some() || self.tags.pick.is_some();
+        self.cites.take_keys(ui);
+        out.picking = self.ac_pick.is_some() || self.tags.pick.is_some() || self.cites.pick.is_some();
 
         // `[!path` file picker: Tab completes, arrows choose, Enter picks, Esc closes.
         let home = dirs::home_dir().unwrap_or_default();
@@ -482,7 +489,12 @@ impl LinkAssist {
             }
         }
         // --- #tag list (EDIT-120)
-        changed |= self.tags.after(ui, self.id, text, vault, output, typing);
+        changed |= self.tags.after(ui, self.id, text, &crate::tag_assist::Tags(vault), output, typing);
+        // --- citation keys and labels after `@` (EDIT-124)
+        changed |= self.cites.after(ui, self.id, text, &crate::cite_assist::Cites(&self.thesis), output, typing);
+        if self.cites.notice_clicked {
+            action = Some(EditorAction::OpenVaultSettings);
+        }
         // While a suggestion popup is open, switch the desktop input method (IBus, Fcitx, dead
         // keys) off for this window: otherwise it may keep Esc and the arrow keys for itself and
         // hand Tab / Enter over as typed text.

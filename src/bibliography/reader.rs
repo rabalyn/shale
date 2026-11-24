@@ -48,6 +48,10 @@ pub struct Entry {
     pub title: String,
     /// set when the key cannot be cited
     pub problem: Option<Problem>,
+    /// the journal, book title or publisher, as plain text, for the peek (EDIT-125)
+    pub venue: String,
+    /// the entry as the formatter reads it (EDIT-127); `None` when the entry has what it cannot convert
+    pub csl: Option<Arc<hayagriva::Entry>>,
 }
 
 /// What a `.bib` file holds: its entries by key, and how many entries were skipped as bad.
@@ -160,7 +164,21 @@ fn entry_of(e: &biblatex::Entry) -> Entry {
     } else {
         None
     };
-    Entry { key: e.key.clone(), kind: e.entry_type.to_string(), authors, et_al, year, title, problem }
+    let field = |name: &str| e.get(name).map(|c| c.format_verbatim()).unwrap_or_default().split_whitespace().collect::<Vec<_>>().join(" ");
+    let venue = ["journaltitle", "journal", "booktitle", "publisher", "institution", "school"].into_iter().map(field).find(|v| !v.is_empty()).unwrap_or_default();
+    Entry { key: e.key.clone(), kind: e.entry_type.to_string(), authors, et_al, year, title, problem, venue, csl: for_formatter(e) }
+}
+
+/// The entry as the formatter reads it. `and others` is no person: it is taken out of the list of
+/// authors (the style then writes the names that are there).
+fn for_formatter(e: &biblatex::Entry) -> Option<Arc<hayagriva::Entry>> {
+    let mut e = e.clone();
+    if let Ok(people) = e.author() {
+        if people.iter().any(|p| p.name.eq_ignore_ascii_case("others") && p.given_name.is_empty()) {
+            e.set_author(people.into_iter().filter(|p| !(p.name.eq_ignore_ascii_case("others") && p.given_name.is_empty())).collect());
+        }
+    }
+    hayagriva::Entry::try_from(&e).ok().map(Arc::new)
 }
 
 /// The first run of four digits.

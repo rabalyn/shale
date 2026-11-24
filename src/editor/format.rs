@@ -43,6 +43,8 @@ impl PartialEq for ImageMark {
 struct Input {
     text: String,
     links: Vec<LinkMark>,
+    /// the citations and references of the block with whether each is fine: drawn as a link that resolves, or as a broken one (EDIT-126)
+    cites: Vec<(Range<usize>, bool)>,
     images: Vec<ImageMark>,
     /// the raw lines of the preview in the block's lines (`None`: no preview), cut to the block
     raw: Option<Range<usize>>,
@@ -58,6 +60,9 @@ impl Input {
         crate::fold_ui::hash_of(&self.text).hash(&mut h);
         for l in &self.links {
             (l.range.start, l.range.end, l.markdown_style, l.embed, l.exists).hash(&mut h);
+        }
+        for (r, ok) in &self.cites {
+            (r.start, r.end, ok).hash(&mut h);
         }
         for i in &self.images {
             (i.range.start, i.range.end, i.h.to_bits(), i.valid).hash(&mut h);
@@ -137,6 +142,12 @@ impl FormatCache {
 
     /// [`highlight_with_math`], formatting only the blocks that are not in the cache.
     pub fn highlight(&mut self, text: &str, links: &[(LinkSpan, bool)], fonts: &EditorFonts, images: &[(Range<usize>, f32)], raw_lines: Option<Range<usize>>) -> (LayoutJob, Vec<MathMark>) {
+        self.highlight_marked(text, links, &[], fonts, images, raw_lines)
+    }
+
+    /// [`Self::highlight`] with the citations and references of the note (EDIT-126): the byte ranges
+    /// in order of the text, each with whether it is fine (a link that resolves) or broken.
+    pub fn highlight_marked(&mut self, text: &str, links: &[(LinkSpan, bool)], cites: &[(Range<usize>, bool)], fonts: &EditorFonts, images: &[(Range<usize>, f32)], raw_lines: Option<Range<usize>>) -> (LayoutJob, Vec<MathMark>) {
         if self.fonts.as_ref() != Some(fonts) {
             self.blocks.clear();
             self.fonts = Some(fonts.clone());
@@ -169,7 +180,7 @@ impl FormatCache {
         link_order.sort_by_key(|&i| links[i].0.range.start);
         let mut image_order: Vec<usize> = (0..images.len()).collect();
         image_order.sort_by_key(|&i| images[i].0.start);
-        let (mut next_link, mut next_image) = (0, 0);
+        let (mut next_link, mut next_image, mut next_cite) = (0, 0, 0);
         let mut active: Vec<usize> = Vec::new();
         let valid = |r: &Range<usize>| r.end <= text.len() && text.is_char_boundary(r.start) && text.is_char_boundary(r.end);
 
@@ -193,6 +204,17 @@ impl FormatCache {
                     LinkMark { range: l.range.start.saturating_sub(a)..l.range.end.saturating_sub(a), markdown_style: l.markdown_style, embed: l.embed, exists: *exists }
                 })
                 .collect();
+            let cites_here: Vec<(Range<usize>, bool)> = {
+                let mut mine = Vec::new();
+                while next_cite < cites.len() && cites[next_cite].0.start < b {
+                    let (r, ok) = &cites[next_cite];
+                    next_cite += 1;
+                    if r.start >= a && valid(r) {
+                        mine.push((r.start - a..r.end.min(b) - a, *ok));
+                    }
+                }
+                mine
+            };
             while next_image < image_order.len() && images[image_order[next_image]].0.start < b {
                 active.push(image_order[next_image]);
                 next_image += 1;
@@ -216,7 +238,7 @@ impl FormatCache {
                     s..e
                 }
             });
-            let input = Input { text: text[a..b].to_string(), links: links_here, images: images_here, raw, footnotes: with_notes[n], defined: if with_notes[n] { defined_hash } else { 0 } };
+            let input = Input { text: text[a..b].to_string(), links: links_here, cites: cites_here, images: images_here, raw, footnotes: with_notes[n], defined: if with_notes[n] { defined_hash } else { 0 } };
             let key = input.key();
             let out = if let Some(e) = blocks.get(&key).filter(|e| e.input == input) {
                 e.out.clone()
@@ -471,6 +493,10 @@ fn format_chunk(text: &str, input: &Input, defined: &HashSet<String>, fonts: &Ed
             f.dim = false;
             f.syn = false
         });
+    }
+    // a citation, a reference or a duplicate label: coloured as a link that resolves or one that does not (EDIT-126)
+    for (r, ok) in &input.cites {
+        set(&mut fmts, r.clone(), |f| f.link = if *ok { 1 } else { 2 });
     }
     for w in crate::lists::find_web_links(text) {
         if code_ranges.iter().any(|c| c.contains(&w.range.start)) {

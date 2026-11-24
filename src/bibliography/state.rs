@@ -45,7 +45,7 @@ pub struct Bibliographies {
 
 /// The bibliography in effect for a note: the indexes of the files that could be read, and what
 /// to tell about the ones that could not.
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Effect {
     pub files: Vec<(PathBuf, Arc<FileIndex>)>,
     /// a file is still being read

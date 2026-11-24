@@ -1,7 +1,7 @@
 //! Tag completion while typing (EDIT-120): `#ta` in the text, or a word in a `tags:` property of
 //! the front matter, opens a list of the vault's tags that match, best match first. It is a part of
-//! [`crate::link_assist::LinkAssist`], which calls [`TagAssist::take_keys`] before the text box and
-//! [`TagAssist::after`] after it, like for the `[[` list.
+//! [`crate::link_assist::LinkAssist`], which calls [`ListAssist::take_keys`] before the text box and
+//! [`ListAssist::after`] after it, like for the `[[` list.
 
 use crate::colour_tags;
 use crate::link_assist::{down_key, up_key};
@@ -66,7 +66,7 @@ pub fn tag_query(text: &str, cursor: usize) -> Option<(usize, String)> {
 }
 
 /// Is the line starting at byte `line_start` a line of the properties, between the two `---`?
-fn front_matter_line(text: &str, line_start: usize) -> bool {
+pub(crate) fn front_matter_line(text: &str, line_start: usize) -> bool {
     if line_start == 0 || !(text.starts_with("---\n") || text.starts_with("---\r\n")) {
         return false;
     }
@@ -106,14 +106,66 @@ pub fn rank(query: &str, tags: &[String]) -> Vec<String> {
     hits.into_iter().take(MAX_ITEMS).map(|(_, t)| t.clone()).collect()
 }
 
-/// State of the tag list of one text box.
+/// One line of a completion list: what is typed in when it is picked, how it is shown, and what is said beside it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Candidate {
+    pub insert: String,
+    pub label: String,
+    pub detail: String,
+}
+
+/// What a completion list is a list of: tags (EDIT-120), or the keys and labels of a thesis (EDIT-124).
+/// [`ListAssist`] does the keys, the popup and the pick for all of them.
+pub(crate) trait Source {
+    /// the id of the popup, so that two lists of one text box are two areas
+    fn area(&self) -> &'static str;
+    /// the name being typed at `cursor`: where it starts, and what is typed
+    fn query(&self, text: &str, cursor: usize) -> Option<(usize, String)>;
+    /// every candidate, read once when the list opens (not on every key)
+    fn load(&self) -> Vec<Candidate>;
+    /// the candidates that match `query`, the best first
+    fn rank(&self, query: &str, all: &[Candidate]) -> Vec<Candidate>;
+    fn colour(&self) -> egui::Color32;
+    /// what to say instead of a list when nothing can be listed and the place wants an answer
+    fn notice(&self, _text: &str, _start: usize, _typed: &str) -> Option<String> {
+        None
+    }
+}
+
+/// The tags of the vault (EDIT-120).
+pub(crate) struct Tags<'a>(pub &'a Vault);
+
+impl Source for Tags<'_> {
+    fn area(&self) -> &'static str {
+        "tags"
+    }
+
+    fn query(&self, text: &str, cursor: usize) -> Option<(usize, String)> {
+        tag_query(text, cursor)
+    }
+
+    fn load(&self) -> Vec<Candidate> {
+        self.0.all_tags().into_iter().map(|(t, _)| Candidate { insert: t.clone(), label: format!("#{t}"), detail: String::new() }).collect()
+    }
+
+    fn rank(&self, query: &str, all: &[Candidate]) -> Vec<Candidate> {
+        let names: Vec<String> = all.iter().map(|c| c.insert.clone()).collect();
+        rank(query, &names).into_iter().filter_map(|t| all.iter().find(|c| c.insert == t).cloned()).collect()
+    }
+
+    fn colour(&self) -> egui::Color32 {
+        theme::palette().tag
+    }
+}
+
+/// State of a completion list of one text box.
 #[derive(Default)]
-pub(crate) struct TagAssist {
+pub(crate) struct ListAssist {
     pub(crate) active: bool,
     pub(crate) sel: usize,
-    pub(crate) items: Vec<String>,
-    /// the vault's tags, read from its index when the list opens (not on every key)
-    all: Vec<String>,
+    pub(crate) items: Vec<Candidate>,
+    /// what the list was read for (read once when it opens)
+    all: Vec<Candidate>,
     /// byte where the name being typed starts
     start: Option<usize>,
     /// Esc was pressed for the name starting at this byte
@@ -122,12 +174,26 @@ pub(crate) struct TagAssist {
     ranked_for: Option<String>,
     /// this frame: the entry picked by the keyboard
     pub(crate) pick: Option<usize>,
+    /// a sentence shown instead of a list (no bibliography): there is nothing to pick
+    pub(crate) notice: Option<String>,
+    /// this frame: the link of the notice was clicked
+    pub(crate) notice_clicked: bool,
 }
 
-impl TagAssist {
+impl ListAssist {
     /// Before the text box: ↑↓ (Ctrl+J/K) choose, Enter or Tab pick, Esc closes.
     pub(crate) fn take_keys(&mut self, ui: &mut Ui) {
         self.pick = None;
+        self.notice_clicked = false;
+        if self.notice.is_some() {
+            ui.input_mut(|i| {
+                if i.consume_key(Modifiers::NONE, Key::Escape) {
+                    self.dismissed = self.start;
+                    self.notice = None;
+                }
+            });
+            return;
+        }
         if !self.active || self.items.is_empty() {
             return;
         }
@@ -149,24 +215,31 @@ impl TagAssist {
         });
     }
 
+    /// Whether the list or its notice is on the screen.
+    pub(crate) fn is_open(&self) -> bool {
+        self.active || self.notice.is_some()
+    }
+
     /// After the text box (`id` is its id): open, filter and draw the list, and complete the pick.
     /// True when the text changed.
-    pub(crate) fn after(&mut self, ui: &mut Ui, id: egui::Id, text: &mut String, vault: &Vault, output: &egui::text_edit::TextEditOutput, typing: bool) -> bool {
+    pub(crate) fn after(&mut self, ui: &mut Ui, id: egui::Id, text: &mut String, source: &dyn Source, output: &egui::text_edit::TextEditOutput, typing: bool) -> bool {
         let resp = &output.response.response;
-        let area = id.with("tags");
-        let on_list = self.active && ui.input(|i| i.pointer.interact_pos()).zip(ui.ctx().memory(|m| m.area_rect(area))).is_some_and(|(p, r)| r.contains(p));
+        let area = id.with(source.area());
+        let shown = self.active || self.notice.is_some();
+        let on_list = shown && ui.input(|i| i.pointer.interact_pos()).zip(ui.ctx().memory(|m| m.area_rect(area))).is_some_and(|(p, r)| r.contains(p));
         if on_list && !resp.has_focus() {
             ui.ctx().memory_mut(|m| m.request_focus(id));
             ui.ctx().request_repaint();
         }
         let stored = || egui::text_edit::TextEditState::load(ui.ctx(), id).and_then(|st| st.cursor.char_range()).filter(|r| r.is_empty()).map(|r| r.primary.index.0);
         let cursor = output.cursor_range.filter(|r| r.is_empty()).map(|r| r.primary.index.0).or_else(|| if on_list { stored() } else { None });
-        let query = if (resp.has_focus() || on_list) && typing { cursor.and_then(|c| tag_query(text, markdown::char_to_byte(text, c))) } else { None };
-        // a dismissed tag stays closed until the cursor leaves it
+        let query = if (resp.has_focus() || on_list) && typing { cursor.and_then(|c| source.query(text, markdown::char_to_byte(text, c))) } else { None };
+        // a dismissed name stays closed until the cursor leaves it
         if query.is_none() {
             self.dismissed = None;
         }
         let query = query.filter(|(s, _)| Some(*s) != self.dismissed);
+        self.notice = None;
         let Some((start, name)) = query else {
             self.active = false;
             self.start = None;
@@ -174,38 +247,41 @@ impl TagAssist {
             return false;
         };
         if !self.active {
-            // the index is read once when the list opens, not on every key
-            self.all = vault.all_tags().into_iter().map(|(t, _)| t).collect();
+            // the candidates are read once when the list opens, not on every key
+            self.all = source.load();
             self.sel = 0;
             self.ranked_for = None;
         }
         self.start = Some(start);
         if self.ranked_for.as_deref() != Some(name.as_str()) {
-            self.items = rank(&name, &self.all);
+            self.items = source.rank(&name, &self.all);
             self.ranked_for = Some(name);
             self.sel = 0;
         }
         self.active = !self.items.is_empty();
+        let below = |c: usize| output.galley_pos + output.galley.pos_from_cursor(CCursor::new(c)).left_bottom().to_vec2() + Vec2::new(0.0, 4.0);
         if !self.active {
+            // nothing to list: a place that wants an answer says why
+            if let Some(why) = source.notice(text, start, self.ranked_for.as_deref().unwrap_or_default()) {
+                self.notice_clicked = Self::notice_popup(ui, area, below(cursor.unwrap_or(0)), &why);
+                self.notice = Some(why);
+            }
             return false;
         }
         let picked = match self.pick.take() {
             Some(p) => Some(p),
             None => {
-                let c = cursor.unwrap_or(0);
-                let r = output.galley.pos_from_cursor(CCursor::new(c));
-                let pos = output.galley_pos + r.left_bottom().to_vec2() + Vec2::new(0.0, 4.0);
-                let clicked = self.popup(ui, area, pos);
+                let clicked = self.popup(ui, area, below(cursor.unwrap_or(0)), source.colour());
                 if clicked.is_some() {
                     ui.ctx().memory_mut(|m| m.request_focus(id));
                 }
                 clicked
             }
         };
-        let Some(tag) = picked.and_then(|i| self.items.get(i).cloned()) else { return false };
+        let Some(item) = picked.and_then(|i| self.items.get(i).cloned()) else { return false };
         let cur = markdown::char_to_byte(text, cursor.unwrap_or(0));
-        text.replace_range(start..cur, &tag);
-        let c = markdown::byte_to_char(text, start + tag.len());
+        text.replace_range(start..cur, &item.insert);
+        let c = markdown::byte_to_char(text, start + item.insert.len());
         let mut state = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
         state.cursor.set_char_range(Some(CCursorRange::one(CCursor::new(c))));
         state.store(ui.ctx(), id);
@@ -215,17 +291,37 @@ impl TagAssist {
     }
 
     /// Draw the list at `pos`; returns the entry clicked.
-    fn popup(&self, ui: &Ui, area: egui::Id, pos: egui::Pos2) -> Option<usize> {
+    fn popup(&self, ui: &Ui, area: egui::Id, pos: egui::Pos2, colour: egui::Color32) -> Option<usize> {
         let mut clicked = None;
         egui::Area::new(area).order(egui::Order::Foreground).fixed_pos(pos).show(ui.ctx(), |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
                 ui.set_min_width(200.0);
-                for (i, t) in self.items.iter().enumerate() {
-                    if ui.selectable_label(i == self.sel, egui::RichText::new(format!("#{t}")).color(theme::palette().tag)).clicked() {
+                for (i, c) in self.items.iter().enumerate() {
+                    let mut job = egui::text::LayoutJob::default();
+                    let font = egui::TextStyle::Body.resolve(ui.style());
+                    job.append(&c.label, 0.0, egui::TextFormat { font_id: font.clone(), color: colour, ..Default::default() });
+                    if !c.detail.is_empty() {
+                        job.append(&format!("  {}", c.detail), 0.0, egui::TextFormat { font_id: egui::FontId::new(font.size * 0.85, font.family.clone()), color: theme::palette().muted, ..Default::default() });
+                    }
+                    // a long entry is cut to the width of the list, not stretched over the page
+                    job.wrap = egui::text::TextWrapping { max_width: 480.0, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+                    if ui.selectable_label(i == self.sel, job).clicked() {
                         clicked = Some(i);
                     }
                 }
                 ui.label(egui::RichText::new("↑↓ or Ctrl+J/K to move · Enter, Tab or click to pick · Esc to close").small().color(theme::palette().faint));
+            });
+        });
+        clicked
+    }
+
+    /// Draw the sentence that says why there is no list; true when its link was clicked.
+    fn notice_popup(ui: &Ui, area: egui::Id, pos: egui::Pos2, why: &str) -> bool {
+        let mut clicked = false;
+        egui::Area::new(area).order(egui::Order::Foreground).fixed_pos(pos).show(ui.ctx(), |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.label(egui::RichText::new(why).color(theme::palette().muted));
+                clicked = ui.link("Choose a bibliography file in Settings").clicked();
             });
         });
         clicked

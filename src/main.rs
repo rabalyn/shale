@@ -31,6 +31,7 @@ mod board;
 mod busy;
 mod calendar;
 mod caption;
+mod cite_assist;
 mod code_box;
 mod colour_tags;
 mod config;
@@ -173,6 +174,7 @@ mod test_exec;
 mod test_exec_tests;
 mod theme;
 mod themes;
+mod thesis;
 mod thread;
 #[cfg(test)]
 mod thread_tests;
