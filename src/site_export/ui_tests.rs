@@ -79,6 +79,17 @@ impl T {
         panic!("the publish did not end");
     }
 
+    /// Frames, with a rest between them, until `text` is shown; fails after 10 s with what is shown.
+    fn wait_for(&mut self, text: &str) {
+        for _ in 0..500 {
+            if self.shows(text) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        panic!("{text:?} was not shown: {:?}", self.hl.text);
+    }
+
     fn tip(&self) -> String {
         git_ok(&hermetic(false), &self.remote, &["for-each-ref", "--format=%(objectname)", "refs/heads/site"])
     }
@@ -198,6 +209,7 @@ fn site_065_cancel_stops_the_publish_and_leaves_the_target_as_it_was() {
     let _gate = crate::gitsync::hold_git(&mut gated, &gate_dir);
     t.app.sync.git = gated;
     t.click("Publish");
+    t.wait_for("Writing the site…");
     assert!(t.shows("Publishing the site…") && t.shows("Writing the site…"), "the task and its step: {:?}", t.hl.text);
     assert!(t.shows("Cancel"));
     t.click("Cancel");
