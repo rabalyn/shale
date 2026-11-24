@@ -1,8 +1,8 @@
 # Forgejo test environment
 
 A real Forgejo (SQLite) in one container, for the server path of the sync wizard (SYNC-066, rabalyn/shale#469).
-It listens on `127.0.0.1:13000` only, has no registration, no SSH, no mail and no actions, and one seeded
-administrator: user `shale`, password `shale-forgejo-test-1` (a test account of a throw-away server). The tests make
+It listens on `127.0.0.1:13000` (web and API) and `127.0.0.1:13022` (Forgejo's built-in SSH server, SYNC-081) only, has
+no registration, no mail and no actions, and one seeded administrator: user `shale`, password `shale-forgejo-test-1` (a test account of a throw-away server). The tests make
 their own access tokens through the API (`POST /api/v1/users/shale/tokens`).
 
 ```sh
@@ -18,7 +18,12 @@ What the suite checks (`src/gitsync/wizard/forgejo_env_tests.rs`):
 - a real `git` syncs a vault with it, and git gets the token through **Shale's askpass helper** (the Shale executable
   with `SHALE_GIT_ASKPASS=1`, SYNC-054) from a pretend `secret-tool` (`tests/askpass/secret-tool`, a few lines of shell
   that keep secrets in a folder), as it would from a desktop's keyring;
-- the words for a wrong token, a repository that is not there and no server.
+- the words for a wrong token, a repository that is not there and no server;
+- SSH (SYNC-081, SYNC-083): the test makes keys with `ssh-keygen` in a temporary folder and registers them through
+  `POST /api/v1/user/keys`; a key without a passphrase syncs a vault; a key with a passphrase syncs when it is in an
+  `ssh-agent` the test starts on a socket of its own (`ssh-add` gets the passphrase from a throw-away `SSH_ASKPASS`
+  script, in the test only); without it the failure is told as "locked" or "no agent". The clone address is
+  `ssh://git@127.0.0.1:13022/<owner>/<repo>.git` and the tests trust the host in a `known_hosts` file of their own.
 
 The tests find the Shale executable that cargo built (`target/debug/shale`; `SHALE_ENV_TESTS_BIN` names another).
 The container image is `codeberg.org/forgejo/forgejo:11.0.16-rootless`, pinned. With Docker the compose command is

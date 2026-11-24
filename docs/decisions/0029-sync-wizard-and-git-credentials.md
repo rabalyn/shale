@@ -72,8 +72,12 @@ store safely, and a warning when the vault is on a network share or in a cloud-s
 
 - **Device and OAuth sign-in (#480)**: needs one registered OAuth application per provider (client IDs
   Shale ships) and a decision for self-hosted servers. Not built; the token path is the default.
-- **Keys without a passphrase** (decision 5) and **trusting a new SSH host on first use** are reversible
-  defaults; the alternative is a passphrase field and an explicit host-key confirmation step.
+- **Trusting a new SSH host on first use** is a reversible default; the alternative is an explicit
+  host-key confirmation step.
+- **Keys with a passphrase** (decided by the owner on 2026-11-24, #635, #563, SYNC-077): Shale has no passphrase
+  field and never asks for or stores an SSH passphrase (the stance of MAIL-171 for GnuPG). A key of the person's
+  own with a passphrase works through their ssh-agent (`SSH_AUTH_SOCK` is passed on to git and ssh); a key that the
+  agent does not hold is told as "locked" with the fix, and no agent as "no agent" (SYNC-079).
 - **Connecting a server to a vault that has a local-only history** moves that history into `.git`
   (decided by the owner on 2026-11-22, ADR-0028 amendment, #485, SYNC-072…SYNC-075).
 - **Without a keyring there is no token sign-in.** A session-only token would need the token in the

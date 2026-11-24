@@ -3,7 +3,7 @@
 //! `app.sync.setup.wizard`; the dialog takes it out while it draws, as the history dialog does.
 
 use super::provider::{self, Kind, PRESETS};
-use super::test_sync;
+use super::test_sync::{self, Problem};
 use super::{api, ssh, Choice, Method, Msg, Step, Test, Wizard, CONNECT, MOVE_OUT, WIZARD_CALL};
 use crate::app::sync::GIT_SYNC;
 use crate::app::{Modal, ShaleApp};
@@ -30,6 +30,8 @@ enum Ask {
     RepoNext,
     RunTest,
     Open(String),
+    /// The section of the sign-in problems note (SYNC-082).
+    Help(&'static str),
     Copy(String),
     MoveOut,
 }
@@ -109,6 +111,7 @@ impl ShaleApp {
                     w.say(format!("Could not open the page: {e}"), false);
                 }
             }
+            Ask::Help(heading) => self.open_user_guide_at(test_sync::GUIDE_NOTE, heading),
             Ask::Copy(text) => ctx.copy_text(text),
             Ask::MoveOut => self.start_moveout(),
             Ask::Finish => {
@@ -349,7 +352,7 @@ impl ShaleApp {
             Test::Running if !self.sync.running() => {
                 w.test = match &self.sync.last {
                     Some((_, Ok(_))) => Test::Worked(test_sync::worked(self.sync.last_report.as_ref().unwrap_or(&gitsync::Report::default()))),
-                    Some((_, Err(e))) => Test::Failed(test_sync::classify(e)),
+                    Some((_, Err(e))) => Test::Failed(super::diagnose::diagnose(e, &self.sync.facts.lock().map(|f| *f).unwrap_or_default())),
                     None => Test::Running,
                 };
             }
@@ -505,13 +508,20 @@ pub(crate) fn warnings_ui(ui: &mut Ui, findings: &[Finding], has_dot_git: bool, 
     ask
 }
 
-fn message(ui: &mut Ui, w: &Wizard) {
-    if let Some((text, ok)) = &w.message {
-        if *ok {
-            theme::hint(ui, text.clone());
-        } else {
-            theme::problem(ui, text.clone());
-        }
+/// What went wrong, in red, and for a case the user guide explains a link to its section (SYNC-082).
+fn problem_with_help(ui: &mut Ui, text: &str) -> Option<Ask> {
+    theme::problem(ui, text.to_string());
+    let heading = Problem::from_words(text)?.guide()?;
+    ui.link("How to fix this (opens the user guide)").clicked().then_some(Ask::Help(heading))
+}
+
+fn message(ui: &mut Ui, w: &Wizard) -> Option<Ask> {
+    let (text, ok) = w.message.as_ref()?;
+    if *ok {
+        theme::hint(ui, text.clone());
+        None
+    } else {
+        problem_with_help(ui, text)
     }
 }
 
@@ -579,7 +589,7 @@ fn body(ui: &mut Ui, w: &mut Wizard, cx: &Cx, managed: &mut ManagedState, gitcfg
                 theme::hint(ui, "Forgejo, Gitea and GitHub let Shale list and create repositories for you. For any other server you paste the address of a repository.");
             }
             theme::hint(ui, "A folder on this computer or a network share also works (an absolute path): no sign-in is needed.");
-            message(ui, w);
+            ask = ask.or(message(ui, w));
             spinner_line(ui, &cx.busy);
         }
         Step::SignIn => {
@@ -642,7 +652,7 @@ fn body(ui: &mut Ui, w: &mut Wizard, cx: &Cx, managed: &mut ManagedState, gitcfg
                     }
                 }
             }
-            message(ui, w);
+            ask = ask.or(message(ui, w));
             spinner_line(ui, &cx.busy);
         }
         Step::Repo => {
@@ -679,7 +689,7 @@ fn body(ui: &mut Ui, w: &mut Wizard, cx: &Cx, managed: &mut ManagedState, gitcfg
                 }
                 ui.add(egui::TextEdit::singleline(&mut w.repo_text).hint_text("owner/name or the address of the repository").desired_width(460.0));
             }
-            message(ui, w);
+            ask = ask.or(message(ui, w));
             spinner_line(ui, &cx.busy);
         }
         Step::Test => {
@@ -712,7 +722,7 @@ fn body(ui: &mut Ui, w: &mut Wizard, cx: &Cx, managed: &mut ManagedState, gitcfg
                     theme::paragraph(ui, text.clone());
                 }
                 Test::Failed(p) => {
-                    theme::problem(ui, p.words());
+                    ask = ask.or(problem_with_help(ui, &p.words()));
                 }
             }
         }

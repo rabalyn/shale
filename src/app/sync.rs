@@ -4,6 +4,8 @@
 use super::{muted, ShaleApp};
 use crate::busy::{self, Key};
 use crate::drawing::DrawingDoc;
+use crate::gitsync::wizard::diagnose;
+use crate::gitsync::wizard::test_sync::{self, Problem};
 use crate::gitsync::{self, lfs, Git, Report, TreeGuard, TreeLock};
 use crate::theme;
 use crate::vault::rel_to_string;
@@ -60,6 +62,9 @@ pub struct SyncState {
     pulls: VecDeque<Option<PathBuf>>,
     /// `git --version`, looked up once (None inside = git is missing).
     git_version: Option<Option<String>>,
+    /// What the cheap checks found when the last sync failed for an SSH key (SYNC-077): written by the
+    /// sync job, read where the error is shown.
+    pub(crate) facts: std::sync::Arc<std::sync::Mutex<crate::gitsync::wizard::diagnose::Facts>>,
     /// The report of the last sync that worked (the wizard's test sync tells it in words, SYNC-058).
     pub last_report: Option<Report>,
     /// The "Turn on sync" wizard, the detection of shared folders and the move out (SYNC-047…SYNC-063).
@@ -104,6 +109,7 @@ impl SyncState {
         self.last_start = None;
         self.last = None;
         self.last_report = None;
+        self.facts = Default::default();
         self.lfs = lfs::Status::default();
         self.setup.forget_vault();
         self.url.clear();
@@ -329,6 +335,12 @@ impl ShaleApp {
         self.start_sync();
     }
 
+    /// What a failed sync says in plain words (SYNC-077…SYNC-081); None when git's own message is all there is.
+    pub(crate) fn sync_problem(&self, error: &str) -> Option<Problem> {
+        let facts = self.sync.facts.lock().map(|f| *f).unwrap_or_default();
+        Some(diagnose::diagnose(error, &facts)).filter(|p| !matches!(p, Problem::Other(_)))
+    }
+
     /// Save everything, then sync in the background.
     pub(crate) fn start_sync(&mut self) {
         let git = self.sync.git.clone();
@@ -351,10 +363,22 @@ impl ShaleApp {
         let tree = self.sync.tree.clone();
         let ctx = self.ctx.clone();
         let job_root = root.clone();
+        let (facts, home) = (self.sync.facts.clone(), self.sync.setup.home().unwrap_or_default());
         let job = self.busy.spawn(
             GIT_SYNC,
             "Syncing with git…",
-            move || gitsync::sync(&git, &job_root, &opts, &tree),
+            move || {
+                // a failed sign-in with an SSH key is looked at here, off the frame (SYNC-077)
+                let r = gitsync::sync(&git, &job_root, &opts, &tree);
+                let found = match &r {
+                    Err(e) => diagnose::gather(&git, &job_root, &home, e),
+                    Ok(_) => Default::default(),
+                };
+                if let Ok(mut f) = facts.lock() {
+                    *f = found;
+                }
+                r
+            },
             move || {
                 if let Some(c) = ctx {
                     c.request_repaint();
@@ -376,7 +400,7 @@ impl ShaleApp {
             Err(e) => {
                 let repeated = matches!(&self.sync.last, Some((_, Err(old))) if *old == e);
                 if !repeated {
-                    self.toast(format!("Git sync failed: {e}"));
+                    self.toast(format!("Git sync failed: {}", self.sync_problem(&e).map_or(e.clone(), |p| p.words())));
                 }
                 self.sync.last = Some((when, Err(e)));
                 return;
@@ -619,12 +643,24 @@ impl ShaleApp {
                 self.start_sync();
             }
             if !busy::ui::status(ui, &self.busy, &GIT_SYNC) {
+                let problem = match &self.sync.last {
+                    Some((_, Err(e))) => self.sync_problem(e),
+                    _ => None,
+                };
                 let status = match &self.sync.last {
                     Some((t, Ok(s))) => muted(format!("Last sync {t}: {s}")),
-                    Some((t, Err(e))) => egui::RichText::new(format!("Last sync {t} failed: {e}")).color(theme::palette().link_missing),
+                    Some((t, Err(e))) => {
+                        let what = problem.as_ref().map_or(e.clone(), |p| p.words());
+                        egui::RichText::new(format!("Last sync {t} failed: {what}")).color(theme::palette().link_missing)
+                    }
                     None => muted("Not synced yet in this session"),
                 };
                 ui.label(status.size(12.0));
+                if let Some(heading) = problem.and_then(|p| p.guide()) {
+                    if ui.link("How to fix this").clicked() {
+                        self.open_user_guide_at(test_sync::GUIDE_NOTE, heading);
+                    }
+                }
             }
         });
         crate::settings::anchor::mark(ui, "sync.now", now.response.rect);

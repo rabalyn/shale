@@ -69,6 +69,7 @@ Shale's own git if you installed one, and which of them is in use.
 - **Remove…** asks first and deletes the folder `shale/git` and nothing else.
 - Passwords are git's business unless you used the wizard: then Shale gives git the token from the keyring (see
   [[Turn on sync]]); otherwise a credential helper or an SSH key. Shale's git is run the same way as any other git (no shell, no prompts).
+  A key with a passphrase works when your ssh-agent holds it; Shale never asks for or keeps a passphrase. When the sign-in fails, Shale says why and what to do, with a link into [[Git sync sign-in problems]].
 
 # Nothing is ever lost
 
