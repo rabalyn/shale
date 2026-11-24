@@ -1462,6 +1462,20 @@ mod pretend_browser_tests {
         assert!(!is_signed_in(&a));
     }
 
+    /// The sockets of this process that listen on 127.0.0.1:`port` (their inode numbers), from `/proc` on Linux; empty elsewhere.
+    fn listening_sockets(port: u16) -> Vec<u64> {
+        let Ok(table) = std::fs::read_to_string("/proc/net/tcp") else { return Vec::new() };
+        let local = format!("0100007F:{port:04X}");
+        table
+            .lines()
+            .skip(1)
+            .filter_map(|l| {
+                let f: Vec<&str> = l.split_whitespace().collect();
+                (f.get(1) == Some(&local.as_str()) && f.get(3) == Some(&"0A")).then(|| f.get(9).and_then(|i| i.parse().ok())).flatten()
+            })
+            .collect()
+    }
+
     // spec: JOB-032
     #[test]
     fn job_032_cancel_frees_the_redirect_listener_and_a_token_that_arrives_with_cancel_is_not_kept() {
@@ -1480,9 +1494,27 @@ mod pretend_browser_tests {
         log.wait_opened(1);
         let port: u16 = url.lock().unwrap().split("redirect_uri=http%3A%2F%2F127.0.0.1%3A").nth(1).and_then(|r| r.split("%2F").next()).and_then(|p| p.parse().ok()).expect("the redirect port is in the address");
         assert!(TcpListener::bind(("127.0.0.1", port)).is_err(), "the listener is bound while it waits");
+        let mine = listening_sockets(port);
         cancel.store(true, Ordering::SeqCst);
         assert_eq!(rx.recv_timeout(Duration::from_secs(10)).expect("the job ended").unwrap().err(), Some(OAuthError::Cancelled));
-        assert!(TcpListener::bind(("127.0.0.1", port)).is_ok(), "Cancel freed the redirect port");
+        // The port is an ephemeral one, and the other tests of this binary (threads of one process) bind port 0 all the time:
+        // one of them can be given this very port the moment Shale lets go of it, and keep it for its whole run (#659). So
+        // "bind fails" does not say that Shale still listens. `sign_in` drops its listener before it returns, i.e. before
+        // the job's result is sent; what is checked is that Shale's own socket is gone (a later holder of the port is
+        // another socket). Where the sockets cannot be listed (not Linux) `mine` is empty and the port is bound again
+        // instead, which can only fail when another test took it first, so that bind is retried for a bounded time.
+        assert!(mine.len() <= 1, "only Shale's listener holds the port while it waits: {mine:?}");
+        if mine.is_empty() {
+            let freed = (0..200).any(|_| {
+                TcpListener::bind(("127.0.0.1", port)).is_ok() || {
+                    std::thread::sleep(Duration::from_millis(25));
+                    false
+                }
+            });
+            assert!(freed, "Cancel freed the redirect port");
+        } else {
+            assert!(!listening_sockets(port).contains(&mine[0]), "Cancel freed the redirect port");
+        }
         drop(guard);
         // Cancel that comes while the code is traded for tokens: the tokens are dropped, nothing is kept, not even in memory
         let (guard, log) = pretend_browser(Visit::Approve);
