@@ -1,6 +1,6 @@
 # ADR-0033: Files, Search and Tags on either side: move or copy
 
-- **Status**: Accepted (2026-11-23)
+- **Status**: Accepted (2026-11-23), amended by [0038](0038-main-views-as-sidebar-companions.md)
 - **Date**: 2026-11-23
 - **Specs**: LAY-020…LAY-027
 - **Issues**: rabalyn/shale#573
@@ -64,4 +64,5 @@ them is a pane that could be drawn in a sidebar.
   at and the choice; the question is a state of the window (`SideState::ask`), not of the model.
 - The left sidebar can be empty of views; its toggle still works and says what to do.
 - Feeds, Mail and the Calendar cannot become sidebar panes without a new decision (they are tabs
-  with their own state and size needs); the drop refuses them with the no-drop cue.
+  with their own state and size needs); the drop refuses them with the no-drop cue. (ADR-0038 is
+  that decision: they become compact companions with a state of their own, Mail first.)

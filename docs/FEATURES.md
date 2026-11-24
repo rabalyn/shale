@@ -692,7 +692,7 @@ The settings stay open until closed (✕, Esc or the ⋯ button; a click outside
 - Drag a panel icon over the content of the right sidebar: the area lights up ("Drop to open
   this icon in a new view") and dropping makes a new view below it. Drag icons from one
   menubar to another, from a view to the ribbon (it then is a shortcut that shows the panel
-  below the views) and back. Icons that are no panels and no views of the left sidebar (Mail, Feeds, …) cannot go to the right
+  below the views) and back. Icons that are no panels, no views of the left sidebar and not Mail (Feeds, Calendar, Graph, …) cannot go to the right
   sidebar: the pointer shows "not allowed" and nothing changes. Taking the last icon out of a
   view removes the view. Esc cancels a drag.
 - **Files, Search and Tags on either side** (LAY-020 to LAY-027): drag the icon of Files, Search or Tags from the
@@ -701,6 +701,13 @@ The settings stay open until closed (✕, Esc or the ⋯ button; a click outside
   changes nothing). Right-click the icon for **Move to / Copy to the right (left) sidebar** instead of dragging. A copy
   shows the same state: one file tree, one search. If the left sidebar's view has moved, it shows the next one (or says
   none is left); Ctrl+Shift+F shows Search where it is. The places are kept in the settings (`sidebars`).
+- **Mail in the right sidebar** (LAY-028 to LAY-032, rabalyn/shale#610, ADR-0038): Mail is placed like Files, Search and Tags
+  (drag and **Move or copy?**, or right-click **Move to / Copy to the right sidebar**). The pane is a compact companion
+  of the Mail tab: the accounts, the folders with their unread counts, and the message list with the unread state. A click
+  on a message opens it in the Mail tab (the tab is opened when there is none). The pane keeps its own account, folder,
+  selection and scroll, so the sidebar can show the Inbox while the tab shows another folder; the mail data and the syncs
+  are shared. A copy keeps the Mail icon in the ribbon, which still opens the tab; the left sidebar never shows Mail.
+  Calendar and Feeds follow with their own compact panes.
 - Drag the border between two views up or down to change their heights (they start equal; a
   view never gets lower than a small minimum).
 - A middle click on the **Mail**, **Feeds** or **Calendar** icon opens that view in a new tab.

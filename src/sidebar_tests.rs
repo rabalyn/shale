@@ -142,6 +142,7 @@ impl W {
 impl Drop for W {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.dir);
+        let _ = std::fs::remove_dir_all(&self.app.mail.root);
     }
 }
 
@@ -311,7 +312,7 @@ fn lay_005_icons_are_dragged_between_menubars_right_to_right_left_to_right_and_r
 fn lay_006_a_ribbon_icon_that_cannot_live_on_the_right_is_refused_with_a_no_drop_cue() {
     let mut w = W::new("refused");
     let before = w.app.side.layout.clone();
-    let mail = w.ribbon_icon(Item::Mail).center();
+    let mail = w.ribbon_icon(Item::Graph).center();
     // over a menubar of the right sidebar
     let bar = w.bar(0).center();
     w.drag_to(mail, bar);
@@ -354,7 +355,7 @@ fn lay_007_taking_the_last_icon_out_of_a_view_removes_the_view_and_an_empty_side
     assert!(w.right_has("Drag a panel icon here"), "{:?}", w.right_text());
     // a drop on the empty sidebar makes the first view; a ribbon icon is refused there
     let area = w.app.side.right_rect.unwrap().center();
-    w.drag_and_drop(w.ribbon_icon(Item::Mail).center(), area);
+    w.drag_and_drop(w.ribbon_icon(Item::Graph).center(), area);
     assert!(w.views().is_empty());
     w.drag_and_drop(w.ribbon_icon(panel(RightPanel::Calendar)).center(), area);
     assert_eq!(w.views(), vec![vec![panel(RightPanel::Calendar)]]);
@@ -835,9 +836,9 @@ fn lay_022_dragging_a_view_back_to_the_ribbon_asks_unless_it_is_there_and_a_move
 
 // spec: LAY-006, LAY-020
 #[test]
-fn lay_020_the_main_views_and_commands_are_still_refused_on_the_right_and_a_movable_view_is_accepted() {
+fn lay_020_the_main_views_without_a_pane_and_commands_are_still_refused_on_the_right_and_a_movable_view_is_accepted() {
     let mut w = W::new("movable-cue");
-    for item in [Item::Mail, Item::Social, Item::Calendar, Item::Import] {
+    for item in [Item::Graph, Item::Social, Item::Calendar, Item::Import] {
         w.drag_to(w.ribbon_icon(item).center(), w.bar(0).center());
         assert_eq!(w.app.side.cue, Cue::Refused, "{item:?}");
         w.release(w.bar(0).center());
@@ -881,8 +882,8 @@ fn lay_024_the_icon_menu_moves_and_copies_a_view_to_the_other_side_without_the_m
     w.click_at(mv.center());
     assert_eq!((movable_places(&w, Item::Search), w.views().len()), ((true, false), 0));
     assert_eq!(w.app.side.layout.ribbon.last(), Some(&Item::Search), "at the end of the ribbon");
-    // the main views have no such entries
-    w.right_click_at(w.ribbon_icon(Item::Mail).center());
+    // the main views that have no pane yet have no such entries
+    w.right_click_at(w.ribbon_icon(Item::Graph).center());
     assert!(w.app.side.menu.to_other.is_none());
 }
 
@@ -925,4 +926,230 @@ fn lay_024_two_copies_of_a_view_share_one_state() {
     w.frames(2);
     assert!(w.left_has("Welcome") && w.right_has("Welcome"), "the same search is shown on both sides: {:?}", w.hl.text);
     assert!(w.app.side.layout.on_left(Item::Search) && w.app.side.layout.on_right(Item::Search));
+}
+
+impl W {
+    /// An account with the demo store (Inbox with 8 mails, 2 of them unread, Sent, Trash, Projects/Hall B);
+    /// returns when the index is open.
+    fn with_mail(tag: &str) -> W {
+        let mut w = W::new(tag);
+        crate::mail::demo::seed(&w.app.mail.root).unwrap();
+        w.app.cfg.mail_accounts = vec![crate::config::MailAccount { id: crate::mail::demo::ACCOUNT.into(), name: "Demo mail".into(), host: "imap.example.com".into(), user: "ada@example.com".into(), ..Default::default() }];
+        // no sync, no watch, no timer that marks a message read and no server: only what the test does changes the index
+        w.app.cfg.mail_sync_minutes = 0;
+        w.app.cfg.mail_mark_read = false;
+        w.app.mail.watch.enabled = false;
+        w.app.mail.factory = std::sync::Arc::new(|_, _| Err("no server in this test".to_string()));
+        w.hl.settle(&mut w.app);
+        w.frames(3);
+        w
+    }
+
+    /// Mail copied to the first right view (the way the icon menu does it).
+    fn copy_mail_right(&mut self) {
+        self.right_click_at(self.ribbon_icon(Item::Mail).center());
+        self.click_at(self.app.side.menu.to_other.expect("Mail has the entries").1.center());
+        self.frames(3);
+    }
+
+    /// Where the pane of the right sidebar drew a control (see `MailPane::rects`).
+    fn pane(&self, name: &str) -> Rect {
+        let rects = &self.app.side.panes.mail.rects;
+        rects.iter().find(|(n, _)| n == name).unwrap_or_else(|| panic!("the Mail pane drew no {name}: {:?}", rects.iter().map(|(n, _)| n).collect::<Vec<_>>())).1
+    }
+
+    fn mail_folder(&self, name: &str) -> i64 {
+        self.app.mail.folders.iter().find(|f| f.name == name).unwrap_or_else(|| panic!("no folder {name}")).id
+    }
+
+    fn pane_unread(&self) -> usize {
+        self.app.side.panes.mail.rects.iter().filter(|(n, _)| n.starts_with("mail:unread:")).count()
+    }
+}
+
+// spec: LAY-028
+#[test]
+fn lay_028_dragging_mail_to_the_right_sidebar_asks_and_both_answers_work_and_the_ribbon_icon_still_opens_the_tab() {
+    let mut w = W::with_mail("mail-drag");
+    let before = w.app.side.layout.clone();
+    // the drop is no longer refused: the cue is the bar's and the question opens
+    let at = Pos2::new(w.bar(0).max.x - 4.0, w.bar(0).center().y);
+    w.drag_to(w.ribbon_icon(Item::Mail).center(), at);
+    assert!(matches!(w.app.side.cue, Cue::Bar { .. }), "{:?}", w.app.side.cue);
+    assert_eq!(w.hl.cursor, egui::CursorIcon::Grabbing);
+    w.release(at);
+    assert!(w.app.side.ask.is_some());
+    assert_eq!(w.app.side.layout, before, "nothing changed before the answer");
+    w.answer(|b| b.copied);
+    assert_eq!(movable_places(&w, Item::Mail), (true, true), "a copy: the ribbon keeps it");
+    assert_eq!(w.app.side.layout.views[0].active, Item::Mail);
+    assert_eq!(w.app.cfg.sidebars.right[0].icons.last().map(String::as_str), Some("mail"), "stored under its own id");
+    // the ribbon icon still opens the Mail tab; the pane stays
+    w.click_at(w.ribbon_icon(Item::Mail).center());
+    w.frames(2);
+    assert_eq!(w.app.tabbar.tabs[w.app.tabbar.active].view, View::Mail);
+    assert!(w.right_has("INBOX"), "{:?}", w.right_text());
+    // a drag of the copy to the ribbon, which has the view: the copy leaves the right side, nothing is asked
+    w.drag_and_drop(w.bar_icon(0, Item::Mail).center(), w.ribbon_icon(Item::Files).center());
+    assert_eq!(movable_places(&w, Item::Mail), (true, false));
+    // Move to the right: the ribbon loses it; the left sidebar never shows it as a pane
+    w.drag_to_first_bar(w.ribbon_icon(Item::Mail).center());
+    w.answer(|b| b.moved);
+    assert_eq!(movable_places(&w, Item::Mail), (false, true));
+    assert!(w.app.left_view().is_some(), "the left sidebar shows Files, Search or Tags");
+    assert!(w.right_has("INBOX"));
+    // it survives a restart
+    let w2 = w.restarted("mail-drag-2");
+    assert_eq!(movable_places(&w2, Item::Mail), (false, true));
+}
+
+// spec: LAY-028, LAY-029
+#[test]
+fn lay_028_the_icon_menu_moves_mail_and_back_and_calendar_and_feeds_are_still_refused() {
+    let mut w = W::with_mail("mail-menu");
+    w.right_click_at(w.ribbon_icon(Item::Mail).center());
+    let (mv, _) = w.app.side.menu.to_other.expect("Mail has Move and Copy");
+    w.click_at(mv.center());
+    assert_eq!((movable_places(&w, Item::Mail), w.views()[0].last()), ((false, true), Some(&Item::Mail)));
+    w.right_click_at(w.bar_icon(0, Item::Mail).center());
+    let (mv, _) = w.app.side.menu.to_other.expect("and back");
+    w.click_at(mv.center());
+    assert_eq!(movable_places(&w, Item::Mail), (true, false));
+    assert_eq!(w.app.side.layout.ribbon.last(), Some(&Item::Mail));
+    // Calendar and Feeds have no pane yet (LAY-029)
+    for item in [Item::Calendar, Item::Social] {
+        w.right_click_at(w.ribbon_icon(item).center());
+        assert!(w.app.side.menu.to_other.is_none(), "{item:?}");
+        w.press_esc();
+        w.drag_to(w.ribbon_icon(item).center(), w.bar(0).center());
+        assert_eq!(w.app.side.cue, Cue::Refused, "{item:?}");
+        w.release(w.bar(0).center());
+        assert_eq!(movable_places(&w, item), (true, false));
+    }
+}
+
+// spec: LAY-030
+#[test]
+fn lay_030_the_pane_lists_the_folders_with_unread_counts_and_the_messages_with_their_unread_state() {
+    let mut w = W::with_mail("mail-pane");
+    w.copy_mail_right();
+    // the first folder of the first account, the Inbox, is listed
+    let text = w.right_text();
+    assert!(text.iter().any(|t| t.starts_with("INBOX") && t.contains("(2)")), "{text:?}");
+    for name in ["Sent", "Trash", "Hall B"] {
+        assert!(w.right_has(name), "{name}: {text:?}");
+    }
+    assert!(w.right_has("8 messages"), "{text:?}");
+    assert!(w.right_has("Lecture hall B"), "{text:?}");
+    assert_eq!(w.pane_unread(), 2, "two of the eight are unread");
+    // a folder click lists that folder: Sent has one mail, read
+    w.click_at(w.pane(&format!("mailpane:folder:{}", w.mail_folder("Sent"))).center());
+    w.frames(2);
+    assert!(w.right_has("1 message") && !w.right_has("1 messages"), "{:?}", w.right_text());
+    assert_eq!(w.pane_unread(), 0);
+    assert_eq!(w.app.side.panes.mail.folder, Some(w.mail_folder("Sent")));
+}
+
+// spec: LAY-030
+#[test]
+fn lay_030_a_click_on_a_message_opens_it_in_the_mail_tab_and_opens_the_tab_when_there_is_none() {
+    let mut w = W::with_mail("mail-click");
+    w.copy_mail_right();
+    let mail_tabs = |w: &W| w.app.tabbar.tabs.iter().filter(|t| t.view == View::Mail).count();
+    assert_eq!(mail_tabs(&w), 0, "no Mail tab yet");
+    w.click_at(w.pane("mailpane:row:1").center());
+    w.frames(3);
+    assert_eq!(mail_tabs(&w), 1, "the tab was opened");
+    assert_eq!(w.app.tabbar.tabs[w.app.tabbar.active].view, View::Mail);
+    let clicked = w.app.side.panes.mail.selected.expect("the pane marks the message");
+    assert_eq!(w.app.mail.open.as_ref().map(|o| o.msg.id), Some(clicked), "the tab shows that message");
+    assert_eq!(w.app.mail.folder, w.app.side.panes.mail.folder);
+    // another message: the same tab
+    w.click_at(w.pane("mailpane:row:3").center());
+    w.frames(3);
+    assert_eq!(mail_tabs(&w), 1, "no second tab");
+    assert_ne!(w.app.mail.open.as_ref().map(|o| o.msg.id), Some(clicked));
+    assert_eq!(w.app.mail.open.as_ref().map(|o| o.msg.id), w.app.side.panes.mail.selected);
+}
+
+// spec: LAY-032
+#[test]
+fn lay_032_the_pane_says_why_it_is_empty() {
+    // no account
+    let mut w = W::new("mail-none");
+    w.copy_mail_right();
+    assert!(w.right_has("No mail account yet"), "{:?}", w.right_text());
+    assert!(w.app.side.panes.mail.rects.is_empty());
+    // the index is opening, or could not be opened
+    w.app.cfg.mail_accounts = vec![crate::config::MailAccount { id: "a".into(), name: "A".into(), ..Default::default() }];
+    w.app.mail.store = crate::mail::ui::StoreState::Opening;
+    w.frames(2);
+    assert!(w.right_has("Opening the mail index"), "{:?}", w.right_text());
+    w.app.mail.store = crate::mail::ui::StoreState::Failed("disk full".into());
+    w.frames(2);
+    assert!(w.right_has("could not be opened: disk full"), "{:?}", w.right_text());
+    // an empty folder, and an account that has no folder yet
+    let mut w = W::with_mail("mail-empty");
+    w.copy_mail_right();
+    w.click_at(w.pane(&format!("mailpane:folder:{}", w.mail_folder("Trash"))).center());
+    w.frames(2);
+    assert!(w.right_has("No messages here."), "{:?}", w.right_text());
+    w.app.cfg.mail_accounts.push(crate::config::MailAccount { id: "empty".into(), name: "Empty account".into(), ..Default::default() });
+    w.frames(2);
+    w.click_at(w.pane("mailpane:account:empty").center());
+    w.frames(2);
+    assert!(w.right_has("No folders yet"), "{:?}", w.right_text());
+    assert_eq!(w.app.side.panes.mail.folder, None);
+    // back to the first account: its first folder is listed again
+    w.click_at(w.pane(&format!("mailpane:account:{}", crate::mail::demo::ACCOUNT)).center());
+    w.frames(2);
+    assert_eq!(w.app.side.panes.mail.folder, Some(w.mail_folder("INBOX")));
+}
+
+// spec: LAY-031
+#[test]
+fn lay_031_the_pane_and_the_tab_choose_their_folders_separately() {
+    let mut w = W::with_mail("mail-independent");
+    w.copy_mail_right();
+    let (inbox, sent, trash) = (w.mail_folder("INBOX"), w.mail_folder("Sent"), w.mail_folder("Trash"));
+    assert_eq!((w.app.side.panes.mail.folder, w.app.mail.folder), (Some(inbox), Some(inbox)));
+    // the pane goes to Sent: the tab's folder stays
+    w.click_at(w.pane(&format!("mailpane:folder:{sent}")).center());
+    w.frames(2);
+    assert_eq!((w.app.side.panes.mail.folder, w.app.mail.folder), (Some(sent), Some(inbox)));
+    // the tab goes to Trash: the pane stays at Sent
+    let cfg = w.app.cfg.clone();
+    w.app.mail.select_folder(&cfg, trash);
+    w.frames(3);
+    assert_eq!((w.app.side.panes.mail.folder, w.app.mail.folder), (Some(sent), Some(trash)));
+    assert!(w.right_has("Re: Schedule for the autumn workshop"), "{:?}", w.right_text());
+    // a message selected in the tab is not the pane's selection
+    w.app.mail.cursor = Some(0);
+    w.frames(2);
+    assert_eq!(w.app.side.panes.mail.selected, None);
+}
+
+// spec: LAY-031
+#[test]
+fn lay_031_the_pane_and_the_tab_scroll_separately_and_share_one_index() {
+    let mut w = W::with_mail("mail-scroll");
+    w.copy_mail_right();
+    // a low window: eight rows do not fit in the pane
+    w.hl.set_size(Vec2::new(1500.0, 420.0));
+    w.click_at(w.ribbon_icon(Item::Mail).center());
+    w.frames(4);
+    assert_eq!(w.app.side.panes.mail.scroll, 0.0);
+    let list = w.pane("mailpane:row:0");
+    w.wheel(list.center(), -120.0);
+    assert!(w.app.side.panes.mail.scroll > 0.0, "the pane's list scrolled: {}", w.app.side.panes.mail.scroll);
+    assert_eq!(w.app.mail.visible.start, 0, "the tab's list did not");
+    // what the tab changes in the index shows in the pane: it reads the newest unread mail
+    w.wheel(list.center(), 500.0);
+    assert_eq!(w.pane_unread(), 2);
+    w.app.mail.cursor = Some(0);
+    let m = w.app.mail.cursor_message().expect("the tab has a first message");
+    let cfg = w.app.cfg.clone();
+    w.app.mail.toggle_read_on(&cfg, vec![m]);
+    w.frames(3);
+    assert_eq!(w.pane_unread(), 1, "the pane read the index again");
 }
