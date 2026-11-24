@@ -117,7 +117,7 @@ pub struct TexExport {
     /// The packages of the list that this engine lacks, when it is the managed one: a line with an
     /// Install button says so (TEX-043).
     pub missing: Vec<String>,
-    /// The packages this document needs besides what every document has (a board: `pdflscape`):
+    /// The packages this document needs besides what every document has (a board: `geometry` and `tools`):
     /// while one of them is in `missing`, Export is off (TEX-043).
     pub needs: Vec<String>,
     /// Install was pressed: the window starts `tlmgr install` of [`TexExport::wanted_packages`].
@@ -321,7 +321,7 @@ impl TexExport {
         }
     }
 
-    /// The line "The managed TeX Live misses: pdflscape" with its Install button, what the install is
+    /// The line "The managed TeX Live misses: geometry" with its Install button, what the install is
     /// doing, and why Export waits (TEX-043).
     fn packages_block(&mut self, ui: &mut Ui, rec: &mut dyn FnMut(&str, egui::Response) -> egui::Response) {
         let wanted = self.wanted_packages();

@@ -428,17 +428,17 @@ fn managed_missing(missing: &[&str]) -> super::engine::Detection {
 // spec: TEX-043
 #[test]
 fn a_managed_tex_live_that_misses_packages_says_so_with_an_install_button_and_a_plain_note_can_still_be_exported() {
-    let mut t = T::new("dlg-missing-note", managed_missing(&["pdflscape"]));
+    let mut t = T::new("dlg-missing-note", managed_missing(&["geometry"]));
     put_set(&t);
     open_on(&mut t, "Plan.md", "---\nauthor: Ada\n---\n# Plan\n");
     click(&mut t, "engine:latex");
-    assert!(t.shows("The managed TeX Live misses: pdflscape") && has(&t, "install-packages") && has(&t, "missing-packages"), "{:?}", t.painted());
+    assert!(t.shows("The managed TeX Live misses: geometry") && has(&t, "install-packages") && has(&t, "missing-packages"), "{:?}", t.painted());
     let d = dialog(&t);
     let tex = d.tex.as_ref().unwrap();
-    assert!(tex.blocked_by().is_empty() && tex.can_export(d.busy()), "a note does not need pdflscape: Export is not held back");
+    assert!(tex.blocked_by().is_empty() && tex.can_export(d.busy()), "a note does not need geometry: Export is not held back");
     assert!(!has(&t, "blocked"));
     // a TeX of this computer that misses it gets no button: it is not Shale's to install into
-    let mut t = T::new("dlg-missing-system", found(Ok(good(Kind::System, &["pdflscape"])), Err("not installed"), None));
+    let mut t = T::new("dlg-missing-system", found(Ok(good(Kind::System, &["geometry"])), Err("not installed"), None));
     put_set(&t);
     open_on(&mut t, "Plan.md", "---\nauthor: Ada\n---\n# Plan\n");
     click(&mut t, "engine:latex");
@@ -448,14 +448,14 @@ fn a_managed_tex_live_that_misses_packages_says_so_with_an_install_button_and_a_
 // spec: TEX-043
 #[test]
 fn a_board_export_waits_for_a_package_the_managed_tex_live_lacks_and_starts_no_compile() {
-    let mut t = T::new("dlg-missing-board", managed_missing(&["pdflscape"]));
+    let mut t = T::new("dlg-missing-board", managed_missing(&["geometry"]));
     put_set(&t);
     open_on_board(&mut t);
     click(&mut t, "engine:latex");
-    assert!(t.shows("The managed TeX Live misses: pdflscape") && has(&t, "install-packages"), "{:?}", t.painted());
-    assert!(t.shows("This document needs pdflscape") && has(&t, "blocked"), "{:?}", t.painted());
+    assert!(t.shows("The managed TeX Live misses: geometry") && has(&t, "install-packages"), "{:?}", t.painted());
+    assert!(t.shows("This document needs geometry") && has(&t, "blocked"), "{:?}", t.painted());
     let d = dialog(&t);
-    assert_eq!(d.tex.as_ref().unwrap().blocked_by(), ["pdflscape"]);
+    assert_eq!(d.tex.as_ref().unwrap().blocked_by(), ["geometry"]);
     assert!(!d.tex.as_ref().unwrap().can_export(d.busy()), "Export is off while the board's package is missing");
     // a click on Export (and the call behind it) starts nothing
     click(&mut t, "export");
@@ -465,7 +465,7 @@ fn a_board_export_waits_for_a_package_the_managed_tex_live_lacks_and_starts_no_c
         _ => panic!("the dialog"),
     };
     let why = t.app.start_tex_export(&mut d, &eframe::egui::Context::default()).unwrap_err();
-    assert!(why.contains("misses the package pdflscape") && why.contains("press Install"), "{why}");
+    assert!(why.contains("misses the package geometry") && why.contains("press Install"), "{why}");
     assert!(d.tex.as_ref().unwrap().job.is_none());
     // another package that is missing is no reason to wait for a board
     let mut t = T::new("dlg-missing-board-other", managed_missing(&["ulem"]));
@@ -495,24 +495,24 @@ mod fake {
     #[test]
     fn install_runs_tlmgr_install_of_the_missing_packages_in_a_job_looks_again_and_then_the_board_exports() {
         use crate::pdf::tex::compile_tests::fake::script;
-        let mut t = T::new("dlg-install-board", managed_missing(&["pdflscape"]));
+        let mut t = T::new("dlg-install-board", managed_missing(&["geometry"]));
         put_set(&t);
         let state = t.dir.join("state");
         std::fs::create_dir_all(&state).unwrap();
-        // a managed TeX Live that lacks pdflscape until tlmgr is asked to install something; its lualatex tells its kernel and compiles
+        // a managed TeX Live that lacks geometry until tlmgr is asked to install something; its lualatex tells its kernel and compiles
         let bin = super::super::engine::managed_root(&t.data()).join("bin").join("x86_64-linux");
         let s = state.display();
         script(&bin, "lualatex", &format!("case \"$*\" in *SHALE-KERNEL*) echo 'SHALE-KERNEL 2025-11-01'; exit 0 ;; esac\ncp main.tex '{s}/main.tex'; echo ok > main.log; echo '%PDF-1.5 fake' > main.pdf"));
         script(&bin, "biber", "echo 'biber version: 2.21'");
-        script(&bin, "kpsewhich", &format!("for a; do [ \"$a\" = pdflscape.sty ] && [ ! -f '{s}/installed' ] || echo /texmf/$a; done"));
+        script(&bin, "kpsewhich", &format!("for a; do [ \"$a\" = geometry.sty ] && [ ! -f '{s}/installed' ] || echo /texmf/$a; done"));
         script(&bin, "tlmgr", &format!("echo \"$@\" >> '{s}/calls'\nsleep 1\ntouch '{s}/installed'"));
         let (repo, _) = super::super::install_tests::fake::serve(vec![]);
         t.app.cfg.tex.repository = repo.clone();
         t.app.tex.detection = None;
         open_on_board(&mut t);
         click(&mut t, "engine:latex");
-        until(&mut t, "the managed TeX Live is looked at", |t| dialog(t).tex.as_ref().unwrap().missing == ["pdflscape".to_string()]);
-        assert!(t.shows("The managed TeX Live misses: pdflscape") && !state.join("main.tex").exists());
+        until(&mut t, "the managed TeX Live is looked at", |t| dialog(t).tex.as_ref().unwrap().missing == ["geometry".to_string()]);
+        assert!(t.shows("The managed TeX Live misses: geometry") && !state.join("main.tex").exists());
         click(&mut t, "install-packages");
         // it runs as a job of the window, with its progress shown in the dialog
         assert!(t.app.tex.task.as_ref().is_some_and(|k| k.kind == super::super::settings_ui::TaskKind::Packages), "a job of Settings → LaTeX");
@@ -520,7 +520,7 @@ mod fake {
         assert!(!dialog(&t).tex.as_ref().unwrap().can_export(dialog(&t).busy()), "no export while it installs");
         until(&mut t, "the packages are installed and TeX was looked at again", |t| t.app.tex.task.is_none() && t.app.tex.detection.is_some() && dialog(t).tex.as_ref().unwrap().installing.is_none());
         let calls = std::fs::read_to_string(state.join("calls")).unwrap();
-        assert_eq!(calls.trim(), format!("--repository {repo} install pdflscape"), "exactly the missing package");
+        assert_eq!(calls.trim(), format!("--repository {repo} install geometry"), "exactly the missing package");
         assert!(dialog(&t).tex.as_ref().unwrap().missing.is_empty() && !t.shows("The managed TeX Live misses") && !has(&t, "install-packages"), "the line is gone: {:?}", t.painted());
         assert!(dialog(&t).tex.as_ref().unwrap().install_error.is_none());
         // now the board compiles
@@ -528,13 +528,13 @@ mod fake {
         click(&mut t, "kind:report");
         click(&mut t, "export");
         until(&mut t, "the export is done", |t| t.app.modal.is_none());
-        assert!(std::fs::read_to_string(state.join("main.tex")).unwrap().contains("\\usepackage{pdflscape}"));
+        assert!(std::fs::read_to_string(state.join("main.tex")).unwrap().contains("\\usepackage[pass]{geometry}"));
     }
 
     // spec: TEX-043
     #[test]
     fn a_failed_install_of_the_packages_says_why_and_keeps_the_button() {
-        let mut t = T::new("dlg-install-fails", managed_missing(&["pdflscape"]));
+        let mut t = T::new("dlg-install-fails", managed_missing(&["geometry"]));
         put_set(&t);
         open_on_board(&mut t);
         click(&mut t, "engine:latex");
@@ -554,7 +554,7 @@ mod fake {
         put_set(&t);
         let f = crate::pdf::tex::compile_tests::fake::Fake::new("pointer");
         f.lualatex();
-        f.put("log.last", "! LaTeX Error: File `pdflscape.sty' not found.\n! LaTeX Error: File `nosuch.sty' not found.\n");
+        f.put("log.last", "! LaTeX Error: File `geometry.sty' not found.\n! LaTeX Error: File `nosuch.sty' not found.\n");
         f.put("exit", "1");
         // the managed TeX Live that was looked at before the package was on the list: it does not know it misses it
         let mut engine = f.engine();
@@ -569,9 +569,9 @@ mod fake {
         until(&mut t, "the export failed", |t| dialog(t).tex.as_ref().unwrap().failure.is_some());
         t.hl.frames(&mut t.app, 3);
         let tex = dialog(&t).tex.as_ref().unwrap();
-        assert_eq!(tex.failure.as_ref().unwrap().missing.as_ref(), ["pdflscape".to_string()], "only the package of Shale's list, not the unknown file");
-        assert_eq!(tex.wanted_packages(), ["pdflscape".to_string()]);
-        assert!(t.shows("pdflscape of Shale's package list is not in the managed TeX Live: press Install above.") && has(&t, "install-packages") && t.shows("The managed TeX Live misses: pdflscape"), "{:?}", t.painted());
+        assert_eq!(tex.failure.as_ref().unwrap().missing.as_ref(), ["geometry".to_string()], "only the package of Shale's list, not the unknown file");
+        assert_eq!(tex.wanted_packages(), ["geometry".to_string()]);
+        assert!(t.shows("geometry of Shale's package list is not in the managed TeX Live: press Install above.") && has(&t, "install-packages") && t.shows("The managed TeX Live misses: geometry"), "{:?}", t.painted());
         // with the TeX of this computer there is nothing to install into: no pointer, no button
         let mut t = T::new("dlg-pointer-system", usable());
         put_set(&t);

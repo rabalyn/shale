@@ -143,8 +143,8 @@ pub const CHECKED: &[(&str, &str)] = &[
     ("pdfx", "pdfx.sty"),
     // what the writer of the export adds to a document (TEX-008)
     ("ulem", "ulem.sty"),
-    // the landscape pages of a board (BOARD-031)
-    ("pdflscape", "pdflscape.sty"),
+    // the landscape pages of a board (BOARD-031): its table (`tools` brings longtable) and its paper (geometry, above)
+    ("tools", "longtable.sty"),
     ("booktabs", "booktabs.sty"),
     ("amsmath", "amsmath.sty"),
     ("amsfonts", "amssymb.sty"),
@@ -152,11 +152,12 @@ pub const CHECKED: &[(&str, &str)] = &[
 ];
 
 /// The packages of `packages.txt` a document needs besides what every document has, by what it is:
-/// a board stands on `pdflscape` for its landscape pages (BOARD-031). A managed TeX Live that was
-/// installed before the package was on the list lacks it, and then the compile would fail (TEX-043).
-pub const BOARD_NEEDS: &[&str] = &["pdflscape"];
+/// a board stands on `geometry` for its landscape pages and on `longtable` (the TeX Live package `tools`)
+/// for its columns of cards (BOARD-031). A managed TeX Live that was installed without one of them
+/// lacks it, and then the compile would fail (TEX-043).
+pub const BOARD_NEEDS: &[&str] = &["geometry", "tools"];
 
-/// The package of the list that brings this file (`pdflscape.sty` is `pdflscape`, `scrartcl.cls` is
+/// The package of the list that brings this file (`geometry.sty` is `geometry`, `scrartcl.cls` is
 /// `koma-script`): one of [`CHECKED`], else a package that is called like the file. None for a file
 /// that is no package of Shale's list.
 pub fn package_of_file(file: &str) -> Option<&'static str> {

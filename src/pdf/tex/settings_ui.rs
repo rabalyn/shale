@@ -239,7 +239,7 @@ impl TexState {
     }
 }
 
-/// "The managed TeX Live misses: pdflscape", the line with the Install button (TEX-043).
+/// "The managed TeX Live misses: geometry", the line with the Install button (TEX-043).
 pub fn missing_line(missing: &[String]) -> String {
     format!("The managed TeX Live misses: {}", missing.join(", "))
 }

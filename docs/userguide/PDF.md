@@ -344,7 +344,7 @@ the TeX and checks it:
   then installs the packages Shale needs that your TeX Live lacks.
 - **The managed TeX Live misses: …** appears (in red, with an **Install** button) when the TeX Live
   Shale installed earlier lacks a package that a later version of Shale needs, for example
-  `pdflscape` for the landscape pages of a board. **Install** runs `tlmgr install` for exactly those
+  `geometry` for the landscape pages of a board. **Install** runs `tlmgr install` for exactly those
   packages, with a progress bar and **Cancel**, and looks for TeX again, so the line disappears. The
   same line and button are in the LaTeX export dialog. A board that needs a missing package cannot
   be exported until it is installed; other documents can. When an export fails because such a

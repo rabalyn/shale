@@ -593,15 +593,15 @@ wr("$dir/bin/$plat/biber", "#!/bin/sh\nexit 0\n");
         assert!(e.contains("tlmgr failed") && e.contains("is newer than local"), "{e}");
     }
 
-    /// A managed TeX Live that lacks `pdflscape` as long as `<dir>/installed` does not exist: its `kpsewhich` finds
-    /// every file of the check list but `pdflscape.sty` until then, and its `tlmgr` records each run in `<dir>/calls`
+    /// A managed TeX Live that lacks `geometry` as long as `<dir>/installed` does not exist: its `kpsewhich` finds
+    /// every file of the check list but `geometry.sty` until then, and its `tlmgr` records each run in `<dir>/calls`
     /// (and makes `installed` when it is asked to install something).
-    fn lacking_pdflscape(f: &Fake) -> PathBuf {
+    fn lacking_geometry(f: &Fake) -> PathBuf {
         let data = f.dir.join("data");
         let bin = managed_root(&data).join("bin").join("x86_64-linux");
         script(&bin, "lualatex", "for a; do last=$a; done\nstem=${last%.tex}\necho ok > $stem.log\necho '%PDF' > $stem.pdf");
         script(&bin, "biber", "exit 0");
-        script(&bin, "kpsewhich", &format!("for a; do [ \"$a\" = pdflscape.sty ] && [ ! -f '{0}/installed' ] || echo /texmf/$a; done", f.dir.display()));
+        script(&bin, "kpsewhich", &format!("for a; do [ \"$a\" = geometry.sty ] && [ ! -f '{0}/installed' ] || echo /texmf/$a; done", f.dir.display()));
         script(&bin, "tlmgr", &format!("echo \"$@\" >> '{0}/calls'\ncase \"$*\" in *' install '*) touch '{0}/installed' ;; esac", f.dir.display()));
         data
     }
@@ -614,11 +614,11 @@ wr("$dir/bin/$plat/biber", "#!/bin/sh\nexit 0\n");
     #[test]
     fn install_missing_runs_tlmgr_install_of_exactly_the_given_packages_on_one_mirror() {
         let f = Fake::new("install-missing");
-        let data = lacking_pdflscape(&f);
+        let data = lacking_geometry(&f);
         let (repo, asked) = serve(vec![]);
         let handle = Handle::default();
-        let done = install_missing(&env(&data, &format!("{repo}/")), &["pdflscape".to_string(), "ulem".to_string()], &handle, &|| {}).unwrap();
-        assert_eq!(calls(&f), [format!("--repository {repo} install pdflscape ulem")], "exactly these packages, nothing of the rest of the list, no update");
+        let done = install_missing(&env(&data, &format!("{repo}/")), &["geometry".to_string(), "ulem".to_string()], &handle, &|| {}).unwrap();
+        assert_eq!(calls(&f), [format!("--repository {repo} install geometry ulem")], "exactly these packages, nothing of the rest of the list, no update");
         assert_eq!(done, Done { warning: None, mirrors: vec![repo.clone()] });
         assert_eq!(paths(&asked), [format!("/tlnet/{MIRROR_PROBE}")], "the mirror was resolved, and nothing else was downloaded by Shale");
         assert_eq!(handle.progress().stage, Stage::Packages);
@@ -628,7 +628,7 @@ wr("$dir/bin/$plat/biber", "#!/bin/sh\nexit 0\n");
         assert!(install_missing(&env(&data, &repo), &[], &Handle::default(), &|| {}).is_err());
         assert_eq!(calls(&f).len(), 1, "a refused name starts no tlmgr");
         // not installed
-        assert!(install_missing(&env(&f.dir.join("empty"), &repo), &["pdflscape".to_string()], &Handle::default(), &|| {}).unwrap_err().contains("no TeX Live programs"));
+        assert!(install_missing(&env(&f.dir.join("empty"), &repo), &["geometry".to_string()], &Handle::default(), &|| {}).unwrap_err().contains("no TeX Live programs"));
     }
 
     // spec: TEX-043
@@ -643,11 +643,11 @@ wr("$dir/bin/$plat/biber", "#!/bin/sh\nexit 0\n");
         let (old, _) = serve(vec![]);
         script(&bin, "tlmgr", &format!("echo \"$@\" >> '{0}/calls'\ncase \"$*\" in *{old}*) {OLDER} ;; esac", f.dir.display()));
         let (redirect, _) = redirector(vec![old.clone(), new.clone()]);
-        let done = install_missing(&env(&data, &redirect), &["pdflscape".to_string()], &Handle::default(), &|| {}).unwrap();
+        let done = install_missing(&env(&data, &redirect), &["geometry".to_string()], &Handle::default(), &|| {}).unwrap();
         assert_eq!(done.mirrors, [old.clone(), new.clone()], "the first mirror was older than the installation, the second one served it");
-        assert_eq!(calls(&f), [format!("--repository {old} install pdflscape"), format!("--repository {new} install pdflscape")]);
+        assert_eq!(calls(&f), [format!("--repository {old} install geometry"), format!("--repository {new} install geometry")]);
         script(&bin, "tlmgr", "echo 'tlmgr: package repository is down' >&2\nexit 1");
-        let e = install_missing(&env(&data, &new), &["pdflscape".to_string()], &Handle::default(), &|| {}).unwrap_err();
+        let e = install_missing(&env(&data, &new), &["geometry".to_string()], &Handle::default(), &|| {}).unwrap_err();
         assert!(e.contains("tlmgr failed") && e.contains("repository is down"), "{e}");
     }
 
@@ -655,11 +655,11 @@ wr("$dir/bin/$plat/biber", "#!/bin/sh\nexit 0\n");
     #[test]
     fn an_update_also_installs_the_packages_of_the_list_the_installation_lacks_and_only_then() {
         let f = Fake::new("update-missing");
-        let data = lacking_pdflscape(&f);
+        let data = lacking_geometry(&f);
         let (repo, _) = serve(vec![]);
         let done = update(&env(&data, &repo), &Handle::default(), &|| {}).unwrap();
         assert_eq!(done.warning, None);
-        assert_eq!(calls(&f), [format!("--repository {repo} update --self --all"), format!("--repository {repo} install pdflscape")], "the update, then exactly the missing package");
+        assert_eq!(calls(&f), [format!("--repository {repo} update --self --all"), format!("--repository {repo} install geometry")], "the update, then exactly the missing package");
         // nothing is missing any more: the next update only updates
         std::fs::remove_file(f.dir.join("calls")).unwrap();
         update(&env(&data, &repo), &Handle::default(), &|| {}).unwrap();
