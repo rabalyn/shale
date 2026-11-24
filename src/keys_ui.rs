@@ -533,7 +533,7 @@ mod tests {
         assert_eq!(w.app.cfg.keybindings.get("files.toggle_folder"), Some(&vec!["Space F".to_string()]));
     }
 
-    // spec: KEY-018
+    // spec: KEY-018, KEY-004
     #[test]
     fn a_clashing_key_asks_to_overwrite_and_no_changes_nothing() {
         let mut w = W::new("ask-no");
@@ -1989,6 +1989,20 @@ mod tests {
         typed(&mut w, Key::P, "p");
         assert!(matches!(w.app.modal, Some(Modal::Picker(_))), "the new ones open the picker");
         assert_eq!(note_text(&w), "# A\n");
+    }
+
+    // spec: KEY-008
+    #[test]
+    fn key_008_a_rebound_key_of_the_file_list_works_and_the_old_one_does_not() {
+        let mut w = W::new("tree-rebind");
+        w.app.keymap.set(Action::TreeNextFile, Binding::parse("Ctrl+Alt+J").unwrap()).unwrap();
+        // Ctrl+H gives the file list the keyboard, with the open note A selected
+        w.press(Key::H, CTRL);
+        assert_eq!(w.app.tree.sel.as_deref(), Some(Path::new("A.md")));
+        w.press(Key::J, Modifiers::NONE);
+        assert_eq!(w.app.tree.sel.as_deref(), Some(Path::new("A.md")), "the old key does nothing now");
+        w.press(Key::J, CTRL_ALT);
+        assert_eq!(w.app.tree.sel.as_deref(), Some(Path::new("B.md")), "the new key moves to the next file");
     }
 
     /// A real click on a point.

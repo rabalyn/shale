@@ -1013,7 +1013,7 @@ fn panel_file_tree_opens_folds_and_offers_menus() {
     }
 }
 
-// spec: DEV-020
+// spec: DEV-020, KEY-013
 #[test]
 fn dev_020_the_help_button_in_settings_opens_the_user_guide_as_the_vault() {
     let mut p = P::new("userguide-help", &[]);
