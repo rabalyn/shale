@@ -62,6 +62,7 @@ fn dev_014_every_spec_comment_names_an_existing_row() {
     let mut sources = Vec::new();
     files(&root.join("src"), "rs", &mut sources);
     files(&root.join("tests"), "rs", &mut sources);
+    files(&root.join("examples"), "rs", &mut sources);
     let mut bad = Vec::new();
     let mut seen = 0;
     for path in &sources {
@@ -228,12 +229,13 @@ fn is_now_rows(text: &str) -> Vec<(&str, &str)> {
         .collect()
 }
 
-/// The `.rs` files of `src/` and `tests/` and the `.sh` scripts of the repo as `(path from the
+/// The `.rs` files of `src/`, `tests/` and `examples/` and the `.sh` scripts of the repo as `(path from the
 /// repo root, text)`.
 fn source_tree(root: &Path) -> Vec<(String, String)> {
     let mut paths = Vec::new();
     files(&root.join("src"), "rs", &mut paths);
     files(&root.join("tests"), "rs", &mut paths);
+    files(&root.join("examples"), "rs", &mut paths);
     for dir in ["scripts", ".forgejo", ".github", "docs"] {
         files(&root.join(dir), "sh", &mut paths);
     }
