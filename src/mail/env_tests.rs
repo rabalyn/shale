@@ -697,9 +697,9 @@ fn send_end_to_end(acct: &MailAccount, smtp: EnvSmtp, imap: EnvConnector, tag: &
     let eml = ob.read_eml(&acct.id, &item.id).unwrap();
 
     // sent exactly once
-    let r = crate::mail::send::send_due(&ob, &store, acct, &smtp, now);
+    let r = crate::mail::send::send_due(&ob, &store, acct, &smtp, now, &std::sync::atomic::AtomicBool::new(false));
     assert_eq!((r.sent.len(), r.failed.len(), r.unsure.len()), (1, 0, 0), "{r:?}");
-    let again = crate::mail::send::send_due(&ob, &store, acct, &smtp, now + 5);
+    let again = crate::mail::send::send_due(&ob, &store, acct, &smtp, now + 5, &std::sync::atomic::AtomicBool::new(false));
     assert_eq!(again, crate::mail::send::SendReport::default());
 
     // what arrived in the sink (Mailpit gets it from Dovecot's submission service)
@@ -885,7 +885,7 @@ fn crypto_end_to_end(std: crate::config::CryptoStandard, tag: &str) {
     let item = crate::mail::send::queue_with(&ob, &alice.g, &acct, &d, crate::mail::send::SendTiming { undo_secs: 0, now, date: &crate::mail::store::today_string() }, &no_cancel()).expect("signed and encrypted");
     let eml = ob.read_eml(&acct.id, &item.id).unwrap();
     assert!(!String::from_utf8_lossy(&eml).contains(&marker), "nothing readable in the outbox");
-    let r = crate::mail::send::send_due(&ob, &store, &acct, &smtp, now);
+    let r = crate::mail::send::send_due(&ob, &store, &acct, &smtp, now, &std::sync::atomic::AtomicBool::new(false));
     assert_eq!((r.sent.len(), r.failed.len(), r.unsure.len()), (1, 0, 0), "{r:?}");
 
     // what the sink got from Dovecot's submission service: our message, byte for byte after the servers' own lines
@@ -1097,4 +1097,93 @@ fn mail_env_a_reply_thread_from_the_server_is_imported_into_a_chain_in_date_orde
 
     let _ = doveadm(&["mailbox", "delete", "-u", USER, "ScratchThread"], None);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Asks the registry for Cancel as soon as the first connection of a send is made: the mail that is then on its way must still arrive.
+struct CancelOnConnect {
+    inner: EnvSmtp,
+    busy: crate::busy::Busy,
+    key: crate::busy::Key,
+}
+
+impl crate::mail::send::SmtpConnector for CancelOnConnect {
+    fn connect(&self) -> Result<crate::mail::smtp_client::Smtp, crate::mail::smtp_client::SmtpError> {
+        if let Some(t) = self.busy.info(&self.key) {
+            self.busy.cancel(t.id);
+        }
+        self.inner.connect()
+    }
+}
+
+/// How many mails of the test the sink holds.
+fn sink_count(tag: &str) -> usize {
+    sink_messages().iter().filter(|m| m["Subject"].as_str().is_some_and(|s| s.starts_with(tag))).count()
+}
+
+// spec: JOB-031
+#[test]
+#[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
+fn mail_env_job_031_a_send_to_the_stack_is_a_task_and_cancel_leaves_the_rest_queued() {
+    use crate::mail::ui::MAIL_SEND;
+    let _turn = turn();
+    let acct = MailAccount {
+        id: "mailenv-job031".into(),
+        name: "Alice".into(),
+        host: "localhost".into(),
+        port: IMAPS_PORT,
+        user: "alice@shale.test".into(),
+        smtp_host: "localhost".into(),
+        smtp_port: SUBMISSION_PORT,
+        smtp_security: MailSecurity::StartTls,
+        from_name: "Alice Shale".into(),
+        from_address: "alice@shale.test".into(),
+        ..MailAccount::default()
+    };
+    let auth: Arc<dyn AuthFactory> = Arc::new(PasswordAuth { user: acct.user.clone(), password: "shale-test-pw".into() });
+    let imap = EnvConnector { auth: auth.clone() };
+    let (dir, store) = temp_store("job031");
+    let now = crate::calendar::time::now();
+    let tag = format!("Shale job031 test {}", std::process::id());
+    clean_sent(&acct.user, "Shale job031 test");
+    clear_sink();
+    discover_folders(&store, &imap, &acct.id, &acct.name).expect("folders");
+    let sum = sync(&store, &acct.id, &imap);
+    assert!(sum.errors.is_empty(), "{:?}", sum.errors);
+    let ob = crate::mail::outbox::Outbox::new(&dir);
+    for n in 1..=2 {
+        let mut d = crate::mail::send::new_draft(&acct);
+        d.to = "Bob <bob@example.org>".into();
+        d.subject = format!("{tag} {n}");
+        d.body = format!("mail {n}\n");
+        crate::mail::send::queue_draft(&ob, &acct, &d, 0, now, &crate::mail::store::today_string()).expect("queued");
+    }
+    let busy = crate::busy::Busy::default();
+    let key = MAIL_SEND.with(&acct.id);
+    let mut task = busy.begin(key.clone(), "Sending mail from Alice…").expect("idle");
+    let cancel = task.cancellable().flag();
+    let smtp = CancelOnConnect { inner: EnvSmtp { port: SUBMISSION_PORT, security: MailSecurity::StartTls, auth }, busy: busy.clone(), key: key.clone() };
+    assert!(busy.is_running(&key));
+    // Cancel is asked for when the first mail connects: that mail is finished, the second is not taken
+    let r = crate::mail::send::send_due(&ob, &store, &acct, &smtp, now, &cancel);
+    drop(task);
+    assert!(r.cancelled && r.sent.len() == 1 && r.failed.is_empty() && r.unsure.is_empty(), "{r:?}");
+    assert!(busy.list().is_empty(), "the task ended with the job");
+    let queued = ob.list(Some(&acct.id)).iter().filter(|i| i.state == crate::mail::outbox::State::Queued).count();
+    assert_eq!(queued, 1, "the second mail waits in the Outbox");
+    let t0 = std::time::Instant::now();
+    while sink_count(&tag) < 1 {
+        assert!(t0.elapsed() < Duration::from_secs(30), "the first mail never reached the sink");
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    assert_eq!(sink_count(&tag), 1, "the mail on its way arrived once, the other did not go");
+    // the next send, not cancelled, brings the rest
+    let r = crate::mail::send::send_due(&ob, &store, &acct, &smtp, now, &std::sync::atomic::AtomicBool::new(false));
+    assert_eq!((r.sent.len(), r.cancelled), (1, false), "{r:?}");
+    while sink_count(&tag) < 2 {
+        assert!(t0.elapsed() < Duration::from_secs(60), "the second mail never reached the sink");
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    clean_sent(&acct.user, "Shale job031 test");
+    clear_sink();
+    let _ = std::fs::remove_dir_all(&dir);
 }

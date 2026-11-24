@@ -562,6 +562,7 @@ impl MailView {
                 let title = if a.name.is_empty() { a.host.clone() } else { a.name.clone() };
                 // a syncing account says so, with its own Cancel (JOB-021)
                 crate::busy::ui::status(ui, &self.busy, &MAIL_SYNC.with(&a.id));
+                crate::busy::ui::status(ui, &self.busy, &MAIL_SEND.with(&a.id));
                 let folders = self.account_folders(&a.id);
                 egui::CollapsingHeader::new(RichText::new(title).color(theme::palette().text_strong)).id_salt(("mail-account", a.id.clone())).default_open(true).show(ui, |ui| {
                     if folders.is_empty() {

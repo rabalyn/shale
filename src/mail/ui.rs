@@ -59,6 +59,10 @@ pub const MAIL_REBUILD: Key = Key::new("mail-rebuild");
 /// stops between two batches of messages or two folders. The idle wait of the watch (IDLE) is not a task.
 pub const MAIL_SYNC: Key = Key::new("mail-sync");
 
+/// The sending of the due mails of one account (JOB-031): one task per account, `MAIL_SEND.with(account id)`.
+/// Cancel is looked at before each mail is taken from the Outbox, never inside a mail that is on its way.
+pub const MAIL_SEND: Key = Key::new("mail-send");
+
 /// What the store is doing.
 pub enum StoreState {
     Closed,
@@ -437,6 +441,9 @@ pub struct MailView {
     pub local_view: Option<LocalView>,
     pub outbox_sel: Option<(String, String)>,
     send_running: HashSet<String>,
+    /// Accounts whose sending the person stopped with Cancel (JOB-031): the rest of their queue waits until
+    /// they queue, retry or send again, so Cancel is not undone by the next frame.
+    send_stopped: HashSet<String>,
     /// Account ids and their names, for the lists (set every frame by the app).
     pub account_names: HashMap<String, String>,
     // phase 4: signing and encrypting (ADR-0011)
@@ -610,6 +617,7 @@ impl MailView {
             local_view: None,
             outbox_sel: None,
             send_running: HashSet::new(),
+            send_stopped: HashSet::new(),
             account_names: HashMap::new(),
             gnupg: Gnupg::default(),
             consent: false,
@@ -1082,6 +1090,10 @@ impl MailView {
                     Ok(r) => {
                         if !r.sent.is_empty() {
                             self.notices.push(format!("{} mail{} sent.", r.sent.len(), if r.sent.len() == 1 { "" } else { "s" }));
+                        }
+                        if r.cancelled {
+                            self.send_stopped.insert(account.clone());
+                            self.notices.push("Sending was stopped. The mails that were not sent yet wait in the Outbox; queue, retry or send one again to go on.".to_string());
                         }
                         for (_, e) in &r.failed {
                             self.problems.push(format!("A mail was not sent: {e} (see the Outbox)"));
@@ -2224,7 +2236,7 @@ impl MailView {
         let now = crate::calendar::time::now();
         for a in &cfg.mail_accounts {
             let due = self.local_items.iter().any(|i| i.account == a.id && ((i.state == State::Queued && i.send_after <= now) || (i.state == State::Sent && !i.copy_done)));
-            if due {
+            if due && !self.send_stopped.contains(&a.id) {
                 self.start_send(a);
             }
         }
@@ -2236,11 +2248,22 @@ impl MailView {
             return;
         }
         let (Some(store), Some(ob)) = (self.ready_store(), self.outbox.clone()) else { return };
+        let display = if account.name.is_empty() { account.host.clone() } else { account.name.clone() };
+        // the task ends with the job, before its report is taken in (JOB-031)
+        let Some(mut task) = self.busy.begin(MAIL_SEND.with(&account.id), format!("Sending mail from {display}…")) else { return };
+        let cancel = task.cancellable().flag();
         self.send_running.insert(account.id.clone());
         let connector = LazySmtp { factory: self.smtp_factory.clone(), account: account.clone(), session: self.session_pw.get(&account.id).cloned() };
         let acct = account.clone();
         let id = account.id.clone();
-        self.spawn(move || send::send_due(&ob, &store, &acct, &connector, crate::calendar::time::now()), move |r| Event::Sent { account: id, result: r });
+        self.spawn(
+            move || {
+                let r = send::send_due(&ob, &store, &acct, &connector, crate::calendar::time::now(), &cancel);
+                drop(task);
+                r
+            },
+            move |r| Event::Sent { account: id, result: r },
+        );
     }
 
     /// The addresses to complete from: the people notes of the vault, then the addresses in the mail index (newest first).
@@ -2505,6 +2528,7 @@ impl MailView {
 
     /// The mail is in the outbox: the compose window is done.
     fn finish_queued(&mut self, item: Item) {
+        self.send_stopped.remove(&item.account);
         if let (Some(ob), Some(c)) = (self.outbox.clone(), self.compose.as_ref()) {
             if let Some(old) = c.saved_account.clone().filter(|o| o != &item.account) {
                 let _ = ob.discard_draft(&old, &item.id, &crate::mail::store::today_string());
@@ -2679,11 +2703,13 @@ impl MailView {
             back_to_editor = Some(ob.edit(&a, &i, now, &date));
         }
         if let Some((a, i)) = out.retry {
+            self.send_stopped.remove(&a);
             if let Err(e) = ob.retry(&a, &i, now) {
                 self.problems.push(format!("Retry: {e}"));
             }
         }
         if let Some((a, i)) = out.send_again {
+            self.send_stopped.remove(&a);
             if let Err(e) = ob.send_again(&a, &i, now) {
                 self.problems.push(format!("Send again: {e}"));
             }
