@@ -1056,7 +1056,7 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
-    // spec: DATA-004
+    // spec: DATA-004, DATA-013
     #[test]
     fn only_one_of_many_creators_wins() {
         let d = tmp("race-create");
@@ -1119,7 +1119,7 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
-    // spec: DATA-013
+    // spec: DATA-013, NET-005
     #[test]
     fn a_rename_that_only_changes_letter_case_works_also_where_letter_case_is_ignored() {
         let d = tmp("case-rename");
@@ -1345,7 +1345,7 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
-    // spec: DATA-004
+    // spec: DATA-004, DATA-010
     #[test]
     fn reads_report_errors_with_the_name() {
         let d = tmp("read");
@@ -1365,7 +1365,7 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
-    // spec: DATA-004
+    // spec: DATA-004, DATA-013
     #[test]
     fn concurrent_writers_never_produce_a_torn_file() {
         let d = tmp("race");

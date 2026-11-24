@@ -169,6 +169,43 @@ fn saved_shows_counting_until_the_numbers_are_in_and_says_when_it_could_not_coun
     let _ = fs::remove_dir_all(&d);
 }
 
+// spec: USE-006, USE-007
+#[test]
+fn every_cache_has_a_row_with_its_name_path_size_entries_age_last_cleanup_and_a_clear_button_that_is_off_while_it_runs() {
+    let (mut u, d) = usage("dlg-rows");
+    let now = crate::calendar::time::now();
+    for id in CacheId::ALL {
+        u.stats.insert(id, Ok(CacheStats { bytes: 2048, entries: 3, oldest: Some(now - 3 * 86_400) }));
+    }
+    u.stats.insert(CacheId::TagWords, Ok(CacheStats { bytes: 10, entries: 1, oldest: None }));
+    u.stats.remove(&CacheId::DebugLog);
+    let mut f = Frames::new();
+    f.frame(&mut u, vec![]);
+    for id in CacheId::ALL {
+        assert!(f.shows(id.name()), "{}: the name", id.name());
+        assert!(f.shows(&u.places.location(id)), "{}: the path", id.name());
+    }
+    let count = |what: &str| f.text.iter().filter(|(t, _)| t.starts_with(what)).count();
+    assert_eq!(count("2.0 KB \u{b7} 3 entries \u{b7} oldest 3 days"), CacheId::ALL.len() - 2, "size, number of entries and the age of the oldest entry");
+    assert_eq!(count("10 bytes \u{b7} 1 entry"), 1, "one entry, no age when there is none");
+    assert_eq!(count("counting\u{2026}"), 2, "the saved part and the cache that are not counted yet");
+    assert_eq!(count("never cleaned"), CacheId::ALL.len(), "the last cleanup of each");
+    // one button per cache: Clear, and Rebuild for the mail index
+    assert_eq!(count("Clear"), CacheId::ALL.len() - 1);
+    assert_eq!(count("Rebuild"), 1);
+    // Clear of a cache that is quick to build again asks for the clear at once, and is off while that clear runs
+    f.click(&mut u, "Clear");
+    assert_eq!(f.asks, [Ask::Clear(CacheId::SocialPictures)]);
+    f.asks.clear();
+    assert!(u.start(CacheId::SocialPictures, Kind::Clear, &CacheRetention::default(), None, || {}));
+    f.frame(&mut u, vec![]);
+    f.click(&mut u, "Clear");
+    assert!(f.asks.is_empty(), "no second clear while one runs: {:?}", f.asks);
+    f.click(&mut u, "Rebuild");
+    assert_eq!(u.confirm, Some(CacheId::MailIndex), "and the mail index asks first (USE-008)");
+    let _ = fs::remove_dir_all(&d);
+}
+
 // spec: USE-003
 #[test]
 fn a_click_on_a_largest_file_opens_it_and_one_on_a_largest_folder_shows_it() {

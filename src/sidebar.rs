@@ -490,7 +490,7 @@ mod tests {
         assert_eq!(all.len(), Item::ALL.len(), "each icon exactly once: {all:?}");
     }
 
-    // spec: LAY-002
+    // spec: LAY-002, HIST-002
     #[test]
     fn lay_002_a_stored_order_with_unknown_missing_and_double_ids_is_repaired() {
         assert_eq!(Layout::from_config(&Config::default()), Layout::default(), "nothing stored: the default");

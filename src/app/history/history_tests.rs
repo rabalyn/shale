@@ -155,7 +155,7 @@ fn saves_make_snapshots_that_coalesce_and_idle_and_close_make_one() {
     assert_eq!(names, [".shale", "Note.md"]);
 }
 
-// spec: SYNC-032
+// spec: SYNC-032, HIST-007
 #[test]
 fn history_off_makes_no_snapshot_and_says_why() {
     let mut t = setup("off", false);

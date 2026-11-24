@@ -410,7 +410,7 @@ fn syncthing_env_saves_arrive_on_the_other_device_and_no_temp_file_leaks() {
     assert_eq!(names(&p.b), ["N.md"], "nothing but the note is in B's folder");
 }
 
-// spec: NET-007, NET-015
+// spec: NET-007, NET-015, NET-010
 #[test]
 #[ignore = "needs the Syncthing pair: tests/syncthing-env/syncthing-env.sh up"]
 fn syncthing_env_an_edit_on_both_devices_gives_a_sync_conflict_file_that_shale_lists() {
@@ -450,7 +450,7 @@ fn syncthing_env_an_edit_on_both_devices_gives_a_sync_conflict_file_that_shale_l
     }
 }
 
-// spec: NET-008
+// spec: NET-008, NET-010
 #[test]
 #[ignore = "needs the Syncthing pair: tests/syncthing-env/syncthing-env.sh up"]
 fn syncthing_env_a_case_only_rename_and_unicode_names_arrive_as_they_are() {
@@ -469,7 +469,7 @@ fn syncthing_env_a_case_only_rename_and_unicode_names_arrive_as_they_are() {
     observe("syncthing", &format!("a note made as NFD on A is on B as {}", if cafes[0] == nfd { "NFD (byte for byte)" } else { "NFC (the name was normalised)" }));
 }
 
-// spec: NET-009
+// spec: NET-009, NET-010
 #[test]
 #[ignore = "needs the Syncthing pair: tests/syncthing-env/syncthing-env.sh up"]
 fn syncthing_env_vault_state_written_on_both_devices_at_once_leaves_a_conflict_file_in_shale_folder() {

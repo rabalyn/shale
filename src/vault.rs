@@ -1895,6 +1895,53 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    // spec: VAULT-002
+    #[test]
+    fn vault_002_drawings_notes_and_attachments_are_told_apart_by_the_name() {
+        for (name, kind) in [
+            ("A.excalidraw", FileKind::Drawing),
+            ("A.excalidraw.md", FileKind::Drawing),
+            ("Map.canvas", FileKind::Drawing),
+            ("Sub/Plan.Excalidraw.MD", FileKind::Drawing),
+            ("A.md", FileKind::Note),
+            ("A.MD", FileKind::Note),
+            ("excalidraw.md", FileKind::Note),
+            ("notes.canvas.md", FileKind::Note),
+            ("pic.png", FileKind::Other),
+            ("A.txt", FileKind::Other),
+            ("README", FileKind::Other),
+        ] {
+            assert_eq!(kind_of(Path::new(name)), kind, "{name}");
+        }
+        // and the vault lists every file with that kind
+        let (v, d) = vault_with("kinds", &[("a.md", "x"), ("b.excalidraw", "{}"), ("c.excalidraw.md", "x"), ("d.canvas", "{}"), ("e.pdf", "x")]);
+        let kinds: Vec<(String, FileKind)> = v.files.iter().map(|f| (rel_to_string(&f.rel), f.kind)).collect();
+        assert_eq!(kinds, vec![("a.md".into(), FileKind::Note), ("b.excalidraw".into(), FileKind::Drawing), ("c.excalidraw.md".into(), FileKind::Drawing), ("d.canvas".into(), FileKind::Drawing), ("e.pdf".into(), FileKind::Other)]);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-011
+    #[test]
+    fn vault_011_a_taken_name_gets_a_number_for_notes_and_drawings_and_nothing_is_overwritten() {
+        let (mut v, d) = vault_with("numbered", &[("Name.md", "note"), ("Name.excalidraw", "{}"), ("Name.excalidraw.md", "plugin")]);
+        let at = |v: &Vault, name: &str| v.new_note_path(Path::new(""), name);
+        assert_eq!(at(&v, "Name"), PathBuf::from("Name 1.md"));
+        assert_eq!(at(&v, "Name.excalidraw"), PathBuf::from("Name 1.excalidraw"));
+        assert_eq!(at(&v, "Name.excalidraw.md"), PathBuf::from("Name 1.excalidraw.md"));
+        // the numbered names are taken in turn, the next number is the next free one
+        for name in ["Name 1.md", "Name 2.md"] {
+            let p = at(&v, "Name");
+            assert_eq!(p, PathBuf::from(name));
+            v.create_file(&p, "made").unwrap();
+        }
+        assert_eq!(at(&v, "Name"), PathBuf::from("Name 3.md"));
+        // a file is never overwritten, not even when a path is asked for directly
+        assert!(v.create_file(Path::new("Name.md"), "other").is_err());
+        assert_eq!(fs::read_to_string(d.join("Name.md")).unwrap(), "note");
+        assert_eq!(fs::read_to_string(d.join("Name 1.md")).unwrap(), "made");
+        let _ = fs::remove_dir_all(&d);
+    }
+
     // spec: LINK-011
     #[test]
     fn graph_has_edges() {
@@ -2072,7 +2119,7 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
-    // spec: NET-013
+    // spec: NET-013, VAULT-005
     #[test]
     fn net_013_the_wait_is_at_least_ten_times_the_last_scan_and_never_below_3_s() {
         let ms = Duration::from_millis;
@@ -2085,7 +2132,7 @@ mod tests {
         assert_eq!(rescan_interval(Duration::MAX), Duration::MAX, "no overflow");
     }
 
-    // spec: NET-013, DATA-002
+    // spec: NET-013, DATA-002, VAULT-005
     #[test]
     fn net_013_a_scan_reads_only_the_files_whose_stamp_changed() {
         let d = temp_vault("scan-reads");
@@ -2234,7 +2281,6 @@ mod tests {
         let d = temp_vault("outside");
         write_sample_vault(&d).unwrap();
         let mut v = Vault::open(&d).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(20));
         fs::write(d.join("Daily log.md"), "changed [[New]]").unwrap();
         // force mtime difference on coarse file systems
         if let Some(n) = v.notes.get_mut(Path::new("Daily log.md")).map(Arc::make_mut) {
@@ -2586,7 +2632,7 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
-    // spec: VAULT-014
+    // spec: VAULT-014, VAULT-016
     #[test]
     fn rename_never_replaces_an_existing_file_or_folder() {
         let (mut v, d) = vault_with("noreplace", &[("A.md", "a"), ("B.md", "b")]);
@@ -2639,7 +2685,7 @@ mod tests {
         fsutil::write_atomic(&p, text.as_bytes()).unwrap();
     }
 
-    // spec: VAULT-017
+    // spec: VAULT-017, VAULT-019
     #[test]
     fn trash_keeps_the_original_path_so_same_names_from_different_folders_do_not_mix() {
         let d = temp_vault("trash-origin");
@@ -2703,7 +2749,7 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
-    // spec: VAULT-020
+    // spec: VAULT-020, VAULT-019
     #[test]
     fn restore_brings_a_file_back_and_refuses_when_the_place_is_taken() {
         let d = temp_vault("trash-restore");
