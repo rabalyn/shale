@@ -41,10 +41,10 @@ report a security problem there, see Security below.
   Add an entry to `docs/changelog-pending/` (not to `CHANGELOG.md`).
 - **Lines of code.** `cargo run --example loc_report -- --out target/loc-report.md` writes a
   Markdown report of the lines of code of the project (production and test code, comments, blank
-  lines, per feature and featureset, the share of tests) from the module tree of `src/main.rs`
-  (DEV-044). A new top-level module goes into a `[[set]]` of `tools/loc-report/featuresets.toml`,
+  lines, per feature and featureset, the share of tests, and a chart of the lines per tag) from the
+  module tree of `src/main.rs` (DEV-044, DEV-046). A new top-level module goes into a `[[set]]` of `tools/loc-report/featuresets.toml`,
   or the report lists it under "Other" and its test fails. `scripts/land.sh` keeps
-  [`docs/loc-report.md`](docs/loc-report.md) current (DEV-045: every landing commits a fresh one), so
+  [`docs/loc-report.md`](docs/loc-report.md), `docs/loc-history.svg` and `docs/loc-history.tsv` current (DEV-045: every landing commits fresh ones), so
   nobody commits that file by hand.
 
 ## Pull requests
