@@ -63,7 +63,7 @@ mod tests {
         Request { url, max_bytes: 10, timeout: Duration::from_secs(5), allow_http, headers: &[] }
     }
 
-    // spec: UPD-003
+    // spec: UPD-003, UPD-021
     #[test]
     fn http_is_accepted_only_when_the_request_allows_it_and_redirects_only_lead_to_https() {
         assert_eq!(protos(&req("https://example.org/a", false)), "=https");
@@ -74,7 +74,7 @@ mod tests {
         assert!(args.windows(2).any(|w| w == ["--proto-redir", "=https"]) && args.contains(&"-q".to_string()), "{args:?}");
     }
 
-    // spec: UPD-003
+    // spec: UPD-003, UPD-021
     #[test]
     fn a_refused_http_address_fails_in_words_and_writes_nothing() {
         let to = std::env::temp_dir().join(format!("shale-download-{}", std::process::id()));
@@ -84,7 +84,33 @@ mod tests {
         assert!(!to.exists());
     }
 
-    // spec: UPD-003
+    // spec: UPD-021
+    #[test]
+    fn a_file_bigger_than_the_size_limit_is_refused_and_a_silent_server_ends_at_the_timeout() {
+        use std::io::Write;
+        // a server that announces 100 bytes and sends them
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://127.0.0.1:{}/a", listener.local_addr().unwrap().port());
+        let server = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let _ = s.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\n{}", "x".repeat(100)).as_bytes());
+        });
+        let to = std::env::temp_dir().join(format!("shale-download-s-{}", std::process::id()));
+        let _ = std::fs::remove_file(&to);
+        let e = to_file(&AtomicBool::new(false), &req(&url, true), &to).unwrap_err();
+        assert!(e.contains("failed"), "{e}");
+        server.join().unwrap();
+        // a server that accepts and then says nothing: the timeout stops the download
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://127.0.0.1:{}/a", listener.local_addr().unwrap().port());
+        let held = std::thread::spawn(move || listener.accept().map(|(s, _)| s));
+        let e = to_file(&AtomicBool::new(false), &Request { timeout: Duration::from_millis(500), ..req(&url, true) }, &to).unwrap_err();
+        assert!(e.contains("took too long"), "{e}");
+        drop(held);
+        let _ = std::fs::remove_file(&to);
+    }
+
+    // spec: UPD-003, UPD-021
     #[test]
     fn a_cancel_flag_stops_a_download_that_gets_no_answer() {
         use std::sync::Arc;

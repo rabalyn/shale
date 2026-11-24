@@ -134,7 +134,7 @@ fn upd_020_whats_new_shows_the_release_notes() {
     assert!(!t.shows("Notes of 9.9.9"));
 }
 
-// spec: UPD-009
+// spec: UPD-009, UPD-019
 #[test]
 fn upd_009_the_buttons_download_install_now_and_restart_now_lead_through_the_update() {
     let mut t = T::new(UpdateMode::Notify, Some("9.9.9"), portable_kind());

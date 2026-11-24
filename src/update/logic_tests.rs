@@ -73,7 +73,7 @@ fn upd_003_the_release_is_read_and_drafts_prereleases_and_odd_tags_are_ignored()
     assert_eq!(parse_release(&long).unwrap().unwrap().notes.len(), 20_000);
 }
 
-// spec: UPD-003
+// spec: UPD-003, UPD-021
 #[test]
 fn upd_003_only_the_release_files_of_the_repository_are_downloaded_and_only_over_https() {
     let github = Source::github();
@@ -280,7 +280,7 @@ fn upd_012_the_mode_a_found_update_gets_follows_what_the_install_allows() {
     }
 }
 
-// spec: UPD-020
+// spec: UPD-020, UPD-015
 #[test]
 fn upd_020_every_kind_is_described_and_a_manual_command_is_given_where_one_helps() {
     let archive = Path::new("/cache/shale/updates/0.7.0/shale-0.7.0-linux-x86_64.tar.gz");
@@ -634,6 +634,7 @@ fn get_latest(github: &FakeGithub, staging: &Path) -> (Backend, Release) {
     (backend, release)
 }
 
+// spec: UPD-014
 #[cfg(unix)]
 #[test]
 fn upd_003_the_check_downloads_and_installs_a_portable_folder_in_place_and_keeps_the_old_program() {
@@ -728,6 +729,7 @@ fn upd_006_a_kept_download_is_checked_again_and_a_damaged_one_is_fetched_anew() 
     assert!(!staging.join("0.0.1").exists());
 }
 
+// spec: UPD-021
 #[cfg(unix)]
 #[test]
 fn upd_003_an_address_that_is_not_a_release_file_of_shale_is_refused_before_curl_runs() {
@@ -1098,7 +1100,7 @@ fn upd_008_notify_announces_without_downloading_and_skipping_hides_only_that_ver
     assert_eq!(c.skipped_version, "9.9.9", "skipping 9.9.9 does not skip 9.9.10");
 }
 
-// spec: UPD-008
+// spec: UPD-008, UPD-007
 #[test]
 fn upd_008_skipping_a_version_also_suppresses_the_question_of_ask() {
     let (backend, _) = fake(Some("9.9.9"));
@@ -1344,6 +1346,7 @@ fn upd_003_when_a_time_is_shown_it_is_in_local_time_as_year_month_day_and_clock(
 
 // ---------------------------------------------------------------- the whole way through the state
 
+// spec: UPD-006
 #[cfg(unix)]
 #[test]
 fn upd_010_the_state_installs_a_portable_folder_from_the_pretend_github_in_install_mode() {
