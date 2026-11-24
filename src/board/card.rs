@@ -2,6 +2,7 @@
 //! values the sort keys compare. A drawing is a card too, with a title and no other fields
 //! (BOARD-011).
 
+use super::file::Chip;
 use crate::calendar::time::{self, parse_ymd};
 use crate::markdown::front_matter_values;
 use crate::note_props::{self, Priority};
@@ -68,6 +69,28 @@ impl Card {
         }
     }
 
+    /// The chips of the card as plain words, in the order `shows` lists them (BOARD-010): the due
+    /// day, the status, the priority, the first three tags and `+n` for the rest. What the card has
+    /// not is left out. The exports print these (BOARD-030).
+    pub fn chip_texts(&self, shows: &[Chip]) -> Vec<String> {
+        const MAX_TAGS: usize = 3;
+        let mut out = Vec::new();
+        for chip in shows {
+            match chip {
+                Chip::Due => out.extend(self.due.map(day_text)),
+                Chip::Status => out.extend(self.status.clone()),
+                Chip::Priority => out.extend(self.priority.map(|p| p.name().to_string())),
+                Chip::Tags => {
+                    out.extend(self.tags.iter().take(MAX_TAGS).map(|t| format!("#{t}")));
+                    if self.tags.len() > MAX_TAGS {
+                        out.push(format!("+{}", self.tags.len() - MAX_TAGS));
+                    }
+                }
+            }
+        }
+        out
+    }
+
     /// Is the due day over today?
     pub fn overdue(&self) -> bool {
         self.due.is_some_and(|d| d < time::today())
@@ -103,6 +126,18 @@ mod tests {
         assert!(c.tags.iter().any(|t| t == "todo"), "{:?}", c.tags);
         assert_eq!(day_text(c.due.unwrap()), "2026-12-01");
         assert_eq!(c.overdue(), c.due.unwrap() < time::today());
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    // spec: BOARD-030, BOARD-010
+    #[test]
+    fn board_030_the_chips_as_words_follow_card_shows_and_leave_out_what_the_card_has_not() {
+        let (v, d) = vault("chip-texts", &[("T.md", "---\nstatus: doing\npriority: high\ndue: 2026-12-01\n---\n#a #b #c #d #e\n"), ("Bare.md", "x\n")]);
+        let c = Card::of(&v, Path::new("T.md")).unwrap();
+        assert_eq!(c.chip_texts(&Chip::ALL), ["2026-12-01", "doing", "high", "#a", "#b", "#c", "+2"]);
+        assert_eq!(c.chip_texts(&[Chip::Tags, Chip::Status]), ["#a", "#b", "#c", "+2", "doing"], "in the order given");
+        assert!(c.chip_texts(&[]).is_empty());
+        assert!(Card::of(&v, Path::new("Bare.md")).unwrap().chip_texts(&Chip::ALL).is_empty());
         let _ = std::fs::remove_dir_all(d);
     }
 

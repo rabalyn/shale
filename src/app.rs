@@ -2270,6 +2270,10 @@ impl ShaleApp {
         let Some(v) = &self.vault else { return };
         let Some(f) = v.file(rel) else { return };
         let drawing = f.kind == FileKind::Drawing;
+        // a board is exported as the board and the notes of its cards (BOARD-030)
+        if !drawing && crate::board::file::is_board(&self.note_text(rel)) {
+            return self.open_export_board_dialog(rel);
+        }
         let name = f.display_name();
         let opts = if drawing {
             let scene = self.drawings.get(rel).map(|d| d.scene.clone()).or_else(|| crate::drawing::Scene::read_file(&v.abs(rel)).ok()).unwrap_or_default();
@@ -2292,6 +2296,19 @@ impl ShaleApp {
             dialog = dialog.with_latex(crate::pdf::tex::dialog::TexExport::new(&root, title, &text, prefer), engine);
         }
         self.modal = Some(Modal::Export(Box::new(dialog)));
+    }
+
+    /// Show the export dialog of the board note `rel` (BOARD-030): the board on landscape pages,
+    /// then the notes of its cards as a book. It is saved to `<vault>/exports/<name>.pdf`. It has the
+    /// built-in engine only.
+    pub fn open_export_board_dialog(&mut self, rel: &Path) {
+        self.flush_all();
+        let Some(v) = &self.vault else { return };
+        let name = v.file(rel).map(|f| f.display_name()).unwrap_or_else(|| rel.to_string_lossy().into_owned());
+        let path = v.root.join("exports").join(format!("{name}.pdf"));
+        let book = crate::pdf::book_dialog::BookExport::for_board(v, rel, &self.busy);
+        let opts = crate::pdf::export::ExportOptions { numbered_headings: self.cfg.numbered_headings, ..crate::pdf::export::ExportOptions::for_note() }.with_toc_break_property(&self.note_text(rel));
+        self.modal = Some(Modal::Export(Box::new(crate::pdf::export_dialog::ExportDialog::new(rel.to_path_buf(), false, name, opts, path).with_book(book))));
     }
 
     /// Show the export dialog for a folder as one PDF, a book (BOOK-010): `dir` is the folder, the

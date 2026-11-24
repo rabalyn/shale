@@ -1148,7 +1148,11 @@ impl ShaleApp {
             }
         }
         if let Modal::Export(d) = &mut modal {
-            let title = if d.book.is_some() { format!("Export the folder “{}” to PDF", d.name) } else { format!("Export “{}” to PDF", d.name) };
+            let title = match d.book.as_deref() {
+                Some(b) if b.board => format!("Export the board “{}” to PDF", d.name),
+                Some(_) => format!("Export the folder “{}” to PDF", d.name),
+                None => format!("Export “{}” to PDF", d.name),
+            };
             // a LaTeX export that is running or has just ended (TEX-016), or the book of a folder (BOOK-010)
             let finished = self.tex_export_tick(d, &ctx).or_else(|| self.book_export_tick(d));
             if d.tex.as_ref().is_some_and(|t| t.working()) || d.book.as_ref().is_some_and(|b| b.working()) {
