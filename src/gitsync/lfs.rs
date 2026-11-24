@@ -119,7 +119,7 @@ fn install_local(git: &Git, vault: &Path) -> Result<(), String> {
 
 /// A new repository: filter and `.gitattributes`, nothing to convert and nothing to commit (the
 /// first sync commits the file). Nothing happens without git-lfs (SYNC-017).
-pub(super) fn prepare_new(git: &Git, vault: &Path) -> Result<(), String> {
+pub(crate) fn prepare_new(git: &Git, vault: &Path) -> Result<(), String> {
     if git.lfs_version().is_none() {
         return Ok(());
     }

@@ -56,7 +56,8 @@ fn flagged(text: &str) -> bool {
     markdown::front_matter_values(text).iter().any(|(k, v)| k == "folder-note" && v.first().is_some_and(|v| v.trim().eq_ignore_ascii_case("true")))
 }
 
-fn vault_name(vault: &Vault) -> String {
+/// The name of the vault: its folder's name.
+pub fn vault_name(vault: &Vault) -> String {
     vault.root.file_name().map(|n| n.to_string_lossy().into_owned()).filter(|n| !n.is_empty()).unwrap_or_else(|| "Vault".to_string())
 }
 

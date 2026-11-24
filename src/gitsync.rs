@@ -32,21 +32,22 @@ impl Default for Git {
 }
 
 /// The result of a command that ran.
-struct Out {
-    ok: bool,
-    stdout: Vec<u8>,
-    stderr: String,
+#[derive(Debug)]
+pub(crate) struct Out {
+    pub(crate) ok: bool,
+    pub(crate) stdout: Vec<u8>,
+    pub(crate) stderr: String,
 }
 
 impl Out {
-    fn text(&self) -> String {
+    pub(crate) fn text(&self) -> String {
         String::from_utf8_lossy(&self.stdout).trim().to_string()
     }
 }
 
 impl Git {
     /// `git -C <dir> args…` with stdin closed, no prompts and no inherited repository variables.
-    fn command(&self, dir: &Path, args: &[&OsStr]) -> Command {
+    pub(crate) fn command(&self, dir: &Path, args: &[&OsStr]) -> Command {
         let mut c = crate::program::command(&self.program);
         c.arg("-C").arg(dir);
         // hidden git-lfs (tests): `git lfs …` becomes an unknown git command, which fails everywhere
@@ -73,13 +74,13 @@ impl Git {
         c
     }
 
-    fn run(&self, dir: &Path, args: &[&OsStr]) -> Result<Out, String> {
+    pub(crate) fn run(&self, dir: &Path, args: &[&OsStr]) -> Result<Out, String> {
         let o: Output = self.command(dir, args).output().map_err(|e| format!("git could not be started ({}): {e}", self.program.display()))?;
         Ok(Out { ok: o.status.success(), stdout: o.stdout, stderr: hide_passwords(String::from_utf8_lossy(&o.stderr).trim()) })
     }
 
     /// Run and require success; the error is git's own message.
-    fn ok(&self, dir: &Path, args: &[&OsStr]) -> Result<Out, String> {
+    pub(crate) fn ok(&self, dir: &Path, args: &[&OsStr]) -> Result<Out, String> {
         let o = self.run(dir, args)?;
         if o.ok {
             Ok(o)
@@ -439,7 +440,7 @@ fn ensure_idle(git: &Git, vault: &Path) -> Result<String, String> {
 }
 
 /// `-c user.name=… -c user.email=…` when git has no identity configured.
-fn identity(git: &Git, vault: &Path) -> Result<Vec<String>, String> {
+pub(crate) fn identity(git: &Git, vault: &Path) -> Result<Vec<String>, String> {
     let name = git.run(vault, args!["config", "user.name"])?.text();
     let email = git.run(vault, args!["config", "user.email"])?.text();
     let mut out = vec![];

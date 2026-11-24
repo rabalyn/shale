@@ -1,7 +1,7 @@
 #!/bin/bash
 # Tests the retry of `.forgejo/scripts/env-tests.sh tex-suite` (spec DEV-011, DEV-035, #327): a fake `cargo`
 # prints what each run of the tex_env suite says, a fake `tex-env.sh` records what is asked of it.
-# It also tests that `suites` picks forgejo_env for the sync wizard, the git credentials and tests/forgejo-env (SYNC-066).
+# It also tests that `suites` picks forgejo_env for the sync wizard, the git credentials, the publish of a vault and tests/forgejo-env (SYNC-066, SITE-062).
 #   bash scripts/test-env-tests.sh
 set -u
 SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/.forgejo/scripts/env-tests.sh"
@@ -133,6 +133,8 @@ suites_case "the sync wizard" "forgejo_env" src/gitsync/wizard/ui.rs
 suites_case "the git credentials" "forgejo_env" src/gitsync/credentials.rs
 suites_case "the Forgejo environment" "forgejo_env" tests/forgejo-env/forgejo-env.sh
 suites_case "the askpass fake keyring" "forgejo_env" tests/askpass/secret-tool
+suites_case "the publish of a vault" "forgejo_env" src/site_export/publish/env_tests.rs
+suites_case "the LFS code of git sync" "forgejo_env" src/gitsync/lfs.rs
 suites_case "other git sync code needs none" "" src/gitsync/detect.rs
 suites_case "CalDAV and TeX together, in a fixed order" "calendar::env_tests tex_env" src/pdf/tex/a.rs src/calendar/b.rs
 suites_case "CalDAV, mail, TeX, Forgejo and Samba together" "$ALL" src/calendar/b.rs src/mail/c.rs tests/tex-env/d src/gitsync/wizard/e.rs tests/smb-env/f

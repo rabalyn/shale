@@ -17,9 +17,9 @@ pub(crate) use ui::warnings_ui;
 
 // Linux only: its keyring is a pretend `secret-tool`, the one backend a separate process can fake.
 #[cfg(all(test, target_os = "linux"))]
-mod diagnose_tests;
+pub(crate) mod diagnose_tests;
 #[cfg(all(test, target_os = "linux"))]
-mod forgejo_env_tests;
+pub(crate) mod forgejo_env_tests;
 #[cfg(test)]
 mod parts_tests;
 #[cfg(all(test, unix))]

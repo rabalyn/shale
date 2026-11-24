@@ -398,7 +398,7 @@ jobs:
       # step finds no engine and skips
       - name: Container engine (Podman)
         run: |
-          (apt-get update -qq && apt-get install -y -qq --no-install-recommends podman python3-pip openssl curl netcat-openbsd util-linux openssh-client >/dev/null) \
+          (apt-get update -qq && apt-get install -y -qq --no-install-recommends podman python3-pip openssl curl netcat-openbsd util-linux openssh-client git-lfs >/dev/null) \
             || echo "Could not install Podman here."
           # bookworm's podman-compose (1.0.3) does not know `network_mode: "service:…"`, which the mail
           # stack uses: a pinned newer one from PyPI

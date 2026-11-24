@@ -21,28 +21,28 @@ fn unique(tag: &str) -> PathBuf {
 }
 
 /// A key pair made by the real `ssh-keygen`, with this passphrase (empty: none).
-pub(super) fn make_key(dir: &Path, name: &str, passphrase: &str) -> PathBuf {
+pub(crate) fn make_key(dir: &Path, name: &str, passphrase: &str) -> PathBuf {
     let key = dir.join(name);
     let o = Command::new("ssh-keygen").args(["-q", "-t", "ed25519", "-N", passphrase, "-C", "shale test"]).arg("-f").arg(&key).stdin(Stdio::null()).output().expect("ssh-keygen is part of OpenSSH");
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     key
 }
 
-pub(super) fn public_of(key: &Path) -> String {
+pub(crate) fn public_of(key: &Path) -> String {
     let mut p = key.as_os_str().to_os_string();
     p.push(".pub");
     std::fs::read_to_string(PathBuf::from(p)).unwrap().trim().to_string()
 }
 
 /// An `ssh-agent` of the test's own, on a socket of its own, stopped when dropped.
-pub(super) struct TestAgent {
+pub(crate) struct TestAgent {
     pub sock: PathBuf,
     pid: String,
     dir: PathBuf,
 }
 
 impl TestAgent {
-    pub(super) fn start(dir: &Path) -> TestAgent {
+    pub(crate) fn start(dir: &Path) -> TestAgent {
         let sock = dir.join("agent.sock");
         let o = Command::new("ssh-agent").arg("-s").arg("-a").arg(&sock).stdin(Stdio::null()).output().expect("ssh-agent is part of OpenSSH");
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
@@ -53,7 +53,7 @@ impl TestAgent {
 
     /// `ssh-add <key>` with its passphrase given by `SSH_ASKPASS` (a script of the test; this is the only place that
     /// passes a passphrase to anything: Shale itself never does).
-    pub(super) fn add(&self, key: &Path, passphrase: &str) {
+    pub(crate) fn add(&self, key: &Path, passphrase: &str) {
         let askpass = self.dir.join("askpass.sh");
         crate::test_exec::write_script(&askpass, &format!("#!/bin/sh\necho '{passphrase}'\n"));
         let o = Command::new("ssh-add").arg(key).env("SSH_AUTH_SOCK", &self.sock).env("SSH_ASKPASS", &askpass).env("SSH_ASKPASS_REQUIRE", "force").env("DISPLAY", ":0").stdin(Stdio::null()).output().expect("ssh-add is part of OpenSSH");
