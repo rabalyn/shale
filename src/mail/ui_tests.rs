@@ -4225,3 +4225,65 @@ fn alt_keys_do_nothing_while_the_search_field_has_the_keyboard() {
     assert_eq!(w.server_uids("INBOX"), vec![1, 2, 3], "the field has the keyboard: Alt+D deletes nothing");
     assert!(w.app.mail.open.is_some());
 }
+
+// spec: JOB-032
+#[test]
+fn job_032_the_browser_sign_in_is_a_listed_task_that_cancel_and_closing_the_dialog_stop_and_success_ends() {
+    use crate::mail::oauth_fake_tests::{pretend_browser, FakeOAuth, Visit};
+    use crate::mail::ui::{SignInState, MAIL_SIGNIN};
+    if std::process::Command::new("curl").arg("--version").output().is_err() {
+        return;
+    }
+    let provider = FakeOAuth::start();
+    let mut w = W::new("job032", true);
+    let mut acct = w.account.clone();
+    acct.auth = crate::config::MailAuth::OAuth2;
+    acct.oauth_provider = crate::config::OAuthProvider::Custom;
+    acct.oauth_client_id = "shale-test".into();
+    acct.oauth_auth_url = format!("http://127.0.0.1:{}/authorize", provider.port);
+    acct.oauth_token_url = format!("http://127.0.0.1:{}/token", provider.port);
+    acct.oauth_scope = "mail".into();
+    let id = acct.id.clone();
+    let key = MAIL_SIGNIN.with(&id);
+    let cancelled = |a: &ShaleApp| !a.mail.busy.is_running(&MAIL_SIGNIN.with(&a.cfg.mail_accounts[0].id)) && matches!(a.mail.signins.get(&a.cfg.mail_accounts[0].id), Some(SignInState::Failed(e)) if e == "The sign-in was cancelled.");
+
+    // waiting for the browser: a task with the account's name and a Cancel; a second sign-in of the account is refused
+    let (guard, log) = pretend_browser(Visit::Silent);
+    w.app.mail.start_sign_in(&acct, None);
+    log.wait_opened(1);
+    let info = w.app.mail.busy.info(&key).expect("listed while it waits for the browser");
+    assert_eq!(info.label, "Signing in Test mail in the browser…");
+    assert!(info.cancellable && !info.cancelling);
+    w.frame(vec![]);
+    assert!(w.shows(&info.label), "the mail view shows the sign-in");
+    w.app.mail.start_sign_in(&acct, None);
+    assert_eq!((w.app.mail.busy.list().len(), log.opened.lock().unwrap().len()), (1, 1), "no second sign-in opens a second browser page");
+
+    // Cancel of the registry (the indicator) stops the wait; nothing is kept
+    assert!(w.app.mail.busy.cancel(info.id));
+    w.until("the cancelled sign-in ends", cancelled);
+    assert!(w.app.mail.busy.list().is_empty());
+    assert!(secrets::mail_secret(&id, MailSecret::RefreshToken).is_none());
+
+    // closing the account dialog stops it too
+    w.app.open_mail_settings();
+    w.frame(vec![]);
+    w.app.mail.start_sign_in(&acct, None);
+    log.wait_opened(2);
+    w.until("it waits again", |a| a.mail.busy.is_running(&MAIL_SIGNIN.with("t-job032")));
+    w.click("md:cancel");
+    assert!(w.app.modal.is_none());
+    w.until("closing the dialog stopped the sign-in", cancelled);
+    assert!(w.app.mail.busy.list().is_empty());
+    assert!(provider.state.lock().unwrap().token_requests.is_empty(), "no code was ever exchanged");
+
+    // a sign-in that succeeds ends its task with the job and keeps the token
+    drop(guard);
+    let (_guard, _log) = pretend_browser(Visit::Approve);
+    w.app.mail.start_sign_in(&acct, None);
+    w.until("the sign-in ends", |a| matches!(a.mail.signins.get("t-job032"), Some(SignInState::Done { .. })));
+    assert!(w.app.mail.busy.list().is_empty(), "the task ended with the job");
+    assert!(secrets::mail_secret(&id, MailSecret::RefreshToken).is_some());
+    secrets::clear_mail_secret(&id, MailSecret::RefreshToken);
+    crate::mail::oauth::forget_source(&id);
+}

@@ -1044,6 +1044,10 @@ impl ShaleApp {
             if resp.should_close() {
                 keep = false;
             }
+            // closing the dialog (Done, Cancel, Esc, a click outside) stops its browser sign-ins (JOB-010, JOB-032)
+            if !keep {
+                self.mail.cancel_sign_ins();
+            }
         }
         if let Modal::Social(d) = &mut modal {
             let accounts = self.cfg.social_accounts.clone();

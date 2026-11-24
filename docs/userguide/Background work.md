@@ -33,6 +33,12 @@ and you cannot start it twice by accident.
   meanwhile, and keeps the mails after it waiting in the Outbox; nothing is sent again by itself until you
   queue, retry or send one again. A mail the server refuses stays in the Outbox as failed with the server's
   words, and the view says "A mail was not sent: …".
+- **Signing in to a mail account in the browser is a task per account**: "Signing in ‹account› in the browser…"
+  shows in the indicator, in the mail view above the account's name, and as "Waiting for the browser…" in the
+  account dialog, each with **Cancel**. Cancel, or closing the account dialog (Done, Cancel, Esc), stops
+  waiting at once and frees the local address the browser answers to; a second sign-in of the same account
+  does not start while one waits. A sign-in is kept whole or not at all: if Cancel comes before Shale has
+  saved it, nothing is saved, and an earlier sign-in stays as it was.
 - **Things that happen on their own are listed only when they take long.** Reading the vault folder for
   changes made by other programs ("Reading the vault folder…", on a slow network share), learning which
   words belong to your tags ("Learning the words of the tags…", **Cancel** stops it) and counting what Shale
