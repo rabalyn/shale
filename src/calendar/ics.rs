@@ -1211,7 +1211,7 @@ pub(crate) mod tests {
         assert!(out.contains("TRIGGER:-PT10M") && !out.contains("ACTION:EMAIL") && !out.contains("DESCRIPTION:fixed"), "{out}");
     }
 
-    // spec: CAL-012, CAL-009
+    // spec: CAL-012, CAL-009, CAL-006
     #[test]
     fn times_keep_their_zone_and_repeats_keep_their_clock_time() {
         if !t::zone_known("Europe/Berlin") {

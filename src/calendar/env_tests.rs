@@ -145,7 +145,7 @@ fn finish(store: &mut CalendarStore, job: &crate::calendar::store::Job, ids: &[&
     r
 }
 
-// spec: CALENV-002, DEV-005
+// spec: CALENV-002, DEV-005, CALENV-001
 #[test]
 #[ignore = "needs the containers: tests/caldav-env/caldav-env.sh up"]
 fn caldav_env_discovers_and_loads_the_seeded_calendars() {
@@ -401,7 +401,7 @@ fn caldav_env_a_wrong_password_is_an_error_and_changes_nothing() {
     assert_eq!(dav::calendar_state(&cal("work"), &other).unwrap_err(), refused);
 }
 
-// spec: CALENV-002, SEC-001
+// spec: CALENV-002, SEC-001, CALENV-003
 #[test]
 #[ignore = "needs the containers: tests/caldav-env/caldav-env.sh up"]
 fn caldav_env_certificate_and_address_rules() {

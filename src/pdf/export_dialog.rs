@@ -359,7 +359,7 @@ mod tests {
         (h, d)
     }
 
-    // spec: PDF-001, PDF-008, EDIT-024
+    // spec: PDF-001, PDF-008, EDIT-024, PDF-019
     #[test]
     fn note_dialog_controls() {
         let (mut h, mut d) = setup(false);
@@ -421,7 +421,7 @@ mod tests {
         assert_eq!(h.last, DialogResult::Export);
     }
 
-    // spec: PDF-018, PDF-019
+    // spec: PDF-018, PDF-019, PDF-024
     #[test]
     fn the_dialog_shows_the_notes_paper_margins_size_and_contents_and_what_the_note_sets_for_itself_pdf_019() {
         let text = "---\nprint-paper: 215.9x279.4mm\nprint-margins: 25.4 20 25.4 20\nprint-font-size: 12\nprint-toc: false\nprint-font: serif\nprint-align: justify\nprint-line-spacing: 1.15\n---\nx";

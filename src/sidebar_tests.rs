@@ -182,7 +182,7 @@ fn lay_001_a_ribbon_icon_is_dragged_to_a_new_place_and_the_order_survives_a_rest
     assert_eq!(w.app.cfg.sidebars.ribbon.last().map(String::as_str), Some("files"), "and the settings follow");
 }
 
-// spec: LAY-001
+// spec: LAY-001, LAY-010
 #[test]
 fn lay_001_dropping_a_ribbon_icon_outside_the_ribbon_or_pressing_esc_changes_nothing() {
     let mut w = W::new("ribbon-cancel");
@@ -380,7 +380,7 @@ fn lay_008_the_split_layout_is_stored_and_comes_back_and_a_broken_one_gives_the_
     }
 }
 
-// spec: LAY-011
+// spec: LAY-011, LAY-004
 #[test]
 fn lay_011_a_panel_shortcut_in_the_ribbon_shows_its_panel_below_the_views_and_closes_again() {
     let mut w = W::new("shortcut");

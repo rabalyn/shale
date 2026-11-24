@@ -292,7 +292,7 @@ fn dialogs_event_new_event_is_typed_saved_and_changed() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-// spec: CAL-005
+// spec: CAL-005, CAL-031
 #[test]
 fn dialogs_event_cancel_and_a_wrong_date_store_nothing() {
     let (mut p, src, dir) = with_calendar("evt-bad");

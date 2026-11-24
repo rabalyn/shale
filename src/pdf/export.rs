@@ -3233,7 +3233,7 @@ pub(crate) mod tests {
         assert_eq!(format!("{:?}", ExportOptions::for_note().with_note_properties("# Just a note\n")), format!("{:?}", ExportOptions::for_note()));
     }
 
-    // spec: PDF-013
+    // spec: PDF-013, PDF-021
     #[test]
     fn bad_print_values_are_ignored_pdf_013() {
         let base = format!("{:?}", ExportOptions::for_note());
@@ -3521,7 +3521,7 @@ pub(crate) mod tests {
         pages.iter().position(|p| p.contains(&hex(word))).unwrap_or_else(|| panic!("{word} is on no page"))
     }
 
-    // spec: PDF-020, PDF-022
+    // spec: PDF-020, PDF-022, PDF-021
     #[test]
     fn a_page_break_marker_starts_a_new_page_and_is_not_printed_pdf_020() {
         let pages = pages_of(&format!("before\n\n{MARK}\n\nafter\n"), &plain_options());
@@ -3561,7 +3561,7 @@ pub(crate) mod tests {
         assert_eq!(pages.len(), 2, "title and contents, then the text");
     }
 
-    // spec: PDF-021
+    // spec: PDF-021, PDF-022
     #[test]
     fn print_break_before_starts_the_headings_up_to_its_level_on_new_pages_pdf_021() {
         let text = "# One\n\nfirstbody\n\n## Sub\n\ntext sub\n\n### Deep\n\n# Two\n\nsecondbody\n";

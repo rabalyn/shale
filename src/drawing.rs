@@ -2185,6 +2185,77 @@ mod tests {
         assert_eq!(d.scene.live().count(), 3);
     }
 
+    // spec: DRAW-001
+    #[test]
+    fn an_unknown_element_is_kept_with_its_fields_and_drawn_as_a_dashed_box() {
+        let frame = r##"{"id":"f1","type":"frame","x":10,"y":20,"width":300,"height":200,"angle":0,"strokeColor":"#bbb","backgroundColor":"transparent","fillStyle":"solid","strokeWidth":1,"strokeStyle":"solid","roughness":0,"opacity":100,"seed":3,"version":1,"versionNonce":1,"isDeleted":false,"groupIds":[],"frameId":null,"roundness":null,"boundElements":null,"updated":1,"link":null,"locked":false,"name":"Frame 1"}"##;
+        let text = SAMPLE_SCENE.replacen("\"elements\": [", &format!("\"elements\": [{frame},"), 1);
+        let s = Scene::parse(&text).unwrap();
+        assert_eq!(s.elements.len(), 6);
+        let back: Value = serde_json::from_str(&s.to_json()).unwrap();
+        let kept = back["elements"].as_array().unwrap().iter().find(|e| e["id"] == "f1").expect("the frame is written back");
+        assert_eq!((kept["type"].as_str(), kept["name"].as_str(), kept["width"].as_f64()), (Some("frame"), Some("Frame 1"), Some(300.0)));
+        // drawn as a dashed box: dashes along the four sides, nothing filled
+        let painter = egui::Painter::new(egui::Context::default(), egui::LayerId::background(), egui::Rect::EVERYTHING);
+        let view = View { origin: Pos2::ZERO, offset: Vec2::ZERO, zoom: 1.0 };
+        let mut out = Vec::new();
+        paint_element(&painter, s.elements.iter().find(|e| e.id == "f1").unwrap(), &view, false, &crate::drawing::pictures::Pictures::new(), &mut out);
+        assert!(out.len() > 8 && out.iter().all(|s| matches!(s, Shape::LineSegment { .. })), "dashes: {}", out.len());
+        let (min, max) = out.iter().fold((Pos2::new(f32::MAX, f32::MAX), Pos2::ZERO), |(lo, hi), s| {
+            let Shape::LineSegment { points, .. } = s else { return (lo, hi) };
+            points.iter().fold((lo, hi), |(lo, hi), p| (Pos2::new(lo.x.min(p.x), lo.y.min(p.y)), Pos2::new(hi.x.max(p.x), hi.y.max(p.y))))
+        });
+        assert_eq!((min, max), (Pos2::new(10.0, 20.0), Pos2::new(310.0, 220.0)), "around the element's box");
+    }
+
+    // spec: DRAW-006
+    #[test]
+    fn undo_keeps_the_last_200_steps_and_redo_brings_them_back() {
+        let mut d = DrawingDoc::new(PathBuf::from("x.excalidraw"), SAMPLE_SCENE);
+        // 250 changes of the first element, each one step
+        for i in 1..=250 {
+            d.snapshot();
+            d.scene.elements[0].x = i as f64;
+        }
+        assert_eq!(d.undo.len(), 200, "the oldest steps are dropped");
+        let mut undone = 0;
+        while !d.undo.is_empty() {
+            d.undo();
+            undone += 1;
+        }
+        assert_eq!(undone, 200);
+        assert_eq!(d.scene.elements[0].x, 50.0, "the state 200 steps back is the oldest one that is kept");
+        d.undo();
+        assert_eq!(d.scene.elements[0].x, 50.0, "nothing further back");
+        for _ in 0..200 {
+            d.redo();
+        }
+        assert_eq!(d.scene.elements[0].x, 250.0, "redo returns to the last state");
+    }
+
+    // spec: DRAW-002
+    #[test]
+    fn the_hand_drawn_look_is_the_same_every_time_for_a_seed_and_another_for_another_seed() {
+        let scene = Scene::parse(SAMPLE_SCENE).unwrap();
+        let painter = egui::Painter::new(egui::Context::default(), egui::LayerId::background(), egui::Rect::EVERYTHING);
+        let view = View { origin: Pos2::ZERO, offset: Vec2::ZERO, zoom: 1.0 };
+        let none = crate::drawing::pictures::Pictures::new();
+        let shapes_of = |e: &Element| {
+            let mut out = Vec::new();
+            paint_element(&painter, e, &view, false, &none, &mut out);
+            out
+        };
+        // the hachure rectangle and the cross-hatched ellipse: strokes and hatch lines wobble, but the same way each time
+        for e in [&scene.elements[0], &scene.elements[3]] {
+            let first = shapes_of(e);
+            assert!(first.len() > 4, "a hand-drawn outline and its hatching: {}", first.len());
+            assert_eq!(first, shapes_of(e), "painted twice: the same shapes ({})", e.id);
+            let mut other = e.clone();
+            other.seed += 1;
+            assert_ne!(first, shapes_of(&other), "another seed wobbles another way ({})", e.id);
+        }
+    }
+
     #[test]
     fn colors() {
         assert_eq!(parse_color("#ff0000"), Some(Color32::from_rgb(255, 0, 0)));

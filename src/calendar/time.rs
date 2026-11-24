@@ -403,6 +403,7 @@ mod tests {
         assert!((now() - real_now()).abs() < 5);
     }
 
+    // spec: CAL-009
     #[test]
     fn civil_round_trip() {
         assert_eq!(days_from_civil(1970, 1, 1), 0);

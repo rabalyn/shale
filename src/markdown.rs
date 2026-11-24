@@ -1506,7 +1506,7 @@ a
         assert_eq!(l[1].target, "My Note");
     }
 
-    // spec: MEDIA-014, MEDIA-015, LINK-001
+    // spec: MEDIA-014, MEDIA-015, LINK-001, MEDIA-018
     #[test]
     fn library_links_and_file_links_to_media_are_links() {
         let t = "![[@Videos/2024/a.mp4|480]] [[@Music/Album/b.flac]]\n![](<file:///home/ada/My Videos/a.mp4>) ![pic](file:///home/ada/My%20Pics/a%20b.png) [song](<file:///home/ada/Track #3.mp3>)";
