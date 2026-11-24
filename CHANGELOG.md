@@ -134,6 +134,7 @@ its section from this file.
 - The server recipe of the user guide ("Publishing to a server") is now run for real in tests, the hook with Hugo and Pagefind and the Forgejo Actions workflow in a runner on a Forgejo test server. That showed two flaws in it, both fixed in the guide: two builds that started within one second shared one folder name, so the second one was never served, and the hook left its working folder behind when a build failed (#665).
 - The Advanced text box of a lane's settings no longer removes a typed space: the box keeps what you type, an invalid query stays as typed with its error shown, and the board note is written 500 ms after your last key, when you leave the box and when you close the settings (#675).
 - CI: `scripts/install-hugo.sh` and `scripts/install-pagefind.sh` download the Hugo and Pagefind release of the machine's architecture (x86_64 or aarch64) instead of always the x86_64 one, so the `build` and `coverage` jobs run on the arm64 runner; another architecture stops with a message naming it (#683).
+- CI: the tests that run in the Forgejo CI as root no longer depend on a read-only folder, parallel test runs no longer share calendar test folders, the sidebar search and publish lock tests wait for the search worker and the retry, and the test stack's Actions runner image builds with the CI's podman-compose 1.2.0 (its `runner.yaml` names the Containerfile), so the check tags run green (#659, #665).
 
 ### Security
 
