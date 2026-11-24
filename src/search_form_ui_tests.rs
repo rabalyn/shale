@@ -345,8 +345,17 @@ fn query_029_the_picker_form_lists_the_tags_and_esc_closes_the_list_before_the_p
     assert!(w.app.modal.is_some(), "Esc closed the list only");
     assert!(!crate::search_form::list_open(w.hl.ctx()));
     // typing opens it again; a click on the entry writes the query of the picker
+    // (the picker lists the hits of "#to" after a debounce and moves the list of the form when they
+    // arrive, so the click waits for them: the debounce is no job of the worker, DEV-041)
     w.hl.frame(&mut w.app, vec![Event::Text("to".into())]);
-    w.hl.frames(&mut w.app, 2);
+    crate::ui_test_support::settle_within(std::time::Duration::from_secs(60), || {
+        w.hl.frame(&mut w.app, vec![]);
+        let mut busy = w.app.busy_jobs();
+        if !w.picker().listed_for().is_some_and(|t| t.contains("#to")) {
+            busy.push("the debounced list of the picker");
+        }
+        busy
+    });
     assert!(crate::search_form::list_open(w.hl.ctx()));
     w.click("todo");
     assert_eq!(w.picker().query, "#todo");
