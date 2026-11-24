@@ -5,10 +5,13 @@ Format: [ADR-0001](../decisions/0001-spec-driven-development.md). Issue: #630.
 
 A vault, synced by git to a server, is browsable online as a wiki built with Hugo. Shale writes a
 Hugo content tree with `shale export-site <vault> <out>` (headless, no window); Hugo builds the
-site from it, Pagefind adds search, and the web server serves it. Git sync is not extended: the
-server builds from the raw vault. The export is opt-in and private by default (SITE-001 to
-SITE-010). Phases: **1** MVP (notes, links, heading links, picture embeds, math, colours, tags,
-backlinks, search, publish filter, theme, server recipe); **2** drawings, layouts per note
+site from it, Pagefind adds search, and the web server serves it. Notes are chosen by
+publishing rules in the vault's settings, so an old vault needs no per-note edits (SITE-051 to
+SITE-059). Two ways lead to the server: git sync pushes the vault and the server builds from it,
+or a local export pushes only the generated tree to a separate site remote (SITE-060 to
+SITE-062). The export is opt-in and private by default (SITE-001 to SITE-010). Phases: **1** MVP
+(notes, links, heading links, picture embeds, math, colours, tags,
+backlinks, search, publishing rules, theme, server recipe); **2** drawings, layouts per note
 type, players, the graph page; **3** board snapshots. Every row is `SHOULD BE`; the phase of a row
 is 1 unless the row says otherwise. Tests are named `file.rs::test_fn` (under `src/`).
 
@@ -17,7 +20,7 @@ is 1 unless the row says otherwise. Tests are named `file.rs::test_fn` (under `s
 | ID | Rule | Status | Code | Test |
 |---|---|---|---|---|
 | SITE-001 | **The export is opt-in.** Only notes chosen for publishing (SITE-002) are written; a vault with no chosen note writes an empty site and says so. | SHOULD BE (#630) | — | — |
-| SITE-002 | **A note is chosen for publishing** by a rule that is not decided yet (OPEN-022); the same rule decides for every command and every note. | SHOULD BE (#630) | — | — |
+| SITE-002 | **A note is chosen for publishing** when the publishing rules of the vault choose it (SITE-051 to SITE-058); the same rules decide for every command and every note. | SHOULD BE (#630) | — | — |
 | SITE-003 | **Never written:** `.shale/`, `.trash/` and every other file or folder whose name starts with `.` (VAULT-003). | SHOULD BE (#630) | — | — |
 | SITE-004 | **Conflict copies are never written:** a file named `Name (conflict YYYY-MM-DD HHMM).ext` (SYNC-008) is left out, also when a published note links it. | SHOULD BE (#630) | — | — |
 | SITE-005 | **Temp and sync debris is never written:** `.shale-tmp-*`, `*.part` and `*.tmp` files are left out. | SHOULD BE (#630) | — | — |
@@ -26,6 +29,20 @@ is 1 unless the row says otherwise. Tests are named `file.rs::test_fn` (under `s
 | SITE-008 | **Mail originals (`.eml`, `.ics`) are never written,** also when a published note links them, unless the file itself is chosen for publishing (SITE-002). | SHOULD BE (#630) | — | — |
 | SITE-009 | **A dry run lists what would be published:** `--dry-run` prints every note and media file that would be written, writes nothing and exits 0. | SHOULD BE (#630) | — | — |
 | SITE-010 | **The output holds nothing of an unpublished note:** not its text, name, tags, links, backlinks or graph entry. | SHOULD BE (#630) | — | — |
+
+## Publishing rules
+
+| ID | Rule | Status | Code | Test |
+|---|---|---|---|---|
+| SITE-051 | **Publishing is off until it is switched on** in Settings (a Publishing section); while it is off, `shale export-site` writes an empty site and says that publishing is off. | SHOULD BE (#630) | — | — |
+| SITE-052 | **The rules live in the vault's settings,** `<vault>/.shale/settings.json` (CFG-005, CFG-006), which travel with the vault, so the export on the server reads the same rules the app wrote. | SHOULD BE (#630) | — | — |
+| SITE-053 | **Include rules combine freely and a note is chosen when any one matches:** all notes; all notes in one or more vault folders (with their subfolders); all notes with one or more tags (front matter or inline, TAG-001). | SHOULD BE (#630) | — | — |
+| SITE-054 | **A nested tag matches the rule of its parent:** a note tagged `#a/b` is chosen by a rule for the tag `#a` as well as by one for `#a/b`. | SHOULD BE (#630) | — | — |
+| SITE-055 | **Exclude rules (folders, tags) win over include rules:** a note in an excluded folder or with an excluded tag is never chosen by a rule. | SHOULD BE (#630) | — | — |
+| SITE-056 | **Notes of a type that holds private data are not chosen by "all notes":** `email`, `event`, `post` and `person` (IMP-003, PPL-001) are left out unless the type is ticked explicitly in the settings. | SHOULD BE (#630) | — | — |
+| SITE-057 | **A note's own `publish:` property wins over every rule:** `publish: false` keeps it off the site, `publish: true` puts it on (still subject to SITE-003 to SITE-005 and SITE-008). | SHOULD BE (#630) | — | — |
+| SITE-058 | **The Publishing settings show how many notes the rules choose now,** and a button lists them (the same list as `--dry-run`, SITE-009). | SHOULD BE (#630) | — | — |
+| SITE-059 | **Changing a rule changes nothing in any note:** no note, front matter or file of the vault is written when a rule is added, changed or removed. | SHOULD BE (#630) | — | — |
 
 ## The command
 
@@ -106,3 +123,11 @@ is 1 unless the row says otherwise. Tests are named `file.rs::test_fn` (under `s
 | SITE-048 | **Full-text search with Pagefind:** the site has a search box that finds words of published notes, and of nothing else. | SHOULD BE (#630) | — | — |
 | SITE-049 | **A server recipe is documented:** `git pull` with git-lfs (SYNC-020), `shale export-site`, `hugo`, `pagefind`, then swapping the output folder in; as a Forgejo Actions job or a post-receive hook. | SHOULD BE (#630) | — | — |
 | SITE-050 | **Access control is the web server's** (basic auth or an OIDC proxy): Shale writes no login; the recipe says so and says that the site is public otherwise. | SHOULD BE (#630) | — | — |
+
+## Getting the site to the server
+
+| ID | Rule | Status | Code | Test |
+|---|---|---|---|---|
+| SITE-060 | **The usual way is git sync:** Shale's git sync pushes the vault, including `.shale/settings.json`, to the git remote; the server (the same remote, or a machine that pulls from it) runs the recipe of SITE-049 on each push. | SHOULD BE (#630) | — | — |
+| SITE-061 | **On the git sync way (SITE-060) the publishing rules are applied on the server,** from the synced settings, so a rule change takes effect with the next sync; on the way of SITE-062 the app applies them before it pushes. | SHOULD BE (#630) | — | — |
+| SITE-062 | **A local export can be pushed to a separate site remote** (phase 3): the app runs the export itself and pushes only the generated tree to a second git remote, so a wiki server that is not trusted with the whole vault never receives an unpublished note. It needs git sync to support a second remote (SYNC rows know one remote, `origin`, today). | SHOULD BE (#630) | — | — |
