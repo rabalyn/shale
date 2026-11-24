@@ -51,6 +51,15 @@ pub struct Failure {
     pub document: Arc<Document>,
     /// The set it was compiled against, for the command line in the saved folder.
     pub set_dir: PathBuf,
+    /// The packages of Shale's list (`assets/tex/packages.txt`) whose files TeX did not find (TEX-052).
+    pub missing: Box<[String]>,
+}
+
+impl Failure {
+    /// A failure with nothing but what it says: no log, no document.
+    pub fn said(headline: String) -> Failure {
+        Failure { headline, problems: vec![], log_tail: String::new(), document: Arc::new(Document::default()), set_dir: PathBuf::new(), missing: Box::default() }
+    }
 }
 
 /// The PDF export through LaTeX, as a task of the busy registry (JOB-018).
@@ -58,7 +67,7 @@ pub const TEX_EXPORT: Key = Key::new("tex-export");
 
 /// A running export of the dialog, a task of the registry. Dropping it (the dialog closed, or
 /// Cancel) stops LuaLaTeX.
-pub struct ExportJob(pub(super) busy::Job<Result<Made, Failure>>);
+pub struct ExportJob(pub(super) busy::Job<Result<Made, Box<Failure>>>);
 
 impl Drop for ExportJob {
     fn drop(&mut self) {
@@ -68,7 +77,7 @@ impl Drop for ExportJob {
 
 /// A running compile of the guided setup's test page. Dropping it stops LuaLaTeX.
 pub struct Job {
-    pub(super) rx: Receiver<Result<Result<Made, Failure>, String>>,
+    pub(super) rx: Receiver<Result<Result<Made, Box<Failure>>, String>>,
     pub(super) cancel: Arc<AtomicBool>,
 }
 
@@ -103,6 +112,20 @@ pub struct TexExport {
     /// The note's `latex-template:` names a set or kind the vault does not have, or one a folder
     /// cannot use: what was not found and what is used instead (TEX-033). Gone once the person picks a set or kind.
     pub template_warning: Option<String>,
+    /// The engine in use is the managed TeX Live (set by the window every frame, TEX-052).
+    pub managed: bool,
+    /// The packages of the list that this engine lacks, when it is the managed one: a line with an
+    /// Install button says so (TEX-052).
+    pub missing: Vec<String>,
+    /// The packages this document needs besides what every document has (a board: `geometry` and `tools`):
+    /// while one of them is in `missing`, Export is off (TEX-052).
+    pub needs: Vec<String>,
+    /// Install was pressed: the window starts `tlmgr install` of [`TexExport::wanted_packages`].
+    pub install_requested: bool,
+    /// The install of the packages runs: what it is doing (set by the window).
+    pub installing: Option<String>,
+    /// Why the install of the packages failed.
+    pub install_error: Option<String>,
 }
 
 /// The choice a note's properties make: `latex-template: tuda/thesis` (a set and a kind).
@@ -128,8 +151,27 @@ impl TexExport {
     fn build(vault: &Path, title: String, text: &str, prefer: Option<(String, String)>, folder: bool) -> TexExport {
         let sets: Vec<SetInfo> = sets::scan(vault).into_iter().filter_map(|e| e.info.ok()).filter(|s| !s.kinds.is_empty()).collect();
         let props = crate::markdown::front_matter_values(text);
-        let mut t =
-            TexExport { sets, set: 0, kind: String::new(), title, props, values: BTreeMap::new(), status: TexStatus::default(), job: None, failure: None, save_requested: false, setup_requested: None, folder, template_warning: None };
+        let mut t = TexExport {
+            sets,
+            set: 0,
+            kind: String::new(),
+            title,
+            props,
+            values: BTreeMap::new(),
+            status: TexStatus::default(),
+            job: None,
+            failure: None,
+            save_requested: false,
+            setup_requested: None,
+            folder,
+            template_warning: None,
+            managed: false,
+            missing: vec![],
+            needs: vec![],
+            install_requested: false,
+            installing: None,
+            install_error: None,
+        };
         let (set, kind) = prefer.unzip();
         if let Some(i) = set.and_then(|id| t.sets.iter().position(|s| s.id == id)) {
             t.set = i;
@@ -230,7 +272,25 @@ impl TexExport {
     /// Whether Export can be pressed: a TeX, a kind, no export running (in this dialog or in one
     /// that was closed while its export was still stopping, JOB-005).
     pub fn can_export(&self, busy: &Busy) -> bool {
-        matches!(self.status, TexStatus::Ready(_)) && self.current_kind().is_some() && self.job.is_none() && !busy.is_running(&TEX_EXPORT)
+        matches!(self.status, TexStatus::Ready(_)) && self.current_kind().is_some() && self.job.is_none() && !busy.is_running(&TEX_EXPORT) && self.blocked_by().is_empty() && self.installing.is_none()
+    }
+
+    /// The packages this document needs that the managed TeX Live lacks: the compile would fail
+    /// with "package ... is missing", so Export waits for the Install button (TEX-052).
+    pub fn blocked_by(&self) -> Vec<&str> {
+        self.needs.iter().map(String::as_str).filter(|n| self.missing.iter().any(|m| m == n)).collect()
+    }
+
+    /// What the Install button installs: the packages of the list the managed TeX Live lacks, and
+    /// the ones the last compile found missing (nothing for a TeX of this computer).
+    pub fn wanted_packages(&self) -> Vec<String> {
+        let mut names = if self.managed { self.missing.clone() } else { vec![] };
+        for m in self.failure.iter().filter(|_| self.managed).flat_map(|f| &f.missing) {
+            if !names.contains(m) {
+                names.push(m.clone());
+            }
+        }
+        names
     }
 
     /// Compile a document against the chosen set as a task of the registry (TEX-004, JOB-018).
@@ -251,13 +311,39 @@ impl TexExport {
         match got {
             Ok(Ok(made)) => Some(made),
             Ok(Err(f)) => {
-                self.failure = Some(f);
+                self.failure = Some(*f);
                 None
             }
             Err(crash) => {
-                self.failure = Some(Failure { headline: crash, problems: vec![], log_tail: String::new(), document: Arc::new(Document::default()), set_dir: PathBuf::new() });
+                self.failure = Some(Failure::said(crash));
                 None
             }
+        }
+    }
+
+    /// The line "The managed TeX Live misses: geometry" with its Install button, what the install is
+    /// doing, and why Export waits (TEX-052).
+    fn packages_block(&mut self, ui: &mut Ui, rec: &mut dyn FnMut(&str, egui::Response) -> egui::Response) {
+        let wanted = self.wanted_packages();
+        if let Some(what) = &self.installing {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                rec("installing", ui.label(what));
+            });
+        } else if !wanted.is_empty() {
+            ui.horizontal_wrapped(|ui| {
+                rec("missing-packages", crate::theme::problem(ui, super::settings_ui::missing_line(&wanted)));
+                if rec("install-packages", ui.button("Install")).on_hover_text(format!("tlmgr install {}", wanted.join(" "))).clicked() {
+                    self.install_requested = true;
+                }
+            });
+            let blocked = self.blocked_by();
+            if !blocked.is_empty() {
+                rec("blocked", crate::theme::prose(ui, muted_text(&format!("This document needs {}: install it, then export.", blocked.join(", ")))));
+            }
+        }
+        if let Some(e) = &self.install_error {
+            rec("install-error", crate::theme::problem(ui, e));
         }
     }
 
@@ -382,6 +468,7 @@ impl TexExport {
                 });
             }
         }
+        self.packages_block(ui, rec);
         if self.working() {
             ui.horizontal(|ui| {
                 ui.spinner();
@@ -390,6 +477,9 @@ impl TexExport {
         }
         if let Some(f) = &self.failure {
             crate::theme::problem(ui, &f.headline);
+            if self.managed && !f.missing.is_empty() {
+                rec("missing-pointer", crate::theme::problem(ui, format!("{} of Shale's package list {} not in the managed TeX Live: press Install above.", f.missing.join(", "), if f.missing.len() == 1 { "is" } else { "are" })));
+            }
             for p in f.problems.iter().take(6) {
                 rec("problem", ui.label(egui::RichText::new(p).monospace().size(12.0)));
             }
@@ -405,6 +495,10 @@ impl TexExport {
     }
 }
 
+fn muted_text(t: &str) -> egui::RichText {
+    egui::RichText::new(t).size(12.0).color(theme::palette().muted)
+}
+
 /// Compile a written document against a set as a job (TEX-004); the export dialog and the test
 /// page of the guided setup (TEX-017) both run it.
 pub fn spawn_compile(engine: Engine, set: SetInfo, doc: Arc<Document>, notify: impl FnOnce() + Send + 'static) -> Job {
@@ -415,15 +509,23 @@ pub fn spawn_compile(engine: Engine, set: SetInfo, doc: Arc<Document>, notify: i
 }
 
 /// Compile a written document against a set and turn the answer into what the dialog needs.
-fn compile_job(engine: &Engine, set: &SetInfo, doc: &Arc<Document>, cancel: Arc<AtomicBool>) -> Result<Made, Failure> {
+fn compile_job(engine: &Engine, set: &SetInfo, doc: &Arc<Document>, cancel: Arc<AtomicBool>) -> Result<Made, Box<Failure>> {
     let files: Vec<(&str, &[u8])> = doc.files.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();
-    let fail = |e: CompileError| Failure { headline: e.headline.clone(), problems: e.problems.iter().map(|p| p.text()).collect(), log_tail: e.log_tail, document: doc.clone(), set_dir: set.dir.clone() };
+    let fail = |e: CompileError| {
+        let mut missing: Vec<String> = vec![];
+        for pkg in e.problems.iter().filter_map(|p| p.missing.as_deref()).filter_map(super::engine::package_of_file) {
+            if !missing.iter().any(|m| m == pkg) {
+                missing.push(pkg.to_string());
+            }
+        }
+        Failure { headline: e.headline.clone(), problems: e.problems.iter().map(|p| p.text()).collect(), log_tail: e.log_tail, document: doc.clone(), set_dir: set.dir.clone(), missing: missing.into() }
+    };
     match sets::compile_with_set(engine, set, "main.tex", &doc.tex, &files, Options { cancel: Some(cancel), ..Options::default() }) {
         Ok(out) => {
             let warnings = doc.warnings.iter().cloned().chain(out.output.warnings).collect();
             Ok(Made { pdf: out.output.pdf, placeholder_logo: out.placeholder_logo, warnings })
         }
-        Err(e) => Err(fail(e)),
+        Err(e) => Err(Box::new(fail(e))),
     }
 }
 

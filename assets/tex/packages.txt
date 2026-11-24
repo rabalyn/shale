@@ -71,4 +71,3 @@ pdfcol
 tikzfill
 urcls
 ulem
-pdflscape

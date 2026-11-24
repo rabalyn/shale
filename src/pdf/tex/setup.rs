@@ -443,8 +443,8 @@ impl TexState {
                 self.setup.job = None;
                 self.setup.outcome = Some(match got {
                     Ok(Ok(made)) => made_outcome(made),
-                    Ok(Err(f)) => Outcome::Failed(f),
-                    Err(crash) => Outcome::Failed(dialog::Failure { headline: crash, problems: vec![], log_tail: String::new(), document: Default::default(), set_dir: PathBuf::new() }),
+                    Ok(Err(f)) => Outcome::Failed(*f),
+                    Err(crash) => Outcome::Failed(dialog::Failure::said(crash)),
                 });
             }
             ctx.request_repaint_after(Duration::from_millis(250));

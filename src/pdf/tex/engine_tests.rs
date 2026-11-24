@@ -133,6 +133,24 @@ mod fake {
         CHECKED.iter().map(|(_, f)| *f).collect()
     }
 
+    // spec: TEX-052
+    #[test]
+    fn the_managed_tex_live_is_used_although_it_misses_packages_and_they_are_listed() {
+        let f = Fake::new("managed-missing");
+        let mut files = all_files();
+        files.retain(|f| *f != "geometry.sty");
+        tex(&f.dir.join("bin"), "2025-11-01", true, &files);
+        let mut managed = f.engine();
+        managed.kind = Kind::Managed;
+        let managed = probe(managed).unwrap();
+        assert_eq!(managed.missing, ["geometry".to_string()]);
+        let d = Detection { system: Err("none".into()), managed: Ok(managed), managed_bytes: None };
+        assert_eq!(d.selected(TexChoice::Auto).unwrap().missing, ["geometry".to_string()], "the managed TeX Live is not refused for what it misses: the dialog offers to install it");
+        let dir = f.dir.join("work");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(missing_in(&f.engine(), &dir).unwrap(), ["geometry".to_string()]);
+    }
+
     // spec: TEX-001
     #[test]
     fn a_new_enough_tex_with_biber_is_accepted_and_its_missing_packages_are_listed() {
@@ -230,4 +248,16 @@ fn the_pretend_tex_of_the_screenshots_is_found_as_the_managed_one_and_makes_a_pd
     // the screenshots' PATH has an xdg-open that opens nothing, so the test page starts no viewer
     let opener = std::process::Command::new(fixtures.join("path/xdg-open")).arg("x.pdf").status().unwrap();
     assert!(opener.success());
+}
+
+// spec: TEX-052
+#[test]
+fn a_file_that_tex_could_not_find_is_traced_to_the_package_of_the_list_that_brings_it() {
+    assert_eq!(package_of_file("geometry.sty"), Some("geometry"));
+    assert_eq!(package_of_file("scrartcl.cls"), Some("koma-script"), "a file of the check list: its package, not its name");
+    assert_eq!(package_of_file("/texmf/tex/latex/ulem/ulem.sty"), Some("ulem"), "a path is reduced to the file");
+    assert_eq!(package_of_file("ltablex.sty"), Some("ltablex"), "a package of the list that is called like its file");
+    assert_eq!(package_of_file("nosuch.sty"), None, "a file that is no package of the list");
+    assert_eq!(package_of_file("main.aux"), None);
+    assert!(BOARD_NEEDS.iter().all(|p| CHECKED.iter().any(|(c, _)| c == p)), "what a board needs is looked for by detection, or the dialog could not know it is missing");
 }
