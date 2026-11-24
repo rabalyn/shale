@@ -328,3 +328,49 @@ fn query_025_a_prefix_of_the_sidebar_query_stays_when_the_form_writes() {
     w.pick("+ Add filter", "is blocked");
     assert_eq!(w.app.search.query, "f: #todo AND blocked");
 }
+
+// spec: QUERY-029, QUERY-028, QUERY-027
+#[test]
+fn query_029_the_picker_form_lists_the_tags_and_esc_closes_the_list_before_the_picker() {
+    let mut w = W::new("picker-complete");
+    w.open_picker();
+    w.press(Key::G, CTRL_SHIFT);
+    w.pick("+ Add filter", "tag is");
+    assert!(w.has("tag is"), "the choice of the menu added the row, the picker stays open");
+    let field = w.edits()[2];
+    w.hl.click(&mut w.app, field.center(), PointerButton::Primary);
+    w.hl.frames(&mut w.app, 2);
+    assert!(crate::search_form::list_open(w.hl.ctx()), "the field lists the tags of the vault");
+    w.press(Key::Escape, Modifiers::NONE);
+    assert!(w.app.modal.is_some(), "Esc closed the list only");
+    assert!(!crate::search_form::list_open(w.hl.ctx()));
+    // typing opens it again; a click on the entry writes the query of the picker
+    w.hl.frame(&mut w.app, vec![Event::Text("to".into())]);
+    w.hl.frames(&mut w.app, 2);
+    assert!(crate::search_form::list_open(w.hl.ctx()));
+    w.click("todo");
+    assert_eq!(w.picker().query, "#todo");
+    w.press(Key::Escape, Modifiers::NONE);
+    assert!(w.app.modal.is_none(), "with no list open Esc closes the picker");
+}
+
+// spec: QUERY-029, QUERY-027
+#[test]
+fn query_029_the_sidebar_form_lists_the_property_names_and_their_values() {
+    let mut w = W::new("sidebar-complete");
+    w.open_sidebar();
+    w.click("⚙");
+    w.pick("+ Add filter", "property is");
+    let name = w.edits()[1];
+    w.hl.click(&mut w.app, name.center(), PointerButton::Primary);
+    w.hl.frames(&mut w.app, 2);
+    assert!(w.has("status"), "the names of the properties of the vault");
+    w.press(Key::ArrowDown, Modifiers::NONE);
+    w.press(Key::Enter, Modifiers::NONE);
+    let value = w.edits()[2];
+    w.hl.click(&mut w.app, value.center(), PointerButton::Primary);
+    w.hl.frames(&mut w.app, 2);
+    assert!(w.has("doing") && w.has("done"), "the values of status");
+    w.click("done");
+    assert_eq!(w.app.search.query, "status:done");
+}

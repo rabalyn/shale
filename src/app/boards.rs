@@ -343,7 +343,8 @@ impl ShaleApp {
         }
         let Some(peek) = self.boards.peek.as_ref() else { return };
         let in_insert = peek.editor.vim_enabled && peek.editor.vim.mode != crate::vim::Mode::Normal;
-        if !in_insert && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        // (Esc in an open list of the form of a lane closes the list only)
+        if !in_insert && !crate::search_form::list_open(ui.ctx()) && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             self.close_peek();
         }
     }

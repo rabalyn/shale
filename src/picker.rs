@@ -286,7 +286,16 @@ pub fn show(ctx: &Context, p: &mut Picker, data: &Ctx, worker: &mut SearchWorker
             if !f.p.form_open || ui.memory(|m| m.focused().is_none()) {
                 r.request_focus();
             }
-            f.keys = if in_form { ListKeys::take_close(ui, keymap) } else { ListKeys::take(ui, keymap) };
+            // (Esc closes an open list or menu of the form first, not the window)
+            // (egui takes the keyboard from a field on Esc, so a list is told by itself)
+            let form_open = crate::search_form::list_open(ui.ctx()) || (in_form && egui::Popup::is_any_open(ui.ctx()));
+            f.keys = if form_open {
+                ListKeys { down: false, up: false, enter: false, esc: false }
+            } else if in_form {
+                ListKeys::take_close(ui, keymap)
+            } else {
+                ListKeys::take(ui, keymap)
+            };
             let form_key = everything && ui.input_mut(|i| keymap.take(i, KeyAction::ListForm));
             if gear.is_some_and(|g| g.clicked()) || form_key {
                 f.p.form_open = !f.p.form_open;
@@ -327,7 +336,7 @@ pub fn show(ctx: &Context, p: &mut Picker, data: &Ctx, worker: &mut SearchWorker
                 }
                 if f.p.form_open {
                     let count = f.p.results.counts().map(|c| c.matches_text(listed, search_all::GROUP_LIMIT));
-                    let opts = crate::search_form::Opts { prefixes: cfg.prefixes(), host_box: true, count: count.as_deref() };
+                    let opts = crate::search_form::Opts { vault: data.vault, prefixes: cfg.prefixes(), host_box: true, count: count.as_deref() };
                     let changed = crate::search_form::show(ui, &mut f.p.form, &mut f.p.query, &mut f.p.check, &mut cfg.advanced, None, &opts);
                     f.save |= changed.advanced;
                     if changed.query {

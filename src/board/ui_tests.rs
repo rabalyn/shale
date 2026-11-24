@@ -704,9 +704,10 @@ fn query_028_a_double_click_on_the_heading_opens_the_settings_that_write_the_fil
     w.settle();
     assert!(w.painted("Lane “Doing”"), "the popover stays open while it is edited");
     assert_eq!(w.lane("Doing"), Vec::<String>::new(), "#todo is in the first lane, Pinned One is pinned");
-    // Esc or a click outside closes it
-    w.key(Key::Escape, Modifiers::NONE, "");
+    // a click outside keeps it open; Esc closes it (#632)
     w.click_at(Pos2::new(900.0, 700.0));
+    assert!(w.painted("Lane “Doing”"), "a click outside does not close the popover");
+    w.key(Key::Escape, Modifiers::NONE, "");
     assert!(!w.painted("Lane “Doing”"));
     w.app.cfg.search.advanced = false;
 }
@@ -734,6 +735,59 @@ fn query_028_the_menu_opens_the_settings_and_the_form_edits_sort_and_done() {
     assert_eq!(super::lanes::drop_property("status:doing OR status:todo"), None);
     assert_eq!(super::lanes::drop_property("(status:"), None);
     assert_eq!(super::lanes::drop_property(""), None);
+}
+
+fn open_settings_of_doing(w: &mut W) {
+    w.double_click("Doing");
+    assert!(w.painted("Lane “Doing”"), "the popover is open");
+}
+
+// spec: QUERY-028
+#[test]
+fn query_028_a_choice_in_the_menus_of_the_popover_is_applied_and_only_the_close_button_esc_or_the_dots_close_it() {
+    let mut w = W::board();
+    open_settings_of_doing(&mut w);
+    let rows = w.all_text().iter().filter(|t| **t == "tag is").count();
+    w.click("+ Add filter");
+    w.click("tag is");
+    assert!(w.painted("Lane “Doing”"), "choosing in the menu does not close the popover");
+    assert_eq!(w.all_text().iter().filter(|t| **t == "tag is").count(), rows + 1, "the row is added: {:?}", w.all_text());
+    w.click("+ Add sort");
+    w.click("title");
+    assert!(w.painted("Lane “Doing”") && w.board_text().contains("title"), "the sort is added: {}", w.board_text());
+    w.click_at(Pos2::new(900.0, 700.0));
+    assert!(w.painted("Lane “Doing”"), "a click outside keeps it open");
+    w.click("✕");
+    assert!(!w.painted("Lane “Doing”"), "the close button closes it");
+    open_settings_of_doing(&mut w);
+    w.key(Key::Escape, Modifiers::NONE, "");
+    assert!(!w.painted("Lane “Doing”"), "Esc closes it");
+    open_settings_of_doing(&mut w);
+    let mut dots: Vec<Pos2> = w.hl.text.iter().filter(|(t, _)| t == "⋯").map(|(_, p)| *p + eframe::egui::vec2(4.0, 6.0)).collect();
+    dots.sort_by(|a, b| a.x.total_cmp(&b.x));
+    w.click_at(dots[1]);
+    assert!(!w.painted("Lane “Doing”"), "the dots again close it");
+}
+
+// spec: QUERY-029
+#[test]
+fn query_029_the_lane_popover_lists_the_tags_and_esc_closes_the_list_before_the_popover() {
+    let mut w = W::board();
+    open_settings_of_doing(&mut w);
+    w.click("+ Add filter");
+    w.click("tag is");
+    w.click("tag");
+    assert!(crate::search_form::list_open(w.hl.ctx()), "the list of the tags of the vault is open");
+    w.key(Key::Escape, Modifiers::NONE, "");
+    assert!(!crate::search_form::list_open(w.hl.ctx()), "Esc closes the list");
+    assert!(w.painted("Lane “Doing”"), "and not the popover");
+    assert!(w.app.boards.peek.is_none());
+    w.click("tag");
+    w.click("todo");
+    assert!(w.board_text().contains("#todo"), "a click takes the tag into the lane: {}", w.board_text());
+    assert!(w.painted("Lane “Doing”"), "the click in the list does not close the popover");
+    w.key(Key::Escape, Modifiers::NONE, "");
+    assert!(!w.painted("Lane “Doing”"), "the next Esc closes the popover");
 }
 
 // spec: BOARD-013, KEY-045

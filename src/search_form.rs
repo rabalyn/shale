@@ -8,9 +8,11 @@
 //! This file is the model: [`Row`], the writer ([`State::write`]) and the reader
 //! ([`State::sync`]). The window of it is [`view`], the sort is in [`sort`].
 
+mod complete;
 pub mod sort;
 mod view;
 
+pub use complete::list_open;
 pub use view::{show, Opts};
 
 use crate::search_all::query::{Checked, Cmp, Due, Expr, Term, TermKind};
@@ -291,11 +293,13 @@ pub struct State {
     pub(crate) sort: sort::State,
     /// the first widget takes the keyboard in the next frame
     pub(crate) focus: bool,
+    /// the lists of the value fields (QUERY-029)
+    pub(crate) complete: complete::Complete,
 }
 
 impl Default for State {
     fn default() -> State {
-        State { rows: Vec::new(), mode: Mode::All, prefix: String::new(), fit: Fit::Rows, synced: None, sort: sort::State::default(), focus: false }
+        State { rows: Vec::new(), mode: Mode::All, prefix: String::new(), fit: Fit::Rows, synced: None, sort: sort::State::default(), focus: false, complete: complete::Complete::default() }
     }
 }
 
