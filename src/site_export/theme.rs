@@ -4,7 +4,7 @@
 //! downloads no Hugo module.
 
 /// The files of the theme: their path in the tree and their text.
-const THEME: [(&str, &str); 16] = [
+const THEME: [(&str, &str); 17] = [
     ("themes/shale/theme.toml", include_str!("../../assets/site/theme/theme.toml")),
     ("themes/shale/layouts/index.html", include_str!("../../assets/site/theme/layouts/index.html")),
     ("themes/shale/layouts/index.graph.html", include_str!("../../assets/site/theme/layouts/index.graph.html")),
@@ -15,6 +15,7 @@ const THEME: [(&str, &str); 16] = [
     ("themes/shale/layouts/_default/_markup/render-image.html", include_str!("../../assets/site/theme/layouts/_default/_markup/render-image.html")),
     ("themes/shale/layouts/_default/_markup/render-link.html", include_str!("../../assets/site/theme/layouts/_default/_markup/render-link.html")),
     ("themes/shale/layouts/_default/_markup/render-passthrough.html", include_str!("../../assets/site/theme/layouts/_default/_markup/render-passthrough.html")),
+    ("themes/shale/layouts/partials/board.html", include_str!("../../assets/site/theme/layouts/partials/board.html")),
     ("themes/shale/layouts/partials/backlinks.html", include_str!("../../assets/site/theme/layouts/partials/backlinks.html")),
     ("themes/shale/layouts/partials/search.html", include_str!("../../assets/site/theme/layouts/partials/search.html")),
     ("themes/shale/layouts/partials/type-header.html", include_str!("../../assets/site/theme/layouts/partials/type-header.html")),

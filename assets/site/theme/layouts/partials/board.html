@@ -1,0 +1,24 @@
+{{- /* The snapshot of a board note (SITE-045): lanes and cards as they were when the site was exported, read-only (no script, no form). `data/boards.json` holds only boards that are published and, in them, only cards of published notes (SITE-007, SITE-010). */ -}}
+{{- with .File }}{{ with hugo.Data.boards }}{{ with index . $.File.Path }}
+<section class="board-snapshot">
+{{- if .unresolved }}
+<p class="board-note">This board could not be shown.</p>
+{{- else }}
+<div class="board">
+{{- range .lanes }}
+<section class="board-lane">
+<h2>{{ .name }} <span class="count">{{ len .cards }}</span></h2>
+{{- if .unresolved }}<p class="board-note">This lane could not be shown.</p>{{ end }}
+{{- if .partial }}<p class="board-note">This lane may be incomplete.</p>{{ end }}
+<ul class="board-cards">
+{{- range .cards }}
+<li class="board-card"><a href="{{ .url | relURL }}">{{ .title }}</a>
+{{- with .chips }}<p class="board-chips">{{ range . }}<span class="board-chip">{{ . }}</span>{{ end }}</p>{{ end }}</li>
+{{- end }}
+</ul>
+</section>
+{{- end }}
+</div>
+{{- end }}
+</section>
+{{ end }}{{ end }}{{ end -}}

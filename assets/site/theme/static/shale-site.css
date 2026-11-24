@@ -43,3 +43,13 @@ object.drawing { display: block; max-width: 100%; height: auto; margin: 8px 0; b
 .note-header dd { margin: 0; overflow-wrap: anywhere; }
 .note-header .kind { color: var(--muted); font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 4px; }
 .note-header ul { margin: 0; padding-left: 1.1em; }
+.board { display: flex; gap: 12px; overflow-x: auto; align-items: flex-start; margin: 16px 0; padding-bottom: 8px; }
+.board-lane { flex: 0 0 16rem; background: var(--panel); border-radius: 8px; padding: 8px 10px; }
+.board-lane h2 { font-size: 0.95em; margin: 0 0 8px; }
+.board-lane .count { color: var(--muted); font-weight: normal; }
+.board-cards { list-style: none; margin: 0; padding: 0; }
+.board-card { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; margin: 0 0 6px; overflow-wrap: anywhere; }
+.board-card a { text-decoration: none; }
+.board-chips { margin: 4px 0 0; color: var(--muted); font-size: 0.8em; }
+.board-chip { margin-right: 8px; }
+.board-note { color: var(--muted); font-size: 0.85em; margin: 4px 0; }

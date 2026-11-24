@@ -1404,7 +1404,9 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   copied when it resolves on this computer, else a placeholder names it. Folders become sections (a folder note is
   the section's text), every page has a backlinks panel, and the index page lists the sections and the latest notes.
   Notes of type `email`, `event`, `post` and `person` show a header with their fields (as written in the note, nothing
-  else); any other type is the plain page. The site has a graph page (`/graph.html`, SITE-040) of the published notes and
+  else); any other type is the plain page. A published board note (SITE-045) shows its lanes and cards as they were at
+  export time, read-only and scrolling sideways, with the board's chips; a card of a note that is not published is left
+  out without a trace, and the lanes' queries and pins are not written. The site has a graph page (`/graph.html`, SITE-040) of the published notes and
   their links, laid out in the browser by a small script of the theme; nothing is loaded from another site.
 - **Search and theme** (SITE-046 to SITE-048): the Shale theme is part of the tree, so the server needs only `hugo` and
   `pagefind`; the pages carry a search box for Pagefind that indexes the notes and nothing else (a test runs Pagefind on a

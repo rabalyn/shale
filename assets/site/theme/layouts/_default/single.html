@@ -6,6 +6,7 @@
 {{ with .GetTerms "tags" }}<p class="tags">{{ range . }}<a class="tag" href="{{ .RelPermalink }}">#{{ .LinkTitle }}</a> {{ end }}</p>{{ end }}
 {{ if in (slice "email" "event" "post" "social-post" "person") $type }}{{ partial "type-header.html" (dict "page" . "type" $type) }}{{ end }}
 <div class="content">{{ .Content }}</div>
+{{ partial "board.html" . }}
 </article>
 {{ partial "backlinks.html" . }}
 {{ end }}
