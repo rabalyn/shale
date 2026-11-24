@@ -1,6 +1,6 @@
 //! A lines-of-code report in Markdown (DEV-044, #628).
 //!
-//! `cargo run --example loc_report -- [--root DIR] [--config FILE] [--out FILE]`
+//! `cargo run --example loc_report -- [--root DIR] [--config FILE] [--out FILE] [--no-history]`
 //!
 //! Shale is a bin-only crate, so this program cannot use its code: it needs only `std`, `serde`
 //! and `toml`. It follows the module tree from `src/main.rs`, so every `.rs` file of `src/` belongs
@@ -8,18 +8,30 @@
 //! test code, groups the features into *featuresets* (`tools/loc-report/featuresets.toml`) and
 //! writes the numbers as Markdown tables. The output has no timestamp, so the same tree gives the
 //! same report.
+//!
+//! The report starts with a chart of the lines of code per `v*` tag (DEV-046, #669): each tag's
+//! `src/` and `tests/` are extracted with `git archive` and counted by the same rules. The counts
+//! are kept in `loc-history.tsv` next to the report (tags never move), the chart is written as
+//! `loc-history.svg`.
 
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::{Command, ExitCode, Stdio};
 
 /// The pseudo-feature of the test modules that belong to no feature (`ui_test_support`).
 const SHARED: &str = "Shared test support";
 
-const USAGE: &str = "usage: cargo run --example loc_report -- [--root DIR] [--config FILE] [--out FILE]";
+const USAGE: &str = "usage: cargo run --example loc_report -- [--root DIR] [--config FILE] [--out FILE] [--no-history]\n\n  --out FILE    write the report to FILE, and loc-history.svg and loc-history.tsv next to it\n  --no-history  leave the chart of the lines of code per tag out (needs no git)";
+
+/// The version of the counting rules. `loc-history.tsv` names the version it was counted with; when
+/// the rules change (a new kind of line, another way to classify code), raise it, and every tag is
+/// counted again.
+const RULES_VERSION: &str = "1";
+const SVG_NAME: &str = "loc-history.svg";
+const TSV_NAME: &str = "loc-history.tsv";
 
 // ---- the lexer: which lines hold code, which only comments ----
 
@@ -734,6 +746,8 @@ struct Report {
     integration: Vec<(String, Stats)>,
     tooling: Vec<(String, Stats)>,
     unreached: Vec<String>,
+    /// The rendered section "Lines of code per tag" (DEV-046), none with `--no-history`.
+    history: Option<String>,
 }
 
 /// Rows biggest (production plus test code) first, then by name.
@@ -762,7 +776,7 @@ fn build_report(scan: SrcScan, integration: BTreeMap<String, Stats>, tooling: BT
     }
     sets.sort_by(|a, b| b.total.code().cmp(&a.total.code()).then_with(|| a.name.cmp(&b.name)));
     let other = scan.features.iter().filter(|(name, _)| !listed.contains_key(name.as_str())).map(|(n, s)| (n.clone(), *s));
-    Ok(Report { commit, sets, other: by_size(other), shared: by_size(scan.shared), integration: by_size(integration), tooling: by_size(tooling), unreached: scan.unreached })
+    Ok(Report { commit, sets, other: by_size(other), shared: by_size(scan.shared), integration: by_size(integration), tooling: by_size(tooling), unreached: scan.unreached, history: None })
 }
 
 // ---- rendering ----
@@ -823,6 +837,10 @@ fn render(r: &Report) -> String {
         let _ = write!(out, " at commit `{commit}`");
     }
     out += ". A line is blank, a comment (`//`, `///`, `//!`, `/* … */`) or code; code is test code inside a module declared under `#[cfg(test)]` or an item marked `#[cfg(test)]`, else production code. The test share is test code ÷ (production code + test code).\n\n";
+    if let Some(history) = &r.history {
+        out += history;
+        out.push('\n');
+    }
 
     out += "## Summary\n\n| | Lines |\n|---|---:|\n";
     for (label, n) in
@@ -865,6 +883,323 @@ fn render(r: &Report) -> String {
     out
 }
 
+// ---- the lines of code per tag (DEV-046) ----
+
+/// The counts of one tag.
+#[derive(Debug, Clone, PartialEq)]
+struct TagCount {
+    tag: String,
+    /// `YYYY-MM-DD`: the tagger's date of an annotated tag, else the commit's.
+    date: String,
+    /// Production code of `src/`.
+    code: usize,
+    /// Unit test code in `src/` plus all code of `tests/`.
+    test: usize,
+}
+
+impl TagCount {
+    /// `vX.Y.Z` is a release, `vX.Y.Z-rc.N` a check tag.
+    fn is_release(&self) -> bool {
+        !self.tag.contains('-')
+    }
+}
+
+/// The counted tags in the order of their dates, and the tags that could not be counted, with why.
+#[derive(Debug, Default, PartialEq)]
+struct History {
+    rows: Vec<TagCount>,
+    skipped: Vec<(String, String)>,
+}
+
+/// Runs git in `root` and returns its output, or its error text.
+fn git(root: &Path, args: &[&str]) -> Result<String, String> {
+    let out = Command::new("git").arg("-C").arg(root).args(args).env_remove("GIT_DIR").env_remove("GIT_WORK_TREE").env_remove("GIT_INDEX_FILE").output().map_err(|e| format!("cannot run git: {e}"))?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    } else {
+        Err(format!("git {}: {}", args.first().unwrap_or(&""), String::from_utf8_lossy(&out.stderr).trim()))
+    }
+}
+
+/// Whether `root` is the top folder of a git work tree.
+fn is_git_root(root: &Path) -> bool {
+    git(root, &["rev-parse", "--show-prefix"]).is_ok_and(|prefix| prefix.trim().is_empty())
+}
+
+/// The `v*` tags with their dates, oldest first.
+fn list_tags(root: &Path) -> Result<Vec<(String, String)>, String> {
+    let out = git(root, &["for-each-ref", "--sort=refname", "--sort=creatordate", "--format=%(refname:strip=2)\t%(creatordate:short)", "refs/tags/v*"])?;
+    Ok(out.lines().filter_map(|l| l.split_once('\t')).map(|(tag, date)| (tag.to_string(), date.to_string())).collect())
+}
+
+/// A temporary folder, removed when dropped.
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new() -> Result<TempDir, String> {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("loc_history_{}_{n}", std::process::id()));
+        fs::create_dir_all(&dir).map_err(|e| format!("cannot make {}: {e}", dir.display()))?;
+        Ok(TempDir(dir))
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Extracts `src/` and `tests/` of a tag into `dest` (`git archive | tar -x`, no checkout).
+fn extract_tag(root: &Path, tag: &str, dest: &Path) -> Result<(), String> {
+    let reference = format!("refs/tags/{tag}");
+    let listing = git(root, &["ls-tree", "--name-only", &reference])?;
+    let dirs: Vec<&str> = ["src", "tests"].into_iter().filter(|d| listing.lines().any(|l| l == *d)).collect();
+    if !dirs.contains(&"src") {
+        return Err("it has no src/ folder".to_string());
+    }
+    let mut archive = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["archive", "--format=tar", &reference])
+        .args(&dirs)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("cannot run git archive: {e}"))?;
+    let tar = Command::new("tar").arg("-x").arg("-C").arg(dest).stdin(archive.stdout.take().ok_or("git archive has no output")?).stderr(Stdio::null()).status().map_err(|e| format!("cannot run tar: {e}"))?;
+    let archived = archive.wait().map_err(|e| format!("git archive: {e}"))?;
+    if archived.success() && tar.success() {
+        Ok(())
+    } else {
+        Err("git archive or tar failed".to_string())
+    }
+}
+
+/// The code and test code of the tree below `dir` (`src/` and `tests/`), by the rules of DEV-044.
+fn count_tree(dir: &Path) -> Result<(usize, usize), String> {
+    let scan = scan_src(dir)?;
+    let src = sum(scan.features.values().chain(scan.shared.values()));
+    let integration = sum(scan_integration(dir)?.values());
+    Ok((src.prod, src.test + integration.test))
+}
+
+fn count_tag(root: &Path, tag: &str) -> Result<(usize, usize), String> {
+    let dir = TempDir::new()?;
+    extract_tag(root, tag, &dir.0)?;
+    count_tree(&dir.0)
+}
+
+/// The text of `loc-history.tsv`: the rules version, a header and a line per tag.
+fn tsv_text(rows: &[TagCount]) -> String {
+    let mut out = format!("# loc-history rules={RULES_VERSION}\ntag\tdate\tcode\ttest\n");
+    for r in rows {
+        let _ = writeln!(out, "{}\t{}\t{}\t{}", r.tag, r.date, r.code, r.test);
+    }
+    out
+}
+
+/// The rows of a `loc-history.tsv`; none when it was counted by other rules or is malformed.
+fn parse_tsv(text: &str) -> Option<Vec<TagCount>> {
+    let mut lines = text.lines();
+    if lines.next()? != format!("# loc-history rules={RULES_VERSION}") || lines.next()? != "tag\tdate\tcode\ttest" {
+        return None;
+    }
+    let mut rows = Vec::new();
+    for line in lines {
+        let [tag, date, code, test] = line.split('\t').collect::<Vec<_>>()[..] else { return None };
+        rows.push(TagCount { tag: tag.into(), date: date.into(), code: code.parse().ok()?, test: test.parse().ok()? });
+    }
+    Some(rows)
+}
+
+/// Counts every tag that `cache` does not hold; a tag that cannot be counted is skipped.
+fn collect_history(root: &Path, cache: &[TagCount]) -> Result<History, String> {
+    let mut history = History::default();
+    for (tag, date) in list_tags(root)? {
+        if let Some(cached) = cache.iter().find(|c| c.tag == tag) {
+            history.rows.push(cached.clone());
+            continue;
+        }
+        match count_tag(root, &tag) {
+            Ok((code, test)) => history.rows.push(TagCount { tag, date, code, test }),
+            Err(why) => history.skipped.push((tag, why)),
+        }
+    }
+    Ok(history)
+}
+
+/// A step of 1, 2 or 5 times a power of ten and the top of the y axis (a multiple of the step, at
+/// least `peak`), so that there are at most five intervals.
+fn nice_scale(peak: usize) -> (usize, usize) {
+    let raw = peak.div_ceil(5).max(1);
+    let mut step = 1;
+    while step < raw {
+        step = match step.to_string().as_bytes()[0] {
+            b'1' => step * 2,
+            b'2' => step / 2 * 5,
+            _ => step * 2,
+        };
+    }
+    (step, (peak.div_ceil(step) * step).max(step))
+}
+
+/// An axis label: `0`, `20k`, `1.5k`, `700`.
+fn tick_label(n: usize) -> String {
+    if n >= 1000 && n.is_multiple_of(1000) {
+        format!("{}k", n / 1000)
+    } else if n >= 1000 && n.is_multiple_of(100) {
+        format!("{}.{}k", n / 1000, n % 1000 / 100)
+    } else {
+        n.to_string()
+    }
+}
+
+/// A count with a space between the thousands: `98 754`.
+fn spaced(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(' ');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn xml_escape(text: &str) -> String {
+    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
+}
+
+const SVG_W: f64 = 960.0;
+const SVG_H: f64 = 420.0;
+const PLOT_LEFT: f64 = 64.0;
+const PLOT_RIGHT: f64 = SVG_W - 24.0;
+const PLOT_TOP: f64 = 56.0;
+const PLOT_BOTTOM: f64 = SVG_H - 72.0;
+const TIP_W: f64 = 190.0;
+const TIP_H: f64 = 62.0;
+const CODE_COLOR: &str = "#2563eb";
+const TEST_COLOR: &str = "#ea580c";
+
+/// The chart of the tags as a self-contained SVG: two lines, a legend, a column per tag whose
+/// `:hover` shows a popup with the tag, its date and both counts (a `<title>` says the same where
+/// CSS does not work).
+fn svg(rows: &[TagCount]) -> String {
+    let n = rows.len();
+    let peak = rows.iter().map(|r| r.code.max(r.test)).max().unwrap_or(0);
+    let (step, top) = nice_scale(peak);
+    let (first, last) = (PLOT_LEFT + 16.0, PLOT_RIGHT - 16.0);
+    let x = |i: usize| if n < 2 { (first + last) / 2.0 } else { first + (last - first) * i as f64 / (n - 1) as f64 };
+    let y = |v: usize| PLOT_BOTTOM - (PLOT_BOTTOM - PLOT_TOP) * v as f64 / top as f64;
+    let col_w = if n < 2 { PLOT_RIGHT - PLOT_LEFT } else { (last - first) / (n - 1) as f64 };
+
+    let mut out = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {SVG_W} {SVG_H}\" width=\"{SVG_W}\" height=\"{SVG_H}\" role=\"img\" aria-label=\"Lines of code per tag\">\n<title>Lines of code per tag</title>\n");
+    out += "<style>\ntext{font-family:sans-serif;font-size:12px;fill:#374151}.lbl{font-size:11px}.tip,.guide{visibility:hidden}.col:hover .tip,.col:hover .guide{visibility:visible}.tipbg{fill:#ffffff;stroke:#9ca3af}.tiphead{font-weight:bold;fill:#111827}\n</style>\n";
+    let _ = writeln!(out, "<rect width=\"{SVG_W}\" height=\"{SVG_H}\" fill=\"#ffffff\"/>");
+    for k in 0..=top / step {
+        let (v, gy) = (k * step, y(k * step));
+        let _ = writeln!(out, "<line x1=\"{PLOT_LEFT}\" y1=\"{gy:.1}\" x2=\"{PLOT_RIGHT}\" y2=\"{gy:.1}\" stroke=\"#e5e7eb\"/>");
+        let _ = writeln!(out, "<text x=\"{}\" y=\"{:.1}\" text-anchor=\"end\">{}</text>", PLOT_LEFT - 8.0, gy + 4.0, tick_label(v));
+    }
+    let _ = writeln!(out, "<line x1=\"{PLOT_LEFT}\" y1=\"{PLOT_BOTTOM}\" x2=\"{PLOT_RIGHT}\" y2=\"{PLOT_BOTTOM}\" stroke=\"#6b7280\"/>");
+    let _ = writeln!(out, "<line x1=\"{PLOT_LEFT}\" y1=\"{PLOT_TOP}\" x2=\"{PLOT_LEFT}\" y2=\"{PLOT_BOTTOM}\" stroke=\"#6b7280\"/>");
+
+    // the legend; the test line is dashed too, for readers who do not tell the colours apart
+    for (k, (label, color, dash)) in [("Code", CODE_COLOR, ""), ("Test code", TEST_COLOR, " stroke-dasharray=\"6 3\"")].into_iter().enumerate() {
+        let lx = PLOT_LEFT + 150.0 * k as f64;
+        let _ = writeln!(out, "<line x1=\"{lx}\" y1=\"26\" x2=\"{}\" y2=\"26\" stroke=\"{color}\" stroke-width=\"2.5\"{dash}/>", lx + 28.0);
+        let _ = writeln!(out, "<text x=\"{}\" y=\"30\">{label}</text>", lx + 34.0);
+    }
+
+    for (color, dash, value) in [(CODE_COLOR, "", (|r: &TagCount| r.code) as fn(&TagCount) -> usize), (TEST_COLOR, " stroke-dasharray=\"6 3\"", |r: &TagCount| r.test)] {
+        let points: Vec<String> = rows.iter().enumerate().map(|(i, r)| format!("{:.1},{:.1}", x(i), y(value(r)))).collect();
+        let _ = writeln!(out, "<polyline fill=\"none\" stroke=\"{color}\" stroke-width=\"2\"{dash} points=\"{}\"/>", points.join(" "));
+        for (i, r) in rows.iter().enumerate() {
+            let radius = if r.is_release() { 4.5 } else { 2.5 };
+            let _ = writeln!(out, "<circle cx=\"{:.1}\" cy=\"{:.1}\" r=\"{radius}\" fill=\"{color}\"/>", x(i), y(value(r)));
+        }
+    }
+    for (i, r) in rows.iter().enumerate().filter(|(_, r)| r.is_release()) {
+        let _ = writeln!(out, "<line x1=\"{0:.1}\" y1=\"{PLOT_BOTTOM}\" x2=\"{0:.1}\" y2=\"{1}\" stroke=\"#6b7280\"/>", x(i), PLOT_BOTTOM + 4.0);
+        let _ = writeln!(out, "<text class=\"lbl\" transform=\"translate({:.1},{}) rotate(-45)\" text-anchor=\"end\">{}</text>", x(i) + 4.0, PLOT_BOTTOM + 16.0, xml_escape(&r.tag));
+    }
+
+    for (i, r) in rows.iter().enumerate() {
+        let cx = x(i);
+        let (x0, x1) = ((cx - col_w / 2.0).max(PLOT_LEFT), (cx + col_w / 2.0).min(PLOT_RIGHT));
+        let tip_x = if cx > SVG_W / 2.0 { cx - 10.0 - TIP_W } else { cx + 10.0 };
+        let tip_y = PLOT_TOP + 4.0;
+        let lines = [format!("{} · {}", r.tag, r.date), format!("Code: {}", spaced(r.code)), format!("Test code: {}", spaced(r.test))];
+        let _ = writeln!(out, "<g class=\"col\">\n<title>{}</title>", xml_escape(&lines.join("\n")));
+        let _ = writeln!(out, "<rect x=\"{x0:.1}\" y=\"{PLOT_TOP}\" width=\"{:.1}\" height=\"{}\" fill=\"transparent\" pointer-events=\"all\"/>", x1 - x0, SVG_H - PLOT_TOP);
+        let _ = writeln!(out, "<line class=\"guide\" x1=\"{cx:.1}\" y1=\"{PLOT_TOP}\" x2=\"{cx:.1}\" y2=\"{PLOT_BOTTOM}\" stroke=\"#6b7280\" stroke-dasharray=\"2 2\"/>");
+        let _ = writeln!(out, "<g class=\"tip\">");
+        let _ = writeln!(out, "<rect class=\"tipbg\" x=\"{tip_x:.1}\" y=\"{tip_y}\" width=\"{TIP_W}\" height=\"{TIP_H}\" rx=\"6\"/>");
+        for (k, line) in lines.iter().enumerate() {
+            let class = if k == 0 { " class=\"tiphead\"" } else { "" };
+            let _ = writeln!(out, "<text{class} x=\"{:.1}\" y=\"{}\">{}</text>", tip_x + 10.0, tip_y + 19.0 + 16.0 * k as f64, xml_escape(line));
+        }
+        let _ = writeln!(out, "</g>\n</g>");
+    }
+    out + "</svg>\n"
+}
+
+/// The section "Lines of code per tag" of the report. `chart`: the SVG is written next to the
+/// report (`--out`), so the report can link it.
+fn history_section(h: &History, chart: bool) -> String {
+    let mut out = String::from("## Lines of code per tag\n\n");
+    if h.rows.is_empty() {
+        out += "There are no tags yet, so there is no chart.\n";
+    } else {
+        if chart {
+            let _ = write!(out, "[![Code and test code per tag]({SVG_NAME})]({SVG_NAME})\n\nThe picture opens the SVG file, where hovering a tag shows its counts. ");
+        } else {
+            let _ = write!(out, "The chart `{SVG_NAME}` and the counts `{TSV_NAME}` are written only with `--out`, next to the report. ");
+        }
+        out += "Code is the production code of `src/`, test code the unit tests in `src/` plus `tests/`, counted on the tree of each tag (releases `vX.Y.Z` and check tags `vX.Y.Z-rc.N`).\n\n<details>\n<summary>Numbers per tag</summary>\n\n| Tag | Date | Code | Test code |\n|---|---|---:|---:|\n";
+        for r in h.rows.iter().rev() {
+            let _ = writeln!(out, "| {} | {} | {} | {} |", r.tag, r.date, r.code, r.test);
+        }
+        out += "\n</details>\n";
+    }
+    if !h.skipped.is_empty() {
+        out += "\nThese tags could not be counted and are left out:\n\n";
+        for (tag, why) in &h.skipped {
+            let _ = writeln!(out, "- `{tag}`: {why}");
+        }
+    }
+    out
+}
+
+/// The section of the report and the files to write next to it (name, content): `None` for the
+/// section when the history is left out. The counts are taken from `loc-history.tsv` next to the
+/// report (`<root>/docs` without `--out`, where it is only read).
+fn history_for(args: &Args) -> Result<(Option<String>, Files), String> {
+    if args.no_history {
+        return Ok((None, Vec::new()));
+    }
+    if !is_git_root(&args.root) {
+        return Ok((Some(format!("## Lines of code per tag\n\nThe history per tag needs git, and {} is no git repository, so there is no chart.\n", args.root.display())), Vec::new()));
+    }
+    let dir = args.out.as_ref().map_or_else(|| args.root.join("docs"), |out| out.parent().unwrap_or(Path::new("")).to_path_buf());
+    let cache = fs::read_to_string(dir.join(TSV_NAME)).ok().and_then(|text| parse_tsv(&text)).unwrap_or_default();
+    let history = collect_history(&args.root, &cache)?;
+    let mut files = Vec::new();
+    if args.out.is_some() {
+        files.push((TSV_NAME, tsv_text(&history.rows)));
+        if !history.rows.is_empty() {
+            files.push((SVG_NAME, svg(&history.rows)));
+        }
+    }
+    Ok((Some(history_section(&history, args.out.is_some())), files))
+}
+
 // ---- the program ----
 
 #[derive(Debug, PartialEq)]
@@ -872,13 +1207,19 @@ struct Args {
     root: PathBuf,
     config: PathBuf,
     out: Option<PathBuf>,
+    /// Leave the chart per tag out (DEV-046).
+    no_history: bool,
 }
 
 fn parse_args(args: &[String], default_root: &Path) -> Result<Args, String> {
-    let (mut root, mut config, mut out) = (None, None, None);
+    let (mut root, mut config, mut out, mut no_history) = (None, None, None, false);
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         let slot = match arg.as_str() {
+            "--no-history" => {
+                no_history = true;
+                continue;
+            }
             "--root" => &mut root,
             "--config" => &mut config,
             "--out" => &mut out,
@@ -888,23 +1229,48 @@ fn parse_args(args: &[String], default_root: &Path) -> Result<Args, String> {
     }
     let root = root.unwrap_or_else(|| default_root.to_path_buf());
     let config = config.unwrap_or_else(|| root.join("tools/loc-report/featuresets.toml"));
-    Ok(Args { root, config, out })
+    Ok(Args { root, config, out, no_history })
 }
 
-fn generate(args: &Args) -> Result<String, String> {
+/// The files that go next to the report: name and content.
+type Files = Vec<(&'static str, String)>;
+
+/// The report and the files that go next to it.
+struct Generated {
+    report: String,
+    files: Files,
+}
+
+fn generate(args: &Args) -> Result<Generated, String> {
     let text = fs::read_to_string(&args.config).map_err(|e| format!("cannot read the config {}: {e}", args.config.display()))?;
     let config: Config = toml::from_str(&text).map_err(|e| format!("the config {} is wrong: {e}", args.config.display()))?;
-    let report = build_report(scan_src(&args.root)?, scan_integration(&args.root)?, scan_tooling(&args.root)?, &config, git_commit(&args.root))?;
-    Ok(render(&report))
+    let mut report = build_report(scan_src(&args.root)?, scan_integration(&args.root)?, scan_tooling(&args.root)?, &config, git_commit(&args.root))?;
+    let (history, files) = history_for(args)?;
+    report.history = history;
+    Ok(Generated { report: render(&report), files })
+}
+
+/// Writes `text` unless the file holds it already.
+fn write_if_changed(path: &Path, text: &str) -> Result<(), String> {
+    if fs::read_to_string(path).is_ok_and(|old| old == text) {
+        return Ok(());
+    }
+    fs::write(path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))
 }
 
 fn execute(args: &[String], default_root: &Path) -> Result<(), String> {
     let args = parse_args(args, default_root)?;
-    let report = generate(&args)?;
+    let generated = generate(&args)?;
     match &args.out {
-        Some(path) => fs::write(path, report).map_err(|e| format!("cannot write {}: {e}", path.display())),
+        Some(path) => {
+            fs::write(path, generated.report).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+            for (name, text) in &generated.files {
+                write_if_changed(&path.with_file_name(name), text)?;
+            }
+            Ok(())
+        }
         None => {
-            print!("{report}");
+            print!("{}", generated.report);
             Ok(())
         }
     }
@@ -1243,6 +1609,7 @@ enum E {
             integration: vec![("cli_start".into(), stats(1, 0, 40, 4, 6))],
             tooling: vec![("scripts".into(), stats(2, 25, 0, 5, 5))],
             unreached: vec!["src/stray.rs".into()],
+            history: None,
         }
     }
 
@@ -1329,8 +1696,8 @@ enum E {
     #[test]
     fn dev_044_the_arguments_are_read_and_a_wrong_one_is_named() {
         let args = |a: &[&str]| parse_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>(), Path::new("/r"));
-        assert_eq!(args(&[]).unwrap(), Args { root: "/r".into(), config: "/r/tools/loc-report/featuresets.toml".into(), out: None });
-        assert_eq!(args(&["--root", "/x", "--out", "o.md"]).unwrap(), Args { root: "/x".into(), config: "/x/tools/loc-report/featuresets.toml".into(), out: Some("o.md".into()) });
+        assert_eq!(args(&[]).unwrap(), Args { root: "/r".into(), config: "/r/tools/loc-report/featuresets.toml".into(), out: None, no_history: false });
+        assert_eq!(args(&["--root", "/x", "--out", "o.md", "--no-history"]).unwrap(), Args { root: "/x".into(), config: "/x/tools/loc-report/featuresets.toml".into(), out: Some("o.md".into()), no_history: true });
         assert_eq!(args(&["--config", "c.toml"]).unwrap().config, Path::new("c.toml"));
         assert!(args(&["--bogus"]).unwrap_err().contains("unknown argument `--bogus`"));
         assert!(args(&["--root"]).unwrap_err().contains("--root needs a value"));
@@ -1364,8 +1731,9 @@ enum E {
     #[test]
     fn dev_044_the_report_of_this_repository_is_complete() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let args = parse_args(&[], root).unwrap();
-        let text = generate(&args).expect("the committed config fits the code");
+        // the history of the tags has tests of its own (dev_046_…): counting 40 trees is slow in a debug build
+        let args = parse_args(&["--no-history".to_string()], root).unwrap();
+        let text = generate(&args).expect("the committed config fits the code").report;
         assert!(!text.contains("## Other"), "a feature is in no set of tools/loc-report/featuresets.toml:\n{text}");
         assert!(!text.contains("## Not reached"), "a file of src/ is declared by no module:\n{text}");
         let scan = scan_src(root).unwrap();
@@ -1381,5 +1749,262 @@ enum E {
         assert!(all.prod > 50_000 && all.test > 50_000 && all.comments > 0 && all.blank > 0, "{all:?}");
         let sets = build_report(scan, scan_integration(root).unwrap(), scan_tooling(root).unwrap(), &toml::from_str(&fs::read_to_string(&args.config).unwrap()).unwrap(), None).unwrap();
         assert!(sets.sets.len() >= 8 && sets.integration.len() > 10 && !sets.tooling.is_empty());
+    }
+
+    // ---- DEV-046: the lines of code per tag ----
+
+    /// Runs git in `dir` with a fixed identity and date, whatever the machine's configuration.
+    fn git_at(dir: &Path, date: &str, args: &[&str]) {
+        let out = Command::new("git")
+            .args(["-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", "-c", "init.defaultBranch=main"])
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_AUTHOR_NAME", "T")
+            .env("GIT_AUTHOR_EMAIL", "t@example.com")
+            .env("GIT_COMMITTER_NAME", "T")
+            .env("GIT_COMMITTER_EMAIL", "t@example.com")
+            .env("GIT_AUTHOR_DATE", date)
+            .env("GIT_COMMITTER_DATE", date)
+            .env_remove("GIT_DIR")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    fn commit(dir: &Path, date: &str, files: &[(&str, &str)]) {
+        for (rel, text) in files {
+            let path = dir.join(rel);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, text).unwrap();
+        }
+        git_at(dir, date, &["add", "-A"]);
+        git_at(dir, date, &["commit", "-q", "-m", "c"]);
+    }
+
+    const MAIN_B: &str = "mod a;\nfn main() {}\n";
+    const A_RS: &str = "pub fn a() {}\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {}\n}\n";
+    const T_RS: &str = "#[test]\nfn x() {}\n// c\n\n";
+
+    /// A repository with a tag without `src/` (`v0.0.1`), a lightweight check tag, an annotated
+    /// release whose tagger date is later than its commit's, a second check tag and a tag that is no
+    /// `v*` tag.
+    fn tagged_repo() -> Tmp {
+        let tmp = Tmp::new(&[]);
+        let d = &tmp.0;
+        fs::create_dir_all(d).unwrap();
+        git_at(d, "2025-12-01T12:00:00Z", &["init", "-q"]);
+        commit(d, "2025-12-01T12:00:00Z", &[("README.md", "x\n")]);
+        git_at(d, "2025-12-01T12:00:00Z", &["tag", "v0.0.1"]);
+        commit(d, "2026-01-01T12:00:00Z", &[("src/main.rs", "fn main() {}\n")]);
+        git_at(d, "2026-01-01T12:00:00Z", &["tag", "v0.1.0-rc.1"]);
+        commit(d, "2026-01-15T12:00:00Z", &[("src/main.rs", MAIN_B), ("src/a.rs", A_RS), ("tests/t.rs", T_RS)]);
+        git_at(d, "2026-02-01T12:00:00Z", &["tag", "-a", "-m", "release", "v0.1.0"]);
+        git_at(d, "2026-02-01T12:00:00Z", &["tag", "nightly"]);
+        commit(d, "2026-03-01T12:00:00Z", &[("src/main.rs", "mod a;\nfn main() {}\nfn extra() {}\n")]);
+        git_at(d, "2026-03-01T12:00:00Z", &["tag", "v0.2.0-rc.1"]);
+        tmp
+    }
+
+    fn row(tag: &str, date: &str, code: usize, test: usize) -> TagCount {
+        TagCount { tag: tag.into(), date: date.into(), code, test }
+    }
+
+    // spec: DEV-046
+    #[test]
+    fn dev_046_the_tags_are_counted_from_their_trees_in_the_order_of_their_dates() {
+        let repo = tagged_repo();
+        assert!(is_git_root(&repo.0));
+        assert!(!is_git_root(&repo.0.join("src")), "a subfolder is not the root");
+        assert_eq!(
+            list_tags(&repo.0).unwrap(),
+            [("v0.0.1", "2025-12-01"), ("v0.1.0-rc.1", "2026-01-01"), ("v0.1.0", "2026-02-01"), ("v0.2.0-rc.1", "2026-03-01")].map(|(t, d)| (t.to_string(), d.to_string())),
+            "the tagger date of an annotated tag, the commit date of a lightweight one, no tag that is not v*"
+        );
+        let h = collect_history(&repo.0, &[]).unwrap();
+        // v0.1.0: main.rs 2 + a.rs 1 = 3 code; a.rs 5 + tests/t.rs 2 = 7 test code
+        assert_eq!(h.rows, [row("v0.1.0-rc.1", "2026-01-01", 1, 0), row("v0.1.0", "2026-02-01", 3, 7), row("v0.2.0-rc.1", "2026-03-01", 4, 7)]);
+        assert_eq!(h.skipped.len(), 1);
+        assert!(h.skipped[0].0 == "v0.0.1" && h.skipped[0].1.contains("no src/"), "{:?}", h.skipped);
+        let gone = {
+            let dir = TempDir::new().unwrap();
+            assert!(dir.0.is_dir());
+            dir.0.clone()
+        };
+        assert!(!gone.exists(), "the temporary folder is removed");
+    }
+
+    // spec: DEV-046
+    #[test]
+    fn dev_046_a_tag_with_a_missing_module_file_is_skipped() {
+        let repo = Tmp::new(&[]);
+        let d = &repo.0;
+        fs::create_dir_all(d).unwrap();
+        git_at(d, "2026-01-01T12:00:00Z", &["init", "-q"]);
+        commit(d, "2026-01-01T12:00:00Z", &[("src/main.rs", "mod gone;\n")]);
+        git_at(d, "2026-01-01T12:00:00Z", &["tag", "v1.0.0"]);
+        let h = collect_history(d, &[]).unwrap();
+        assert!(h.rows.is_empty());
+        assert!(h.skipped[0].1.contains("mod gone;"), "{:?}", h.skipped);
+    }
+
+    // spec: DEV-046
+    #[test]
+    fn dev_046_the_counts_are_kept_in_a_tsv_and_a_cached_tag_is_not_counted_again() {
+        let rows = [row("v0.1.0", "2026-02-01", 3, 7), row("v0.2.0-rc.1", "2026-03-01", 4, 7)];
+        let text = tsv_text(&rows);
+        assert_eq!(text, "# loc-history rules=1\ntag\tdate\tcode\ttest\nv0.1.0\t2026-02-01\t3\t7\nv0.2.0-rc.1\t2026-03-01\t4\t7\n");
+        assert_eq!(parse_tsv(&text).unwrap(), rows);
+        assert_eq!(parse_tsv(&text.replace("rules=1", "rules=0")), None, "other rules: all is counted again");
+        assert_eq!(parse_tsv("tag\tdate\tcode\ttest\n"), None);
+        assert_eq!(parse_tsv("# loc-history rules=1\ntag\tdate\tcode\ttest\nv1\t2026-01-01\tx\t1\n"), None);
+        assert_eq!(parse_tsv("# loc-history rules=1\ntag\tdate\tcode\ttest\nv1\t2026-01-01\t1\n"), None);
+        let repo = tagged_repo();
+        let wrong = [row("v0.1.0", "2026-02-01", 999, 888)];
+        let h = collect_history(&repo.0, &wrong).unwrap();
+        assert_eq!(h.rows[1], wrong[0], "a cached tag keeps its numbers");
+        assert_eq!(h.rows[2], row("v0.2.0-rc.1", "2026-03-01", 4, 7), "a tag that is not cached is counted");
+    }
+
+    // spec: DEV-046
+    #[test]
+    fn dev_046_the_program_writes_the_chart_and_the_counts_next_to_the_report_and_reuses_them() {
+        let repo = tagged_repo();
+        fs::create_dir_all(repo.0.join("tools/loc-report")).unwrap();
+        fs::write(repo.0.join("tools/loc-report/featuresets.toml"), "[[set]]\nname = \"All\"\nfeatures = [\"a\", \"main\"]\n").unwrap();
+        let out = repo.0.join("docs/loc-report.md");
+        fs::create_dir_all(repo.0.join("docs")).unwrap();
+        let run = |extra: &[&str]| {
+            let mut args: Vec<String> = ["--root", repo.0.to_str().unwrap(), "--out", out.to_str().unwrap()].map(String::from).to_vec();
+            args.extend(extra.iter().map(|s| s.to_string()));
+            execute(&args, Path::new("/unused"))
+        };
+        run(&[]).unwrap();
+        let tsv_path = repo.0.join("docs/loc-history.tsv");
+        let tsv = fs::read_to_string(&tsv_path).unwrap();
+        assert!(tsv.contains("\nv0.1.0\t2026-02-01\t3\t7\n") && !tsv.contains("v0.0.1"), "{tsv}");
+        let svg_text = fs::read_to_string(repo.0.join("docs/loc-history.svg")).unwrap();
+        assert!(svg_text.starts_with("<svg") && svg_text.contains("v0.1.0"));
+        let report = fs::read_to_string(&out).unwrap();
+        assert!(report.contains("[![Code and test code per tag](loc-history.svg)](loc-history.svg)") && report.contains("- `v0.0.1`: it has no src/ folder"), "{report}");
+
+        // a deliberately wrong number is kept: the tag is not counted again, and the file is not rewritten
+        fs::write(&tsv_path, tsv.replace("v0.1.0\t2026-02-01\t3\t7", "v0.1.0\t2026-02-01\t30\t70")).unwrap();
+        let before = fs::metadata(&tsv_path).unwrap().modified().unwrap();
+        run(&[]).unwrap();
+        assert!(fs::read_to_string(&out).unwrap().contains("| v0.1.0 | 2026-02-01 | 30 | 70 |"));
+        assert_eq!(fs::metadata(&tsv_path).unwrap().modified().unwrap(), before);
+
+        // other rules: everything is counted again
+        fs::write(&tsv_path, fs::read_to_string(&tsv_path).unwrap().replace("rules=1", "rules=0")).unwrap();
+        run(&[]).unwrap();
+        assert!(fs::read_to_string(&out).unwrap().contains("| v0.1.0 | 2026-02-01 | 3 | 7 |"));
+        assert!(fs::read_to_string(&tsv_path).unwrap().starts_with("# loc-history rules=1\n"));
+
+        // --no-history: no section, no files
+        fs::remove_file(&tsv_path).unwrap();
+        fs::remove_file(repo.0.join("docs/loc-history.svg")).unwrap();
+        run(&["--no-history"]).unwrap();
+        assert!(!fs::read_to_string(&out).unwrap().contains("Lines of code per tag") && !tsv_path.exists() && !repo.0.join("docs/loc-history.svg").exists());
+
+        // stdout: the section and the table, the cache is read from docs/ and nothing is written
+        let args = parse_args(&["--root".to_string(), repo.0.to_str().unwrap().to_string()], Path::new("/unused")).unwrap();
+        let generated = generate(&args).unwrap();
+        assert!(generated.files.is_empty());
+        assert!(generated.report.contains("are written only with `--out`") && generated.report.contains("| v0.2.0-rc.1 | 2026-03-01 | 4 | 7 |") && !generated.report.contains("](loc-history.svg)"), "{}", generated.report);
+    }
+
+    // spec: DEV-046
+    #[test]
+    fn dev_046_a_folder_without_git_says_so_and_is_no_error() {
+        let tmp = Tmp::new(&[("src/main.rs", "fn main() {}\n"), ("cfg.toml", "[[set]]\nname = \"All\"\nfeatures = [\"main\"]\n")]);
+        let out = tmp.0.join("out.md");
+        let args: Vec<String> = ["--root", tmp.0.to_str().unwrap(), "--config", tmp.0.join("cfg.toml").to_str().unwrap(), "--out", out.to_str().unwrap()].map(String::from).to_vec();
+        execute(&args, Path::new("/unused")).unwrap();
+        let text = fs::read_to_string(&out).unwrap();
+        assert!(text.contains("## Lines of code per tag\n\nThe history per tag needs git") && !tmp.0.join("loc-history.svg").exists() && !tmp.0.join("loc-history.tsv").exists(), "{text}");
+    }
+
+    // spec: DEV-046
+    #[test]
+    fn dev_046_the_axis_has_round_ticks_and_counts_are_written_with_thousands_spaces() {
+        assert_eq!(nice_scale(98_754), (20_000, 100_000));
+        assert_eq!(nice_scale(101_000), (50_000, 150_000));
+        assert_eq!(nice_scale(50_000), (10_000, 50_000));
+        assert_eq!(nice_scale(1_200), (500, 1_500));
+        assert_eq!(nice_scale(7), (2, 8));
+        assert_eq!(nice_scale(0), (1, 1));
+        assert_eq!([0, 7, 700, 1_500, 20_000, 1_250].map(tick_label), ["0", "7", "700", "1.5k", "20k", "1250"]);
+        assert_eq!([0, 999, 1_000, 98_754, 1_234_567].map(spaced), ["0", "999", "1 000", "98 754", "1 234 567"]);
+    }
+
+    fn attr_values(svg: &str, marker: &str, attr: &str) -> Vec<f64> {
+        svg.split(marker).skip(1).map(|rest| rest.split(&format!("{attr}=\"")).nth(1).unwrap().split('"').next().unwrap().parse().unwrap()).collect()
+    }
+
+    // spec: DEV-046
+    #[test]
+    fn dev_046_the_svg_has_two_lines_a_column_with_a_popup_per_tag_and_labels_for_releases_only() {
+        let rows = [row("v0.1.0-rc.1", "2026-01-01", 1_000, 200), row("v0.1.0", "2026-02-01", 98_754, 96_288), row("v0.2.0-rc.1", "2026-03-01", 99_000, 97_000), row("v0.2.0", "2026-03-02", 100_000, 98_000)];
+        let s = svg(&rows);
+        assert!(s.starts_with("<svg xmlns=\"http://www.w3.org/2000/svg\"") && s.trim_end().ends_with("</svg>"));
+        assert!(!s.contains("<script") && !s.contains("href") && !s.contains("http://www.w3.org/1999/xlink") && s.contains("<rect width=\"960\" height=\"420\" fill=\"#ffffff\"/>"), "self-contained, white");
+        assert!(s.contains(".tip,.guide{visibility:hidden}") && s.contains(".col:hover .tip,.col:hover .guide{visibility:visible}"));
+        let lines: Vec<&str> = s.lines().filter(|l| l.starts_with("<polyline")).collect();
+        assert_eq!(lines.len(), 2);
+        assert!(lines.iter().all(|l| l.split("points=\"").nth(1).unwrap().split(' ').count() == 4));
+        assert!(lines[0].contains("#2563eb") && lines[1].contains("#ea580c") && lines[1].contains("stroke-dasharray"));
+        assert_eq!(s.matches("<g class=\"col\">").count(), 4);
+        assert_eq!(s.matches("<g class=\"tip\">").count(), 4);
+        assert_eq!(s.matches("class=\"lbl\"").count(), 2, "only the releases are labelled");
+        assert!(s.contains(">v0.1.0</text>") && s.contains(">v0.2.0</text>") && !s.contains("rotate(-45)\" text-anchor=\"end\">v0.1.0-rc"));
+        assert_eq!(s.matches("r=\"4.5\"").count(), 4, "two releases, two lines");
+        assert_eq!(s.matches("r=\"2.5\"").count(), 4);
+        assert!(s.contains(">v0.1.0 · 2026-02-01</text>") && s.contains(">Code: 98 754</text>") && s.contains(">Test code: 96 288</text>"));
+        assert!(s.contains("<title>v0.1.0 · 2026-02-01\nCode: 98 754\nTest code: 96 288</title>"), "the fallback");
+        assert!(s.contains(">100k</text>") && s.contains(">0</text>") && s.contains(">20k</text>"));
+        // the popup is right of the guide in the left half and left of it in the right half, inside the canvas
+        let guides = attr_values(&s, "class=\"guide\"", "x1");
+        let tips = attr_values(&s, "class=\"tipbg\"", "x");
+        assert_eq!(guides.len(), 4);
+        assert!(tips[0] > guides[0] && tips[3] + 190.0 < guides[3]);
+        assert!(tips.iter().all(|&x| x >= 0.0 && x + 190.0 <= 960.0));
+    }
+
+    // spec: DEV-046
+    #[test]
+    fn dev_046_the_svg_escapes_text_and_survives_zero_and_one_tag() {
+        let s = svg(&[row("v1.0.0<&\">", "2026-01-01", 5, 3)]);
+        assert!(s.contains("v1.0.0&lt;&amp;&quot;&gt;") && !s.contains("<&\">"), "{s}");
+        assert!(!s.contains("NaN") && !s.contains("inf"), "{s}");
+        assert_eq!(s.matches("<g class=\"col\">").count(), 1);
+        assert!(s.contains("points=\"500.0,"), "one tag is in the middle");
+        let none = svg(&[]);
+        assert!(!none.contains("NaN") && none.contains("</svg>"));
+        assert_eq!(xml_escape("a&b<c>\"d'"), "a&amp;b&lt;c&gt;&quot;d&apos;");
+    }
+
+    // spec: DEV-046
+    #[test]
+    fn dev_046_the_section_links_the_chart_and_lists_the_tags_newest_first() {
+        let h = History { rows: vec![row("v0.1.0", "2026-02-01", 3, 7), row("v0.2.0-rc.1", "2026-03-01", 4, 7)], skipped: vec![("v0.0.1".into(), "it has no src/ folder".into())] };
+        let text = history_section(&h, true);
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines[0], "## Lines of code per tag");
+        assert_eq!(lines[2], "[![Code and test code per tag](loc-history.svg)](loc-history.svg)");
+        assert!(lines[4].contains("hovering a tag shows its counts"));
+        let at = |l: &str| lines.iter().position(|x| *x == l).unwrap_or_else(|| panic!("{l:?} in\n{text}"));
+        assert!(at("<details>") < at("| Tag | Date | Code | Test code |") && at("| v0.2.0-rc.1 | 2026-03-01 | 4 | 7 |") < at("| v0.1.0 | 2026-02-01 | 3 | 7 |") && at("| v0.1.0 | 2026-02-01 | 3 | 7 |") < at("</details>"));
+        assert_eq!(lines[at("<summary>Numbers per tag</summary>") + 1], "", "a blank line, so the table renders inside the details");
+        assert_eq!(lines[at("</details>") - 1], "");
+        assert!(at("</details>") < at("- `v0.0.1`: it has no src/ folder"));
+        let none = history_section(&History::default(), true);
+        assert!(none.contains("There are no tags yet") && !none.contains("loc-history.svg") && !none.contains("<details>"), "{none}");
+        // in the report it comes after the note and before the summary
+        let mut r = fixed();
+        r.history = Some(text);
+        let report = render(&r);
+        let (note, section, summary) = (report.find("The test share is").unwrap(), report.find("## Lines of code per tag").unwrap(), report.find("## Summary").unwrap());
+        assert!(note < section && section < summary);
+        assert!(report[section..summary].ends_with("\n\n"));
     }
 }
