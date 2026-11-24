@@ -141,13 +141,19 @@ bundled fonts have licence files in `assets/fonts/`, so neither is checked at ru
 | 1 | 0x0002 | Restricted License embedding: must not be embedded | **not used**: warning, section 5 |
 | 2 | 0x0004 | Preview and Print embedding | used (a PDF is for print and view) |
 | 3 | 0x0008 | Editable embedding | used |
-| 8 | 0x0100 | No subsetting | used, but **embedded whole**, not as a subset |
-| 9 | 0x0200 | Bitmap embedding only | **not used** (Shale embeds outlines, not bitmaps): warning, section 5 |
+| 8 | 0x0100 | No subsetting (only in an OS/2 table of version 2 or later) | used, but **embedded whole**, not as a subset |
+| 9 | 0x0200 | Bitmap embedding only (only in an OS/2 table of version 2 or later) | **not used** (Shale embeds outlines, not bitmaps): warning, section 5 |
 | 0, 4 to 7, 10 to 15 | | reserved | ignored |
 
-- The specification says that bits 1, 2 and 3 are mutually exclusive in a table of version 3 or
-  later and that, when several are set, the least restrictive applies; Shale does the same
-  (restricted counts only when 0x0002 is the **only** one of these three).
+- The specification (checked against the OpenType OS/2 table, field `fsType`, in phase 2) says that
+  bits 0 to 3 are mutually exclusive and that bit 0 is permanently reserved. It states that when
+  several of them are set the least restrictive permission applies for tables of versions 0 to 2,
+  that tables of version 3 and later must not set more than one, and that "restricted" takes effect
+  only when the sub-field is exactly 2. Shale does the same for every version (restricted counts
+  only when 0x0002 is the **only** one of bits 1 to 3; bit 0 is ignored).
+- **Bits 4 to 15 are ignored in an OS/2 table of version 0 or 1** (the specification: only bits 0
+  to 3 were assigned then), so 0x0100 and 0x0200 count only from version 2 on. (The first version
+  of this ADR missed this.)
 - **A font without an OS/2 table counts as installable**, as does one whose `fsType` cannot be
   read.
 - The vault and the system are treated alike: having a font file is not a licence to embed it.

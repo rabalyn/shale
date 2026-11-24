@@ -7,6 +7,20 @@
 //! of the settings (in the dialog or in the settings file) is used at once and fonts are only
 //! rebuilt when the set of chosen families changes.
 
+// The fonts of the exports (ADR-0040, #658): the licence of a font file, the scan of the fonts
+// of the vault and the system, and the resolver that decides which font an export uses.
+pub mod licence;
+#[cfg(test)]
+mod licence_tests;
+pub mod resolve;
+#[cfg(test)]
+mod resolve_tests;
+pub mod scan;
+#[cfg(test)]
+mod scan_tests;
+#[cfg(test)]
+pub(crate) mod test_fonts;
+
 use crate::font_list::ListFonts;
 use crate::theme;
 use eframe::egui::{self, FontFamily, FontId, Ui};
