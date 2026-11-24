@@ -87,6 +87,8 @@ pub struct PublishState {
     pub(crate) target_dirty: bool,
     /// The address as typed, which may have a password in it that is not kept (SEC-010).
     pub(crate) url_text: Option<String>,
+    /// The address of the site as typed; kept apart until it is allowed (SITE-081).
+    pub(crate) site_address_text: Option<String>,
     /// What the checks found when an SSH sign-in failed (SYNC-077), read where the error is shown.
     facts: Arc<Mutex<Facts>>,
     pub lists: Lists,

@@ -36,9 +36,46 @@ pub struct ExportDialog {
     pub book: Option<Box<BookExport>>,
     /// The export of a note or drawing with the built-in writer, while it runs (JOB-017).
     pub note: Option<NoteExport>,
+    /// The fonts the export will use for this note and what could not be used (PDF-034, PDF-037);
+    /// filled by the window once the font scan is in (JOB-040).
+    pub fonts: Option<FontsNote>,
     busy: Busy,
     /// screen rect of every control (used by the UI tests)
     pub rects: Vec<(String, Rect)>,
+}
+
+/// The fonts of a note's export in words, for the dialog (PDF-019).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FontsNote {
+    /// What the scan and the engine of the dialog were when this was made; it is made again when they change.
+    pub stamp: (u64, bool, usize),
+    /// "text Garamond (system), code Hack": the roles that the note, the book or the vault set.
+    pub line: String,
+    pub warnings: Vec<String>,
+    /// The system fonts are still being looked up.
+    pub pending: bool,
+}
+
+impl FontsNote {
+    /// The row(s) of the dialog: the fonts that are set, and why one was not used.
+    fn show(&self, ui: &mut Ui, muted: &dyn Fn(&str) -> egui::RichText) {
+        if self.line.is_empty() && self.warnings.is_empty() && !self.pending {
+            return;
+        }
+        ui.label(muted("Fonts"));
+        ui.vertical(|ui| {
+            if !self.line.is_empty() {
+                ui.label(muted(&self.line));
+            }
+            if self.pending {
+                ui.label(muted("Looking up fonts..."));
+            }
+            for w in &self.warnings {
+                crate::theme::problem(ui, w);
+            }
+        });
+        ui.end_row();
+    }
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -50,7 +87,22 @@ pub enum DialogResult {
 
 impl ExportDialog {
     pub fn new(rel: PathBuf, drawing: bool, name: String, opts: ExportOptions, default_path: PathBuf) -> Self {
-        ExportDialog { rel, drawing, name, opts, path: default_path.to_string_lossy().into_owned(), open_after: false, error: None, engine: ExportEngine::Builtin, tex: None, book: None, note: None, busy: Busy::default(), rects: vec![] }
+        ExportDialog {
+            rel,
+            drawing,
+            name,
+            opts,
+            path: default_path.to_string_lossy().into_owned(),
+            open_after: false,
+            error: None,
+            engine: ExportEngine::Builtin,
+            tex: None,
+            book: None,
+            note: None,
+            fonts: None,
+            busy: Busy::default(),
+            rects: vec![],
+        }
     }
 
     /// The registry the exports of this dialog are tasks of (the window's; a dialog made without
@@ -149,6 +201,9 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
     if let (ExportEngine::Latex, Some(tex)) = (d.engine, d.tex.as_deref_mut()) {
         tex.show(ui, &mut d.opts, &mut rec);
         egui::Grid::new("export-save-grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
+            if let Some(f) = d.fonts.as_ref().filter(|_| d.book.is_none()) {
+                f.show(ui, &muted);
+            }
             ui.label(muted("Save as"));
             rec("path", ui.add(egui::TextEdit::singleline(&mut d.path).desired_width(250.0)));
             ui.end_row();
@@ -243,6 +298,9 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
                 ui.label(muted("From the note"));
                 ui.label(muted(&label));
                 ui.end_row();
+            }
+            if let Some(f) = d.fonts.as_ref().filter(|_| d.book.is_none()) {
+                f.show(ui, &muted);
             }
             ui.label(muted("Include"));
             ui.vertical(|ui| {

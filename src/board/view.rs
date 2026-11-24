@@ -5,8 +5,8 @@
 
 use super::card::{day_text, Card};
 use super::deps::Step;
-use super::drag::Dropped;
-use super::file::{line_value, Chip, Props};
+use super::drag::{self, Dropped, Target, TreeDropped};
+use super::file::{line_value, Board, Chip, Props};
 use super::lanes::{drop_property, PRESETS};
 use super::{Info, LaneView};
 use crate::note_props::Priority;
@@ -65,6 +65,20 @@ pub enum Act {
     OpenTab(PathBuf),
     /// a card was dropped on a lane (BOARD-019 to BOARD-022)
     Drop(Dropped),
+    /// `blocker` blocks `waiting`: the handle of a card was dragged onto another (BOARD-045)
+    Block {
+        blocker: PathBuf,
+        waiting: PathBuf,
+    },
+    /// `blocker` does not block `waiting` any more (the card's menu, BOARD-046)
+    Unblock {
+        blocker: PathBuf,
+        waiting: PathBuf,
+    },
+    /// the peek of the card with the field of "+ Add blocker" (or, with `true`, "+ Add blocked card") open (BOARD-046)
+    AddBlock(PathBuf, Rect, bool),
+    /// a note, drawing or folder of the file list was dropped on the board (BOARD-035 to BOARD-037)
+    TreeDrop(TreeDropped),
     /// the Advanced switch of the form is a setting (QUERY-026)
     SaveSettings,
 }
@@ -234,6 +248,12 @@ pub struct State {
     drag: Option<(PathBuf, usize)>,
     /// where the dragged card would land now: the lane and the place among its cards
     pub(crate) over: Option<(usize, usize)>,
+    /// the card whose link handle is dragged: the blocker that is being connected (BOARD-045)
+    connect: Option<PathBuf>,
+    /// the card the link is over now
+    pub(crate) connect_over: Option<PathBuf>,
+    /// where the handle of the selected card was drawn in this frame
+    pub(crate) handle: Option<Rect>,
     /// where the lanes were drawn in this frame
     places: Vec<Place>,
     /// the arrows drawn in this frame (BOARD-025)
@@ -245,6 +265,10 @@ pub struct State {
     board_view: Option<Rect>,
     /// how far the drag scrolls in the next frame
     auto: AutoScroll,
+    /// where the "+ Add lane" button was drawn (a folder dropped on it makes a lane, BOARD-037)
+    add_lane: Option<Rect>,
+    /// the frame in which a drag from the file list was over the board, which then owns it (BOARD-035)
+    tree_claim: Option<u64>,
 }
 
 /// The scroll a dragged card at the edge asks for (BOARD-034).
@@ -281,7 +305,12 @@ impl State {
 
     /// Is a card being dragged? Esc then cancels the drag and nothing else.
     pub fn dragging(&self) -> bool {
-        self.drag.is_some()
+        self.drag.is_some() || self.connect.is_some()
+    }
+
+    /// Is a drag from the file list over the board in this frame? The window then leaves the drag to the board.
+    pub fn claims_tree_drag(&self, ctx: &egui::Context) -> bool {
+        self.tree_claim == Some(ctx.cumulative_frame_nr())
     }
 
     /// A card was selected with the keys: show it.
@@ -315,7 +344,7 @@ pub struct Data<'a> {
 /// Draw the board view; the answer is what was asked for.
 pub fn show(ui: &mut Ui, st: &mut State, data: &Data, env: &mut Env) -> Vec<Act> {
     let mut acts = Vec::new();
-    strip(ui, data, &mut acts);
+    strip(ui, st, data, &mut acts);
     ui.add_space(4.0);
     if data.current.is_none() {
         ui.add_space(24.0);
@@ -339,6 +368,7 @@ pub fn show(ui: &mut Ui, st: &mut State, data: &Data, env: &mut Env) -> Vec<Act>
     }
     let height = ui.available_height();
     st.places.clear();
+    st.handle = None;
     st.lane_offsets.resize(data.lanes.len(), 0.0);
     let mut area = egui::ScrollArea::horizontal().id_salt("board-lanes").auto_shrink([false, false]);
     if st.auto.board != 0.0 {
@@ -360,6 +390,8 @@ pub fn show(ui: &mut Ui, st: &mut State, data: &Data, env: &mut Env) -> Vec<Act>
         paint_arrow(ui, *a);
     }
     drag_end(ui, st, data, &mut acts);
+    connect_end(ui, st, data, &mut acts);
+    tree_drag_end(ui, st, data, env, &mut acts);
     confirm_delete(ui.ctx(), st, &mut acts);
     acts
 }
@@ -404,14 +436,7 @@ fn drag_end(ui: &Ui, st: &mut State, data: &Data, acts: &mut Vec<Act>) {
     let pal = theme::palette();
     let painter = ctx.layer_painter(LayerId::new(Order::Tooltip, Id::unique("board-drag")));
     if let Some((to, index)) = st.over {
-        let place = &st.places[to];
-        painter.rect_stroke(place.lane, CornerRadius::same(8), Stroke::new(2.0, pal.accent), egui::StrokeKind::Inside);
-        let y = match (place.cards.get(index), place.cards.last()) {
-            (Some(r), _) => r.top() - 2.0,
-            (None, Some(r)) => r.bottom() + 2.0,
-            (None, None) => place.lane.top() + 44.0,
-        };
-        painter.line_segment([Pos2::new(place.lane.left() + 10.0, y), Pos2::new(place.lane.right() - 10.0, y)], Stroke::new(3.0, pal.accent));
+        mark(&painter, &st.places[to], index);
     }
     if let (Some(p), Some(card)) = (pos, data.lanes.get(from).and_then(|l| l.cards.iter().find(|c| c.rel == rel))) {
         let galley = painter.layout_no_wrap(card.title.clone(), egui::FontId::proportional(13.0), pal.text_strong);
@@ -425,6 +450,128 @@ fn drag_end(ui: &Ui, st: &mut State, data: &Data, acts: &mut Vec<Act>) {
         }
         st.drag = None;
         st.over = None;
+    }
+}
+
+/// Where the card `rel` was drawn in this frame.
+fn card_rect(places: &[Place], data: &Data, rel: &Path) -> Option<Rect> {
+    places.iter().zip(data.lanes).find_map(|(p, lane)| lane.cards.iter().position(|c| c.rel == rel).and_then(|c| p.cards.get(c).copied()))
+}
+
+/// The card under `pos` that shows its cards there (a card scrolled out of its lane is not).
+fn card_at(places: &[Place], data: &Data, pos: Pos2) -> Option<PathBuf> {
+    places.iter().zip(data.lanes).find(|(p, _)| p.body.contains(pos)).and_then(|(p, lane)| p.cards.iter().position(|r| r.contains(pos)).and_then(|c| lane.cards.get(c)).map(|c| c.rel.clone()))
+}
+
+/// While a link is dragged from the handle of the selected card (BOARD-045): an arrow runs from the
+/// card to the pointer, and a hint says what letting go makes, "A blocks B". Letting go on another
+/// card makes that card wait for this one; Esc, and letting go anywhere else, do nothing.
+fn connect_end(ui: &Ui, st: &mut State, data: &Data, acts: &mut Vec<Act>) {
+    let Some(from) = st.connect.clone() else {
+        st.connect_over = None;
+        return;
+    };
+    if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+        st.connect = None;
+        st.connect_over = None;
+        return;
+    }
+    let pos = ui.input(|i| i.pointer.interact_pos());
+    st.connect_over = pos.and_then(|p| card_at(&st.places, data, p));
+    let title = |rel: &Path| data.lanes.iter().flat_map(|l| &l.cards).find(|c| c.rel == rel).map(|c| c.title.clone()).unwrap_or_default();
+    let ctx = ui.ctx();
+    ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
+    let pal = theme::palette();
+    let painter = ctx.layer_painter(LayerId::new(Order::Tooltip, Id::unique("board-connect")));
+    if let (Some(p), Some(rect)) = (pos, card_rect(&st.places, data, &from)) {
+        let start = Pos2::new(if p.x < rect.center().x { rect.left() } else { rect.right() }, rect.center().y);
+        let end = match st.connect_over.as_ref().and_then(|o| card_rect(&st.places, data, o)) {
+            Some(target) => Pos2::new(if p.x < target.center().x { target.left() } else { target.right() }, target.center().y),
+            None => p,
+        };
+        let (back, line) = ((start - end).normalized(), Stroke::new(2.0, pal.accent));
+        painter.line_segment([start, end], line);
+        for angle in [0.45_f32, -0.45] {
+            let (sin, cos) = angle.sin_cos();
+            painter.line_segment([end, end + Vec2::new(back.x * cos - back.y * sin, back.x * sin + back.y * cos) * 10.0], line);
+        }
+        let text = match st.connect_over.as_ref() {
+            Some(o) if *o == from => format!("{} cannot block itself", title(&from)),
+            Some(o) => format!("{} blocks {}", title(&from), title(o)),
+            None => format!("{} blocks …", title(&from)),
+        };
+        let galley = painter.layout_no_wrap(text, egui::FontId::proportional(13.0), pal.text_strong);
+        let hint = Rect::from_min_size(p + Vec2::new(14.0, 10.0), galley.size() + Vec2::new(16.0, 10.0));
+        painter.rect(hint, CornerRadius::same(6), pal.bg_primary.gamma_multiply(0.95), Stroke::new(1.0, pal.accent), egui::StrokeKind::Inside);
+        painter.galley(hint.min + Vec2::new(8.0, 5.0), galley, pal.text_strong);
+    }
+    if ui.input(|i| i.pointer.any_released()) {
+        if let Some(waiting) = st.connect_over.take().filter(|o| *o != from) {
+            acts.push(Act::Block { blocker: from, waiting });
+        }
+        st.connect = None;
+    }
+}
+
+/// The lane that a drag is over is outlined and a line marks the place among its cards.
+fn mark(painter: &egui::Painter, place: &Place, index: usize) {
+    let pal = theme::palette();
+    painter.rect_stroke(place.lane, CornerRadius::same(8), Stroke::new(2.0, pal.accent), egui::StrokeKind::Inside);
+    let y = match (place.cards.get(index), place.cards.last()) {
+        (Some(r), _) => r.top() - 2.0,
+        (None, Some(r)) => r.bottom() + 2.0,
+        (None, None) => place.lane.top() + 44.0,
+    };
+    painter.line_segment([Pos2::new(place.lane.left() + 10.0, y), Pos2::new(place.lane.right() - 10.0, y)], Stroke::new(3.0, pal.accent));
+}
+
+/// What a drag from the file list is over: a lane and the place among its cards, or the empty part of
+/// the board and the "+ Add lane" button (BOARD-035). None outside the board.
+fn tree_target(st: &State, pos: Pos2) -> Option<Target> {
+    if let Some((lane, index)) = target(&st.places, pos) {
+        return Some(Target::Lane { lane, index });
+    }
+    (st.board_view.is_some_and(|r| r.contains(pos)) || st.add_lane.is_some_and(|r| r.contains(pos))).then_some(Target::NewLane)
+}
+
+/// While a note, a drawing or a folder of the file list is dragged over the board (BOARD-035 to
+/// BOARD-037): the lane and the place, or the empty board, are marked and a text at the pointer says
+/// what the drop does. The board then owns the drag: letting go carries it out, Esc cancels it.
+/// Outside the board the drag is the file list's own (a move into a folder).
+fn tree_drag_end(ui: &Ui, st: &mut State, data: &Data, env: &Env, acts: &mut Vec<Act>) {
+    let ctx = ui.ctx();
+    let Some(path) = egui::DragAndDrop::payload::<crate::panels::TreeDrag>(ctx).map(|d| d.0.clone()) else { return };
+    if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+        egui::DragAndDrop::clear_payload(ctx);
+        return;
+    }
+    let Some(pos) = ui.input(|i| i.pointer.latest_pos()) else { return };
+    let (Some(target), Some(board_rel)) = (tree_target(st, pos), data.current) else { return };
+    st.tree_claim = Some(ctx.cumulative_frame_nr());
+    let board = Board::parse(env.vault.notes.get(board_rel).map(|n| n.text.as_str()).unwrap_or_default());
+    let verdict = drag::tree(env.vault, board_rel, &board, data.lanes, &path, &target);
+    let pal = theme::palette();
+    let painter = ctx.layer_painter(LayerId::new(Order::Tooltip, Id::unique("board-tree-drag")));
+    match (&target, &verdict.todo) {
+        (Target::Lane { lane, index }, Some(_)) => mark(&painter, &st.places[*lane], *index),
+        (Target::NewLane, Some(_)) => {
+            if let Some(r) = st.add_lane.filter(|r| r.contains(pos)).or(st.board_view) {
+                painter.rect_stroke(r, CornerRadius::same(6), Stroke::new(2.0, pal.accent), egui::StrokeKind::Inside);
+            }
+        }
+        _ => {}
+    }
+    let galley = painter.layout_no_wrap(verdict.hint, egui::FontId::proportional(13.0), pal.text_strong);
+    let rect = Rect::from_min_size(pos + Vec2::new(16.0, 12.0), galley.size() + Vec2::new(16.0, 10.0));
+    painter.rect(rect, CornerRadius::same(6), pal.bg_secondary, Stroke::new(1.0, pal.border), egui::StrokeKind::Inside);
+    painter.galley(rect.min + Vec2::new(8.0, 5.0), galley, pal.text_strong);
+    st.auto = auto_scroll(st, pos, ui.input(|i| i.stable_dt));
+    ctx.request_repaint();
+    if ui.input(|i| i.pointer.any_released()) {
+        egui::DragAndDrop::clear_payload(ctx);
+        if verdict.todo.is_some() {
+            acts.push(Act::TreeDrop(TreeDropped { path, target }));
+        }
     }
 }
 
@@ -451,7 +598,8 @@ fn confirm_delete(ctx: &egui::Context, st: &mut State, acts: &mut Vec<Act>) {
 
 /// The boards of the vault in a row, the new-board button and the menu of the board itself
 /// (BOARD-007).
-fn strip(ui: &mut Ui, data: &Data, acts: &mut Vec<Act>) {
+fn strip(ui: &mut Ui, st: &mut State, data: &Data, acts: &mut Vec<Act>) {
+    st.add_lane = None;
     ui.horizontal(|ui| {
         egui::ScrollArea::horizontal().id_salt("board-strip").max_width((ui.available_width() - 190.0).max(100.0)).show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -499,7 +647,9 @@ fn strip(ui: &mut Ui, data: &Data, acts: &mut Vec<Act>) {
                 })
                 .response
                 .on_hover_text("Add a lane from a preset");
-                if ui.button("+ Add lane").on_hover_text("A lane at the end of the board; set its query with its ⋯ menu").clicked() {
+                let add = ui.button("+ Add lane").on_hover_text("A lane at the end of the board; set its query with its ⋯ menu (drop a folder of the file list here for a lane of its notes)");
+                st.add_lane = Some(add.rect);
+                if add.clicked() {
                     acts.push(Act::AddLane);
                 }
                 if ui.button("Edit file").on_hover_text("Open the note of the board in a tab").clicked() {
@@ -832,6 +982,10 @@ fn card_ui(ui: &mut Ui, lane: usize, card: &Card, data: &Data, st: &mut State, e
     if resp.drag_started() {
         st.drag = Some((card.rel.clone(), lane));
     }
+    if selected && !card.drawing {
+        link_handle(ui, rect, card, st);
+    }
+    resp.context_menu(|ui| card_menu(ui, rect, card, env.vault, acts));
     if resp.clicked() {
         if ui.input(|i| i.modifiers.ctrl || i.modifiers.command) {
             acts.push(Act::OpenTab(card.rel.clone()));
@@ -840,6 +994,59 @@ fn card_ui(ui: &mut Ui, lane: usize, card: &Card, data: &Data, st: &mut State, e
         }
     }
     rect
+}
+
+/// The handle at the top right of the selected card: dragging it onto another card makes that card wait
+/// for this one (BOARD-045).
+fn link_handle(ui: &mut Ui, card: Rect, c: &Card, st: &mut State) {
+    let pal = theme::palette();
+    let rect = Rect::from_center_size(Pos2::new(card.right() - 14.0, card.top() + 14.0), Vec2::splat(18.0));
+    st.handle = Some(rect);
+    let resp = ui.interact(rect, ui.scope_id().with(("board-link-handle", &c.rel)), Sense::drag()).on_hover_cursor(egui::CursorIcon::Crosshair).on_hover_text("Drag onto another card: that card waits for this one");
+    let color = if resp.hovered() || resp.dragged() { pal.accent } else { pal.muted };
+    let painter = ui.painter();
+    painter.circle_stroke(rect.center(), 7.0, Stroke::new(1.5, color));
+    painter.circle_filled(rect.center(), 2.5, color);
+    if resp.drag_started() {
+        st.connect = Some(c.rel.clone());
+    }
+}
+
+/// The menu of a card (BOARD-046): add a blocker or a blocked card, take one away.
+fn card_menu(ui: &mut Ui, rect: Rect, card: &Card, vault: &Vault, acts: &mut Vec<Act>) {
+    let title = |rel: &Path| vault.file(rel).map(|f| f.title()).unwrap_or_else(|| rel.to_string_lossy().into_owned());
+    // (a drawing has no front matter: it neither waits nor is waited for)
+    if card.drawing {
+        return;
+    }
+    if ui.button("Add blocker…").on_hover_text("A note this card waits for").clicked() {
+        acts.push(Act::AddBlock(card.rel.clone(), rect, false));
+        ui.close();
+    }
+    if !card.dep.blockers.is_empty() {
+        ui.menu_button("Remove blocker", |ui| {
+            for b in &card.dep.blockers {
+                if ui.button(title(b)).clicked() {
+                    acts.push(Act::Unblock { blocker: b.clone(), waiting: card.rel.clone() });
+                    ui.close();
+                }
+            }
+        });
+    }
+    if ui.button("Add blocked card…").on_hover_text("A card that waits for this one").clicked() {
+        acts.push(Act::AddBlock(card.rel.clone(), rect, true));
+        ui.close();
+    }
+    if !card.dep.dependants.is_empty() {
+        ui.menu_button("Remove blocked card", |ui| {
+            for w in &card.dep.dependants {
+                if ui.button(title(w)).clicked() {
+                    acts.push(Act::Unblock { blocker: card.rel.clone(), waiting: w.clone() });
+                    ui.close();
+                }
+            }
+        });
+    }
 }
 
 #[cfg(test)]

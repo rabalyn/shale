@@ -115,6 +115,17 @@ nothing.
   in that earlier lane. The card stays selected and is scrolled into view, so you can see where it went.
 - When the card's note changed since the board drew it, nothing is moved and a message says so.
 
+**From the file list**: drag a **note or drawing** from the file list onto a lane and it is dropped like a card: a lane
+with a property sets it in the note's front matter (`modified:` stays), any other lane pins the note at the place you
+dropped it. A note that is a card of another lane moves there instead of showing twice. A drawing has no front matter, so
+it is only pinned (a message says so on a lane with a property). Drag a **folder** onto a lane and every note and drawing
+in it, also in its subfolders and in path order, is pinned there at that place: a snapshot that writes nothing into the
+notes, one step to undo in the board's note. Notes that are cards already, and the board's own note, are skipped. Drag a
+folder onto the empty part of the board, or onto **+ Add lane**, and a new lane at the end follows the folder with
+`query: path:Folder/` (in quotes when the name has spaces or brackets). While you drag, the lane and the place are marked
+and a text at the pointer says what the drop does; **Esc** cancels. Over the file list itself a drag still moves the file
+into a folder.
+
 **With the keys**: with a card selected, **Alt+Shift+→** moves it to the next lane and **Alt+Shift+←** to the previous
 one, as if you had dropped it below the pinned cards of that lane. The card stays selected and in view. At the first or
 last lane nothing happens, and the keys do nothing while a text field or the peek's editor has the keyboard. Change
@@ -127,7 +138,8 @@ card further away.
 # Dependencies
 
 A note says what it waits for in its front matter: `blocked-by: [[Foundation]], [[Permit]]`, next to `due:` and
-`start:`. The links are read by name, like links in the vault.
+`start:`. The links are read by name, like links in the vault. You can write the line by hand or set the blockers in
+the board (below).
 
 ![[board-dependencies.png]]
 
@@ -143,6 +155,21 @@ A note says what it waits for in its front matter: `blocked-by: [[Foundation]], 
   earlier due day comes first, then the higher priority, then the title. Pinned cards stay on top.
 - Cards in a **cycle** (A waits for B, B for A) cannot be ordered. They are marked **circular** and listed after
   the others, with the cards that only wait for them.
+- **Set a blocker without editing the note.** The peek of a card has two lines under its title: **Blocked by** (the
+  notes it waits for) and **Blocks** (the notes that wait for it), each with a **✕** that takes the link away.
+  **+ Add blocker** and **+ Add blocked card** open a field: type part of a note's name, the list shows the cards of the
+  board first and then other notes (↓ / ↑ and Enter, or a click, choose; Esc closes the field, the next Esc the peek).
+  The link is written to the **waiting** note's `blocked-by:`, next to its other blockers, in its front matter; the
+  last ✕ removes the line. The note's `modified:` day does not change, and Ctrl+Z in the note undoes it.
+![[board-blockers.png]]
+
+- **Drag to connect**: the selected card has a small round handle at its top right. Drag it onto another card; the
+  hint says "A blocks B" and the arrow runs from the blocker to the card that waits, as the selected card shows it. Esc
+  cancels. A **right click** on a card has **Add blocker…**, **Add blocked card…** and, when it has some, **Remove
+  blocker ▸** and **Remove blocked card ▸**.
+- A card cannot block itself and a blocker is not added twice. A blocker that makes a **cycle** is still added; Shale
+  tells you, and the cards show **circular**. Names that `[[ ]]` cannot hold (a `#` in a mail note's name) are
+  written as a markdown link, `[Mail #12](<Inbox/Mail %2312.md>)`, which `blocked-by:` reads too.
 - The **▾** menu next to **+ Add lane** has the preset **My dependency chain**: a lane with
   `query: blocked OR blocking` and `sort: dependencies`. Put it as the last lane: a card is in the first lane that
   matches it.
