@@ -311,7 +311,7 @@ pub(super) fn lay_out(vault: &Vault, plan: &Plan, opts: &ExportOptions, progress
     for (i, s) in secs.iter().enumerate() {
         if let Some(p) = progress {
             if p.cancel.is_cancelled() {
-                return Err("The export was cancelled".into());
+                return Err(crate::pdf::export::CANCELLED.into());
             }
             p.done.store(i, Ordering::SeqCst);
         }

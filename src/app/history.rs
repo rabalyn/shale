@@ -13,6 +13,7 @@
 //! (SYNC-035), reads (versions, text at a version, deleted notes) beside them.
 
 use super::{unix_now, ShaleApp};
+use crate::busy::{self, Key};
 use crate::gitsync::history::thin;
 use crate::gitsync::history::{self, Deleted, HistoryConfig, Outcome, Reason, Repo, Request, Schedule, Version};
 use crate::gitsync::{Git, Options};
@@ -22,7 +23,7 @@ use crate::vault::rel_to_string;
 use eframe::egui;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{Receiver, TryRecvError};
+use std::sync::mpsc::TryRecvError;
 use std::time::Duration;
 
 /// How long a snapshot waits for the tree lock before it is asked for again later (SYNC-035).
@@ -38,8 +39,14 @@ const THIN_RETRY: u64 = 30;
 /// How many versions and deleted notes the list asks for.
 const LIST_LIMIT: usize = 300;
 
-/// What a job sends back: its result, or why it died.
-type Sent<T> = Result<Result<T, String>, String>;
+/// The snapshots of the file history as tasks (JOB-025): housekeeping that is over in a moment, so
+/// the indicator lists one only after 2 seconds. They cannot be stopped: a snapshot waits for the
+/// tree lock and then commits.
+pub(crate) const HISTORY_SNAPSHOT: Key = Key::new("history-snapshot");
+/// The thinning of a local-only history (SYNC-070), likewise.
+pub(crate) const HISTORY_THIN: Key = Key::new("history-thin");
+/// A read of the history (versions, a text at a version, deleted notes, a comparison), likewise.
+pub(crate) const HISTORY_QUERY: Key = Key::new("history-query");
 
 /// A snapshot to make and what happens after it.
 struct Queued {
@@ -59,13 +66,13 @@ enum Then {
 struct SnapJob {
     vault: PathBuf,
     queued: Queued,
-    rx: Receiver<Sent<Outcome>>,
+    job: busy::Job<Result<Outcome, String>>,
 }
 
 /// The thinning of a local-only history (SYNC-067…SYNC-070).
 struct ThinJob {
     vault: PathBuf,
-    rx: Receiver<Sent<thin::Outcome>>,
+    job: busy::Job<Result<thin::Outcome, String>>,
 }
 
 /// A read of the history.
@@ -113,7 +120,7 @@ enum Answer {
 struct QueryJob {
     vault: PathBuf,
     query: Query,
-    rx: Receiver<Sent<Answer>>,
+    job: busy::Job<Result<Answer, String>>,
 }
 
 /// The history's state in the app.
@@ -158,6 +165,20 @@ impl HistoryState {
             return t;
         }
         unix_now()
+    }
+
+    /// The vault is left (VAULT-037): its snapshots, queue, panel and lists are dropped. What is
+    /// kept is what belongs to the window (a screenshot's made-up history, the test clock).
+    pub(crate) fn drop_vault(&mut self) {
+        let kept = HistoryState {
+            demo: self.demo,
+            #[cfg(test)]
+            fake_now: self.fake_now,
+            #[cfg(test)]
+            on: self.on,
+            ..Default::default()
+        };
+        *self = kept;
     }
 
     /// A snapshot job is running.
@@ -270,14 +291,19 @@ impl ShaleApp {
     fn history_start_snapshot(&mut self, ctx: &egui::Context, vault: PathBuf, queued: Queued) {
         let Some((git, root, hist, opts)) = self.history_job_data() else { return };
         let (tree, req, repaint) = (self.sync.tree.clone(), queued.req.clone(), ctx.clone());
-        let rx = crate::jobs::spawn(
+        let job = self.busy.spawn_quiet(
+            HISTORY_SNAPSHOT,
+            "Saving a version of the changed notes…",
             move || {
                 let repo = history::locate(&git, &root, &hist)?;
                 history::snapshot(&repo, &opts, &req, &tree, TREE_WAIT)
             },
             move || repaint.request_repaint(),
         );
-        self.history.job = Some(SnapJob { vault, queued, rx });
+        match job {
+            Some(job) => self.history.job = Some(SnapJob { vault, queued, job }),
+            None => self.history.queue.push_front(queued), // the task is still listed: the next frame tries again
+        }
     }
 
     /// Thin the local history when a day has passed since the last time (SYNC-070). A vault with its
@@ -285,14 +311,16 @@ impl ShaleApp {
     fn history_start_thin(&mut self, ctx: &egui::Context, vault: PathBuf, now: u64) {
         let Some((git, root, hist, _)) = self.history_job_data() else { return };
         let (tree, repaint) = (self.sync.tree.clone(), ctx.clone());
-        let rx = crate::jobs::spawn(
+        let job = self.busy.spawn_quiet(
+            HISTORY_THIN,
+            "Thinning out the old versions…",
             move || {
                 let repo = history::locate(&git, &root, &hist)?;
                 thin::run_if_due(&repo, &tree, TREE_WAIT, now)
             },
             move || repaint.request_repaint(),
         );
-        self.history.thin = Some(ThinJob { vault, rx });
+        self.history.thin = job.map(|job| ThinJob { vault, job });
     }
 
     fn history_start_query(&mut self, ctx: &egui::Context) {
@@ -302,21 +330,26 @@ impl ShaleApp {
         let Some(query) = self.history.queries.pop_front() else { return };
         let Some((git, root, hist, _)) = self.history_job_data() else { return };
         let (job_query, repaint, job_root) = (query.clone(), ctx.clone(), root.clone());
-        let rx = crate::jobs::spawn(
+        let job = self.busy.spawn_quiet(
+            HISTORY_QUERY,
+            "Reading the history…",
             move || {
                 let repo = history::locate(&git, &job_root, &hist)?;
                 run_query(&repo, &job_query)
             },
             move || repaint.request_repaint(),
         );
-        self.history.query = Some(QueryJob { vault: root, query, rx });
+        match job {
+            Some(job) => self.history.query = Some(QueryJob { vault: root, query, job }),
+            None => self.history.queries.push_front(query), // the task is still listed: the next frame tries again
+        }
     }
 
     /// Take what the jobs finished.
     fn history_collect(&mut self, ctx: &egui::Context) {
         let now = self.history.now();
         if let Some(job) = &self.history.job {
-            let r = match job.rx.try_recv() {
+            let r = match job.job.try_recv() {
                 Ok(r) => Some(r.unwrap_or_else(Err)),
                 Err(TryRecvError::Empty) => {
                     ctx.request_repaint_after(Duration::from_millis(200));
@@ -331,7 +364,7 @@ impl ShaleApp {
             }
         }
         if let Some(job) = &self.history.thin {
-            let r = match job.rx.try_recv() {
+            let r = match job.job.try_recv() {
                 Ok(r) => Some(r.unwrap_or_else(Err)),
                 Err(TryRecvError::Empty) => {
                     ctx.request_repaint_after(Duration::from_millis(200));
@@ -346,7 +379,7 @@ impl ShaleApp {
             }
         }
         if let Some(job) = &self.history.query {
-            let r = match job.rx.try_recv() {
+            let r = match job.job.try_recv() {
                 Ok(r) => Some(r.unwrap_or_else(Err)),
                 Err(TryRecvError::Empty) => {
                     ctx.request_repaint_after(Duration::from_millis(200));
@@ -728,10 +761,10 @@ impl ShaleApp {
             return;
         }
         if let Some(job) = self.history.job.take() {
-            let _ = job.rx.recv_timeout(EXIT_WAIT);
+            let _ = job.job.recv_timeout(EXIT_WAIT);
         }
         if let Some(job) = self.history.thin.take() {
-            let _ = job.rx.recv_timeout(EXIT_WAIT);
+            let _ = job.job.recv_timeout(EXIT_WAIT);
         }
         let mut reqs: Vec<Request> = self.history.queue.drain(..).filter(|q| q.then.is_none() && q.req.reason != Reason::Initial).map(|q| q.req).collect();
         let paths = self.history.sched.take_all();

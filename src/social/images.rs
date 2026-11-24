@@ -67,9 +67,9 @@ fn fetch(dir: &Path, url: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-/// Whether a file name is one of the cache's own (`<16 hex digits>.<picture type>`).
+/// Whether a file name is one of the cache's own (`<16 hex digits>.<picture or video type>`).
 fn is_cache_file(name: &str) -> bool {
-    name.split_once('.').is_some_and(|(stem, ext)| stem.len() == 16 && stem.bytes().all(|b| b.is_ascii_hexdigit()) && EXTS.contains(&ext))
+    name.split_once('.').is_some_and(|(stem, ext)| stem.len() == 16 && stem.bytes().all(|b| b.is_ascii_hexdigit()) && (EXTS.contains(&ext) || super::clips::EXTS.contains(&ext)))
 }
 
 /// The picture files in the cache folder, oldest fetch first (USE-010).
@@ -120,6 +120,12 @@ impl ImageCache {
         }
     }
 
+    /// Tests: an address that is on its way and never arrives (the loading state).
+    #[cfg(test)]
+    pub fn hold(&self, url: &str) {
+        self.slots.lock().unwrap_or_else(|e| e.into_inner()).insert(url.to_string(), Slot::Pending);
+    }
+
     /// Whether this address could not be fetched (show a placeholder instead of waiting).
     pub fn failed(&self, url: &str) -> bool {
         self.slots.lock().unwrap_or_else(|e| e.into_inner()).get(url) == Some(&Slot::Failed)
@@ -141,6 +147,7 @@ impl ImageCache {
 mod tests {
     use super::*;
 
+    // spec: SOC-015
     // spec: SOC-013
     #[test]
     fn local_files_are_used_as_they_are_and_names_are_stable() {
@@ -164,10 +171,41 @@ mod tests {
         assert_eq!(c.pending(), 0);
     }
 
+    // spec: SOC-013
+    #[test]
+    fn a_picture_is_fetched_once_without_a_login_into_a_file_named_by_its_address_and_the_second_ask_is_free() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let (base, handle) = crate::calendar::dav::tests::mock_http(1, |_, _, headers, _| {
+            assert!(!headers.to_ascii_lowercase().contains("authorization"), "no login: {headers}");
+            (200, "GIF89a-pretend-picture".into())
+        });
+        let dir = std::env::temp_dir().join(format!("shale-img-fetch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let c = ImageCache::new(&egui::Context::default(), dir.clone());
+        let url = format!("{base}/a.gif");
+        assert_eq!(c.get(&url), None, "the window never waits: the first ask only queues it");
+        assert_eq!(c.get(&url), None);
+        let mut got = None;
+        for _ in 0..500 {
+            got = c.get(&url);
+            if got.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_eq!(got, Some(dir.join(format!("{:016x}.gif", fnv(&url)))));
+        assert_eq!(std::fs::read(got.unwrap()).unwrap(), b"GIF89a-pretend-picture");
+        assert_eq!(handle.join().unwrap().len(), 1, "one request for any number of asks");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     // spec: USE-010
     #[test]
     fn only_picture_files_of_the_cache_are_its_own_and_forgetting_fetches_again() {
         assert!(is_cache_file("0123456789abcdef.png"));
+        assert!(is_cache_file("0123456789abcdef.mp4") && is_cache_file("0123456789abcdef.webm"), "videos of posts are in the cache too (SOC-076)");
         assert!(!is_cache_file("0123456789abcdef.txt"));
         assert!(!is_cache_file("short.png"));
         assert!(!is_cache_file("notes.md"));

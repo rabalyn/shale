@@ -699,13 +699,15 @@ pub fn fetch_message(store: &MailStore, connector: &dyn Connector, account_id: &
 // ---------------------------------------------------------------- as a background job
 
 /// Run a sync as a background job (panics become an error in the summary). The receiver gets
-/// the progress events and, last, `Progress::Finished`.
-pub fn start(store: Arc<MailStore>, account_id: String, display: String, connector: Arc<dyn Connector>, opts: SyncOptions, cancel: Arc<AtomicBool>) -> Receiver<Progress> {
+/// the progress events and, last, `Progress::Finished`. The busy task of the sync (JOB-021) is dropped
+/// just before that, so a view that has seen the end finds the account idle.
+pub fn start(store: Arc<MailStore>, account_id: String, display: String, connector: Arc<dyn Connector>, opts: SyncOptions, cancel: Arc<AtomicBool>, task: crate::busy::Task) -> Receiver<Progress> {
     let (tx, rx) = channel();
     let tx2 = tx.clone();
     crate::jobs::run(
         move || sync_account(&store, &account_id, &display, connector.as_ref(), &opts, &tx, &cancel),
         move |r| {
+            drop(task);
             let summary = r.unwrap_or_else(|e| SyncSummary { errors: vec![e], ..Default::default() });
             let _ = tx2.send(Progress::Finished(summary));
         },
@@ -725,6 +727,7 @@ mod tests {
     use crate::config::MailSecurity;
     use crate::mail::db::{STATE_HEADER, STATE_TOO_LARGE};
     use crate::mail::imap_fake_tests::{message, server_cert, FakeServer};
+    use crate::mail::ui::MAIL_SYNC;
     use std::sync::atomic::AtomicBool;
 
     /// 2026-11-14 12:00 UTC.
@@ -1185,7 +1188,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // spec: MAIL-023
+    // spec: MAIL-023, MAIL-100
     #[test]
     fn a_whole_sync_sends_only_read_only_commands() {
         let (dir, server) = (root("readonly"), server());
@@ -1233,7 +1236,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // spec: MAIL-037
+    // spec: MAIL-037, MAIL-039
     #[test]
     fn an_error_in_one_folder_does_not_stop_the_others() {
         let (dir, server) = (root("onefails"), server());
@@ -1343,7 +1346,8 @@ mod tests {
         let (dir, server) = (root("job"), server());
         let store = Arc::new(MailStore::open(&dir).unwrap());
         let c: Arc<dyn Connector> = Arc::new(connector(&server));
-        let rx = start(store.clone(), "acct1".into(), "T".into(), c, opts(), Arc::new(AtomicBool::new(false)));
+        let busy = crate::busy::Busy::default();
+        let rx = start(store.clone(), "acct1".into(), "T".into(), c, opts(), Arc::new(AtomicBool::new(false)), busy.begin(MAIL_SYNC.with("acct1"), "Syncing T…").unwrap());
         let last = std::iter::from_fn(|| rx.recv_timeout(std::time::Duration::from_secs(20)).ok()).last().unwrap();
         assert!(matches!(&last, Progress::Finished(s) if s.messages_added == 6), "{last:?}");
         // a connector that panics still ends with a Finished event
@@ -1353,9 +1357,149 @@ mod tests {
                 panic!("boom")
             }
         }
-        let rx = start(store, "acct1".into(), "T".into(), Arc::new(Boom), opts(), Arc::new(AtomicBool::new(false)));
+        let rx = start(store, "acct1".into(), "T".into(), Arc::new(Boom), opts(), Arc::new(AtomicBool::new(false)), busy.begin(MAIL_SYNC.with("acct1"), "Syncing T…").expect("the first task ended with its job"));
         let last = rx.recv_timeout(std::time::Duration::from_secs(20)).unwrap();
         assert!(matches!(&last, Progress::Finished(s) if !s.errors.is_empty()), "{last:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A connector that waits for a signal before it connects (the gate hook of the JOB-021 tests).
+    struct Gated {
+        inner: TestConnector,
+        gate: Mutex<Option<Receiver<()>>>,
+    }
+
+    impl Connector for Gated {
+        fn connect(&self) -> Result<Client, ImapError> {
+            // only the first connection waits; the workers of the folders connect again afterwards
+            if let Some(gate) = self.gate.lock().unwrap().take() {
+                let _ = gate.recv_timeout(std::time::Duration::from_secs(20));
+            }
+            self.inner.connect()
+        }
+    }
+
+    fn gated(server: &FakeServer) -> (Arc<dyn Connector>, Sender<()>) {
+        let (tx, rx) = channel();
+        (Arc::new(Gated { inner: connector(server), gate: Mutex::new(Some(rx)) }), tx)
+    }
+
+    fn finished(rx: &Receiver<Progress>) -> SyncSummary {
+        loop {
+            if let Progress::Finished(s) = rx.recv_timeout(std::time::Duration::from_secs(30)).expect("the sync ends") {
+                return s;
+            }
+        }
+    }
+
+    /// Start the sync of an account as its task, the way the mail view does.
+    fn start_task(busy: &crate::busy::Busy, store: &Arc<MailStore>, id: &str, display: &str, c: Arc<dyn Connector>, o: SyncOptions) -> Receiver<Progress> {
+        let mut task = busy.begin(MAIL_SYNC.with(id), format!("Syncing {display}…")).expect("the account is idle");
+        let cancel = task.cancellable().flag();
+        start(store.clone(), id.into(), display.into(), c, o, cancel, task)
+    }
+
+    // spec: JOB-021
+    #[test]
+    fn job_021_a_sync_is_a_task_with_the_account_name_that_cancel_stops_between_batches_and_a_later_sync_completes() {
+        let (dir, server) = (root("job021"), server());
+        // the server serves a batch only when the test sends a token: the first one, then none until Cancel
+        let (serve, tokens) = channel();
+        let mut serve = Some(serve);
+        server.state().fetch_gate = Some(Arc::new(Mutex::new(tokens)));
+        let store = Arc::new(MailStore::open(&dir).unwrap());
+        let busy = crate::busy::Busy::default();
+        let (c, gate) = gated(&server);
+        let o = SyncOptions { parallel: 1, batch_size: 1, ..opts() };
+        let rx = start_task(&busy, &store, "acct1", "Work mail", c, o.clone());
+        // while it runs (held at the gate) it is listed with the account name, and a second one is refused
+        let info = busy.info(&MAIL_SYNC.with("acct1")).expect("listed while it runs");
+        assert_eq!(info.label, "Syncing Work mail…");
+        assert!(info.cancellable && !info.cancelling);
+        assert!(busy.begin(MAIL_SYNC.with("acct1"), "again").is_none(), "never two syncs of one account");
+        gate.send(()).unwrap();
+        serve.as_ref().unwrap().send(()).unwrap();
+        // Cancel after the first batch has been stored (the next fetch waits for a token): the sync stops between batches
+        let mut summary = None;
+        let mut cancelled = false;
+        while let Ok(e) = rx.recv_timeout(std::time::Duration::from_secs(30)) {
+            match e {
+                Progress::Folder { .. } if !cancelled => {
+                    cancelled = true;
+                    assert!(busy.cancel(info.id), "the registry's Cancel reaches the sync");
+                    assert!(busy.info(&MAIL_SYNC.with("acct1")).is_some_and(|t| t.cancelling));
+                    // Cancel is set: closing the gate lets the waiting fetch through, the sync stops at its next check
+                    serve.take();
+                }
+                Progress::Finished(s) => {
+                    summary = Some(s);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let summary = summary.expect("the sync ends");
+        assert!(summary.cancelled && summary.errors.is_empty(), "{summary:?}");
+        assert!(busy.list().is_empty(), "the task ended before the last report");
+        let partial = store.reader().unwrap().count_messages().unwrap();
+        assert!((1..6).contains(&partial), "some messages are whole, not all: {partial}");
+        // no message file is half written, the index is sound (MAIL-006, MAIL-007)
+        crate::mail::db::quick_check(&store.index_path()).expect("the index passes its check after a stop");
+        let mut stray = vec![];
+        for e in walk(&dir) {
+            if e.extension().is_some_and(|x| x == "tmp" || x == "part") {
+                stray.push(e);
+            }
+        }
+        assert!(stray.is_empty(), "no half-written file stays: {stray:?}");
+        // the next sync continues normally with a fresh token
+        let (c, gate) = gated(&server);
+        gate.send(()).unwrap();
+        let rx = start_task(&busy, &store, "acct1", "Work mail", c, opts());
+        let again = finished(&rx);
+        assert!(!again.cancelled && again.errors.is_empty(), "{again:?}");
+        assert_eq!(store.reader().unwrap().count_messages().unwrap(), 6);
+        assert!(busy.list().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let mut out = vec![];
+        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                out.extend(walk(&p));
+            } else {
+                out.push(p);
+            }
+        }
+        out
+    }
+
+    // spec: JOB-021
+    #[test]
+    fn job_021_two_accounts_sync_as_two_tasks_and_cancelling_one_leaves_the_other_running() {
+        let (dir, s1, s2) = (root("job021-two"), server(), server());
+        let store = Arc::new(MailStore::open(&dir).unwrap());
+        let busy = crate::busy::Busy::default();
+        let (c1, g1) = gated(&s1);
+        let (c2, g2) = gated(&s2);
+        let rx1 = start_task(&busy, &store, "acct1", "Work", c1, opts());
+        let rx2 = start_task(&busy, &store, "acct2", "Home", c2, opts());
+        let labels: Vec<String> = busy.list().into_iter().map(|t| t.label).collect();
+        assert_eq!(labels, ["Syncing Work…", "Syncing Home…"], "two tasks, one per account");
+        // Cancel the first while both wait: only it stops
+        assert!(busy.cancel(busy.info(&MAIL_SYNC.with("acct1")).unwrap().id));
+        assert!(busy.info(&MAIL_SYNC.with("acct2")).is_some_and(|t| !t.cancelling));
+        g1.send(()).unwrap();
+        let one = finished(&rx1);
+        assert!(one.cancelled, "{one:?}");
+        assert_eq!(busy.list().iter().map(|t| t.label.as_str()).collect::<Vec<_>>(), ["Syncing Home…"], "the other still runs");
+        g2.send(()).unwrap();
+        let two = finished(&rx2);
+        assert!(!two.cancelled && two.errors.is_empty() && two.messages_added == 6, "{two:?}");
+        assert!(busy.list().is_empty());
+        crate::mail::db::quick_check(&store.index_path()).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
 

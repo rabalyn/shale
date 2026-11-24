@@ -761,6 +761,15 @@ pub struct SignedIn {
     pub kept: bool,
 }
 
+/// Cancel was asked for: the sign-in ends here and keeps nothing (JOB-032).
+fn stop_if_cancelled(cancel: &AtomicBool) -> Result<(), OAuthError> {
+    if cancel.load(Ordering::SeqCst) {
+        Err(OAuthError::Cancelled)
+    } else {
+        Ok(())
+    }
+}
+
 /// The whole browser sign-in of an account. Blocks (up to `timeout`): run it as a job.
 /// `shown` gets the sign-in address (so it can be offered when no browser opens).
 pub fn sign_in(account: &MailAccount, client_secret: Option<Secret>, cancel: &AtomicBool, timeout: Duration, shown: &dyn Fn(&str)) -> Result<SignedIn, OAuthError> {
@@ -776,10 +785,14 @@ pub fn sign_in(account: &MailAccount, client_secret: Option<Secret>, cancel: &At
         }
     }
     let code = tracing::info_span!("flow.mail_oauth.wait_for_code", peer = "browser").in_scope(|| pending.wait_for_code(cancel, timeout))?;
+    // Cancel, also pressed just as the code came: no exchange (JOB-032)
+    stop_if_cancelled(cancel)?;
     let tokens = tracing::info_span!("flow.mail_oauth.exchange_code", peer = "provider").in_scope(|| exchange_code(&cfg, &code, &pending.redirect_uri, &pending.verifier))?;
     if tokens.refresh_token.is_none() {
         return Err(OAuthError::Rejected("The provider sent no refresh token, so the sign-in could not be kept (with Microsoft the scope must include offline_access).".into()));
     }
+    // all or nothing (JOB-032): Cancel until here drops the tokens, and from here on the sign-in is kept whole
+    stop_if_cancelled(cancel)?;
     let kept = tracing::info_span!("flow.mail_oauth.adopt", peer = "keyring").in_scope(|| shared_source(&account.id, cfg).adopt(&tokens));
     Ok(SignedIn { user: tokens.user, kept })
 }
@@ -1015,7 +1028,7 @@ mod tests {
         assert_eq!(preset_server(OAuthProvider::Microsoft), Some(("outlook.office365.com", 993)));
     }
 
-    // spec: MAIL-085
+    // spec: MAIL-085, MAIL-082
     #[test]
     fn there_is_no_built_in_client_id_and_endpoints_must_be_https_except_local_http_for_custom() {
         assert!(matches!(OAuthConfig::for_account(&MailAccount::default(), None), Err(OAuthError::Config(t)) if t.contains("client ID")));
@@ -1104,7 +1117,7 @@ mod tests {
         assert!(matches!(r.wait_for_code(&cancel, Duration::from_secs(10)), Err(OAuthError::Denied(t)) if t.contains("cancelled")));
     }
 
-    // spec: MAIL-084
+    // spec: MAIL-084, MAIL-082, SEC-017
     #[test]
     fn sasl_responses_follow_the_specifications() {
         assert_eq!(*xoauth2_response("someuser@example.com", "ya29.vF9dft4qmTc2Nvb3RlckBhbHRhdmlzdGEuY29tCg"), b"user=someuser@example.com\x01auth=Bearer ya29.vF9dft4qmTc2Nvb3RlckBhbHRhdmlzdGEuY29tCg\x01\x01".to_vec());
@@ -1136,7 +1149,7 @@ mod tests {
         assert!(!format!("{cfg:?}").contains("SECRET-CS"));
     }
 
-    // spec: MAIL-082
+    // spec: MAIL-082, SEC-016
     #[test]
     fn token_answers_are_read_and_errors_are_told_apart() {
         let t = parse_token_response(200, r#"{"access_token":"at","token_type":"Bearer","expires_in":3599,"refresh_token":"rt","scope":"mail"}"#, false).unwrap();
@@ -1447,5 +1460,46 @@ mod pretend_browser_tests {
         assert!(log.opened.lock().unwrap().iter().all(|u| u.starts_with(&format!("http://127.0.0.1:{f_port}/authorize?"))));
         assert!(log.callbacks.lock().unwrap().is_empty());
         assert!(!is_signed_in(&a));
+    }
+
+    // spec: JOB-032
+    #[test]
+    fn job_032_cancel_frees_the_redirect_listener_and_a_token_that_arrives_with_cancel_is_not_kept() {
+        if !has_curl() {
+            return;
+        }
+        let f = FakeOAuth::start();
+        let a = account("oauth-job032", &f);
+        forget(&a.id);
+        // Cancel while waiting for the browser: the redirect port is free again when the sign-in returns
+        let (guard, log) = pretend_browser(Visit::Silent);
+        let url = Arc::new(Mutex::new(String::new()));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (u2, c2, a2) = (url.clone(), cancel.clone(), a.clone());
+        let rx = crate::jobs::spawn(move || sign_in(&a2, None, &c2, Duration::from_secs(60), &|u| *u2.lock().unwrap() = u.to_string()), || {});
+        log.wait_opened(1);
+        let port: u16 = url.lock().unwrap().split("redirect_uri=http%3A%2F%2F127.0.0.1%3A").nth(1).and_then(|r| r.split("%2F").next()).and_then(|p| p.parse().ok()).expect("the redirect port is in the address");
+        assert!(TcpListener::bind(("127.0.0.1", port)).is_err(), "the listener is bound while it waits");
+        cancel.store(true, Ordering::SeqCst);
+        assert_eq!(rx.recv_timeout(Duration::from_secs(10)).expect("the job ended").unwrap().err(), Some(OAuthError::Cancelled));
+        assert!(TcpListener::bind(("127.0.0.1", port)).is_ok(), "Cancel freed the redirect port");
+        drop(guard);
+        // Cancel that comes while the code is traded for tokens: the tokens are dropped, nothing is kept, not even in memory
+        let (guard, log) = pretend_browser(Visit::Approve);
+        let cancel = Arc::new(AtomicBool::new(false));
+        f.state.lock().unwrap().cancel_on_exchange = Some(cancel.clone());
+        let r = sign_in(&a, None, &cancel, Duration::from_secs(20), &|_| {});
+        assert_eq!(r.err(), Some(OAuthError::Cancelled));
+        assert_eq!(log.wait_callbacks(1), vec![200]);
+        assert_eq!(f.state.lock().unwrap().token_requests.len(), 1, "the code was traded: the token did arrive");
+        assert!(secrets::mail_secret(&a.id, MailSecret::RefreshToken).is_none(), "no token in the keyring");
+        assert!(!is_signed_in(&a), "and none in memory");
+        // without Cancel the same flow keeps the whole sign-in
+        f.state.lock().unwrap().cancel_on_exchange = None;
+        drop(guard);
+        let (_guard, _log) = pretend_browser(Visit::Approve);
+        let r = sign_in(&a, None, &AtomicBool::new(false), Duration::from_secs(20), &|_| {}).unwrap();
+        assert!(r.kept && is_signed_in(&a));
+        forget(&a.id);
     }
 }

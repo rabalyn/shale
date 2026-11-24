@@ -3,7 +3,7 @@
 //! to the replaced program against a pretend GitHub.
 
 use super::check::*;
-use super::fake_github::FakeGithub;
+use super::fake_github::{FakeGithub, Sign};
 use super::install::*;
 use super::kind::*;
 use super::*;
@@ -101,7 +101,7 @@ pub(super) fn release_for_tests(version: &str) -> Release {
 fn release(version: &str, os: &str, arch: &str) -> Release {
     let name = asset_name(version, os, arch).unwrap();
     let asset = |n: String| Asset { url: format!("https://github.com/rabalyn/shale/releases/download/v{version}/{n}"), name: n, size: 10 };
-    Release { version: version.into(), notes: format!("Notes of {version}"), assets: vec![asset(format!("{name}.sha256")), asset(name)] }
+    Release { version: version.into(), notes: format!("Notes of {version}"), assets: vec![asset(format!("{name}.sig")), asset(format!("{name}.sha256")), asset(name)] }
 }
 
 // spec: UPD-005
@@ -115,8 +115,9 @@ fn upd_005_the_file_is_chosen_by_system_and_processor() {
     }
     for (os, arch) in [("linux", "x86_64"), ("macos", "aarch64"), ("windows", "x86_64")] {
         let r = release("0.7.0", os, arch);
-        let (file, sum) = asset_for(&r, os, arch).unwrap();
+        let (file, sum, sig) = asset_for(&r, os, arch).unwrap();
         assert_eq!(format!("{}.sha256", file.name), sum.name);
+        assert_eq!(format!("{}.sig", file.name), sig.name);
     }
     // nothing for this system, no file in the release, no checksum file: each says so
     let r = release("0.7.0", "linux", "x86_64");
@@ -125,6 +126,32 @@ fn upd_005_the_file_is_chosen_by_system_and_processor() {
     let mut no_sum = r.clone();
     no_sum.assets.retain(|a| !a.name.ends_with(".sha256"));
     assert!(asset_for(&no_sum, "linux", "x86_64").unwrap_err().contains("no checksum file"));
+}
+
+// spec: UPD-023
+#[test]
+fn upd_022_a_release_without_a_signature_file_is_not_downloaded_and_the_reason_says_what_to_do() {
+    let mut r = release("0.7.0", "linux", "x86_64");
+    r.assets.retain(|a| !a.name.ends_with(".sig"));
+    let e = asset_for(&r, "linux", "x86_64").unwrap_err();
+    assert!(e.contains("no signature file for shale-0.7.0-linux-x86_64.tar.gz") && e.contains("does not download or install it by itself"), "{e}");
+    assert!(e.contains("https://github.com/rabalyn/shale/releases/tag/v0.7.0"), "{e}");
+    assert_eq!(releases_page(), "https://github.com/rabalyn/shale/releases");
+}
+
+// spec: UPD-023
+#[test]
+fn upd_022_the_notice_of_an_unsigned_release_has_no_download_or_install_button_but_the_release_page() {
+    let (backend, counts) = fake(Some("9.9.9"));
+    counts.latest.lock().unwrap().as_mut().unwrap().assets.retain(|a| !a.name.ends_with(".sig"));
+    let mut st = state(portable_kind(), backend);
+    let mut c = cfg(UpdateMode::Install);
+    pump(&mut st, &mut c, |s| s.found.is_some());
+    assert_eq!(Counts::n(&counts.fetches), 0, "an unsigned release is not even downloaded in Install mode");
+    let n = st.notice(&c).unwrap();
+    assert!(n.text.contains("Shale 9.9.9 is available") && n.text.contains("no signature file") && n.text.contains("releases/tag/v9.9.9"), "{}", n.text);
+    assert!(!n.buttons.iter().any(|(l, _)| *l == "Download" || *l == "Install"), "{:?}", n.buttons);
+    assert!(n.buttons.iter().any(|(l, _)| *l == "What's new"));
 }
 
 // spec: UPD-006
@@ -845,6 +872,39 @@ pub(super) fn fake(latest: Option<&str>) -> (Backend, Counts) {
     (backend, c)
 }
 
+/// The same fake with the three steps held back: the check and the download wait for the gate or
+/// for Cancel (then they end with "cancelled"), the install waits for the gate only.
+pub(super) fn gated(latest: Option<&str>) -> (Backend, Counts, Arc<AtomicBool>) {
+    let (inner, counts) = fake(latest);
+    let gate = Arc::new(AtomicBool::new(false));
+    fn wait(gate: &AtomicBool, cancel: Option<&AtomicBool>) -> Result<(), String> {
+        while !gate.load(Ordering::SeqCst) {
+            if cancel.is_some_and(|c| c.load(Ordering::SeqCst)) {
+                return Err("cancelled".into());
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        Ok(())
+    }
+    let (g1, g2, g3) = (gate.clone(), gate.clone(), gate.clone());
+    let (check, fetch, install) = (inner.check.clone(), inner.fetch.clone(), inner.install.clone());
+    let backend = Backend {
+        check: Arc::new(move |cancel| {
+            wait(&g1, Some(cancel))?;
+            check(cancel)
+        }),
+        fetch: Arc::new(move |r, cancel| {
+            wait(&g2, Some(cancel))?;
+            fetch(r, cancel)
+        }),
+        install: Arc::new(move |kind, staged, cancel| {
+            wait(&g3, None)?;
+            install(kind, staged, cancel)
+        }),
+    };
+    (backend, counts, gate)
+}
+
 pub(super) fn portable_kind() -> InstallKind {
     InstallKind::LinuxPortable { dir: "/p".into(), whole: true }
 }
@@ -1387,4 +1447,139 @@ fn dev_032_dataflow_of_an_install_through_install_sh() {
     });
     assert_eq!(std::fs::read(prefix.join("bin/shale")).unwrap(), NEW_PROGRAM);
     crate::dataflow::verify_flow(&flow, "update_install_script", &update_doc());
+}
+
+// ---------------------------------------------------------------- signed, unsigned and tampered releases (UPD-022)
+
+#[cfg(unix)]
+const SIGNED_FILE: &str = "shale-9.9.9-linux-x86_64.tar.gz";
+
+/// What `fetch` makes of a release signed as `sign` (with the checksums right).
+#[cfg(unix)]
+fn fetch_signed(sign: Sign, tag: &str) -> (Result<Staged, String>, PathBuf, FakeGithub) {
+    let github = FakeGithub::start();
+    github.publish_signed("9.9.9", &[(SIGNED_FILE, tarball(NEW_PROGRAM))], false, sign);
+    let staging = temp(tag);
+    let (backend, release) = get_latest(&github, &staging);
+    let got = (backend.fetch)(&release, &AtomicBool::new(false));
+    (got, staging, github)
+}
+
+// spec: UPD-024
+#[cfg(unix)]
+#[test]
+fn upd_022_a_signed_release_is_downloaded_with_its_signature_and_checked_against_it() {
+    let (got, staging, github) = fetch_signed(Sign::Valid, "stage-signed");
+    let staged = got.unwrap();
+    assert!(staged.archive.is_file());
+    assert!(staging.join("9.9.9").join(format!("{SIGNED_FILE}.sig")).is_file(), "the signature is kept next to the download");
+    assert!(github.hits().iter().any(|h| h == &format!("/dl/{SIGNED_FILE}.sig")));
+}
+
+// spec: UPD-023
+#[cfg(unix)]
+#[test]
+fn upd_022_an_unsigned_release_downloads_nothing_and_tells_where_to_get_it() {
+    let (got, staging, github) = fetch_signed(Sign::Unsigned, "stage-unsigned");
+    let e = got.unwrap_err();
+    assert!(e.contains("no signature file") && e.contains("releases/tag/v9.9.9"), "{e}");
+    assert!(!github.hits().iter().any(|h| h.ends_with(".tar.gz")), "the archive was not even fetched");
+    assert!(!staging.join("9.9.9").join(SIGNED_FILE).exists());
+}
+
+// spec: UPD-024
+#[cfg(unix)]
+#[test]
+fn upd_022_a_file_changed_after_signing_a_foreign_key_and_a_foreign_name_are_refused_and_deleted() {
+    for (sign, tag, why) in [(Sign::Tampered, "stage-tampered", "does not match the file"), (Sign::OtherKey, "stage-other-key", "not signed with the release key"), (Sign::OtherName, "stage-other-name", "signed for another file")] {
+        let (got, staging, _github) = fetch_signed(sign, tag);
+        let e = got.unwrap_err();
+        assert!(e.contains("is not signed by the owner of Shale's release key") && e.contains(why) && e.contains("nothing was installed"), "{sign:?}: {e}");
+        assert!(e.contains("https://github.com/rabalyn/shale/releases"), "{e}");
+        let dir = staging.join("9.9.9");
+        assert!(!dir.join(SIGNED_FILE).exists() && !dir.join(format!("{SIGNED_FILE}.sig")).exists(), "{sign:?}: deleted");
+    }
+}
+
+// spec: UPD-024
+#[cfg(unix)]
+#[test]
+fn upd_022_a_damaged_checksum_is_reported_before_the_signature_and_a_signature_file_that_is_no_signature_is_refused() {
+    let github = FakeGithub::start();
+    github.publish_signed("9.9.9", &[(SIGNED_FILE, tarball(NEW_PROGRAM))], true, Sign::Valid);
+    let (backend, release) = get_latest(&github, &temp("stage-sum-first"));
+    assert!(((backend.fetch)(&release, &AtomicBool::new(false))).unwrap_err().contains("is damaged"));
+    github.serve(&format!("/dl/{SIGNED_FILE}.sig"), "not a signature");
+    github.publish_signed("9.9.9", &[(SIGNED_FILE, tarball(NEW_PROGRAM))], false, Sign::Valid);
+    github.serve(&format!("/dl/{SIGNED_FILE}.sig"), "not a signature");
+    let (backend, release) = get_latest(&github, &temp("stage-junk-sig"));
+    let e = (backend.fetch)(&release, &AtomicBool::new(false)).unwrap_err();
+    assert!(e.contains("not signed by the owner") && e.contains("no BEGIN and END"), "{e}");
+}
+
+// spec: UPD-024
+#[cfg(unix)]
+#[test]
+fn upd_022_a_kept_download_is_checked_against_the_signature_again_and_a_swapped_one_is_fetched_anew() {
+    let github = FakeGithub::start();
+    github.publish("9.9.9", &[(SIGNED_FILE, tarball(NEW_PROGRAM))], false);
+    let staging = temp("stage-kept-signed");
+    let (backend, release) = get_latest(&github, &staging);
+    let cancel = AtomicBool::new(false);
+    let staged = (backend.fetch)(&release, &cancel).unwrap();
+    let archives = |g: &FakeGithub| g.hits().iter().filter(|h| h.ends_with(".tar.gz")).count();
+    (backend.fetch)(&release, &cancel).unwrap();
+    assert_eq!(archives(&github), 1, "a kept download that is signed is not fetched again");
+    // the account is taken over: another file, with a checksum that fits, and the old signature
+    let evil = tarball(b"#!/bin/sh\necho evil\n");
+    github.serve(&format!("/dl/{SIGNED_FILE}"), evil.clone());
+    github.serve(&format!("/dl/{SIGNED_FILE}.sha256"), format!("{}  {SIGNED_FILE}\n", crate::pdf::tex::archive::sha256_hex(&evil)));
+    std::fs::write(&staged.archive, &evil).unwrap();
+    let e = (backend.fetch)(&release, &cancel).unwrap_err();
+    assert!(e.contains("does not match the file"), "{e}");
+    assert_eq!(archives(&github), 2, "the kept file was not trusted: it was fetched anew and refused");
+    assert!(!staged.archive.exists());
+}
+
+// spec: UPD-024
+#[cfg(unix)]
+#[test]
+fn upd_022_a_tampered_release_installs_nothing_through_the_state() {
+    let github = FakeGithub::start();
+    github.publish_signed("9.9.9", &[(SIGNED_FILE, tarball(b"#!/bin/sh\necho evil\n"))], false, Sign::Tampered);
+    let (dir, kind) = portable("portable-tampered");
+    let mut st = UpdateState::with(kind, dir.join("shale"), pretend_backend(&github, &temp("stage-state-tampered")), true);
+    st.env_off = false;
+    st.platform = ("linux", "x86_64");
+    st.start_delay = Duration::ZERO;
+    let mut c = cfg(UpdateMode::Install);
+    pump(&mut st, &mut c, |s| matches!(s.phase, Phase::Failed(_)));
+    assert_eq!(std::fs::read(dir.join("shale")).unwrap(), OLD_PROGRAM);
+    let n = st.notice(&c).unwrap();
+    assert!(n.error && n.text.contains("not signed by the owner of Shale's release key"), "{}", n.text);
+}
+
+// spec: UPD-023
+#[cfg(unix)]
+#[test]
+fn upd_022_an_unsigned_release_in_install_mode_is_announced_not_installed_through_the_state() {
+    let github = FakeGithub::start();
+    github.publish_signed("9.9.9", &[(SIGNED_FILE, tarball(NEW_PROGRAM))], false, Sign::Unsigned);
+    let (dir, kind) = portable("portable-unsigned");
+    let mut st = UpdateState::with(kind, dir.join("shale"), pretend_backend(&github, &temp("stage-state-unsigned")), true);
+    st.env_off = false;
+    st.platform = ("linux", "x86_64");
+    st.start_delay = Duration::ZERO;
+    let mut c = cfg(UpdateMode::Install);
+    pump(&mut st, &mut c, |s| s.found.is_some());
+    assert_eq!(st.phase, Phase::Idle, "nothing is downloaded or installed");
+    assert_eq!(std::fs::read(dir.join("shale")).unwrap(), OLD_PROGRAM);
+    assert!(!github.hits().iter().any(|h| h.ends_with(".tar.gz")));
+    let n = st.notice(&c).unwrap();
+    assert!(n.text.contains("no signature file") && !n.error, "{}", n.text);
+    // the owner signs it later: the next check offers the installation
+    github.publish("9.9.9", &[(SIGNED_FILE, tarball(NEW_PROGRAM))], false);
+    st.check_now();
+    pump(&mut st, &mut c, |s| matches!(s.phase, Phase::Installed(_)));
+    assert_eq!(std::fs::read(dir.join("shale")).unwrap(), NEW_PROGRAM);
 }

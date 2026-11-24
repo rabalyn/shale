@@ -447,6 +447,8 @@ pub struct Config {
     pub social_replies: bool,
     /// Minutes between looks for new posts in the feeds open in tabs (0 = never, SOC-025).
     pub social_check_minutes: u32,
+    /// The language a new post starts with (ISO 639-1 such as "de"; "" = none): Settings → Feeds (SOC-065).
+    pub social_post_language: String,
     /// How long each cache is kept (USE-020).
     #[serde(deserialize_with = "lenient")]
     pub caches: CacheRetention,
@@ -550,6 +552,7 @@ impl Default for Config {
             social_last: None,
             social_replies: false,
             social_check_minutes: 5,
+            social_post_language: crate::social::language::system(),
             caches: CacheRetention::default(),
             tex: Default::default(),
             git: Default::default(),
@@ -843,7 +846,7 @@ mod tests {
         assert_eq!(Config::load().0.fonts, c.fonts);
     }
 
-    // spec: CFG-001
+    // spec: CFG-001, EDIT-016, EDIT-017, EDIT-018, EDIT-026, EDIT-030
     #[test]
     fn old_config_files_still_load() {
         let (c, newer) = crate::vault_state::parse::<Config>(br#"{"vault": "/tmp/v"}"#).unwrap();
@@ -1140,6 +1143,7 @@ mod tests {
         assert_eq!(serde_json::from_str::<Config>(&back).unwrap().mail_accounts, c.mail_accounts);
     }
 
+    // spec: SOC-025
     // spec: SOC-003
     #[test]
     fn social_accounts_are_saved_without_secrets_that_the_keyring_holds() {
@@ -1199,6 +1203,7 @@ mod tests {
         assert_eq!((CryptoStandard::OpenPgp.program(), CryptoStandard::Smime.program()), ("gpg", "gpgsm"));
     }
 
+    // spec: MAIL-020
     #[test]
     fn mail_accounts_load_and_have_no_plain_text_mode() {
         let c: Config = serde_json::from_str(r#"{"mail_accounts": [{"id": "a1", "host": "imap.example.com", "user": "ada"}]}"#).unwrap();

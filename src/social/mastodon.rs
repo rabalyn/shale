@@ -3,14 +3,19 @@
 //!
 //! Sign-in steps: `register_app` once per server → open `authorize_url` in the browser → the
 //! user copies the code the server shows → `exchange_code` gives the access token → `verify`
-//! checks it and tells the user's name. The token only needs the `read` permission.
+//! checks it and tells the user's name. The token asks for `read write` (SOC-001, SOC-056); an account
+//! that signed in before with `read` only keeps reading and is asked to sign in again to write.
 
+use super::actions::{iso_at, prepare, write_error, ActionError, Draft, DraftPicture, InstanceInfo, Reacted, Reaction, Sent, TempFile, MAX_PICTURES};
 use super::markup::html_to_markdown;
+use super::poll::{Poll, PollLimits};
+use super::schedule::Scheduled;
+use super::video::{self, DraftVideo};
 use super::*;
 use serde_json::json;
 
 const REDIRECT: &str = "urn:ietf:wg:oauth:2.0:oob";
-const SCOPE: &str = "read";
+const SCOPE: &str = "read write";
 const PAGE_SIZE: &str = "20";
 
 /// What `register_app` gets from the server (the secret is not shown in debug output).
@@ -58,8 +63,9 @@ pub fn authorize_url(server: &str, app: &AppCredentials) -> Result<String, Strin
     Ok(format!("{server}/oauth/authorize{}", query(&[("client_id", &app.client_id), ("scope", SCOPE), ("redirect_uri", REDIRECT), ("response_type", "code")])))
 }
 
-/// Step 3: the code from the browser → the access token.
-pub fn exchange_code(server: &str, app: &AppCredentials, code: &str) -> Result<Secret, String> {
+/// Step 3: the code from the browser → the access token and the permissions it was given
+/// (`scope`, "read write"; None when the server does not say).
+pub fn exchange_code(server: &str, app: &AppCredentials, code: &str) -> Result<(Secret, Option<String>), String> {
     let _step = tracing::info_span!("flow.social_mastodon.exchange_code", peer = "server").entered();
     let server = base(server)?;
     let mut body = json!({"client_id": app.client_id, "client_secret": app.client_secret.expose(), "redirect_uri": REDIRECT, "grant_type": "authorization_code", "code": code.trim(), "scope": SCOPE});
@@ -67,11 +73,12 @@ pub fn exchange_code(server: &str, app: &AppCredentials, code: &str) -> Result<S
     wipe_value(&mut body);
     let mut v = answer?;
     let tok = secret_of(&v["access_token"]);
+    let scope = Some(text(&v["scope"]).trim().to_string()).filter(|s| !s.is_empty());
     wipe_value(&mut v);
     if tok.is_empty() {
         Err("the server did not give an access token".into())
     } else {
-        Ok(tok)
+        Ok((tok, scope))
     }
 }
 
@@ -98,11 +105,12 @@ fn full_acct(acct: &str, server: &str) -> String {
     }
 }
 
-/// Home and the user's lists.
+/// Home, Notifications, Your posts (SOC-068) and the user's lists.
 pub fn feeds(server: &str, token: &str) -> Result<Vec<Feed>, String> {
     let _step = tracing::info_span!("flow.social_mastodon.feeds", peer = "server").entered();
     let server = base(server)?;
     let mut out = vec![Feed { id: "home".into(), title: "Home".into() }];
+    out.extend(notifications::extra_feeds());
     let lists = api("GET", &format!("{server}/api/v1/lists"), Some(token), None)?;
     for l in lists.as_array().into_iter().flatten() {
         let (id, title) = (text(&l["id"]), text(&l["title"]));
@@ -113,8 +121,20 @@ pub fn feeds(server: &str, token: &str) -> Result<Vec<Feed>, String> {
     Ok(out)
 }
 
-/// The API path of a feed.
-fn timeline_path(feed: &Feed) -> Result<String, String> {
+/// The API path of a feed. "Your posts" is the statuses of the account, whose id the server tells
+/// once and `me` keeps (SOC-074).
+fn timeline_path(server: &str, token: &str, feed: &Feed, me: &mut Option<String>) -> Result<String, String> {
+    if feed.id == notifications::OWN {
+        if me.is_none() {
+            let v = api("GET", &format!("{server}/api/v1/accounts/verify_credentials"), Some(token), None)?;
+            let id = text(&v["id"]);
+            if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric()) {
+                return Err("the server did not say which account this is".into());
+            }
+            *me = Some(id);
+        }
+        return Ok(format!("accounts/{}/statuses", me.as_deref().unwrap_or_default()));
+    }
     match feed.id.strip_prefix("list:") {
         Some(id) if !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric()) => Ok(format!("timelines/list/{id}")),
         Some(_) => Err("bad list".into()),
@@ -123,15 +143,18 @@ fn timeline_path(feed: &Feed) -> Result<String, String> {
 }
 
 /// The id of the newest of the timeline entries (ids are numbers, longer is newer).
-fn newest_id(items: &[Value]) -> Option<String> {
+pub(super) fn newest_id(items: &[Value]) -> Option<String> {
     items.iter().map(|s| text(&s["id"])).filter(|c| !c.is_empty()).max_by(|a, b| a.len().cmp(&b.len()).then_with(|| a.cmp(b)))
 }
 
 /// One page of a timeline (20 posts). `cursor`: the last id of the page before.
-pub fn timeline(server: &str, token: &str, feed: &Feed, cursor: Option<&str>) -> Result<Page, String> {
+pub fn timeline(server: &str, token: &str, feed: &Feed, cursor: Option<&str>, me: &mut Option<String>) -> Result<Page, String> {
     let _step = tracing::info_span!("flow.social_mastodon.timeline", peer = "server").entered();
     let server = base(server)?;
-    let path = timeline_path(feed)?;
+    if feed.id == notifications::NOTIFICATIONS {
+        return notifications::mastodon_page(&server, token, cursor);
+    }
+    let path = timeline_path(&server, token, feed, me)?;
     let mut params = vec![("limit", PAGE_SIZE)];
     if let Some(c) = cursor.filter(|c| !c.is_empty()) {
         params.push(("max_id", c));
@@ -151,9 +174,12 @@ const MAX_CHECK_PAGES: usize = 12;
 /// the newest entry of that page is the `min_id` of the next, until a page is empty or `cap`
 /// posts are there. What is found is always the block directly above `top`, so nothing is
 /// missing in between; if the cap stops the check, the next check goes on from the new top.
-pub fn newer(server: &str, token: &str, feed: &Feed, top: Option<&str>, cap: usize) -> Result<Fresh, String> {
+pub fn newer(server: &str, token: &str, feed: &Feed, top: Option<&str>, cap: usize, me: &mut Option<String>) -> Result<Fresh, String> {
     let server = base(server)?;
-    let path = timeline_path(feed)?;
+    if feed.id == notifications::NOTIFICATIONS {
+        return notifications::mastodon_newer(&server, token, top, cap);
+    }
+    let path = timeline_path(&server, token, feed, me)?;
     newer_with(&server, top, cap, |min| {
         let mut params = vec![("limit", "40")];
         if let Some(m) = min {
@@ -164,7 +190,12 @@ pub fn newer(server: &str, token: &str, feed: &Feed, top: Option<&str>, cap: usi
 }
 
 /// `newer` with the requests left to the caller (`fetch(min_id)` returns the JSON answer).
-pub(crate) fn newer_with(server: &str, top: Option<&str>, cap: usize, mut fetch: impl FnMut(Option<&str>) -> Result<Value, String>) -> Result<Fresh, String> {
+pub(crate) fn newer_with(server: &str, top: Option<&str>, cap: usize, fetch: impl FnMut(Option<&str>) -> Result<Value, String>) -> Result<Fresh, String> {
+    newer_pages(top, cap, fetch, |items| items.iter().filter_map(|s| parse_status(s, server)).collect())
+}
+
+/// `newer_with` for any list of entries: `parse` makes the posts of one page (notifications, SOC-069).
+pub(crate) fn newer_pages(top: Option<&str>, cap: usize, mut fetch: impl FnMut(Option<&str>) -> Result<Value, String>, parse: impl Fn(&[Value]) -> Vec<Post>) -> Result<Fresh, String> {
     let mut posts: Vec<Post> = vec![];
     let mut min = top.map(String::from);
     let mut newest = None;
@@ -173,7 +204,7 @@ pub(crate) fn newer_with(server: &str, top: Option<&str>, cap: usize, mut fetch:
         let items = v.as_array().ok_or("the server's answer is not a timeline")?;
         let Some(page_top) = newest_id(items) else { break };
         // this page is newer than what was found before it
-        let mut page: Vec<Post> = items.iter().filter_map(|s| parse_status(s, server)).collect();
+        let mut page: Vec<Post> = parse(items);
         page.append(&mut posts);
         posts = page;
         min = Some(page_top.clone());
@@ -185,8 +216,8 @@ pub(crate) fn newer_with(server: &str, top: Option<&str>, cap: usize, mut fetch:
     Ok(Fresh { posts, top: newest, gap: None })
 }
 
-/// The self-thread and the replies of other people.
-pub fn thread_full(server: &str, token: &str, post: &Post) -> Result<(Vec<Post>, Vec<Reply>), String> {
+/// The self-thread, the replies of other people and the id of the first status of the conversation.
+pub fn thread_full(server: &str, token: &str, post: &Post) -> Result<ThreadFetch, String> {
     let server = base(server)?;
     if post.id.is_empty() || !post.id.chars().all(|c| c.is_ascii_alphanumeric()) {
         return Err("bad post id".into());
@@ -194,7 +225,25 @@ pub fn thread_full(server: &str, token: &str, post: &Post) -> Result<(Vec<Post>,
     let v = api("GET", &format!("{server}/api/v1/statuses/{}/context", post.id), Some(token), None)?;
     let t = thread_from_context(post, &v, &server);
     let r = replies_from_context(&t, &v, &server);
-    Ok((t, r))
+    // the first ancestor is the status that starts the conversation
+    let root = v["ancestors"].as_array().and_then(|a| a.first()).map(|s| text(&s["id"])).filter(|i| !i.is_empty());
+    Ok((t, r, root))
+}
+
+/// The conversation around a post: the ancestors, and all descendants as a tree (SOC-045).
+pub fn thread_view(server: &str, token: &str, post: &Post) -> Result<ThreadView, String> {
+    let server = base(server)?;
+    if post.id.is_empty() || !post.id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err("bad post id".into());
+    }
+    let v = api("GET", &format!("{server}/api/v1/statuses/{}/context", post.id), Some(token), None)?;
+    Ok(thread_view_from_context(post, &v, &server))
+}
+
+/// The conversation from a `/context` answer. (Separate so it can be tested with fixtures.)
+pub fn thread_view_from_context(post: &Post, context: &Value, server: &str) -> ThreadView {
+    let list = |k: &str| -> Vec<Post> { context[k].as_array().into_iter().flatten().filter_map(|s| parse_status(s, server)).collect() };
+    thread_view_of(post, list("ancestors"), &list("descendants"))
 }
 
 /// One post by its id (a boost is not fetched: its id is the original's).
@@ -240,12 +289,8 @@ pub fn parse_status(s: &Value, server: &str) -> Option<Post> {
     // Mastodon 4.4 quote posts
     let quoted = &s["quote"]["quoted_status"];
     let quote = if quoted.is_object() { parse_status(quoted, server).map(Box::new) } else { None };
-    let mut body = html_to_markdown(&text(&s["content"]));
-    if let Some(poll) = s["poll"].as_object() {
-        for o in poll.get("options").and_then(|o| o.as_array()).into_iter().flatten() {
-            body.push_str(&format!("\n- [ ] {}", text(&o["title"])));
-        }
-    }
+    let body = html_to_markdown(&text(&s["content"]));
+    let visibility = Some(text(&s["visibility"])).filter(|v| !v.is_empty());
     Some(Post {
         network: Network::Mastodon,
         id,
@@ -263,10 +308,15 @@ pub fn parse_status(s: &Value, server: &str) -> Option<Post> {
         reply_count: count(&s["replies_count"]),
         boost_count: count(&s["reblogs_count"]),
         like_count: count(&s["favourites_count"]),
+        mine: Mine { liked: s["favourited"].as_bool().unwrap_or(false), boosted: s["reblogged"].as_bool().unwrap_or(false), like_record: None, boost_record: None, unknown: false },
+        reply_root: None,
+        visibility,
+        poll: Poll::parse(&s["poll"]),
+        notice: None,
     })
 }
 
-fn parse_account(a: &Value, server: &str) -> Author {
+pub(super) fn parse_account(a: &Value, server: &str) -> Author {
     Author { id: text(&a["id"]), handle: full_acct(&text(&a["acct"]), server), display_name: text(&a["display_name"]), profile_url: text(&a["url"]), avatar_url: text(&a["avatar"]) }
 }
 
@@ -291,8 +341,177 @@ fn parse_media(m: &Value, post_id: &str) -> Option<Media> {
     Some(Media { kind, preview_url: text(&m["preview_url"]), alt: text(&m["description"]), file_name_hint: file_name_from_url(&url, &format!("{post_id}.{ext}")), url, blob_cid: None })
 }
 
+// ---------------------------------------------------------------- writing
+
+/// Favourite / boost a post, or undo it. The answer carries the new count (SOC-050).
+pub fn react(server: &str, token: &str, id: &str, kind: Reaction, on: bool) -> Result<Reacted, ActionError> {
+    let _step = tracing::info_span!("flow.social_mastodon.react", peer = "server").entered();
+    let server = base(server)?;
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err("bad post id".into());
+    }
+    let verb = match (kind, on) {
+        (Reaction::Like, true) => "favourite",
+        (Reaction::Like, false) => "unfavourite",
+        (Reaction::Boost, true) => "reblog",
+        (Reaction::Boost, false) => "unreblog",
+    };
+    let v = api("POST", &format!("{server}/api/v1/statuses/{id}/{verb}"), Some(token), Some(&json!({}))).map_err(write_error)?;
+    // a boost answers with the boost, the post inside it
+    let status = if kind == Reaction::Boost && v["reblog"].is_object() { &v["reblog"] } else { &v };
+    let field = if kind == Reaction::Like { "favourites_count" } else { "reblogs_count" };
+    Ok(Reacted { on, record: None, count: status[field].as_u64().map(|_| count(&status[field])), fresh: None })
+}
+
+/// What the server allows in a post (`/api/v2/instance`); a server that names nothing gets Mastodon's defaults.
+pub fn instance_info(server: &str, token: &str) -> Result<InstanceInfo, String> {
+    let server = base(server)?;
+    let v = api("GET", &format!("{server}/api/v2/instance"), Some(token), None)?;
+    Ok(instance_from(&v))
+}
+
+/// The limits from an instance answer. Quotes need API version 7 (Mastodon 4.5).
+pub fn instance_from(v: &Value) -> InstanceInfo {
+    let d = InstanceInfo::defaults(Network::Mastodon);
+    let c = &v["configuration"];
+    InstanceInfo {
+        max_chars: c["statuses"]["max_characters"].as_u64().map(|n| n as usize).filter(|n| *n > 0).unwrap_or(d.max_chars),
+        max_pictures: c["statuses"]["max_media_attachments"].as_u64().map(|n| (n as usize).clamp(1, MAX_PICTURES)).unwrap_or(d.max_pictures),
+        image_bytes: c["media_attachments"]["image_size_limit"].as_u64().filter(|n| *n > 0).unwrap_or(d.image_bytes),
+        quotes: v["api_versions"]["mastodon"].as_u64().is_some_and(|n| n >= 7),
+        poll: PollLimits::from_instance(v),
+        video_bytes: c["media_attachments"]["video_size_limit"].as_u64().filter(|n| *n > 0).unwrap_or(d.video_bytes),
+    }
+}
+
+/// The JSON body of a new status.
+fn status_body(d: &Draft, media: &[String]) -> Value {
+    let mut b = json!({"status": d.text, "visibility": d.visibility.key()});
+    if !media.is_empty() {
+        b["media_ids"] = json!(media);
+    }
+    if let Some(r) = &d.reply_to {
+        b["in_reply_to_id"] = json!(r.id);
+    }
+    if !d.cw.trim().is_empty() {
+        b["spoiler_text"] = json!(d.cw.trim());
+    }
+    if let (Some(q), true) = (&d.quote, d.info.quotes) {
+        b["quoted_status_id"] = json!(q.id);
+    }
+    if let Some(p) = &d.poll {
+        b["poll"] = json!({"options": p.options, "expires_in": p.expires_in, "multiple": p.multiple, "hide_totals": p.hide_totals});
+    }
+    if let Some(at) = d.schedule {
+        b["scheduled_at"] = json!(iso_at(at));
+    }
+    if !d.language.is_empty() {
+        b["language"] = json!(d.language);
+    }
+    b
+}
+
+/// Send a post: the pictures or the video first (SOC-053, SOC-066), then the status. `poll`: how
+/// long to wait between two looks at a file the server is still processing. A post with a time
+/// (SOC-063) is answered with a scheduled status, which is no post.
+pub fn send(server: &str, token: &str, d: &Draft, poll: std::time::Duration) -> Result<Sent, ActionError> {
+    let _step = tracing::info_span!("flow.social_mastodon.send", peer = "server").entered();
+    let server = base(server)?;
+    if d.pictures.len() > d.info.max_pictures {
+        return Err(format!("This server takes at most {} pictures in a post.", d.info.max_pictures).into());
+    }
+    if d.poll.is_some() && (!d.pictures.is_empty() || d.video.is_some()) {
+        return Err("A poll cannot go with pictures or a video.".into());
+    }
+    if d.video.is_some() && !d.pictures.is_empty() {
+        return Err("A post has pictures or a video, not both.".into());
+    }
+    let mut media = d.pictures.iter().map(|p| upload(&server, token, p, d.info.image_bytes, poll)).collect::<Result<Vec<_>, _>>()?;
+    if let Some(v) = &d.video {
+        media.push(upload_video(&server, token, v, d.info.video_bytes, poll)?);
+    }
+    // the same key for a retry of the same draft: the server answers with the post it made the first time (SOC-057)
+    let key = format!("Idempotency-Key: {}", d.key);
+    let extra: Vec<&str> = if d.key.is_empty() { vec![] } else { vec![&key] };
+    let v = api_with("POST", &format!("{server}/api/v1/statuses"), Some(token), Some(&status_body(d, &media)), &extra).map_err(write_error)?;
+    if d.schedule.is_some() {
+        return Scheduled::parse(&v).map(Sent::Scheduled).ok_or_else(|| "the server's answer is not a scheduled post".into());
+    }
+    parse_status(&v, &server).map(|p| Sent::Posted(Box::new(p))).ok_or_else(|| "the server's answer is not a post".into())
+}
+
+/// One picture with its description → the id of the media attachment. A server that processes
+/// the picture later (`url` still null) is asked again until it is ready.
+fn upload(server: &str, token: &str, pic: &DraftPicture, limit: u64, poll: std::time::Duration) -> Result<String, ActionError> {
+    let prepared = prepare(&pic.path, Network::Mastodon, limit)?;
+    let file = TempFile::new(&prepared.bytes, prepared.ext)?;
+    upload_file(server, token, &file, prepared.mime, &pic.alt, poll, 30)
+}
+
+/// The video → the id of its media attachment; the server converts it, which takes a while (asked every `poll`, up to 5 minutes at the real pace).
+fn upload_video(server: &str, token: &str, v: &DraftVideo, limit: u64, poll: std::time::Duration) -> Result<String, ActionError> {
+    let prepared = video::prepare(&v.path, limit)?;
+    upload_file(server, token, &prepared.file, prepared.mime, &v.alt, poll, 300)
+}
+
+/// A file (already a private copy) with its description to `/api/v2/media`, then wait until the
+/// server has processed it (at most `tries` looks).
+fn upload_file(server: &str, token: &str, file: &TempFile, mime: &str, alt: &str, poll: std::time::Duration, tries: u32) -> Result<String, ActionError> {
+    let alt = alt.trim();
+    let fields: Vec<(&str, &str)> = if alt.is_empty() { vec![] } else { vec![("description", alt)] };
+    let v = api_upload("POST", &format!("{server}/api/v2/media"), token, None, dav::Upload::Form { field: "file", path: &file.0, mime, fields: &fields }).map_err(write_error)?;
+    let id = text(&v["id"]);
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err("the server did not accept the file".into());
+    }
+    let mut ready = !v["url"].is_null();
+    for _ in 0..tries {
+        if ready {
+            return Ok(id);
+        }
+        std::thread::sleep(poll);
+        let m = api("GET", &format!("{server}/api/v1/media/{id}"), Some(token), None).map_err(write_error)?;
+        ready = !m["url"].is_null();
+    }
+    Err("the server is still processing the file; try again in a minute".into())
+}
+
+/// Vote in a poll (SOC-062): the chosen options by index; the answer is the poll as it is now.
+pub fn vote(server: &str, token: &str, poll: &Poll, choices: &[usize]) -> Result<Poll, ActionError> {
+    let _step = tracing::info_span!("flow.social_mastodon.vote", peer = "server").entered();
+    let server = base(server)?;
+    if poll.id.is_empty() || !poll.id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err("bad poll id".into());
+    }
+    if choices.is_empty() || choices.iter().any(|c| *c >= poll.options.len()) {
+        return Err("choose an option first".into());
+    }
+    let v = api("POST", &format!("{server}/api/v1/polls/{}/votes", poll.id), Some(token), Some(&json!({"choices": choices}))).map_err(write_error)?;
+    Poll::parse(&v).ok_or_else(|| "the server's answer is not a poll".into())
+}
+
+/// The posts the server holds back (SOC-064), as the list shows them.
+pub fn scheduled(server: &str, token: &str) -> Result<Vec<Scheduled>, String> {
+    let _step = tracing::info_span!("flow.social_mastodon.scheduled", peer = "server").entered();
+    let server = base(server)?;
+    let v = api("GET", &format!("{server}/api/v1/scheduled_statuses"), Some(token), None)?;
+    Ok(v.as_array().into_iter().flatten().filter_map(Scheduled::parse).collect())
+}
+
+/// Delete a scheduled post (SOC-064).
+pub fn cancel_scheduled(server: &str, token: &str, id: &str) -> Result<(), ActionError> {
+    let _step = tracing::info_span!("flow.social_mastodon.cancel_scheduled", peer = "server").entered();
+    let server = base(server)?;
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err("bad id of the scheduled post".into());
+    }
+    api("DELETE", &format!("{server}/api/v1/scheduled_statuses/{id}"), Some(token), None).map_err(write_error)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
+    use super::super::actions::Visibility;
     use super::*;
     use crate::calendar::dav::tests::mock_http;
 
@@ -302,6 +521,7 @@ mod tests {
                "media_attachments": [], "replies_count": 1, "reblogs_count": 2, "favourites_count": 3})
     }
 
+    // spec: SOC-001
     #[test]
     fn status_parsing() {
         let mut s = status("10", "1", "ada", "2024-05-17T10:30:00.000Z", None, "<p>Hello <a href=\"https://m.test/tags/x\" class=\"mention hashtag\">#<span>x</span></a></p>");
@@ -325,6 +545,7 @@ mod tests {
         assert!(parse_status(&json!({"foo": 1}), "https://m.test").is_none());
     }
 
+    // spec: SOC-014, SOC-019
     #[test]
     fn thread_from_a_context_fixture() {
         let ctx = json!({
@@ -341,6 +562,8 @@ mod tests {
         assert_eq!(r.iter().map(|r| (r.post.text_markdown.as_str(), r.depth)).collect::<Vec<_>>(), [("nice", 0), ("reply to cy", 1)]);
     }
 
+    // spec: SOC-001, SOC-039
+    // spec: SOC-056
     #[test]
     fn sign_in_feeds_paging_thread_and_media_against_a_mock_server() {
         if std::process::Command::new("curl").arg("--version").output().is_err() {
@@ -355,7 +578,7 @@ mod tests {
                 ("POST", "/api/v1/apps") => (200, json!({"client_id": "cid", "client_secret": "csec"}).to_string()),
                 ("POST", "/oauth/token") => {
                     assert!(body.contains("\"code\":\"abc\"") && body.contains("csec"), "{body}");
-                    (200, json!({"access_token": "tok-1"}).to_string())
+                    (200, json!({"access_token": "tok-1", "scope": "read write"}).to_string())
                 }
                 ("GET", "/api/v1/accounts/verify_credentials") if authed => (200, json!({"acct": "ada", "display_name": "Ada"}).to_string()),
                 ("GET", "/api/v1/lists") if authed => (200, json!([{"id": "7", "title": "Friends"}]).to_string()),
@@ -371,13 +594,14 @@ mod tests {
             }
         });
         let app = register_app(&base).unwrap();
-        assert!(authorize_url(&base, &app).unwrap().contains("/oauth/authorize?client_id=cid&scope=read&redirect_uri=urn%3Aietf%3Awg%3Aoauth%3A2.0%3Aoob&response_type=code"));
-        let tok = exchange_code(&base, &app, " abc ").unwrap();
+        assert!(authorize_url(&base, &app).unwrap().contains("/oauth/authorize?client_id=cid&scope=read%20write&redirect_uri=urn%3Aietf%3Awg%3Aoauth%3A2.0%3Aoob&response_type=code"));
+        let (tok, scope) = exchange_code(&base, &app, " abc ").unwrap();
+        assert_eq!(scope.as_deref(), Some("read write"));
         let who = verify(&base, tok.expose()).unwrap();
         assert_eq!((who.handle.as_str(), who.display_name.as_str()), ("ada@127.0.0.1", "Ada"));
         let mut c = Client::new(Account::new(Network::Mastodon, &base, &who.handle, &who.display_name), tok.expose());
         let feeds = c.feeds().unwrap();
-        assert_eq!(feeds, vec![Feed { id: "home".into(), title: "Home".into() }, Feed { id: "list:7".into(), title: "Friends".into() }]);
+        assert_eq!(feeds.iter().map(|f| (f.id.as_str(), f.title.as_str())).collect::<Vec<_>>(), [("home", "Home"), ("notifications", "Notifications"), ("own", "Your posts"), ("list:7", "Friends")]);
         let page = c.timeline(&feeds[0], None).unwrap();
         assert_eq!(page.posts.len(), 6);
         assert_eq!(page.cursor.as_deref(), Some("100"));
@@ -397,6 +621,7 @@ mod tests {
         assert_eq!(seen.len(), 9, "{seen:?}");
     }
 
+    // spec: SOC-001
     #[test]
     fn errors_are_readable() {
         if std::process::Command::new("curl").arg("--version").output().is_err() {
@@ -408,6 +633,398 @@ mod tests {
         h.join().unwrap();
         assert!(verify("http://mastodon.example", "x").unwrap_err().contains("https"));
         assert!(verify(&base, "to\nken").is_err());
+    }
+
+    // spec: SOC-050
+    #[test]
+    fn a_status_tells_whether_the_account_favourited_or_boosted_it() {
+        let mut s = status("10", "1", "ada", "2024-05-17T10:30:00Z", None, "<p>x</p>");
+        let p = parse_status(&s, "https://m.test").unwrap();
+        assert_eq!((p.mine.clone(), p.visibility.as_deref()), (Mine::default(), None));
+        s["favourited"] = json!(true);
+        s["reblogged"] = json!(true);
+        s["visibility"] = json!("unlisted");
+        let p = parse_status(&s, "https://m.test").unwrap();
+        assert_eq!((p.mine.liked, p.mine.boosted, p.visibility.as_deref()), (true, true, Some("unlisted")));
+        // a boost entry shows the post inside it with the flags of that post
+        let boost = json!({"id": "99", "reblog": s, "account": {"id": "5", "acct": "cy", "display_name": "Cy", "url": "", "avatar": ""}});
+        assert!(parse_status(&boost, "https://m.test").unwrap().mine.liked);
+    }
+
+    // spec: SOC-060
+    #[test]
+    fn a_quoted_status_keeps_its_id_state_counts_and_address_and_can_be_reacted_to_by_them() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let mut inner = status("200", "2", "bob", "2024-05-16T10:00:00Z", Some("150"), "<p>quoted</p>");
+        inner["favourited"] = json!(true);
+        let mut outer = status("100", "1", "ada", "2024-05-17T10:00:00Z", None, "<p>look</p>");
+        outer["quote"] = json!({"state": "accepted", "quoted_status": inner});
+        let q = *parse_status(&outer, "https://m.test").unwrap().quote.unwrap();
+        assert_eq!((q.id.as_str(), q.url.as_str(), q.reply_to.as_deref(), q.mine.liked, q.mine.boosted), ("200", "https://m.test/@bob/200", Some("150"), true, false));
+        assert_eq!((q.reply_count, q.boost_count, q.like_count), (1, 2, 3), "the counts for the buttons");
+        // every button has what it needs: the id of the quote goes to the server, not the id of the card
+        let (base, handle) = mock_http(2, |method, path, _, _| {
+            assert_eq!(method, "POST");
+            let mut s = status("200", "2", "bob", "2024-05-16T10:00:00Z", None, "<p>quoted</p>");
+            match path {
+                "/api/v1/statuses/200/unfavourite" => {
+                    s["favourites_count"] = json!(2);
+                    (200, s.to_string())
+                }
+                "/api/v1/statuses/200/reblog" => {
+                    s["reblogs_count"] = json!(3);
+                    (200, s.to_string())
+                }
+                _ => (404, "{}".into()),
+            }
+        });
+        assert_eq!(react(&base, "tok-1", &q.id, Reaction::Like, false).unwrap().count, Some(2));
+        assert_eq!(react(&base, "tok-1", &q.id, Reaction::Boost, true).unwrap().count, Some(3));
+        assert_eq!(handle.join().unwrap().len(), 2);
+    }
+
+    // spec: SOC-050, SOC-056
+    #[test]
+    fn favourite_and_boost_post_to_the_status_and_read_the_counts_the_server_names() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let (base, handle) = mock_http(6, |method, path, headers, body| {
+            assert!(method == "POST" && headers.to_ascii_lowercase().contains("authorization: bearer tok-1"), "{method} {path} {headers}");
+            let mut s = status("100", "1", "ada", "2024-05-17T10:00:00Z", None, "<p>x</p>");
+            match path {
+                "/api/v1/statuses/100/favourite" => {
+                    s["favourites_count"] = json!(4);
+                    (200, s.to_string())
+                }
+                "/api/v1/statuses/100/unfavourite" => {
+                    s["favourites_count"] = json!(3);
+                    (200, s.to_string())
+                }
+                // a boost answers with the boost, the status inside it
+                "/api/v1/statuses/100/reblog" => {
+                    s["reblogs_count"] = json!(9);
+                    (200, json!({"id": "555", "reblog": s}).to_string())
+                }
+                "/api/v1/statuses/100/unreblog" => {
+                    s["reblogs_count"] = json!(8);
+                    (200, s.to_string())
+                }
+                "/api/v1/statuses/101/favourite" => {
+                    assert_eq!(body, "{}");
+                    (403, json!({"error": "This action is outside the authorized scopes"}).to_string())
+                }
+                _ => (500, json!({"error": "Internal error"}).to_string()),
+            }
+        });
+        let r = |kind, on| react(&base, "tok-1", "100", kind, on).unwrap();
+        assert_eq!(r(Reaction::Like, true), Reacted { on: true, record: None, count: Some(4), fresh: None });
+        assert_eq!(r(Reaction::Like, false), Reacted { on: false, record: None, count: Some(3), fresh: None });
+        assert_eq!(r(Reaction::Boost, true).count, Some(9));
+        assert_eq!(r(Reaction::Boost, false), Reacted { on: false, record: None, count: Some(8), fresh: None });
+        // a token without the permission to write is told apart from other refusals
+        assert_eq!(react(&base, "tok-1", "101", Reaction::Like, true), Err(ActionError::NeedsWrite));
+        assert_eq!(react(&base, "tok-1", "102", Reaction::Like, true), Err(ActionError::Failed("the server answered with status 500: Internal error".into())));
+        assert_eq!(handle.join().unwrap().len(), 6);
+        assert_eq!(react(&base, "tok-1", "../x", Reaction::Like, true), Err(ActionError::Failed("bad post id".into())));
+        // the sign-in asks for the permission to write
+        assert_eq!(SCOPE, "read write");
+    }
+
+    fn draft(text: &str) -> Draft {
+        Draft {
+            text: text.into(),
+            cw: String::new(),
+            visibility: Visibility::Public,
+            reply_to: None,
+            quote: None,
+            pictures: vec![],
+            poll: None,
+            schedule: None,
+            language: String::new(),
+            video: None,
+            info: InstanceInfo::defaults(Network::Mastodon),
+            key: "keymasto0000a".into(),
+        }
+    }
+
+    /// The post a send made (a scheduled post fails the test).
+    fn posted(s: Sent) -> Post {
+        match s {
+            Sent::Posted(p) => *p,
+            other => panic!("not a post: {other:?}"),
+        }
+    }
+
+    // spec: SOC-051, SOC-052, SOC-054
+    #[test]
+    fn a_status_is_posted_with_its_visibility_warning_and_the_post_it_answers_against_a_mock_server() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let (base, handle) = mock_http(2, |method, path, headers, body| {
+            assert!(
+                method == "POST" && path == "/api/v1/statuses" && headers.to_ascii_lowercase().contains("authorization: bearer tok-1") && headers.to_ascii_lowercase().contains("content-type: application/json"),
+                "{method} {path} {headers}"
+            );
+            let b: Value = serde_json::from_str(body).unwrap();
+            let mut s = status("200", "1", "ada", "2024-05-17T10:00:00Z", b["in_reply_to_id"].as_str(), &format!("<p>{}</p>", b["status"].as_str().unwrap()));
+            s["visibility"] = b["visibility"].clone();
+            s["spoiler_text"] = b["spoiler_text"].clone();
+            if s["spoiler_text"].is_null() {
+                s["spoiler_text"] = json!("");
+            }
+            (200, s.to_string())
+        });
+        let parent = parse_status(&status("100", "2", "bob", "2024-05-17T09:00:00Z", None, "<p>q</p>"), &base).unwrap();
+        let sent = send(&base, "tok-1", &Draft { reply_to: Some(parent.clone()), cw: " spoilers ".into(), visibility: Visibility::Unlisted, ..draft("@bob@m.test hello") }, std::time::Duration::ZERO).map(posted).unwrap();
+        assert_eq!((sent.id.as_str(), sent.text_markdown.as_str(), sent.reply_to.as_deref(), sent.content_warning.as_deref(), sent.visibility.as_deref()), ("200", "@bob@m.test hello", Some("100"), Some("spoilers"), Some("unlisted")));
+        // a plain post names no reply, warning, pictures or quote
+        let plain = send(&base, "tok-1", &draft("just text"), std::time::Duration::ZERO).map(posted).unwrap();
+        assert_eq!((plain.reply_to, plain.content_warning, plain.visibility.as_deref()), (None, None, Some("public")));
+        handle.join().unwrap();
+        // the body that goes out
+        let b = status_body(&Draft { reply_to: Some(parent.clone()), cw: "w".into(), visibility: Visibility::Direct, ..draft("t") }, &["7".into()]);
+        assert_eq!(b, json!({"status": "t", "visibility": "direct", "media_ids": ["7"], "in_reply_to_id": "100", "spoiler_text": "w"}));
+        assert_eq!(status_body(&draft("t"), &[]), json!({"status": "t", "visibility": "public"}));
+        // too many pictures are refused before anything is sent
+        let many = Draft { pictures: vec![DraftPicture { path: "a.png".into(), alt: String::new() }; 5], ..draft("t") };
+        assert!(send(&base, "tok-1", &many, std::time::Duration::ZERO).unwrap_err().to_string().contains("at most 4 pictures"));
+    }
+
+    // spec: SOC-057
+    #[test]
+    fn a_status_carries_the_key_of_its_draft_so_a_retry_cannot_post_twice() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let (base, handle) = mock_http(3, |_, _, headers, _| {
+            let key = headers.lines().find_map(|l| l.to_ascii_lowercase().strip_prefix("idempotency-key: ").map(String::from)).unwrap_or_default();
+            // a server that knows the key answers with the post it made the first time
+            let id = if key == "k1" { "500" } else { "501" };
+            (200, status(id, "1", "ada", "2024-05-17T10:00:00Z", None, "<p>x</p>").to_string())
+        });
+        let go = |key: &str| send(&base, "tok-1", &Draft { key: key.into(), ..draft("x") }, std::time::Duration::ZERO).map(posted).unwrap().id;
+        assert_eq!((go("k1"), go("k1"), go("k2")), ("500".to_string(), "500".to_string(), "501".to_string()));
+        handle.join().unwrap();
+    }
+
+    // spec: SOC-052
+    #[test]
+    fn the_limits_come_from_the_servers_instance_answer_and_default_to_those_of_mastodon() {
+        let v = json!({"api_versions": {"mastodon": 7}, "configuration": {"statuses": {"max_characters": 1500, "max_media_attachments": 6}, "media_attachments": {"image_size_limit": 8_000_000}}});
+        assert_eq!(instance_from(&v), InstanceInfo { max_chars: 1500, max_pictures: 4, image_bytes: 8_000_000, quotes: true, poll: PollLimits::default(), video_bytes: video::MASTODON_VIDEO_BYTES });
+        let old = instance_from(&json!({"api_versions": {"mastodon": 6}, "configuration": {"statuses": {"max_media_attachments": 2}}}));
+        assert_eq!((old.max_chars, old.max_pictures, old.image_bytes, old.quotes), (500, 2, 16 * 1024 * 1024, false));
+        assert_eq!(instance_from(&json!({})), InstanceInfo::defaults(Network::Mastodon));
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let (base, handle) = mock_http(1, move |method, path, headers, _| {
+            assert!((method, path) == ("GET", "/api/v2/instance") && headers.to_ascii_lowercase().contains("authorization: bearer tok-1"), "{method} {path}");
+            (200, v.to_string())
+        });
+        assert_eq!(instance_info(&base, "tok-1").unwrap().max_chars, 1500);
+        handle.join().unwrap();
+    }
+
+    // spec: SOC-053
+    #[test]
+    fn pictures_are_uploaded_with_their_description_and_waited_for_before_the_status_names_them() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let png = crate::social::actions::tests::file("up.png", &crate::social::actions::tests::png(30, 20, false));
+        let second = crate::social::actions::tests::file("up2.png", &crate::social::actions::tests::png(20, 20, false));
+        let polled = std::sync::atomic::AtomicUsize::new(0);
+        let (base, handle) = mock_http(5, move |method, path, headers, body| {
+            let low = headers.to_ascii_lowercase();
+            assert!(low.contains("authorization: bearer tok-1"), "{method} {path}");
+            match (method, path) {
+                ("POST", "/api/v2/media") => {
+                    assert!(low.contains("content-type: multipart/form-data"), "{headers}");
+                    assert!(body.contains("name=\"file\"") && body.contains("Content-Type: image/png"), "{}", body.chars().take(300).collect::<String>());
+                    if body.contains("name=\"description\"") {
+                        // the first picture: a description, and the server processes it later (202, no address yet)
+                        assert!(body.contains("A cat in a box"));
+                        (202, json!({"id": "m1", "type": "image", "url": null}).to_string())
+                    } else {
+                        (200, json!({"id": "m2", "type": "image", "url": "https://files.test/m2.png"}).to_string())
+                    }
+                }
+                ("GET", "/api/v1/media/m1") => {
+                    // not ready the first time (206), ready the second
+                    if polled.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                        (206, json!({"id": "m1", "url": null}).to_string())
+                    } else {
+                        (200, json!({"id": "m1", "url": "https://files.test/m1.png"}).to_string())
+                    }
+                }
+                ("POST", "/api/v1/statuses") => {
+                    let b: Value = serde_json::from_str(body).unwrap();
+                    assert_eq!(b["media_ids"], json!(["m1", "m2"]), "in the order of the pictures");
+                    (200, status("300", "1", "ada", "2024-05-17T10:00:00Z", None, "<p>pics</p>").to_string())
+                }
+                _ => (500, json!({"error": "no"}).to_string()),
+            }
+        });
+        let pictures = vec![DraftPicture { path: png.clone(), alt: " A cat in a box ".into() }, DraftPicture { path: second, alt: String::new() }];
+        let sent = send(&base, "tok-1", &Draft { pictures, ..draft("pics") }, std::time::Duration::from_millis(5)).map(posted).unwrap();
+        assert_eq!(sent.id, "300");
+        assert_eq!(handle.join().unwrap(), ["POST /api/v2/media", "GET /api/v1/media/m1", "GET /api/v1/media/m1", "POST /api/v2/media", "POST /api/v1/statuses"], "the second picture goes up after the first is ready");
+    }
+
+    fn poll_json(voted: bool) -> Value {
+        json!({"id": "p9", "expires_at": "2030-01-01T10:00:00.000Z", "expired": false, "multiple": true, "votes_count": 5, "voters_count": 4, "voted": voted, "own_votes": if voted { json!([1]) } else { json!([]) },
+               "options": [{"title": "Tea", "votes_count": 3}, {"title": "Coffee", "votes_count": 2}, {"title": "Water", "votes_count": null}]})
+    }
+
+    // spec: SOC-062
+    #[test]
+    fn the_poll_of_a_status_is_parsed_with_its_votes_and_no_longer_added_to_the_text() {
+        let mut s = status("11", "1", "ada", "2024-05-17T10:30:00.000Z", None, "<p>Which?</p>");
+        s["poll"] = poll_json(true);
+        let p = parse_status(&s, "https://m.test").unwrap();
+        assert_eq!(p.text_markdown, "Which?", "the options are not text any more");
+        let poll = p.poll.unwrap();
+        assert_eq!((poll.id.as_str(), poll.multiple, poll.votes_count, poll.voters_count, poll.voted, poll.own_votes.clone()), ("p9", true, 5, Some(4), true, vec![1]));
+        assert_eq!(poll.expires_at, Some(1_893_492_000));
+        assert_eq!(poll.options.iter().map(|o| (o.title.as_str(), o.votes)).collect::<Vec<_>>(), [("Tea", Some(3)), ("Coffee", Some(2)), ("Water", None)], "hidden totals are None");
+        s["poll"] = json!(null);
+        assert!(parse_status(&s, "https://m.test").unwrap().poll.is_none());
+        s["poll"] = json!({"id": "x", "options": [{"title": "only one"}]});
+        assert!(parse_status(&s, "https://m.test").unwrap().poll.is_none(), "a poll needs two options");
+    }
+
+    // spec: SOC-062
+    #[test]
+    fn a_vote_posts_the_choices_to_the_poll_and_the_answer_is_the_new_poll() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let poll = Poll::parse(&poll_json(false)).unwrap();
+        let (base, handle) = mock_http(1, |method, path, headers, body| {
+            assert!(method == "POST" && path == "/api/v1/polls/p9/votes" && headers.to_ascii_lowercase().contains("authorization: bearer tok-1"), "{method} {path}");
+            assert_eq!(serde_json::from_str::<Value>(body).unwrap(), json!({"choices": [0, 1]}));
+            (200, poll_json(true).to_string())
+        });
+        let now = vote(&base, "tok-1", &poll, &[0, 1]).unwrap();
+        assert!(now.voted && now.own_votes == vec![1]);
+        handle.join().unwrap();
+        // nothing is sent for no choice, a choice that is not there or a poll id that could change the address
+        assert!(vote(&base, "tok-1", &poll, &[]).is_err() && vote(&base, "tok-1", &poll, &[3]).is_err());
+        assert!(vote(&base, "tok-1", &Poll { id: "../x".into(), ..poll }, &[0]).is_err());
+    }
+
+    // spec: SOC-061, SOC-063, SOC-065
+    #[test]
+    fn a_poll_a_time_and_a_language_go_into_the_status_and_the_answer_to_a_time_is_no_post() {
+        use super::super::poll::DraftPoll;
+        let d = Draft { poll: Some(DraftPoll { options: vec!["Tea".into(), "Coffee".into()], expires_in: 3600, multiple: true, hide_totals: true }), schedule: Some(1_893_492_000), language: "de".into(), ..draft("Which?") };
+        assert_eq!(
+            status_body(&d, &[]),
+            json!({"status": "Which?", "visibility": "public", "poll": {"options": ["Tea", "Coffee"], "expires_in": 3600, "multiple": true, "hide_totals": true}, "scheduled_at": "2030-01-01T10:00:00.000Z", "language": "de"})
+        );
+        assert_eq!(status_body(&draft("x"), &[]), json!({"status": "x", "visibility": "public"}), "no language, no time, no poll: none sent");
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let (base, handle) = mock_http(2, |_, path, _, body| {
+            assert_eq!(path, "/api/v1/statuses");
+            let b: Value = serde_json::from_str(body).unwrap();
+            if b["scheduled_at"].is_string() {
+                // a ScheduledStatus: no content, no account
+                (200, json!({"id": "321", "scheduled_at": b["scheduled_at"], "params": {"text": b["status"], "visibility": "public", "poll": b["poll"]}, "media_attachments": []}).to_string())
+            } else {
+                (200, status("1", "1", "ada", "2024-05-17T10:00:00Z", None, "<p>now</p>").to_string())
+            }
+        });
+        match send(&base, "tok-1", &d, std::time::Duration::ZERO).unwrap() {
+            Sent::Scheduled(s) => assert_eq!((s.id.as_str(), s.at, s.text.as_str(), s.poll), ("321", 1_893_492_000, "Which?", true)),
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(send(&base, "tok-1", &draft("now"), std::time::Duration::ZERO).unwrap(), Sent::Posted(_)));
+        handle.join().unwrap();
+        // a poll cannot go with pictures or a video: refused before anything is sent
+        let pic = DraftPicture { path: "a.png".into(), alt: String::new() };
+        let both = Draft { poll: d.poll.clone(), pictures: vec![pic], ..draft("x") };
+        assert!(send(&base, "tok-1", &both, std::time::Duration::ZERO).unwrap_err().to_string().contains("cannot go with pictures or a video"));
+    }
+
+    // spec: SOC-061, SOC-066
+    #[test]
+    fn the_instance_names_the_limits_of_polls_and_videos() {
+        let v = json!({"configuration": {"polls": {"max_options": 6, "max_characters_per_option": 80, "min_expiration": 60, "max_expiration": 604_800}, "media_attachments": {"video_size_limit": 99_000_000}}});
+        let i = instance_from(&v);
+        assert_eq!((i.poll.max_options, i.poll.max_chars, i.poll.min_expiry, i.poll.max_expiry, i.video_bytes), (6, 80, 60, 604_800, 99_000_000));
+        let d = instance_from(&json!({}));
+        assert_eq!((d.poll, d.video_bytes), (PollLimits::default(), video::MASTODON_VIDEO_BYTES));
+    }
+
+    // spec: SOC-064
+    #[test]
+    fn scheduled_posts_are_listed_and_deleted_by_their_id() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let (base, handle) = mock_http(2, |method, path, headers, _| {
+            assert!(headers.to_ascii_lowercase().contains("authorization: bearer tok-1"));
+            match (method, path) {
+                ("GET", "/api/v1/scheduled_statuses") => (200, json!([{"id": "5", "scheduled_at": "2030-01-01T10:00:00.000Z", "params": {"text": "later", "visibility": "public"}, "media_attachments": []}, {"nonsense": true}]).to_string()),
+                ("DELETE", "/api/v1/scheduled_statuses/5") => (200, "{}".into()),
+                _ => (404, json!({"error": "no"}).to_string()),
+            }
+        });
+        let list = scheduled(&base, "tok-1").unwrap();
+        assert_eq!(list.len(), 1, "what is no scheduled status is skipped");
+        assert_eq!((list[0].id.as_str(), list[0].text.as_str()), ("5", "later"));
+        cancel_scheduled(&base, "tok-1", "5").unwrap();
+        assert_eq!(handle.join().unwrap(), ["GET /api/v1/scheduled_statuses", "DELETE /api/v1/scheduled_statuses/5"]);
+        assert!(cancel_scheduled(&base, "tok-1", "5/../x").is_err(), "an id that could change the address is refused");
+    }
+
+    // spec: SOC-066, SEC-026, SEC-027
+    #[test]
+    fn a_video_goes_up_like_a_picture_with_a_longer_wait_and_a_big_one_is_refused_before_any_request() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let mut mp4 = vec![0, 0, 0, 24, b'f', b't', b'y', b'p', b'i', b's', b'o', b'm', 0, 0, 2, 0, b'i', b's', b'o', b'm', b'm', b'p', b'4', b'1'];
+        mp4.extend_from_slice(&[7u8; 300]);
+        let clip = crate::social::actions::tests::file("clip.mp4", &mp4);
+        let polled = std::sync::atomic::AtomicUsize::new(0);
+        let (base, handle) = mock_http(5, move |method, path, _, body| match (method, path) {
+            ("POST", "/api/v2/media") => {
+                assert!(body.contains("Content-Type: video/mp4") && body.contains("A short clip"), "{}", body.chars().take(200).collect::<String>());
+                (202, json!({"id": "v1", "type": "video", "url": null}).to_string())
+            }
+            ("GET", "/api/v1/media/v1") => {
+                // still converting the first two times
+                if polled.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 2 {
+                    (206, json!({"id": "v1", "url": null}).to_string())
+                } else {
+                    (200, json!({"id": "v1", "url": "https://files.test/v1.mp4"}).to_string())
+                }
+            }
+            ("POST", "/api/v1/statuses") => {
+                assert_eq!(serde_json::from_str::<Value>(body).unwrap()["media_ids"], json!(["v1"]));
+                (200, status("400", "1", "ada", "2024-05-17T10:00:00Z", None, "<p>clip</p>").to_string())
+            }
+            _ => (500, "{}".into()),
+        });
+        let d = Draft { video: Some(DraftVideo { path: clip.clone(), alt: " A short clip ".into() }), ..draft("clip") };
+        assert!(matches!(send(&base, "tok-1", &d, std::time::Duration::from_millis(2)).unwrap(), Sent::Posted(p) if p.id == "400"));
+        assert_eq!(handle.join().unwrap(), ["POST /api/v2/media", "GET /api/v1/media/v1", "GET /api/v1/media/v1", "GET /api/v1/media/v1", "POST /api/v1/statuses"]);
+        // over the limit the server names: refused with the sizes, nothing sent
+        let small = Draft { info: InstanceInfo { video_bytes: 100, ..d.info.clone() }, ..d };
+        let e = send(&base, "tok-1", &small, std::time::Duration::ZERO).unwrap_err().to_string();
+        assert!(e.contains("clip.mp4") && e.contains("videos can be up to"), "{e}");
+        // what is no video is refused
+        let text = crate::social::actions::tests::file("not-a-video.mp4", b"words, only words, nothing else here");
+        let e = send(&base, "tok-1", &Draft { video: Some(DraftVideo { path: text, alt: String::new() }), ..draft("x") }, std::time::Duration::ZERO).unwrap_err().to_string();
+        assert!(e.contains("is not an MP4, QuickTime, WebM or MPEG video"), "{e}");
     }
 
     fn entries(ids: &[u32]) -> Value {
@@ -469,8 +1086,57 @@ mod tests {
                 _ => (404, json!({"error": "nope"}).to_string()),
             }
         });
-        let f = newer(&base, "tok-1", &Feed { id: "home".into(), title: "Home".into() }, Some("10"), 200).unwrap();
+        let f = newer(&base, "tok-1", &Feed { id: "home".into(), title: "Home".into() }, Some("10"), 200, &mut None).unwrap();
         assert_eq!((f.posts.len(), f.top.as_deref()), (2, Some("12")));
         assert_eq!(handle.join().unwrap().len(), 2);
+    }
+
+    fn counted(mut s: Value, replies: u32) -> Value {
+        s["replies_count"] = json!(replies);
+        s
+    }
+
+    // spec: SOC-045, SOC-046
+    #[test]
+    fn the_conversation_of_a_post_from_a_context_fixture() {
+        let ctx = json!({
+            "ancestors": [counted(status("1", "2", "bob", "2024-05-17T10:00:00Z", None, "<p>question</p>"), 1), counted(status("2", "1", "ada", "2024-05-17T10:01:00Z", Some("1"), "<p>answer 1/3</p>"), 1)],
+            "descendants": [
+                counted(status("6", "1", "ada", "2024-05-17T10:05:00Z", Some("5"), "<p>reply to cy</p>"), 0),
+                counted(status("4", "1", "ada", "2024-05-17T10:04:00Z", Some("3"), "<p>answer 3/3</p>"), 0),
+                counted(status("5", "3", "cy", "2024-05-17T10:03:00Z", Some("3"), "<p>nice</p>"), 1)]});
+        let root = parse_status(&counted(status("3", "1", "ada", "2024-05-17T10:02:00Z", Some("2"), "<p>answer 2/3</p>"), 2), "https://m.test").unwrap();
+        let v = thread_view_from_context(&root, &ctx, "https://m.test");
+        let texts = |l: &[Post]| l.iter().map(|p| p.text_markdown.clone()).collect::<Vec<_>>();
+        assert_eq!(texts(&v.ancestors), ["question", "answer 1/3"], "everything above it, also by other authors");
+        assert_eq!(v.post.id, "3");
+        // everything below it, also the author's own posts: depth first, oldest first among siblings
+        assert_eq!(v.replies.iter().map(|r| (r.post.text_markdown.as_str(), r.depth)).collect::<Vec<_>>(), [("nice", 0), ("reply to cy", 1), ("answer 3/3", 0)]);
+        assert!(!v.cut);
+        // the post counts a reply the server did not send
+        let more = Post { reply_count: 3, ..root };
+        assert!(thread_view_from_context(&more, &ctx, "https://m.test").cut);
+    }
+
+    // spec: SOC-045, SOC-046
+    #[test]
+    fn the_conversation_of_a_post_is_asked_from_the_servers_context() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let ctx = json!({"ancestors": [counted(status("2", "1", "ada", "2024-05-17T10:01:00Z", None, "<p>above</p>"), 1)], "descendants": [counted(status("4", "3", "cy", "2024-05-17T10:03:00Z", Some("3"), "<p>below</p>"), 0)]});
+        let (base, handle) = mock_http(2, move |method, path, headers, _| match (method, path) {
+            ("GET", "/api/v1/statuses/3/context") if headers.to_ascii_lowercase().contains("authorization: bearer tok-1") => (200, ctx.to_string()),
+            _ => (500, json!({"error": "Internal error"}).to_string()),
+        });
+        let mut c = Client::new(Account::new(Network::Mastodon, &base, "ada@127.0.0.1", "Ada"), "tok-1");
+        let post = parse_status(&counted(status("3", "1", "ada", "2024-05-17T10:02:00Z", Some("2"), "<p>middle</p>"), 1), &base).unwrap();
+        let v = c.thread_view(&post).unwrap();
+        assert_eq!((v.ancestors.len(), v.replies.len(), v.post.text_markdown.as_str(), v.cut), (1, 1, "middle", false));
+        // a failing server is an error, not an empty conversation
+        let gone = Post { id: "9".into(), ..post.clone() };
+        assert!(c.thread_view(&gone).is_err());
+        assert!(c.thread_view(&Post { id: "../x".into(), ..post }).unwrap_err().contains("bad post id"));
+        assert_eq!(handle.join().unwrap(), ["GET /api/v1/statuses/3/context", "GET /api/v1/statuses/9/context"]);
     }
 }

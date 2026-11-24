@@ -33,6 +33,7 @@ fn ui_git(_root: &Path) -> Git {
 
 use super::detect::Finding;
 use super::{connect_moving, credentials, Git, TreeLock};
+use crate::busy::{self, Busy};
 use crate::secret::Secret;
 use api::RepoInfo;
 use eframe::egui;
@@ -40,7 +41,6 @@ use provider::{Kind, Server};
 use ssh::Key;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use test_sync::{Problem, Remote};
 
@@ -103,7 +103,19 @@ pub enum Msg {
     Inspected(Remote, bool, bool),
 }
 
-type Job = Receiver<Result<Result<Msg, String>, String>>;
+type Job = busy::Job<Result<Msg, String>>;
+
+/// One call of the wizard (sign in, make a key, create a repository, connect and ask the server) as
+/// a task (JOB-027). It cannot be stopped: a provider call or a connect that is dropped half way
+/// would leave a token, a key or a repository behind that nobody was told about. Closing the dialog
+/// leaves it running and in the indicator, and its result is dropped.
+pub(crate) const WIZARD_CALL: busy::Key = busy::Key::new("git-wizard-call");
+/// Looking at where the vault is (SYNC-061), as a quiet task (JOB-027): it runs whenever the page is shown for a new vault.
+pub(crate) const VAULT_PLACE: busy::Key = busy::Key::new("vault-place");
+/// Moving `.git` out of the vault (SYNC-063): not stopped half way.
+pub(crate) const MOVE_OUT: busy::Key = busy::Key::new("git-move-out");
+/// Advanced → Connect, which may move a local history into the vault (SYNC-072): not stopped half way.
+pub(crate) const CONNECT: busy::Key = busy::Key::new("git-connect");
 
 /// The wizard's state while it is open.
 pub struct Wizard {
@@ -134,7 +146,7 @@ pub struct Wizard {
     pub test: Test,
     /// What the last step said went wrong (or right), in words.
     pub message: Option<(String, bool)>,
-    pub(super) job: Option<(&'static str, Job)>,
+    pub(super) job: Option<Job>,
     /// The text of the final screen of the history choices.
     pub done: Option<String>,
 }
@@ -223,22 +235,19 @@ pub struct Detect {
     /// The vault the findings are for.
     pub for_vault: Option<PathBuf>,
     pub findings: Vec<Finding>,
-    pub(super) job: Option<Receiver<Result<Vec<Finding>, String>>>,
+    pub(super) job: Option<busy::Job<Vec<Finding>>>,
 }
-
-/// Where a move's result arrives (the outer error: the job itself died).
-type MoveJob = Receiver<Result<Result<PathBuf, String>, String>>;
 
 /// A running or finished move of `.git` out of the vault (SYNC-063).
 #[derive(Default)]
 pub struct MoveOut {
-    pub(super) job: Option<(PathBuf, MoveJob)>,
+    pub(super) job: Option<(PathBuf, busy::Job<Result<PathBuf, String>>)>,
     /// How the last move ended: words and whether it went well.
     pub result: Option<(String, bool)>,
 }
 
-/// Where the result of an Advanced connection arrives: whether a history moved (the outer error: the job died).
-type JoinJob = Receiver<Result<Result<bool, String>, String>>;
+/// The job of an Advanced connection: whether a history moved (the outer error: the job died).
+type JoinJob = busy::Job<Result<bool, String>>;
 
 /// Connecting that may move a local-only history into the vault (SYNC-072): while one runs, no
 /// snapshot, thinning or read of the history starts, and Advanced → Connect keeps its job here.
@@ -305,20 +314,21 @@ impl Setup {
     }
 
     /// Look at where `vault` is, in a job, unless that was done (SYNC-061).
-    pub fn detect_for(&mut self, vault: &Path, ctx: &egui::Context) {
+    pub fn detect_for(&mut self, vault: &Path, ctx: &egui::Context, busy: &Busy) {
         if self.detect.for_vault.as_deref() == Some(vault) || self.detect.job.is_some() {
             return;
         }
+        let (v, ctx) = (vault.to_path_buf(), ctx.clone());
+        let Some(job) = busy.spawn_quiet(VAULT_PLACE, "Looking at where the vault is…", move || super::detect::detect_real(&v), move || ctx.request_repaint()) else { return };
         self.detect.for_vault = Some(vault.to_path_buf());
         self.detect.findings.clear();
-        let (v, ctx) = (vault.to_path_buf(), ctx.clone());
-        self.detect.job = Some(crate::jobs::spawn(move || super::detect::detect_real(&v), move || ctx.request_repaint()));
+        self.detect.job = Some(job);
     }
 
     /// Take a finished detection.
     pub fn poll_detect(&mut self) {
-        if let Some(rx) = &self.detect.job {
-            if let Ok(r) = rx.try_recv() {
+        if let Some(job) = &self.detect.job {
+            if let Ok(r) = job.try_recv() {
                 self.detect.job = None;
                 self.detect.findings = r.unwrap_or_default();
             }
@@ -335,9 +345,18 @@ impl Setup {
 
 // ---------------------------------------------------------------- jobs
 
+/// A safe point of a job of the wizard: the dialog was closed, so the job ends here (JOB-010).
+pub(crate) fn stop_point(cancel: &busy::Cancel) -> Result<(), String> {
+    if cancel.is_cancelled() {
+        Err("cancelled".into())
+    } else {
+        Ok(())
+    }
+}
+
 /// Sign in with a token (SYNC-052, SYNC-053): ask the provider who the token belongs to and for the
 /// person's repositories where it has an API, then keep the token in the keyring.
-pub fn sign_in(server: &Server, user_hint: &str, token: &Secret) -> Result<SignedIn, String> {
+pub fn sign_in(server: &Server, user_hint: &str, token: &Secret, cancel: &busy::Cancel) -> Result<SignedIn, String> {
     if token.is_empty() {
         return Err("Paste the token first".into());
     }
@@ -356,6 +375,8 @@ pub fn sign_in(server: &Server, user_hint: &str, token: &Secret) -> Result<Signe
         }
         (user.to_string(), vec![])
     };
+    // the safe point: nothing is kept yet, so a closed dialog leaves nothing behind (JOB-010)
+    stop_point(cancel)?;
     let key = credentials::server_key(&server.base()).ok_or("That server address cannot hold a token")?;
     if !crate::secrets::git_token_store(&key, &login, token.expose()) {
         return Err("Shale could not keep the token: this computer has no keyring, or it refused. Use an SSH key instead; Shale never writes a token to a file.".into());
@@ -366,8 +387,11 @@ pub fn sign_in(server: &Server, user_hint: &str, token: &Secret) -> Result<Signe
 /// Make the vault a repository whose `origin` is `url` (a local-only history moves into its `.git`
 /// first, SYNC-072), set the SSH command for a key, and ask the server what its repository holds
 /// (SYNC-057). The last value: a history moved.
-pub fn connect_and_inspect(git: &Git, vault: &Path, url: &str, ssh_key: Option<&Path>, history_root: &Path, tree: &TreeLock) -> Result<(Remote, bool, bool), String> {
+pub fn connect_and_inspect(git: &Git, vault: &Path, url: &str, ssh_key: Option<&Path>, history_root: &Path, tree: &TreeLock, cancel: &busy::Cancel) -> Result<(Remote, bool, bool), String> {
+    stop_point(cancel)?;
     let moved = connect_moving(git, vault, url, history_root, tree)?;
+    // the safe point after the connection: the repository is set up, only the question to the server is left
+    stop_point(cancel)?;
     if let Some(cmd) = ssh::ssh_command(ssh_key, false) {
         // the key is part of the repository's configuration (a path, nothing secret)
         if ssh_key.is_some() {

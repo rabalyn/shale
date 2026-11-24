@@ -58,7 +58,7 @@ fn import_file(tag: &str, path: PathBuf, keep: bool) -> Option<(Vault, Imported)
     // ahead of time, as the dialog does it in its job
     let mut d = dialog::ImportDialog::new(std::mem::take(&mut items), vec![], "In".into(), String::new(), None, false);
     d.keep_docx = keep;
-    assert!(d.start_conversion(v.root.clone()));
+    assert_eq!(d.start_conversion(v.root.clone()), Ok(true));
     let end = std::time::Instant::now() + Duration::from_secs(120);
     while !d.poll_conversion() {
         assert!(std::time::Instant::now() < end, "pandoc did not finish");

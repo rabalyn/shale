@@ -411,7 +411,7 @@ fn dialogs_export_writes_the_pdf_where_asked_and_says_when_it_cannot() {
     p.click(Show::Modals, "Landscape");
     assert!(matches!(&p.app.modal, Some(Modal::Export(d)) if d.opts.landscape));
     p.click(Show::Modals, "Export");
-    assert!(p.app.modal.is_none());
+    until(&mut p, Show::Modals, "the export has saved the PDF", |p| p.app.modal.is_none());
     let pdf = std::fs::read(&target).unwrap();
     assert!(pdf.starts_with(b"%PDF"), "a PDF file");
     assert!(p.app.toasts.iter().any(|(t, _)| t.starts_with("Exported to") && t.contains("Welcome.pdf")), "{:?}", p.app.toasts);
@@ -423,6 +423,7 @@ fn dialogs_export_writes_the_pdf_where_asked_and_says_when_it_cannot() {
         d.path = p.dir.join("in-the-way/out.pdf").to_string_lossy().into_owned();
     }
     p.click(Show::Modals, "Export");
+    until(&mut p, Show::Modals, "the export has failed to save", |p| matches!(&p.app.modal, Some(Modal::Export(d)) if d.error.is_some()));
     let Some(Modal::Export(d)) = &p.app.modal else { panic!("the dialog closed") };
     let error = d.error.clone().expect("an error");
     assert!(error.contains("Could not create the folder"), "{error}");
@@ -432,6 +433,7 @@ fn dialogs_export_writes_the_pdf_where_asked_and_says_when_it_cannot() {
         d.path.clear();
     }
     p.click(Show::Modals, "Export");
+    until(&mut p, Show::Modals, "the export has said where to save", |p| matches!(&p.app.modal, Some(Modal::Export(d)) if d.error.as_deref() == Some("Choose where to save the PDF")));
     assert!(p.shows(Show::Modals, "Choose where to save the PDF"));
     // Cancel
     p.click(Show::Modals, "Cancel");
@@ -786,7 +788,7 @@ fn nav_028_export_to_pdf_keeps_export_and_cancel_in_view_in_a_short_window() {
     let target = p.dir.join("exports/Welcome.pdf");
     assert!(!target.exists());
     p.click(Show::Modals, "Export");
-    assert!(p.app.modal.is_none());
+    until(&mut p, Show::Modals, "the export has saved the PDF", |p| p.app.modal.is_none());
     assert!(std::fs::read(&target).unwrap().starts_with(b"%PDF"));
     // Cancel closes it without writing
     p.app.open_export_dialog(Path::new("Ideas.md"));
@@ -1262,4 +1264,37 @@ fn imp_071_update_puts_the_older_mail_in_its_place_and_saves_open_notes_first() 
     // the open buffer shows what is on disk now
     assert_eq!(p.app.notes[Path::new("Mail/2026-11-18 C.md")].text, c);
     assert!(!p.app.notes[Path::new("Mail/2026-11-18 C.md")].dirty);
+}
+
+// spec: IMP-074
+#[test]
+fn imp_074_an_item_that_continues_another_item_of_the_import_says_so_and_the_question_is_asked_once() {
+    use crate::thread_tests::{eml, D16, D17, D18, D19};
+    let mut p = P::with_files("batch-dialog", &[("Mail/2026-11-16 Plan.md", &thread_note("a", "2026-11-16 12:00", "a")), ("Mail/2026-11-19 Last.md", &thread_note("d", "2026-11-19 12:00", "a"))]);
+    let items = [eml("b@h", D17, "Between", Some("a@h"), &["a@h"]), eml("c@h", D18, "Then", Some("b@h"), &["a@h", "b@h"])].into_iter().map(|r| crate::import::eml_item(r, None)).collect();
+    p.app.open_import(items, vec![], None);
+    p.look(Show::Modals);
+    // the second item continues the first, named by its title; the first continues the note of the vault
+    assert!(p.shows(Show::Modals, "(in this import)"), "the item of the import is named");
+    assert!(p.shows(Show::Modals, "[[2026-11-16 Plan]]"));
+    assert!(p.shows(Show::Modals, "Keep the thread in date order? This changes the previous and next of 2 notes."));
+    let keys = |p: &P, key: &str| match &p.app.modal {
+        Some(Modal::Import(d)) => d.rects.iter().any(|(k, _)| k == key),
+        _ => false,
+    };
+    assert!(keys(&p, "continues-update:0") && !keys(&p, "continues-update:1"), "asked on the first item only");
+    // a batch of its own: no note of the vault, no question
+    let mut q = P::with_files("batch-dialog-own", &[("Other/Else.md", "# Else\n")]);
+    let items = [eml("a@h", D16, "Root", None, &[]), eml("b@h", D19, "Reply", Some("a@h"), &["a@h"])].into_iter().map(|r| crate::import::eml_item(r, None)).collect();
+    q.app.open_import(items, vec![], None);
+    assert!(q.shows(Show::Modals, "Root (in this import)"));
+    assert!(!q.shows(Show::Modals, "Keep the thread in date order?"));
+    // in-batch continues is text, no choice
+    assert!(!keys(&q, "continues-pick:1") && keys(&q, "continues:1"));
+    // Include off on the first item: the second stops naming it and its line goes away
+    click_control(&mut q, "include:0");
+    assert!(!q.shows(Show::Modals, "Root (in this import)"), "an excluded item is not named");
+    assert!(!keys(&q, "continues:1"), "nothing left to continue: no line");
+    click_control(&mut q, "include:0");
+    assert!(q.shows(Show::Modals, "Root (in this import)") && keys(&q, "continues:1"));
 }

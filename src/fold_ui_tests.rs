@@ -210,7 +210,7 @@ fn edit_074_without_the_gutter_the_marker_is_left_of_the_text() {
     assert_eq!(w.hidden(), 4);
 }
 
-// spec: EDIT-073, KEY-030, KEY-031, KEY-032, KEY-033
+// spec: EDIT-073, KEY-030, KEY-031, KEY-032, KEY-033, EDIT-077
 #[test]
 fn key_030_the_fold_keys_fold_and_unfold_at_the_cursor_and_all() {
     let mut w = W::new("keys", SECTIONS, true);
@@ -256,7 +256,7 @@ fn edit_075_the_cursor_moving_into_a_folded_block_unfolds_it() {
     assert_eq!(w.numbers(), vec![1, 2, 3, 4, 5, 6], "# One and ## Sub are open, # Two stays folded");
 }
 
-// spec: EDIT-076
+// spec: EDIT-076, EDIT-072, EDIT-075
 #[test]
 fn edit_076_selecting_everything_leaves_folds_alone_and_typing_and_undo_work_around_them() {
     let mut w = W::new("select", SECTIONS, false);
@@ -683,7 +683,7 @@ fn edit_090_the_copy_button_shows_on_hover_and_a_click_copies_the_code_without_t
     assert!(raw.copy_button(2).is_none());
 }
 
-// spec: EDIT-090
+// spec: EDIT-090, EDIT-094
 #[test]
 fn edit_090_the_button_shows_while_the_cursor_is_in_the_block_and_on_a_folded_block_and_does_not_unfold_it() {
     let mut w = W::new("copy-cursor", CODE, true);
@@ -951,6 +951,7 @@ fn large_note() -> String {
     t
 }
 
+// spec: EDIT-099, EDIT-109
 /// Timing of the fold engine and the code boxes on a large note (#364). Not a check of anything and not part
 /// of `cargo test`: `cargo test --release large_note_timing -- --ignored --nocapture`.
 #[test]

@@ -273,7 +273,7 @@ fn the_settings_say_where_ffmpeg_is_or_that_it_is_missing_and_where_to_get_it() 
     }
 }
 
-// spec: MEDIA-004
+// spec: MEDIA-004, EDIT-052
 #[test]
 fn in_the_editor_the_round_buttons_the_edge_and_the_picture_of_a_video_leave_the_keyboard_with_the_text() {
     use eframe::egui::{

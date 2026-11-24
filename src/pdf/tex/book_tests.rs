@@ -130,7 +130,7 @@ fn an_article_kind_starts_the_same_structure_at_sections() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-// spec: TEX-037
+// spec: TEX-037, TEX-035
 #[test]
 fn the_department_logo_is_in_a_book_too_when_the_slot_is_filled_and_the_box_is_on() {
     let (v, dir) = handbook("dept");
@@ -290,6 +290,6 @@ fn only_kinds_of_the_article_and_book_family_hold_a_folder() {
     super::sets_tests::make_set(&dir, "slides", &super::sets_tests::META.replace("Test set", "Slides only"), &[("talk", "name = \"Talk\"\nmapping = \"beamer\"\nclass = \"my\"\n")]);
     let mut t = TexExport::for_folder(&dir, "Book".into(), "", Some(("slides".into(), "talk".into())));
     t.status = super::dialog::TexStatus::Ready("x".into());
-    assert_eq!((t.current_set().unwrap().id.as_str(), t.kind.as_str(), t.current_kind().is_none(), t.can_export()), ("slides", "", true, false));
+    assert_eq!((t.current_set().unwrap().id.as_str(), t.kind.as_str(), t.current_kind().is_none(), t.can_export(&crate::busy::Busy::default())), ("slides", "", true, false));
     let _ = std::fs::remove_dir_all(dir);
 }

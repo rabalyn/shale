@@ -20,7 +20,11 @@ row per area; each starts with what it had.
 To choose a font, press the button of a row. A list of the fonts installed on the computer opens
 with a search field on top: type a part of the name, move with the arrow keys, press **Enter** to pick
 (a click works too) and **Esc** to close without picking. **Default** is Shale's own font. The list
-opens on the font the row has.
+opens on the font the row has. Each entry is drawn in its own font, so you see what you pick. The fonts
+of the entries on screen are loaded in the background once you stop scrolling (until then, and for
+a font that is still loading, the name shows in Shale's font); at most 64 stay loaded, and they are
+let go when the list closes. A font whose letters are pictures (a symbol font) shows its name in
+Shale's font with a sample, "Aa Bb 12", in the font next to it.
 
 Next to every row is a sample text, "The quick brown fox, **bold** and *italic*", in the row's
 font and size, so you see all the fonts you have chosen side by side. While a list is open, the

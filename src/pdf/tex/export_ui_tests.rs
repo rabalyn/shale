@@ -13,7 +13,6 @@ use eframe::egui::{PointerButton, Rect};
 use std::path::Path;
 #[cfg(unix)]
 use std::path::PathBuf;
-#[cfg(unix)]
 use std::time::Duration;
 
 /// The imported set of the tuda kinds in the vault of the window.
@@ -86,7 +85,6 @@ fn open_on_board(t: &mut T) {
 }
 
 /// Frames until `done` holds.
-#[cfg(unix)]
 fn until(t: &mut T, what: &str, done: impl Fn(&T) -> bool) {
     for _ in 0..600 {
         t.hl.frames(&mut t.app, 1);
@@ -270,7 +268,7 @@ fn a_vault_without_sets_says_where_to_import_one_and_export_stays_off() {
     open_on(&mut t, "Plan.md", "# Plan\n");
     click(&mut t, "engine:latex");
     assert!(t.shows("This vault has no template sets yet: import one in Settings → LaTeX → Template sets."), "{:?}", t.painted());
-    assert!(!dialog(&t).tex.as_ref().unwrap().can_export());
+    assert!(!dialog(&t).tex.as_ref().unwrap().can_export(&t.app.busy));
     click(&mut t, "export");
     assert!(t.app.modal.is_some() && dialog(&t).tex.as_ref().unwrap().job.is_none(), "Export does nothing without a kind");
 }
@@ -353,7 +351,8 @@ fn without_a_tex_the_status_says_so_and_export_is_off_while_looking_it_is_off_to
     // the built-in export still works
     click(&mut t, "engine:builtin");
     click(&mut t, "export");
-    assert!(t.app.modal.is_none() && t.dir.join("exports/Plan.pdf").is_file());
+    until(&mut t, "the built-in export has saved the PDF", |t| t.app.modal.is_none());
+    assert!(t.dir.join("exports/Plan.pdf").is_file());
     // a TeX that is still being looked for
     t.app.tex.detection = None;
     t.app.open_export_dialog(Path::new("Plan.md"));
@@ -645,7 +644,7 @@ mod fake {
         assert!(t.dir.join("exports/Plan.pdf").is_file());
     }
 
-    // spec: TEX-016, TEX-004
+    // spec: TEX-016, TEX-004, JOB-010, JOB-018
     #[test]
     fn export_shows_that_it_is_working_and_cancel_stops_the_compile_and_closes_the_dialog() {
         let mut t = T::new("dlg-cancel", usable());
@@ -662,12 +661,18 @@ mod fake {
         click(&mut t, "export");
         until(&mut t, "LuaLaTeX has started", |_| marker.with_extension("started").exists());
         assert!(dialog(&t).tex.as_ref().unwrap().working() && t.shows("Compiling with LuaLaTeX"), "{:?}", t.painted());
+        // the compile is a task of the registry with its text and Cancel, and Export is off beside it (JOB-018, JOB-005)
+        let listed = t.app.busy.info(&crate::pdf::tex::dialog::TEX_EXPORT);
+        assert!(listed.as_ref().is_some_and(|i| i.cancellable && i.label == "Exporting “Plan” to PDF with LaTeX…"), "{listed:?}");
+        assert!(!dialog(&t).tex.as_ref().unwrap().can_export(&t.app.busy));
         // the choices cannot change while it runs, and Export is off
         let kind = dialog(&t).tex.as_ref().unwrap().kind.clone();
         click(&mut t, "engine:builtin");
         assert_eq!((dialog(&t).engine, dialog(&t).tex.as_ref().unwrap().kind.clone()), (ExportEngine::Latex, kind));
+        // Cancel stops the work and closes the dialog (JOB-010): the task leaves the list once LuaLaTeX is gone
         click(&mut t, "cancel");
         assert!(t.app.modal.is_none(), "the dialog is closed");
+        until(&mut t, "the task has ended", |t| t.app.busy.list().is_empty());
         std::thread::sleep(Duration::from_millis(500));
         assert!(!marker.exists(), "the compile was killed, not waited for");
         let _ = std::fs::remove_file(marker.with_extension("started"));
@@ -675,7 +680,7 @@ mod fake {
     }
 }
 
-// spec: TEX-016
+// spec: TEX-016, TEX-033
 #[test]
 fn a_note_that_names_its_template_is_exported_through_it_whatever_was_chosen_last() {
     let mut t = T::new("dlg-noted", usable());
@@ -720,27 +725,46 @@ fn a_template_the_vault_does_not_have_is_said_in_the_dialog_with_what_is_used_in
     assert!(tex.template_warning.is_none() && !has(&t, "template-warning"));
 }
 
-// spec: TEX-016
+// spec: TEX-016, JOB-018
 #[test]
 fn a_job_that_crashed_is_an_error_in_the_dialog_and_a_dropped_job_asks_the_compile_to_stop() {
-    use super::dialog::{Job, TexExport};
+    use super::dialog::{ExportJob, TexExport, TEX_EXPORT};
     let t = T::new("dlg-crash", usable());
     put_set(&t);
+    let busy = crate::busy::Busy::default();
     let mut tex = TexExport::new(&t.dir, "Plan".into(), "# Plan\n", None);
-    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let (tx, rx) = std::sync::mpsc::channel();
-    tex.job = Some(Job { rx, cancel: cancel.clone() });
-    assert!(tex.working() && tex.poll().is_none(), "nothing yet");
-    tx.send(Err("the background job crashed: boom".to_string())).unwrap();
+    let wait_idle = || {
+        let end = std::time::Instant::now() + Duration::from_secs(20);
+        while busy.is_running(&TEX_EXPORT) {
+            assert!(std::time::Instant::now() < end, "the task ends with its job");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    };
+    let job = busy.spawn(TEX_EXPORT, "x", || -> Result<super::dialog::Made, super::dialog::Failure> { panic!("boom") }, || {}).unwrap();
+    tex.job = Some(ExportJob(job));
+    wait_idle();
     assert!(tex.poll().is_none() && !tex.working());
     let failure = tex.failure.as_ref().expect("the crash is shown");
     assert_eq!(failure.headline, "the background job crashed: boom");
-    // the dialog closing drops the job: LuaLaTeX is told to stop
-    cancel.store(false, std::sync::atomic::Ordering::SeqCst);
-    let (_tx, rx) = std::sync::mpsc::channel();
-    tex.job = Some(Job { rx, cancel: cancel.clone() });
+    // the dialog closing drops the job: the task's token is set, so LuaLaTeX is told to stop
+    let seen = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = seen.clone();
+    let mut task = busy.begin(TEX_EXPORT, "y").unwrap();
+    let cancel = task.cancellable();
+    let (hold, wait) = std::sync::mpsc::channel::<()>();
+    let job = task.run(
+        move || -> Result<super::dialog::Made, super::dialog::Failure> {
+            let _ = wait.recv();
+            flag.store(cancel.is_cancelled(), std::sync::atomic::Ordering::SeqCst);
+            Ok(super::dialog::Made { pdf: vec![], placeholder_logo: false, warnings: vec![] })
+        },
+        || {},
+    );
+    tex.job = Some(ExportJob(job));
     drop(tex);
-    assert!(cancel.load(std::sync::atomic::Ordering::SeqCst));
+    drop(hold);
+    wait_idle();
+    assert!(seen.load(std::sync::atomic::Ordering::SeqCst), "the dropped dialog set the token");
 }
 
 // spec: TEX-016

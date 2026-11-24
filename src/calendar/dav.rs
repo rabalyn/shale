@@ -19,6 +19,7 @@
 //! are on the same server as the calendar, so a server can't make Shale send the password to
 //! somewhere else.
 
+use crate::busy::Cancel;
 use crate::calendar::ics::{self, Event};
 use roxmltree::{Document, Node};
 use std::io::Write;
@@ -229,7 +230,7 @@ pub fn request_with(method: &str, url: &str, headers: &[&str], body: &str, acct:
 /// Like [`request_with`]; `follow` = false never follows a redirect (the OAuth2 token endpoint:
 /// its form holds secrets and must go only where it was addressed).
 pub fn request_opts(method: &str, url: &str, headers: &[&str], body: &str, acct: &Account, follow: bool) -> Result<Response, String> {
-    let mut r = request_bytes_opts(method, url, headers, body, acct, MAX_BYTES, follow)?;
+    let mut r = request_bytes_opts(method, url, headers, body, acct, MAX_BYTES, How { follow, upload: None })?;
     let text = String::from_utf8_lossy(&r.body).into_owned();
     r.body.zeroize();
     Ok(Response { status: r.status, body: text, url: r.url, etag: r.etag })
@@ -252,10 +253,66 @@ pub struct BytesResponse {
 /// accepted when the answer finally comes from the same server (curl itself drops it on a
 /// redirect to another server).
 pub fn request_bytes(method: &str, url: &str, headers: &[&str], body: &str, acct: &Account, max_bytes: u64) -> Result<BytesResponse, String> {
-    request_bytes_opts(method, url, headers, body, acct, max_bytes, true)
+    request_bytes_opts(method, url, headers, body, acct, max_bytes, How { follow: true, upload: None })
 }
 
-fn request_bytes_opts(method: &str, url: &str, headers: &[&str], body: &str, acct: &Account, max_bytes: u64, follow: bool) -> Result<BytesResponse, String> {
+/// A file that curl sends as the body of a request (read by curl itself, so the bytes never pass
+/// through a text field).
+#[derive(Clone, Copy, Debug)]
+pub enum Upload<'a> {
+    /// the whole body is the file (`data-binary @file`); the caller sets `Content-Type`
+    Raw { path: &'a std::path::Path },
+    /// a `multipart/form-data` body: the file as `field`, and these text fields
+    Form { field: &'a str, path: &'a std::path::Path, mime: &'a str, fields: &'a [(&'a str, &'a str)] },
+}
+
+/// How a request is sent besides its method, address and headers.
+#[derive(Clone, Copy)]
+struct How<'a> {
+    /// follow redirects
+    follow: bool,
+    upload: Option<Upload<'a>>,
+}
+
+/// Like [`request_bytes`] with a file as the body (SOC-053). The path must be one Shale made (no
+/// `"`, `;`, `,` or backslash in it). Uploads may take longer than other requests.
+pub fn request_upload(method: &str, url: &str, headers: &[&str], upload: Upload, acct: &Account, max_bytes: u64) -> Result<BytesResponse, String> {
+    let plain = |s: &str| !s.chars().any(|c| c.is_control() || matches!(c, '"' | ';' | ',' | '\\'));
+    let (path, mime) = match upload {
+        Upload::Raw { path } => (path, ""),
+        Upload::Form { path, mime, .. } => (path, mime),
+    };
+    let p = path.to_str().ok_or("the file name is not text")?;
+    if !plain(p) || !plain(mime) {
+        return Err("the file cannot be sent (its name or type has special characters)".into());
+    }
+    request_bytes_opts(method, url, headers, "", acct, max_bytes, How { follow: true, upload: Some(upload) })
+}
+
+/// The curl command of a request: its arguments hold no user name, password, header or body (they
+/// arrive on standard input, `-K -`, SEC-002), and `-q` comes first so that `~/.curlrc` is ignored.
+fn curl_command(follow: bool, protos: &str, max_time: &str, max_bytes: u64, method: &str, url: &str) -> std::process::Command {
+    let mut curl = crate::program::command("curl");
+    // -q must come first: don't read ~/.curlrc (it could turn off certificate checks or trace the password to a file)
+    curl.args(["-q", "-sS", "-i"]).args(if follow { &["-L", "--max-redirs", "5"][..] } else { &[][..] }).args(["--proto", protos, "--proto-redir", protos]).args([
+        "--connect-timeout",
+        "10",
+        "--max-time",
+        max_time,
+        "--max-filesize",
+        &max_bytes.to_string(),
+    ]);
+    // tests only: trust the test environment's certificate authority (tests/caldav-env/, CALENV-002)
+    #[cfg(test)]
+    if let Some(ca) = TEST_CA.lock().unwrap().as_ref() {
+        curl.arg("--cacert").arg(ca);
+    }
+    curl.args(["-X", method, "-w", WRITE_OUT, "-K", "-", url]);
+    curl
+}
+
+fn request_bytes_opts(method: &str, url: &str, headers: &[&str], body: &str, acct: &Account, max_bytes: u64, how: How) -> Result<BytesResponse, String> {
+    let How { follow, upload } = how;
     let origin = check_url(url)?;
     if !method.chars().all(|c| c.is_ascii_uppercase()) || method.is_empty() {
         return Err(format!("bad request method {method:?}"));
@@ -283,6 +340,24 @@ fn request_bytes_opts(method: &str, url: &str, headers: &[&str], body: &str, acc
         quote_into(&mut cfg, &[body]);
         cfg.push('\n');
     }
+    match upload {
+        Some(Upload::Raw { path }) => {
+            cfg.push_str("data-binary = ");
+            quote_into(&mut cfg, &["@", &path.to_string_lossy()]);
+            cfg.push('\n');
+        }
+        Some(Upload::Form { field, path, mime, fields }) => {
+            cfg.push_str("form = ");
+            quote_into(&mut cfg, &[field, "=@", &path.to_string_lossy(), ";type=", mime]);
+            cfg.push('\n');
+            for (k, v) in fields {
+                cfg.push_str("form-string = ");
+                quote_into(&mut cfg, &[k, "=", v]);
+                cfg.push('\n');
+            }
+        }
+        None => {}
+    }
     for h in headers {
         cfg.push_str("header = ");
         quote_into(&mut cfg, &[h]);
@@ -291,23 +366,9 @@ fn request_bytes_opts(method: &str, url: &str, headers: &[&str], body: &str, acc
     let with_auth = headers.iter().any(|h| h.trim_start().to_ascii_lowercase().starts_with("authorization:"));
     // a local http server may redirect to http; the final address is checked below
     let protos = if origin.scheme == "http" { "=http,https" } else { "=https" };
-    let max_time = if max_bytes > 10_000_000 { "300" } else { "30" };
-    let mut curl = crate::program::command("curl");
-    // -q must come first: don't read ~/.curlrc (it could turn off certificate checks or trace the password to a file)
-    curl.args(["-q", "-sS", "-i"]).args(if follow { &["-L", "--max-redirs", "5"][..] } else { &[][..] }).args(["--proto", protos, "--proto-redir", protos]).args([
-        "--connect-timeout",
-        "10",
-        "--max-time",
-        max_time,
-        "--max-filesize",
-        &max_bytes.to_string(),
-    ]);
-    // tests only: trust the test environment's certificate authority (tests/caldav-env/, CALENV-002)
-    #[cfg(test)]
-    if let Some(ca) = TEST_CA.lock().unwrap().as_ref() {
-        curl.arg("--cacert").arg(ca);
-    }
-    let mut child = curl.args(["-X", method, "-w", WRITE_OUT, "-K", "-", url]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| format!("could not run curl ({e}) — is curl installed?"))?;
+    let max_time = if max_bytes > 10_000_000 || upload.is_some() { "300" } else { "30" };
+    let mut curl = curl_command(follow, protos, max_time, max_bytes, method, url);
+    let mut child = curl.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| format!("could not run curl ({e}) — is curl installed?"))?;
     child.stdin.take().unwrap().write_all(cfg.as_bytes()).map_err(|e| e.to_string())?;
     drop(cfg);
     let out = child.wait_with_output().map_err(|e| e.to_string())?;
@@ -531,9 +592,27 @@ fn useful(body: &str) -> bool {
     parse(body).map(|d| responses(&d).iter().any(|r| r.is_calendar() || r.prop_href(CALDAV, "calendar-home-set").is_some() || r.prop_href(DAV, "current-user-principal").is_some())).unwrap_or(false)
 }
 
+/// What a load or a discovery that Cancel stopped reports instead of a result (JOB-033, JOB-034).
+pub const STOPPED: &str = "stopped";
+
+/// A safe point of a discovery: between two requests, never inside one.
+fn go_on(cancel: &Cancel) -> Result<(), String> {
+    if cancel.is_cancelled() {
+        Err(STOPPED.into())
+    } else {
+        Ok(())
+    }
+}
+
 /// Find the calendars of an account. The address may be a calendar, the calendar home, the
 /// principal, or just the server (then `/.well-known/caldav` is tried).
+#[cfg(test)]
 pub fn discover(acct: &Account) -> Result<Vec<FoundCalendar>, String> {
+    discover_until(acct, &Cancel::default())
+}
+
+/// [`discover`] that stops between two requests when `cancel` is set, with the error [`STOPPED`] (JOB-034).
+pub fn discover_until(acct: &Account, cancel: &Cancel) -> Result<Vec<FoundCalendar>, String> {
     let _flow = tracing::info_span!("flow.caldav_discover", peer = "calendar").entered();
     let entered = acct.url.trim();
     if entered.is_empty() {
@@ -541,8 +620,10 @@ pub fn discover(acct: &Account) -> Result<Vec<FoundCalendar>, String> {
     }
     check_url(entered)?;
     let first_props = propfind_body(&format!("<d:current-user-principal/><c:calendar-home-set/>{CAL_PROPS}"));
+    go_on(cancel)?;
     let first = tracing::info_span!("flow.caldav_discover.probe", peer = "caldav").in_scope(|| propfind_following(entered, "0", &first_props, acct))?;
     let r = if matches!(first.status, 404 | 405) || (is_2xx(first.status) && !useful(&first.body)) {
+        go_on(cancel)?;
         let wk = tracing::info_span!("flow.caldav_discover.well_known", peer = "caldav").in_scope(|| propfind_following(&resolve(entered, "/.well-known/caldav"), "0", &first_props, acct))?;
         if is_2xx(wk.status) || !is_2xx(first.status) {
             wk
@@ -564,6 +645,7 @@ pub fn discover(acct: &Account) -> Result<Vec<FoundCalendar>, String> {
     if home.is_none() {
         if let Some(p) = resps.iter().find_map(|x| x.prop_href(DAV, "current-user-principal")) {
             let purl = resolve(&r.url, &p);
+            go_on(cancel)?;
             let pr = tracing::info_span!("flow.caldav_discover.principal", peer = "caldav").in_scope(|| propfind_following(&purl, "0", &propfind_body("<c:calendar-home-set/>"), acct))?;
             check(&pr, &purl)?;
             let pdoc = parse(&pr.body)?;
@@ -571,6 +653,7 @@ pub fn discover(acct: &Account) -> Result<Vec<FoundCalendar>, String> {
         }
     }
     let home = home.unwrap_or_else(|| r.url.clone());
+    go_on(cancel)?;
     let hr = tracing::info_span!("flow.caldav_discover.calendars", peer = "caldav").in_scope(|| propfind_following(&home, "1", &propfind_body(CAL_PROPS), acct))?;
     check(&hr, &home)?;
     let hdoc = parse(&hr.body)?;
@@ -829,6 +912,53 @@ pub(crate) mod tests {
         quote_into(&mut s, &["a\"b", ":", "c\\d\r\n\te"]);
         assert_eq!(s, "\"a\\\"b:c\\\\d\\r\\n\\te\"");
     }
+
+    // spec: SEC-002
+    #[test]
+    fn the_curl_command_has_no_secret_in_it_and_ignores_the_curlrc() {
+        let cmd = curl_command(true, "=https", "30", 1000, "PROPFIND", "https://dav.example.com/cal/");
+        let args: Vec<String> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(args.first().map(String::as_str), Some("-q"), "{args:?}");
+        let k = args.iter().position(|a| a == "-K").expect("the configuration is read with -K");
+        assert_eq!(args[k + 1], "-", "{args:?}");
+        for banned in ["--user", "-u", "--data", "-d", "--data-binary", "-H", "--header", "--form", "-F"] {
+            assert!(!args.iter().any(|a| a == banned), "{banned} is on the command line: {args:?}");
+        }
+        // nothing but fixed words, numbers and the method and address is on the line
+        assert!(args.iter().all(|a| !a.contains('@') && !a.contains("pw")), "{args:?}");
+        assert_eq!(args.last().map(String::as_str), Some("https://dav.example.com/cal/"));
+    }
+
+    // spec: SEC-002
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn while_curl_runs_the_password_is_on_no_command_line_of_the_system() {
+        if !has_curl() {
+            return;
+        }
+        let secret = "pw-never-on-a-command-line-4711";
+        let acct = Account { url: String::new(), username: "ada-never-on-a-command-line".into(), password: secret.into() };
+        let (base, h) = mock_http(1, move |_, _, headers, body| {
+            assert!(headers.to_ascii_lowercase().contains("authorization: basic"), "{headers}");
+            // curl waits for this answer: look at every command line on this computer now
+            let mut curls = 0;
+            for entry in std::fs::read_dir("/proc").unwrap().flatten() {
+                let Ok(raw) = std::fs::read(entry.path().join("cmdline")) else { continue };
+                let line = String::from_utf8_lossy(&raw).replace('\0', " ");
+                if line.contains("-K - ") && line.contains("--proto") {
+                    curls += 1;
+                    assert!(line.starts_with("curl -q ") || line.contains("/curl -q "), "{line}");
+                    assert!(!line.contains(secret) && !line.contains("never-on-a-command-line") && !line.contains("BODYTEXT"), "{line}");
+                }
+            }
+            assert!(curls >= 1, "the running curl was not found");
+            assert_eq!(body, "BODYTEXT");
+            (200, String::new())
+        });
+        let r = request("PUT", &format!("{base}/x"), "0", "BODYTEXT", &acct).unwrap();
+        assert_eq!(r.status, 200);
+        h.join().unwrap();
+    }
     use std::io::{BufRead, BufReader, Read};
     use std::net::TcpListener;
     use std::process::Command;
@@ -879,7 +1009,7 @@ pub(crate) mod tests {
         assert!(request("PROPFIND", "http://127.0.0.1:1/", "0", "", &bad_user).is_err());
     }
 
-    // spec: SEC-007
+    // spec: SEC-007, SEC-016
     #[test]
     fn passwords_stay_out_of_debug_output() {
         let acct = Account { url: "https://x".into(), username: "ada".into(), password: "hunter2".into() };
@@ -1081,6 +1211,43 @@ pub(crate) mod tests {
         })
     }
 
+    // spec: SOC-053, SEC-026
+    #[test]
+    fn an_upload_names_its_file_to_curl_through_its_input_never_the_command_line_and_odd_names_are_refused() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("shale-upload-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("pic.bin");
+        std::fs::write(&file, "FILEBYTES").unwrap();
+        let nobody = Account { url: String::new(), username: String::new(), password: Default::default() };
+        let (base, handle) = mock_http(2, |_, path, headers, body| {
+            let low = headers.to_ascii_lowercase();
+            assert!(low.contains("authorization: bearer tok-secret"), "{headers}");
+            if path == "/raw" {
+                assert!(low.contains("content-type: image/png") && body == "FILEBYTES", "{headers} {body}");
+            } else {
+                assert!(low.contains("multipart/form-data") && body.contains("name=\"file\"; filename=\"pic.bin\"") && body.contains("FILEBYTES") && body.contains("name=\"description\"") && body.contains("a \"quoted\" text"), "{body}");
+            }
+            (200, "{}".into())
+        });
+        let hs = ["Authorization: Bearer tok-secret", "Content-Type: image/png"];
+        let r = request_upload("POST", &format!("{base}/raw"), &hs, Upload::Raw { path: &file }, &nobody, 1000).unwrap();
+        assert_eq!(r.status, 200);
+        let form = Upload::Form { field: "file", path: &file, mime: "image/png", fields: &[("description", "a \"quoted\" text")] };
+        assert_eq!(request_upload("POST", &format!("{base}/form"), &hs[..1], form, &nobody, 1000).unwrap().status, 200);
+        handle.join().unwrap();
+        // a name or type that could change the meaning of curl's input is refused before curl runs
+        for bad in ["a\"b.png", "a;b.png", "a,b.png", "a\nb.png"] {
+            let p = dir.join(bad);
+            assert!(request_upload("POST", &format!("{base}/raw"), &hs, Upload::Raw { path: &p }, &nobody, 1000).unwrap_err().contains("special characters"), "{bad}");
+        }
+        let odd_mime = Upload::Form { field: "file", path: &file, mime: "image/png;filename=x", fields: &[] };
+        assert!(request_upload("POST", &format!("{base}/form"), &hs, odd_mime, &nobody, 1000).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Like `mock_http`, the handler also returns extra response header lines.
     pub(crate) fn mock_http_with(n: usize, handler: impl Fn(&str, &str, &str, &str) -> (u16, String, String) + Send + 'static) -> (String, std::thread::JoinHandle<Vec<String>>) {
         let l = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1192,7 +1359,7 @@ pub(crate) mod tests {
         assert_eq!(seen.len(), 4);
     }
 
-    // spec: CAL-004, CAL-011
+    // spec: CAL-004, CAL-011, SEC-004
     #[test]
     fn writes_and_removes_events() {
         if !has_curl() {
@@ -1315,7 +1482,7 @@ pub(crate) mod tests {
         assert_eq!(r.body, "<x>HTTP/1.1 200 OK\r\n\r\nnot a header</x>");
     }
 
-    // spec: CAL-004
+    // spec: CAL-004, SEC-004
     #[test]
     fn fetched_events_know_their_address() {
         if !has_curl() {

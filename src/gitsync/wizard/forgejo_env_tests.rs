@@ -122,13 +122,13 @@ fn forgejo_env_a_token_creates_a_repository_and_git_syncs_with_it_through_the_as
     assert!(!remote.contains(token.expose()));
     let a = st.vault("a");
     crate::fsutil::write_atomic(&a.join("Note.md"), b"from a\n").unwrap();
-    let (state, has_notes, _) = connect_and_inspect(&st.git, &a, &remote, None, &st.root.join("history"), &TreeLock::default()).unwrap();
+    let (state, has_notes, _) = connect_and_inspect(&st.git, &a, &remote, None, &st.root.join("history"), &TreeLock::default(), &crate::busy::Cancel::default()).unwrap();
     assert_eq!((state, has_notes), (Remote::Empty, true));
     let rep = gitsync::sync(&st.git, &a, &options("a"), &TreeLock::default()).unwrap();
     assert!(rep.pushed, "{rep:?}");
     // the notes are on the server: another computer's vault takes them
     let b = st.vault("b");
-    let (state, has_notes, _) = connect_and_inspect(&st.git, &b, &remote, None, &st.root.join("history"), &TreeLock::default()).unwrap();
+    let (state, has_notes, _) = connect_and_inspect(&st.git, &b, &remote, None, &st.root.join("history"), &TreeLock::default(), &crate::busy::Cancel::default()).unwrap();
     assert_eq!((state, has_notes), (Remote::HasNotes, false));
     gitsync::sync(&st.git, &b, &options("b"), &TreeLock::default()).unwrap();
     assert_eq!(crate::fsutil::read_to_string(b.join("Note.md")).unwrap(), "from a\n");
@@ -154,27 +154,27 @@ fn forgejo_env_a_wrong_token_a_missing_repository_and_no_server_are_told_in_plai
     // a wrong token
     st.keep("shale", "this-is-not-the-token");
     let v = st.vault("wrong");
-    let err = connect_and_inspect(&st.git, &v, &remote, None, &st.root.join("history"), &TreeLock::default()).unwrap_err();
+    let err = connect_and_inspect(&st.git, &v, &remote, None, &st.root.join("history"), &TreeLock::default(), &crate::busy::Cancel::default()).unwrap_err();
     assert_eq!(err, Problem::Sign.words(), "{err}");
     // no token at all (a user the keyring knows nothing about)
     let v2 = st.vault("none");
-    let err = connect_and_inspect(&st.git, &v2, &s.https_remote("nobody", "shale", &name), None, &st.root.join("history"), &TreeLock::default()).unwrap_err();
+    let err = connect_and_inspect(&st.git, &v2, &s.https_remote("nobody", "shale", &name), None, &st.root.join("history"), &TreeLock::default(), &crate::busy::Cancel::default()).unwrap_err();
     assert_eq!(err, Problem::Sign.words(), "{err}");
 
     // the right token, a repository that is not there
     st.keep("shale", token.expose());
     let v3 = st.vault("missing");
-    let err = connect_and_inspect(&st.git, &v3, &s.https_remote("shale", "shale", &unique("missing")), None, &st.root.join("history"), &TreeLock::default()).unwrap_err();
+    let err = connect_and_inspect(&st.git, &v3, &s.https_remote("shale", "shale", &unique("missing")), None, &st.root.join("history"), &TreeLock::default(), &crate::busy::Cancel::default()).unwrap_err();
     assert_eq!(err, Problem::NoRepository.words(), "{err}");
     // and with it the one that is there works
     let v4 = st.vault("ok");
-    assert_eq!(connect_and_inspect(&st.git, &v4, &remote, None, &st.root.join("history"), &TreeLock::default()).unwrap().0, Remote::Empty);
+    assert_eq!(connect_and_inspect(&st.git, &v4, &remote, None, &st.root.join("history"), &TreeLock::default(), &crate::busy::Cancel::default()).unwrap().0, Remote::Empty);
 
     // no server: a port nothing listens on
     let closed = closed_port();
     let dead = Server { kind: Kind::Forgejo, scheme: "http".into(), host: format!("127.0.0.1:{}", closed.port) };
     let v5 = st.vault("dead");
-    let err = connect_and_inspect(&st.git, &v5, &dead.https_remote("shale", "shale", "x"), None, &st.root.join("history"), &TreeLock::default()).unwrap_err();
+    let err = connect_and_inspect(&st.git, &v5, &dead.https_remote("shale", "shale", "x"), None, &st.root.join("history"), &TreeLock::default(), &crate::busy::Cancel::default()).unwrap_err();
     assert_eq!(err, Problem::NoNetwork.words(), "{err}");
     // the plain-words function agrees with what git said
     let raw = test_sync::inspect(&st.git, &v5).unwrap_err();

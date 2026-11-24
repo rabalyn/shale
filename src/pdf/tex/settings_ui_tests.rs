@@ -178,7 +178,7 @@ fn the_engine_choice_is_a_setting_changed_by_a_click() {
     assert_eq!(t.app.cfg.tex.engine, TexChoice::Auto);
 }
 
-// spec: TEX-002, TEX-023
+// spec: TEX-002, TEX-023, JOB-029
 #[test]
 fn install_asks_first_with_the_sizes_and_downloads_nothing_until_the_person_agrees() {
     let mut t = T::new("consent", nothing_found());
@@ -195,7 +195,7 @@ fn install_asks_first_with_the_sizes_and_downloads_nothing_until_the_person_agre
     assert!(!t.data().join("shale").exists(), "nothing was made on disk");
 }
 
-// spec: TEX-002, TEX-023
+// spec: TEX-002, TEX-023, JOB-029
 #[test]
 fn agreeing_starts_the_install_job_and_its_failure_is_reported_with_nothing_left() {
     let mut t = T::new("agree", nothing_found());
@@ -211,33 +211,36 @@ fn agreeing_starts_the_install_job_and_its_failure_is_reported_with_nothing_left
     assert!(!super::engine::partial_root(&t.data()).exists() && !super::engine::managed_root(&t.data()).exists());
 }
 
-// spec: TEX-002, TEX-023
+// spec: TEX-002, TEX-023, JOB-029
 #[test]
 fn the_progress_of_a_running_install_is_shown_and_cancel_asks_the_job_to_stop() {
     let mut t = T::new("progress", nothing_found());
     let handle = Handle::default();
     handle.set(|p| *p = Progress { stage: Stage::Packages, done: 31, total: 52, package: "koma-script".into() });
     // a job that never ends by itself, standing in for the install
-    let (_tx, rx) = std::sync::mpsc::channel();
-    t.app.tex.task = Some(Task { kind: TaskKind::Install, handle: handle.clone(), rx });
-    assert!(t.shows("Installing the packages: koma-script (31 of 52)"), "{:?}", t.painted());
+    let (tx, rx) = std::sync::mpsc::channel();
+    t.app.tex.inject(TaskKind::Install, handle.clone(), rx);
+    let task = t.app.busy.info(&super::settings_ui::TEX_JOB).expect("the install is a task of the registry");
+    assert_eq!((task.label.as_str(), task.cancellable), ("Installing TeX Live…", true));
+    assert!(t.shows("Installing the packages: koma-script (31 of 52)") && t.shows("Installing TeX Live…"), "{:?}", t.painted());
     assert!(!t.shows("Install TeX Live…"), "no second install while one runs");
     handle.set(|p| *p = Progress { stage: Stage::Fonts, ..Progress::default() });
     assert!(t.shows("Building the font cache"), "{:?}", t.painted());
     assert!(!handle.cancelled());
-    t.click("Cancel install");
+    t.click("Cancel");
     assert!(handle.cancelled(), "Cancel stops the job");
-    // an update shows its own cancel button
+    drop(tx);
+    t.wait_for_job();
+    // an update is a task with its own text and Cancel
     let handle = Handle::default();
-    let (_tx2, rx) = std::sync::mpsc::channel();
-    t.app.tex.task = Some(Task { kind: TaskKind::Update, handle: handle.clone(), rx });
-    assert!(t.shows("Cancel update") && !t.shows("Cancel install"));
-    // the end of the job is taken by the window and the page looks again
     let (tx, rx) = std::sync::mpsc::channel();
-    t.app.tex.task = Some(Task { kind: TaskKind::Update, handle, rx });
+    t.app.tex.inject(TaskKind::Update, handle.clone(), rx);
+    assert!(t.shows("Updating TeX Live…") && t.shows("Cancel") && !t.shows("Installing TeX Live…"));
+    // the end of the job is taken by the window and the page looks again
     tx.send(Ok(Notice::new("The update is done.", true))).unwrap();
+    t.wait_for_job();
     assert!(t.shows("The update is done."), "{:?}", t.painted());
-    assert!(t.app.tex.task.is_none());
+    assert!(t.app.tex.task.is_none() && t.app.busy.list().is_empty());
 }
 
 /// A tree where the managed TeX Live would be, with a file in it and one beside it.
@@ -331,6 +334,26 @@ mod fake {
     use super::*;
     use crate::pdf::tex::compile_tests::fake::Fake;
 
+    // spec: JOB-029
+    #[test]
+    fn job_029_the_test_compile_is_a_task_that_cannot_stop_and_its_button_is_off_while_it_runs() {
+        let f = Fake::new("job035-test");
+        f.lualatex();
+        f.put("log.last", "ok\n");
+        let gate = f.hold();
+        let mut t = T::new("job035-test", found(Ok(f.engine()), Err("not installed"), None));
+        t.click("Test");
+        let task = t.app.busy.info(&super::super::settings_ui::TEX_JOB).expect("the test is a task");
+        assert_eq!((task.label.as_str(), task.cancellable), ("Compiling the test document…", false));
+        assert!(t.shows("Compiling the test document…") && !t.shows("Cancel"), "{:?}", t.painted());
+        t.click("Test");
+        assert_eq!(t.app.busy.list().len(), 1, "a second test is not started");
+        std::fs::write(&gate, "").unwrap();
+        t.wait_for_job();
+        assert!(t.app.busy.list().is_empty());
+        assert!(t.app.tex.notice.clone().expect("a notice").ok);
+    }
+
     // spec: TEX-004, TEX-023
     #[test]
     fn test_compiles_the_small_document_with_the_chosen_tex_as_a_job_and_reports() {
@@ -354,6 +377,21 @@ mod fake {
     }
 }
 
+// spec: JOB-029
+#[test]
+fn job_029_a_removal_is_a_task_that_cannot_stop() {
+    let mut t = T::new("job035-remove", nothing_found());
+    let (tx, rx) = std::sync::mpsc::channel();
+    t.app.tex.inject(TaskKind::Remove, Handle::default(), rx);
+    let task = t.app.busy.info(&super::settings_ui::TEX_JOB).expect("the removal is a task");
+    assert_eq!((task.label.as_str(), task.cancellable), ("Removing the TeX Live…", false));
+    assert!(t.shows("Removing the TeX Live…") && !t.shows("Cancel"), "{:?}", t.painted());
+    assert!(t.app.busy.begin(super::settings_ui::TEX_JOB, "again").is_none(), "no second job beside it");
+    drop(tx);
+    t.wait_for_job();
+    assert!(t.app.busy.list().is_empty());
+}
+
 // spec: TEX-002, TEX-003
 #[test]
 fn the_end_of_an_install_or_update_says_which_mirror_it_came_from() {
@@ -369,4 +407,24 @@ fn the_end_of_an_install_or_update_says_which_mirror_it_came_from() {
     assert!(!n.ok && n.text.contains("from the mirror https://a.example/tlnet, but the test document"), "{}", n.text);
     assert_eq!(done_notice(Err("cancelled".into()), "The install").text, "The install was cancelled; nothing of it is left.");
     assert_eq!(done_notice(Err("boom".into()), "The update").text, "The update failed: boom");
+}
+
+// spec: TEX-001, JOB-023
+#[test]
+fn the_look_for_tex_is_a_task_that_ends_with_the_look_and_never_runs_twice() {
+    let mut t = T::new("probe-task", found(Err("none"), Err("none"), None));
+    let ctx = eframe::egui::Context::default();
+    t.app.tex.check_again(&ctx);
+    let info = t.app.busy.info(&TEX_PROBE).expect("the look is a task of the window's list");
+    assert_eq!((info.label.as_str(), info.cancellable), (TEX_PROBE_TEXT, false));
+    assert!(t.app.tex.detection.is_none(), "the old answer is gone while it looks again");
+    t.app.tex.check_again(&ctx);
+    assert_eq!(t.app.busy.list().len(), 1, "a second look does not start next to the first");
+    let start = std::time::Instant::now();
+    while t.app.tex.detecting.is_some() {
+        assert!(start.elapsed() < Duration::from_secs(60), "the look ends");
+        t.app.tex.poll(&ctx);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(t.app.tex.detection.is_some() && !t.app.busy.is_running(&TEX_PROBE), "the task is gone when the answer is in");
 }

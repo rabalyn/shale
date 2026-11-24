@@ -1,4 +1,4 @@
-//! The text of a PDF made by LuaLaTeX, for the tests of the writer: every glyph a page draws, by
+//! The text of a PDF made by LuaLaTeX, for the tests of the writer (TEX-008): every glyph a page draws, by
 //! the `ToUnicode` map of its font, with hayro's interpreter. Not a layout engine: the text of a
 //! page comes in the order it was drawn, so tests look for words with the spaces taken out.
 

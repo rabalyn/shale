@@ -31,6 +31,7 @@ impl T {
         let path = OsString::from(w.data.join("no-bin"));
         let mut app = ShaleApp::build(Options { screenshot: None, vault: None, view: None, keys: None }, false);
         app.sync.managed = ManagedState::for_test(w.data.clone(), Some(path.clone()), w.sources.clone(), Platform::new(os, arch));
+        app.sync.managed.busy = app.busy.clone();
         app.sync.managed.set_detection(detection, GitChoice::Auto);
         app.open_settings(SettingsTab::Sync);
         let mut t = T { app, hl: Headless::new(), w, path };
@@ -148,26 +149,100 @@ fn a_failed_install_says_why_and_leaves_nothing() {
     assert!(t.shows("Download and install git"), "the offer is back");
 }
 
-// spec: SYNC-025
+// spec: SYNC-025, JOB-028
 #[test]
-fn the_progress_of_a_running_install_is_shown_and_cancel_asks_the_job_to_stop() {
+fn job_028_a_running_install_is_a_task_with_progress_and_cancel_and_the_page_shows_it() {
     let mut t = T::new("progress", "windows", "x86_64", found(None, None));
-    let handle = super::install::Handle::default();
-    let (_tx, rx) = std::sync::mpsc::channel();
-    t.app.sync.managed.task = Some(Task { kind: TaskKind::Install, handle: handle.clone(), rx });
-    assert!(t.shows("Cancel install") && !t.shows("Download and install git"), "no second install while one runs: {:?}", t.painted());
+    let ctx = eframe::egui::Context::default();
+    // work that goes on until it is cancelled
+    let until_cancelled = |text: &'static str| {
+        move |h: &super::install::Handle, _: &dyn Fn()| {
+            while !h.cancelled() {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            Notice { text: text.into(), ok: true }
+        }
+    };
+    t.app.sync.managed.start(&ctx, TaskKind::Install, "Installing git and git-lfs…", until_cancelled("The install was cancelled."));
+    let handle = t.app.sync.managed.task.as_ref().expect("a task").handle.clone();
+    let task = t.app.busy.info(&GIT_MANAGED).expect("the install is a task of the registry");
+    assert_eq!((task.label.as_str(), task.cancellable), ("Installing git and git-lfs…", true));
+    assert!(t.shows("Installing git and git-lfs…") && t.shows("Cancel") && !t.shows("Download and install git"), "no second install while one runs: {:?}", t.painted());
     assert!(!handle.cancelled());
-    t.click("Cancel install");
+    t.click("Cancel");
     assert!(handle.cancelled(), "Cancel stops the job");
-    let (_tx2, rx) = std::sync::mpsc::channel();
-    t.app.sync.managed.task = Some(Task { kind: TaskKind::Update, handle: super::install::Handle::default(), rx });
-    assert!(t.shows("Cancel update") && !t.shows("Cancel install"));
-    // the end of the job is taken by the window
-    let (tx, rx) = std::sync::mpsc::channel();
-    t.app.sync.managed.task = Some(Task { kind: TaskKind::Update, handle: super::install::Handle::default(), rx });
-    tx.send(Ok(Notice { text: "The update is done: x.".into(), ok: true })).unwrap();
+    t.wait_until("the job ends", |t| t.app.sync.managed.task.is_none());
+    assert!(t.shows("The install was cancelled."), "{:?}", t.painted());
+    assert!(t.app.busy.list().is_empty(), "the task ends with the job");
+    // an update is a task too, and the end of the job is taken by the window
+    t.app.sync.managed.start(&ctx, TaskKind::Update, "Updating Shale's git…", until_cancelled("The update is done: x."));
+    assert!(t.shows("Updating Shale's git…") && t.shows("Cancel"));
+    t.click("Cancel");
+    t.wait_until("the update is taken in", |t| t.app.sync.managed.task.is_none());
     assert!(t.shows("The update is done: x."), "{:?}", t.painted());
-    assert!(t.app.sync.managed.task.is_none());
+}
+
+// spec: SYNC-025, JOB-028
+#[test]
+fn job_028_cancel_in_the_registry_stops_a_real_download_and_leaves_nothing() {
+    let mut t = T::new("cancel-real", "windows", "x86_64", found(None, None));
+    t.w.files.hang("/git-for-windows/git/releases/download/v2.99.0.windows.1/MinGit-2.99.0-64-bit.zip");
+    t.click("Download and install git");
+    let task = t.app.busy.info(&GIT_MANAGED).expect("the install is a task");
+    assert_eq!((task.label.as_str(), task.cancellable), ("Installing git and git-lfs…", true));
+    assert_eq!(t.app.busy.list().len(), 1, "and the indicator lists it");
+    // the indicator's Cancel is the registry's: it reaches the download through the handle's flag
+    assert!(t.app.busy.cancel(task.id));
+    t.wait_for_job();
+    let n = t.app.sync.managed.notice.clone().expect("a notice");
+    assert!(!n.ok && n.text.contains("The install of git and git-lfs was cancelled"), "{n:?}");
+    assert!(t.w.leftovers().is_empty());
+    assert!(t.app.busy.list().is_empty());
+}
+
+// spec: JOB-028
+#[test]
+fn job_028_removing_is_a_task_that_cannot_stop_and_the_looks_are_quiet_tasks() {
+    let mut t = T::new("remove-task", "windows", "x86_64", found(None, None));
+    let ctx = eframe::egui::Context::default();
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    t.app.sync.managed.start(&ctx, TaskKind::Remove, "Removing Shale's git…", move |_, _| {
+        let _ = rx.recv_timeout(Duration::from_secs(30));
+        Notice { text: "Shale's git was removed.".into(), ok: true }
+    });
+    let task = t.app.busy.info(&GIT_MANAGED).expect("the removal is a task");
+    assert_eq!((task.label.as_str(), task.cancellable), ("Removing Shale's git…", false));
+    assert!(t.shows("Removing Shale's git…") && !t.shows("Cancel"), "{:?}", t.painted());
+    assert!(t.app.busy.begin(GIT_MANAGED, "again").is_none(), "no second install, update or removal beside it");
+    tx.send(()).unwrap();
+    t.wait_until("the removal ends", |t| t.app.sync.managed.task.is_none());
+    assert!(t.shows("Shale's git was removed."));
+    // the look for git is a task whose page shows it; the key is quiet, so the indicator waits
+    t.wait_for_job();
+    let held = t.app.busy.begin_listed_after(GIT_DETECT, "Looking for git…", crate::busy::LISTED_AFTER).unwrap();
+    t.app.sync.managed.check_again(&ctx, GitChoice::Auto);
+    assert!(!t.app.sync.managed.busy(), "not started while the task is listed");
+    assert!(t.shows("Looking for git…"), "{:?}", t.painted());
+    assert!(t.app.busy.list().is_empty(), "a quiet task is not in the indicator at once");
+    drop(held);
+    t.wait_for_job();
+    assert!(t.app.busy.list().is_empty());
+}
+
+// spec: SYNC-027, JOB-028
+#[test]
+fn job_028_the_look_for_a_new_version_is_a_task_that_can_stop() {
+    let mut t = T::new("check-task", "windows", "x86_64", found(None, None));
+    installed(&mut t);
+    t.w.files.hang("/repos/git-for-windows/git/releases/latest");
+    t.click("Look for a new version");
+    let task = t.app.busy.info(&GIT_CHECK).expect("the check is a task");
+    assert_eq!((task.label.as_str(), task.cancellable), ("Looking for a newer git…", true));
+    assert!(t.shows("Looking for a newer git…") && t.shows("Cancel"), "{:?}", t.painted());
+    t.click("Cancel");
+    t.wait_until("the check ends", |t| t.app.sync.managed.notice.is_some());
+    assert!(t.shows("The look for a new version was cancelled."), "{:?}", t.painted());
+    assert!(t.app.busy.list().is_empty() && !t.app.busy.is_running(&GIT_CHECK));
 }
 
 fn installed(t: &mut T) {

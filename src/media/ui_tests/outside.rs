@@ -284,6 +284,93 @@ fn toast_with(fx: &Fx, what: &str) -> bool {
     fx.app.toasts.iter().any(|(t, _)| t.contains(what))
 }
 
+/// A plugin drawing (`.excalidraw.md`) with one picture element per entry of `embedded` (lines of
+/// `## Embedded Files`), its drawing data compressed or plain JSON.
+fn plugin_drawing(compressed: bool, embedded: &str) -> String {
+    let ids: Vec<&str> = embedded.lines().filter_map(|l| l.split_once(": ").map(|(id, _)| id)).collect();
+    let elements: Vec<String> = ids.iter().enumerate().map(|(i, id)| format!(r#"{{"id":"e{i}","type":"image","x":{},"y":0,"width":20,"height":10,"fileId":"{id}"}}"#, i * 30)).collect();
+    let scene = crate::drawing::Scene::parse(&format!(r#"{{"type":"excalidraw","version":2,"elements":[{}]}}"#, elements.join(","))).unwrap();
+    let text = crate::drawing::excalidraw_md::new_file(&scene).replace("\n%%\n## Drawing", &format!("\n## Embedded Files\n{embedded}\n%%\n## Drawing"));
+    if compressed {
+        text
+    } else {
+        crate::drawing::excalidraw_md::write(&text.replace("```compressed-json", "```json"), &scene).unwrap()
+    }
+}
+
+/// The window with the drawing `rel` (made by [`plugin_drawing`]) open.
+fn with_drawing(tag: &str, rel: &str, text: &str, libraries: Vec<Library>) -> Fx {
+    let mut fx = window(tag, "just a note\n", libraries);
+    std::fs::write(fx.dir.join(rel), text).unwrap();
+    fx.app.vault.as_mut().unwrap().rescan();
+    fx.app.open(std::path::Path::new(rel), false);
+    fx.hl.frames(&mut fx.app, 3);
+    fx
+}
+
+// spec: MEDIA-031
+#[test]
+fn a_drawing_with_an_outside_picture_is_copied_in_its_entry_points_into_the_vault_and_the_file_stays_valid() {
+    let o = Outside::new("drawing-copy");
+    o.picture("a.png").picture("b.png");
+    let by_address = o.address("b.png");
+    for (compressed, fence) in [(true, "```compressed-json"), (false, "```json")] {
+        let rel = "Sketch.excalidraw.md";
+        let embedded = format!("f1: [[@Media/a.png]]\n\nf2: [[{by_address}]]\n\nf3: [[@Media/gone.png]]\n\nf4: [[inside.png]]\n");
+        let mut fx = with_drawing(&format!("o-drawing-{compressed}"), rel, &plugin_drawing(compressed, &embedded), o.library());
+        image::RgbaImage::from_pixel(4, 4, image::Rgba([0, 0, 255, 255])).save(fx.dir.join("inside.png")).unwrap();
+        fx.app.vault.as_mut().unwrap().rescan();
+        let path = std::path::Path::new(rel);
+        assert!(!fx.app.drawings[path].dirty);
+        // the ⋯ menu of the drawing offers it
+        fx.click_label("⋯");
+        fx.click_label("Copy outside media into the vault");
+        copied(&mut fx);
+        let saved = std::fs::read_to_string(fx.dir.join(rel)).unwrap();
+        let scene = crate::drawing::excalidraw_md::read(&saved).expect("the file is still a valid drawing");
+        assert_eq!(scene.elements.len(), 4, "the drawing is the same");
+        assert!(saved.contains(fence) && (compressed || !saved.contains("compressed-json")), "the format stays: {saved}");
+        let entry = |id: &str| scene.embedded.iter().find(|(k, _)| k == id).map(|(_, t)| t.clone()).unwrap_or_else(|| panic!("{id}: {:?}\n{saved}", scene.embedded));
+        for id in ["f1", "f2"] {
+            assert!(entry(id).starts_with("z_media/") && entry(id).ends_with(".png"), "{id}: {}", entry(id));
+            assert!(fx.dir.join(entry(id)).is_file(), "the copy is in the vault");
+        }
+        assert!(entry("f1").ends_with("_a.png") && entry("f2").ends_with("_b.png"));
+        assert_eq!(entry("f3"), "@Media/gone.png", "a file that is not there is left");
+        assert_eq!(entry("f4"), "inside.png", "a picture of the vault is not touched");
+        assert!(saved.contains("f3: [[@Media/gone.png]]\n\nf4: [[inside.png]]"), "only the targets changed: {saved}");
+        assert!(toast_with(&fx, "Copied 2 files into the vault") && toast_with(&fx, "@Media/gone.png"), "the missing file is reported: {:?}", fx.app.toasts);
+        assert!(!fx.app.drawings[path].dirty, "saved");
+        assert_eq!(fx.app.drawings[path].scene.embedded, scene.embedded, "the open drawing points at the copies");
+        assert_eq!(walk_files(&fx.dir.join("z_media")).len(), 2);
+        assert!(o.folder.join("a.png").is_file(), "the originals stay");
+        // only the file that is not there is left: said, nothing changes
+        fx.app.copy_outside(path, None);
+        copied(&mut fx);
+        assert!(toast_with(&fx, "No file was copied into the vault. Left as they are"), "{:?}", fx.app.toasts);
+        assert_eq!(std::fs::read_to_string(fx.dir.join(rel)).unwrap(), saved);
+    }
+}
+
+// spec: MEDIA-031
+#[test]
+fn the_menu_entry_of_a_drawing_is_off_without_outside_pictures_and_a_drawing_that_cannot_be_read_is_not_changed() {
+    let o = Outside::new("drawing-off");
+    o.picture("a.png");
+    let none = plugin_drawing(true, "f1: [[inside.png]]\n");
+    let mut fx = with_drawing("o-drawing-off", "Sketch.excalidraw.md", &none, o.library());
+    fx.click_label("⋯");
+    fx.hl.frames(&mut fx.app, 2);
+    let at = fx.hl.text.iter().find(|(t, _)| t == "Copy outside media into the vault").map(|(_, p)| *p).expect("the entry is in the menu");
+    fx.hl.click(&mut fx.app, at + egui::vec2(8.0, 6.0), PointerButton::Primary);
+    assert!(fx.app.outside_copy.is_none() && fx.app.toasts.iter().all(|(t, _)| !t.contains("Copying")), "it does nothing when it is off");
+    // a drawing that could not be read is not written
+    let rel = std::path::Path::new("Sketch.excalidraw.md");
+    fx.app.drawings.get_mut(rel).unwrap().error = Some("broken".into());
+    fx.app.copy_outside(rel, None);
+    assert!(toast_with(&fx, "could not be read or is read-only") && fx.app.outside_copy.is_none(), "{:?}", fx.app.toasts);
+}
+
 /// Where the link of a note points after "Copy into the vault": the path in `z_media` and its bytes.
 fn copy_of(fx: &Fx, link: &str, name: &str) -> PathBuf {
     let rel = link.trim_start_matches("![[").split(['|', ']']).next().unwrap().to_string();
@@ -588,6 +675,49 @@ fn a_picture_that_is_decoded_slowly_is_loading_in_a_strip_and_does_not_stop_the_
     assert!(!said(&fx, "Loading"));
 }
 
+/// Where the line "after" is, from the last frame.
+fn after_at(fx: &Fx) -> Pos2 {
+    // the reading view has the line as a text of its own; the editor has one text and the number of the line in its gutter
+    fx.hl.text.iter().find(|(t, _)| t.trim() == "after").or_else(|| fx.hl.text.iter().find(|(t, _)| t == "3")).map(|(_, p)| *p).unwrap_or_else(|| panic!("the line after the picture is on screen: {:?}", fx.hl.text))
+}
+
+// spec: MEDIA-029
+#[test]
+fn a_picture_that_is_still_decoding_has_its_own_size_from_the_header_and_the_page_does_not_jump_when_it_arrives() {
+    for reading in [true, false] {
+        let tag = format!("sized-{reading}");
+        let o = Outside::new(&tag);
+        o.picture("a.png");
+        let path = o.folder.join("a.png");
+        let gate = Arc::new(crate::media::look::tests::Gate::default());
+        let g = gate.clone();
+        let mut fx = Fx::start(&format!("o-{tag}"), "![[@Media/a.png|60]]\n\nafter\n", &[], |app, ctx| {
+            app.cfg.media_libraries = o.library();
+            crate::media::look::Looks::of(ctx).use_decode(move |p| {
+                g.pass();
+                image::open(p).ok().map(|i| egui::ColorImage::from_rgba_unmultiplied([i.width() as usize, i.height() as usize], i.to_rgba8().as_raw()))
+            });
+        });
+        fx.show(reading);
+        // the decoder is held; the header is read
+        let looks = crate::media::look::Looks::of(fx.hl.ctx());
+        let start = std::time::Instant::now();
+        while !matches!(looks.picture(fx.hl.ctx(), &path), crate::media::look::Pic::Loading(Some(_))) {
+            assert!(start.elapsed() < std::time::Duration::from_secs(60), "the header was not read");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(matches!(looks.picture(fx.hl.ctx(), &path), crate::media::look::Pic::Loading(Some(s)) if s == egui::vec2(80.0, 40.0)), "the size of the file, from its header");
+        fx.hl.frames(&mut fx.app, 3);
+        assert_eq!(drawn_now(&mut fx), 0, "nothing is decoded yet");
+        let waiting = after_at(&fx);
+        gate.open();
+        assert_eq!(until_drawn(&mut fx, 1), 1);
+        fx.settle();
+        let arrived = after_at(&fx);
+        assert!((waiting.y - arrived.y).abs() < 0.5, "the line below stood at {waiting:?} while the picture loaded and stands at {arrived:?} after: the layout jumped (reading: {reading})");
+    }
+}
+
 // spec: MEDIA-024, MEDIA-016
 #[test]
 fn a_file_that_is_not_there_says_so_after_the_check_and_is_found_when_it_appears_and_lost_when_it_goes() {
@@ -658,4 +788,57 @@ fn a_click_on_an_outside_link_does_not_stop_the_window_while_the_file_is_handed_
     gate.open();
     fx.until("the file is opened", |a| a.outside_opens.is_empty());
     assert!(opened.lock().unwrap().iter().any(|p| p.ends_with("tone.wav")), "{:?}", opened.lock().unwrap());
+}
+
+// spec: MEDIA-017, JOB-023, JOB-005
+#[test]
+fn opening_an_outside_file_is_a_task_per_file_listed_while_it_is_handed_over_and_the_same_file_twice_is_refused() {
+    let o = Outside::new("open-task");
+    o.fixture("tone.wav", "tone.wav").fixture("tone.wav", "more.wav");
+    let gate = Arc::new(crate::media::look::tests::Gate::default());
+    let opened = Arc::new(Mutex::new(Vec::new()));
+    let (g, sink) = (gate.clone(), opened.clone());
+    let _guard = crate::opener::install_test_browser(Box::new(move |t| {
+        g.pass();
+        sink.lock().unwrap().push(t.to_string());
+    }));
+    let mut fx = window("o-open-task", "[[@Media/tone.wav]]\n\n[[@Media/more.wav]]\n", o.library());
+    fx.reading(true);
+    let labels = |fx: &Fx| fx.app.busy.list().iter().map(|t| t.label.clone()).collect::<Vec<_>>();
+    let click = |fx: &mut Fx, text: &str| {
+        fx.hl.frames(&mut fx.app, 2);
+        let at = fx.hl.text.iter().find(|(t, _)| t.contains(text)).map(|(_, p)| *p).unwrap_or_else(|| panic!("{text:?} is not on the screen: {:?}", fx.hl.text));
+        fx.hl.click(&mut fx.app, at + egui::vec2(6.0, 6.0), PointerButton::Primary);
+    };
+    click(&mut fx, "@Media/tone.wav");
+    assert_eq!(labels(&fx), ["Opening tone.wav…"], "the task names the file");
+    assert!(fx.app.busy.list().iter().all(|t| !t.cancellable), "handing a file to a program cannot be taken back, so there is no Cancel");
+    // the same file again: nothing starts; another file runs next to it
+    click(&mut fx, "@Media/tone.wav");
+    assert_eq!(fx.app.outside_opens.len(), 1, "a second click on the same file does nothing while it opens");
+    click(&mut fx, "@Media/more.wav");
+    assert_eq!(labels(&fx), ["Opening tone.wav…", "Opening more.wav…"]);
+    gate.open();
+    fx.until("both are handed over", |a| a.outside_opens.is_empty());
+    assert!(fx.app.busy.list().is_empty(), "the tasks are gone with the jobs");
+}
+
+// spec: MEDIA-021, JOB-023, JOB-006
+#[test]
+fn the_copy_into_the_vault_is_a_task_that_cancel_reaches_and_that_ends_with_the_copy() {
+    use crate::app::OUTSIDE_COPY;
+    let o = Outside::new("copy-task");
+    o.picture("a.png");
+    let mut fx = window("o-copy-task", "![[@Media/a.png]]\n", o.library());
+    let rel = std::path::Path::new("Player.md");
+    fx.app.copy_outside(rel, None);
+    let info = fx.app.busy.info(&OUTSIDE_COPY).expect("the copy is a task");
+    assert_eq!((info.label.as_str(), info.cancellable), ("Copying media into the vault…", true));
+    assert!(fx.app.busy.cancel(info.id), "Cancel reaches the copy");
+    copied(&mut fx);
+    assert!(!fx.app.busy.is_running(&OUTSIDE_COPY), "the task ends with the copy");
+    // stopped before the file or done before Cancel arrived: either way the person is told and the note is consistent
+    assert!(toast_with(&fx, "into the vault"), "{:?}", fx.app.toasts);
+    let text = note_text(&fx);
+    assert!(text == "![[@Media/a.png]]\n" || text.starts_with("![[z_media/"), "{text}");
 }

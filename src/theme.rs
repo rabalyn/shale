@@ -231,7 +231,7 @@ pub const HAND_FONT: &str = "hand";
 /// a list of keys to look a character up in (CFG-033, CFG-039).
 #[derive(Default)]
 pub struct SystemFonts {
-    pub data: Vec<(String, egui::FontData)>,
+    pub data: Vec<(String, std::sync::Arc<egui::FontData>)>,
     pub families: Vec<(String, Vec<String>)>,
 }
 
@@ -246,7 +246,7 @@ pub fn font_definitions(system: SystemFonts) -> egui::FontDefinitions {
     fam.extend(normal.clone());
     defs.families.insert(FontFamily::Name(HAND_FONT.into()), fam);
     for (key, data) in system.data {
-        defs.font_data.insert(key, std::sync::Arc::new(data));
+        defs.font_data.insert(key, data);
     }
     for (key, mut fam) in system.families {
         fam.extend(normal.clone());

@@ -1,14 +1,16 @@
 //! The "Import" dialog shown when e-mails, events or files are dropped on the window (or
 //! chosen with the Import button): what to import, the folder, tags and a few options.
 
+use crate::busy::{self, Busy, Key};
 use crate::import::{self, docx, Item, Source};
 use crate::media::intake::Choice;
 use crate::theme;
 use eframe::egui::{self, Rect, Ui};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::Arc;
+
+/// The conversion of the Word files with pandoc, as a task of the busy registry (JOB-020).
+pub const IMPORT_CONVERT: Key = Key::new("import-convert");
 
 /// The result of pandoc for the item at this place of the list.
 pub type Converted = (usize, Result<Arc<docx::Prepared>, String>);
@@ -27,10 +29,10 @@ pub struct ImportDialog {
     pub skip_signatures: bool,
     /// leave the quoted mails out of the text of e-mails (IMP-066)
     pub leave_out_quoted: bool,
-    /// pandoc runs for the Word files that are going on in a job (IMP-035)
-    pub converting: Option<Receiver<Result<Vec<Converted>, String>>>,
-    /// set when the dialog is let go: a pandoc run that is still going stops
-    pub cancel: Arc<AtomicBool>,
+    /// pandoc runs for the Word files that are going on in a job, a task of the registry (IMP-035,
+    /// JOB-020); letting go of the dialog stops it (JOB-010)
+    pub converting: Option<busy::Job<Vec<Converted>>>,
+    busy: Busy,
     /// a note to add links to the new notes to (where it was dropped / the open note)
     pub link_into: Option<PathBuf>,
     pub link_on: bool,
@@ -72,7 +74,7 @@ impl ImportDialog {
             skip_signatures: true,
             leave_out_quoted: false,
             converting: None,
-            cancel: Arc::new(AtomicBool::new(false)),
+            busy: Busy::default(),
             link_into,
             link_on,
             add_path: String::new(),
@@ -87,9 +89,16 @@ impl ImportDialog {
         }
     }
 
-    /// Start pandoc, in a job, on the Word files that have not been converted yet (IMP-035). False
-    /// when there is nothing to do.
-    pub fn start_conversion(&mut self, root: PathBuf) -> bool {
+    /// The registry the conversion is a task of (the window's; a dialog made without one has its own).
+    pub fn with_busy(mut self, busy: &Busy) -> Self {
+        self.busy = busy.clone();
+        self
+    }
+
+    /// Start pandoc, in a task of the registry (JOB-020), on the Word files that have not been
+    /// converted yet (IMP-035). `Ok(false)` when there is nothing to do; an error when a conversion
+    /// of another dialog still runs (JOB-005) and nothing starts.
+    pub fn start_conversion(&mut self, root: PathBuf) -> Result<bool, String> {
         let todo: Vec<(usize, PathBuf, PathBuf)> = self
             .items
             .iter()
@@ -101,10 +110,11 @@ impl ImportDialog {
             })
             .collect();
         if todo.is_empty() {
-            return false;
+            return Ok(false);
         }
-        let (keep, cancel, date) = (self.keep_docx, self.cancel.clone(), crate::media::local_date());
-        self.converting = Some(crate::jobs::spawn(
+        let Some(mut task) = self.busy.begin(IMPORT_CONVERT, "Converting the Word files with pandoc…") else { return Err("Word files are still being converted for another import; try again in a moment.".into()) };
+        let (keep, cancel, date) = (self.keep_docx, task.cancellable().flag(), crate::media::local_date());
+        self.converting = Some(task.run(
             move || {
                 let mut reserved = std::collections::HashSet::new();
                 todo.into_iter()
@@ -116,17 +126,14 @@ impl ImportDialog {
             },
             || {},
         ));
-        true
+        Ok(true)
     }
 
     /// Take the result of the job when it has ended. True when it has: the import can go on.
     pub fn poll_conversion(&mut self) -> bool {
-        let Some(rx) = &self.converting else { return false };
-        let done = match rx.try_recv() {
-            Ok(r) => r,
-            Err(TryRecvError::Empty) => return false,
-            Err(TryRecvError::Disconnected) => Err("the conversion stopped without a result".into()),
-        };
+        let Some(job) = &self.converting else { return false };
+        // the result always arrives, also after a panic (JOB-002): an empty channel is a job that runs
+        let Ok(done) = job.try_recv() else { return false };
         self.converting = None;
         match done {
             Ok(results) => {
@@ -184,7 +191,9 @@ impl ImportDialog {
 
 impl Drop for ImportDialog {
     fn drop(&mut self) {
-        self.cancel.store(true, Ordering::SeqCst);
+        if let Some(job) = &self.converting {
+            job.cancel();
+        }
     }
 }
 
@@ -200,40 +209,47 @@ pub(crate) fn size_text(n: usize) -> String {
 const OUTSIDE_CHOICES: [(&str, &str, Choice, &str); 2] =
     [("copy", "Copy into the vault", Choice::Copy, "A copy goes to the media folder (z_media/)"), ("link", "Link where it is", Choice::Link, "The note links the file where it is; nothing is copied")];
 
-/// "Continues [[note]]" of a mail that answers a note of the vault (IMP-068): the tick box, the
+/// "Continues [[note]]" of a mail or post that answers a note of the vault (IMP-068, SOC-071): the tick box, the
 /// choice when several notes qualify and, when the mail is older than a note of its thread, the
-/// question "Keep the thread in date order?" (IMP-071). True when the choice that decides the
-/// folder changed (IMP-069).
-fn continues_line(ui: &mut Ui, i: usize, c: &mut import::Continues, rec: &mut impl FnMut(String, egui::Response) -> egui::Response) -> bool {
+/// question "Keep the thread in date order?" (IMP-071), asked on one item per thread of the batch
+/// (`ask`: how many notes it changes, IMP-074). An earlier item of the same import (`in_import`: the
+/// title of the nearest one that is ticked) is named by its title and "(in this import)", as text
+/// and no choice; the line is hidden when there is nothing left to continue. True when the choice
+/// that decides the folder changed (IMP-069).
+fn continues_line(ui: &mut Ui, i: usize, c: &mut import::Continues, in_import: Option<String>, ask: Option<usize>, rec: &mut impl FnMut(String, egui::Response) -> egui::Response) -> bool {
+    if c.candidates.is_empty() && in_import.is_none() {
+        return false;
+    }
     let name = |p: &std::path::Path| p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let label = |p: &std::path::Path| format!("[[{}]]", name(p));
     let (was_on, was) = (c.on, c.chosen);
     ui.horizontal_wrapped(|ui| {
         rec(format!("continues:{i}"), ui.checkbox(&mut c.on, egui::RichText::new("Continues").size(12.5)))
-            .on_hover_text("Found by the reply headers of the mail (In-Reply-To, References). Ticked: the new note is linked into the thread (previous and next) and goes in the folder of that note. Unticked: it gets its ids only and no other note is touched");
+            .on_hover_text("Found by the reply headers of the mail or the reply ids of the post (never the subject or the text). Ticked: the new note is linked into the thread (previous and next) and goes in the folder of that note. Unticked: it gets its ids only and no other note is touched");
         if c.candidates.len() > 1 {
-            let label = c.anchor().map(name).unwrap_or_default();
-            egui::ComboBox::from_id_salt(format!("continues-pick:{i}")).selected_text(format!("[[{label}]]")).show_ui(ui, |ui| {
+            let shown = c.anchor().map(label).unwrap_or_default();
+            egui::ComboBox::from_id_salt(format!("continues-pick:{i}")).selected_text(shown).show_ui(ui, |ui| {
                 for (k, cand) in c.candidates.iter().enumerate() {
-                    rec(format!("continues-pick:{i}:{k}"), ui.selectable_value(&mut c.chosen, k, format!("[[{}]]  {}", name(&cand.rel), cand.date_key))).on_hover_text(cand.rel.to_string_lossy());
+                    rec(format!("continues-pick:{i}:{k}"), ui.selectable_value(&mut c.chosen, k, format!("{}  {}", label(&cand.rel), cand.date_key))).on_hover_text(cand.rel.to_string_lossy());
                 }
             });
         } else if let Some(a) = c.anchor() {
-            ui.label(egui::RichText::new(format!("[[{}]]", name(a))).size(12.5).color(theme::palette().link)).on_hover_text(a.to_string_lossy());
+            ui.label(egui::RichText::new(label(a)).size(12.5).color(theme::palette().link)).on_hover_text(a.to_string_lossy());
+        }
+        if let Some(t) = &in_import {
+            ui.label(egui::RichText::new(format!("{t} (in this import)")).size(12.5));
         }
     });
-    if c.on {
-        if let Some(plan) = c.plan().filter(|p| p.is_older()) {
-            let n = plan.changes();
-            ui.horizontal_wrapped(|ui| {
-                ui.label(egui::RichText::new(format!("Keep the thread in date order? This changes the previous and next of {n} note{}.", if n == 1 { "" } else { "s" })).size(12.0).color(theme::palette().muted));
-                if rec(format!("continues-update:{i}"), ui.selectable_label(c.update, "Update")).on_hover_text("Insert the mail at its place: it gets both links and its neighbours get a new next / previous line").clicked() {
-                    c.update = true;
-                }
-                if rec(format!("continues-leave:{i}"), ui.selectable_label(!c.update, "Leave the chain")).on_hover_text("Write the mail without previous and next; no other note is touched").clicked() {
-                    c.update = false;
-                }
-            });
-        }
+    if let (true, Some(n)) = (c.on, ask) {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(egui::RichText::new(format!("Keep the thread in date order? This changes the previous and next of {n} note{}.", if n == 1 { "" } else { "s" })).size(12.0).color(theme::palette().muted));
+            if rec(format!("continues-update:{i}"), ui.selectable_label(c.update, "Update")).on_hover_text("Insert it at its place: it gets both links and its neighbours get a new next / previous line").clicked() {
+                c.update = true;
+            }
+            if rec(format!("continues-leave:{i}"), ui.selectable_label(!c.update, "Leave the chain")).on_hover_text("Write it without previous and next; no other note is touched").clicked() {
+                c.update = false;
+            }
+        });
     }
     c.on != was_on || c.chosen != was
 }
@@ -252,6 +268,8 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
         crate::theme::prose(ui, muted("Nothing to import yet. Drop e-mails, calendar events, pictures or other files on the window, or add a file below."));
     }
     let outside: Vec<bool> = d.items.iter().map(|it| it.outside_media(&d.root)).collect();
+    let titles: Vec<Option<String>> = d.items.iter().map(|it| it.include.then(|| it.title.clone())).collect();
+    let questions = import::older_questions(&d.items);
     let mut refollow = false;
     for (i, it) in d.items.iter_mut().enumerate() {
         let outside_media = outside[i];
@@ -317,7 +335,8 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
             }
             let mut follow = false;
             if let Some(c) = &mut it.continues {
-                follow = continues_line(ui, i, c, &mut rec);
+                let nearest = c.batch.iter().find_map(|k| titles[*k].clone());
+                follow = continues_line(ui, i, c, nearest, questions.get(&c.group).filter(|(first, _)| *first == i).map(|(_, n)| *n), &mut rec);
             }
             if follow {
                 refollow = true;
@@ -456,7 +475,10 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
         rec("keep-docx".into(), ui.checkbox(&mut d.keep_docx, "Keep the original .docx")).on_hover_text("Copies each Word file into its import folder and names it in the note's properties");
     }
     if d.converting.is_some() {
-        ui.label(muted("Converting the Word files with pandoc…"));
+        ui.horizontal(|ui| {
+            ui.add(egui::Spinner::new().size(14.0));
+            ui.label(muted("Converting the Word files with pandoc… Cancel stops it."));
+        });
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
     }
     let included = || d.items.iter().filter(|i| i.include);
@@ -746,7 +768,7 @@ mod tests {
         assert!(!d.rects.iter().any(|r| r.0 == "keep-docx"));
     }
 
-    // spec: IMP-035
+    // spec: IMP-035, JOB-020
     #[test]
     fn the_result_of_the_conversion_job_is_taken_and_a_crash_fails_the_files_waiting_for_it() {
         let ready = |d: &ImportDialog| -> Vec<Option<bool>> { d.items.iter().map(|i| if let Source::Docx { ready, .. } = &i.source { ready.as_ref().map(|r| r.is_ok()) } else { None }).collect() };
@@ -754,36 +776,69 @@ mod tests {
         let mut d = ImportDialog::new(vec![item(), import::markdown_item("n.md".into(), "x".into())], vec![], String::new(), String::new(), None, false);
         assert!(!d.poll_conversion(), "nothing is running");
         // the job runs pandoc, which is not there: the file fails with the words for it
-        assert!(d.start_conversion(std::env::temp_dir().join("shale-dialog-conv-never-used")));
+        assert_eq!(d.start_conversion(std::env::temp_dir().join("shale-dialog-conv-never-used")), Ok(true));
         let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
         while !d.poll_conversion() {
             assert!(std::time::Instant::now() < end);
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         assert_eq!(ready(&d), vec![Some(false), None]);
-        assert!(!d.start_conversion(std::env::temp_dir()), "what has a result is not run again");
+        assert_eq!(d.start_conversion(std::env::temp_dir()), Ok(false), "what has a result is not run again");
         d.forget_conversions();
         assert_eq!(ready(&d), vec![None, None]);
-        // a job that ends without a result
-        let (tx, rx) = std::sync::mpsc::channel::<Result<Vec<Converted>, String>>();
-        drop(tx);
-        d.converting = Some(rx);
-        assert!(d.poll_conversion());
-        match &d.items[0].source {
-            Source::Docx { ready: Some(Err(e)), .. } => assert!(e.contains("without a result"), "{e}"),
-            other => panic!("{other:?}"),
-        }
         // a job that crashed
         d.forget_conversions();
-        let (tx, rx) = std::sync::mpsc::channel();
-        tx.send(Err("the background job crashed: boom".to_string())).unwrap();
-        d.converting = Some(rx);
+        d.converting = Some(Busy::default().spawn(IMPORT_CONVERT, "x", || -> Vec<Converted> { panic!("boom") }, || {}).unwrap());
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while !d.poll_conversion() {
+            assert!(std::time::Instant::now() < end);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(matches!(&d.items[0].source, Source::Docx { ready: Some(Err(e)), .. } if e.contains("boom")), "{:?}", d.items[0].source);
+    }
+
+    // spec: JOB-010, JOB-020
+    #[cfg(unix)]
+    #[test]
+    fn the_conversion_is_a_task_with_its_text_and_closing_the_dialog_stops_it_and_takes_it_off_the_list() {
+        let dir = std::env::temp_dir().join(format!("shale-dialog-conv-task-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let pandoc = dir.join("pandoc");
+        crate::test_exec::write_script(&pandoc, "#!/bin/sh\nsleep 30\n");
+        let item = || import::docx::docx_item(PathBuf::from("/in/a.docx"), Some(pandoc.clone()));
+        let wait_idle = |busy: &Busy| {
+            let end = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            while busy.is_running(&IMPORT_CONVERT) {
+                assert!(std::time::Instant::now() < end, "the task ends with its job");
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        };
+        let busy = Busy::default();
+        let mut d = ImportDialog::new(vec![item()], vec![], String::new(), String::new(), None, false).with_busy(&busy);
+        assert_eq!(d.start_conversion(dir.join("vault")), Ok(true));
+        let listed = busy.info(&IMPORT_CONVERT);
+        assert!(listed.as_ref().is_some_and(|t| t.cancellable && t.label == "Converting the Word files with pandoc…"), "{listed:?}");
+        // a second dialog waits: the registry refuses a second conversion (JOB-005)
+        let mut other = ImportDialog::new(vec![item()], vec![], String::new(), String::new(), None, false).with_busy(&busy);
+        assert!(other.start_conversion(dir.join("vault")).unwrap_err().contains("still being converted"));
+        assert!(other.converting.is_none());
+        // the dialog shows that it works, and Import waits
+        let mut h = H { ctx: egui::Context::default(), t: 0.0 };
+        h.frame(vec![], &mut d, &[], &[]);
+        assert_eq!(h.click("import", &mut d, &[], &[]), None, "Import is off while pandoc works");
+        // the list's own Cancel stops the work, and the dialog goes on with the files failed
+        assert!(busy.cancel(busy.list()[0].id));
+        wait_idle(&busy);
         assert!(d.poll_conversion());
-        assert!(matches!(&d.items[0].source, Source::Docx { ready: Some(Err(e)), .. } if e.contains("boom")));
-        // letting go of the dialog stops a run that is still going
-        let flag = d.cancel.clone();
+        assert!(matches!(&d.items[0].source, Source::Docx { ready: Some(Err(_)), .. }));
+        // Cancel or closing the dialog (the same, JOB-010) stops pandoc and the task goes
+        d.forget_conversions();
+        assert_eq!(d.start_conversion(dir.join("vault")), Ok(true));
         drop(d);
-        assert!(flag.load(Ordering::SeqCst));
+        wait_idle(&busy);
+        assert!(busy.list().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // spec: SOC-020

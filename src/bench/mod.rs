@@ -5,7 +5,7 @@
 //! `--bench-compare` and `--bench-report` turn results into a verdict and a page. See
 //! `docs/perf/README.md`.
 
-mod alloc;
+pub(crate) mod alloc;
 pub mod cli;
 mod compare;
 mod content_gen;

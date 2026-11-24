@@ -52,6 +52,20 @@ const REFRESH_EVERY: Duration = Duration::from_millis(800);
 /// The check of the mail index when the store opens (MAIL-006, JOB-015): started at app start, shown by the mail view through this key.
 pub const MAIL_INDEX: Key = Key::new("mail-index");
 
+/// The rebuild of the mail index (USE-012, JOB-016): a task that Cancel can stop between two folders.
+pub const MAIL_REBUILD: Key = Key::new("mail-rebuild");
+
+/// The sync of one mail account (JOB-021): one task per account, `MAIL_SYNC.with(account id)`, that Cancel
+/// stops between two batches of messages or two folders. The idle wait of the watch (IDLE) is not a task.
+pub const MAIL_SYNC: Key = Key::new("mail-sync");
+
+/// The sending of the due mails of one account (JOB-031): one task per account, `MAIL_SEND.with(account id)`.
+/// Cancel is looked at before each mail is taken from the Outbox, never inside a mail that is on its way.
+pub const MAIL_SEND: Key = Key::new("mail-send");
+/// The browser sign-in (OAuth2) of one mail account (JOB-032): one task per account, `MAIL_SIGNIN.with(account id)`,
+/// listed while the flow waits for the browser and until it has ended.
+pub const MAIL_SIGNIN: Key = Key::new("mail-signin");
+
 /// What the store is doing.
 pub enum StoreState {
     Closed,
@@ -160,7 +174,7 @@ pub enum SignInState {
 
 /// One sync of one account, running or finished.
 pub struct SyncRun {
-    rx: Receiver<Progress>,
+    pub(crate) rx: Receiver<Progress>,
     pub cancel: Arc<AtomicBool>,
     pub folder: String,
     pub done: usize,
@@ -430,6 +444,9 @@ pub struct MailView {
     pub local_view: Option<LocalView>,
     pub outbox_sel: Option<(String, String)>,
     send_running: HashSet<String>,
+    /// Accounts whose sending the person stopped with Cancel (JOB-031): the rest of their queue waits until
+    /// they queue, retry or send again, so Cancel is not undone by the next frame.
+    send_stopped: HashSet<String>,
     /// Account ids and their names, for the lists (set every frame by the app).
     pub account_names: HashMap<String, String>,
     // phase 4: signing and encrypting (ADR-0011)
@@ -603,6 +620,7 @@ impl MailView {
             local_view: None,
             outbox_sel: None,
             send_running: HashSet::new(),
+            send_stopped: HashSet::new(),
             account_names: HashMap::new(),
             gnupg: Gnupg::default(),
             consent: false,
@@ -1075,6 +1093,10 @@ impl MailView {
                     Ok(r) => {
                         if !r.sent.is_empty() {
                             self.notices.push(format!("{} mail{} sent.", r.sent.len(), if r.sent.len() == 1 { "" } else { "s" }));
+                        }
+                        if r.cancelled {
+                            self.send_stopped.insert(account.clone());
+                            self.notices.push("Sending was stopped. The mails that were not sent yet wait in the Outbox; queue, retry or send one again to go on.".to_string());
                         }
                         for (_, e) in &r.failed {
                             self.problems.push(format!("A mail was not sent: {e} (see the Outbox)"));
@@ -1731,10 +1753,12 @@ impl MailView {
             return;
         }
         let (Some(store), Some(account)) = (self.ready_store(), cfg.mail_accounts.iter().find(|a| a.id == id).cloned()) else { return };
-        let cancel = Arc::new(AtomicBool::new(false));
         let display = if account.name.is_empty() { account.host.clone() } else { account.name.clone() };
+        // the task ends with the job, before its last report is taken in (JOB-021)
+        let Some(mut task) = self.busy.begin(MAIL_SYNC.with(id), format!("Syncing {display}…")) else { return };
+        let cancel = task.cancellable().flag();
         let connector: Arc<dyn imap_sync::Connector> = Arc::new(self.lazy_connector(&account, None));
-        let rx = imap_sync::start(store, account.id.clone(), display, connector, self.opts.clone(), cancel.clone());
+        let rx = imap_sync::start(store, account.id.clone(), display, connector, self.opts.clone(), cancel.clone(), task);
         self.syncs.insert(id.to_string(), SyncRun { rx, cancel, folder: String::new(), done: 0, total: 0, added: 0, errors: vec![], finished: None });
     }
 
@@ -1775,7 +1799,10 @@ impl MailView {
         if matches!(self.signins.get(&account.id), Some(SignInState::Waiting { .. })) {
             return;
         }
-        let cancel = Arc::new(AtomicBool::new(false));
+        let display = if account.name.is_empty() { account.host.clone() } else { account.name.clone() };
+        // the task ends with the job, before its result is taken in; a second sign-in of the account is refused while it is listed (JOB-032)
+        let Some(mut task) = self.busy.begin(MAIL_SIGNIN.with(&account.id), format!("Signing in {display} in the browser…")) else { return };
+        let cancel = task.cancellable().flag();
         self.signins.insert(account.id.clone(), SignInState::Waiting { cancel: cancel.clone(), url: None });
         let (acct, id, id2) = (account.clone(), account.id.clone(), account.id.clone());
         let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
@@ -1788,7 +1815,9 @@ impl MailView {
                         c.request_repaint();
                     }
                 };
-                crate::mail::oauth::sign_in(&acct, secret, &cancel, crate::mail::oauth::SIGN_IN_TIMEOUT, &shown).map_err(|e| e.to_string())
+                let r = crate::mail::oauth::sign_in(&acct, secret, &cancel, crate::mail::oauth::SIGN_IN_TIMEOUT, &shown).map_err(|e| e.to_string());
+                drop(task);
+                r
             },
             move |r| Event::SignedIn { account: id2, result: flatten(r) },
         );
@@ -1798,6 +1827,15 @@ impl MailView {
     pub fn cancel_sign_in(&mut self, account: &str) {
         if let Some(SignInState::Waiting { cancel, .. }) = self.signins.get(account) {
             cancel.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// The account dialog closes: its sign-ins stop with it (JOB-010, JOB-032).
+    pub fn cancel_sign_ins(&mut self) {
+        for s in self.signins.values() {
+            if let SignInState::Waiting { cancel, .. } = s {
+                cancel.store(true, Ordering::SeqCst);
+            }
         }
     }
 
@@ -2215,7 +2253,7 @@ impl MailView {
         let now = crate::calendar::time::now();
         for a in &cfg.mail_accounts {
             let due = self.local_items.iter().any(|i| i.account == a.id && ((i.state == State::Queued && i.send_after <= now) || (i.state == State::Sent && !i.copy_done)));
-            if due {
+            if due && !self.send_stopped.contains(&a.id) {
                 self.start_send(a);
             }
         }
@@ -2227,11 +2265,22 @@ impl MailView {
             return;
         }
         let (Some(store), Some(ob)) = (self.ready_store(), self.outbox.clone()) else { return };
+        let display = if account.name.is_empty() { account.host.clone() } else { account.name.clone() };
+        // the task ends with the job, before its report is taken in (JOB-031)
+        let Some(mut task) = self.busy.begin(MAIL_SEND.with(&account.id), format!("Sending mail from {display}…")) else { return };
+        let cancel = task.cancellable().flag();
         self.send_running.insert(account.id.clone());
         let connector = LazySmtp { factory: self.smtp_factory.clone(), account: account.clone(), session: self.session_pw.get(&account.id).cloned() };
         let acct = account.clone();
         let id = account.id.clone();
-        self.spawn(move || send::send_due(&ob, &store, &acct, &connector, crate::calendar::time::now()), move |r| Event::Sent { account: id, result: r });
+        self.spawn(
+            move || {
+                let r = send::send_due(&ob, &store, &acct, &connector, crate::calendar::time::now(), &cancel);
+                drop(task);
+                r
+            },
+            move |r| Event::Sent { account: id, result: r },
+        );
     }
 
     /// The addresses to complete from: the people notes of the vault, then the addresses in the mail index (newest first).
@@ -2496,6 +2545,7 @@ impl MailView {
 
     /// The mail is in the outbox: the compose window is done.
     fn finish_queued(&mut self, item: Item) {
+        self.send_stopped.remove(&item.account);
         if let (Some(ob), Some(c)) = (self.outbox.clone(), self.compose.as_ref()) {
             if let Some(old) = c.saved_account.clone().filter(|o| o != &item.account) {
                 let _ = ob.discard_draft(&old, &item.id, &crate::mail::store::today_string());
@@ -2670,11 +2720,13 @@ impl MailView {
             back_to_editor = Some(ob.edit(&a, &i, now, &date));
         }
         if let Some((a, i)) = out.retry {
+            self.send_stopped.remove(&a);
             if let Err(e) = ob.retry(&a, &i, now) {
                 self.problems.push(format!("Retry: {e}"));
             }
         }
         if let Some((a, i)) = out.send_again {
+            self.send_stopped.remove(&a);
             if let Err(e) = ob.send_again(&a, &i, now) {
                 self.problems.push(format!("Send again: {e}"));
             }

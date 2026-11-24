@@ -220,5 +220,5 @@ fn write_book_in_shale(req: &BookRequest, board: Option<&Resolved>) -> Result<Do
     }
     let tex = document(head, true, false, toc.then(|| toc_depth(book)), &values, &main);
     let files = files.into_inner();
-    Ok(Document { tex, files: files.list, warnings: files.warnings })
+    Ok(Document::new(tex, files))
 }

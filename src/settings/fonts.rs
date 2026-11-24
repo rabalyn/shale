@@ -66,7 +66,7 @@ impl ShaleApp {
 fn font_row(ui: &mut Ui, (id, label): (&str, &str), choice: &mut FontChoice, families: &[String], searching: bool, fonts: &mut FontState, keymap: &Keymap) -> bool {
     let mut changed = false;
     let name = ui.label(label);
-    let picker = font_picker::show(ui, label, &mut choice.family, families, searching, keymap);
+    let picker = font_picker::show(ui, label, &mut choice.family, families, searching, keymap, fonts);
     changed |= picker.picked;
     let size_cell = ui.horizontal(|ui| {
         changed |= ui.add(egui::DragValue::new(&mut choice.size).range(MIN_SIZE..=MAX_SIZE).speed(0.1).suffix(" pt").max_decimals(1)).on_hover_text("Text size in points").changed();

@@ -26,7 +26,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   (```` ```js ````, ```` ```rust ````, `python`, `ts`, `toml`, `sh`, `json`, `yaml`, `c++`, … about 140 languages, with the usual aliases) in the
   editor and the reading view; a block without a language or with an unknown one stays plain.
   Inline code colours its strings, numbers and called names. The PDF export draws code the same way,
-  on the same dark code background (PDF-007).
+  on the same dark code background (PDF-007). A long block (20 lines or more) is plain for a moment and then coloured,
+  highlighted on a background thread so typing and scrolling do not stall; exports are coloured at once.
 - Line numbers are shown left of the text (Settings → Editor, on by default); a wrapped
   line keeps one number.
 - **Folding.** Headings (up to the next heading of the same or a higher level), quotes, list items and whole lists can be
@@ -179,13 +180,14 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   into the vault** (the right end of its caption in the editor and the preview, a button or a line in the
   reading view), and the note's ⋯ menu has **Copy outside media into the vault** for all of its links: the
   files go to `z_media/` in the background and the links are rewritten (width and alias kept, one undo step,
-  MEDIA-021). **Settings → Vault → Check names for Windows and macOS…** also lists the vault's outside
+  MEDIA-021); a drawing's ⋯ menu has the same for the outside pictures of its `## Embedded Files`, whose
+  entries are pointed at the copies (the drawing keeps its format, MEDIA-031). **Settings → Vault → Check names for Windows and macOS…** also lists the vault's outside
   links by note (a file that is not found, a library not set up on this computer or whose folder is not
   there, file links that work on this computer only; MEDIA-022), and **Data usage** counts the outside
   files the vault links and their size (USE-026), both in background jobs. The window never waits for
   the disk of a shown picture or media file: whether a file is there, its date and its decoding are looked
   up in the background and asked again every few seconds, and an embed says "Loading …" until the answer
-  is there, so a NAS or USB disk that does not answer freezes nothing (MEDIA-024). The Import tab of Settings is
+  is there, so a NAS or USB disk that does not answer freezes nothing (MEDIA-024). The placeholder of a picture has its size from the file's header, so the text below does not jump when it arrives (MEDIA-029), and the decoded pictures are kept up to 256 MiB, the ones shown longest ago going first (MEDIA-030). The Import tab of Settings is
   shown under "Importing e-mails, events and files".
 
 ![Reading view](userguide/z_media/screenshots/reading.png)
@@ -346,13 +348,13 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   `recipient:` and so on), switch the table of contents, and Export compiles the note with LuaLaTeX in
   the background (a spinner, Cancel). Headings become sections, chapters, slides or poster boxes by how
   they are nested; emphasis, code in colours, lists, tasks, tables with their column sizes, quotes,
-  links, colours, pictures, drawings (as vector graphics) and PDF pages are written, with every special
+  links, colours, pictures, drawings (as vector graphics), PDF pages and the player cards of sounds and videos (#623, as in the built-in export) are written, quotes with their bar, tags in violet and emoji in a bundled emoji font, with every special
   character kept as text; code sits on a light box, a picture inside a line is as high as the line, and a
   link to a heading of the note jumps there in the PDF (links to other notes are link-coloured text). A failure shows the file and line of the error or the package that is missing,
   and **Save the .tex** writes the document and its pictures into a folder for debugging with your own
   TeX. The dialog remembers the last engine, set and kind per vault, and a note can name its template
   with `latex-template: tuda/thesis`; a template the vault does not have, or a kind a folder's book cannot use, is said in the dialog (TEX-008 to
-  TEX-016, TEX-018, TEX-019, TEX-030 to TEX-033).
+  TEX-016, TEX-018, TEX-019, TEX-030 to TEX-033, TEX-041, TEX-042).
 
   ![The export dialog with the LaTeX template engine](userguide/z_media/screenshots/pdf-export-dialog-latex.png)
 
@@ -799,6 +801,7 @@ In a narrow sidebar the header wraps: the month name on its own line, the button
   browser**, and sign in on the provider's page. Shale shows who signed in, keeps only a refresh
   token in the system keyring and renews the short-lived access token by itself. If the sign-in
   expires or is revoked, the mail view and the settings say so and **Sign in again** fixes it.
+  The sign-in is a background task with Cancel (JOB-032): Cancel or closing the account settings stops waiting for the browser and keeps nothing; a second sign-in of the account does not start meanwhile.
   Without a keyring the sign-in lasts until Shale quits. If a renewed sign-in can't be saved in the keyring, Shale says so once.
   - *Google:* in the Google Cloud console create a project, set up the OAuth consent screen
     (External, status Testing) and add your Gmail address as a test user, create an **OAuth client
@@ -1030,14 +1033,23 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   tick box and, with several matches, a choice (IMP-068); the folder of the import follows the matched
   note unless a folder was dropped on or typed (IMP-069). Ticked, the new note gets `previous` / `next`
   links in date order and the last note of the thread its `next`: one line of one other note (IMP-070). An
-  older mail asks "Keep the thread in date order?" with **Update** or **Leave the chain**; an import never
+  older mail asks "Keep the thread in date order?" with **Update** or **Leave the chain**; one mail never
   rewrites more than two other notes, open notes are saved first (IMP-071). The new note and the neighbour
   lines are one history snapshot (IMP-072); a rename keeps the chain because `previous` and `next` are
   links, and old notes with only a `message-id` still match as the parent (IMP-073).
+  A whole thread dropped at once is chained in date order together with the notes of the vault (IMP-074): an item
+  that continues another item shows "Continues: <title> (in this import)", the question for older mails is asked
+  once per thread, and notes of the vault change only their `previous` / `next` line.
+- **A saved post continues its conversation the same way** (ADR-0032, #575). A post note has `in-reply-to`
+  and `thread-id` (the root of the conversation as the network gives it, else the post replied to, else the
+  post's own id) besides `post-id` and `network` (SOC-070). The Import dialog offers "Continues [[note]]" for
+  saved posts of the same network that it replies to, that reply to it or that share its `thread-id`; a saved
+  self-thread matches by every id in its `thread-ids` (SOC-071). `previous` / `next`, the question for an older
+  post and the one history snapshot are those of mails (SOC-072).
 - **Thread view** (NAV-070, KEY-050): a panel of the right sidebar lists the notes with the same
   `thread-id` as the open note, oldest first, with date, sender and title and the current one marked; a
   click opens the note (a pinned tab is not replaced). Ctrl+Shift+PageUp / Ctrl+Shift+PageDown step to
-  the previous / next mail of the thread, Ctrl+Shift+T opens the view and gives it the keyboard.
+  the previous / next mail or post of the thread, Ctrl+Shift+T opens the view and gives it the keyboard.
 - Drop onto a folder in the file list to import into that folder, or onto a note to also add
   links to the new notes there.
 - After an import of two or more items a window, **Import summary**, says what was made: the new
@@ -1083,8 +1095,8 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   token) or a Bluesky account (handle and an **app password** from Settings → Privacy and
   security → App passwords, never your main password). Secrets go to the system keyring. **Edit** next to an account signs in
   to it again (new app password or code) and replaces its secret; the account keeps its feeds and posts.
-- Pick the account and the feed (Mastodon: Home and your lists; Bluesky: Following and your
-  saved feeds). Posts show the avatar, name, time, "boosted by", pictures (video and GIF
+- Pick the account and the feed (Mastodon: Home, Notifications, Your posts and your lists; Bluesky:
+  Following, Notifications, Your posts and your saved feeds). Posts show the avatar, name, time, "boosted by", pictures (video and GIF
   previews have a play mark), quoted posts and link cards. A content warning stays closed until
   you click Show. The next page loads when you reach the end of the list.
 - **Several feeds at once**: every Feeds tab has its own feed, scroll position and back/forward
@@ -1100,6 +1112,20 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   exactly where it is, so you can scroll up slowly. **Check now** looks right away (a spinner shows inside the button while it runs);
   **⋯ → Reload from the top** replaces the list. If more than 200 posts came in on Bluesky,
   **Load more in between** fills the gap.
+- **Notifications are a feed** (Mastodon and Bluesky, in the picker of every account): one compact row
+  per notification (what happened, who did it, how long ago, a dot while it is unread; "Ada, Bo and 3
+  others favourited your post" when likes or boosts of one post come together, also when a page or a check cut the group) above the post it
+  is about as a normal card with all its buttons (reply, like, boost, quote, Show thread, Save to
+  vault …). A follow shows the account and **Open in browser**. Mentions, replies, quotes, favourites
+  / likes, boosts / reposts, follows and follow requests, polls, edits and posts you asked to be told about are
+  shown. The feed is checked like the others; new ones wait behind "N new notifications — show", the
+  tab title counts the unread ones, and when you have the list on screen Shale tells the server that
+  you read them (Mastodon's marker, Bluesky's "seen"), so other apps agree. Their posts are in the search index.
+  **Your posts** is the feed of your own posts, replies and boosts, with the same buttons; a post you
+  write from Shale waits there too.
+
+![The Notifications feed](userguide/z_media/screenshots/social-notifications.png)
+
 - **Search the posts you loaded**: every post a feed brings in is kept in a search index
   (`~/.local/share/shale/social-posts.db`, the same for every vault: text, author, date, links
   and the thread around it). The sidebar search (Ctrl+Shift+F) lists the posts that match under
@@ -1111,6 +1137,25 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   later, and a hit whose post is gone from both index and feed is fetched from the server.
   **Settings → Feeds → Post search index** shows how many posts are indexed, **Rebuild**s it
   from the posts your open feeds hold, or **Clear…**s it (after a question). (Mouse only for now.)
+- **The conversation of a post** opens in the same tab with a click on its reply count or **Show
+  thread** (Shift+click or middle click: a new tab): what it replies to above, the post highlighted,
+  and the replies below as a tree, moved in for each level (up to 6). It is fetched in the
+  background (spinner, an error with **Retry**) and drawn with the cards of the feed: pictures and
+  the viewer, links, content warnings, Save to vault, Open in browser and Copy link. **← Back** (or
+  the tab's Back) returns to the feed at the same place; another post's reply count opens that
+  conversation as the next step. Replies the server leaves out are noted, with Open in browser.
+
+![The conversation of a post](userguide/z_media/screenshots/social-thread.png)
+
+- **Pictures and videos open big in a viewer** over the tab (click one): fitted to the window, its description
+  (alt text) below, **◀ ▶** or Left / Right to step through the post's pictures and videos, mouse wheel or
+  `+` `-` to zoom, **100%** / **Fit** (`0`), drag to pan, Esc or **Close** to leave. The full size file
+  comes through the background picture cache (spinner while it loads, a message when it fails);
+  pictures behind a content warning stay closed until Show. **A video or GIF plays in the viewer** (SOC-076): the file
+  is fetched into the same cache (https only, no login, at most 64 MB; a Bluesky video as its real file from the
+  author's server), then plays in the media player's card with play / pause (also **Space**), seek and volume;
+  a GIF plays muted and again and again. Stepping away or closing stops it. Without ffmpeg the viewer shows the
+  video's preview picture and says so, and **Open in browser** stays.
 - **Save to vault** copies the post, and the whole thread when it is a thread by one author,
   into the Import dialog: choose the folder (default `Social`), tags and which pictures to
   bring along. **Open in browser** and **Copy link** are next to it.
@@ -1124,6 +1169,40 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   and the text (a thread: every post in order, numbered); the box **Header list in the note
   body** also writes them as a list below the title (IMP-058). The pictures are saved in `z_media/`, with their descriptions. A post
   that was saved before, also as part of a thread, is marked "Imported before".
+- **Like, boost, reply, quote, post**: every post has **Reply**, **Boost** / **Repost**,
+  **Favourite** / **Like** and **Quote** buttons (also in the conversation view), and the toolbar
+  has **New post**. Boost and Favourite / Like toggle (a second press takes it back), show whether
+  you did it (a filled button), and change the counts only when the server said yes; a spinner
+  inside the button shows while it runs and nothing moves. A quoted post inside a card has the same
+  buttons in a small row (Reply, Boost, Favourite, Quote, Show thread, Save, Open, Copy link) that act on the quoted post
+  itself (#588). A like or boost is also written into the post search index, so a post opened from the search shows
+  the state you left it in. The compose box has the text with a
+  live counter (Mastodon: the server's limit, 500 by default, addresses count 23; Bluesky: 300
+  characters), on Mastodon a content warning and who may see the post (a reply starts with the
+  author's @mention and is no more public than the post it answers), up to **4 pictures with a
+  description each** (**Choose pictures…** opens the system's file dialog, or drop picture files
+  on the box, or paste a picture with Ctrl+V, or type the path of a file or of one in the vault;
+  JPEG, PNG, GIF, WebP; Bluesky takes 1 MB, so bigger pictures are scaled down) or **one video** (MP4, QuickTime, WebM, MPEG; up to
+  what the server allows and 100 MB; on Bluesky it goes through the video service, with its size sent along and a video over 10 minutes refused when ffmpeg is installed), a **language** for the post (starts with the
+  setting Post language), on Mastodon a **poll** (options, duration, several choices, hidden totals; not together with
+  pictures or a video) and **Schedule…** to let the server send the post later (a date picked in a month grid or typed, an hour and a minute, local time, at least 5 minutes ahead;
+  **Scheduled posts…** lists them and cancels one), and **Send** (Ctrl+Enter), which
+  always asks **"Post this?"** with your handle, who may see it and the time of a scheduled post before anything is posted.
+  Mastodon **polls on cards** show their options with bars and percentages (after you voted, when the poll is closed and on your
+  own posts) or a Vote button with a spinner (#589).
+  Boosts and favourites do not ask. A **quote** uses the network's own quote (Bluesky; Mastodon
+  4.5 and later); for an older Mastodon server the post's web address is put into the text and
+  the box says so. Bluesky links, mentions and hashtags become clickable. When it is sent the box
+  closes and the post waits behind the "new posts" button (the view does not move); a failed send
+  keeps your text. **Mastodon accounts need the permission to write**: new sign-ins ask for it;
+  an account you signed in to before with read-only access keeps reading, and the first like,
+  boost, reply or post says "Sign in again to allow writing" and opens that account's **Edit**
+  sign-in.
+
+![The compose box](userguide/z_media/screenshots/social-compose.png)
+
+![A poll on a card](userguide/z_media/screenshots/social-poll.png)
+
 - Try it without an account: `shale --screenshot out.png --view social` shows made-up posts.
 
 ## People (contact notes)
@@ -1165,10 +1244,16 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   that tests keep complete.
 
   ![Settings with the search for "cursor" and its results, each with its tab](userguide/z_media/screenshots/settings-find.png)
+
+  ![The Vault tab of Settings](userguide/z_media/screenshots/settings-vault.png)
+
+  ![The Editor tab of Settings](userguide/z_media/screenshots/settings-editor.png)
 - The settings of the program itself are one text file, `~/.config/shale/config.toml`, with a
   description above every setting. "Open settings file" (top right of Settings) opens it in a tab (no note, no
   vault file); saving applies the values at once, a change from another editor is picked up within a
   second, and text with an error is not saved (quitting puts it in the recovery folder instead of losing it). An old `config.json` is moved over at the first start.
+
+  ![The settings file in a tab of its own](userguide/z_media/screenshots/settings-file.png)
 - Each vault keeps its own settings in `.shale/settings.json` (people folder, git sync) and its
   session in `.shale/state.json` (open notes, last import folder, recent tags), so a vault
   behaves the same on every computer. The undo histories of the notes (`u` in vim-style editing)
@@ -1199,7 +1284,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   the mail index, its daily backups, damaged copies of the mail index, the learned tag words, the
   undo histories of the notes of the open vault and the keyboard debug log. Each row shows its size, entries, oldest entry and last cleanup, and
   has a **Clear** button. The mail index is **rebuilt** from the message files instead (it asks
-  first; not while mail syncs or a change waits for the server), and damaged copies are only
+  first; not while mail syncs or a change waits for the server; it is a background task with Cancel, JOB-016), and damaged copies are only
   deleted after you confirm; Clear on the undo histories asks first too (every `u` history of the
   vault goes, damaged copies included) and empties the histories of the open notes.
 - How long each cache is kept is a setting (on its row, and in Settings under "How long caches
@@ -1220,7 +1305,10 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   installed one **Restart now**, which saves everything like quitting and starts the new version (UPD-001 to UPD-010,
   UPD-019, UPD-020).
 - The download is checked against the release's `.sha256` file and nothing is installed when it does not match. That
-  shows the file arrived whole, not who made it (authenticity is #422, UPD-022).
+  shows the file arrived whole, not who made it. For that the owner signs the release files with a key whose public
+  half is built into Shale (an SSH signature, `<file>.sig`); Shale installs a file only when its signature is valid, and
+  a release that has none yet (older ones, or the hours before it is signed) is only announced with a link to its page
+  (UPD-022 to UPD-025).
 - What an update does depends on how this copy was installed (UPD-011 to UPD-018): the Linux folder or an `install.sh`
   install, the macOS app and the Windows folder update themselves and keep the previous program as `shale.old` until the
   new one has run (on Windows `shale.exe.old` goes at the next start); a package-managed install (AUR `shale-bin`,
@@ -1390,7 +1478,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 ## Busy states: spinner, what is happening, Cancel
 
-Whatever runs longer than a moment says what it does, cannot be started twice and shows in one place (JOB-003 to JOB-015, #397, #385).
+Whatever runs longer than a moment says what it does, cannot be started twice and shows in one place (JOB-003 to JOB-030, #397, #385, #524, #525, #526).
 
 - **A spinner and what happens.** A running action shows a spinner and a short phrase that names it
   ("Syncing with git…", "Checking file names and links…", "Exporting “Handbook” to PDF…"). Where the work can stop, **Cancel**
@@ -1403,10 +1491,15 @@ Whatever runs longer than a moment says what it does, cannot be started twice an
   where the work can stop. It disappears when nothing runs.
   ![The indicator with two tasks listed](userguide/z_media/screenshots/busy-indicator.png)
 - **Known vaults** (VAULT-029, VAULT-031, VAULT-040, CFG-075, #582): the global `config.toml` keeps a list of the vaults Shale has opened, each with a name (by default the folder's name, local to the computer) and its canonical path, so a folder is never listed twice and the list has no length cap. It replaces the recent list and is converted from it at the first start. A vault is added when it has loaded (also one from `--vault` or a second start, never one that failed to load). The start screen lists the names; the window title shows the name of the open vault, with the parent folder after it when two known vaults have the same name.
-- **Vault dropdown** (VAULT-030, VAULT-032 to VAULT-034, VAULT-038, VAULT-039, #583): the vault label at the bottom left of the window (name and ▾) opens a list of the known vaults, the open one marked, then **Open…** and **Create…**. A click or Enter opens a vault; arrows, Enter and Esc work. A right-click on a vault offers **Rename** (an empty name is refused). Open… and Create… use the app's own folder picker (a path field, the folders below, Up); Create takes an empty folder (hidden files do not count; a new path is made), can start with sample notes, and offers to open a folder with content instead. A vault whose folder is missing is greyed out in the list and on the start screen with **Locate…** (pick the new folder, the name stays) and **Forget**, and Shale never makes that folder again by itself. A folder inside a known vault, or around one, is allowed and warned about once. Close, and the "Switch vault" command, follow in #584.
+- **Vault dropdown** (VAULT-030, VAULT-032 to VAULT-034, VAULT-038, VAULT-039, #583): the vault label at the bottom left of the window (name and ▾) opens a list of the known vaults, the open one marked, then **Open…** and **Create…**. A click or Enter opens a vault; arrows, Enter and Esc work. A right-click on a vault offers **Rename** (an empty name is refused). Open… and Create… use the app's own folder picker (a path field, the folders below, Up); Create takes an empty folder (hidden files do not count; a new path is made), can start with sample notes, and offers to open a folder with content instead. A vault whose folder is missing is greyed out in the list and on the start screen with **Locate…** (pick the new folder, the name stays) and **Forget**, and Shale never makes that folder again by itself. A folder inside a known vault, or around one, is allowed and warned about once. A right-click on a vault also offers **Close** (VAULT-035, VAULT-044, #584): the vault is forgotten (its notes stay) and a question asks whether to remove `.shale/` and `.trash/` too (both off by default; there is no system trash, they are deleted for good; notes and `.git` are never touched). **Close current vault** is the last line of the list and the quick switcher has a "Switch vault" command that shows the list. Closing or switching saves all buffers, waits for a running sync without freezing the window (30 s at most, with Cancel), drops everything of the old vault (VAULT-036, VAULT-037) and keeps mail, calendar and the global settings.
 - **Opening a vault** (NET-019, #513): a vault is read on a background thread. While it loads, the start screen shows a spinner, "Opening ‹folder›…" and **Cancel** (a vault on a slow network share or an online-only folder no longer freezes the window); the main window appears when the vault has arrived. This covers the last vault at start, `--vault`, a folder a second start hands over, the user guide and Open or Create in the start dialog.
-- **Moved so far:** the git sync and the Git LFS setup, the check of the vault's names (Cancel stops it) and the PDF export of a
-  folder (Cancel stops it), and the check of the mail index (JOB-015: it starts with the window when a mail account is set up, so the mail view finds the index ready, and the view shows "Checking the mail index…" with a spinner when it is opened earlier). The other long actions follow; the list of all of them, with what each shows today, is
+- **Git and installs** (#526, JOB-024 to JOB-030): the LFS downloads, the snapshots and reads of the file history (listed in the indicator only
+  after two seconds), the "Turn on sync" wizard and its moves of `.git`, the install, update and removal of Shale's own git and of the TeX Live,
+  the import of a template set, the test compiles and the check, download and install of an update are tasks with their own text. An
+  install, an update, the check for a newer git, an import and the check or download of an update can be cancelled (what was downloaded is
+  removed); the rest cannot be stopped half way.
+- **Moved so far:** the git sync and the Git LFS setup, the check of the vault's names (Cancel stops it) the PDF export of a
+  folder, of a note and of a drawing (Cancel stops it before the next picture and writes no half file, JOB-017), the export through LaTeX (JOB-018), the export to Word with its new spinner (JOB-019) and the conversion of Word files of the Import dialog (JOB-020); closing such a dialog stops its work (JOB-010). Also the check of the mail index (JOB-015: it starts with the window when a mail account is set up, so the mail view finds the index ready, and the view shows "Checking the mail index…" with a spinner when it is opened earlier). The rebuild of the mail index is a task too, with Cancel between two folders (JOB-016), and so is the sync of each mail account, with its own Cancel between two batches (JOB-021). Sending mail is a task per account too (JOB-031): "Sending mail from ‹account›…" with Cancel, which stops before the next mail is taken from the Outbox and never tears down a mail that is on its way. So is the browser sign-in of a mail account (JOB-032): "Signing in ‹account› in the browser…" with Cancel; closing the account dialog stops it. The load of each CalDAV calendar is a task of its own, "Syncing the calendar “Work”…" (JOB-033; the timer's load is listed after 2 seconds), and so is finding the calendars of an account (JOB-034); both have Cancel at the next request. In the feeds the first page, the next page, the check for new posts and "Load more in between" are tasks per feed with Cancel (JOB-035), saving a post is one too (JOB-036), and so is the sign-in of a feed account, which keeps no token when it is stopped (JOB-037). The other long actions follow; the list of all of them, with what each shows today, is
   [docs/spec/busy-states.md](spec/busy-states.md).
 
 ## Keyboard

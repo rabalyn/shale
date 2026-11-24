@@ -15,6 +15,16 @@ A value of the wrong shape in the file loads as its default; fields Shale does n
 The "Where" column says which window changes a value. The global file is meant to be edited
 too: it is plain text with a description above every setting.
 
+# The Vault and Editor tabs
+
+![[settings-vault.png]]
+
+The **Vault** tab is the short page Settings opens on: the vault folder, the button that closes the vault, the people folder and the check of file names for Windows and macOS.
+
+![[settings-editor.png]]
+
+The **Editor** tab holds the settings of the editor (cursor, links, drawings, the formatting toolbar and its colours); the tables below say which key each one is.
+
 # Finding a setting
 
 ![[settings-find.png]]
@@ -32,6 +42,8 @@ used for all) pulses the control that makes it appear instead.
 On the Keybindings tab the field of the tab filters the list, see [[Keyboard shortcuts]].
 
 # The settings file
+
+![[settings-file.png]]
 
 **Settings → Open settings file** opens `config.toml` in a tab of its own. It is not a note: it
 is not in the file tree, not in any vault and not in the lists of recent files. Change a value,
@@ -88,7 +100,8 @@ change within a second.
 
 One table, `fonts` (`[fonts]` in the file), in the settings file. Each area has a `family` (an installed font family such as
 "DejaVu Sans"; left out: Shale's own font) and a `size` in points (8 to 48). Settings → Fonts shows them
-(see [[Fonts]]).
+(see [[Fonts]]). There is no setting for the list of fonts: it draws each entry in its own font,
+loading the entries on screen once you stop scrolling.
 
 | Key | Default | Where |
 |---|---|---|
@@ -193,10 +206,12 @@ system keyring, never in this file):
 
 | Key | Default | Where |
 |---|---|---|
-| `social_accounts` | empty | Feeds → Accounts… (secrets in the keyring) |
+| `social_accounts` | empty | Feeds → Accounts… (secrets in the keyring; a Mastodon account also keeps `scopes`, the permissions its token was given: "read write" lets Shale like, boost and post) |
 | `social_last` | none; the account and feed shown last | set by Shale |
 | `social_replies` | off | the tick "Include replies from others" in the Import dialog |
 | `social_check_minutes` | 5 (0 = never) | Settings → Feeds, and Feeds → Accounts… |
+| `social_accounts[].post_language` | the language of the account's last post | kept by Shale: the next post of the account starts with it |
+| `social_post_language` | the language of the system's locale ("en" without one); "" = none | Settings → Feeds → Post language: the language a new post in the feed view starts with (two-letter code) |
 
 ## Search ([[Search and pickers]])
 
@@ -268,8 +283,8 @@ Settings → Updates is the table `[updates]` in the settings file. `SHALE_UPDAT
 |---|---|---|
 | `input_log` | off | Settings → Help → Troubleshooting, "Record keyboard input to a file" |
 | `caches` | the values below; each can be "forever" or "no limit" | Settings → Data → How long caches are kept; Data usage… rows |
-| `caches.picture_days` | 30 (social pictures, days) | same |
-| `caches.picture_mb` | 500 (social pictures, MB) | same |
+| `caches.picture_days` | 30 (social pictures and videos, days) | same |
+| `caches.picture_mb` | 500 (social pictures and videos, MB) | same |
 | `caches.post_days` | 365 (social post index, days) | same |
 | `caches.posts_per_account` | 10 000 | same |
 | `caches.mail_backups` | 3 (newest mail index backups kept) | same |

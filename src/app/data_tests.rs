@@ -526,7 +526,7 @@ fn a_rename_updates_links_in_an_open_note_with_unsaved_edits_and_keeps_the_edits
     let _ = std::fs::remove_dir_all(&d);
 }
 
-// spec: VAULT-013, VAULT-042
+// spec: VAULT-013, VAULT-016, VAULT-042
 #[test]
 fn a_rename_never_overwrites_edits_that_could_not_be_saved() {
     let (mut app, d) = app_in("rename-dirty-fail", &[("Target.md", b"t\n"), ("sub/A.md", b"see [[Target]]\n")]);
@@ -543,5 +543,9 @@ fn a_rename_never_overwrites_edits_that_could_not_be_saved() {
     assert!(a.dirty && a.text.starts_with("precious edit"), "the edit stays in the buffer: {:?}", a.text);
     assert_eq!(crate::note_props::unstamped(&read(&d, "sub/A.md")), "see [[Target]]\n", "the file is not touched");
     assert!(app.vault.as_ref().unwrap().failed_rewrites.iter().any(|f| f.0 == Path::new("sub/A.md")), "and it is reported");
+    // the message says the save failed, not that another program changed the file (VAULT-016)
+    let t = app.toasts.iter().map(|(t, _)| t.clone()).find(|t| t.contains("could not be updated")).expect("a message");
+    assert!(t.contains("“sub/A.md” (its unsaved changes could not be saved before the rename"), "{t}");
+    assert!(!t.contains("another program"), "{t}");
     let _ = std::fs::remove_dir_all(&d);
 }

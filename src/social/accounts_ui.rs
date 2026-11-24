@@ -6,9 +6,17 @@
 
 use super::mastodon::{self, AppCredentials};
 use super::{bluesky, clean_server, Account, Network, SocialAccountEntry, BLUESKY_SERVER};
+use crate::busy::{Busy, Cancel, Job, Key};
 use crate::theme;
 use eframe::egui::{self, Rect, Ui};
-use std::sync::mpsc::{channel, Receiver, TryRecvError};
+use std::sync::mpsc::TryRecvError;
+
+/// The task of a sign-in step of the dialog: opening the sign-in page, or the sign-in itself
+/// (JOB-037). One at a time.
+pub const SIGN_IN: Key = Key::new("social-sign-in");
+
+/// What a step that Cancel stopped reports.
+const STOPPED: &str = "stopped";
 
 enum Done {
     /// the app is registered on the server and the sign-in page is open
@@ -35,7 +43,12 @@ pub struct SocialDialog {
     app: Option<(String, AppCredentials)>,
     /// Edit (SOC-043): the account the form signs in to again; network, server and handle are fixed
     pub editing: Option<Account>,
-    job: Option<Receiver<JobResult>>,
+    job: Option<Job<JobResult>>,
+    /// what runs in the background (JOB-037); the window's registry once the dialog is opened by it
+    busy: Busy,
+    /// tests: the step that `pretend_busy` holds, until this is dropped
+    #[cfg(test)]
+    hold: Option<std::sync::mpsc::Sender<()>>,
     pub error: Option<String>,
     pub rects: Vec<(String, Rect)>,
 }
@@ -54,19 +67,39 @@ pub enum DialogAction {
     CheckMinutes(u32),
 }
 
-fn spawn(ctx: &egui::Context, f: impl FnOnce() -> JobResult + Send + 'static) -> Receiver<JobResult> {
-    let (tx, rx) = channel();
-    let ctx = ctx.clone();
-    crate::jobs::run(f, move |r| {
-        let _ = tx.send(r.and_then(|x| x));
-        ctx.request_repaint();
-    });
-    rx
-}
-
 impl SocialDialog {
     pub fn new() -> SocialDialog {
-        SocialDialog { network: Network::Mastodon, server: String::new(), handle: String::new(), secret: Default::default(), code: String::new(), use_token: false, app: None, editing: None, job: None, error: None, rects: vec![] }
+        SocialDialog {
+            network: Network::Mastodon,
+            server: String::new(),
+            handle: String::new(),
+            secret: Default::default(),
+            code: String::new(),
+            use_token: false,
+            app: None,
+            editing: None,
+            job: None,
+            busy: Busy::default(),
+            #[cfg(test)]
+            hold: None,
+            error: None,
+            rects: vec![],
+        }
+    }
+
+    /// The dialog runs its steps as tasks of this registry (JOB-037).
+    pub fn with_busy(mut self, busy: &Busy) -> Self {
+        self.busy = busy.clone();
+        self
+    }
+
+    /// Run a step as a task that Cancel (or closing the dialog) stops at its next safe point (JOB-037, JOB-010).
+    fn start(&mut self, ctx: &egui::Context, label: String, f: impl FnOnce(&Cancel) -> JobResult + Send + 'static) {
+        let ctx = ctx.clone();
+        match self.busy.spawn_cancellable(SIGN_IN, label, f, move || ctx.request_repaint()) {
+            Some(job) => self.job = Some(job),
+            None => self.error = Some("A sign-in is still running.".into()),
+        }
     }
 
     /// Edit (SOC-043): the form signs in again to `account`.
@@ -98,6 +131,26 @@ impl SocialDialog {
         self.job.is_some()
     }
 
+    /// Tests: the dialog is busy with a sign-in that never ends (`false`: it is idle again).
+    #[cfg(test)]
+    pub fn pretend_busy(&mut self, on: bool) {
+        self.hold = None;
+        self.job = None;
+        if on {
+            let (tx, rx) = std::sync::mpsc::channel::<()>();
+            self.hold = Some(tx);
+            self.job = self.busy.spawn_cancellable(
+                SIGN_IN,
+                "Signing in…",
+                move |_| {
+                    let _ = rx.recv();
+                    Err(STOPPED.to_string())
+                },
+                || {},
+            );
+        }
+    }
+
     /// The server as typed, cleaned up; the error text when it is not usable.
     fn server_ok(&self) -> Result<String, String> {
         if self.server.trim().is_empty() {
@@ -115,12 +168,18 @@ impl SocialDialog {
             }
         };
         self.error = None;
-        self.job = Some(spawn(ctx, move || {
+        let label = format!("Opening the sign-in page of {}…", server.trim_start_matches("https://"));
+        self.start(ctx, label, move |cancel| {
+            // Cancel is looked at between the steps; nothing is kept until the browser opens (JOB-037)
+            let stop = || if cancel.is_cancelled() { Err(STOPPED.to_string()) } else { Ok(()) };
+            stop()?;
             let app = mastodon::register_app(&server)?;
+            stop()?;
             let url = mastodon::authorize_url(&server, &app)?;
+            stop()?;
             crate::opener::open_signin_url(&url, false)?;
             Ok(Done::Opened(server, app))
-        }));
+        });
     }
 
     fn sign_in(&mut self, ctx: &egui::Context) {
@@ -145,17 +204,21 @@ impl SocialDialog {
                     self.error = Some(if app.is_none() { "Open the sign-in page first, then paste the code it shows." } else { "Paste the code from the sign-in page first." }.into());
                     return;
                 }
-                self.job = Some(spawn(ctx, move || {
-                    let token = match (&app, use_token) {
+                let label = format!("Signing in to {}…", server.trim_start_matches("https://"));
+                self.start(ctx, label, move |cancel| {
+                    // the permissions the server gave are kept with the account (not a secret); a pasted token says nothing
+                    let (token, scopes) = match (&app, use_token) {
                         (Some(app), false) => mastodon::exchange_code(&server, app, &code)?,
-                        _ => secret,
+                        _ => (secret, None),
                     };
+                    stopped(cancel)?;
                     let who = mastodon::verify(&server, token.expose())?;
                     if let Some(old) = editing {
-                        return resigned(old, &who.handle, &token);
+                        return resigned(old, &who.handle, &token, scopes, cancel);
                     }
-                    Ok(Done::Added(SocialAccountEntry::new(Account::new(Network::Mastodon, &server, &who.handle, &who.display_name), &token)))
-                }));
+                    let account = Account { scopes, ..Account::new(Network::Mastodon, &server, &who.handle, &who.display_name) };
+                    keep_new(account, &token, cancel)
+                });
             }
             Network::Bluesky => {
                 let server = if self.server.trim().is_empty() { BLUESKY_SERVER.to_string() } else { self.server.clone() };
@@ -164,14 +227,16 @@ impl SocialDialog {
                     self.error = Some("Type your handle and an app password.".into());
                     return;
                 }
-                self.job = Some(spawn(ctx, move || {
+                let label = format!("Signing in to {}…", server.trim_start_matches("https://"));
+                self.start(ctx, label, move |cancel| {
+                    stopped(cancel)?;
                     let server = clean_server(&server).map_err(|e| format!("This server address can't be used: {e}"))?;
                     let session = bluesky::create_session(&server, &handle, secret.expose())?;
                     if let Some(old) = editing {
-                        return resigned(old, &session.handle, &secret);
+                        return resigned(old, &session.handle, &secret, None, cancel);
                     }
-                    Ok(Done::Added(SocialAccountEntry::new(Account::new(Network::Bluesky, &server, &session.handle, &session.handle), &secret)))
-                }));
+                    keep_new(Account::new(Network::Bluesky, &server, &session.handle, &session.handle), &secret, cancel)
+                });
             }
         }
     }
@@ -180,7 +245,7 @@ impl SocialDialog {
     fn poll(&mut self) -> Option<DialogAction> {
         let rx = self.job.as_ref()?;
         let r = match rx.try_recv() {
-            Ok(r) => r,
+            Ok(r) => r.and_then(|r| r),
             Err(TryRecvError::Empty) => return None,
             Err(TryRecvError::Disconnected) => Err("the sign-in stopped unexpectedly".into()),
         };
@@ -199,20 +264,53 @@ impl SocialDialog {
                 self.cancel_edit();
                 return Some(DialogAction::Updated(e));
             }
+            Err(e) if e == STOPPED => self.error = Some("The sign-in was stopped. Nothing was saved.".into()),
             Err(e) => self.error = Some(e),
         }
         None
     }
 }
 
+impl Drop for SocialDialog {
+    /// Closing the dialog stops its step at the next safe point (JOB-010, JOB-037).
+    fn drop(&mut self) {
+        if let Some(j) = &self.job {
+            j.cancel();
+        }
+    }
+}
+
+/// A safe point of a sign-in: Cancel was asked for.
+fn stopped(cancel: &Cancel) -> Result<(), String> {
+    if cancel.is_cancelled() {
+        Err(STOPPED.into())
+    } else {
+        Ok(())
+    }
+}
+
+/// A new account: its secret goes to the keyring (or the entry) only when Cancel has not been
+/// asked for, and one that was asked for while it was being stored is taken out again, so a
+/// stopped sign-in keeps no token (JOB-037).
+fn keep_new(account: Account, secret: &crate::secret::Secret, cancel: &Cancel) -> JobResult {
+    stopped(cancel)?;
+    let entry = SocialAccountEntry::new(account, secret);
+    if cancel.is_cancelled() {
+        crate::secrets::social_clear(&entry.account.server, &entry.account.handle);
+        return Err(STOPPED.into());
+    }
+    Ok(Done::Added(entry))
+}
+
 /// The sign-in of Edit worked: it must be the account's own handle (nothing is stored for another
 /// one); then the secret goes to the keyring (or the entry) under the account's own name, and
 /// the entry is the account as it was.
-fn resigned(old: Account, signed_in_as: &str, secret: &crate::secret::Secret) -> JobResult {
+fn resigned(old: Account, signed_in_as: &str, secret: &crate::secret::Secret, scopes: Option<String>, cancel: &Cancel) -> JobResult {
     if !signed_in_as.trim().trim_start_matches('@').eq_ignore_ascii_case(&old.handle) {
         return Err(format!("This sign-in is for @{}, not for @{}. Nothing was changed.", signed_in_as.trim_start_matches('@'), old.handle));
     }
-    Ok(Done::Resigned(SocialAccountEntry::new(old, secret)))
+    stopped(cancel)?;
+    Ok(Done::Resigned(SocialAccountEntry::new(Account { scopes, ..old }, secret)))
 }
 
 impl Default for SocialDialog {
@@ -312,7 +410,7 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
                     ui.label(muted("Step 1"));
                     ui.horizontal(|ui| {
                         if rec("open-browser".into(), ui.add_enabled(!busy, egui::Button::new("Open sign-in page in browser")))
-                            .on_hover_text("Shale asks the server for a read-only sign-in; you log in and allow it on the server's own page")
+                            .on_hover_text("Shale asks the server for a sign-in that can read and write (to like, boost and post); you log in and allow it on the server's own page")
                             .clicked()
                         {
                             d.open_sign_in(ui.ctx());
@@ -364,7 +462,6 @@ pub fn footer(ui: &mut Ui, d: &mut SocialDialog) -> Option<DialogAction> {
     let mut action = None;
     let mut cancel_edit = false;
     let busy = d.busy();
-    let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::palette().muted);
     if let Some(e) = &d.error {
         ui.add(egui::Label::new(egui::RichText::new(e).color(theme::palette().link_missing)).wrap());
     }
@@ -374,10 +471,7 @@ pub fn footer(ui: &mut Ui, d: &mut SocialDialog) -> Option<DialogAction> {
             r
         };
         let sign_in = rec("sign-in", ui.add_enabled(!busy, egui::Button::new(egui::RichText::new("Sign in").strong()))).clicked();
-        if busy {
-            ui.spinner();
-            ui.label(muted("Talking to the server…"));
-        }
+        crate::busy::ui::status(ui, &d.busy, &SIGN_IN);
         let editing = d.editing.is_some();
         if editing && rec("edit-cancel", ui.add_enabled(!busy, egui::Button::new("Cancel"))).clicked() {
             cancel_edit = true;
@@ -478,7 +572,7 @@ mod tests {
         std::process::Command::new("curl").arg("--version").output().is_ok()
     }
 
-    // spec: SOC-001, SOC-004, SOC-010
+    // spec: SOC-001, SOC-004, SOC-010, SOC-056
     #[test]
     fn a_mastodon_sign_in_opens_the_browser_takes_the_code_and_adds_the_account() {
         if !has_curl() {
@@ -501,6 +595,8 @@ mod tests {
         let Some(DialogAction::Added(e)) = added else { panic!("no account was added: {:?}", d.error) };
         assert_eq!((e.account.network, e.account.handle.as_str(), e.account.display_name.as_str(), e.account.server.as_str()), (Network::Mastodon, "ada@127.0.0.1", "Ada L.", server.address().as_str()));
         assert!(e.secret.is_empty() && server.state.lock().unwrap().tokens.iter().any(|t| t == e.secret().expose()), "the access token the server made is in the keyring, not in the entry");
+        // spec: SOC-056: the permissions the server gave are kept with the account (and can write)
+        assert_eq!((e.account.scopes.as_deref(), e.account.may_write()), (Some("read write"), Some(true)));
         crate::secrets::social_clear(&e.account.server, &e.account.handle);
         assert_eq!(server.state.lock().unwrap().requests, ["POST /api/v1/apps", "GET /oauth/authorize", "POST /oauth/token", "GET /api/v1/accounts/verify_credentials"]);
         assert!(d.code.is_empty() && d.server.is_empty() && d.app.is_none(), "the dialog is ready for the next account");
@@ -659,5 +755,136 @@ mod tests {
         assert_eq!(e.account, ada.account, "the display name of the account stays, not the server's \"Ada L.\"");
         assert_eq!(crate::secrets::social_lookup(&ada.account.server, "ada@127.0.0.1").as_ref().map(|s| s.expose()), Some("new-token"));
         crate::secrets::social_clear(&ada.account.server, "ada@127.0.0.1");
+    }
+
+    /// A pretend Bluesky server whose first request waits for the test: it says it is there and
+    /// answers the sign-in when `release` is used or dropped.
+    fn held_sign_in() -> (String, std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
+        let (entered_tx, entered) = std::sync::mpsc::channel::<()>();
+        let (release, gate) = std::sync::mpsc::channel::<()>();
+        let first = std::sync::atomic::AtomicBool::new(true);
+        let (base, _h) = crate::calendar::dav::tests::mock_http(10, move |_, _, _, _| {
+            if first.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                let _ = entered_tx.send(());
+                let _ = gate.recv_timeout(std::time::Duration::from_secs(20));
+            }
+            (200, r#"{"accessJwt":"access","refreshJwt":"refresh","did":"did:plc:ada","handle":"job037.test"}"#.to_string())
+        });
+        (base, entered, release)
+    }
+
+    fn bluesky_form(busy: &Busy, base: &str) -> SocialDialog {
+        let mut d = SocialDialog::new().with_busy(busy);
+        d.network = Network::Bluesky;
+        d.server = base.to_string();
+        d.handle = "job037.test".into();
+        d.secret = "abcd-efgh-ijkl-mnop".into();
+        d
+    }
+
+    fn poll_until_idle(d: &mut SocialDialog) -> Option<DialogAction> {
+        let start = std::time::Instant::now();
+        loop {
+            if let Some(a) = d.poll() {
+                return Some(a);
+            }
+            if !d.busy() {
+                return None;
+            }
+            assert!(start.elapsed() < std::time::Duration::from_secs(20), "the step ends");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    // spec: JOB-037
+    #[test]
+    fn job_037_a_sign_in_is_a_task_that_cancel_stops_without_keeping_a_token_and_the_next_one_completes() {
+        if !has_curl() {
+            return;
+        }
+        let busy = Busy::default();
+        let (base, entered, release) = held_sign_in();
+        let mut d = bluesky_form(&busy, &base);
+        let ctx = egui::Context::default();
+        d.sign_in(&ctx);
+        entered.recv_timeout(std::time::Duration::from_secs(20)).expect("the request is on its way");
+        assert_eq!(busy.list().iter().map(|t| t.label.clone()).collect::<Vec<_>>(), [format!("Signing in to {base}…")]);
+        assert!(d.busy());
+        // a second start is refused and does not lose the running one
+        d.sign_in(&ctx);
+        assert_eq!((busy.list().len(), d.error.as_deref()), (1, Some("A sign-in is still running.")));
+        assert!(d.busy());
+        // Cancel: the answer arrives, nothing is kept
+        let task = busy.info(&SIGN_IN).unwrap();
+        assert!(task.cancellable && busy.cancel(task.id));
+        release.send(()).unwrap();
+        assert!(poll_until_idle(&mut d).is_none());
+        assert_eq!(d.error.as_deref(), Some("The sign-in was stopped. Nothing was saved."));
+        assert!(busy.list().is_empty() && !d.busy());
+        assert_eq!(crate::secrets::social_lookup(&base, "job037.test"), None, "no token was kept");
+        // the next sign-in completes
+        d.secret = "abcd-efgh-ijkl-mnop".into();
+        d.sign_in(&ctx);
+        let Some(DialogAction::Added(e)) = poll_until_idle(&mut d) else { panic!("no account was added: {:?}", d.error) };
+        assert_eq!(e.account.handle, "job037.test");
+        crate::secrets::social_clear(&e.account.server, &e.account.handle);
+        assert!(busy.list().is_empty());
+    }
+
+    // spec: JOB-037, JOB-010
+    #[test]
+    fn job_037_closing_the_dialog_stops_the_sign_in_and_keeps_no_token() {
+        if !has_curl() {
+            return;
+        }
+        let busy = Busy::default();
+        let (base, entered, release) = held_sign_in();
+        let mut d = bluesky_form(&busy, &base);
+        d.sign_in(&egui::Context::default());
+        entered.recv_timeout(std::time::Duration::from_secs(20)).expect("the request is on its way");
+        drop(d);
+        assert!(busy.info(&SIGN_IN).is_some_and(|t| t.cancelling), "closing asked it to stop; it stays listed until it has");
+        release.send(()).unwrap();
+        let start = std::time::Instant::now();
+        while busy.is_running(&SIGN_IN) {
+            assert!(start.elapsed() < std::time::Duration::from_secs(20), "the task ends");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(crate::secrets::social_lookup(&base, "job037.test"), None, "no token was kept");
+    }
+
+    // spec: JOB-037
+    #[test]
+    fn job_037_the_footer_shows_the_task_with_its_cancel_while_a_step_runs() {
+        let busy = Busy::default();
+        let mut d = SocialDialog::new().with_busy(&busy);
+        let (ctx, mut t) = (egui::Context::default(), 0.0);
+        let texts = |ctx: &egui::Context, t: &mut f64, d: &mut SocialDialog| {
+            let mut texts = vec![];
+            *t += 0.05;
+            let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 900.0))), time: Some(*t), ..Default::default() };
+            let mut out = ctx.run_ui(raw, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    footer(ui, d);
+                });
+            });
+            out.textures_delta.clear();
+            fn collect(s: &egui::Shape, out: &mut Vec<String>) {
+                match s {
+                    egui::Shape::Text(t) => out.push(t.galley.text().to_string()),
+                    egui::Shape::Vec(v) => v.iter().for_each(|s| collect(s, out)),
+                    _ => {}
+                }
+            }
+            for s in &out.shapes {
+                collect(&s.shape, &mut texts);
+            }
+            texts
+        };
+        assert!(!texts(&ctx, &mut t, &mut d).iter().any(|t| t == "Cancel"), "idle: no Cancel");
+        d.pretend_busy(true);
+        let shown = texts(&ctx, &mut t, &mut d);
+        assert!(shown.iter().any(|t| t == "Signing in…") && shown.iter().any(|t| t == "Cancel"), "{shown:?}");
+        d.pretend_busy(false);
     }
 }

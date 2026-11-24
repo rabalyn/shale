@@ -103,7 +103,7 @@ fn mail_rebuild(fx: &mut Fixtures) -> Prep {
     fill_mail(&dir, fx.scale.mail / 4).map_err(|e| e.to_string())?;
     let store = MailStore::open(&dir).map_err(|e| e.0)?;
     Ok(Box::new(move || {
-        black_box(store.rebuild_index().expect("the index is rebuilt"));
+        black_box(store.rebuild_index(&crate::busy::Cancel::default()).expect("the index is rebuilt"));
     }))
 }
 

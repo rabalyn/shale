@@ -12,10 +12,11 @@
 //! finds the action idle.
 
 use crate::jobs;
+use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Receiver, TryRecvError};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, TryRecvError};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 mod demo;
 pub mod ui;
@@ -25,19 +26,37 @@ mod tests;
 
 /// What a task is: the action that runs. Two running tasks never share a key.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Key(&'static str);
+pub struct Key(Cow<'static, str>);
 
 impl Key {
     /// The key of an action, as a constant of the module that owns the action.
     pub const fn new(kind: &'static str) -> Key {
-        Key(kind)
+        Key(Cow::Borrowed(kind))
+    }
+
+    /// The key of this action for one subject (an account, a calendar): tasks of the same action
+    /// with different subjects run side by side, two with the same subject never do.
+    pub fn with(&self, subject: &str) -> Key {
+        Key(Cow::Owned(format!("{}\u{1f}{subject}", self.0)))
     }
 }
+
+/// How long housekeeping that is usually over in a moment (a snapshot of the file history, a look
+/// for git or TeX, a check for updates) runs before the indicator lists it (JOB-022, JOB-024).
+pub const LISTED_AFTER: Duration = Duration::from_secs(2);
 
 /// The request to stop, shared by the window, the indicator and the job, which looks at it between
 /// two steps of its work.
 #[derive(Clone, Debug, Default)]
 pub struct Cancel(Arc<AtomicBool>);
+
+impl From<Arc<AtomicBool>> for Cancel {
+    /// A flag that code of its own already looks at (the handle of an install, the flag of the
+    /// update) becomes the token of a task, so that Cancel in a view or in the indicator sets it.
+    fn from(flag: Arc<AtomicBool>) -> Cancel {
+        Cancel(flag)
+    }
+}
 
 impl Cancel {
     pub fn cancel(&self) {
@@ -46,6 +65,11 @@ impl Cancel {
 
     pub fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::SeqCst)
+    }
+
+    /// The same request as the plain flag that the older jobs (pandoc, LuaLaTeX) look at.
+    pub fn flag(&self) -> Arc<AtomicBool> {
+        self.0.clone()
     }
 }
 
@@ -68,6 +92,8 @@ struct Entry {
     label: String,
     started: Instant,
     cancel: Option<Cancel>,
+    /// the indicator lists the task only when it has run this long (JOB-022)
+    listed_after: Duration,
 }
 
 #[derive(Default)]
@@ -88,13 +114,21 @@ impl Busy {
     /// Register a task. `None`: a task with this key already runs, and the action must not start
     /// a second time. Whoever holds the [`Task`] keeps it listed.
     pub fn begin(&self, key: Key, label: impl Into<String>) -> Option<Task> {
+        self.begin_listed_after(key, label, Duration::ZERO)
+    }
+
+    /// Like [`Busy::begin`] for work that is usually quick and happens on its own (the rescan of
+    /// the vault folder, the learning of tag words): the indicator lists the task only when it has
+    /// run for `listed_after` (JOB-022). It counts as running at once: the key is taken, and
+    /// [`Busy::info`] finds it.
+    pub fn begin_listed_after(&self, key: Key, label: impl Into<String>, listed_after: Duration) -> Option<Task> {
         let mut tasks = self.tasks();
         if tasks.list.iter().any(|e| e.key == key) {
             return None;
         }
         let id = tasks.next;
         tasks.next += 1;
-        tasks.list.push(Entry { id, key, label: label.into(), started: Instant::now(), cancel: None });
+        tasks.list.push(Entry { id, key, label: label.into(), started: Instant::now(), cancel: None, listed_after });
         Some(Task { busy: self.clone(), id, cancel: None })
     }
 
@@ -111,6 +145,19 @@ impl Busy {
         Some(task.run(move || f(&cancel), notify))
     }
 
+    /// [`Busy::spawn`] for housekeeping: the task is listed in the indicator only when it has run for
+    /// [`LISTED_AFTER`] (JOB-022, JOB-024); the views of the action see it at once.
+    pub fn spawn_quiet<T: Send + 'static>(&self, key: Key, label: impl Into<String>, f: impl FnOnce() -> T + Send + 'static, notify: impl FnOnce() + Send + 'static) -> Option<Job<T>> {
+        Some(self.begin_listed_after(key, label, LISTED_AFTER)?.run(f, notify))
+    }
+
+    /// [`Busy::spawn_cancellable`] for housekeeping, as [`Busy::spawn_quiet`].
+    pub fn spawn_cancellable_quiet<T: Send + 'static>(&self, key: Key, label: impl Into<String>, f: impl FnOnce(&Cancel) -> T + Send + 'static, notify: impl FnOnce() + Send + 'static) -> Option<Job<T>> {
+        let mut task = self.begin_listed_after(key, label, LISTED_AFTER)?;
+        let cancel = task.cancellable();
+        Some(task.run(move || f(&cancel), notify))
+    }
+
     /// The task of this action, if it runs.
     pub fn info(&self, key: &Key) -> Option<TaskInfo> {
         self.tasks().list.iter().find(|e| e.key == *key).map(Entry::info)
@@ -120,9 +167,22 @@ impl Busy {
         self.tasks().list.iter().any(|e| e.key == *key)
     }
 
-    /// Every running task, the oldest first.
+    /// Every running task that is to be listed, the oldest first.
+    #[cfg(test)]
     pub fn list(&self) -> Vec<TaskInfo> {
-        self.tasks().list.iter().map(Entry::info).collect()
+        self.list_at(Instant::now())
+    }
+
+    /// [`Busy::list`] at the time `now`: a task that waits to be listed (JOB-022) is left out
+    /// until it has run for its time.
+    pub fn list_at(&self, now: Instant) -> Vec<TaskInfo> {
+        self.tasks().list.iter().filter(|e| e.listed(now)).map(Entry::info).collect()
+    }
+
+    /// How long until the next task that waits to be listed comes into the list at `now`: the
+    /// indicator repaints then.
+    pub fn next_listing(&self, now: Instant) -> Option<Duration> {
+        self.tasks().list.iter().filter(|e| !e.listed(now)).map(|e| (e.started + e.listed_after).saturating_duration_since(now)).min()
     }
 
     /// Ask the task to stop; true when it can be stopped. It stays listed until its job has ended.
@@ -135,6 +195,10 @@ impl Busy {
 }
 
 impl Entry {
+    fn listed(&self, now: Instant) -> bool {
+        now.saturating_duration_since(self.started) >= self.listed_after
+    }
+
     fn info(&self) -> TaskInfo {
         TaskInfo { id: self.id, label: self.label.clone(), started: self.started, cancellable: self.cancel.is_some(), cancelling: self.cancel.as_ref().is_some_and(Cancel::is_cancelled) }
     }
@@ -152,10 +216,16 @@ impl Task {
     /// Make the task one that Cancel can stop, and hand out the token its work looks at.
     pub fn cancellable(&mut self) -> Cancel {
         let cancel = self.cancel.get_or_insert_with(Cancel::default).clone();
-        if let Some(e) = self.busy.tasks().list.iter_mut().find(|e| e.id == self.id) {
-            e.cancel = Some(cancel.clone());
-        }
+        self.cancellable_with(cancel.clone());
         cancel
+    }
+
+    /// The same with a token that the work already has (see `From<Arc<AtomicBool>>`).
+    pub fn cancellable_with(&mut self, cancel: Cancel) {
+        self.cancel = Some(cancel.clone());
+        if let Some(e) = self.busy.tasks().list.iter_mut().find(|e| e.id == self.id) {
+            e.cancel = Some(cancel);
+        }
     }
 
     /// Run `f` on a new thread under this task: the task ends before the job's result can be
@@ -189,6 +259,11 @@ impl<T> Job<T> {
     /// The result if the job has ended: its value, or the message of a panic. `Empty` while it runs.
     pub fn try_recv(&self) -> Result<Result<T, String>, TryRecvError> {
         self.rx.try_recv()
+    }
+
+    /// Wait for the result for at most `limit` (the window that closes waits for the last job a moment).
+    pub fn recv_timeout(&self, limit: Duration) -> Result<Result<T, String>, RecvTimeoutError> {
+        self.rx.recv_timeout(limit)
     }
 
     /// Ask the job to stop (nothing happens for a task that cannot be stopped).

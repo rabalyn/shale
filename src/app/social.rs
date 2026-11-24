@@ -15,13 +15,22 @@ impl ShaleApp {
     /// The Feeds tab on screen: `feed` is what its view says.
     pub fn social_view(&mut self, ui: &mut Ui, feed: Option<FeedRef>) {
         let accounts = self.cfg.social_accounts.clone();
-        let tab = TabCtx { id: self.tabbar.tabs.get(self.tabbar.active).map(|t| t.id).unwrap_or(0), feed, last: self.cfg.social_last.clone(), keys: self.modal.is_none() };
+        let tab = TabCtx {
+            id: self.tabbar.tabs.get(self.tabbar.active).map(|t| t.id).unwrap_or(0),
+            feed,
+            last: self.cfg.social_last.clone(),
+            keys: self.modal.is_none(),
+            vault: self.vault.as_ref().map(|v| v.root.clone()),
+            media: self.media.clone(),
+        };
         let font = self.fonts.area(crate::fonts::Area::Social);
         for a in crate::fonts::with_area(ui, &font, |ui| feed_ui::show(ui, &mut self.social, &accounts, &tab)) {
             match a {
                 Ask::Accounts => self.open_social_accounts(),
                 Ask::Pick { feed, new_tab } => self.open_feed(feed, new_tab),
                 Ask::Resolve(feed) => self.set_tab_feed(feed),
+                Ask::Thread { feed, post, new_tab } => self.open_thread(feed, &post, new_tab),
+                Ask::Back => self.go_back(),
             }
         }
     }
@@ -33,6 +42,13 @@ impl ShaleApp {
         self.remember_open_files();
     }
 
+    /// Show the conversation of a post: in this tab (a step in its history, so Back returns to
+    /// the feed where it was) or in a new Feeds tab (SOC-045). The server is asked again.
+    pub fn open_thread(&mut self, feed: FeedRef, post: &crate::social::Post, new_tab: bool) {
+        self.social.threads.open(&feed.account, post);
+        self.open_feed(FeedRef { thread: Some(post.id.clone()), ..feed }, new_tab);
+    }
+
     /// Open a post the search found in its feed, in a new Feeds tab scrolled to the post (SOC-035).
     /// A feed that is gone shows the account's other feed (the post goes into its list from the index).
     pub fn open_post_hit(&mut self, hit: &PostHit) {
@@ -40,7 +56,7 @@ impl ShaleApp {
             self.toast("The account of this post is no longer here");
             return;
         }
-        self.open_feed(FeedRef { account: hit.account.clone(), feed: hit.feed.clone() }, true);
+        self.open_feed(FeedRef::new(hit.account.clone(), hit.feed.clone()), true);
         let tab = self.tabbar.tabs[self.tabbar.active].id;
         // a post that neither the index nor the list holds any more is fetched first (SOC-039)
         let (key, feed) = (crate::social::state::post_key(&hit.post), (hit.account.clone(), hit.feed.clone()));
@@ -111,6 +127,7 @@ impl ShaleApp {
     pub fn social_title(&self, feed: Option<&FeedRef>) -> String {
         let accounts = &self.cfg.social_accounts;
         let Some(f) = feed.filter(|f| !f.feed.is_empty()) else { return "Feeds".into() };
+        let thread = f.thread.is_some();
         let Some(e) = accounts.iter().find(|e| e.account.id == f.account) else { return "Feeds".into() };
         let title = match self.social.feeds.get(&f.account) {
             Some(FeedsState::Ready(list)) => list.iter().find(|x| x.id == f.feed).map(|x| x.title.clone()),
@@ -120,6 +137,7 @@ impl ShaleApp {
         let shared = accounts.iter().filter(|x| x.account.network == e.account.network).count() > 1;
         let who = if shared { format!("@{}", e.account.handle) } else { e.account.network.label().to_string() };
         match self.social.waiting_count(&f.account, &f.feed) {
+            _ if thread => format!("{who} · Conversation"),
             0 => format!("{who} · {title}"),
             n => format!("{who} · {title} ({n})"),
         }
@@ -127,11 +145,11 @@ impl ShaleApp {
 
     /// The feeds of the open Feeds tabs, in tab order (for the state file).
     pub fn open_feed_refs(&self) -> Vec<FeedRef> {
-        self.all_tabs().filter_map(|t| if let View::Social(Some(f)) = &t.view { Some(f.clone()) } else { None }).filter(|f| !f.feed.is_empty()).collect()
+        self.all_tabs().filter_map(|t| if let View::Social(Some(f)) = &t.view { Some(f.feed_only()) } else { None }).filter(|f| !f.feed.is_empty()).collect()
     }
 
     pub fn open_social_accounts(&mut self) {
-        self.modal = Some(Modal::Social(Box::default()));
+        self.modal = Some(Modal::Social(Box::new(crate::social::accounts_ui::SocialDialog::new().with_busy(&self.busy))));
     }
 
     /// Every frame: collect finished jobs, show their messages, and open the Import dialog for
@@ -143,8 +161,41 @@ impl ShaleApp {
         for m in std::mem::take(&mut self.social.messages) {
             self.toast(m);
         }
+        // an account whose token cannot write is signed in again (SOC-056): the dialog opens on its Edit form
+        for id in std::mem::take(&mut self.social.writes.needs_write) {
+            let Some(e) = self.cfg.social_accounts.iter_mut().find(|e| e.account.id == id) else { continue };
+            // a refusal means the token has no write permission, whatever the sign-in said
+            if e.account.may_write() != Some(false) {
+                e.account.scopes = Some("read".into());
+                self.save_config();
+            }
+            let account = self.cfg.social_accounts.iter().find(|e| e.account.id == id).map(|e| e.account.clone());
+            if let (Some(a), true) = (account, self.modal.is_none() || matches!(self.modal, Some(Modal::Social(_)))) {
+                let mut d = match self.modal.take() {
+                    Some(Modal::Social(d)) => d,
+                    _ => Box::new(crate::social::accounts_ui::SocialDialog::new().with_busy(&self.busy)),
+                };
+                d.start_edit(&a);
+                self.modal = Some(Modal::Social(d));
+            }
+        }
+        // the language of the posts that went out is kept with their account (SOC-065)
+        let languages = std::mem::take(&mut self.social.writes.language_to_save);
+        let mut save = false;
+        for (id, language) in languages {
+            if let Some(e) = self.cfg.social_accounts.iter_mut().find(|e| e.account.id == id).filter(|e| e.account.post_language.as_deref() != Some(language.as_str())) {
+                e.account.post_language = Some(language);
+                save = true;
+            }
+        }
+        if save {
+            self.save_config();
+        }
         // the feeds open in tabs look for new posts every few minutes
         self.social.check_every = Duration::from_secs(u64::from(self.cfg.social_check_minutes) * 60);
+        self.social.week_monday = self.cfg.week_starts_monday;
+        // a code that is no code (a hand-edited settings file) is the system's language
+        self.social.post_language = if crate::social::language::is_code(&self.cfg.social_post_language) { self.cfg.social_post_language.clone() } else { crate::social::language::system() };
         let (accounts, open) = (self.cfg.social_accounts.clone(), self.open_feed_refs());
         self.social.tick(ctx, &accounts, &open, Instant::now());
         self.social.start_fetches(ctx, &accounts);
@@ -172,7 +223,7 @@ impl ShaleApp {
                 self.social.forget(&id);
                 // the tab that is open shows the new account
                 if matches!(self.tabbar.tabs.get(self.tabbar.active).map(|t| &t.view), Some(View::Social(_))) {
-                    self.open_feed(FeedRef { account: id, feed: String::new() }, false);
+                    self.open_feed(FeedRef::new(id, String::new()), false);
                 }
                 self.save_config();
                 self.toast(format!("Added @{name}"));
@@ -183,6 +234,7 @@ impl ShaleApp {
                 match self.cfg.social_accounts.iter_mut().find(|x| x.account.id == e.account.id) {
                     Some(x) => {
                         x.secret = e.secret;
+                        x.account.scopes = e.account.scopes;
                         self.social.forget_client(&x.account.id);
                         let name = x.account.handle.clone();
                         self.save_config();

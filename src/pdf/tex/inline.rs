@@ -306,11 +306,15 @@ fn write_line(look: &Look, text: &str, in_cell: bool) -> String {
                 t = format!("\\textcolor[RGB]{{{}}}{{{t}}}", rgb([c.0, c.1, c.2]));
             } else if let Some((_, _, Some([r, g, b, _]))) = paint {
                 t = format!("\\textcolor[RGB]{{{}}}{{{t}}}", rgb([*r, *g, *b]));
+            } else if f.background == theme::Palette::shale().tag_bg {
+                // a tag: the violet text on its light violet field, as in the built-in export (TEX-008)
+                let c = print_color(theme::Palette::shale().tag);
+                t = format!("\\textcolor[RGB]{{{}}}{{{t}}}", rgb([c.0, c.1, c.2]));
             }
             // a highlight: the colour the note asks for, else the reading view's (over white paper)
             let bg = match paint.and_then(|p| p.1) {
                 Some(c) => Some(over_white(c)),
-                None if code || f.background == Color32::TRANSPARENT || f.background == theme::Palette::shale().tag_bg => None,
+                None if code || f.background == Color32::TRANSPARENT => None,
                 None => print_bg(f.background),
             };
             if let Some(c) = bg {

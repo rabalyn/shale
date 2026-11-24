@@ -80,7 +80,7 @@ fn the_undo_histories_are_counted_with_the_age_of_the_oldest_step() {
     let _ = fs::remove_dir_all(&d);
 }
 
-// spec: USE-017, USE-022
+// spec: USE-017, USE-022, EDIT-022
 #[test]
 fn the_undo_prune_drops_old_steps_empty_files_and_every_damaged_copy_and_spares_newer_files() {
     let (p, d) = places_with_caches("undo-prune");
@@ -170,7 +170,7 @@ fn the_mail_index_is_rebuilt_through_the_open_store() {
     assert_eq!(store.reader().unwrap().count_messages().unwrap(), 1, "the file was indexed at the start");
     let before = stats(CacheId::MailIndex, &p).unwrap();
     assert!(before.bytes > 0 && before.entries == 1, "{before:?}");
-    assert_eq!(clear(CacheId::MailIndex, &p, Some(&store)).map(|f| f.entries), Ok(1));
+    assert_eq!(clear(CacheId::MailIndex, &p, Some((&store, &crate::busy::Cancel::default()))).map(|f| f.entries), Ok(1));
     drop(store);
     let _ = fs::remove_dir_all(&d);
 }
@@ -445,5 +445,62 @@ fn saved_counts_the_outside_media_the_vault_links_each_file_once_and_the_missing
     // all of them there: no problem line
     p.linked.links.retain(|(_, t)| !t.contains("gone") && !t.contains("Nowhere"));
     assert_eq!(scan::saved(&p).linked.unwrap().problem, None);
+    let _ = fs::remove_dir_all(&d);
+}
+
+/// Poll until every job of `u` has ended.
+fn finish(u: &mut DataUsage) {
+    for _ in 0..500 {
+        u.poll(|| {});
+        if !u.any_running() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("the jobs of the data usage did not end");
+}
+
+// spec: USE-007, JOB-023
+#[test]
+fn a_clear_and_a_prune_are_tasks_with_a_text_each_and_a_prune_waits_to_be_listed() {
+    let (p, d) = places_with_caches("tasks");
+    let busy = crate::busy::Busy::default();
+    let mut u = DataUsage::new(p);
+    u.busy = busy.clone();
+    let retention = CacheRetention::default();
+    assert!(u.start(CacheId::SocialPictures, Kind::Clear, &retention, None, || {}));
+    assert!(u.start(CacheId::PostIndex, Kind::Prune, &retention, None, || {}), "another cache goes next to it");
+    assert!(!u.start(CacheId::SocialPictures, Kind::Prune, &retention, None, || {}), "the same cache never twice, and a refused start leaves no task");
+    let clear = busy.info(&CacheId::SocialPictures.key()).expect("a clear is a task");
+    let prune = busy.info(&CacheId::PostIndex.key()).expect("a prune is a task");
+    assert_eq!((clear.label.as_str(), clear.cancellable), ("Clearing the social pictures…", false));
+    assert_eq!((prune.label.as_str(), prune.cancellable), ("Cleaning up the social post index…", false));
+    // the clock is given: a clear is the person's own action and is listed at once, the cleanup that runs on its own after two seconds
+    let at = clear.started.max(prune.started);
+    assert_eq!(busy.list_at(at).iter().map(|t| t.label.as_str()).collect::<Vec<_>>(), ["Clearing the social pictures…"]);
+    assert_eq!(busy.list_at(at + LISTED_AFTER).len(), 2);
+    assert_eq!(CacheId::MailIndex.working_text(Kind::Clear), "Rebuilding the mail index…");
+    finish(&mut u);
+    assert!(busy.list_at(at + Duration::from_secs(60)).is_empty() && !busy.is_running(&CacheId::SocialPictures.key()), "the tasks end with their jobs");
+    assert!(u.start(CacheId::SocialPictures, Kind::Clear, &retention, None, || {}), "free again");
+    finish(&mut u);
+    let _ = fs::remove_dir_all(&d);
+}
+
+// spec: USE-005, JOB-023
+#[test]
+fn counting_is_two_tasks_listed_after_two_seconds_and_a_new_count_replaces_the_old_one() {
+    let (p, d) = places_with_caches("count-tasks");
+    let busy = crate::busy::Busy::default();
+    let mut u = DataUsage::new(p);
+    u.busy = busy.clone();
+    u.refresh(|| {});
+    u.refresh(|| {});
+    let tasks = |at: Instant| busy.list_at(at).iter().map(|t| t.label.clone()).collect::<Vec<_>>();
+    let now = Instant::now();
+    assert!(tasks(now).is_empty(), "a count that has just begun is not listed");
+    assert_eq!(tasks(now + LISTED_AFTER), ["Counting what Shale keeps on this computer…", "Measuring the caches…"], "one count of each kind, the second refresh took the place of the first");
+    finish(&mut u);
+    assert!(tasks(now + Duration::from_secs(60)).is_empty());
     let _ = fs::remove_dir_all(&d);
 }

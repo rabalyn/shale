@@ -180,17 +180,18 @@ mod git_ask;
 mod git_ask_tests;
 #[cfg(test)]
 mod handover_tests;
-mod history;
+pub(crate) mod history;
 mod history_ui;
 mod link_preview;
 mod mail;
 mod outside_copy;
+pub(crate) use outside_copy::OUTSIDE_COPY;
 mod outside_open;
 pub mod panes;
 mod rescan;
 mod screenshot;
 mod social;
-mod sync;
+pub(crate) mod sync;
 mod tabs;
 mod tex_setup;
 mod thread_ui;
@@ -198,6 +199,9 @@ mod thread_ui;
 mod tree_ui_tests;
 mod usage;
 mod userguide;
+pub mod vault_close;
+#[cfg(test)]
+mod vault_close_tests;
 pub mod vault_load;
 #[cfg(test)]
 mod vault_load_tests;
@@ -372,6 +376,13 @@ pub enum Action {
     RestoreTrashed,
     NewFolder(PathBuf),
     OpenVault(PathBuf),
+    /// close the vault in this folder: forget it, and remove the Shale files `remove` names (VAULT-035, VAULT-036)
+    CloseVault {
+        path: PathBuf,
+        remove: vault_close::Remove,
+    },
+    /// show the list of the vaults (the quick switcher's "Switch vault", VAULT-044)
+    OpenVaultMenu,
     /// Look at the vault folder again (e.g. after a file was copied in).
     Rescan,
     /// show a message (the app's toast)
@@ -488,6 +499,8 @@ pub struct ShaleApp {
     pub guide: crate::userguide::Places,
     /// paths that a second start of Shale hands over (DATA-015); none in tests and screenshots
     pub handover: Option<crate::instance::Handover>,
+    /// a close or switch of the vault that waits for the running sync (VAULT-036, VAULT-037)
+    pub(crate) pending_leave: Option<vault_close::PendingLeave>,
     pub modal: Option<Modal>,
     /// The key registry with the user's changes (KEY-001…009).
     pub keymap: crate::keys::Keymap,
@@ -544,6 +557,12 @@ impl ShaleApp {
         }
         let persist = opts.screenshot.is_none();
         let scripted = opts.keys.is_some();
+        // long code blocks are highlighted on a worker and the window repaints when one is done (EDIT-121); a screenshot shows the end state at once
+        let ctx = cc.egui_ctx.clone();
+        crate::syntax::set_repaint(move || ctx.request_repaint());
+        if !persist {
+            crate::syntax::set_all_sync();
+        }
         // the window reads the vault on a worker thread (NET-019); the start screen shows it
         // (a screenshot run has no one to wait for the load: it reads the vault here)
         let mut app = Self::build_with(opts, persist, persist.then_some(&cc.egui_ctx));
@@ -756,9 +775,17 @@ impl ShaleApp {
             word: Default::default(),
             guide: if persist { crate::userguide::Places::system() } else { crate::userguide::Places::none() },
             handover: None,
+            pending_leave: None,
         };
         // the mail view's check of the index is a task of the window's registry (JOB-015)
         app.mail.busy = app.busy.clone();
+        app.calendar.busy = app.busy.clone();
+        app.social.busy = app.busy.clone();
+        app.sync.managed.busy = app.busy.clone();
+        app.update.busy = app.busy.clone();
+        app.usage.busy = app.busy.clone();
+        app.tex.busy = app.busy.clone();
+        app.word.busy = app.busy.clone();
         // the audio attachments play in the app's one player (MAIL-240, MEDIA-007)
         app.mail.media = app.media.clone();
         if persist {
@@ -837,6 +864,11 @@ impl ShaleApp {
                 self.social.index.add(&demo.account.id, "home", &crate::social::demo::posts());
             }
             Some("tasks") => self.show_view(View::Tasks, false),
+            // the settings file tab with the text of the settings in use (a screenshot run keeps no file, so there is nothing to read)
+            Some("settings-file") => {
+                self.sf.text = self.cfg.file_text();
+                self.show_view(View::SettingsFile, false);
+            }
             Some("keybindings") => self.open_settings(SettingsTab::Keybindings),
             // the Data usage dialog with made-up cache files in the temporary folders
             Some("data-usage") => {
@@ -847,12 +879,24 @@ impl ShaleApp {
             }
             Some("graph") => self.show_view(View::Graph, false),
             Some("boards") => self.show_view(View::Boards, false),
-            // the feed view with made-up posts (no network); "social-import": and the dialog for saving some of them
-            Some(v @ ("social" | "social-import")) => {
+            // the feed view with made-up posts (no network); "social-import": and the dialog for saving some of them; "social-thread": the conversation of a post
+            Some(v @ ("social" | "social-import" | "social-thread" | "social-notifications")) => {
                 let demo = crate::social::demo::account();
                 self.cfg.social_accounts = vec![demo.clone()];
                 self.social.load_demo(&demo);
                 self.show_view(View::Social(None), false);
+                if v == "social-thread" {
+                    // the conversation of the first reply to the demo thread (SOC-045)
+                    let post = crate::social::demo::replies().remove(0).post;
+                    self.social.threads.open(&demo.account.id, &post);
+                    self.show_view(View::Social(Some(crate::social::FeedRef { thread: Some(post.id), ..crate::social::FeedRef::new(demo.account.id.clone(), "home") })), false);
+                }
+                if v == "social-notifications" {
+                    // the Notifications feed of the demo account, loaded already (SOC-078)
+                    let key = (demo.account.id.clone(), crate::social::notifications::NOTIFICATIONS.to_string());
+                    self.social.timelines.insert(key.clone(), crate::social::state::Timeline { posts: crate::social::demo::notifications(), loaded: true, ..Default::default() });
+                    self.show_view(View::Social(Some(crate::social::FeedRef::new(key.0, key.1))), false);
+                }
                 if v == "social-import" {
                     let posts = crate::social::demo::posts();
                     let items = [3, 4].iter().map(|i| crate::import::social_item(crate::social::demo::saved(&posts[*i]), "Mastodon", false)).collect();
@@ -996,16 +1040,10 @@ impl ShaleApp {
                 self.toast(e);
             }
         }
+        // nothing of the vault being left stays (VAULT-037)
+        self.drop_vault_state();
         self.load_vault_data(&v.root);
-        self.media.stop();
         self.vault = Some(v);
-        self.tabbar.tabs.clear();
-        self.panes.reset();
-        self.notes.clear();
-        self.drawings.clear();
-        self.tabbar.active = 0;
-        // the folders are looked at again the next time the list is shown
-        self.presence.clear();
         if known {
             // a folder that is new to the list and lies in or around another vault: warned once (VAULT-039)
             let nesting = if self.cfg.vaults.contains(path) { None } else { self.cfg.vaults.nested_with(path, None) };
@@ -1812,6 +1850,7 @@ impl ShaleApp {
         let changed = v.rename(rel, to, update_links).map_err(|e| e.to_string())?;
         let failed = v.failed_rewrites.clone();
         self.after_move(rel, to, is_dir, &changed.changed);
+        let failed = self.rewrite_reasons(failed);
         self.remember_open_files();
         Ok((changed, failed))
     }
@@ -1847,6 +1886,23 @@ impl ShaleApp {
             }
             Err(e) => self.toast(format!("Could not fix the link: {e}")),
         }
+    }
+
+    /// The notes whose links a rename could not rewrite, with the reason: a note that still holds
+    /// unsaved edits (its save failed before the rename, VAULT-042) was not changed on disk by
+    /// another program, its buffer is simply newer than the file, so it says so (VAULT-016).
+    fn rewrite_reasons(&self, failed: Vec<(PathBuf, String)>) -> Vec<(PathBuf, String)> {
+        failed
+            .into_iter()
+            .map(|(p, why)| {
+                let unsaved = self.notes.get(&p).is_some_and(|d| d.dirty) || self.drawings.get(&p).is_some_and(|d| d.dirty);
+                if unsaved {
+                    (p, "its unsaved changes could not be saved before the rename, so the file was left as it is".to_string())
+                } else {
+                    (p, why)
+                }
+            })
+            .collect()
     }
 
     /// After a file or folder moved from `rel` to `to`: open notes, drawings and tabs follow it,
@@ -1939,6 +1995,7 @@ impl ShaleApp {
         let (to, changed) = v.move_into(rel, into).map_err(|e| e.to_string())?;
         let failed = v.failed_rewrites.clone();
         self.after_move(rel, &to, is_dir, &changed.changed);
+        let failed = self.rewrite_reasons(failed);
         if let Some(m) = rewrite_problems("Moved", &changed.changed, &failed) {
             self.toast(m);
         }
@@ -2283,7 +2340,7 @@ impl ShaleApp {
             crate::pdf::export::ExportOptions { numbered_headings: self.cfg.numbered_headings, ..crate::pdf::export::ExportOptions::for_note() }.with_note_properties(&self.note_text(rel))
         };
         let path = v.root.join("exports").join(format!("{name}.pdf"));
-        let mut dialog = crate::pdf::export_dialog::ExportDialog::new(rel.to_path_buf(), drawing, name, opts, path);
+        let mut dialog = crate::pdf::export_dialog::ExportDialog::new(rel.to_path_buf(), drawing, name, opts, path).with_busy(&self.busy);
         if !drawing {
             let (title, root) = (f.title(), v.root.clone());
             let text = self.note_text(rel);
@@ -2340,7 +2397,7 @@ impl ShaleApp {
         let engine = if noted.is_some() || last.latex { ExportEngine::Latex } else { ExportEngine::Builtin };
         let prefer = noted.or_else(|| (!last.set.is_empty()).then(|| (last.set.clone(), last.kind.clone())));
         let tex = crate::pdf::tex::dialog::TexExport::for_folder(&v.root, title, &text, prefer);
-        self.modal = Some(Modal::Export(Box::new(crate::pdf::export_dialog::ExportDialog::new(dir.to_path_buf(), false, name, opts, path).with_book(book).with_latex(tex, engine))));
+        self.modal = Some(Modal::Export(Box::new(crate::pdf::export_dialog::ExportDialog::new(dir.to_path_buf(), false, name, opts, path).with_book(book).with_latex(tex, engine).with_busy(&self.busy))));
     }
 
     /// Lay a folder's book out as a job (BOOK-010).
@@ -2367,22 +2424,33 @@ impl ShaleApp {
         self.notes.get(rel).map(|n| n.text.clone()).or_else(|| self.vault.as_ref().and_then(|v| v.notes.get(rel)).map(|n| n.text.clone())).unwrap_or_default()
     }
 
-    /// Write the PDF for the dialog's file and options. Returns where it was saved.
-    pub fn run_export(&mut self, d: &crate::pdf::export_dialog::ExportDialog) -> Result<PathBuf, String> {
+    /// Lay the PDF of the dialog's note or drawing out as a task (PDF-001, JOB-017): the window stays
+    /// free, the export can be stopped before the next picture, and nothing is written until it is done.
+    pub fn start_note_export(&mut self, d: &mut crate::pdf::export_dialog::ExportDialog, ctx: &egui::Context) -> Result<(), String> {
+        use crate::pdf::note_export::{NoteExport, What, Work};
         self.flush_all();
         let v = self.vault.as_ref().ok_or("No vault is open")?;
-        let bytes = if d.drawing {
+        let (what, opts) = if d.drawing {
             let scene = match self.drawings.get(&d.rel) {
                 Some(doc) => doc.scene.clone(),
                 None => crate::drawing::Scene::read_file(&v.abs(&d.rel))?,
             };
-            crate::pdf::export::export_drawing(&scene, &d.name, &d.opts, &crate::drawing::pictures::images(&scene, v, &d.rel))?
+            (What::Drawing(Box::new(scene)), d.opts.clone())
         } else {
-            let text = self.note_text(&d.rel);
-            crate::pdf::export::export_note(v, &d.rel, &text, &crate::pdf::export::ExportOptions { column: self.editor_column(&d.rel), ..d.opts.clone() })?
+            (What::Note(self.note_text(&d.rel)), crate::pdf::export::ExportOptions { column: self.editor_column(&d.rel), ..d.opts.clone() })
         };
+        let work = Work { root: v.root.clone(), rel: d.rel.clone(), name: d.name.clone(), opts, what };
+        let ctx = ctx.clone();
+        d.note = Some(NoteExport::start(d.busy(), work, move || ctx.request_repaint()).ok_or("Another PDF export is still running")?);
         self.remember_export_engine(false, d);
-        self.save_pdf(&d.path, &bytes)
+        Ok(())
+    }
+
+    /// Where a note's or drawing's export is: when the job has ended, the PDF is saved (or why not).
+    pub fn note_export_tick(&mut self, d: &mut crate::pdf::export_dialog::ExportDialog) -> Option<Result<PathBuf, String>> {
+        let made = d.note.as_ref()?.poll()?;
+        d.note = None;
+        Some(made.and_then(|bytes| self.save_pdf(&d.path, &bytes)))
     }
 
     /// The width of the editor's text column where a note is shown: embeds are as big in
@@ -2468,6 +2536,7 @@ impl ShaleApp {
         let text = self.note_text(&d.rel);
         let column = self.editor_column(&d.rel);
         let v = self.vault.as_ref().ok_or("No vault is open")?;
+        let busy = d.busy().clone();
         let tex = d.tex.as_mut().ok_or("This note has no LaTeX choices")?;
         let (set, kind) = (tex.current_set().ok_or("Choose a template set first: import one in Settings → LaTeX")?, tex.current_kind().ok_or("Choose a kind of document")?);
         let doc = match &d.book {
@@ -2487,7 +2556,9 @@ impl ShaleApp {
             }
         };
         let ctx = ctx.clone();
-        tex.start(engine, doc, move || ctx.request_repaint());
+        if !tex.start(&busy, engine, doc, move || ctx.request_repaint()) {
+            return Err("Another LaTeX export is still running".into());
+        }
         self.remember_export_engine(true, d);
         Ok(())
     }
@@ -2704,6 +2775,8 @@ impl ShaleApp {
                 Action::RestoreTrashed => self.restore_trashed(),
                 Action::NewFolder(parent) => self.modal = Some(Modal::NewFolder { parent, name: String::new() }),
                 Action::OpenVault(p) => self.open_vault_in_background(&p, vault_load::After::Nothing),
+                Action::CloseVault { path, remove } => self.close_vault(&path, remove),
+                Action::OpenVaultMenu => self.open_vault_menu(),
                 Action::Export(rel) => self.open_export_dialog(&rel),
                 Action::ExportDocx(rel) => self.open_docx_export_dialog(&rel),
                 Action::ExportFolder(dir) => self.open_export_folder_dialog(&dir),
@@ -3261,6 +3334,7 @@ impl ShaleApp {
         self.update_tick(&ctx);
         self.take_handover(&ctx);
         self.sync_tick(&ctx);
+        self.vault_leave_tick();
         self.history_tick(&ctx);
         self.mail_tick(&ctx);
         if self.calendar.poll() {
@@ -3813,6 +3887,7 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: SOC-005
     // spec: SOC-007, SOC-012
     #[test]
     fn saving_a_post_opens_the_import_dialog_and_the_note_lands_in_the_vault() {
@@ -3991,6 +4066,27 @@ mod export_tests {
         (ShaleApp::build(Options { screenshot: None, vault: Some(d.clone()), view: None, keys: None }, false), d)
     }
 
+    /// Run the export of the dialog as the window does (a task) and wait for the file.
+    fn export_now(app: &mut ShaleApp, dialog: &mut crate::pdf::export_dialog::ExportDialog) -> Result<PathBuf, String> {
+        app.start_note_export(dialog, &egui::Context::default())?;
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        loop {
+            if let Some(done) = app.note_export_tick(dialog) {
+                return done;
+            }
+            assert!(std::time::Instant::now() < end, "the export ends");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    fn wait_idle(app: &ShaleApp) {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while app.busy.is_running(&crate::pdf::book_dialog::PDF_EXPORT) {
+            assert!(std::time::Instant::now() < end, "the task ends with its job");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
     // spec: PDF-003
     #[test]
     fn export_menu_entry_opens_the_dialog_and_writes_a_pdf() {
@@ -3998,10 +4094,10 @@ mod export_tests {
             let (mut app, d) = test_app(tag);
             app.actions.push(Action::Export(PathBuf::from(rel)));
             app.process_actions();
-            let Some(Modal::Export(dialog)) = app.modal.take() else { panic!("export dialog should open for {rel}") };
+            let Some(Modal::Export(mut dialog)) = app.modal.take() else { panic!("export dialog should open for {rel}") };
             assert_eq!(dialog.drawing, rel.ends_with(".excalidraw"));
             assert!(dialog.path.replace('\\', "/").ends_with(&format!("exports/{}.pdf", rel.split('.').next().unwrap())), "default path {}", dialog.path);
-            let out = app.run_export(&dialog).unwrap();
+            let out = export_now(&mut app, &mut dialog).unwrap();
             let bytes = std::fs::read(&out).unwrap();
             let pdf = hayro::hayro_syntax::Pdf::new(bytes).expect("a valid PDF was written");
             assert!(!pdf.pages().is_empty());
@@ -4025,8 +4121,8 @@ mod export_tests {
             let a = app.tabbar.active;
             app.tabbar.tabs[a].editor.column = column;
             app.open_export_dialog(Path::new("Welcome.md"));
-            let Some(Modal::Export(dialog)) = app.modal.take() else { panic!("the export dialog opens") };
-            let out = app.run_export(&dialog).unwrap();
+            let Some(Modal::Export(mut dialog)) = app.modal.take() else { panic!("the export dialog opens") };
+            let out = export_now(app, &mut dialog).unwrap();
             crate::pdf::export::tests::image_sizes(&std::fs::read(out).unwrap())[0].0
         };
         let (a, b) = (page_w(&mut app, Some(600.0)), page_w(&mut app, Some(1200.0)));
@@ -4053,7 +4149,7 @@ mod export_tests {
         assert_eq!((plain.opts.paper, plain.opts.margins_mm, plain.opts.title, plain.opts.toc), (crate::pdf::export::Paper::A4, [20.0; 4], true, true));
         // what the dialog holds is what is exported: A4 chosen in it wins over the note's Letter
         dialog.opts.paper = crate::pdf::export::Paper::A4;
-        let out = app.run_export(&dialog).unwrap();
+        let out = export_now(&mut app, &mut dialog).unwrap();
         let bytes = std::fs::read(out).unwrap();
         assert!(String::from_utf8_lossy(&bytes).contains("/MediaBox [0 0 595.00 842.00]"));
         let _ = std::fs::remove_dir_all(&d);
@@ -4067,7 +4163,53 @@ mod export_tests {
         let Some(Modal::Export(mut dialog)) = app.modal.take() else { panic!() };
         // a file where a folder is needed: cannot be written on any system
         dialog.path = d.join("Ideas.md").join("x.pdf").to_string_lossy().into_owned();
-        assert!(app.run_export(&dialog).is_err());
+        assert!(export_now(&mut app, &mut dialog).is_err());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-001, JOB-010, JOB-017
+    #[test]
+    fn the_export_of_a_note_is_a_task_with_its_text_and_cancel_stops_it_and_writes_no_file() {
+        let (mut app, d) = test_app("note-task");
+        let long: String = (0..30_000).map(|n| format!("Line {n} of a long note, with *words* and a [[Ideas]] link.\n\n")).collect();
+        std::fs::write(d.join("Long.md"), long).unwrap();
+        app.vault.as_mut().unwrap().rescan();
+        app.open_export_dialog(Path::new("Long.md"));
+        let Some(Modal::Export(mut dialog)) = app.modal.take() else { panic!("the export dialog opens") };
+        dialog.engine = crate::pdf::export_dialog::ExportEngine::Builtin;
+        let key = crate::pdf::book_dialog::PDF_EXPORT;
+        assert!(!dialog.note_working() && app.busy.list().is_empty());
+        app.start_note_export(&mut dialog, &egui::Context::default()).unwrap();
+        // the window is not held: the call returned and the task is listed with its text and Cancel
+        let listed = app.busy.info(&key);
+        assert!(listed.as_ref().is_some_and(|t| t.cancellable && t.label == "Exporting “Long” to PDF…"), "{listed:?}");
+        assert!(dialog.note_working());
+        // no second export beside it, from this dialog or another (JOB-005)
+        assert_eq!(app.start_note_export(&mut dialog, &egui::Context::default()).unwrap_err(), "Another PDF export is still running");
+        // Cancel of the dialog (JOB-010) stops the work; the PDF is not saved
+        dialog.cancel_note();
+        assert!(!dialog.note_working());
+        wait_idle(&app);
+        assert!(app.busy.list().is_empty() && app.note_export_tick(&mut dialog).is_none());
+        assert!(!d.join("exports/Long.pdf").exists(), "a stopped export writes nothing");
+        // the list's own Cancel stops it too: the job ends with an error, never with a half PDF
+        app.start_note_export(&mut dialog, &egui::Context::default()).unwrap();
+        let id = app.busy.info(&key).unwrap().id;
+        assert!(app.busy.cancel(id));
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let stopped = loop {
+            if let Some(done) = app.note_export_tick(&mut dialog) {
+                break done;
+            }
+            assert!(std::time::Instant::now() < end, "the export ends");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+        // a long note may finish before the token is looked at; if it was stopped, it says so and writes nothing
+        match stopped {
+            Err(e) => assert_eq!((e.as_str(), d.join("exports/Long.pdf").exists()), ("The export was cancelled", false)),
+            Ok(out) => assert!(out.is_file()),
+        }
+        assert!(app.busy.list().is_empty());
         let _ = std::fs::remove_dir_all(&d);
     }
 

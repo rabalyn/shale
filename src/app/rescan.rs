@@ -2,6 +2,7 @@
 //! the reads of changed files happen there, the result is applied on the UI thread.
 
 use super::{DrawingDoc, ShaleApp, View};
+use crate::busy::{Key, Task};
 use crate::jobs;
 use crate::vault::{rescan_interval, Scan, ScanInput, Stamp, RESCAN_EVERY};
 use eframe::egui;
@@ -10,6 +11,13 @@ use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+/// The task of a scan of the vault folder (NET-013, JOB-022).
+pub const VAULT_RESCAN: Key = Key::new("vault-rescan");
+
+/// A scan is listed in the busy indicator only when it takes this long (a slow network share): a
+/// scan that is over in a moment is nothing to show (JOB-022).
+pub const LISTED_AFTER: Duration = Duration::from_secs(2);
 
 /// Size and modification time of a drawing file (what `DrawingDoc::seen` holds).
 type Meta = Option<(Option<std::time::SystemTime>, u64)>;
@@ -41,6 +49,8 @@ type Runner = Arc<dyn Fn(ScanInput, Vec<DrawingProbe>) -> Outcome + Send + Sync>
 /// The scan that is running: for the vault with this `uid`.
 struct Flight {
     uid: u64,
+    // held while the scan runs: the task is gone when the flight is, also when the vault changes (VAULT-037)
+    _task: Task,
     rx: Receiver<Result<Outcome, String>>,
 }
 
@@ -57,6 +67,14 @@ pub struct RescanState {
 impl RescanState {
     pub fn new() -> Self {
         Self { last: Instant::now(), interval: RESCAN_EVERY, flight: None, runner: Arc::new(scan) }
+    }
+
+    /// The vault changed (VAULT-037): the scan of the old one is dropped (its result is never
+    /// applied) and the timer starts again. The way a scan is made stays.
+    pub(super) fn reset(&mut self) {
+        self.last = Instant::now();
+        self.interval = RESCAN_EVERY;
+        self.flight = None;
     }
 
     /// A scan is running.
@@ -123,10 +141,11 @@ impl ShaleApp {
         }
         let Some(v) = self.vault.as_ref() else { return };
         let (uid, input, probes) = (v.uid, v.scan_input(), self.drawing_probes());
+        let Some(task) = self.busy.begin_listed_after(VAULT_RESCAN, "Reading the vault folder…", LISTED_AFTER) else { return };
         let runner = self.rescan.runner.clone();
         let ctx = ctx.clone();
         self.rescan.last = Instant::now();
-        self.rescan.flight = Some(Flight { uid, rx: jobs::spawn(move || runner(input, probes), move || ctx.request_repaint()) });
+        self.rescan.flight = Some(Flight { uid, _task: task, rx: jobs::spawn(move || runner(input, probes), move || ctx.request_repaint()) });
     }
 
     fn scan_arrived(&mut self, uid: u64, result: Result<Outcome, String>) {

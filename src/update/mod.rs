@@ -8,6 +8,7 @@
 pub mod check;
 pub mod install;
 pub mod kind;
+mod sshsig;
 mod ui;
 
 // the tests use `sh`, Unix paths and (UPD-015) the Linux `install.sh`: they run on Linux and macOS
@@ -18,15 +19,23 @@ mod logic_tests;
 #[cfg(all(test, unix))]
 mod ui_tests;
 
+use crate::busy::{self, Busy, Key};
 use check::{Release, Source, Staged};
 use install::{Installed, Relaunch};
 use kind::{Capability, InstallKind};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+/// The three tasks of an update (JOB-030), all looking at the one cancel flag of the state. The
+/// check is quiet (it also runs by itself, every day) and can stop; the download can stop and its
+/// partial file is removed; the install cannot, because it is a few file operations that undo
+/// themselves on an error and must not end half way.
+pub(crate) const UPDATE_CHECK: Key = Key::new("update-check");
+pub(crate) const UPDATE_DOWNLOAD: Key = Key::new("update-download");
+pub(crate) const UPDATE_INSTALL: Key = Key::new("update-install");
 
 /// The version of this program.
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
@@ -196,7 +205,7 @@ pub enum Action {
     ShowNotes,
 }
 
-type Job<T> = Receiver<Result<Result<T, String>, String>>;
+type Job<T> = busy::Job<Result<T, String>>;
 
 pub struct UpdateState {
     /// Checks and downloads happen (not in tests and pictures, which have no network).
@@ -215,6 +224,8 @@ pub struct UpdateState {
     next_check: Option<Instant>,
     force: bool,
     cancel: Arc<AtomicBool>,
+    /// The window's registry of running tasks (the window sets it; JOB-003).
+    pub(crate) busy: Busy,
     check_job: Option<Job<Option<Release>>>,
     fetch_job: Option<Job<Staged>>,
     install_job: Option<Job<Installed>>,
@@ -260,6 +271,7 @@ impl UpdateState {
             next_check: None,
             force: false,
             cancel: Arc::new(AtomicBool::new(false)),
+            busy: Busy::default(),
             check_job: None,
             fetch_job: None,
             install_job: None,
@@ -297,39 +309,47 @@ impl UpdateState {
         self.result = None;
     }
 
-    /// Whether a check is running or about to start.
-    pub fn check_pending(&self) -> bool {
-        self.check_job.is_some() || self.force
-    }
-
     /// Whether a check, download or install is running.
     pub fn busy(&self) -> bool {
         self.check_job.is_some() || self.fetch_job.is_some() || self.install_job.is_some()
     }
 
-    fn start_job<T: Send + 'static>(&mut self, ctx: &eframe::egui::Context, f: impl FnOnce(&AtomicBool) -> Result<T, String> + Send + 'static) -> Job<T> {
+    /// Run `f` as the task `key`, with a new cancel flag that the task's Cancel sets when `stoppable`.
+    /// None: the task of this key is still listed (a job that was dropped by `quiet` has not ended yet).
+    fn start_job<T: Send + 'static>(&mut self, ctx: &eframe::egui::Context, key: Key, label: String, stoppable: bool, f: impl FnOnce(&AtomicBool) -> Result<T, String> + Send + 'static) -> Option<Job<T>> {
+        // the check also runs by itself, every day: quiet, like the other housekeeping
+        let wait = if key == UPDATE_CHECK { busy::LISTED_AFTER } else { Duration::ZERO };
+        let mut task = self.busy.begin_listed_after(key, label, wait)?;
         self.cancel = Arc::new(AtomicBool::new(false));
+        if stoppable {
+            task.cancellable_with(self.cancel.clone().into());
+        }
         let (cancel, ctx) = (self.cancel.clone(), ctx.clone());
-        crate::jobs::spawn(move || f(&cancel), move || ctx.request_repaint())
+        Some(task.run(move || f(&cancel), move || ctx.request_repaint()))
     }
 
     fn start_check(&mut self, ctx: &eframe::egui::Context) {
-        self.force = false;
         let check = self.backend.check.clone();
-        self.check_job = Some(self.start_job(ctx, move |c| check(c)));
+        self.check_job = self.start_job(ctx, UPDATE_CHECK, "Checking for updates…".into(), true, move |c| check(c));
+        // a check that could not start waits for the next frame
+        self.force &= self.check_job.is_none();
     }
 
     fn start_fetch(&mut self, ctx: &eframe::egui::Context, then_install: bool) {
         let Some(found) = self.found.clone().filter(|f| f.no_file.is_none()) else { return };
         let fetch = self.backend.fetch.clone();
-        self.phase = Phase::Downloading { then_install };
-        self.fetch_job = Some(self.start_job(ctx, move |c| fetch(&found.release, c)));
+        let label = format!("Downloading Shale {}…", found.release.version);
+        self.fetch_job = self.start_job(ctx, UPDATE_DOWNLOAD, label, true, move |c| fetch(&found.release, c));
+        if self.fetch_job.is_some() {
+            self.phase = Phase::Downloading { then_install };
+        }
     }
 
     fn start_install(&mut self, ctx: &eframe::egui::Context, staged: Staged) {
-        let (install, kind) = (self.backend.install.clone(), self.kind.clone());
-        self.phase = Phase::Installing;
-        self.install_job = Some(self.start_job(ctx, move |c| install(&kind, &staged, c)));
+        let (install, kind, kept) = (self.backend.install.clone(), self.kind.clone(), staged.clone());
+        let label = format!("Installing Shale {}…", staged.version);
+        self.install_job = self.start_job(ctx, UPDATE_INSTALL, label, false, move |c| install(&kind, &staged, c));
+        self.phase = if self.install_job.is_some() { Phase::Installing } else { Phase::Ready(kept) };
     }
 
     /// A release was found that is newer than this program: what the mode does with it (UPD-007 to UPD-010).
@@ -409,6 +429,11 @@ impl UpdateState {
                 }
                 true
             }
+            // Cancel in a view or in the indicator: no answer, and no word of a failure; the next check is a while away
+            Err(e) if e == "cancelled" => {
+                self.next_check = Some(Instant::now() + RETRY_AFTER);
+                false
+            }
             Err(e) => {
                 self.next_check = Some(Instant::now() + RETRY_AFTER);
                 self.result = Some(CheckResult::Failed(e));
@@ -429,11 +454,11 @@ impl UpdateState {
             return false;
         }
         let mut changed = false;
-        if let Some(r) = self.check_job.as_ref().and_then(|rx| rx.try_recv().ok()) {
+        if let Some(r) = self.check_job.as_ref().and_then(|job| job.try_recv().ok()) {
             self.check_job = None;
             changed |= self.handle_check(ctx, cfg, r.and_then(|x| x));
         }
-        if let Some(r) = self.fetch_job.as_ref().and_then(|rx| rx.try_recv().ok()) {
+        if let Some(r) = self.fetch_job.as_ref().and_then(|job| job.try_recv().ok()) {
             self.fetch_job = None;
             match r.and_then(|x| x) {
                 Ok(staged) if matches!(self.phase, Phase::Downloading { then_install: true }) && self.capability() == Capability::Install => self.start_install(ctx, staged),
@@ -442,7 +467,7 @@ impl UpdateState {
                 Err(e) => self.phase = Phase::Failed(e),
             }
         }
-        if let Some(r) = self.install_job.as_ref().and_then(|rx| rx.try_recv().ok()) {
+        if let Some(r) = self.install_job.as_ref().and_then(|job| job.try_recv().ok()) {
             self.install_job = None;
             match r.and_then(|x| x) {
                 Ok(installed) => self.phase = Phase::Installed(installed),

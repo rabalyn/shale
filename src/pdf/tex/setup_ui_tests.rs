@@ -10,7 +10,7 @@ use super::install::{Handle, Progress, Stage};
 use super::sets::load_settings;
 use super::sets_tests::{make_set, META, PNG};
 use super::sets_ui::{Form, Slot};
-use super::settings_ui::{Notice, Task, TaskKind};
+use super::settings_ui::{Notice, TaskKind};
 use super::settings_ui_tests::{found, good, nothing_found, T};
 use super::setup::*;
 use crate::app::{Modal, SettingsTab};
@@ -123,12 +123,13 @@ fn a_missing_tex_is_explained_in_plain_words_and_installing_shows_progress_and_c
     // a running install: its progress and Cancel
     let handle = Handle::default();
     handle.set(|p| *p = Progress { stage: Stage::Download, ..Progress::default() });
-    let (_tx, rx) = std::sync::mpsc::channel();
-    t.app.tex.task = Some(Task { kind: TaskKind::Install, handle: handle.clone(), rx });
-    assert!(t.shows("Cancel install") && !t.shows("Install (about"), "{:?}", t.painted());
-    t.click("Cancel install");
+    let (tx, rx) = std::sync::mpsc::channel();
+    t.app.tex.inject(TaskKind::Install, handle.clone(), rx);
+    assert!(t.shows("Installing TeX Live…") && t.shows("Cancel") && !t.shows("Install (about"), "{:?}", t.painted());
+    t.click("Cancel");
     assert!(handle.cancelled());
-    t.app.tex.task = None;
+    drop(tx);
+    t.wait_for_job();
     // once there is a TeX, the step is done
     t.app.tex.detection = Some(usable());
     assert!(t.shows("Found: the TeX of this computer"));
@@ -154,7 +155,7 @@ fn a_tex_that_is_still_being_looked_for_is_said_and_a_computer_without_a_data_fo
     let mut t = T::new("su-looking", usable());
     // (a job of the page keeps the setup from looking again by itself, so the state stays)
     let (_tx, rx) = std::sync::mpsc::channel();
-    t.app.tex.task = Some(Task { kind: TaskKind::Test, handle: Handle::default(), rx });
+    t.app.tex.inject(TaskKind::Test, Handle::default(), rx);
     t.app.tex.detection = None;
     open(&mut t, Some(Step::Tex));
     assert!(t.shows("Looking for TeX on this computer…"), "{:?}", t.painted());
@@ -218,12 +219,13 @@ fn a_running_import_shows_progress_and_cancel() {
     open(&mut t, Some(Step::Templates));
     let handle = Handle::default();
     handle.set(|p| *p = Progress { stage: Stage::Generate, ..Progress::default() });
-    let (_tx, rx) = std::sync::mpsc::channel();
-    t.app.tex.task = Some(Task { kind: TaskKind::Import, handle: handle.clone(), rx });
-    assert!(t.shows("Generating the class files with docstrip") && t.shows("Cancel import") && !t.shows("recommended"), "{:?}", t.painted());
-    t.click("Cancel import");
+    let (tx, rx) = std::sync::mpsc::channel();
+    t.app.tex.inject(TaskKind::Import, handle.clone(), rx);
+    assert!(t.shows("Generating the class files with docstrip") && t.shows("Importing the template set…") && t.shows("Cancel") && !t.shows("recommended"), "{:?}", t.painted());
+    t.click("Cancel");
     assert!(handle.cancelled());
-    t.app.tex.task = None;
+    drop(tx);
+    t.wait_for_job();
 }
 
 // spec: TEX-017
@@ -416,19 +418,20 @@ fn the_test_page_without_a_usable_tex_says_so_and_a_swatchless_set_takes_the_col
     assert_eq!(load_settings(&dir).unwrap().accent, "9c");
 }
 
-// spec: TEX-017
+// spec: TEX-017, JOB-029
 #[test]
 fn cancel_closes_the_setup_and_stops_what_it_started() {
     let mut t = T::new("su-cancel", usable());
     open(&mut t, Some(Step::Templates));
     let handle = Handle::default();
-    let (_tx, rx) = std::sync::mpsc::channel();
-    t.app.tex.task = Some(Task { kind: TaskKind::Import, handle: handle.clone(), rx });
+    let (tx, rx) = std::sync::mpsc::channel();
+    t.app.tex.inject(TaskKind::Install, handle.clone(), rx);
     t.hl.frames(&mut t.app, 4);
     t.click("Cancel");
     assert!(!is_open(&t), "closed");
     assert!(handle.cancelled(), "a running job is asked to stop");
-    t.app.tex.task = None;
+    drop(tx);
+    t.wait_for_job();
 }
 
 fn note(t: &mut T, name: &str, text: &str) {
@@ -542,7 +545,7 @@ fn click_key(t: &mut T, key: &str) {
     t.hl.frames(&mut t.app, 3);
 }
 
-// spec: TEX-017
+// spec: TEX-017, TEX-023
 #[test]
 fn settings_has_a_button_that_opens_the_setup_and_cancel_goes_back_to_settings() {
     let mut t = T::new("su-settings", usable());
@@ -672,7 +675,33 @@ fn a_second_logo_dropped_on_the_logo_step_is_the_department_logo_and_a_toast_say
     let _ = std::fs::remove_dir_all(outside);
 }
 
-// spec: TEX-017
+// spec: TEX-028
+#[test]
+fn a_drag_over_the_window_says_what_the_open_dialog_takes_and_other_dialogs_keep_the_import_hint() {
+    // one frame with files hovering over the window, the pointer at some place; what that frame painted
+    fn hover(t: &mut T) -> Vec<String> {
+        t.hl.frame_with(&mut t.app, vec![eframe::egui::Event::PointerMoved(eframe::egui::pos2(300.0, 300.0))], |_, raw| raw.hovered_files.push(eframe::egui::HoveredFile::default()));
+        t.hl.text.iter().map(|(text, _)| text.clone()).collect()
+    }
+    let mut t = T::new("su-drag-hint", usable());
+    open(&mut t, Some(Step::Logo));
+    assert!(hover(&mut t).iter().any(|s| s.contains("Drop the logo here (a PDF or a PNG file)")), "{:?}", t.painted());
+    t.app.tex.setup.step = Step::Templates;
+    assert!(hover(&mut t).iter().any(|s| s.contains("Drop the templates here (a .zip or .tar.gz file, or a folder)")), "{:?}", t.painted());
+    t.app.tex.setup.step = Step::Tex;
+    assert!(hover(&mut t).iter().any(|s| s.contains("Nothing to drop on this step")), "{:?}", t.painted());
+    // Settings → LaTeX takes archives, folders and logos
+    t.app.open_settings(SettingsTab::Latex);
+    t.hl.frames(&mut t.app, 3);
+    assert!(hover(&mut t).iter().any(|s| s.contains("Drop templates (a .zip, a .tar.gz or a folder) or a logo (a PDF or PNG) here")), "{:?}", t.painted());
+    // another tab of Settings: the drag says what it always said
+    t.app.open_settings(SettingsTab::Vim);
+    t.hl.frames(&mut t.app, 3);
+    let said = hover(&mut t);
+    assert!(said.iter().any(|s| s.contains("Drop to import")) && !said.iter().any(|s| s.contains("Drop templates")), "{said:?}");
+}
+
+// spec: TEX-017, TEX-028
 #[test]
 fn a_folder_dropped_on_the_templates_step_is_imported_as_a_set() {
     let mut t = T::new("su-drop-set", usable());
@@ -740,7 +769,7 @@ fn drops_on_settings_latex_import_an_archive_and_give_a_pdf_to_the_set_whose_log
     let _ = std::fs::remove_file(logo);
 }
 
-// spec: TEX-017
+// spec: TEX-017, TEX-028
 #[test]
 fn drops_still_open_the_import_dialog_when_neither_the_setup_nor_settings_latex_is_open() {
     let mut t = T::new("su-drop-normal", usable());

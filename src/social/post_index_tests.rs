@@ -17,6 +17,7 @@ fn with_text(id: &str, who: &str, at: i64, text: &str) -> Post {
     Post { text_markdown: text.into(), ..post(id, who, at, None) }
 }
 
+// spec: SOC-031
 // spec: SOC-030
 #[test]
 fn a_post_is_found_by_text_author_link_date_and_thread_context() {
@@ -247,4 +248,37 @@ fn clearing_empties_the_index_and_it_fills_again() {
     assert!(!ix.contains("a", &key));
     ix.add("a", "home", &[with_text("3", "x", ago(1), "gamma")]);
     assert_eq!(ids(&ix.search_wild("gamma", 10)), ["3"]);
+}
+
+// spec: SOC-059
+#[test]
+fn a_reaction_changes_the_indexed_post_also_where_it_is_quoted_and_a_post_seen_again_replaces_it() {
+    let mut ix = PostIndex::in_memory();
+    let mut p = with_text("1", "ada", ago(1), "a loquat");
+    p.quote = Some(Box::new(with_text("q", "bob", ago(2), "quoted words")));
+    let other = with_text("2", "cy", ago(1), "a loquat too");
+    ix.add("a", "home", &[p.clone(), other]);
+    ix.add("b", "home", &[with_text("1", "ada", ago(1), "a loquat")]);
+    let like = |p: &mut Post| {
+        p.mine.liked = true;
+        p.like_count += 1;
+    };
+    ix.update_post("a", "1", like);
+    ix.update_post("a", "q", like);
+    let by = |ix: &PostIndex, id: &str| ix.search_wild("loquat", 9).into_iter().find(|h| h.post.id == id && h.account == "a").map(|h| h.post).unwrap();
+    assert_eq!((by(&ix, "1").mine.liked, by(&ix, "1").like_count), (true, 1));
+    let q = by(&ix, "1").quote.unwrap();
+    assert_eq!((q.mine.liked, q.like_count), (true, 1), "inside the post that quotes it");
+    assert!(!by(&ix, "2").mine.liked, "another post is not touched");
+    assert!(ix.search_wild("loquat", 9).into_iter().filter(|h| h.account == "b").all(|h| !h.post.mine.liked), "another account is not touched");
+    assert_eq!(ix.search_wild("quoted words", 9).len(), 1, "the search text is as it was");
+    // the feed loads the post again with the state the server has now: that replaces it
+    let mut fresh = p.clone();
+    fresh.like_count = 7;
+    ix.add("a", "home", &[fresh]);
+    assert_eq!((by(&ix, "1").mine.liked, by(&ix, "1").like_count), (false, 7));
+    // get: the post as it is held now
+    ix.update_post("a", "1", like);
+    assert!(ix.get("a", &crate::social::state::post_key(&p)).unwrap().mine.liked);
+    assert!(ix.get("a", "nope").is_none());
 }

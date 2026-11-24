@@ -58,6 +58,7 @@ mod fold;
 mod fold_ui;
 #[cfg(test)]
 mod fold_ui_tests;
+mod font_list;
 mod fonts;
 #[cfg(test)]
 mod fonts_ui_tests;
@@ -171,6 +172,7 @@ mod thread;
 mod thread_tests;
 #[cfg(test)]
 mod thread_ui_tests;
+mod tree_rows;
 #[cfg(test)]
 mod ui_test_support;
 mod undo;
@@ -473,6 +475,23 @@ mod tests {
         for first_output in ["bench::cli::parse(", "askpass_requested(", "parse_args(", "eprintln!", "println!", "harden_process("] {
             assert!(attach < main.find(first_output).expect(first_output), "the attach comes before {first_output}");
         }
+    }
+
+    // spec: SEC-019
+    #[test]
+    fn sec_019_a_release_build_hardens_the_process_at_start_and_a_failure_only_tells_stderr() {
+        let source = include_str!("main.rs");
+        let code = source.split("\nmod tests {").next().expect("the program part");
+        let main = &code[code.find("fn main() -> eframe::Result {").expect("main")..];
+        let call = "if let Err(e) = secret::harden_process(cfg!(not(debug_assertions))) {";
+        let at = main.find(call).expect("main hardens the process, in a release build only");
+        let body = &main[at + call.len()..];
+        let body = &body[..body.find("\n    }").expect("the end of the failure branch")];
+        assert!(body.contains("eprintln!(\"shale: could not make the process undumpable: {e}\")"), "{body}");
+        assert!(!body.contains("exit") && !body.contains("return") && !body.contains("panic") && !body.contains('?'), "a failure never stops the program: {body}");
+        // before anything reads or holds a secret: the git askpass helper and the window come after it
+        assert!(at < main.find("askpass_requested(").expect("askpass"), "hardened before the askpass helper runs");
+        assert!(at < main.find("eframe::run_native").expect("the window"), "hardened before the window opens");
     }
 
     // spec: UPD-019

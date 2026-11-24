@@ -74,7 +74,19 @@ struct Out {
     first: Option<Fmt>,
     last: Option<Fmt>,
     marks: Vec<MathMark>,
+    /// a code block in it is drawn plain until the worker has highlighted it (EDIT-121)
+    pending: bool,
 }
+
+/// A code block as it was drawn with its colours.
+struct Coloured {
+    lang: String,
+    body: String,
+    spans: Arc<syntax::Spans>,
+}
+
+/// Coloured blocks kept for [`Coloured`].
+const COLOURED_MAX: usize = 16;
 
 struct Entry {
     input: Input,
@@ -92,6 +104,10 @@ struct Cut {
 pub(crate) struct FormatCache {
     fonts: Option<EditorFonts>,
     blocks: HashMap<u64, Entry>,
+    /// `syntax::generation` when the blocks were last looked at (EDIT-121)
+    syntax_gen: u64,
+    /// the last coloured code blocks that were drawn, to show an edited one with the colours of its unchanged lines until the worker is done (EDIT-121)
+    coloured: Vec<Coloured>,
     min_block: usize,
     /// how many blocks were formatted (not found in the cache), for the tests
     #[cfg(test)]
@@ -103,6 +119,8 @@ impl Default for FormatCache {
         FormatCache {
             fonts: None,
             blocks: HashMap::new(),
+            syntax_gen: 0,
+            coloured: Vec::new(),
             min_block: MIN_BLOCK,
             #[cfg(test)]
             formatted: 0,
@@ -122,6 +140,12 @@ impl FormatCache {
         if self.fonts.as_ref() != Some(fonts) {
             self.blocks.clear();
             self.fonts = Some(fonts.clone());
+        }
+        // a block that was drawn with plain code is formatted again once the worker has finished a block (EDIT-121)
+        let syntax_gen = syntax::generation();
+        if syntax_gen != self.syntax_gen {
+            self.blocks.retain(|_, e| !e.out.pending);
+            self.syntax_gen = syntax_gen;
         }
         let cuts = cuts(text, links, self.min_block);
         let end_of = |n: usize| cuts.get(n + 1).map_or(text.len(), |c| c.byte);
@@ -149,6 +173,7 @@ impl FormatCache {
         let mut active: Vec<usize> = Vec::new();
         let valid = |r: &Range<usize>| r.end <= text.len() && text.is_char_boundary(r.start) && text.is_char_boundary(r.end);
 
+        let mut coloured = std::mem::take(&mut self.coloured);
         let mut old = std::mem::take(&mut self.blocks);
         let mut blocks: HashMap<u64, Entry> = HashMap::with_capacity(cuts.len());
         let mut parts: Vec<(usize, usize, Arc<Out>)> = Vec::with_capacity(cuts.len());
@@ -204,13 +229,14 @@ impl FormatCache {
                 {
                     self.formatted += 1;
                 }
-                let out = Arc::new(format_chunk(&input.text, &input, &defined, fonts));
+                let out = Arc::new(format_chunk(&input.text, &input, &defined, fonts, &mut coloured));
                 blocks.insert(key, Entry { input, out: out.clone() });
                 out
             };
             parts.push((a, cut.line, out));
         }
         self.blocks = blocks;
+        self.coloured = coloured;
         join(text, &parts, fonts)
     }
 }
@@ -296,13 +322,27 @@ fn join(text: &str, parts: &[(usize, usize, Arc<Out>)], fonts: &EditorFonts) -> 
 }
 
 /// The format of one block (EDIT-109): what [`highlight_with_math`] makes of a whole text, for the text of a block that starts where nothing is carried over.
-fn format_chunk(text: &str, input: &Input, defined: &HashSet<String>, fonts: &EditorFonts) -> Out {
+fn format_chunk(text: &str, input: &Input, defined: &HashSet<String>, fonts: &EditorFonts, coloured: &mut Vec<Coloured>) -> Out {
     let raw_lines = input.raw.clone();
     let mut fmts = vec![Fmt::default(); text.len()];
     let fenced = markdown::fenced_code_lines(text);
+    let mut pending = false;
     for block in syntax::fenced_blocks(text) {
         let body = &text[block.body.clone()];
-        for (r, kind) in syntax::highlight(&block.lang, body).iter() {
+        let shown = syntax::highlight_shown(&block.lang, body);
+        pending |= shown.pending;
+        let mut spans = shown.spans.clone();
+        if shown.pending {
+            // an edited block keeps the colours of the lines it did not change until the worker is done (EDIT-121)
+            let best = coloured.iter().filter(|c| c.lang == block.lang).filter_map(|c| syntax::carry_over(&c.body, &c.spans, body)).max_by_key(|(_, lines)| *lines);
+            spans = Arc::new(best.map(|(s, _)| s).unwrap_or_default());
+        } else if !shown.spans.is_empty() && !coloured.iter().any(|c| c.lang == block.lang && c.body == body) {
+            if coloured.len() >= COLOURED_MAX {
+                coloured.remove(0);
+            }
+            coloured.push(Coloured { lang: block.lang.clone(), body: body.to_string(), spans: shown.spans.clone() });
+        }
+        for (r, kind) in spans.iter() {
             set(&mut fmts, block.body.start + r.start..block.body.start + r.end, |f| f.syn_kind = Some(*kind));
         }
     }
@@ -584,7 +624,7 @@ fn format_chunk(text: &str, input: &Input, defined: &HashSet<String>, fonts: &Ed
             cur = f;
         }
     }
-    Out { sections, first, last, marks }
+    Out { sections, first, last, marks, pending }
 }
 #[cfg(test)]
 mod tests {
@@ -618,6 +658,10 @@ mod tests {
 
     /// `text` formatted by `cache` and as a whole text (one block), which must be the same.
     fn check(cache: &mut FormatCache, text: &str, raw: Option<Range<usize>>) {
+        // long code blocks are coloured by the worker (EDIT-121): fill the cache first, so no block is plain or half carried over
+        for b in syntax::fenced_blocks(text) {
+            syntax::highlight(&b.lang, &text[b.body.clone()]);
+        }
         let (links, images) = inputs(text);
         let (job, marks) = cache.highlight(text, &links, &fonts(), &images, raw.clone());
         let (whole, whole_marks) = FormatCache::with_min_block(usize::MAX).highlight(text, &links, &fonts(), &images, raw.clone());
@@ -712,7 +756,7 @@ mod tests {
         assert!(cuts(NOTE, &[], 0).len() > 8);
     }
 
-    // spec: PDF-028, EDIT-109
+    // spec: PDF-028, EDIT-109, EDIT-110
     #[test]
     fn a_wrapper_longer_than_a_block_is_kept_whole_and_both_its_lines_are_dimmed() {
         let text = format!("intro\n\n<div align=\"center\">\n\n{}</div>\n\nafter\n", "paragraph in the wrapper\n\n".repeat(10));
@@ -731,6 +775,84 @@ mod tests {
         assert_eq!(dim(lines[close].0), crate::theme::palette().faint, "the closing line");
         assert_ne!(dim(lines[4].0), crate::theme::palette().faint);
         check(&mut cache, &text, Some(0..0));
+    }
+
+    /// The height of a job laid out in a window.
+    fn height_of(job: &LayoutJob) -> (f32, usize) {
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx);
+        let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(900.0, 700.0))), ..Default::default() };
+        let mut out = (0.0, 0);
+        let mut done = ctx.run_ui(raw, |ui| {
+            let g = ui.painter().layout_job(job.clone());
+            out = (g.size().y, g.rows.len());
+        });
+        done.textures_delta.clear();
+        out
+    }
+
+    // spec: EDIT-121
+    #[test]
+    fn edit_121_a_long_code_block_is_plain_at_first_and_coloured_when_the_worker_is_done_with_the_same_height() {
+        let code: String = (0..syntax::ASYNC_LINES + 10).map(|i| format!("const fmt119_{i}: number = {i};\n")).collect();
+        let text = format!("intro\n\n```ts\n{code}```\n\nafter\n");
+        let keyword = crate::theme::palette().syntax(syntax::Kind::Keyword);
+        let coloured = |job: &LayoutJob| job.sections.iter().any(|s| s.format.color == keyword);
+        let mut cache = FormatCache::default();
+        let (plain, _) = cache.highlight(&text, &[], &fonts(), &[], Some(0..0));
+        assert!(!coloured(&plain), "plain monospace at first");
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let done = loop {
+            let (job, _) = cache.highlight(&text, &[], &fonts(), &[], Some(0..0));
+            if coloured(&job) || std::time::Instant::now() > end {
+                break job;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+        assert!(coloured(&done), "coloured after the worker: the cache of the block was invalidated");
+        assert_eq!(done.text, plain.text);
+        assert_eq!(height_of(&done), height_of(&plain), "colour does not change the layout");
+        // once coloured it is kept: nothing is formatted again
+        let before = cache.formatted;
+        cache.highlight(&text, &[], &fonts(), &[], Some(0..0));
+        assert_eq!(cache.formatted, before);
+        // a short block is coloured at once
+        let short = "```ts\nconst a = 1;\n```\n";
+        let (job, _) = FormatCache::default().highlight(short, &[], &fonts(), &[], Some(0..0));
+        assert!(coloured(&job));
+    }
+
+    // spec: EDIT-121
+    #[test]
+    fn edit_121_an_edit_in_a_long_coloured_block_keeps_the_colours_of_the_other_lines_until_the_worker_is_done() {
+        let code: String = (0..200).map(|i| format!("const typed121_{i}: number = {i};\n")).collect();
+        let doc = |code: &str| format!("```ts\n{code}```\n");
+        let keyword = crate::theme::palette().syntax(syntax::Kind::Keyword);
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let mut cache = FormatCache::default();
+        let settled = |cache: &mut FormatCache, text: &str| loop {
+            let (job, _) = cache.highlight(text, &[], &fonts(), &[], Some(0..0));
+            let all = text.matches("const ").count();
+            let coloured = job.sections.iter().filter(|s| s.format.color == keyword).count();
+            if coloured >= all || std::time::Instant::now() > end {
+                return job;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+        let before = settled(&mut cache, &doc(&code));
+        // one line is edited
+        let edited = code.replacen("typed121_100: number = 100", "typed121_100: number = 1000", 1);
+        assert_ne!(edited, code);
+        let (now, _) = cache.highlight(&doc(&edited), &[], &fonts(), &[], Some(0..0));
+        let keywords_at = |job: &LayoutJob| -> Vec<usize> { job.sections.iter().filter(|s| s.format.color == keyword).map(|s| job.text[..s.byte_range.start.0].matches('\n').count()).collect() };
+        let shown = keywords_at(&now);
+        assert!(!shown.contains(&101), "the changed line is plain");
+        assert_eq!(shown.len(), 199, "every other line keeps its colour");
+        assert_eq!(height_of(&now), height_of(&before), "the same height");
+        // then the worker's result applies
+        let done = settled(&mut cache, &doc(&edited));
+        assert_eq!(keywords_at(&done).len(), 200);
+        assert_eq!(done.text, now.text);
     }
 
     // spec: EDIT-109

@@ -31,7 +31,7 @@ fn the_accent_colours_are_read_from_the_definitions_of_the_set_in_rows_and_colum
     assert_eq!(read_accents(&dir).len(), 5);
 }
 
-// spec: TEX-017
+// spec: TEX-017, TEX-028
 #[test]
 fn a_dropped_file_is_a_logo_an_archive_or_nothing_by_its_name() {
     let v = vault("classify");

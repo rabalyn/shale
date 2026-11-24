@@ -238,6 +238,16 @@ if [ -f "$S/toc.$n" ]; then cp "$S/toc.$n" "$stem.toc"; fi"#,
             );
         }
 
+        /// Make LuaLaTeX wait until the returned file exists and then do what it did before, so a
+        /// compile runs (and is listed as a task) as long as the test wants.
+        pub fn hold(&self) -> PathBuf {
+            let gate = self.state().join("gate");
+            let bin = self.dir.join("bin");
+            std::fs::rename(bin.join("lualatex"), bin.join("lualatex.real")).unwrap();
+            script(&bin, "lualatex", &format!("while [ ! -e '{}' ]; do sleep 0.02; done\nexec \"$(dirname \"$0\")/lualatex.real\" \"$@\"", gate.display()));
+            gate
+        }
+
         pub fn biber(&self, exit: i32, output: &str) {
             let st = self.state();
             script(&self.dir.join("bin"), "biber", &format!("echo \"$@\" >> '{0}/biber.calls'\ncat <<'EOF'\n{1}\nEOF\nexit {2}", st.display(), output, exit));
@@ -515,7 +525,7 @@ fn container_compile(files: &[(&str, &str)], main: &str, opts: &Options) -> Resu
     compile(&engine, work, main, opts)
 }
 
-// spec: TEX-004
+// spec: TEX-004, TEX-020
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_a_small_article_compiles_to_a_pdf() {

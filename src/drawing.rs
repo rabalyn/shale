@@ -925,6 +925,17 @@ impl DrawingDoc {
         }
     }
 
+    /// Point the pictures in `done` (target as written → copy in the vault) at their copies in the
+    /// `## Embedded Files` of the plugin file (MEDIA-031); the file is saved afterwards. False when no
+    /// entry matches (a drawing of another format has no entries).
+    pub fn relink_pictures(&mut self, done: &[(String, PathBuf)]) -> bool {
+        let Some(text) = self.plugin_file.as_deref().and_then(|t| crate::drawing::pictures::relink_embedded(t, done)) else { return false };
+        self.scene.embedded = crate::drawing::pictures::embedded_files(&text);
+        self.plugin_file = Some(text);
+        self.changed();
+        true
+    }
+
     fn changed(&mut self) {
         self.dirty = true;
         self.last_edit = Instant::now();

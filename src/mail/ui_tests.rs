@@ -578,7 +578,7 @@ fn removing_an_account_clears_its_password_and_keeps_its_mail() {
     assert!(w.app.toasts.iter().any(|(t, _)| t.contains("stays in")), "{:?}", w.app.toasts);
 }
 
-// spec: MAIL-050, MAIL-051, MAIL-052, MAIL-053, MAIL-054, MAIL-058
+// spec: MAIL-050, MAIL-051, MAIL-052, MAIL-053, MAIL-054, MAIL-058, MAIL-100
 #[test]
 fn sync_fills_the_folders_the_list_and_the_reading_pane_and_attachments_are_saved_to_the_vault() {
     let mut w = W::new("read", true);
@@ -1184,7 +1184,7 @@ fn an_account_without_a_password_asks_for_it_and_syncs_with_it() {
     assert_eq!(secrets::mail_secret(&w.account.id, MailSecret::Password), None, "it was not put into the keyring");
 }
 
-// spec: MAIL-060, MAIL-061
+// spec: MAIL-060, MAIL-061, MAIL-066
 #[test]
 fn search_waits_for_a_pause_runs_in_a_job_and_the_keys_work_without_the_mouse() {
     let mut w = W::new("search", true);
@@ -1482,7 +1482,7 @@ fn dates_in_the_list_are_short() {
     assert!(crate::mail::ui::list_date(Some(now - 800 * 86_400), now).starts_with("202"), "older shows the date");
 }
 
-// spec: MAIL-083, MAIL-084, MAIL-086
+// spec: MAIL-083, MAIL-084, MAIL-086, MAIL-120
 #[test]
 fn an_oauth2_account_signs_in_through_the_dialog_syncs_renews_its_token_and_asks_to_sign_in_again_when_revoked() {
     use crate::mail::oauth_fake_tests::{http_get, try_http_get, FakeOAuth};
@@ -1802,7 +1802,7 @@ fn the_reading_pane_buttons_the_marked_bar_and_the_row_menu_do_the_same_things()
     assert_eq!(w.server_flags("Sent", 1), vec!["\\Flagged"]);
 }
 
-// spec: MAIL-105
+// spec: MAIL-105, MAIL-110
 #[test]
 fn delete_in_trash_asks_first_and_names_the_count_and_only_the_confirmation_deletes() {
     let mut w = W::new("forever2", true);
@@ -1994,7 +1994,7 @@ fn world_with_unsent(tag: &str, n: u32) -> W {
     w
 }
 
-// spec: MAIL-214
+// spec: MAIL-214, MAIL-211
 #[test]
 fn sent_copies_that_only_exist_here_are_announced_and_uploaded_again_once_even_when_clicked_twice() {
     let mut w = world_with_unsent("unsent-up", 2);
@@ -2193,7 +2193,7 @@ impl W {
     }
 }
 
-// spec: MAIL-150, MAIL-151, MAIL-132, MAIL-141
+// spec: MAIL-150, MAIL-151, MAIL-132, MAIL-141, MAIL-128
 #[test]
 fn compose_with_c_complete_an_address_send_with_ctrl_enter_and_the_mail_appears_in_sent() {
     let (mut w, smtp) = compose_world("send1", 1);
@@ -2242,6 +2242,40 @@ fn compose_with_c_complete_an_address_send_with_ctrl_enter_and_the_mail_appears_
     assert!(w.subjects().contains(&"Plans für Köln".to_string()));
 }
 
+// spec: JOB-031
+#[test]
+fn job_031_the_mail_view_lists_a_send_with_its_account_while_it_runs_and_a_failure_ends_the_task_and_says_so() {
+    use crate::mail::ui::MAIL_SEND;
+    let (mut w, _smtp) = compose_world("job031", 0);
+    let (reached_tx, reached) = std::sync::mpsc::channel();
+    let (open, gate) = std::sync::mpsc::channel::<()>();
+    let gate = std::sync::Mutex::new(gate);
+    w.app.mail.smtp_factory = Arc::new(move |_, _| {
+        let _ = reached_tx.send(());
+        let _ = gate.lock().unwrap().recv_timeout(Duration::from_secs(30));
+        Err("the SMTP server is down".to_string())
+    });
+    let acct = w.app.cfg.mail_accounts[0].clone();
+    let key = MAIL_SEND.with(&acct.id);
+    w.press_text(Key::C, Modifiers::NONE, "c");
+    w.typ("mail:compose:to", "bob@x.de");
+    w.typ("mail:compose:subject", "Plans");
+    w.write_body("Hallo Bob");
+    w.ctrl_enter();
+    // the send starts by itself and, held at the gate, is a task with the account's name and a Cancel
+    w.until("the send is on its way", |a| a.mail.busy.is_running(&key));
+    reached.recv_timeout(Duration::from_secs(30)).expect("the connector was asked");
+    let info = w.app.mail.busy.info(&key).expect("listed");
+    assert_eq!(info.label, format!("Sending mail from {}…", if acct.name.is_empty() { &acct.host } else { &acct.name }));
+    assert!(info.cancellable);
+    assert!(w.shows(&info.label), "the mail view shows what is sending");
+    open.send(()).unwrap();
+    // it ends with the job and says what went wrong, in the view's problem line and in the Outbox
+    w.until("the failure is reported", |a| !a.mail.busy.is_running(&key) && a.mail.problems.iter().any(|p| p.contains("A mail was not sent") && p.contains("the SMTP server is down")));
+    assert!(w.app.mail.busy.list().is_empty());
+    assert!(w.items().iter().all(|i| i.state == OutState::Failed), "{:?}", w.items());
+}
+
 // spec: MAIL-126, MAIL-150
 #[test]
 fn reply_reply_all_and_forward_start_with_the_right_fields_and_quote_the_original() {
@@ -2287,7 +2321,7 @@ fn reply_reply_all_and_forward_start_with_the_right_fields_and_quote_the_origina
     assert!(w.server_flags("INBOX", 2).contains(&"\\Flagged".to_string()), "plain f flags, Shift+F forwards");
 }
 
-// spec: MAIL-134
+// spec: MAIL-134, MAIL-151
 #[test]
 fn undo_send_pulls_the_mail_back_into_the_editor_and_nothing_goes_out() {
     let (mut w, smtp) = compose_world("undo1", 30);
@@ -2315,7 +2349,7 @@ fn undo_send_pulls_the_mail_back_into_the_editor_and_nothing_goes_out() {
     w.until("sent at once", |_| smtp.state().received.len() == 1);
 }
 
-// spec: MAIL-135
+// spec: MAIL-135, MAIL-127
 #[test]
 fn a_forgotten_attachment_an_empty_subject_and_an_empty_body_each_ask_before_sending() {
     let (mut w, smtp) = compose_world("confirm1", 0);
@@ -2367,7 +2401,7 @@ fn a_forgotten_attachment_an_empty_subject_and_an_empty_body_each_ask_before_sen
     assert_eq!((m.attachments.len(), m.attachments[0].name.as_str()), (1, "Welcome.md"));
 }
 
-// spec: MAIL-130, MAIL-131
+// spec: MAIL-130, MAIL-131, MAIL-150, MAIL-151
 #[test]
 fn closing_with_changes_asks_keep_or_discard_and_nothing_is_lost_either_way() {
     let (mut w, _smtp) = compose_world("close1", 10);
@@ -2446,7 +2480,7 @@ fn a_draft_is_saved_by_itself_after_a_pause_and_a_crash_leaves_it_in_drafts() {
     assert_eq!(view.local_drafts.len(), 1);
 }
 
-// spec: MAIL-133, MAIL-136
+// spec: MAIL-133, MAIL-136, MAIL-151
 #[test]
 fn a_mail_that_may_have_been_sent_waits_for_the_person_and_a_failed_one_can_be_retried() {
     let (mut w, smtp) = compose_world("unsure1", 0);
@@ -2677,7 +2711,7 @@ fn a_signed_mail_is_verified_without_any_consent_and_the_strip_says_valid_or_bad
     assert!(w.vault_files().iter().all(|f| !f.contains("decrypted")), "verifying stores nothing");
 }
 
-// spec: MAIL-180, MAIL-181, MAIL-182, MAIL-183, MAIL-184
+// spec: MAIL-180, MAIL-181, MAIL-182, MAIL-183, MAIL-184, MAIL-191
 #[test]
 fn encrypted_mail_needs_the_typed_consent_then_is_decrypted_stored_and_searchable_and_withdrawing_stops_it() {
     if !have_gnupg() {
@@ -2809,7 +2843,7 @@ fn encrypted_mail_needs_the_typed_consent_then_is_decrypted_stored_and_searchabl
     assert_eq!(w.app.mail.results.as_ref().unwrap().len(), 1, "and still searched");
 }
 
-// spec: MAIL-190, MAIL-191
+// spec: MAIL-190, MAIL-191, MAIL-192
 #[test]
 fn the_account_settings_pick_a_key_and_a_certificate_sign_by_default_and_the_standard_and_new_mail_starts_that_way() {
     if !have_gnupg() {
@@ -3054,7 +3088,7 @@ fn encryption_layouts(height: f32) -> [Vec<(String, Rect)>; 3] {
     [pending, arrived, missing]
 }
 
-// spec: MAIL-191
+// spec: MAIL-191, MAIL-235
 #[cfg(unix)]
 #[test]
 fn the_controls_of_the_encryption_section_and_the_dialog_stay_put_in_a_window_of_any_height_when_the_gnupg_result_arrives() {
@@ -4190,4 +4224,66 @@ fn alt_keys_do_nothing_while_the_search_field_has_the_keyboard() {
     w.settle_ops();
     assert_eq!(w.server_uids("INBOX"), vec![1, 2, 3], "the field has the keyboard: Alt+D deletes nothing");
     assert!(w.app.mail.open.is_some());
+}
+
+// spec: JOB-032
+#[test]
+fn job_032_the_browser_sign_in_is_a_listed_task_that_cancel_and_closing_the_dialog_stop_and_success_ends() {
+    use crate::mail::oauth_fake_tests::{pretend_browser, FakeOAuth, Visit};
+    use crate::mail::ui::{SignInState, MAIL_SIGNIN};
+    if std::process::Command::new("curl").arg("--version").output().is_err() {
+        return;
+    }
+    let provider = FakeOAuth::start();
+    let mut w = W::new("job032", true);
+    let mut acct = w.account.clone();
+    acct.auth = crate::config::MailAuth::OAuth2;
+    acct.oauth_provider = crate::config::OAuthProvider::Custom;
+    acct.oauth_client_id = "shale-test".into();
+    acct.oauth_auth_url = format!("http://127.0.0.1:{}/authorize", provider.port);
+    acct.oauth_token_url = format!("http://127.0.0.1:{}/token", provider.port);
+    acct.oauth_scope = "mail".into();
+    let id = acct.id.clone();
+    let key = MAIL_SIGNIN.with(&id);
+    let cancelled = |a: &ShaleApp| !a.mail.busy.is_running(&MAIL_SIGNIN.with(&a.cfg.mail_accounts[0].id)) && matches!(a.mail.signins.get(&a.cfg.mail_accounts[0].id), Some(SignInState::Failed(e)) if e == "The sign-in was cancelled.");
+
+    // waiting for the browser: a task with the account's name and a Cancel; a second sign-in of the account is refused
+    let (guard, log) = pretend_browser(Visit::Silent);
+    w.app.mail.start_sign_in(&acct, None);
+    log.wait_opened(1);
+    let info = w.app.mail.busy.info(&key).expect("listed while it waits for the browser");
+    assert_eq!(info.label, "Signing in Test mail in the browser…");
+    assert!(info.cancellable && !info.cancelling);
+    w.frame(vec![]);
+    assert!(w.shows(&info.label), "the mail view shows the sign-in");
+    w.app.mail.start_sign_in(&acct, None);
+    assert_eq!((w.app.mail.busy.list().len(), log.opened.lock().unwrap().len()), (1, 1), "no second sign-in opens a second browser page");
+
+    // Cancel of the registry (the indicator) stops the wait; nothing is kept
+    assert!(w.app.mail.busy.cancel(info.id));
+    w.until("the cancelled sign-in ends", cancelled);
+    assert!(w.app.mail.busy.list().is_empty());
+    assert!(secrets::mail_secret(&id, MailSecret::RefreshToken).is_none());
+
+    // closing the account dialog stops it too
+    w.app.open_mail_settings();
+    w.frame(vec![]);
+    w.app.mail.start_sign_in(&acct, None);
+    log.wait_opened(2);
+    w.until("it waits again", |a| a.mail.busy.is_running(&MAIL_SIGNIN.with("t-job032")));
+    w.click("md:cancel");
+    assert!(w.app.modal.is_none());
+    w.until("closing the dialog stopped the sign-in", cancelled);
+    assert!(w.app.mail.busy.list().is_empty());
+    assert!(provider.state.lock().unwrap().token_requests.is_empty(), "no code was ever exchanged");
+
+    // a sign-in that succeeds ends its task with the job and keeps the token
+    drop(guard);
+    let (_guard, _log) = pretend_browser(Visit::Approve);
+    w.app.mail.start_sign_in(&acct, None);
+    w.until("the sign-in ends", |a| matches!(a.mail.signins.get("t-job032"), Some(SignInState::Done { .. })));
+    assert!(w.app.mail.busy.list().is_empty(), "the task ended with the job");
+    assert!(secrets::mail_secret(&id, MailSecret::RefreshToken).is_some());
+    secrets::clear_mail_secret(&id, MailSecret::RefreshToken);
+    crate::mail::oauth::forget_source(&id);
 }

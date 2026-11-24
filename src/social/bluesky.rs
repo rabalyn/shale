@@ -5,6 +5,7 @@
 //! The login (`Session`) lives in memory only. `Api` keeps it for the caller and renews it
 //! when it has expired (refresh token first, else a new login with the app password).
 
+use super::actions::{iso_now, prepare, ActionError, Draft, Reacted, Reaction, TempFile, BLUESKY_IMAGE_BYTES, BLUESKY_MAX_CHARS};
 use super::markup::{md_link, md_url};
 use super::*;
 use serde_json::json;
@@ -43,6 +44,12 @@ pub struct Api {
     handle: String,
     password: Secret,
     pub session: Option<Session>,
+    /// the video service (SOC-067); a test points it at a pretend one
+    pub(super) video_service: String,
+    /// how long to wait between two looks at a video the service processes (SOC-067)
+    pub(super) video_poll: std::time::Duration,
+    /// what is known of a video file: its size and length (ffprobe; a test gives its own, SOC-067)
+    pub(super) probe: fn(&std::path::Path) -> Option<crate::media::ffmpeg::Info>,
 }
 
 impl std::fmt::Debug for Api {
@@ -99,7 +106,15 @@ pub fn refresh_session(s: &Session) -> Result<Session, String> {
 
 impl Api {
     pub fn new(server: &str, handle: &str, password: &str) -> Api {
-        Api { server: server.trim().trim_end_matches('/').to_string(), handle: handle.trim().to_string(), password: Secret::new(password), session: None }
+        Api {
+            server: server.trim().trim_end_matches('/').to_string(),
+            handle: handle.trim().to_string(),
+            password: Secret::new(password),
+            session: None,
+            video_service: super::video::VIDEO_SERVICE.to_string(),
+            video_poll: std::time::Duration::from_millis(1500),
+            probe: super::video::probe_file,
+        }
     }
 
     /// Sign in now (done by itself with the first call).
@@ -108,17 +123,13 @@ impl Api {
         Ok(self.session.insert(s))
     }
 
-    fn once(&mut self, method: &str, nsid: &str, params: &[(&str, &str)], body: Option<&Value>) -> Result<Value, ApiError> {
-        let s = self.session.as_ref().ok_or_else(|| ApiError::plain("not signed in"))?;
-        api(method, &format!("{}/xrpc/{nsid}{}", s.pds, query(params)), Some(s.access_jwt.expose()), body)
-    }
-
-    /// One XRPC call. When the login has expired: renew it (refresh token, else app password) and try once more.
-    pub fn call(&mut self, method: &str, nsid: &str, params: &[(&str, &str)], body: Option<&Value>) -> Result<Value, String> {
+    /// Run a request with the session. When the login has expired: renew it (refresh token, else app password) and try once more.
+    fn authed(&mut self, f: impl Fn(&Session) -> Result<Value, ApiError>) -> Result<Value, String> {
         if self.session.is_none() {
             self.login()?;
         }
-        match self.once(method, nsid, params, body) {
+        let once = |me: &Api| f(me.session.as_ref().ok_or_else(|| ApiError::plain("not signed in"))?);
+        match once(self) {
             Err(e) if is_expired(&e) => {
                 let renewed = self.session.as_ref().and_then(|s| refresh_session(s).ok());
                 match renewed {
@@ -127,10 +138,28 @@ impl Api {
                         self.login()?;
                     }
                 }
-                Ok(self.once(method, nsid, params, body)?)
+                Ok(once(self)?)
             }
             r => Ok(r?),
         }
+    }
+
+    /// One XRPC call (see `authed`).
+    pub fn call(&mut self, method: &str, nsid: &str, params: &[(&str, &str)], body: Option<&Value>) -> Result<Value, String> {
+        self.authed(|s| api(method, &format!("{}/xrpc/{nsid}{}", s.pds, query(params)), Some(s.access_jwt.expose()), body))
+    }
+
+    /// Upload a picture file as a blob (SOC-053): the answer holds the `blob` for the post's embed.
+    pub fn upload_blob(&mut self, path: &std::path::Path, mime: &str) -> Result<Value, String> {
+        self.authed(|s| api_upload("POST", &format!("{}/xrpc/com.atproto.repo.uploadBlob", s.pds), s.access_jwt.expose(), Some(mime), dav::Upload::Raw { path }))
+    }
+
+    /// The account's DID (signs in when that has not happened yet).
+    pub fn did(&mut self) -> Result<String, String> {
+        if self.session.is_none() {
+            self.login()?;
+        }
+        self.session.as_ref().map(|s| s.did.clone()).ok_or_else(|| "not signed in".to_string())
     }
 
     pub fn get(&mut self, nsid: &str, params: &[(&str, &str)]) -> Result<Value, String> {
@@ -144,6 +173,7 @@ impl Api {
 pub fn feeds(api: &mut Api) -> Result<Vec<Feed>, String> {
     let _step = tracing::info_span!("flow.social_bluesky.feeds", peer = "server").entered();
     let mut out = vec![Feed { id: "timeline".into(), title: "Following".into() }];
+    out.extend(notifications::extra_feeds());
     let prefs = api.get("app.bsky.actor.getPreferences", &[])?;
     let uris = saved_feed_uris(&prefs);
     if uris.is_empty() {
@@ -191,12 +221,21 @@ pub fn saved_feed_uris(prefs: &Value) -> Vec<String> {
 /// One page (30 posts) of "Following" or a custom feed.
 pub fn timeline(api: &mut Api, feed: &Feed, cursor: Option<&str>) -> Result<Page, String> {
     let _step = tracing::info_span!("flow.social_bluesky.timeline", peer = "server").entered();
+    if feed.id == notifications::NOTIFICATIONS {
+        return notifications::bluesky_page(api, cursor);
+    }
+    let own;
     let mut params: Vec<(&str, &str)> = vec![("limit", PAGE_SIZE)];
     if let Some(c) = cursor.filter(|c| !c.is_empty()) {
         params.push(("cursor", c));
     }
     let v = if feed.id == "timeline" {
         api.get("app.bsky.feed.getTimeline", &params)?
+    } else if feed.id == notifications::OWN {
+        // "Your posts" (SOC-074): the posts, replies and reposts of the account itself
+        own = api.did()?;
+        params.extend([("actor", own.as_str()), ("filter", "posts_with_replies")]);
+        api.get("app.bsky.feed.getAuthorFeed", &params)?
     } else {
         if !feed.id.starts_with("at://") {
             return Err("bad feed".into());
@@ -215,6 +254,9 @@ const MAX_CHECK_PAGES: usize = 12;
 /// is already known (`known`: `state::post_key`s). At most `cap` posts; if that limit comes
 /// first, `Fresh::gap` has the cursor to go on with.
 pub fn newer(api: &mut Api, feed: &Feed, known: &HashSet<String>, cap: usize) -> Result<Fresh, String> {
+    if feed.id == notifications::NOTIFICATIONS {
+        return notifications::bluesky_newer(api, known, cap);
+    }
     newer_with(known, cap, |cursor| timeline(api, feed, cursor))
 }
 
@@ -256,11 +298,38 @@ fn parse_feed_item(item: &Value) -> Option<Post> {
 // ---------------------------------------------------------------- threads
 
 /// The self-thread and the replies of other people.
-pub fn thread_full(api: &mut Api, post: &Post) -> Result<(Vec<Post>, Vec<Reply>), String> {
+pub fn thread_full(api: &mut Api, post: &Post) -> Result<ThreadFetch, String> {
     let v = api.get("app.bsky.feed.getPostThread", &[("uri", &post.id), ("depth", "10"), ("parentHeight", "80")])?;
     let t = thread_from_response(post, &v);
     let r = replies_from_response(&t, &v);
-    Ok((t, r))
+    // the reply reference of the opened post names the root of the conversation
+    let root = parse_post_view(&v["thread"]["post"]).and_then(|p| p.reply_root).map(|r| r.uri);
+    Ok((t, r, root))
+}
+
+/// The conversation around a post: the ancestors, and all replies as a tree (SOC-045).
+pub fn thread_view(api: &mut Api, post: &Post) -> Result<ThreadView, String> {
+    let v = api.get("app.bsky.feed.getPostThread", &[("uri", &post.id), ("depth", "10"), ("parentHeight", "80")])?;
+    Ok(thread_view_from_response(post, &v))
+}
+
+/// The conversation from a `getPostThread` answer. (Separate so it can be tested with fixtures.)
+pub fn thread_view_from_response(post: &Post, resp: &Value) -> ThreadView {
+    let node = &resp["thread"];
+    let root = parse_post_view(&node["post"]).unwrap_or_else(|| post.clone());
+    let mut ancestors = Vec::new();
+    let mut up = &node["parent"];
+    while text(&up["$type"]).ends_with("#threadViewPost") {
+        match parse_post_view(&up["post"]) {
+            Some(p) => ancestors.push(p),
+            None => break,
+        }
+        up = &up["parent"];
+    }
+    ancestors.reverse();
+    let mut descendants = Vec::new();
+    collect_replies(node, &mut descendants);
+    thread_view_of(&root, ancestors, &descendants)
 }
 
 /// One post by its at:// address.
@@ -312,7 +381,7 @@ pub fn web_url(handle_or_did: &str, at_uri: &str) -> String {
     format!("https://bsky.app/profile/{handle_or_did}/post/{}", at_uri.rsplit('/').next().unwrap_or(""))
 }
 
-fn parse_author(a: &Value) -> Author {
+pub(super) fn parse_author(a: &Value) -> Author {
     let (did, handle) = (text(&a["did"]), text(&a["handle"]));
     let who = if handle.is_empty() || handle == "handle.invalid" { did.clone() } else { handle.clone() };
     Author { id: did, handle, display_name: text(&a["displayName"]), profile_url: format!("https://bsky.app/profile/{who}"), avatar_url: text(&a["avatar"]) }
@@ -357,6 +426,14 @@ fn build_post(v: &Value, record: &Value, embeds: &[&Value]) -> Option<Post> {
         reply_count: count(&v["replyCount"]),
         boost_count: count(&v["repostCount"]),
         like_count: count(&v["likeCount"]),
+        mine: {
+            let (like, repost) = (text(&v["viewer"]["like"]), text(&v["viewer"]["repost"]));
+            Mine { liked: !like.is_empty(), boosted: !repost.is_empty(), like_record: Some(like).filter(|l| !l.is_empty()), boost_record: Some(repost).filter(|l| !l.is_empty()), unknown: false }
+        },
+        reply_root: Some(PostRef { uri: text(&record["reply"]["root"]["uri"]), cid: text(&record["reply"]["root"]["cid"]) }).filter(|r| !r.uri.is_empty()),
+        visibility: None,
+        poll: None,
+        notice: None,
     })
 }
 
@@ -394,7 +471,11 @@ fn embed_parts(e: &Value, media: &mut Vec<Media>, quote: &mut Option<Box<Post>>,
             let r = &e["record"];
             if text(&r["$type"]).ends_with("#viewRecord") {
                 let inner: Vec<&Value> = r["embeds"].as_array().into_iter().flatten().collect();
-                *quote = build_post(r, &r["value"], &inner).map(Box::new);
+                *quote = build_post(r, &r["value"], &inner).map(|mut q| {
+                    // a quoted record carries no viewer state (SOC-060)
+                    q.mine.unknown = true;
+                    Box::new(q)
+                });
             }
         }
         "app.bsky.embed.recordWithMedia#view" => {
@@ -495,8 +576,236 @@ pub fn download_blob(did: &str, cid: &str) -> Result<(Vec<u8>, Option<String>), 
     download(&format!("{pds}/xrpc/com.atproto.sync.getBlob{}", query(&[("did", did), ("cid", cid)])))
 }
 
+// ---------------------------------------------------------------- writing
+
+/// Like / repost a post, or undo it: a record in the account's repository (SOC-050). The record
+/// that undoes it comes from the post (`Mine`) and is kept from the answer.
+pub fn react(api: &mut Api, post: &Post, kind: Reaction, on: bool) -> Result<Reacted, ActionError> {
+    let _step = tracing::info_span!("flow.social_bluesky.react", peer = "server").entered();
+    let collection = match kind {
+        Reaction::Like => "app.bsky.feed.like",
+        Reaction::Boost => "app.bsky.feed.repost",
+    };
+    let did = api.did()?;
+    // a post whose state is not known (a quoted one) is read first: liking what is liked would make a second record
+    let read;
+    let (post, fresh) = if post.mine.unknown {
+        read = states(api, std::slice::from_ref(&post.id))?.into_iter().next().ok_or("could not read the post to see what you did with it")?;
+        (&read, Some(read.mine.clone()))
+    } else {
+        (post, None)
+    };
+    let current = match kind {
+        Reaction::Like => &post.mine.like_record,
+        Reaction::Boost => &post.mine.boost_record,
+    };
+    if on {
+        let (already, count) = match kind {
+            Reaction::Like => (post.mine.liked, post.like_count),
+            Reaction::Boost => (post.mine.boosted, post.boost_count),
+        };
+        if already && fresh.is_some() {
+            return Ok(Reacted { on: true, record: current.clone(), count: Some(count), fresh });
+        }
+        if post.cid.is_empty() || !post.id.starts_with("at://") {
+            return Err("this post cannot be reacted to (its content id is missing)".into());
+        }
+        let record = json!({"$type": collection, "subject": {"uri": post.id, "cid": post.cid}, "createdAt": iso_now()});
+        let v = api.call("POST", "com.atproto.repo.createRecord", &[], Some(&json!({"repo": did, "collection": collection, "record": record})))?;
+        let uri = text(&v["uri"]);
+        if !uri.starts_with("at://") {
+            return Err("the server did not name the new record".into());
+        }
+        return Ok(Reacted { on: true, record: Some(uri), count: None, fresh });
+    }
+    // undo: the record is named by its address at://<did>/<collection>/<rkey>
+    let uri = current.as_deref().ok_or("Shale does not know which record to remove; reload the feed and try again")?;
+    let mut parts = uri.strip_prefix("at://").unwrap_or("").splitn(3, '/');
+    let (repo, coll, rkey) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+    if coll != collection || rkey.is_empty() || repo != did {
+        return Err("the record to remove is not one of this account's".into());
+    }
+    api.call("POST", "com.atproto.repo.deleteRecord", &[], Some(&json!({"repo": did, "collection": collection, "rkey": rkey})))?;
+    Ok(Reacted { on: false, record: None, count: None, fresh })
+}
+
+/// The posts with these addresses as the server shows them to the signed-in account: counts and
+/// what the account did with them (`app.bsky.feed.getPosts`, at most 25 addresses per request).
+pub fn states(api: &mut Api, uris: &[String]) -> Result<Vec<Post>, String> {
+    let mut out = vec![];
+    for chunk in uris.chunks(25) {
+        let params: Vec<(&str, &str)> = chunk.iter().map(|u| ("uris", u.as_str())).collect();
+        let v = api.get("app.bsky.feed.getPosts", &params)?;
+        out.extend(v["posts"].as_array().into_iter().flatten().filter_map(parse_post_view));
+    }
+    Ok(out)
+}
+
+/// Fill the state of the quoted posts of `posts` (SOC-060): counts and what the account did with
+/// them. A request that fails leaves the rest as it is: the state stays unknown.
+pub fn hydrate<'a>(api: &mut Api, posts: impl Iterator<Item = &'a mut Post>) {
+    let mut posts: Vec<&mut Post> = posts.collect();
+    let mut uris: Vec<String> = posts.iter().filter_map(|p| p.quote.as_deref()).filter(|q| q.mine.unknown).map(|q| q.id.clone()).collect();
+    uris.sort();
+    uris.dedup();
+    let mut known: std::collections::HashMap<String, Post> = std::collections::HashMap::new();
+    for chunk in uris.chunks(25) {
+        match states(api, chunk) {
+            Ok(v) => known.extend(v.into_iter().map(|p| (p.id.clone(), p))),
+            Err(_) => break,
+        }
+    }
+    for q in posts.iter_mut().filter_map(|p| p.quote.as_deref_mut()).filter(|q| q.mine.unknown) {
+        if let Some(k) = known.get(&q.id) {
+            (q.mine, q.reply_count, q.boost_count, q.like_count) = (k.mine.clone(), k.reply_count, k.boost_count, k.like_count);
+        }
+    }
+}
+
+/// The facets of a post's text: links, mentions and hashtags with their UTF-8 byte offsets
+/// (SOC-052). `resolve` turns a handle into a DID; a mention that does not resolve stays plain text.
+pub fn facets(text: &str, mut resolve: impl FnMut(&str) -> Option<String>) -> Vec<Value> {
+    let mut out = vec![];
+    let mut at = 0;
+    for word in text.split_inclusive(char::is_whitespace) {
+        let start = at;
+        at += word.len();
+        let bare = word.trim_end_matches(char::is_whitespace);
+        let lead = bare.len() - bare.trim_start_matches(['(', '[', '{', '"', '\'']).len();
+        let tok = &bare[lead..];
+        let from = start + lead;
+        let trimmed = tok.trim_end_matches(['.', ',', ';', ':', '!', '?', ')', ']', '}', '"', '\'']);
+        let index = |t: &str| json!({"byteStart": from, "byteEnd": from + t.len()});
+        if (trimmed.starts_with("https://") || trimmed.starts_with("http://")) && trimmed.contains('.') && check_url(trimmed).is_ok() {
+            out.push(json!({"index": index(trimmed), "features": [{"$type": "app.bsky.richtext.facet#link", "uri": trimmed}]}));
+        } else if let Some(handle) = trimmed.strip_prefix('@').filter(|h| is_handle(h)) {
+            if let Some(did) = resolve(handle) {
+                out.push(json!({"index": index(trimmed), "features": [{"$type": "app.bsky.richtext.facet#mention", "did": did}]}));
+            }
+        } else if let Some(tag) = trimmed.strip_prefix('#').filter(|t| !t.is_empty() && !t.contains('#') && t.chars().count() <= 64 && !t.chars().all(|c| c.is_ascii_digit())) {
+            out.push(json!({"index": index(trimmed), "features": [{"$type": "app.bsky.richtext.facet#tag", "tag": tag}]}));
+        }
+    }
+    out
+}
+
+/// The answer to a createRecord with a record key that is taken: status 409, or words that say so.
+fn is_conflict(message: &str) -> bool {
+    let m = message.to_ascii_lowercase();
+    m.contains("status 409") || m.contains("already exist") || m.contains("duplicate") || m.contains("conflict")
+}
+
+/// "ada.bsky.social": labels of letters, digits and hyphens, at least two.
+fn is_handle(h: &str) -> bool {
+    let labels: Vec<&str> = h.split('.').collect();
+    labels.len() >= 2 && h.len() <= 253 && labels.iter().all(|l| !l.is_empty() && l.len() <= 63 && !l.starts_with('-') && !l.ends_with('-') && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+}
+
+/// How many graphemes a Bluesky post has (the limit is 300, SOC-052).
+pub fn grapheme_count(text: &str) -> usize {
+    unicode_segmentation::UnicodeSegmentation::graphemes(text, true).count()
+}
+
+/// Send a post: pictures first (`uploadBlob`), then the record with facets, reply references and
+/// the embed (pictures, a quote, or both). Then the post is read back from the server; when it
+/// is not there yet, the post is made from what was sent.
+pub fn send(api: &mut Api, d: &Draft) -> Result<Post, ActionError> {
+    let _step = tracing::info_span!("flow.social_bluesky.send", peer = "server").entered();
+    if grapheme_count(&d.text) > BLUESKY_MAX_CHARS || d.text.len() > 3000 {
+        return Err(format!("A Bluesky post has at most {BLUESKY_MAX_CHARS} characters.").into());
+    }
+    if d.pictures.len() > d.info.max_pictures {
+        return Err(format!("A Bluesky post has at most {} pictures.", d.info.max_pictures).into());
+    }
+    if d.video.is_some() && !d.pictures.is_empty() {
+        return Err("A Bluesky post has pictures or a video, not both.".into());
+    }
+    if d.poll.is_some() || d.schedule.is_some() {
+        return Err("Bluesky has no polls and no scheduled posts.".into());
+    }
+    let did = api.did()?;
+    let mut images = vec![];
+    for p in &d.pictures {
+        let prepared = prepare(&p.path, Network::Bluesky, BLUESKY_IMAGE_BYTES)?;
+        let file = TempFile::new(&prepared.bytes, prepared.ext)?;
+        let v = api.upload_blob(&file.0, prepared.mime)?;
+        if !v["blob"].is_object() {
+            return Err("the server did not accept the picture".into());
+        }
+        images.push(json!({"alt": p.alt.trim(), "image": v["blob"].clone()}));
+    }
+    let mut known: HashMap<String, Option<String>> = HashMap::new();
+    let facets = facets(&d.text, |h| known.entry(h.to_string()).or_insert_with(|| api.get("com.atproto.identity.resolveHandle", &[("handle", h)]).ok().map(|v| text(&v["did"])).filter(|d| !d.is_empty())).clone());
+    let mut record = json!({"$type": "app.bsky.feed.post", "text": d.text, "createdAt": iso_now()});
+    if !facets.is_empty() {
+        record["facets"] = Value::Array(facets);
+    }
+    if let Some(p) = &d.reply_to {
+        let parent = json!({"uri": p.id, "cid": p.cid});
+        let root = p.reply_root.as_ref().map(|r| json!({"uri": r.uri, "cid": r.cid})).unwrap_or_else(|| parent.clone());
+        record["reply"] = json!({"root": root, "parent": parent});
+    }
+    if !d.language.is_empty() {
+        record["langs"] = json!([d.language]);
+    }
+    // a video goes through the video service first (SOC-067)
+    let video = d.video.as_ref().map(|v| super::video::bluesky_embed(api, v)).transpose()?;
+    let pictures = (!images.is_empty()).then(|| json!({"$type": "app.bsky.embed.images", "images": images})).or(video);
+    let quote = d.quote.as_ref().map(|q| json!({"$type": "app.bsky.embed.record", "record": {"uri": q.id, "cid": q.cid}}));
+    match (pictures, quote) {
+        (Some(m), Some(r)) => record["embed"] = json!({"$type": "app.bsky.embed.recordWithMedia", "media": m, "record": r}),
+        (Some(e), None) | (None, Some(e)) => record["embed"] = e,
+        (None, None) => {}
+    }
+    // the record key is the key of the draft: a retry of a send that went through but did not
+    // answer finds its record there already, which counts as posted (SOC-057)
+    let mut body = json!({"repo": did, "collection": "app.bsky.feed.post", "record": record});
+    if !d.key.is_empty() {
+        body["rkey"] = json!(d.key);
+    }
+    let (uri, cid) = match api.call("POST", "com.atproto.repo.createRecord", &[], Some(&body)) {
+        Ok(v) => (text(&v["uri"]), text(&v["cid"])),
+        Err(e) if !d.key.is_empty() && is_conflict(&e) => (format!("at://{did}/app.bsky.feed.post/{}", d.key), String::new()),
+        Err(e) => return Err(e.into()),
+    };
+    if !uri.starts_with("at://") {
+        return Err("the server did not name the new post".into());
+    }
+    if let Ok(p) = fetch_post(api, &uri) {
+        return Ok(p);
+    }
+    // the post is not in the feed server yet: made from what was sent
+    let handle = api.session.as_ref().map(|s| s.handle.clone()).unwrap_or_else(|| api.handle.clone());
+    let who = Author { id: did, handle: handle.clone(), display_name: String::new(), profile_url: format!("https://bsky.app/profile/{handle}"), avatar_url: String::new() };
+    Ok(Post {
+        network: Network::Bluesky,
+        url: web_url(&handle, &uri),
+        id: uri,
+        cid,
+        author: who,
+        created_at: t::now(),
+        text_markdown: facets_to_markdown(&d.text, &record["facets"]),
+        content_warning: None,
+        media: vec![],
+        quote: d.quote.clone().map(|q| Box::new(Post { reposted_by: None, ..q })),
+        link_card: None,
+        reply_to: d.reply_to.as_ref().map(|p| p.id.clone()),
+        reposted_by: None,
+        reply_count: 0,
+        boost_count: 0,
+        like_count: 0,
+        mine: Mine::default(),
+        reply_root: None,
+        visibility: None,
+        poll: None,
+        notice: None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
+    use super::super::actions::{DraftPicture, InstanceInfo};
+    use super::super::video::DraftVideo;
     use super::*;
     use crate::calendar::dav::tests::mock_http;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -541,6 +850,615 @@ mod tests {
         json!({"uri": uri, "cid": format!("cid{n}"), "author": {"did": did, "handle": handle, "displayName": handle.to_uppercase(), "avatar": "https://cdn.test/av.jpg"}, "record": record, "replyCount": 1, "repostCount": 2, "likeCount": 3, "indexedAt": at})
     }
 
+    /// A pretend server with a session, for the tests of writes: `handler(nsid, body)` answers the rest.
+    fn writing_server(n: usize, handler: impl Fn(&str, &str, &Value) -> (u16, String) + Send + 'static) -> (String, std::thread::JoinHandle<Vec<String>>) {
+        mock_http(n + 1, move |method, path, headers, body| {
+            let nsid = path.split('?').next().unwrap().trim_start_matches("/xrpc/").to_string();
+            if nsid == "com.atproto.server.createSession" {
+                let host = headers.lines().find_map(|l| l.strip_prefix("Host: ")).unwrap_or("").trim().to_string();
+                return (200, json!({"accessJwt": "jwt-1", "refreshJwt": "ref-1", "did": "did:plc:ada", "handle": "ada.test", "didDoc": {"service": [{"id": "#atproto_pds", "serviceEndpoint": format!("http://{host}")}]}}).to_string());
+            }
+            assert!(headers.to_ascii_lowercase().contains("authorization: bearer jwt-1"), "{nsid}: {headers}");
+            let json: Value = serde_json::from_str(body).unwrap_or(Value::Null);
+            handler(method, &nsid, &json)
+        })
+    }
+
+    // spec: SOC-050
+    #[test]
+    fn a_post_view_tells_what_the_account_did_with_it_and_the_records_that_undo_it() {
+        let mut v = post_view("1", "did:plc:bob", "bob.test", "2024-05-17T10:30:00Z", Some("2"), "hi");
+        assert_eq!(parse_post_view(&v).unwrap().mine, Mine::default());
+        v["viewer"] = json!({"like": "at://did:plc:ada/app.bsky.feed.like/3k1", "repost": "at://did:plc:ada/app.bsky.feed.repost/3k2"});
+        let p = parse_post_view(&v).unwrap();
+        assert_eq!(p.mine, Mine { liked: true, boosted: true, like_record: Some("at://did:plc:ada/app.bsky.feed.like/3k1".into()), boost_record: Some("at://did:plc:ada/app.bsky.feed.repost/3k2".into()), unknown: false });
+        // the first post of the conversation is kept to answer it (SOC-051)
+        assert_eq!(p.reply_root, Some(PostRef { uri: "at://x/y/z".into(), cid: "c".into() }));
+    }
+
+    // spec: SOC-060
+    #[test]
+    fn a_quoted_record_keeps_its_uri_cid_counts_and_address_and_can_be_liked_and_reposted_by_them() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let mut v = post_view("1", "did:plc:ada", "ada.test", "2024-05-17T10:30:00Z", None, "look");
+        v["embed"] = json!({"$type": "app.bsky.embed.record#view", "record": {"$type": "app.bsky.embed.record#viewRecord", "uri": "at://did:plc:bob/app.bsky.feed.post/q1", "cid": "cq",
+            "author": {"did": "did:plc:bob", "handle": "bob.test"}, "value": {"text": "quoted", "createdAt": "2024-05-16T10:30:00Z", "reply": {"parent": {"uri": "at://did:plc:bob/app.bsky.feed.post/q0", "cid": "c0"}, "root": {"uri": "at://did:plc:bob/app.bsky.feed.post/q0", "cid": "c0"}}},
+            "replyCount": 4, "repostCount": 5, "likeCount": 6}});
+        let q = *parse_post_view(&v).unwrap().quote.unwrap();
+        assert_eq!((q.id.as_str(), q.cid.as_str(), q.url.as_str(), q.reply_to.as_deref()), ("at://did:plc:bob/app.bsky.feed.post/q1", "cq", "https://bsky.app/profile/bob.test/post/q1", Some("at://did:plc:bob/app.bsky.feed.post/q0")));
+        assert_eq!((q.reply_count, q.boost_count, q.like_count), (4, 5, 6));
+        assert_eq!(q.mine, Mine { unknown: true, ..Mine::default() }, "a quoted record carries no viewer state: that is unknown, not \"not liked\"");
+        // what the server says about the quote when asked: not liked, not reposted
+        let (base, handle) = writing_server(4, |_, nsid, body| match nsid {
+            "app.bsky.feed.getPosts" => {
+                let mut v = post_view("q1", "did:plc:bob", "bob.test", "2024-05-16T10:30:00Z", None, "quoted");
+                v["cid"] = json!("cq");
+                (200, json!({"posts": [v]}).to_string())
+            }
+            _ => {
+                assert_eq!(nsid, "com.atproto.repo.createRecord");
+                assert_eq!((body["record"]["subject"]["uri"].as_str(), body["record"]["subject"]["cid"].as_str()), (Some("at://did:plc:bob/app.bsky.feed.post/q1"), Some("cq")), "the quote, not the post that quotes");
+                let coll = body["collection"].as_str().unwrap();
+                (200, json!({"uri": format!("at://did:plc:ada/{coll}/3q"), "cid": "n"}).to_string())
+            }
+        });
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        let liked = react(&mut api, &q, Reaction::Like, true).unwrap();
+        assert_eq!((liked.record.as_deref(), liked.fresh.map(|m| (m.unknown, m.liked, m.boosted))), (Some("at://did:plc:ada/app.bsky.feed.like/3q"), Some((false, false, false))), "read first, then the record is made");
+        assert_eq!(react(&mut api, &q, Reaction::Boost, true).unwrap().record.as_deref(), Some("at://did:plc:ada/app.bsky.feed.repost/3q"));
+        assert_eq!(handle.join().unwrap().len(), 5, "the login, and a read and a record each");
+    }
+
+    // spec: SOC-060
+    #[test]
+    fn a_reaction_to_a_post_with_unknown_state_that_is_already_liked_makes_no_second_record_and_undo_deletes_the_known_one() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let like = "at://did:plc:ada/app.bsky.feed.like/3k1";
+        let (base, handle) = writing_server(3, move |_, nsid, body| match nsid {
+            "app.bsky.feed.getPosts" => {
+                let mut v = post_view("q1", "did:plc:bob", "bob.test", "2024-05-16T10:30:00Z", None, "quoted");
+                v["viewer"] = json!({"like": like});
+                v["likeCount"] = json!(12);
+                (200, json!({"posts": [v]}).to_string())
+            }
+            "com.atproto.repo.deleteRecord" => {
+                assert_eq!((body["collection"].as_str(), body["rkey"].as_str()), (Some("app.bsky.feed.like"), Some("3k1")));
+                (200, "{}".into())
+            }
+            other => panic!("no record is to be made: {other}"),
+        });
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        let mut q = parse_post_view(&post_view("q1", "did:plc:bob", "bob.test", "2024-05-16T10:30:00Z", None, "quoted")).unwrap();
+        q.mine.unknown = true;
+        // a like on what is liked: it is shown as liked, with the record that exists and the count of the server
+        let r = react(&mut api, &q, Reaction::Like, true).unwrap();
+        assert_eq!((r.on, r.record.as_deref(), r.count), (true, Some(like), Some(12)));
+        assert_eq!(r.fresh.map(|m| (m.unknown, m.liked, m.like_record)), Some((false, true, Some(like.to_string()))));
+        // the undo of an unknown state reads the record first and deletes it
+        let r = react(&mut api, &q, Reaction::Like, false).unwrap();
+        assert!(!r.on && r.fresh.is_some_and(|m| m.liked));
+        assert_eq!(handle.join().unwrap().len(), 4, "login, read, read, delete");
+        // when the state cannot be read nothing is made
+        let (base, handle) = writing_server(1, |_, _, _| (500, json!({"error": "Down"}).to_string()));
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        assert!(react(&mut api, &q, Reaction::Like, true).is_err());
+        assert_eq!(handle.join().unwrap().len(), 2);
+    }
+
+    fn quoting(n: usize) -> Post {
+        let mut v = post_view(&format!("p{n}"), "did:plc:ada", "ada.test", "2024-05-17T10:30:00Z", None, "look");
+        v["embed"] = json!({"$type": "app.bsky.embed.record#view", "record": {"$type": "app.bsky.embed.record#viewRecord", "uri": format!("at://did:plc:bob/app.bsky.feed.post/q{n}"), "cid": format!("cq{n}"),
+            "author": {"did": "did:plc:bob", "handle": "bob.test"}, "value": {"text": "quoted", "createdAt": "2024-05-16T10:30:00Z"}}});
+        parse_post_view(&v).unwrap()
+    }
+
+    // spec: SOC-060
+    #[test]
+    fn the_quoted_posts_of_a_page_get_their_state_in_one_request_and_a_missing_one_stays_unknown() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let (base, handle) = mock_http(2, |method, path, headers, _| {
+            let nsid = path.split('?').next().unwrap().trim_start_matches("/xrpc/");
+            if nsid == "com.atproto.server.createSession" {
+                let host = headers.lines().find_map(|l| l.strip_prefix("Host: ")).unwrap_or("").trim().to_string();
+                return (200, json!({"accessJwt": "jwt-1", "refreshJwt": "ref-1", "did": "did:plc:ada", "handle": "ada.test", "didDoc": {"service": [{"id": "#atproto_pds", "serviceEndpoint": format!("http://{host}")}]}}).to_string());
+            }
+            assert_eq!((method, nsid), ("GET", "app.bsky.feed.getPosts"));
+            // two posts quote the same post: the address is asked for once; q3 is gone
+            assert_eq!(path.matches("uris=").count(), 2, "{path}");
+            let mut v = post_view("q1", "did:plc:bob", "bob.test", "2024-05-16T10:30:00Z", None, "quoted");
+            v["viewer"] = json!({"repost": "at://did:plc:ada/app.bsky.feed.repost/3r"});
+            v["repostCount"] = json!(40);
+            (200, json!({"posts": [v]}).to_string())
+        });
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        let mut posts = [quoting(1), quoting(3), Post { quote: quoting(1).quote, ..quoting(5) }, parse_post_view(&post_view("9", "did:plc:ada", "ada.test", "2024-05-17T10:30:00Z", None, "plain")).unwrap()];
+        hydrate(&mut api, posts.iter_mut());
+        let q = posts[0].quote.as_ref().unwrap();
+        assert_eq!((q.mine.unknown, q.mine.boosted, q.mine.liked, q.mine.boost_record.as_deref(), q.boost_count), (false, true, false, Some("at://did:plc:ada/app.bsky.feed.repost/3r"), 40));
+        assert!(posts[2].quote.as_ref().unwrap().mine.boosted, "the same quote in another post");
+        assert!(posts[1].quote.as_ref().unwrap().mine.unknown, "a post the server did not return stays unknown");
+        assert!(!posts[3].mine.unknown);
+        assert_eq!(handle.join().unwrap().len(), 2, "the login and one read");
+    }
+
+    // spec: SOC-060
+    #[test]
+    fn many_quotes_are_read_in_batches_of_25_and_a_failed_read_leaves_the_state_unknown_quietly() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let batches = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
+        let seen = batches.clone();
+        let (base, handle) = writing_server(2, move |_, nsid, _| {
+            assert_eq!(nsid, "app.bsky.feed.getPosts");
+            seen.lock().unwrap().push(());
+            (200, json!({"posts": []}).to_string())
+        });
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        let mut posts: Vec<Post> = (0..30).map(quoting).collect();
+        hydrate(&mut api, posts.iter_mut());
+        assert_eq!(handle.join().unwrap().len(), 3, "the login and two reads: 25 and 5");
+        assert!(posts.iter().all(|p| p.quote.as_ref().unwrap().mine.unknown));
+        // the first read fails: the rest is not tried
+        let (base, handle) = writing_server(1, |_, _, _| (500, json!({"error": "Down"}).to_string()));
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        hydrate(&mut api, posts.iter_mut());
+        assert!(posts.iter().all(|p| p.quote.as_ref().unwrap().mine.unknown));
+        assert_eq!(handle.join().unwrap().len(), 2);
+    }
+
+    // spec: SOC-050
+    #[test]
+    fn like_and_repost_are_records_that_are_created_and_deleted_against_a_mock_server() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let (base, handle) = writing_server(3, |method, nsid, body| {
+            assert_eq!(method, "POST");
+            match nsid {
+                "com.atproto.repo.createRecord" => {
+                    let coll = body["collection"].as_str().unwrap().to_string();
+                    assert_eq!(
+                        (body["repo"].as_str(), body["record"]["$type"].as_str(), body["record"]["subject"]["uri"].as_str(), body["record"]["subject"]["cid"].as_str()),
+                        (Some("did:plc:ada"), Some(coll.as_str()), Some("at://did:plc:bob/app.bsky.feed.post/1"), Some("cid1"))
+                    );
+                    assert!(body["record"]["createdAt"].as_str().unwrap().ends_with('Z'));
+                    (200, json!({"uri": format!("at://did:plc:ada/{coll}/3k9"), "cid": "newcid"}).to_string())
+                }
+                "com.atproto.repo.deleteRecord" => {
+                    assert_eq!((body["repo"].as_str(), body["collection"].as_str(), body["rkey"].as_str()), (Some("did:plc:ada"), Some("app.bsky.feed.like"), Some("3k1")));
+                    (200, "{}".into())
+                }
+                _ => (404, json!({"error": "NotFound"}).to_string()),
+            }
+        });
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        let mut p = parse_post_view(&post_view("1", "did:plc:bob", "bob.test", "2024-05-17T10:30:00Z", None, "hi")).unwrap();
+        let liked = react(&mut api, &p, Reaction::Like, true).unwrap();
+        assert_eq!(liked, Reacted { on: true, record: Some("at://did:plc:ada/app.bsky.feed.like/3k9".into()), count: None, fresh: None });
+        let reposted = react(&mut api, &p, Reaction::Boost, true).unwrap();
+        assert_eq!(reposted.record.as_deref(), Some("at://did:plc:ada/app.bsky.feed.repost/3k9"));
+        // undo: the record that was made (or that the post view named) is deleted
+        p.mine = Mine { liked: true, like_record: Some("at://did:plc:ada/app.bsky.feed.like/3k1".into()), ..Mine::default() };
+        assert_eq!(react(&mut api, &p, Reaction::Like, false).unwrap(), Reacted { on: false, record: None, count: None, fresh: None });
+        // no record known, or somebody else's record: nothing is sent
+        assert!(react(&mut api, &Post { mine: Mine::default(), ..p.clone() }, Reaction::Boost, false).unwrap_err().to_string().contains("which record"));
+        let alien = Post { mine: Mine { boosted: true, boost_record: Some("at://did:plc:eve/app.bsky.feed.repost/1".into()), ..Mine::default() }, ..p.clone() };
+        assert!(react(&mut api, &alien, Reaction::Boost, false).unwrap_err().to_string().contains("not one of this account's"));
+        assert!(react(&mut api, &Post { cid: String::new(), ..p }, Reaction::Like, true).is_err(), "without the content id of the post");
+        assert_eq!(handle.join().unwrap().len(), 4, "the login and three requests");
+    }
+
+    fn draft(text: &str) -> Draft {
+        Draft {
+            text: text.into(),
+            cw: String::new(),
+            visibility: super::super::actions::Visibility::Public,
+            reply_to: None,
+            quote: None,
+            poll: None,
+            schedule: None,
+            language: String::new(),
+            video: None,
+            pictures: vec![],
+            info: InstanceInfo::defaults(Network::Bluesky),
+            key: "keybsky00000a".into(),
+        }
+    }
+
+    // spec: SOC-051, SOC-052, SOC-054
+    #[test]
+    fn a_post_is_a_record_with_facets_the_reply_references_and_the_quote_embed_against_a_mock_server() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+        let seen2 = seen.clone();
+        // the fourth post is not in the feed server yet when it is read back
+        let (base, handle) = writing_server(9, move |method, nsid, body| match (method, nsid) {
+            ("GET", "com.atproto.identity.resolveHandle") => (200, json!({"did": "did:plc:bob"}).to_string()),
+            ("POST", "com.atproto.repo.createRecord") => {
+                assert_eq!((body["repo"].as_str(), body["collection"].as_str()), (Some("did:plc:ada"), Some("app.bsky.feed.post")));
+                seen2.lock().unwrap().push(body["record"].clone());
+                let n = seen2.lock().unwrap().len();
+                (200, json!({"uri": format!("at://did:plc:ada/app.bsky.feed.post/n{n}"), "cid": format!("cn{n}")}).to_string())
+            }
+            ("GET", "app.bsky.feed.getPosts") => {
+                let n = seen2.lock().unwrap().len();
+                if n == 4 {
+                    return (200, json!({"posts": []}).to_string());
+                }
+                let record = seen2.lock().unwrap()[n - 1].clone();
+                let mut v = post_view(&format!("n{n}"), "did:plc:ada", "ada.test", "2024-05-17T10:30:00Z", None, record["text"].as_str().unwrap());
+                v["record"] = record;
+                (200, json!({"posts": [v]}).to_string())
+            }
+            _ => (404, json!({"error": "NotFound"}).to_string()),
+        });
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        let parent = parse_post_view(&post_view("1", "did:plc:bob", "bob.test", "2024-05-17T10:30:00Z", Some("0"), "q")).unwrap();
+        let top = Post { reply_root: None, reply_to: None, ..parent.clone() };
+        // 1: a reply inside a conversation: the root of the conversation is kept, the parent is the post
+        let one = send(&mut api, &Draft { reply_to: Some(parent.clone()), ..draft("hi @bob.test see https://e.com/x #tag") }).unwrap();
+        let r = seen.lock().unwrap()[0].clone();
+        assert_eq!(r["$type"], "app.bsky.feed.post");
+        assert_eq!(r["text"], "hi @bob.test see https://e.com/x #tag");
+        assert_eq!(r["reply"], json!({"root": {"uri": "at://x/y/z", "cid": "c"}, "parent": {"uri": parent.id, "cid": "cid1"}}));
+        let kinds: Vec<&str> = r["facets"].as_array().unwrap().iter().map(|f| f["features"][0]["$type"].as_str().unwrap().rsplit('#').next().unwrap()).collect();
+        assert_eq!(kinds, ["mention", "link", "tag"]);
+        assert_eq!((r["facets"][0]["index"]["byteStart"].as_u64(), r["facets"][0]["features"][0]["did"].as_str()), (Some(3), Some("did:plc:bob")));
+        assert!(r["createdAt"].as_str().unwrap().ends_with('Z'));
+        assert_eq!((one.id.as_str(), one.cid.as_str()), ("at://did:plc:ada/app.bsky.feed.post/n1", "cidn1"));
+        // 2: a reply to a post that starts a conversation: it is its own root
+        send(&mut api, &Draft { reply_to: Some(top.clone()), ..draft("second") }).unwrap();
+        assert_eq!(seen.lock().unwrap()[1]["reply"]["root"], json!({"uri": top.id, "cid": "cid1"}));
+        assert!(seen.lock().unwrap()[1].get("facets").is_none() && seen.lock().unwrap()[1].get("embed").is_none());
+        // 3: a quote is an embedded record
+        send(&mut api, &Draft { quote: Some(top.clone()), ..draft("look at this") }).unwrap();
+        assert_eq!(seen.lock().unwrap()[2]["embed"], json!({"$type": "app.bsky.embed.record", "record": {"uri": top.id, "cid": "cid1"}}));
+        // 4: not in the feed server yet: the post is made from what was sent
+        let local = send(&mut api, &Draft { quote: Some(top.clone()), reply_to: Some(parent.clone()), ..draft("see https://e.com") }).unwrap();
+        assert_eq!(
+            (local.id.as_str(), local.author.handle.as_str(), local.reply_to.as_deref(), local.quote.as_ref().map(|q| q.id.clone())),
+            ("at://did:plc:ada/app.bsky.feed.post/n4", "ada.test", Some(parent.id.as_str()), Some(top.id.clone()))
+        );
+        assert!(local.text_markdown.contains("https://e.com"), "{}", local.text_markdown);
+        // too long: refused before anything is sent
+        let long = "x".repeat(301);
+        assert!(send(&mut api, &draft(&long)).unwrap_err().to_string().contains("at most 300"));
+        let calls = handle.join().unwrap();
+        assert_eq!(calls.iter().filter(|c| c.contains("createRecord")).count(), 4, "{calls:?}");
+    }
+
+    // spec: SOC-057
+    #[test]
+    fn the_record_key_is_the_key_of_the_draft_and_a_taken_key_on_a_retry_counts_as_posted() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let taken = Arc::new(AtomicBool::new(false));
+        let keys = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let (taken2, keys2) = (taken.clone(), keys.clone());
+        let (base, handle) = writing_server(4, move |method, nsid, body| match (method, nsid) {
+            ("POST", "com.atproto.repo.createRecord") => {
+                let key = body["rkey"].as_str().unwrap_or("").to_string();
+                keys2.lock().unwrap().push(key.clone());
+                // the first try made the record but the answer was lost; the retry meets the record
+                if key == "keybsky00000a" && taken2.swap(true, Ordering::SeqCst) {
+                    return (400, json!({"error": "InvalidRequest", "message": "Record already exists"}).to_string());
+                }
+                (200, json!({"uri": format!("at://did:plc:ada/app.bsky.feed.post/{key}"), "cid": "c1"}).to_string())
+            }
+            ("GET", "app.bsky.feed.getPosts") => (200, json!({"posts": [post_view("keybsky00000a", "did:plc:ada", "ada.test", "2024-05-17T10:30:00Z", None, "same")]}).to_string()),
+            _ => (404, json!({"error": "NotFound"}).to_string()),
+        });
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        let first = send(&mut api, &draft("same")).unwrap();
+        let retry = send(&mut api, &draft("same")).unwrap();
+        assert_eq!((first.id.as_str(), retry.id.as_str()), ("at://did:plc:ada/app.bsky.feed.post/keybsky00000a", "at://did:plc:ada/app.bsky.feed.post/keybsky00000a"), "the retry is the post, read back");
+        assert_eq!(*keys.lock().unwrap(), ["keybsky00000a", "keybsky00000a"], "the same record key");
+        // other refusals are errors, not posted
+        assert!(is_conflict("the server answered with status 409") && !is_conflict("the server answered with status 500: Internal error"));
+        handle.join().unwrap();
+    }
+
+    /// A pretend Bluesky server and video service in one: the account's session, service tokens named after their method, the video service's calls.
+    /// `already`: the upload answers 409 "already exists" with the job; `can_upload`: what the limits say.
+    fn video_server(already: bool, can_upload: bool, records: Arc<std::sync::Mutex<Vec<Value>>>, n: usize) -> (String, std::thread::JoinHandle<Vec<String>>) {
+        let polled = std::sync::atomic::AtomicUsize::new(0);
+        mock_http(n, move |method, path, headers, body| {
+            let nsid = path.split('?').next().unwrap().trim_start_matches("/xrpc/").to_string();
+            let (query, low) = (path.split_once('?').map(|q| q.1).unwrap_or(""), headers.to_ascii_lowercase());
+            let bearer = |t: &str| assert!(low.contains(&format!("authorization: bearer {}", t.to_ascii_lowercase())), "{nsid}: {headers}");
+            match (method, nsid.as_str()) {
+                ("POST", "com.atproto.server.createSession") => {
+                    let host = headers.lines().find_map(|l| l.strip_prefix("Host: ")).unwrap_or("").trim().to_string();
+                    (200, json!({"accessJwt": "jwt-1", "refreshJwt": "ref-1", "did": "did:plc:ada", "handle": "ada.test", "didDoc": {"service": [{"id": "#atproto_pds", "serviceEndpoint": format!("http://{host}")}]}}).to_string())
+                }
+                // the account's own server hands out service tokens, each for one audience and one method
+                ("GET", "com.atproto.server.getServiceAuth") => {
+                    bearer("jwt-1");
+                    // (the real hosts have no port: the pretend one is 127.0.0.1 for the service and the account's server alike)
+                    assert!(query.contains("aud=did%3Aweb%3A127.0.0.1"), "audience is a did:web: {query}");
+                    let lxm = query.split('&').find_map(|p| p.strip_prefix("lxm=")).unwrap_or("").to_string();
+                    assert!(query.contains("exp="), "{query}");
+                    (200, json!({"token": format!("svc-{lxm}")}).to_string())
+                }
+                ("GET", "app.bsky.video.getUploadLimits") => {
+                    bearer("svc-app.bsky.video.getUploadLimits");
+                    (200, json!({"canUpload": can_upload, "message": "You have reached your daily limit", "remainingDailyVideos": 3}).to_string())
+                }
+                ("POST", "app.bsky.video.uploadVideo") => {
+                    // a service token for the account's server and this one method: never the session token
+                    bearer("svc-com.atproto.repo.uploadBlob");
+                    assert!(!low.contains("jwt-1") && low.contains("content-type: video/mp4"), "{headers}");
+                    assert!(query.contains("did=did%3Aplc%3Aada") && query.contains("name=video.mp4"), "{query}");
+                    if already {
+                        (409, json!({"jobId": "j1", "state": "JOB_STATE_COMPLETED", "error": "already_exists", "message": "Video already processed"}).to_string())
+                    } else {
+                        (200, json!({"jobStatus": {"jobId": "j1", "did": "did:plc:ada", "state": "JOB_STATE_CREATED"}}).to_string())
+                    }
+                }
+                ("GET", "app.bsky.video.getJobStatus") => {
+                    // the status of a job is public: the Bluesky app asks without a token
+                    assert!(!low.contains("authorization:"), "{headers}");
+                    assert!(query.contains("jobId=j1"));
+                    let blob = json!({"$type": "blob", "ref": {"$link": "bafyvideo"}, "mimeType": "video/mp4", "size": 324});
+                    if already || polled.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0 {
+                        (200, json!({"jobStatus": {"jobId": "j1", "state": "JOB_STATE_COMPLETED", "blob": blob}}).to_string())
+                    } else {
+                        (200, json!({"jobStatus": {"jobId": "j1", "state": "JOB_STATE_ENCODING", "progress": 40}}).to_string())
+                    }
+                }
+                ("POST", "com.atproto.repo.createRecord") => {
+                    bearer("jwt-1");
+                    records.lock().unwrap().push(serde_json::from_str::<Value>(body).unwrap()["record"].clone());
+                    (200, json!({"uri": "at://did:plc:ada/app.bsky.feed.post/p1", "cid": "cp1"}).to_string())
+                }
+                _ => (404, json!({"error": "NotFound"}).to_string()),
+            }
+        })
+    }
+
+    fn mp4_clip(name: &str) -> std::path::PathBuf {
+        let mut b = vec![0, 0, 0, 24, b'f', b't', b'y', b'p', b'i', b's', b'o', b'm', 0, 0, 2, 0, b'i', b's', b'o', b'm', b'm', b'p', b'4', b'1'];
+        b.extend_from_slice(&[9u8; 300]);
+        crate::social::actions::tests::file(name, &b)
+    }
+
+    // spec: SOC-065, SOC-067, SEC-027
+    #[test]
+    fn a_video_goes_through_the_video_service_with_service_tokens_and_the_post_embeds_its_blob_and_names_its_language() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let records = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+        // createSession, 2 service tokens, limits, upload, 2 looks at the job, the record, the read back
+        let (base, handle) = video_server(false, true, records.clone(), 9);
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        api.video_service = base.clone();
+        api.video_poll = std::time::Duration::from_millis(2);
+        api.probe = |_| Some(crate::media::ffmpeg::Info { duration: Some(12.5), width: 720, height: 1280, fps: 30.0, has_audio: true });
+        let video = DraftVideo { path: mp4_clip("bsky-clip.mp4"), alt: " A clip ".into() };
+        send(&mut api, &Draft { video: Some(video), language: "de".into(), ..draft("Ein Video") }).unwrap();
+        let seen = handle.join().unwrap();
+        let order: Vec<&str> = seen.iter().map(|s| s.split('?').next().unwrap().rsplit('/').next().unwrap()).collect();
+        assert_eq!(
+            order,
+            [
+                "com.atproto.server.createSession",
+                "com.atproto.server.getServiceAuth",
+                "app.bsky.video.getUploadLimits",
+                "com.atproto.server.getServiceAuth",
+                "app.bsky.video.uploadVideo",
+                "app.bsky.video.getJobStatus",
+                "app.bsky.video.getJobStatus",
+                "com.atproto.repo.createRecord",
+                "app.bsky.feed.getPosts"
+            ]
+        );
+        let r = records.lock().unwrap()[0].clone();
+        assert_eq!(r["embed"]["$type"], "app.bsky.embed.video");
+        assert_eq!((r["embed"]["video"]["ref"]["$link"].as_str(), r["embed"]["alt"].as_str()), (Some("bafyvideo"), Some("A clip")));
+        assert_eq!(r["langs"], json!(["de"]));
+        assert_eq!(r["embed"]["aspectRatio"], json!({"width": 720, "height": 1280}), "the size ffprobe read");
+        // no language: no `langs`
+        assert!(send_record_without_language().is_none());
+    }
+
+    /// A text post without a language has no `langs`.
+    fn send_record_without_language() -> Option<Value> {
+        let records = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+        let (base, handle) = video_server(false, true, records.clone(), 3);
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        send(&mut api, &draft("plain")).unwrap();
+        handle.join().unwrap();
+        let r = records.lock().unwrap()[0].clone();
+        r.get("langs").cloned()
+    }
+
+    // spec: SOC-067, SEC-027
+    #[test]
+    fn a_video_the_service_already_has_is_found_by_its_job_and_one_the_account_may_not_upload_says_why() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let video = DraftVideo { path: mp4_clip("bsky-clip2.mp4"), alt: String::new() };
+        // 409 "already exists": the answer names the job, whose status holds the blob
+        let records = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+        let (base, handle) = video_server(true, true, records.clone(), 8);
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        api.video_service = base.clone();
+        api.video_poll = std::time::Duration::ZERO;
+        api.probe = |_| None;
+        send(&mut api, &Draft { video: Some(video.clone()), ..draft("again") }).unwrap();
+        handle.join().unwrap();
+        let r = records.lock().unwrap()[0].clone();
+        assert_eq!(r["embed"]["video"]["ref"]["$link"], "bafyvideo");
+        assert!(r["embed"].get("alt").is_none(), "no description, none sent");
+        assert!(r["embed"].get("aspectRatio").is_none(), "without ffprobe (here: no information) no aspect ratio is sent");
+        // the service says no: its message is the answer, nothing is uploaded
+        let (base, handle) = video_server(false, false, records, 3);
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        api.video_service = base.clone();
+        let e = send(&mut api, &Draft { video: Some(video), ..draft("no") }).unwrap_err().to_string();
+        assert!(e.contains("does not take a video from this account now: You have reached your daily limit"), "{e}");
+        assert_eq!(handle.join().unwrap().len(), 3, "session, token, limits: no upload");
+    }
+
+    // spec: SOC-067
+    #[test]
+    fn a_video_longer_than_the_apps_limit_is_refused_before_any_request_and_a_missing_ffprobe_leaves_it_to_the_service() {
+        let video = DraftVideo { path: mp4_clip("bsky-long.mp4"), alt: String::new() };
+        let mut api = Api::new("http://127.0.0.1:9", "a", "pw");
+        api.probe = |_| Some(crate::media::ffmpeg::Info { duration: Some(601.0), width: 1920, height: 1080, fps: 30.0, has_audio: true });
+        let e = crate::social::video::bluesky_embed(&mut api, &video).unwrap_err().to_string();
+        assert!(e.contains("bsky-long.mp4 is 10 minutes long; Bluesky takes videos up to 10 minutes."), "{e}");
+        assert_eq!(crate::social::video::BLUESKY_MAX_SECONDS, 600.0, "VIDEO_MAX_DURATION_MS of the Bluesky app");
+        // no ffmpeg: nothing is known, nothing is refused here (the service decides)
+        assert!(crate::social::video::probe_with(None, &video.path).is_none());
+        // an unknown length is no reason to refuse: the first request after the checks is the session
+        api.probe = |_| Some(crate::media::ffmpeg::Info { duration: None, width: 1, height: 1, fps: 30.0, has_audio: false });
+        let e = crate::social::video::bluesky_embed(&mut api, &video).unwrap_err().to_string();
+        assert!(!e.contains("minutes long"), "{e}");
+    }
+
+    // spec: SOC-067
+    #[test]
+    fn the_size_and_length_are_read_from_a_real_video_when_ffmpeg_is_installed() {
+        let Some(tools) = crate::media::ffmpeg::locate() else { return };
+        let dir = std::env::temp_dir().join(format!("shale-probe-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("t.mp4");
+        let made = std::process::Command::new(&tools.ffmpeg).args(["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=160x90:rate=10:duration=1", "-pix_fmt", "yuv420p"]).arg(&file).status();
+        if !made.is_ok_and(|s| s.success()) {
+            return;
+        }
+        let info = crate::social::video::probe_with(Some(&tools), &file).unwrap();
+        assert_eq!((info.width, info.height), (160, 90));
+        assert!(info.duration.is_some_and(|d| (0.9..1.2).contains(&d)), "{:?}", info.duration);
+        assert!(crate::social::video::probe_with(Some(&tools), &dir.join("missing.mp4")).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: SOC-063, SOC-066, SOC-067, SEC-026
+    #[test]
+    fn a_video_is_one_per_post_not_with_pictures_and_bluesky_refuses_polls_and_times() {
+        let video = Some(DraftVideo { path: "a.mp4".into(), alt: String::new() });
+        let mut api = Api::new("https://bsky.social", "a", "pw");
+        let both = Draft { video: video.clone(), pictures: vec![DraftPicture { path: "a.png".into(), alt: String::new() }], ..draft("x") };
+        assert!(send(&mut api, &both).unwrap_err().to_string().contains("pictures or a video, not both"));
+        let timed = Draft { schedule: Some(1), ..draft("x") };
+        assert!(send(&mut api, &timed).unwrap_err().to_string().contains("no polls and no scheduled posts"));
+        // what is no video, and what is too big, is refused before the account is asked anything
+        let text = crate::social::actions::tests::file("bsky-text.mp4", b"not a video at all, only some words");
+        assert!(crate::social::video::prepare(&text, 1000).unwrap_err().contains("is not an MP4"));
+        assert!(crate::social::video::prepare(&mp4_clip("bsky-clip3.mp4"), 100).unwrap_err().contains("videos can be up to"));
+        // whatever limit a server names, 100 MB is the most that is read (SEC-026): a sparse file just over it
+        let huge = mp4_clip("bsky-huge.mp4");
+        std::fs::OpenOptions::new().write(true).open(&huge).unwrap().set_len(100_000_001).unwrap();
+        let e = crate::social::video::prepare(&huge, u64::MAX).unwrap_err();
+        assert!(e.contains("videos can be up to 100.0 MB"), "{e}");
+        assert!(crate::social::video::prepare(&mp4_clip("bsky-clip4.mp4"), u64::MAX).is_ok());
+        assert_eq!(crate::social::video::sniff(&[0x1A, 0x45, 0xDF, 0xA3, 0, 0, 0, 0, 0, 0, 0, 0]), Some(("video/webm", "webm")));
+        assert_eq!(crate::social::video::sniff(b"\0\0\0\x18ftypqt  xxxx"), Some(("video/quicktime", "mov")));
+        assert_eq!(crate::social::video::sniff(&[0, 0, 1, 0xBA, 0, 0, 0, 0, 0, 0, 0, 0]), Some(("video/mpeg", "mpeg")));
+        assert!(crate::social::video::sniff(b"GIF89a......").is_none());
+    }
+
+    // spec: SOC-053, SOC-054
+    #[test]
+    fn pictures_are_blobs_with_alt_text_in_an_images_embed_also_beside_a_quote_against_a_mock_server() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let small = crate::social::actions::tests::file("bsky-small.png", &crate::social::actions::tests::png(30, 20, false));
+        // too big for Bluesky: it is made smaller before it goes up
+        let big = crate::social::actions::tests::file("bsky-big.png", &crate::social::actions::tests::png(700, 700, true));
+        let uploads = Arc::new(std::sync::Mutex::new(Vec::<(String, usize)>::new()));
+        let (up2, records) = (uploads.clone(), Arc::new(std::sync::Mutex::new(Vec::<Value>::new())));
+        let rec2 = records.clone();
+        let (base, handle) = mock_http(8, move |method, path, headers, body| {
+            let nsid = path.trim_start_matches("/xrpc/").to_string();
+            let low = headers.to_ascii_lowercase();
+            match (method, nsid.as_str()) {
+                ("POST", "com.atproto.server.createSession") => {
+                    let host = headers.lines().find_map(|l| l.strip_prefix("Host: ")).unwrap_or("").trim().to_string();
+                    (200, json!({"accessJwt": "jwt-1", "refreshJwt": "ref-1", "did": "did:plc:ada", "handle": "ada.test", "didDoc": {"service": [{"id": "#atproto_pds", "serviceEndpoint": format!("http://{host}")}]}}).to_string())
+                }
+                ("POST", "com.atproto.repo.uploadBlob") => {
+                    assert!(low.contains("authorization: bearer jwt-1"));
+                    let ct = low.lines().find_map(|l| l.strip_prefix("content-type: ")).unwrap_or("").trim().to_string();
+                    let n = up2.lock().unwrap().len();
+                    // (the mock reads the body as text: the real size is the Content-Length)
+                    let len: usize = low.lines().find_map(|l| l.strip_prefix("content-length: ")).and_then(|v| v.trim().parse().ok()).unwrap();
+                    up2.lock().unwrap().push((ct.clone(), len));
+                    (200, json!({"blob": {"$type": "blob", "ref": {"$link": format!("bafy{n}")}, "mimeType": ct, "size": len}}).to_string())
+                }
+                ("POST", "com.atproto.repo.createRecord") => {
+                    rec2.lock().unwrap().push(serde_json::from_str::<Value>(body).unwrap()["record"].clone());
+                    (200, json!({"uri": "at://did:plc:ada/app.bsky.feed.post/p1", "cid": "cp1"}).to_string())
+                }
+                ("GET", "app.bsky.feed.getPosts") => (200, json!({"posts": []}).to_string()),
+                _ => (404, json!({"error": "NotFound"}).to_string()),
+            }
+        });
+        let mut api = Api::new(&base, "ada.test", "app-pw");
+        let quoted = parse_post_view(&post_view("9", "did:plc:bob", "bob.test", "2024-05-17T10:30:00Z", None, "q")).unwrap();
+        let pictures = vec![DraftPicture { path: small, alt: " A small one ".into() }, DraftPicture { path: big, alt: String::new() }];
+        send(&mut api, &Draft { pictures: pictures.clone(), ..draft("with pictures") }).unwrap();
+        let r = records.lock().unwrap()[0].clone();
+        assert_eq!(r["embed"]["$type"], "app.bsky.embed.images");
+        assert_eq!((r["embed"]["images"][0]["alt"].as_str(), r["embed"]["images"][1]["alt"].as_str()), (Some("A small one"), Some("")));
+        assert_eq!(r["embed"]["images"][0]["image"]["ref"]["$link"], "bafy0", "the blob the server named");
+        let ups = uploads.lock().unwrap().clone();
+        assert_eq!((ups[0].0.as_str(), ups[1].0.as_str()), ("image/png", "image/jpeg"), "the big one became a JPEG");
+        assert!(ups[1].1 as u64 <= BLUESKY_IMAGE_BYTES, "{}", ups[1].1);
+        // pictures and a quote: recordWithMedia
+        send(&mut api, &Draft { pictures: pictures[..1].to_vec(), quote: Some(quoted.clone()), ..draft("both") }).unwrap();
+        let r = records.lock().unwrap()[1].clone();
+        assert_eq!(r["embed"]["$type"], "app.bsky.embed.recordWithMedia");
+        assert_eq!((r["embed"]["media"]["$type"].as_str(), r["embed"]["record"]["record"]["uri"].as_str(), r["embed"]["record"]["$type"].as_str()), (Some("app.bsky.embed.images"), Some(quoted.id.as_str()), Some("app.bsky.embed.record")));
+        // nothing is uploaded for a refused picture
+        let nothing = crate::social::actions::tests::file("bsky-text.png", b"words");
+        let before = uploads.lock().unwrap().len();
+        let e = send(&mut api, &Draft { pictures: vec![DraftPicture { path: nothing, alt: String::new() }], ..draft("x") }).unwrap_err();
+        assert!(e.to_string().contains("not a JPEG, PNG, GIF or WebP"), "{e}");
+        assert_eq!(uploads.lock().unwrap().len(), before);
+        // too many pictures
+        let five = vec![pictures[0].clone(); 5];
+        assert!(send(&mut api, &Draft { pictures: five, ..draft("x") }).unwrap_err().to_string().contains("at most 4 pictures"));
+        assert_eq!(handle.join().unwrap().len(), 8, "the login, 3 uploads, 2 records and 2 reads");
+    }
+
+    // spec: SOC-051, SOC-052
+    #[test]
+    fn links_mentions_and_tags_become_facets_with_utf8_byte_offsets() {
+        let text = "Grüße 😀 @ada.test see (https://e.com/x?a=1). #Rust, @nobody.test and #123 @bad";
+        let mut asked = vec![];
+        let f = facets(text, |h| {
+            asked.push(h.to_string());
+            (h == "ada.test").then(|| "did:plc:ada".to_string())
+        });
+        assert_eq!(asked, ["ada.test", "nobody.test"], "a handle needs a dot; a number is no tag");
+        let slice = |v: &Value| &text.as_bytes()[v["index"]["byteStart"].as_u64().unwrap() as usize..v["index"]["byteEnd"].as_u64().unwrap() as usize];
+        let kinds: Vec<(&str, String)> = f.iter().map(|v| (v["features"][0]["$type"].as_str().unwrap().rsplit('#').next().unwrap(), String::from_utf8(slice(v).to_vec()).unwrap())).collect();
+        // the "(" in front and the ")." behind a link are not part of it; the unresolved mention is plain text
+        assert_eq!(kinds, [("mention", "@ada.test".to_string()), ("link", "https://e.com/x?a=1".to_string()), ("tag", "#Rust".to_string())]);
+        assert_eq!((f[0]["features"][0]["did"].as_str(), f[1]["features"][0]["uri"].as_str(), f[2]["features"][0]["tag"].as_str()), (Some("did:plc:ada"), Some("https://e.com/x?a=1"), Some("Rust")));
+        // the facets read back as Markdown links (what a feed shows)
+        let md = facets_to_markdown(text, &Value::Array(f));
+        assert!(md.contains("[@ada.test](https://bsky.app/profile/did:plc:ada)") && md.contains("(https://e.com/x?a=1)"), "{md}");
+        assert!(facets("no facets here, not even e.com or @ or #", |_| None).is_empty());
+        assert_eq!(grapheme_count("a😀e\u{301}👨‍👩‍👧"), 4, "an emoji with a joiner and a letter with an accent count once");
+    }
+
     #[test]
     fn embeds_become_media_cards_and_quotes() {
         let mut v = post_view("1", "did:plc:ada", "ada.test", "2024-05-17T10:30:00.000Z", None, "look");
@@ -574,6 +1492,7 @@ mod tests {
         assert!(parse_feed_item(&json!({"post": post_view("1", "did:plc:ada", "ada.test", "2024-05-17T10:30:00Z", None, "hi")})).unwrap().reposted_by.is_none());
     }
 
+    // spec: SOC-002
     #[test]
     fn saved_feeds_from_preferences() {
         let g = |n: &str| format!("at://did:plc:x/app.bsky.feed.generator/{n}");
@@ -585,6 +1504,7 @@ mod tests {
         assert!(saved_feed_uris(&json!({})).is_empty());
     }
 
+    // spec: SOC-014, SOC-019
     #[test]
     fn thread_from_a_fixture() {
         let d = "did:plc:ada";
@@ -605,10 +1525,11 @@ mod tests {
         assert_eq!(r.iter().map(|r| (r.post.text_markdown.as_str(), r.depth)).collect::<Vec<_>>(), [("post c1", 0), ("post a9", 1), ("post c2", 0)]);
     }
 
+    // spec: SOC-003, SEC-016
     #[test]
     fn sessions_do_not_show_their_tokens() {
         let s = Session { pds: "https://p".into(), did: "did:plc:a".into(), handle: "a".into(), access_jwt: "jwt-secret-1".into(), refresh_jwt: "jwt-secret-2".into() };
-        let api = Api { server: "https://bsky.social".into(), handle: "a".into(), password: "pw-secret-3".into(), session: Some(s) };
+        let api = Api { server: "https://bsky.social".into(), handle: "a".into(), password: "pw-secret-3".into(), session: Some(s), video_service: String::new(), video_poll: std::time::Duration::ZERO, probe: |_| None };
         let d = format!("{api:?}");
         assert!(!d.contains("secret") && d.contains("***"), "{d}");
         let doc = json!({"service": [{"id": "#other", "serviceEndpoint": "https://no"}, {"id": "#atproto_pds", "type": "AtprotoPersonalDataServer", "serviceEndpoint": "https://pds.example"}]});
@@ -616,6 +1537,7 @@ mod tests {
         assert!(resolve_pds("did:plc:a/../b").is_err() && resolve_pds("did:key:abc").is_err() && resolve_pds("did:web:evil.com/x").is_err());
     }
 
+    // spec: SOC-002, SOC-039
     #[test]
     fn sign_in_expiry_feeds_paging_thread_and_media_against_a_mock_server() {
         if std::process::Command::new("curl").arg("--version").output().is_err() {
@@ -675,7 +1597,7 @@ mod tests {
         });
         let mut c = Client::new(Account::new(Network::Bluesky, &base, "ada.test", "Ada"), "app-pw");
         let feeds = c.feeds().unwrap();
-        assert_eq!(feeds.iter().map(|f| f.title.as_str()).collect::<Vec<_>>(), ["Following", "Cats"]);
+        assert_eq!(feeds.iter().map(|f| f.title.as_str()).collect::<Vec<_>>(), ["Following", "Notifications", "Your posts", "Cats"]);
         // the first timeline call finds the token expired, refreshes and tries again
         let page = c.timeline(&feeds[0], None).unwrap();
         assert_eq!(page.posts.len(), 1);
@@ -747,5 +1669,86 @@ mod tests {
         let f = newer_with(&keys(&[]), 200, |c| Ok(if c.is_none() { page_of(&["a", "b"], Some("x")) } else { page_of(&["b", "c"], None) })).unwrap();
         assert_eq!(f.posts.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["a", "b", "c"]);
         assert!(newer_with(&keys(&[]), 200, |_| Err("offline".into())).is_err());
+    }
+
+    fn thread_node(n: &str, who: (&str, &str), min: u32, parent: Option<&str>, kids: Vec<Value>, replies: u32) -> Value {
+        let mut v = post_view(n, who.0, who.1, &format!("2024-05-17T10:0{min}:00Z"), parent, &format!("post {n}"));
+        v["replyCount"] = json!(replies);
+        json!({"$type": "app.bsky.feed.defs#threadViewPost", "post": v, "replies": kids})
+    }
+
+    /// The answer for the post `p2` of ada: two posts above it, replies of others and of ada herself below it.
+    fn conversation_fixture(root_replies: u32) -> Value {
+        let (d, cy) = ("did:plc:ada", ("did:plc:cy", "cy.test"));
+        let ada = (d, "ada.test");
+        let at = |who: &str, n: &str| format!("at://{who}/app.bsky.feed.post/{n}");
+        let mut root = thread_node(
+            "p2",
+            ada,
+            2,
+            Some("p1"),
+            vec![
+                thread_node("c1", cy, 3, Some(&at(d, "p2")), vec![thread_node("a9", ada, 9, Some(&at(cy.0, "c1")), vec![], 0)], 1),
+                thread_node("p3", ada, 4, Some("p2"), vec![thread_node("p4", ada, 5, Some("p3"), vec![], 0), thread_node("c2", cy, 6, Some(&at(d, "p3")), vec![], 0)], 2),
+                json!({"$type": "app.bsky.feed.defs#notFoundPost", "uri": "at://x/y/z", "notFound": true}),
+            ],
+            root_replies,
+        );
+        root["parent"] = {
+            let mut p1 = thread_node("p1", ada, 1, Some("b0"), vec![], 1);
+            p1["parent"] = thread_node("b0", ("did:plc:bob", "bob.test"), 0, None, vec![], 1);
+            p1
+        };
+        json!({"thread": root})
+    }
+
+    // spec: SOC-045, SOC-046
+    #[test]
+    fn the_conversation_of_a_post_from_a_thread_fixture() {
+        let resp = conversation_fixture(2);
+        let root = parse_post_view(&resp["thread"]["post"]).unwrap();
+        let v = thread_view_from_response(&root, &resp);
+        let texts = |l: &[Post]| l.iter().map(|p| p.text_markdown.clone()).collect::<Vec<_>>();
+        assert_eq!(texts(&v.ancestors), ["post b0", "post p1"], "from the top of the conversation down");
+        assert_eq!(v.post.text_markdown, "post p2");
+        // depth first, oldest first among siblings; the author's own posts are replies here; a post that is gone is left out
+        assert_eq!(v.replies.iter().map(|r| (r.post.text_markdown.as_str(), r.depth)).collect::<Vec<_>>(), [("post c1", 0), ("post a9", 1), ("post p3", 0), ("post p4", 1), ("post c2", 1)]);
+        assert!(!v.cut);
+        // the post counts more replies than the answer holds (the server stopped at its depth limit)
+        let resp = conversation_fixture(3);
+        assert!(thread_view_from_response(&root, &resp).cut);
+    }
+
+    // spec: SOC-045, SOC-046
+    #[test]
+    fn the_conversation_of_a_post_is_asked_with_get_post_thread() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let (base, handle) = mock_http(3, move |method, path, headers, _| {
+            let host = headers.lines().find_map(|l| l.strip_prefix("Host: ")).unwrap_or("").trim().to_string();
+            let did = format!("did:web:{}", host.replace(':', "%3A"));
+            match (method, path.split('?').next().unwrap()) {
+                ("POST", "/xrpc/com.atproto.server.createSession") => {
+                    (200, json!({"accessJwt": "jwt-1", "refreshJwt": "ref-1", "did": did, "handle": "ada.test", "didDoc": {"service": [{"id": "#atproto_pds", "serviceEndpoint": format!("http://{host}")}]}}).to_string())
+                }
+                ("GET", "/xrpc/app.bsky.feed.getPostThread") if path.contains("missing") => (400, json!({"error": "NotFound", "message": "Post not found"}).to_string()),
+                ("GET", "/xrpc/app.bsky.feed.getPostThread") => {
+                    assert!(path.contains("depth=10") && path.contains("parentHeight=80"), "{path}");
+                    let mut up = thread_node("p1", (&did, "ada.test"), 1, None, vec![], 1);
+                    let mut root = thread_node("p2", (&did, "ada.test"), 2, Some("p1"), vec![thread_node("p3", ("did:plc:cy", "cy.test"), 3, Some(&format!("at://{did}/app.bsky.feed.post/p2")), vec![], 0)], 1);
+                    up["replies"] = json!([]);
+                    root["parent"] = up;
+                    (200, json!({"thread": root}).to_string())
+                }
+                _ => (404, json!({"error": "NotFound"}).to_string()),
+            }
+        });
+        let mut c = Client::new(Account::new(Network::Bluesky, &base, "ada.test", "Ada"), "app-pw");
+        let post = crate::social::tests::post("at://x/app.bsky.feed.post/p2", "ada", 1, None);
+        let v = c.thread_view(&post).unwrap();
+        assert_eq!((v.ancestors.len(), v.post.text_markdown.as_str(), v.replies.len(), v.cut), (1, "post p2", 1, false));
+        assert!(c.thread_view(&Post { id: "at://x/app.bsky.feed.post/missing".into(), ..post }).unwrap_err().to_lowercase().contains("not found"));
+        assert_eq!(handle.join().unwrap().len(), 3);
     }
 }

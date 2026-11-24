@@ -179,6 +179,30 @@ fn cfg_032_the_picker_filters_and_picks_by_keyboard() {
     let _ = std::fs::remove_dir_all(&f.dir);
 }
 
+// spec: CFG-077
+#[test]
+fn cfg_077_an_open_picker_draws_its_entries_in_their_own_fonts_once_the_list_rests() {
+    let mut f = F::new("list-fonts");
+    f.app.open_settings(SettingsTab::Fonts);
+    f.frames(3);
+    f.click("Default  ⏷");
+    f.frames(3);
+    let own = FontFamily::Name(format!("system:{}", f.virgil).into());
+    // the name waits in Shale's font until the list has rested (CFG-077 unit tests); then the worker has read the face and egui has it
+    let mut drawn = false;
+    for _ in 0..200 {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        f.frames(2);
+        drawn = f.texts().iter().any(|(t, _, fam)| *t == f.virgil && *fam == own);
+        if drawn {
+            break;
+        }
+    }
+    assert!(drawn, "the entry is drawn in its own font");
+    assert!(f.texts().iter().any(|(t, _, fam)| t == "Default  ✓" && *fam != own), "Default stays in Shale's font");
+    let _ = std::fs::remove_dir_all(&f.dir);
+}
+
 // spec: CFG-035
 #[test]
 fn cfg_035_a_font_that_is_not_installed_falls_back_and_says_so() {
@@ -250,7 +274,7 @@ fn cfg_040_every_row_has_a_sample_that_follows_the_highlighted_font_until_one_is
     f.frames(3);
     let at = f.hl.find_label(&mut f.app, &f.virgil.clone()).center();
     f.hl.frame(&mut f.app, vec![Event::PointerMoved(at)]);
-    assert!(f.texts().iter().any(|(t, _, _)| t == "Loading the font…"), "the font is loaded for the sample first");
+    // (the font is loaded for the sample first, or the list has its face already, CFG-077)
     f.frames(3);
     assert_eq!(samples(&mut f), [(14.0, virgil.clone())]);
     assert!(f.app.cfg.fonts.all.family.is_none(), "nothing is picked");

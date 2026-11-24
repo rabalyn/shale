@@ -254,7 +254,7 @@ Settings → LaTeX.
 
 1. **TeX.** If a usable TeX is found, the step says "Found: … ✓" and you go on. If not, it says so in a
    sentence and offers **Install (about 100 MB download, 330 MB on disk)**; only that button downloads
-   anything. A bar shows the progress, **Cancel install** stops it and removes what was downloaded. On
+   anything. A bar shows the progress, **Cancel** stops it and removes what was downloaded. On
    Linux and macOS the installer needs `perl`; a computer without it is told so in words before anything is
    downloaded.
 2. **Templates.** **TU Darmstadt (tested version)** is the recommended choice (the version Shale was
@@ -336,7 +336,7 @@ the TeX and checks it:
   330 MB on disk**), where it comes from and the folder it goes to
   (`<data folder>/shale/texlive`, on Linux `~/.local/share/shale/texlive`), and only
   **Download and install** starts it; **Not now** changes nothing. A bar shows the progress with the
-  package being installed, and **Cancel install** stops it and removes what was downloaded so far.
+  package being installed, and **Cancel** stops it and removes what was downloaded so far.
   The folder is built under another name and renamed when it is complete, so a half-finished install is never
   used. It takes a few minutes. On Linux and macOS the installer needs `perl`; if there is none, the
   page says "install perl first" (for example `sudo apt install perl`) before downloading anything.
@@ -389,7 +389,7 @@ when there is one), and has these buttons:
   announcement). It downloads the version Shale was tested with (4.06, a fixed commit whose
   checksum is checked: a different file is refused), makes the class files with docstrip using your
   TeX, and puts the finished set into the vault in one step. A progress bar shows where it is, and
-  **Cancel import** stops it; a cancelled or failed import leaves the vault as it was.
+  **Cancel** stops it; a cancelled or failed import leaves the vault as it was.
 - **Newest TU Darmstadt templates from CTAN** does the same with whatever version CTAN has today. It
   is not pinned and has no checksum, and the kinds were tested with 4.06 only; the page says so.
   CTAN hands the download to one of its mirrors; when that mirror is down or sends a broken file,
@@ -585,9 +585,13 @@ Also exported: emphasis, strong, ~~strike-through~~, inline code, block quotes, 
 the column widths you set in the editor), fenced code in its syntax colours on a light grey box (a long block goes on on the next page in
 documents; on slides and posters it stays in one piece), web links (clickable), the highlights and colours of [[Editor]] as exact colours, and
 `![[…]]` embeds on a line of their own: a picture as wide in proportion to the text as in the
-note, a drawing as a vector graphic, all pages of a PDF, each with its caption; a file that is
-missing is a red line `[missing: name]` in the PDF and a note in the message afterwards, and a sound
-or video is such a line too. A **picture inside a line** of text (`an icon ![[icon.png]] here`, also in a
+note, a drawing as a vector graphic, all pages of a PDF, a sound or a video as its player card (the cover or the
+first frame, the play button, the name and the empty bar with `0:00` and the length, as in the built-in export;
+without ffmpeg a video is a grey tile with its name), each with its caption; a file that is
+missing is a red line `[missing: name]` in the PDF and a note in the message afterwards. Block quotes have the violet
+bar of the built-in export (a note with `print-*` properties has the plain indent, as there), tags are violet on a light
+field, and emoji such as the 📅 of a task's due date are set in an emoji font that Shale puts next to the document
+(the same Noto Emoji the built-in export draws with), not as an empty box. A **picture inside a line** of text (`an icon ![[icon.png]] here`, also in a
 table cell) is drawn in the line, as high as the line, like a letter; a missing one is the red
 `[missing: name]` in the line. Other embeds inside a line (a drawing, a PDF) stay their link text.
 

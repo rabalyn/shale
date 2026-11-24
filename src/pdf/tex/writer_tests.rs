@@ -102,7 +102,7 @@ fn text_is_escaped_everywhere_so_hostile_input_stays_text() {
     assert!(tex.contains("\\author{\\textbackslash{}input\\{/etc/passwd\\}"), "{tex}");
 }
 
-// spec: TEX-008
+// spec: TEX-008, TEX-032
 #[test]
 fn inline_markup_is_written_as_commands_and_links_as_href() {
     let t = doc("a *it* **bo** ~~st~~ `co de` ==hi== <mark style=\"background: #FFFF00;\">m</mark> <span style=\"color: #FF0000;\">r</span> [w](https://e.com/a_b?x=1&y=2#f) [[Wiki|shown]] [[Plain]] #tag\n", "pub");
@@ -134,13 +134,13 @@ fn an_address_in_a_link_cannot_end_the_command_it_is_in() {
     assert!(t.contains("\\href{https://www.example.org}{w}"), "{t}");
 }
 
-// spec: TEX-008
+// spec: TEX-008, TEX-042
 #[test]
 fn blocks_are_written_as_environments() {
     let t = doc("## S\nfirst\nsecond line\n\n> q1\n> q2\n>> nested\n\n- a\n- b\n  - c\n    - d\n      - e\n        - f\n1. one\n\n7. seven\n8. eight\n\n- [ ] open\n- [x] done\n\n---\n\n```\nlet a = 1 & 2;\n\tindented\n```\n", "pub");
     let b = body_of(&t);
     assert!(b.contains("first \\newline\nsecond line\n\n"), "a line break of the note is a line break: {b}");
-    assert!(b.contains("\\begin{quote}\nq1 \\newline\nq2\n\\begin{quote}\nnested\n\\end{quote}\n\n\\end{quote}"), "{b}");
+    assert!(b.contains("\\begin{shalequote}\nq1 \\newline\nq2\n\\begin{shalequote}\nnested\n\\end{shalequote}\n\n\\end{shalequote}"), "{b}");
     assert!(
         b.contains("\\begin{itemize}\n\\item a\n\\item b\n\\begin{itemize}\n\\item c\n\\begin{itemize}\n\\item d\n\\begin{itemize}\n\\item e\n\\item f\n\\end{itemize}\n\\end{itemize}\n\\end{itemize}\n\\end{itemize}\n"),
         "four levels, a fifth stays on the fourth: {b}"
@@ -193,7 +193,7 @@ fn stored_column_sizes_become_the_proportions_of_the_columns() {
     assert!(!b.contains("shale-table"), "the comment line is not text");
 }
 
-// spec: TEX-008
+// spec: TEX-008, TEX-018
 #[test]
 fn the_front_matter_is_not_printed_and_the_properties_fill_the_fields() {
     let note = "---\ntitle: The Real Title\nauthor: [Ada, Bob]\nsubtitle: Sub & more\ndate: 2026-11-17\nsecret: printed?\n---\nBody text\n";
@@ -212,7 +212,7 @@ fn the_front_matter_is_not_printed_and_the_properties_fill_the_fields() {
     assert!(t.contains("\\author{A \\and B \\textbackslash{}input\\{x\\}}"), "{t}");
 }
 
-// spec: TEX-008
+// spec: TEX-008, TEX-018
 #[test]
 fn a_required_field_with_no_value_stops_the_export_and_names_the_field() {
     let e = doc_with("# Plan\ntext\n", "pub", &ExportOptions::for_note(), &[], &[]).unwrap_err();
@@ -222,7 +222,7 @@ fn a_required_field_with_no_value_stops_the_export_and_names_the_field() {
     assert!(doc_with("---\nauthor: X\n---\ntext", "pub", &ExportOptions::for_note(), &[], &[]).is_ok(), "a property is enough");
 }
 
-// spec: TEX-009
+// spec: TEX-009, TEX-010
 #[test]
 fn headings_of_an_article_kind_are_levels_by_nesting_and_the_title_heading_is_not_repeated() {
     let note = "# Plan\nintro\n## A\n#### Deep under A\n## B\n### C\n###### D\n# Other\n";
@@ -290,7 +290,7 @@ fn doc_department(kind_id: &str, filled: bool, wanted: bool) -> String {
     out.unwrap_or_else(|e| panic!("{e}")).tex
 }
 
-// spec: TEX-037
+// spec: TEX-037, TEX-035
 #[test]
 fn the_department_logo_lines_are_written_after_the_preamble_only_when_the_slot_is_filled_the_box_is_on_and_the_kind_has_a_place() {
     for id in ["pub", "report", "thesis", "phd", "beamer", "letter", "poster", "sciposter", "leaflet"] {
@@ -479,11 +479,11 @@ fn a_picture_and_a_pdf_outside_the_vault_are_files_in_the_work_folder_and_a_miss
 fn an_embed_that_cannot_be_used_is_a_line_of_text_and_a_warning_not_a_failure() {
     let assets = rich_assets();
     let files: Vec<(&str, &[u8])> = assets.iter().map(|(n, b)| (*n, b.as_slice())).collect();
-    let note = "## S\n![[missing.png]]\n![[broken.png]]\n![[nothing.mp3]]\n";
-    let out = doc_with(note, "pub", &ExportOptions::for_note(), &[("author", "A")], &[("broken.png", b"not a png"), ("nothing.mp3", b"x"), files[0]]).unwrap();
+    let note = "## S\n![[missing.png]]\n![[broken.png]]\n![[data.zip]]\n";
+    let out = doc_with(note, "pub", &ExportOptions::for_note(), &[("author", "A")], &[("broken.png", b"not a png"), ("data.zip", b"x"), files[0]]).unwrap();
     let b = body_of(&out.tex);
-    assert!(b.contains("\\textit{[missing: missing.png]}") && b.contains("\\textit{[not readable: broken.png]}") && b.contains("\\textit{[nothing.mp3: not in a PDF]}"), "{b}");
-    assert_eq!(out.warnings, ["missing: missing.png", "not readable: broken.png", "nothing.mp3: not in a PDF"]);
+    assert!(b.contains("\\textit{[missing: missing.png]}") && b.contains("\\textit{[not readable: broken.png]}") && b.contains("\\textit{[data.zip: not in a PDF]}"), "{b}");
+    assert_eq!(out.warnings, ["missing: missing.png", "not readable: broken.png", "data.zip: not in a PDF"]);
     assert!(out.files.is_empty());
     let off = doc_with("## S\n![[pic.png]]\n", "pub", &ExportOptions { embeds: false, ..ExportOptions::for_note() }, &[("author", "A")], &[files[0]]).unwrap();
     assert!(!off.tex.contains("includegraphics{") && off.files.is_empty());
@@ -515,7 +515,7 @@ fn the_document_has_the_kinds_lines_the_helpers_and_one_main_file() {
     let _ = std::fs::remove_dir_all(d);
 }
 
-// spec: TEX-013
+// spec: TEX-013, TEX-018
 #[test]
 fn the_dialog_is_prefilled_from_the_properties_and_the_title_is_the_notes_name() {
     let set = tuda_set(SetSettings::default());
@@ -681,7 +681,7 @@ fn a_hostile_formula_can_never_run_tex() {
 fn fenced_code_is_on_a_light_box_that_breaks_across_pages_where_tables_may() {
     let note = "## S\n```rust\nfn main() {}\n```\n";
     let t = doc(note, "pub");
-    assert!(t.contains("\\usepackage{tcolorbox}\n\\definecolor{shalecodebg}{RGB}{244,244,246}\n\\tcbuselibrary{breakable}\n\\newtcolorbox{shalecode}{breakable,colback=shalecodebg,colframe=shalecodebg,"), "{t}");
+    assert!(t.contains("\\usepackage{tcolorbox}\n\\definecolor{shalecodebg}{RGB}{244,244,246}\n\\tcbuselibrary{skins,breakable}\n\\newtcolorbox{shalecode}{breakable,colback=shalecodebg,colframe=shalecodebg,"), "{t}");
     let b = body_of(&t);
     assert!(b.contains("\\begin{shalecode}\n\\mbox{}\\textcolor[RGB]{125,45,170}{fn}") && b.contains("\\end{shalecode}"), "the box keeps the colours of the code: {b}");
     for k in ["thesis", "letter", "leaflet"] {
@@ -826,4 +826,115 @@ fn print_break_before_writes_a_newpage_before_the_headings_up_to_its_level_but_n
     assert_eq!(t.matches("\\newpage").count(), 2, "{t}");
     // slides and the like have their own pages
     assert_eq!(at(1, "beamer").matches("\\newpage").count(), 0);
+}
+
+// ---------------------------------------------------------------- media cards (TEX-015)
+
+/// A note written with these media files of the test fixtures.
+fn with_media(note: &str, names: &[&str]) -> Document {
+    let media: Vec<(String, Vec<u8>)> = names.iter().map(|n| (n.to_string(), std::fs::read(crate::media::testdata::fixture(n)).unwrap())).collect();
+    let files: Vec<(&str, &[u8])> = media.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();
+    doc_with(note, "pub", &ExportOptions::for_note(), &[("author", "A")], &files).unwrap()
+}
+
+/// The drawn content of one of the PDFs of the work folder.
+fn pdf_text(out: &Document, name: &str) -> String {
+    let bytes = &out.files.iter().find(|(n, _)| n == name).unwrap_or_else(|| panic!("no file {name}")).1;
+    crate::pdf::export::tests::contents(bytes)
+}
+
+// spec: TEX-015
+#[test]
+fn tex_015_a_sound_is_its_player_card_as_a_vector_pdf_with_the_caption_below() {
+    use crate::pdf::export::tests::hex;
+    let out = with_media("## S\n![[tone-cover.mp3]]\n\n![[tone.wav]]\n", &["tone-cover.mp3", "tone.wav"]);
+    let b = body_of(&out.tex);
+    assert!(out.warnings.is_empty() && !b.contains("not in a PDF"), "{b}");
+    // the card is as wide in proportion to the column as the editor's
+    let card = crate::media::widget::card_size(&crate::media::testdata::fixture("tone.wav"), crate::embed_size::DEFAULT_COLUMN, None);
+    let share = format!("{:.3}", card.x / crate::embed_size::DEFAULT_COLUMN);
+    assert!(b.contains(&format!("\\includegraphics[width={share}\\linewidth,height=0.8\\textheight,keepaspectratio]{{player-1.pdf}}")), "{b}");
+    assert!(b.contains("\\textit{tone-cover.mp3}") && b.contains("\\textit{tone.wav}"), "the caption below: {b}");
+    let names: Vec<&str> = out.files.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, ["player-1.pdf", "player-2.pdf"]);
+    // the cover is the artwork; the name and the times are text
+    let with = pdf_text(&out, "player-1.pdf");
+    assert!(with.contains("/Im") && with.contains(&hex("tone-cover.mp3")) && with.contains(&hex("0:00")), "{with}");
+    // without a cover: a grey tile with the name, no picture
+    let without = pdf_text(&out, "player-2.pdf");
+    assert!(!without.contains("/Im") && without.contains(&hex("tone.wav")), "{without}");
+    // one page the size of the card
+    let pdf = hayro::hayro_syntax::Pdf::new(out.files[1].1.clone()).unwrap();
+    assert_eq!(pdf.pages().len(), 1);
+    let (w, h) = pdf.pages()[0].render_dimensions();
+    assert!((w - card.x).abs() < 0.5 && (h - card.y).abs() < 0.5, "{w}x{h} against {card:?}");
+}
+
+// spec: TEX-015
+#[test]
+fn tex_015_a_video_is_its_first_frame_with_the_play_button_or_the_tile_without_ffmpeg() {
+    let out = with_media("## S\n![[clip.mp4|320]]\n", &["clip.mp4"]);
+    let b = body_of(&out.tex);
+    assert!(out.warnings.is_empty() && b.contains("]{player-1.pdf}") && b.contains("\\textit{clip.mp4}"), "{b}");
+    let card = pdf_text(&out, "player-1.pdf");
+    assert!(card.contains(&crate::pdf::export::tests::hex("clip.mp4")) || card.contains("/Im"), "the card has the name or the frame");
+    if crate::media::ffmpeg::locate().is_some() {
+        assert!(card.contains("/Im"), "the first frame is the artwork");
+        assert!(b.contains(&format!("width={:.3}\\linewidth", 320.0 / crate::embed_size::DEFAULT_COLUMN)), "as wide as the link says: {b}");
+    } else {
+        // without ffmpeg the card is as the built-in export draws it: the tile, no picture
+        assert!(!card.contains("/Im"));
+        println!("the first frame is not tested: ffmpeg is not installed");
+    }
+}
+
+// spec: TEX-015
+#[test]
+fn tex_015_a_sound_used_twice_is_one_file_and_a_missing_one_keeps_the_placeholder() {
+    let out = with_media("## S\n![[tone.wav]]\n\n![[tone.wav|300]]\n", &["tone.wav"]);
+    assert_eq!(out.files.len(), 1, "one file for the sound however often it is embedded");
+    assert_eq!(body_of(&out.tex).matches("{player-1.pdf}").count(), 2);
+    let gone = doc_with("## S\n![[gone.mp3]]\n![[gone.mp4]]\n", "pub", &ExportOptions::for_note(), &[("author", "A")], &[]).unwrap();
+    let b = body_of(&gone.tex);
+    assert!(b.contains("\\textit{[missing: gone.mp3]}") && b.contains("\\textit{[missing: gone.mp4]}") && gone.files.is_empty(), "{b}");
+    assert_eq!(gone.warnings, ["missing: gone.mp3", "missing: gone.mp4"]);
+}
+
+// spec: TEX-041
+#[test]
+fn tex_041_emoji_are_set_in_the_emoji_font_that_travels_with_the_document() {
+    let out = doc_with("## S\n- [ ] pay 📅 2026-12-01\n- done ✅ and 👍🏽 and 👨‍👩‍👧 and ⚠\u{fe0f}\n", "pub", &ExportOptions::for_note(), &[("author", "A")], &[]).unwrap();
+    let b = body_of(&out.tex);
+    assert!(b.contains("pay \\shaleemoji{📅} 2026-12-01") && b.contains("\\shaleemoji{✅}") && b.contains("\\shaleemoji{⚠}"), "{b}");
+    assert!(b.contains("\\shaleemoji{👍🏽}") && b.contains("\\shaleemoji{👨👩👧}"), "a run of emoji is one group, the joiner left out: {b}");
+    assert!(!b.contains('\u{fe0f}') && !b.contains('\u{200d}'), "{b}");
+    // the font file is in the work folder and the preamble sets it up, with a text version for bookmarks
+    assert!(out.files.iter().any(|(n, bytes)| n == "shale-emoji.ttf" && bytes.len() > 10_000), "{:?}", out.files.iter().map(|f| &f.0).collect::<Vec<_>>());
+    assert!(out.tex.contains("\\newfontface\\shaleemojiface[Path=./]{shale-emoji.ttf}") && out.tex.contains("\\pdfstringdefDisableCommands{\\renewcommand{\\shaleemoji}[1]{#1}}"));
+    // a heading and a field too
+    let head = doc_with("## Plan 📅\n", "pub", &ExportOptions::for_note(), &[("author", "A 🎓")], &[]).unwrap();
+    assert!(head.tex.contains("Plan \\shaleemoji{📅}") && head.tex.contains("A \\shaleemoji{🎓}"), "{}", head.tex);
+    // no emoji: no font, no setup
+    let plain = doc_with("## S\ntext × → é\n", "pub", &ExportOptions::for_note(), &[("author", "A")], &[]).unwrap();
+    assert!(plain.files.is_empty() && !plain.tex.contains("shaleemoji"));
+}
+
+// spec: TEX-008
+#[test]
+fn tex_008_tags_are_violet_on_their_light_field_as_in_the_built_in_export() {
+    let b = body_of(&doc("## S\nsee #ideas and #a/b here\n", "pub"));
+    assert!(b.contains("\\colorbox[RGB]{236,232,251}{\\textcolor[RGB]{105,65,198}{\\#ideas}}"), "{b}");
+    assert!(b.contains("\\textcolor[RGB]{105,65,198}{\\#a/b}"), "{b}");
+}
+
+// spec: TEX-042
+#[test]
+fn tex_042_a_quote_has_the_bar_and_a_note_with_print_properties_the_plain_indent() {
+    let t = doc("## S\n> quoted\n> words\n", "pub");
+    let b = body_of(&t);
+    assert!(b.contains("\\begin{shalequote}\nquoted \\newline\nwords\n\\end{shalequote}"), "{b}");
+    assert!(t.contains("\\newtcolorbox{shalequote}{breakable,enhanced,blanker,borderline west={2.5pt}{0pt}{shalequotebar},colupper=shalequoteink"), "{t}");
+    assert!(t.contains("\\definecolor{shalequotebar}{RGB}{149,121,215}") && t.contains("\\tcbuselibrary{skins,breakable}"), "{t}");
+    let paper = doc_with("## S\n> quoted\n", "pub", &ExportOptions { paper_look: true, ..ExportOptions::for_note() }, &[("author", "A")], &[]).unwrap();
+    assert!(body_of(&paper.tex).contains("\\begin{quote}\nquoted\n\\end{quote}"), "{}", paper.tex);
 }

@@ -47,24 +47,34 @@ pub struct SavedPost {
     /// replies of other people below the thread (their media is not downloaded, only linked);
     /// they go into the note only when they are still here (the Import dialog can drop them)
     pub replies: Vec<Reply>,
+    /// the id of the post that starts the conversation the first post replies to, as the network
+    /// gives it (SOC-070); `None` when the post starts it or the network did not say
+    pub root: Option<String>,
 }
 
 /// Fetch the self-thread of `post` and download all media of all its posts (blocking: use a
 /// background thread). Problems with single files or the thread are not fatal, see the fields.
-pub fn fetch_saved(client: &mut Client, post: &Post) -> SavedPost {
-    let (mut thread, thread_error, replies) = match client.thread_with_replies(post) {
-        Ok((t, r)) if t.iter().any(|p| p.id == post.id) => (t, None, r),
-        Ok(_) => (vec![post.clone()], None, vec![]),
-        Err(e) => (vec![post.clone()], Some(e), vec![]),
+/// `stop` is asked before the thread and before each file: when it says yes, nothing is returned (JOB-036).
+pub fn fetch_saved(client: &mut Client, post: &Post, stop: &dyn Fn() -> bool) -> Option<SavedPost> {
+    if stop() {
+        return None;
+    }
+    let (mut thread, thread_error, replies, root) = match client.thread_with_replies(post) {
+        Ok((t, r, root)) if t.iter().any(|p| p.id == post.id) => (t, None, r, root),
+        Ok(_) => (vec![post.clone()], None, vec![], None),
+        Err(e) => (vec![post.clone()], Some(e), vec![], None),
     };
     // the post as the feed showed it (same content; keeps the card and counters the user saw)
     if thread.len() == 1 {
         thread[0] = Post { reposted_by: None, ..post.clone() };
     }
-    let mut saved = SavedPost { thread, reposted_by: post.reposted_by.clone(), media: vec![], failed_media: vec![], thread_error, replies };
+    let mut saved = SavedPost { thread, reposted_by: post.reposted_by.clone(), media: vec![], failed_media: vec![], thread_error, replies, root };
     let mut n = 0;
     for (pi, p) in saved.thread.clone().iter().enumerate() {
         for (mi, m) in p.media.iter().enumerate() {
+            if stop() {
+                return None;
+            }
             n += 1;
             match client.download_media(p, m) {
                 Ok((data, content_type)) => saved.media.push(SavedMedia { file_name: media_file_name(p, m, n, content_type.as_deref()), data, post: pi, item: mi }),
@@ -72,7 +82,7 @@ pub fn fetch_saved(client: &mut Client, post: &Post) -> SavedPost {
             }
         }
     }
-    saved
+    Some(saved)
 }
 
 /// "ada_m.test-1.jpg": author and running number, the extension from the address or the content type.
@@ -256,11 +266,28 @@ fn replies_section(saved: &SavedPost) -> String {
     s
 }
 
+/// The ids of a saved post (its first post) for the matching and the chain of its thread
+/// (SOC-071, SOC-072, ADR-0032): the post id and the post it replies to, the root of the
+/// conversation (in `references`, so `Ident::thread_id` is the root), the network and the time.
+pub fn post_ident(saved: &SavedPost) -> crate::thread::Ident {
+    let first = &saved.thread[0];
+    let id = crate::thread::bare_id(&first.id);
+    let root = saved.root.as_deref().map(crate::thread::bare_id).filter(|r| !r.is_empty() && *r != id);
+    crate::thread::Ident {
+        id,
+        in_reply_to: first.reply_to.as_deref().map(crate::thread::bare_id).unwrap_or_default(),
+        references: root.into_iter().collect(),
+        network: first.network.key().into(),
+        date_key: crate::thread::date_key(&if first.created_at == 0 { String::new() } else { local_stamp(first.created_at, false) }),
+    }
+}
+
 /// The note for a saved post or thread. `media_rel_paths`: where each of `saved.media` was saved
 /// in the vault (same order). `tags` and `people_links` (e.g. `[[Ada Lovelace]]`) as for e-mails.
 /// The properties are the one record of the header (IMP-050, IMP-058); `header_list` also writes
-/// them as a list below the title (IMP-052).
-pub fn post_note(saved: &SavedPost, media_rel_paths: &[PathBuf], tags: &[String], people_links: &[String], header_list: bool) -> String {
+/// them as a list below the title (IMP-052). `chain`: the `previous` / `next` links of the post's
+/// thread (SOC-072).
+pub fn post_note(saved: &SavedPost, media_rel_paths: &[PathBuf], tags: &[String], people_links: &[String], header_list: bool, chain: &crate::import::Chain) -> String {
     let first = &saved.thread[0];
     let n = saved.thread.len();
     let when = |p: &Post| if p.created_at == 0 { String::new() } else { local_stamp(p.created_at, false) };
@@ -275,6 +302,10 @@ pub fn post_note(saved: &SavedPost, media_rel_paths: &[PathBuf], tags: &[String]
             ("date", when(first)),
             ("url", yaml(&first.url)),
             ("post-id", yaml(&first.id)),
+            ("in-reply-to", first.reply_to.as_deref().filter(|r| !r.is_empty()).map(yaml).unwrap_or_default()),
+            ("thread-id", Some(post_ident(saved).thread_id()).filter(|t| !t.is_empty()).map(|t| yaml(&t)).unwrap_or_default()),
+            ("previous", chain.previous.as_deref().map(yaml).unwrap_or_default()),
+            ("next", chain.next.as_deref().map(yaml).unwrap_or_default()),
             ("thread", if n > 1 { n.to_string() } else { String::new() }),
             ("replies", if saved.replies.is_empty() { String::new() } else { saved.replies.len().to_string() }),
             ("thread-ids", if n > 1 { format!("[{}]", saved.thread.iter().map(|p| yaml(&p.id)).collect::<Vec<_>>().join(", ")) } else { String::new() }),
@@ -341,7 +372,7 @@ mod tests {
     use super::*;
 
     fn saved_of(thread: Vec<Post>) -> SavedPost {
-        SavedPost { thread, reposted_by: None, media: vec![], failed_media: vec![], thread_error: None, replies: vec![] }
+        SavedPost { thread, reposted_by: None, media: vec![], failed_media: vec![], thread_error: None, replies: vec![], root: None }
     }
 
     fn media(kind: MediaKind, url: &str, alt: &str) -> Media {
@@ -366,6 +397,7 @@ mod tests {
         assert!(post_title(&p).ends_with("– Grüße 😀 aus Köln"));
     }
 
+    // spec: SOC-011
     // spec: IMP-050, IMP-052, IMP-058
     #[test]
     fn the_header_is_properties_and_a_list_only_on_request() {
@@ -374,7 +406,7 @@ mod tests {
         let mut saved = saved_of(vec![p, post("43", "ada", 1_715_941_900, Some("42"))]);
         saved.reposted_by = Some(Author { handle: "cy@m.test".into(), display_name: "Cy".into(), profile_url: "https://m.test/@cy".into(), ..Default::default() });
         let people = ["[[Ada]]".to_string(), "[[Bob, Jr.]]".to_string()];
-        let off = post_note(&saved, &[], &["social".into()], &people, false);
+        let off = post_note(&saved, &[], &["social".into()], &people, false, &Default::default());
         for line in ["author-url: \"https://m.test/@ada\"\n", "reposted-by: \"Cy (@cy@m.test)\"\n", "people:\n  - \"[[Ada]]\"\n  - \"[[Bob, Jr.]]\"\n", "thread: 2\n", "url: \"https://m.test/@ada/42\"\n"] {
             assert!(off.contains(line), "missing {line:?} in\n{off}");
         }
@@ -382,7 +414,7 @@ mod tests {
         let (head, body) = off.split_once("\n# ").unwrap();
         assert!(head.starts_with("---\n") && body.contains(" @ada@m.test – ") && body.contains("\n\n## Thread\n\n**1/2**"), "title, then the text directly: {off}");
         assert!(note_has_post(&off, "43"), "the marker is still found");
-        let on = post_note(&saved, &[], &["social".into()], &people, true);
+        let on = post_note(&saved, &[], &["social".into()], &people, true, &Default::default());
         assert!(on.contains("\n\n- **Author:** [Ada L. (@ada@m.test)](https://m.test/@ada)\n- **Posted:** "), "{on}");
         assert!(on.contains("- **Thread:** 2 posts by @ada@m.test\n- **Boosted by:** [Cy (@cy@m.test)](https://m.test/@cy)\n- **People:** [[Ada]], [[Bob, Jr.]]\n\n## Thread\n"), "{on}");
         // the list is the only difference in the text
@@ -390,6 +422,7 @@ mod tests {
         assert_eq!(strip(&on), strip(&off));
     }
 
+    // spec: SOC-011
     #[test]
     fn single_post_note() {
         let mut p = post("42", "ada", 1_715_941_800, None);
@@ -408,7 +441,7 @@ mod tests {
         saved.media = vec![SavedMedia { file_name: "a.png".into(), data: vec![1], post: 0, item: 0 }, SavedMedia { file_name: "v.mp4".into(), data: vec![2], post: 0, item: 1 }];
         saved.failed_media = vec![FailedMedia { url: "https://f.test/gone.jpg".into(), error: "404".into(), post: 0, item: 2 }];
         let paths = vec![PathBuf::from("z_media/2024/05/240517_ada-1.png"), PathBuf::from("z_media/2024/05/240517_ada-2.mp4")];
-        let n = post_note(&saved, &paths, &["social".into(), "recipes".into()], &["[[Ada]]".into()], true);
+        let n = post_note(&saved, &paths, &["social".into(), "recipes".into()], &["[[Ada]]".into()], true, &Default::default());
         let (y, m, d) = local_day(1_715_941_800);
         let stamp = local_stamp(1_715_941_800, false);
         assert!(n.starts_with("---\ntype: social-post\nnetwork: mastodon\nauthor: \"@ada@m.test\"\nauthor-name: \"Ada \\\"Countess\\\" L.\"\n"), "{n}");
@@ -441,6 +474,7 @@ mod tests {
         assert!(note_has_post(&n, "42") && !note_has_post(&n, "4"));
     }
 
+    // spec: SOC-011
     #[test]
     fn thread_note_layout() {
         let mut ps: Vec<Post> = (1..=3).map(|i| post(&format!("p{i}"), "ada", 1_715_941_800 + i * 60, None)).collect();
@@ -451,7 +485,7 @@ mod tests {
         let mut saved = saved_of(ps);
         saved.media = vec![SavedMedia { file_name: "b.jpg".into(), data: vec![], post: 1, item: 0 }];
         saved.reposted_by = Some(Author { handle: "cy.test".into(), ..Default::default() });
-        let n = post_note(&saved, &[PathBuf::from("z_media/b.jpg")], &[], &[], true);
+        let n = post_note(&saved, &[PathBuf::from("z_media/b.jpg")], &[], &[], true, &Default::default());
         assert!(n.contains("network: bluesky\n") && n.contains("thread: 3\n") && n.contains("thread-ids: [\"p1\", \"p2\", \"p3\"]\n"), "{n}");
         assert!(n.contains("- **Thread:** 3 posts by @ada@m.test\n") && n.contains("- **Reposted by:** cy.test (@cy.test)\n"), "{n}");
         assert!(n.contains("## Thread\n\n**1/3** · ") && n.contains("\n---\n\n**2/3** · ") && n.contains("\n---\n\n**3/3** · "), "{n}");
@@ -466,6 +500,7 @@ mod tests {
         assert_eq!(marker("p1"), "post-id: \"p1\"");
     }
 
+    // spec: SOC-011
     #[test]
     fn failed_thread_and_missing_paths_fall_back_to_links() {
         let mut p = post("1", "ada", 0, None);
@@ -474,26 +509,26 @@ mod tests {
         let mut saved = saved_of(vec![p]);
         saved.thread_error = Some("offline".into());
         saved.failed_media = vec![FailedMedia { url: "https://f.test/v.mp4".into(), error: "too big".into(), post: 0, item: 0 }];
-        let n = post_note(&saved, &[], &[], &[], true);
+        let n = post_note(&saved, &[], &[], &[], true, &Default::default());
         assert!(n.contains("[video](https://f.test/v.mp4)\n*clip*") && n.contains("offline") && !n.contains("- **Posted:**") && !n.contains("\ndate:"), "{n}");
         // a saved file without a path (caller lost it) is a link too, never a panic
         saved.failed_media.clear();
         saved.media = vec![SavedMedia { file_name: "v.mp4".into(), data: vec![], post: 0, item: 0 }];
-        assert!(post_note(&saved, &[], &[], &[], true).contains("[video](https://f.test/v.mp4)"));
+        assert!(post_note(&saved, &[], &[], &[], true, &Default::default()).contains("[video](https://f.test/v.mp4)"));
     }
 
     // spec: SOC-020
     #[test]
     fn replies_are_a_quoted_section_only_when_there_are_some() {
         let mut saved = saved_of(vec![post("p1", "ada", 1_715_941_800, None)]);
-        let plain = post_note(&saved, &[], &[], &[], true);
+        let plain = post_note(&saved, &[], &[], &[], true, &Default::default());
         assert!(!plain.contains("## Replies") && !plain.contains("replies:"), "{plain}");
         let mut r1 = post("c1", "cy", 1_715_941_900, Some("p1"));
         r1.media = vec![media(MediaKind::Image, "https://f.test/pic.jpg", "a cat")];
         let r2 = post("c2", "dee", 1_715_942_000, Some("c1"));
         let deep = post("c3", "eve", 1_715_942_100, Some("c2"));
         saved.replies = vec![Reply { post: r1, depth: 0 }, Reply { post: r2, depth: 1 }, Reply { post: deep, depth: 9 }];
-        let n = post_note(&saved, &[], &[], &[], true);
+        let n = post_note(&saved, &[], &[], &[], true, &Default::default());
         assert!(n.contains("replies: 3\n") && n.contains("\n## Replies\n"), "{n}");
         assert!(n.contains("\n> **[CY (@cy@m.test)](https://m.test/@cy)** · ") && n.contains(" · [link](https://m.test/@cy/c1)\n>\n> text of c1\n> [image](https://f.test/pic.jpg) — a cat\n"), "{n}");
         assert!(n.contains("\n>> **[DEE") && n.contains("\n>> text of c2\n"), "{n}");
@@ -512,5 +547,41 @@ mod tests {
         let m = Media { file_name_hint: "weird".into(), ..m };
         assert_eq!(media_file_name(&p, &m, 1, Some("image/webp")), "ada_m.test-1.webp");
         assert_eq!(media_file_name(&p, &m, 2, None), "ada_m.test-2.bin");
+    }
+
+    // spec: JOB-036
+    #[test]
+    fn job_036_saving_asks_to_stop_before_the_thread_and_before_each_file_and_gives_nothing_when_it_does() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let l2 = log.clone();
+        let (base, _h) = crate::calendar::dav::tests::mock_http(40, move |m, path, _, _| {
+            l2.lock().unwrap().push(format!("{m} {path}"));
+            if path.starts_with("/m") {
+                (200, "PNGDATA".into())
+            } else {
+                (404, String::new())
+            }
+        });
+        let mut p = post("1", "ada", 1_715_941_800, None);
+        p.media = vec![media(MediaKind::Image, &format!("{base}/m1.png"), ""), media(MediaKind::Image, &format!("{base}/m2.png"), "")];
+        let mut client = Client::new(Account::new(Network::Mastodon, &base, "ada@127.0.0.1", "Ada"), "tok");
+        let files = || log.lock().unwrap().iter().filter(|l| l.contains(" /m")).cloned().collect::<Vec<_>>();
+        // asked before the thread: no request at all
+        assert!(fetch_saved(&mut client, &p, &|| true).is_none());
+        assert!(log.lock().unwrap().is_empty());
+        // the third question (before the second file) says stop: the first file was fetched, the second never
+        let asked = std::cell::Cell::new(0);
+        let stop = || {
+            asked.set(asked.get() + 1);
+            asked.get() >= 3
+        };
+        assert!(fetch_saved(&mut client, &p, &stop).is_none());
+        assert_eq!(files(), ["GET /m1.png"]);
+        // never asked to stop: both files
+        let saved = fetch_saved(&mut client, &p, &|| false).expect("saved");
+        assert_eq!(saved.media.len(), 2);
     }
 }

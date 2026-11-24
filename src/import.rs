@@ -121,25 +121,31 @@ pub struct Item {
     pub already: Option<PathBuf>,
     /// the people of an e-mail or event (linked to their contact notes)
     pub people: Vec<crate::import::people::Person>,
-    /// e-mail: the notes of the vault it continues, as a suggestion (IMP-068)
+    /// e-mail, post: the notes of the vault it continues, as a suggestion (IMP-068, SOC-071)
     pub continues: Option<Continues>,
 }
 
-/// An e-mail that continues notes of the vault: found by the reply headers, offered in the Import
-/// dialog as "Continues [[note]]" (IMP-068, ADR-0032).
+/// An e-mail or post that continues notes of the vault: found by the reply headers, offered in the Import
+/// dialog as "Continues [[note]]" (IMP-068, ADR-0032), or an earlier item of the same import.
 #[derive(Clone, Debug)]
 pub struct Continues {
     /// the notes it may continue, the nearest first
     pub candidates: Vec<thread::Candidate>,
     /// where the mail goes in the chain of each candidate's thread (same order)
     pub plans: Vec<thread::Plan>,
+    /// the earlier items of the same import it continues, the nearest first (IMP-074); shown as
+    /// text, not a choice: the chain of the batch does not depend on it
+    pub batch: Vec<usize>,
     /// the candidate that is chosen
     pub chosen: usize,
     /// the tick box: link the new note into the chain
     pub on: bool,
     /// the answer to "Keep the thread in date order?" when the mail is older than a note of the
-    /// thread: true = Update, false = Leave the chain (IMP-071)
+    /// thread: true = Update, false = Leave the chain (IMP-071). Asked once per thread of the
+    /// batch (IMP-074): the answer of the first item that asks counts for the whole thread.
     pub update: bool,
+    /// the thread of the batch the item belongs to: the smallest item number of it (IMP-074)
+    pub group: usize,
 }
 
 impl Continues {
@@ -170,28 +176,135 @@ pub fn mail_ident(mail: &Mail) -> thread::Ident {
     thread::Ident { id: thread::bare_id(&mail.message_id), in_reply_to: thread::bare_id(&mail.in_reply_to), references: thread::bare_ids(&mail.references), network: String::new(), date_key: thread::date_key(&stamp) }
 }
 
-/// Search the vault for the notes each e-mail of `items` continues, by its reply headers only
-/// (IMP-068), and put the suggestion in `Item::continues` (ticked; the older-mail question starts
-/// with Update). Items that have a suggestion already keep it.
-pub fn find_continues(vault: &Vault, items: &mut [Item]) {
-    if !items.iter().any(|i| i.continues.is_none() && matches!(i.source, Source::Email { .. })) {
-        return;
-    }
-    let index = thread::Index::build(vault);
-    for it in items.iter_mut().filter(|i| i.continues.is_none()) {
-        let Source::Email { mail, .. } = &it.source else { continue };
-        let ident = mail_ident(mail);
-        let candidates = index.matches(&ident);
-        if candidates.is_empty() {
-            continue;
-        }
-        let plans = candidates.iter().map(|c| index.plan(&ident, &c.rel)).collect();
-        it.continues = Some(Continues { candidates, plans, chosen: 0, on: true, update: true });
+/// The ids of an item that can continue a thread: an e-mail or a post; `None` for other items.
+fn thread_ident(source: &Source) -> Option<thread::Ident> {
+    match source {
+        Source::Email { mail, .. } => Some(mail_ident(mail)),
+        Source::Social { saved, .. } => Some(crate::social::note::post_ident(saved)),
+        _ => None,
     }
 }
 
-/// The folder the first ticked continuation points to: where the Import dialog presets its folder
-/// (IMP-069).
+/// For each thread of the batch that has to change the chain in the middle (a new note comes before
+/// a note of the vault, IMP-071): the first ticked item that asks "Keep the thread in date order?"
+/// and how many notes of the vault the thread changes. The question is asked once per thread, and
+/// the answer of that item counts for the whole thread (IMP-074). Keyed by `Continues::group`.
+pub fn older_questions(items: &[Item]) -> std::collections::HashMap<usize, (usize, usize)> {
+    let mut asks: std::collections::HashMap<usize, (Option<usize>, std::collections::HashSet<&Path>)> = Default::default();
+    for (i, c) in items.iter().enumerate().filter(|(_, it)| it.include).filter_map(|(i, it)| it.continues.as_ref().filter(|c| c.on).map(|c| (i, c))) {
+        let Some(plan) = c.plan() else { continue };
+        let e = asks.entry(c.group).or_default();
+        e.0 = e.0.or(plan.is_older().then_some(i));
+        e.1.extend(plan.previous.iter().chain(&plan.next).map(PathBuf::as_path));
+    }
+    asks.into_iter().filter_map(|(g, (first, notes))| first.map(|i| (g, (i, notes.len())))).collect()
+}
+
+/// The chain of a batch, planned before anything is written (IMP-070, IMP-071, IMP-074, SOC-072):
+/// the whole batch and the notes of its threads in the vault, in date order. A thread that would change
+/// the chain in the middle only when the person said Update; "Leave the chain" writes no link of
+/// that thread and touches nothing.
+#[derive(Default)]
+struct BatchChain {
+    /// the note of the vault right before / after the item
+    before: std::collections::HashMap<usize, PathBuf>,
+    after: std::collections::HashMap<usize, PathBuf>,
+    /// items that are neighbours: (earlier, later); linked once both are written
+    between: Vec<(usize, usize)>,
+}
+
+impl BatchChain {
+    fn plan(vault: &Vault, items: &[Item]) -> BatchChain {
+        let entries: Vec<thread::Entry> = items
+            .iter()
+            .enumerate()
+            .filter(|(_, it)| it.include)
+            .filter_map(|(i, it)| {
+                let ident = thread_ident(&it.source)?;
+                let anchor = match it.continues.as_ref() {
+                    Some(c) if !c.on => return None,
+                    Some(c) => c.anchor().filter(|a| vault.notes.contains_key(*a)).map(Path::to_path_buf),
+                    None => None,
+                };
+                Some(thread::Entry { item: i, ident, anchor })
+            })
+            .collect();
+        if entries.len() < 2 && !entries.iter().any(|e| e.anchor.is_some()) {
+            return BatchChain::default();
+        }
+        let questions = older_questions(items);
+        let mut out = BatchChain::default();
+        for g in thread::Index::build(vault).plan_batch(&entries) {
+            let asker = g.items.iter().find_map(|i| items[*i].continues.as_ref().and_then(|c| questions.get(&c.group)).map(|(a, _)| *a));
+            if g.older && asker.is_some_and(|a| items[a].continues.as_ref().is_some_and(|c| !c.update)) {
+                continue;
+            }
+            for (a, b) in g.links {
+                match (a, b) {
+                    (thread::Node::Item(x), thread::Node::Item(y)) => out.between.push((x, y)),
+                    (thread::Node::Item(x), thread::Node::Note(p)) => {
+                        out.after.insert(x, p);
+                    }
+                    (thread::Node::Note(p), thread::Node::Item(y)) => {
+                        out.before.insert(y, p);
+                    }
+                    (thread::Node::Note(_), thread::Node::Note(_)) => {}
+                }
+            }
+        }
+        out
+    }
+
+    /// The links the note of item `i` gets to notes of the vault, and the neighbours that get a link
+    /// to it (the property to set).
+    fn of(&self, vault: &Vault, i: usize) -> (Chain, Vec<(PathBuf, &'static str)>) {
+        let (previous, next) = (self.before.get(&i), self.after.get(&i));
+        let chain = Chain { previous: previous.map(|p| people::link_to(vault, p)), next: next.map(|p| people::link_to(vault, p)) };
+        let neighbours = [(previous, "next"), (next, "previous")].into_iter().filter_map(|(p, k)| p.map(|p| (p.clone(), k))).collect();
+        (chain, neighbours)
+    }
+}
+
+/// Search the vault for the notes each e-mail and post of `items` continues, by its reply ids only
+/// (IMP-068, SOC-071), and put the suggestion in `Item::continues` (ticked; the older-mail question starts
+/// with Update). Items that have a suggestion already keep it.
+pub fn find_continues(vault: &Vault, items: &mut [Item]) {
+    if !items.iter().any(|i| i.continues.is_none() && matches!(i.source, Source::Email { .. } | Source::Social { .. })) {
+        return;
+    }
+    let index = thread::Index::build(vault);
+    // the other items of the batch count as notes too (IMP-074): an item continues an earlier one
+    let idents: Vec<(usize, thread::Ident)> = items.iter().enumerate().filter(|(_, i)| i.include).filter_map(|(k, i)| thread_ident(&i.source).map(|id| (k, id))).collect();
+    let with_items = index.with_items(&idents);
+    let groups = thread::components(&idents);
+    for ((k, ident), group) in idents.iter().zip(groups) {
+        if items[*k].continues.is_some() {
+            continue;
+        }
+        let (mut candidates, mut batch) = (Vec::new(), Vec::new());
+        for c in with_items.matches(ident) {
+            match thread::item_of(&c.rel) {
+                None => candidates.push(c),
+                Some(j) => {
+                    let earlier = idents.iter().find(|(x, _)| *x == j).is_some_and(|(_, o)| j != *k && (c.date_key.as_str(), o.id.as_str()) < (ident.date_key.as_str(), ident.id.as_str()));
+                    if earlier {
+                        batch.push(j);
+                    }
+                }
+            }
+        }
+        if candidates.is_empty() && batch.is_empty() {
+            continue;
+        }
+        let plans = candidates.iter().map(|c| index.plan(ident, &c.rel)).collect();
+        items[*k].continues = Some(Continues { candidates, plans, batch, chosen: 0, on: true, update: true, group });
+    }
+}
+
+/// The folder the first ticked continuation of a note of the vault points to: where the Import
+/// dialog presets its folder (IMP-069). A continuation of another item of the import has no folder
+/// of its own: the items of a thread follow the note of the vault they continue, or, with none, the
+/// folder together (IMP-074).
 pub fn continued_folder(items: &[Item]) -> Option<String> {
     items.iter().filter(|i| i.include).filter_map(|i| i.continues.as_ref().filter(|c| c.on)).find_map(|c| c.anchor()).map(|a| rel_to_string(a.parent().unwrap_or(Path::new(""))))
 }
@@ -838,7 +951,9 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
     let mut errors = Vec::new();
     let mut touched = Vec::new();
     let root = vault.root.clone();
-    for it in items.iter().filter(|i| i.include) {
+    let batch = BatchChain::plan(vault, items);
+    let mut new_paths: Vec<Option<PathBuf>> = vec![None; items.len()];
+    for (item_no, it) in items.iter().enumerate().filter(|(_, i)| i.include) {
         if let Source::Media { name, data, how, .. } = &it.source {
             let file = media_file_name(&it.title, name);
             let date = today_ymd();
@@ -898,16 +1013,8 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
                         None
                     };
                     // the chain of the thread (IMP-070, IMP-071): a continued mail names its neighbours
-                    let mut chain = Chain::default();
-                    if let Some(c) = it.continues.as_ref().filter(|c| c.on) {
-                        if let Some(plan) = c.anchor().filter(|a| vault.notes.contains_key(*a)).map(|a| thread::Index::build(vault).plan(&mail_ident(mail), a)) {
-                            // an older mail: only when the person said Update; "Leave the chain" writes no link
-                            if !plan.is_older() || c.update {
-                                chain = Chain { previous: plan.previous.as_ref().map(|p| people::link_to(vault, p)), next: plan.next.as_ref().map(|p| people::link_to(vault, p)) };
-                                neighbours = vec![(plan.previous.clone(), "next"), (plan.next.clone(), "previous")].into_iter().filter_map(|(p, k)| p.map(|p| (p, k))).collect();
-                            }
-                        }
-                    }
+                    let chain;
+                    (chain, neighbours) = batch.of(vault, item_no);
                     email_note(mail, &o.tags, &atts, orig.as_deref(), &people, &EmailExtras { header_list: o.header_list, cut: o.cut, chain })
                 }
                 Source::Event { event, calendar, original } => {
@@ -933,6 +1040,8 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
                 Source::Social { saved, replies, .. } => {
                     // only the ticked files are saved; the others stay links to their web address
                     let date = crate::social::note::media_date(saved);
+                    let chain;
+                    (chain, neighbours) = batch.of(vault, item_no);
                     let mut chosen = crate::social::note::SavedPost { media: vec![], failed_media: vec![], thread_error: None, replies: if *replies { saved.replies.clone() } else { vec![] }, ..saved.clone() };
                     let mut paths = vec![];
                     for (m, on) in saved.media.iter().zip(&it.att_on) {
@@ -941,7 +1050,7 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
                             chosen.media.push(m.clone());
                         }
                     }
-                    crate::social::note::post_note(&chosen, &paths, &o.tags, &people, o.header_list)
+                    crate::social::note::post_note(&chosen, &paths, &o.tags, &people, o.header_list, &chain)
                 }
             })
         })();
@@ -963,12 +1072,23 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
                                 Err(e) => errors.push(format!("“{}”: could not change its {key} link: {e}", rel_to_string(&n))),
                             }
                         }
+                        new_paths[item_no] = Some(r.clone());
                         made.push(r)
                     }
                     Err(e) => errors.push(format!("“{title}”: could not write the note: {e}")),
                 }
             }
             Err(e) => errors.push(format!("“{title}”: {e}")),
+        }
+    }
+    // the new notes of one thread link to each other once all of them exist (IMP-074)
+    for (a, b) in &batch.between {
+        let (Some(a), Some(b)) = (&new_paths[*a], &new_paths[*b]) else { continue };
+        for (note, key, other) in [(a, "next", b), (b, "previous", a)] {
+            let link = yaml(&people::link_to(vault, other));
+            if let Err(e) = vault.edit_note(note, |t| thread::set_property(t, key, &link)) {
+                errors.push(format!("“{}”: could not set its {key} link: {e}", rel_to_string(note)));
+            }
         }
     }
     Imported { notes: made, files, linked, errors, touched }
@@ -1184,6 +1304,7 @@ mod tests {
         assert!(bare.contains("# Plan\n\n## Message\n\nHallo"), "{bare}");
     }
 
+    // spec: SOC-020
     // spec: SOC-011, SOC-012
     #[test]
     fn a_saved_post_becomes_a_note_with_pictures_and_a_second_import_is_spotted() {

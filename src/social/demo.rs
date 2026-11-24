@@ -11,7 +11,10 @@ pub fn account() -> SocialAccountEntry {
 }
 
 pub fn feeds() -> Vec<Feed> {
-    vec![Feed { id: "home".into(), title: "Home".into() }, Feed { id: "list:1".into(), title: "List: Rust people".into() }]
+    let mut out = vec![Feed { id: "home".into(), title: "Home".into() }];
+    out.extend(super::notifications::extra_feeds());
+    out.push(Feed { id: "list:1".into(), title: "List: Rust people".into() });
+    out
 }
 
 /// A picture file in the demo folder (made on first use): a colour gradient with a few shapes.
@@ -65,6 +68,11 @@ fn post(id: &str, who: Author, ago_minutes: i64, text: &str) -> Post {
         reply_count: 0,
         boost_count: 0,
         like_count: 0,
+        mine: Mine::default(),
+        reply_root: None,
+        visibility: Some("public".into()),
+        poll: None,
+        notice: None,
     }
 }
 
@@ -103,17 +111,31 @@ pub fn posts() -> Vec<Post> {
         "Morning! Finished reading [@grace](https://fosstodon.org/@grace)'s notes on [#plaintext](https://demo.social/tags/plaintext). Worth your time: https://example.org/plain-text-forever",
     );
     p1.like_count = 17;
+    p1.mine.liked = true;
     p1.boost_count = 3;
     p1.reply_count = 2;
     let mut p2 = post("demo-2", linus, 25, "Merge window is open. Please send patches that compile.");
     p2.reposted_by = Some(ada);
     p2.like_count = 320;
     p2.boost_count = 88;
+    p2.mine.boosted = true;
     let mut p3 = post("demo-3", author("ken@demo.social", "Ken Thompson", 2.4), 41, "I would rather not say this out loud, but the weather forecast was right for once.");
     p3.content_warning = Some("Weather, mild sarcasm".into());
     let mut p4 = post("demo-4", author("margaret@space.example", "Margaret H.", 1.8), 62, "Sunrise over the lab this morning. Two shots, same hill.");
     p4.media = vec![image_media("demo-sunrise-1.png", 800, 500, 0.3, "A hill with a bright sun in an orange sky"), image_media("demo-sunrise-2.png", 800, 500, 1.1, "The same hill a minute later, more purple")];
     p4.like_count = 95;
+    let mut p5 = post("demo-5", author("grace@fosstodon.org", "Grace Hopper", 1.3), 95, "Poll: what do you keep your notes in?");
+    p5.poll = Some(super::poll::Poll {
+        id: "demo-poll-1".into(),
+        options: [("Plain files in a folder", 41), ("An app with sync", 22), ("Paper", 9)].iter().map(|(t, v)| super::poll::PollOption { title: (*t).into(), votes: Some(*v) }).collect(),
+        expires_at: Some(crate::calendar::time::now() + 20 * 3600),
+        expired: false,
+        multiple: false,
+        votes_count: 72,
+        voters_count: Some(72),
+        voted: true,
+        own_votes: vec![0],
+    });
     let mut p6 = post("demo-6", author("edsger@demo.social", "Edsger D.", 2.9), 130, "Simplicity is prerequisite for reliability.");
     let mut quoted = post("demo-6q", author("tony@demo.social", "Tony Hoare", 0.7), 400, "Null references were a billion dollar mistake. Sorry about that.");
     quoted.like_count = 1200;
@@ -122,6 +144,7 @@ pub fn posts() -> Vec<Post> {
     let mut out = vec![p1, p2, p3, p4];
     out.push(thread().remove(0));
     out.push(p6);
+    out.push(p5);
     out
 }
 
@@ -136,18 +159,90 @@ pub fn new_posts() -> Vec<Post> {
     vec![a, b, c]
 }
 
+/// The account's own posts ("Your posts", SOC-074), newest first.
+pub fn own_posts() -> Vec<Post> {
+    let ada = author("ada@demo.social", "Ada Demo", 0.4);
+    let mut a = post("demo-own-1", ada.clone(), 20, "Plain text files outlive every app I have ever used. Mine are older than my phone.");
+    (a.like_count, a.boost_count, a.reply_count) = (9, 2, 1);
+    let mut b = post("demo-own-2", ada.clone(), 190, "Reading in the train. Back in the evening.");
+    b.like_count = 3;
+    let mut c = post("demo-own-3", ada, 1300, "Does anyone else keep a folder called \"later\" that is older than their last job?");
+    c.reply_to = Some("demo-thread-1".into());
+    vec![a, b, c]
+}
+
+/// The Notifications feed of the demo account (SOC-078), newest first: five people favourited
+/// the first post (one entry), a reply, a boost, a follow, a mention and an older favourite that
+/// was read. The server's marker is 895: the ones above it are unread.
+pub fn notifications() -> Vec<Post> {
+    use super::notifications::{entries, Kind, Raw};
+    let now = crate::calendar::time::now();
+    let own = own_posts();
+    let people = [
+        author("alan@mathstodon.xyz", "Alan Turing", 0.9),
+        author("grace@fosstodon.org", "Grace Hopper", 1.3),
+        author("linus@kernel.social", "Linus T.", 3.0),
+        author("ken@demo.social", "Ken Thompson", 2.4),
+        author("margaret@space.example", "Margaret H.", 1.8),
+        author("tony@demo.social", "Tony Hoare", 0.7),
+    ];
+    let raw = |id: i64, kind: Kind, who: usize, minutes: i64, post: Option<Post>| Raw { id: id.to_string(), mark: id.to_string(), rank: id, kind, who: people[who].clone(), at: now - minutes * 60, unread: id > 895, post };
+    let mut reply = post("demo-reply-n1", people[1].clone(), 12, "@ada Same here. Which editor do you open them with?");
+    reply.reply_to = Some(own[0].id.clone());
+    let mut mention = post("demo-mention-n1", people[0].clone(), 40, "Notes on notes: [@ada](https://demo.social/@ada) has the right idea about plain files.");
+    mention.like_count = 4;
+    let raws = vec![
+        raw(910, Kind::Reply, 1, 12, Some(reply)),
+        raw(909, Kind::Like, 0, 18, Some(own[0].clone())),
+        raw(908, Kind::Like, 2, 19, Some(own[0].clone())),
+        raw(907, Kind::Like, 3, 26, Some(own[0].clone())),
+        raw(906, Kind::Like, 4, 31, Some(own[0].clone())),
+        raw(905, Kind::Like, 5, 33, Some(own[0].clone())),
+        raw(904, Kind::Follow, 5, 35, None),
+        raw(903, Kind::Mention, 0, 40, Some(mention)),
+        raw(902, Kind::Boost, 4, 150, Some(own[1].clone())),
+        raw(890, Kind::Like, 2, 480, Some(own[1].clone())),
+    ];
+    entries(Network::Mastodon, raws)
+}
+
 /// A pretend server for the demo: nothing older than the posts shown, and the first check finds
 /// the posts of `new_posts`.
 pub struct DemoSource;
 
 impl super::state::Source for DemoSource {
-    fn page(&self, _feed: &Feed, _cursor: Option<&str>) -> Result<Page, String> {
-        Ok(Page::default())
+    fn page(&self, feed: &Feed, _cursor: Option<&str>) -> Result<Page, String> {
+        Ok(match feed.id.as_str() {
+            super::notifications::NOTIFICATIONS => Page { posts: notifications(), ..Default::default() },
+            super::notifications::OWN => Page { posts: own_posts(), ..Default::default() },
+            _ => Page::default(),
+        })
     }
     fn post(&self, id: &str) -> Result<Post, String> {
         posts().into_iter().chain(thread()).chain(new_posts()).find(|p| p.id == id).ok_or_else(|| "no such post".to_string())
     }
-    fn newer(&self, _feed: &Feed, since: &Since) -> Result<Fresh, String> {
+    fn thread(&self, post: &Post) -> Result<ThreadView, String> {
+        // the demo thread and the replies to it are one conversation
+        let everything: Vec<Post> = thread().into_iter().chain(replies().into_iter().map(|r| r.post)).collect();
+        let mut ancestors = vec![];
+        let mut up = post.reply_to.clone();
+        while let Some(p) = up.and_then(|id| everything.iter().find(|p| p.id == id)) {
+            ancestors.push(p.clone());
+            up = p.reply_to.clone();
+        }
+        ancestors.reverse();
+        let mut below: Vec<Post> = vec![];
+        let mut ids = vec![post.id.clone()];
+        while let Some(next) = everything.iter().find(|p| p.reply_to.as_ref().is_some_and(|r| ids.contains(r)) && !ids.contains(&p.id)) {
+            ids.push(next.id.clone());
+            below.push(next.clone());
+        }
+        Ok(super::thread_view_of(post, ancestors, &below))
+    }
+    fn newer(&self, feed: &Feed, since: &Since) -> Result<Fresh, String> {
+        if feed.id != "home" {
+            return Ok(Fresh::default());
+        }
         Ok(Fresh { posts: new_posts().into_iter().filter(|p| !since.known.contains(&super::state::post_key(p))).collect(), ..Default::default() })
     }
 }
@@ -175,5 +270,5 @@ pub fn saved(p: &Post) -> SavedPost {
         }
     }
     let replies = if p.id == thread_id() { replies() } else { vec![] };
-    SavedPost { thread, reposted_by: p.reposted_by.clone(), media, failed_media: vec![], thread_error: None, replies }
+    SavedPost { thread, reposted_by: p.reposted_by.clone(), media, failed_media: vec![], thread_error: None, replies, root: None }
 }

@@ -70,6 +70,8 @@ pub struct LayoutKey {
     pub raw: Option<Range<usize>>,
     /// the rows the embeds, tables and folds change: byte range and height
     pub ranges: Vec<(Range<usize>, f32)>,
+    /// [`crate::syntax::generation`]: a layout with plain code is made again when the worker has coloured some (EDIT-121)
+    pub syntax_gen: u64,
 }
 
 /// A laid-out note and what is painted over it.
@@ -158,7 +160,7 @@ mod tests {
         assert!(parse.web_links("no link").is_empty(), "a text without a link");
     }
 
-    // spec: EDIT-105
+    // spec: EDIT-105, EDIT-106
     #[test]
     fn edit_105_the_layout_is_built_again_only_for_another_key_and_not_at_all_when_it_is_not_to_be_kept() {
         let key = |text: &str| LayoutKey {
@@ -172,6 +174,7 @@ mod tests {
             scope: HashSet::new(),
             raw: Some(0..1),
             ranges: vec![(0..1, 0.0)],
+            syntax_gen: 0,
         };
         let ctx = eframe::egui::Context::default();
         crate::theme::apply(&ctx);
@@ -195,9 +198,13 @@ mod tests {
         assert_eq!(cache.builds, 3, "another row height");
         cache.get(key("b"), true, make);
         assert_eq!(cache.builds, 4, "another text");
+        let mut other = key("b");
+        other.font_set = 7;
+        cache.get(other, true, make);
+        assert_eq!(cache.builds, 5, "the pass that set the fonts is part of the key (EDIT-106)");
         cache.get(key("b"), false, make);
         cache.get(key("b"), true, make);
-        assert_eq!(cache.builds, 6, "what is made while the fonts change is not kept");
+        assert_eq!(cache.builds, 7, "what is made while the fonts change is not kept");
     }
 
     // spec: EDIT-107

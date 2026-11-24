@@ -1459,7 +1459,7 @@ mod tests {
         assert_eq!(apply(Cmd::Italic, text, at..at + 2).unwrap().0, "| A | B |\n|---|---|\n| bar | b*az* |\n");
     }
 
-    // spec: EDIT-030
+    // spec: EDIT-030, EDIT-066, EDIT-111
     #[test]
     fn only_the_inline_commands_work_in_a_table_cell() {
         let inline = [Cmd::Bold, Cmd::Italic, Cmd::Strike, Cmd::Highlight, Cmd::Code, Cmd::WikiLink, Cmd::WebLink, Cmd::HighlightColour(None), Cmd::FontColour(Some([1, 2, 3])), Cmd::Clear];

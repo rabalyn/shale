@@ -130,7 +130,7 @@ fn is_unseen(line: &str) -> bool {
     !line.contains("\\Seen")
 }
 
-// spec: MAIL-091, MAIL-092, MAIL-242, DEV-026
+// spec: MAIL-091, MAIL-092, MAIL-242, DEV-026, MAIL-090
 #[test]
 #[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
 fn mail_env_password_account_syncs_end_to_end_and_changes_nothing_on_the_server() {
@@ -226,6 +226,56 @@ fn mail_env_password_account_syncs_end_to_end_and_changes_nothing_on_the_server(
     let _ = std::fs::remove_dir_all(dir);
 }
 
+// spec: JOB-021
+#[test]
+#[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
+fn mail_env_job_021_a_sync_of_the_stack_is_a_task_and_a_stop_leaves_a_sound_index() {
+    use crate::mail::imap_sync::{start, Progress};
+    use crate::mail::ui::MAIL_SYNC;
+    let _turn = turn();
+    let dir = std::env::temp_dir().join(format!("shale-mailenv-job021-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let store = Arc::new(MailStore::open(&dir).expect("the mail store"));
+    let auth: Arc<dyn AuthFactory> = Arc::new(PasswordAuth { user: "alice@shale.test".into(), password: "shale-test-pw".into() });
+    let busy = crate::busy::Busy::default();
+    let begin = || {
+        let mut task = busy.begin(MAIL_SYNC.with("alice"), "Syncing Alice…").expect("the account is idle");
+        let cancel = task.cancellable().flag();
+        (task, cancel)
+    };
+    let opts = SyncOptions { parallel: 1, batch_size: 1, ..SyncOptions::default() };
+    let (task, cancel) = begin();
+    assert_eq!(busy.info(&MAIL_SYNC.with("alice")).map(|t| t.label), Some("Syncing Alice…".to_string()));
+    let rx = start(store.clone(), "alice".into(), "Alice".into(), Arc::new(EnvConnector { auth: auth.clone() }), opts, cancel, task);
+    // Cancel (the registry's) as soon as the first batch is reported
+    let mut summary = None;
+    while let Ok(e) = rx.recv_timeout(Duration::from_secs(120)) {
+        match e {
+            Progress::Folder { .. } => {
+                if let Some(t) = busy.info(&MAIL_SYNC.with("alice")) {
+                    busy.cancel(t.id);
+                }
+            }
+            Progress::Finished(s) => {
+                summary = Some(s);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let summary = summary.expect("the sync ends");
+    assert!(summary.cancelled, "{summary:?}");
+    assert!(busy.list().is_empty(), "the task ended with the job");
+    crate::mail::db::quick_check(&store.index_path()).expect("the index passes its check after a stop (MAIL-006)");
+    // the next sync continues normally and brings everything
+    let (task, cancel) = begin();
+    let rx = start(store.clone(), "alice".into(), "Alice".into(), Arc::new(EnvConnector { auth }), SyncOptions::default(), cancel, task);
+    let done = std::iter::from_fn(|| rx.recv_timeout(Duration::from_secs(120)).ok()).find_map(|e| if let Progress::Finished(s) = e { Some(s) } else { None }).expect("the sync ends");
+    assert!(!done.cancelled && done.errors.is_empty(), "{done:?}");
+    assert_eq!(store.reader().unwrap().count_messages().unwrap(), 11);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 fn oauth_account() -> MailAccount {
     MailAccount {
         id: "mailenv-oauth".into(),
@@ -258,7 +308,7 @@ fn sign_in_headless(acct: &MailAccount) -> Result<oauth::SignedIn, oauth::OAuthE
     oauth::sign_in(acct, None, &AtomicBool::new(false), Duration::from_secs(60), &|_| {})
 }
 
-// spec: MAIL-091
+// spec: MAIL-091, MAIL-090
 #[test]
 #[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
 fn mail_env_oauth_account_signs_in_syncs_renews_its_token_and_a_dead_sign_in_is_said_in_words() {
@@ -647,9 +697,9 @@ fn send_end_to_end(acct: &MailAccount, smtp: EnvSmtp, imap: EnvConnector, tag: &
     let eml = ob.read_eml(&acct.id, &item.id).unwrap();
 
     // sent exactly once
-    let r = crate::mail::send::send_due(&ob, &store, acct, &smtp, now);
+    let r = crate::mail::send::send_due(&ob, &store, acct, &smtp, now, &std::sync::atomic::AtomicBool::new(false));
     assert_eq!((r.sent.len(), r.failed.len(), r.unsure.len()), (1, 0, 0), "{r:?}");
-    let again = crate::mail::send::send_due(&ob, &store, acct, &smtp, now + 5);
+    let again = crate::mail::send::send_due(&ob, &store, acct, &smtp, now + 5, &std::sync::atomic::AtomicBool::new(false));
     assert_eq!(again, crate::mail::send::SendReport::default());
 
     // what arrived in the sink (Mailpit gets it from Dovecot's submission service)
@@ -717,7 +767,7 @@ fn send_end_to_end(acct: &MailAccount, smtp: EnvSmtp, imap: EnvConnector, tag: &
     let _ = std::fs::remove_dir_all(dir);
 }
 
-// spec: MAIL-160
+// spec: MAIL-160, MAIL-124
 #[test]
 #[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
 fn mail_env_password_and_oauth_accounts_send_with_an_attachment_and_dovecot_has_one_sent_copy_each() {
@@ -835,7 +885,7 @@ fn crypto_end_to_end(std: crate::config::CryptoStandard, tag: &str) {
     let item = crate::mail::send::queue_with(&ob, &alice.g, &acct, &d, crate::mail::send::SendTiming { undo_secs: 0, now, date: &crate::mail::store::today_string() }, &no_cancel()).expect("signed and encrypted");
     let eml = ob.read_eml(&acct.id, &item.id).unwrap();
     assert!(!String::from_utf8_lossy(&eml).contains(&marker), "nothing readable in the outbox");
-    let r = crate::mail::send::send_due(&ob, &store, &acct, &smtp, now);
+    let r = crate::mail::send::send_due(&ob, &store, &acct, &smtp, now, &std::sync::atomic::AtomicBool::new(false));
     assert_eq!((r.sent.len(), r.failed.len(), r.unsure.len()), (1, 0, 0), "{r:?}");
 
     // what the sink got from Dovecot's submission service: our message, byte for byte after the servers' own lines
@@ -976,7 +1026,7 @@ fn put_thread_mail(id: &str, date: &str, subject: &str, reply: Option<&str>, ref
     doveadm(&["save", "-u", USER, "-m", "ScratchThread"], Some(raw.as_bytes())).unwrap_or_else(|e| panic!("could not put {subject:?}: {e}"));
 }
 
-// spec: IMP-068, IMP-070, IMP-071
+// spec: IMP-068, IMP-070, IMP-071, IMP-074
 #[test]
 #[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
 fn mail_env_a_reply_thread_from_the_server_is_imported_into_a_chain_in_date_order() {
@@ -1031,6 +1081,109 @@ fn mail_env_a_reply_thread_from_the_server_is_imported_into_a_chain_in_date_orde
     let rows = crate::thread::Index::build(&vault).thread_of(&two).unwrap();
     assert_eq!(rows.iter().map(|r| &r.rel).collect::<Vec<_>>(), vec![&root, &one, &two]);
 
+    // IMP-074: the same three mails dropped at once, newest first, give the same chain
+    let batch_dir = dir.join("vault-batch");
+    std::fs::create_dir_all(&batch_dir).unwrap();
+    let mut batch_vault = crate::vault::Vault::open(&batch_dir).unwrap();
+    let mut items: Vec<import::Item> = ["Re: Re: Thread root", "Re: Thread root", "Thread root"].iter().map(|s| import::eml_item(store.read_raw(all.iter().find(|m| m.subject == *s).unwrap()).unwrap(), None)).collect();
+    import::find_continues(&batch_vault, &mut items);
+    let done = import::import(&mut batch_vault, &items, &options);
+    assert!(done.errors.is_empty() && done.touched.is_empty(), "{done:?}");
+    let [bt, bo, br] = [&done.notes[0], &done.notes[1], &done.notes[2]];
+    let read = |p: &Path| std::fs::read_to_string(batch_vault.abs(p)).unwrap();
+    assert!(read(br).contains(&link("next", bo)) && !read(br).contains("previous:"), "{}", read(br));
+    assert!(read(bo).contains(&link("previous", br)) && read(bo).contains(&link("next", bt)), "{}", read(bo));
+    assert!(read(bt).contains(&link("previous", bo)) && !read(bt).contains("next:"), "{}", read(bt));
+
     let _ = doveadm(&["mailbox", "delete", "-u", USER, "ScratchThread"], None);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Asks the registry for Cancel as soon as the first connection of a send is made: the mail that is then on its way must still arrive.
+struct CancelOnConnect {
+    inner: EnvSmtp,
+    busy: crate::busy::Busy,
+    key: crate::busy::Key,
+}
+
+impl crate::mail::send::SmtpConnector for CancelOnConnect {
+    fn connect(&self) -> Result<crate::mail::smtp_client::Smtp, crate::mail::smtp_client::SmtpError> {
+        if let Some(t) = self.busy.info(&self.key) {
+            self.busy.cancel(t.id);
+        }
+        self.inner.connect()
+    }
+}
+
+/// How many mails of the test the sink holds.
+fn sink_count(tag: &str) -> usize {
+    sink_messages().iter().filter(|m| m["Subject"].as_str().is_some_and(|s| s.starts_with(tag))).count()
+}
+
+// spec: JOB-031
+#[test]
+#[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
+fn mail_env_job_031_a_send_to_the_stack_is_a_task_and_cancel_leaves_the_rest_queued() {
+    use crate::mail::ui::MAIL_SEND;
+    let _turn = turn();
+    let acct = MailAccount {
+        id: "mailenv-job031".into(),
+        name: "Alice".into(),
+        host: "localhost".into(),
+        port: IMAPS_PORT,
+        user: "alice@shale.test".into(),
+        smtp_host: "localhost".into(),
+        smtp_port: SUBMISSION_PORT,
+        smtp_security: MailSecurity::StartTls,
+        from_name: "Alice Shale".into(),
+        from_address: "alice@shale.test".into(),
+        ..MailAccount::default()
+    };
+    let auth: Arc<dyn AuthFactory> = Arc::new(PasswordAuth { user: acct.user.clone(), password: "shale-test-pw".into() });
+    let imap = EnvConnector { auth: auth.clone() };
+    let (dir, store) = temp_store("job031");
+    let now = crate::calendar::time::now();
+    let tag = format!("Shale job031 test {}", std::process::id());
+    clean_sent(&acct.user, "Shale job031 test");
+    clear_sink();
+    discover_folders(&store, &imap, &acct.id, &acct.name).expect("folders");
+    let sum = sync(&store, &acct.id, &imap);
+    assert!(sum.errors.is_empty(), "{:?}", sum.errors);
+    let ob = crate::mail::outbox::Outbox::new(&dir);
+    for n in 1..=2 {
+        let mut d = crate::mail::send::new_draft(&acct);
+        d.to = "Bob <bob@example.org>".into();
+        d.subject = format!("{tag} {n}");
+        d.body = format!("mail {n}\n");
+        crate::mail::send::queue_draft(&ob, &acct, &d, 0, now, &crate::mail::store::today_string()).expect("queued");
+    }
+    let busy = crate::busy::Busy::default();
+    let key = MAIL_SEND.with(&acct.id);
+    let mut task = busy.begin(key.clone(), "Sending mail from Alice…").expect("idle");
+    let cancel = task.cancellable().flag();
+    let smtp = CancelOnConnect { inner: EnvSmtp { port: SUBMISSION_PORT, security: MailSecurity::StartTls, auth }, busy: busy.clone(), key: key.clone() };
+    assert!(busy.is_running(&key));
+    // Cancel is asked for when the first mail connects: that mail is finished, the second is not taken
+    let r = crate::mail::send::send_due(&ob, &store, &acct, &smtp, now, &cancel);
+    drop(task);
+    assert!(r.cancelled && r.sent.len() == 1 && r.failed.is_empty() && r.unsure.is_empty(), "{r:?}");
+    assert!(busy.list().is_empty(), "the task ended with the job");
+    let queued = ob.list(Some(&acct.id)).iter().filter(|i| i.state == crate::mail::outbox::State::Queued).count();
+    assert_eq!(queued, 1, "the second mail waits in the Outbox");
+    let t0 = std::time::Instant::now();
+    while sink_count(&tag) < 1 {
+        assert!(t0.elapsed() < Duration::from_secs(30), "the first mail never reached the sink");
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    assert_eq!(sink_count(&tag), 1, "the mail on its way arrived once, the other did not go");
+    // the next send, not cancelled, brings the rest
+    let r = crate::mail::send::send_due(&ob, &store, &acct, &smtp, now, &std::sync::atomic::AtomicBool::new(false));
+    assert_eq!((r.sent.len(), r.cancelled), (1, false), "{r:?}");
+    while sink_count(&tag) < 2 {
+        assert!(t0.elapsed() < Duration::from_secs(60), "the second mail never reached the sink");
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    clean_sent(&acct.user, "Shale job031 test");
+    clear_sink();
+    let _ = std::fs::remove_dir_all(&dir);
 }

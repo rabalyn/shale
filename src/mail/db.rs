@@ -432,6 +432,14 @@ pub fn apply_batch(c: &mut Connection, ops: &[Op], crash_after: Option<usize>) -
     Ok(())
 }
 
+/// Apply operations inside a transaction of the caller.
+pub fn apply_in(tx: &rusqlite::Transaction<'_>, ops: &[Op]) -> Result<()> {
+    for op in ops {
+        apply_op(tx, op)?;
+    }
+    Ok(())
+}
+
 fn apply_op(tx: &rusqlite::Transaction<'_>, op: &Op) -> Result<()> {
     match op {
         Op::Message(m) => insert_message(tx, m)?,
@@ -1241,7 +1249,7 @@ mod tests {
         assert!(plan.iter().any(|p| p.contains("messages_by_message_id")), "the duplicate check uses the Message-ID index: {plan:?}");
     }
 
-    // spec: NAV-023
+    // spec: NAV-023, MAIL-060
     #[test]
     fn wildcards_make_a_word_a_prefix_in_the_mail_query() {
         let q = |s: &str| fts_query_wild(s, &FIELDS);

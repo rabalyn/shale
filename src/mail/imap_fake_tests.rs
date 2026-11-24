@@ -50,6 +50,9 @@ pub struct FakeState {
     pub password: String,
     /// Wait this long before answering a fetch (to make connections overlap).
     pub fetch_delay: Duration,
+    /// Every fetch waits for one token from this channel before it answers (a closed channel lets
+    /// all through), so a test decides when each batch is served instead of racing a delay.
+    pub fetch_gate: Option<Arc<Mutex<std::sync::mpsc::Receiver<()>>>>,
     pub connections: usize,
     pub open_connections: usize,
     pub max_open_connections: usize,
@@ -226,6 +229,7 @@ impl FakeServer {
             user: "ada".into(),
             password: "pässword \"quoted\"".into(),
             fetch_delay: Duration::ZERO,
+            fetch_gate: None,
             connections: 0,
             open_connections: 0,
             max_open_connections: 0,
@@ -632,7 +636,7 @@ fn session<S: Read + Write + ReadTimeout>(r: &mut BufReader<S>, st: &Arc<Mutex<F
                         write!(out, "* SEARCH{}\r\n{tag} OK search done\r\n", hits.iter().map(|u| format!(" {u}")).collect::<String>())?;
                     }
                     ("FETCH", Some(f)) => {
-                        let (delay, pad) = (g.fetch_delay, g.pad_message);
+                        let (delay, pad, gate) = (g.fetch_delay, g.pad_message, g.fetch_gate.clone());
                         let condstore = g.condstore;
                         let args = rest.splitn(3, ' ').nth(2).unwrap_or("");
                         let set = args.split_whitespace().next().unwrap_or("");
@@ -642,6 +646,9 @@ fn session<S: Read + Write + ReadTimeout>(r: &mut BufReader<S>, st: &Arc<Mutex<F
                         let msgs: Vec<FakeMessage> = f.msgs.iter().filter(|m| in_set(set, m.uid, max)).filter(|m| since.map(|s| m.modseq > s).unwrap_or(true)).cloned().collect();
                         let ids: Vec<u32> = f.msgs.iter().map(|m| m.uid).collect();
                         drop(g);
+                        if let Some(gate) = gate {
+                            let _ = gate.lock().unwrap().recv_timeout(Duration::from_secs(20));
+                        }
                         if !delay.is_zero() {
                             std::thread::sleep(delay);
                         }
@@ -1018,7 +1025,7 @@ mod tests {
         assert!(seen.iter().all(|l| !l.contains("LOGIN") && !l.contains("AUTHENTICATE") && !l.contains("secret")), "{seen:?}");
     }
 
-    // spec: MAIL-022
+    // spec: MAIL-022, MAIL-092
     #[test]
     fn a_certificate_the_system_does_not_trust_is_refused() {
         let server = seeded(MailSecurity::ImplicitTls);
@@ -1043,7 +1050,7 @@ mod tests {
         assert_eq!(format!("{bad:?}"), "PlainAuth(ada, ***)");
     }
 
-    // spec: MAIL-023
+    // spec: MAIL-023, MAIL-100
     #[test]
     fn the_client_never_sends_anything_that_changes_the_mailbox() {
         let server = seeded(MailSecurity::ImplicitTls);
@@ -1069,7 +1076,7 @@ mod tests {
         assert!(verbs.iter().any(|v| v.starts_with("EXAMINE")));
     }
 
-    // spec: MAIL-023
+    // spec: MAIL-023, MAIL-230
     #[test]
     fn the_guard_refuses_what_could_change_a_mailbox() {
         for ok in ["CAPABILITY", "LIST \"\" \"*\"", "EXAMINE \"INBOX\"", "UID SEARCH ALL", "UID FETCH 1:* (UID FLAGS)", "UID FETCH 5 (UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[])", "uid fetch 5 (BODY.PEEK[HEADER])", "IDLE", "LOGOUT"] {
@@ -1285,7 +1292,7 @@ mod tests {
         server.state().verbs().into_iter().filter(|v| ["SELECT", "UID STORE", "UID MOVE", "UID COPY", "UID EXPUNGE", "EXPUNGE", "STORE"].iter().any(|w| v.starts_with(w))).collect()
     }
 
-    // spec: MAIL-101
+    // spec: MAIL-101, MAIL-140
     #[test]
     fn typed_commands_become_exact_text_and_the_write_gate_takes_only_those_shapes() {
         let cmds = [
@@ -1370,7 +1377,7 @@ mod tests {
         }
     }
 
-    // spec: MAIL-101
+    // spec: MAIL-101, MAIL-140
     #[test]
     fn no_text_of_a_write_command_exists_outside_the_typed_enum() {
         fn files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {

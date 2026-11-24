@@ -6,7 +6,7 @@ use super::install::{Handle, Progress, Stage};
 use super::sets::{sets_root, Source};
 use super::sets_tests::{make_set, meta_from_local, META, PNG};
 use super::sets_ui::*;
-use super::settings_ui::{Task, TaskKind};
+use super::settings_ui::TaskKind;
 use super::settings_ui_tests::{nothing_found, T};
 use std::path::{Path, PathBuf};
 
@@ -132,11 +132,27 @@ fn a_running_import_shows_its_progress_and_cancel_asks_the_job_to_stop() {
     let handle = Handle::default();
     handle.set(|p| *p = Progress { stage: Stage::Generate, ..Progress::default() });
     let (_tx, rx) = std::sync::mpsc::channel();
-    t.app.tex.task = Some(Task { kind: TaskKind::Import, handle: handle.clone(), rx });
-    assert!(t.shows("Generating the class files with docstrip") && t.shows("Cancel import"), "{:?}", t.painted());
-    assert!(!t.shows("Cancel install"), "it is not shown with the TeX Live");
-    t.click("Cancel import");
+    t.app.tex.inject(TaskKind::Import, handle.clone(), rx);
+    assert!(t.shows("Generating the class files with docstrip") && t.shows("Cancel"), "{:?}", t.painted());
+    assert!(!t.shows("Installing TeX Live…"), "it is not shown with the TeX Live");
+    t.click("Cancel");
     assert!(handle.cancelled());
+}
+
+// spec: JOB-029
+#[test]
+fn job_029_an_import_is_a_task_that_can_stop_and_cancel_of_the_registry_ends_it() {
+    let mut t = T::new("job035-import", nothing_found());
+    t.click("Import TU Darmstadt templates");
+    let task = t.app.busy.info(&super::settings_ui::TEX_JOB).expect("the import is a task");
+    assert_eq!((task.label.as_str(), task.cancellable), ("Importing the template set…", true));
+    assert!(t.shows("Importing the template set…") && t.shows("Cancel"), "{:?}", t.painted());
+    assert_eq!(t.app.busy.list().len(), 1, "the indicator lists it");
+    // the indicator's Cancel is the registry's: it reaches the job through the flag of its handle
+    assert!(t.app.busy.cancel(task.id));
+    t.wait_for_job();
+    assert!(t.app.tex.notice.is_some());
+    assert!(t.app.busy.list().is_empty());
 }
 
 // spec: TEX-024, TEX-006
@@ -290,6 +306,28 @@ mod fake {
     use super::super::settings_ui_tests::found;
     use super::*;
     use crate::pdf::tex::compile_tests::fake::Fake;
+
+    // spec: JOB-029
+    #[test]
+    fn job_029_the_test_page_of_a_set_is_a_task_that_names_the_set_and_cannot_stop() {
+        let f = Fake::new("job035-page");
+        f.lualatex();
+        f.put("log.last", "ok\n");
+        let gate = f.hold();
+        let opener = crate::opener::FakeXdgOpen::install();
+        let mut t = T::new("job035-page", found(Ok(f.engine()), Err("not installed"), None));
+        make_set(&t.dir, "mine", META, &[("pub", KIND)]);
+        t.app.tex.sets.dirty = true;
+        t.click("Test page");
+        let task = t.app.busy.info(&super::super::settings_ui::TEX_JOB).expect("the test page is a task");
+        assert_eq!((task.label.as_str(), task.cancellable), ("Compiling the test page of “Test set”…", false));
+        assert!(t.shows("Compiling the test page of “Test set”…") && !t.shows("Cancel"), "{:?}", t.painted());
+        std::fs::write(&gate, "").unwrap();
+        t.wait_for_job();
+        assert!(t.app.busy.list().is_empty());
+        assert!(t.app.tex.notice.clone().expect("a notice").ok);
+        assert_eq!(opener.calls(1).len(), 1);
+    }
 
     // spec: TEX-024, TEX-026
     #[test]

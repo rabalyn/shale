@@ -166,6 +166,8 @@ pub struct SendReport {
     pub unsure: Vec<String>,
     /// Other things worth telling (a missing Sent folder, a copy that could not be recorded).
     pub notes: Vec<String>,
+    /// Cancel stopped the run before the next mail was taken from the Outbox (JOB-031): what is left stays queued.
+    pub cancelled: bool,
 }
 
 fn connect_failed(e: &SmtpError) -> String {
@@ -174,12 +176,18 @@ fn connect_failed(e: &SmtpError) -> String {
 
 /// Send the queued mails of an account whose time has come, one after the other, each on its own
 /// connection. Blocks: run it as a job. A mail is sent at most once per call and never again by this function
-/// once it is anything but `Queued`.
-pub fn send_due(ob: &Outbox, store: &MailStore, a: &MailAccount, connector: &dyn SmtpConnector, now: i64) -> SendReport {
+/// once it is anything but `Queued`. `cancel` is looked at only before a mail is taken from the Outbox
+/// (JOB-031): a mail that is on its way is finished, because once its data has gone to the server nothing
+/// can take it back; the mails after it stay `Queued` and the report says `cancelled`.
+pub fn send_due(ob: &Outbox, store: &MailStore, a: &MailAccount, connector: &dyn SmtpConnector, now: i64, cancel: &std::sync::atomic::AtomicBool) -> SendReport {
     let mut report = SendReport::default();
     for item in ob.list(Some(&a.id)) {
         if item.state != State::Queued || item.send_after > now {
             continue;
+        }
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            report.cancelled = true;
+            return report;
         }
         // one flow per mail that is up for sending (DEV-028)
         let _flow = tracing::info_span!("flow.mail_send", peer = "send").entered();
@@ -311,7 +319,7 @@ pub mod tests {
         let (e, ob) = with_sent("t1");
         let item = queue(&ob, "Plans für Köln", "Hallo Bob");
         let eml = ob.read_eml("acct1", &item.id).unwrap();
-        let r = send_due(&ob, &e.store, &account(), &c, NOW);
+        let r = send_due(&ob, &e.store, &account(), &c, NOW, &std::sync::atomic::AtomicBool::new(false));
         assert_eq!((r.sent.len(), r.failed.len(), r.unsure.len()), (1, 0, 0), "{r:?}");
         assert_eq!(smtp.state().received.len(), 1);
         assert_eq!(smtp.state().received[0].data, eml, "the bytes that arrived are the bytes in the outbox");
@@ -327,7 +335,7 @@ pub mod tests {
         assert_eq!(e.pending().len(), 1);
         assert!(e.server.state().messages("Sent").is_empty(), "nothing was appended yet");
         // a second run sends nothing again
-        let r = send_due(&ob, &e.store, &account(), &c, NOW + 5);
+        let r = send_due(&ob, &e.store, &account(), &c, NOW + 5, &std::sync::atomic::AtomicBool::new(false));
         assert_eq!(r, SendReport::default());
         assert_eq!(smtp.state().received.len(), 1);
         // the append: exactly one copy on the server, and the local row now has the server's UID
@@ -355,7 +363,7 @@ pub mod tests {
         let smtp = FakeSmtp::start(MailSecurity::ImplicitTls);
         let (e, ob) = with_sent("t2");
         queue(&ob, "Waiting", "x");
-        send_due(&ob, &e.store, &account(), &connector(&smtp), NOW);
+        send_due(&ob, &e.store, &account(), &connector(&smtp), NOW, &std::sync::atomic::AtomicBool::new(false));
         let (tx, _rx) = std::sync::mpsc::channel();
         let sum = crate::mail::imap_sync::sync_account(&e.store, "acct1", "Test", &e.conn, &crate::mail::imap_sync::SyncOptions { now: Some(NOW), ..Default::default() }, &tx, &std::sync::atomic::AtomicBool::new(false));
         assert!(sum.errors.is_empty());
@@ -374,7 +382,7 @@ pub mod tests {
         let smtp = FakeSmtp::start(MailSecurity::ImplicitTls);
         let (e, ob) = with_sent("s0a");
         queue(&ob, "Mine", "local text");
-        send_due(&ob, &e.store, &account(), &connector(&smtp), NOW);
+        send_due(&ob, &e.store, &account(), &connector(&smtp), NOW, &std::sync::atomic::AtomicBool::new(false));
         let local = sent_list(&e);
         assert_eq!((local.len(), local[0].uidvalidity), (1, crate::mail::db::LOCAL_UIDVALIDITY));
         let local_raw = e.store.read_raw(&local[0]).unwrap();
@@ -399,7 +407,7 @@ pub mod tests {
         let (e, ob) = with_sent("s0b");
         let item = queue(&ob, "Same id", "text");
         let eml = ob.read_eml("acct1", &item.id).unwrap();
-        send_due(&ob, &e.store, &account(), &connector(&smtp), NOW);
+        send_due(&ob, &e.store, &account(), &connector(&smtp), NOW, &std::sync::atomic::AtomicBool::new(false));
         let local = sent_list(&e);
         let local_path = e.dir.join(&local[0].path);
         assert!(local_path.is_file());
@@ -465,7 +473,7 @@ pub mod tests {
         let item = queue_with(&ob, &alice.g, &acct, &d, SendTiming { undo_secs: 0, now: NOW, date: DATE }, &no_cancel()).unwrap();
         let eml = ob.read_eml("acct1", &item.id).unwrap();
         assert!(!String::from_utf8_lossy(&eml).contains("the secret plan"), "the outbox holds the encrypted bytes");
-        let r = send_due(&ob, &e.store, &acct, &c, NOW);
+        let r = send_due(&ob, &e.store, &acct, &c, NOW, &std::sync::atomic::AtomicBool::new(false));
         assert_eq!((r.sent.len(), r.failed.len(), r.unsure.len()), (1, 0, 0), "{r:?}");
         let got = smtp.state().received[0].clone();
         assert_eq!(got.data, eml, "what arrived is what the outbox held");
@@ -527,7 +535,7 @@ pub mod tests {
         (d.to, d.sign, d.standard, d.from_addr) = ("bob@example.org".into(), true, CryptoStandard::Smime, "alice@example.org".into());
         let item = queue_with(&ob, &alice.g, &acct, &d, SendTiming { undo_secs: 0, now: NOW, date: DATE }, &no_cancel()).unwrap();
         let eml = ob.read_eml("acct1", &item.id).unwrap();
-        let r = send_due(&ob, &e.store, &acct, &c, NOW);
+        let r = send_due(&ob, &e.store, &acct, &c, NOW, &std::sync::atomic::AtomicBool::new(false));
         assert_eq!(r.sent.len(), 1, "{r:?}");
         let got = smtp.state().received[0].data.clone();
         assert_eq!(got, eml);
@@ -544,14 +552,14 @@ pub mod tests {
         let c = connector(&smtp);
         let (e, ob) = with_sent("t3");
         let item = queue(&ob, "Append later", "text");
-        send_due(&ob, &e.store, &account(), &c, NOW);
+        send_due(&ob, &e.store, &account(), &c, NOW, &std::sync::atomic::AtomicBool::new(false));
         // the network goes away: the append is offline and stays
         e.conn.offline.store(true, Ordering::SeqCst);
         let rep = e.run();
         assert!(rep.offline.is_some(), "{rep:?}");
         assert_eq!(e.pending().len(), 1);
         for t in 0..3 {
-            let r = send_due(&ob, &e.store, &account(), &c, NOW + 10 + t);
+            let r = send_due(&ob, &e.store, &account(), &c, NOW + 10 + t, &std::sync::atomic::AtomicBool::new(false));
             assert_eq!(r, SendReport::default(), "nothing is sent again because an append failed");
         }
         assert_eq!(smtp.state().received.len(), 1);
@@ -570,7 +578,7 @@ pub mod tests {
         let c = connector(&smtp);
         let (e, ob) = with_sent("t4");
         queue(&ob, "Stored but unanswered", "text");
-        send_due(&ob, &e.store, &account(), &c, NOW);
+        send_due(&ob, &e.store, &account(), &c, NOW, &std::sync::atomic::AtomicBool::new(false));
         e.server.state().hang_up_after_append = true;
         let rep = e.run();
         assert!(rep.offline.is_some(), "a broken connection is a retry: {rep:?}");
@@ -582,13 +590,108 @@ pub mod tests {
         assert_eq!(sent_list(&e).len(), 1);
         // a server that refuses: told in words, the mail stays sent
         queue(&ob, "Refused copy", "text");
-        send_due(&ob, &e.store, &account(), &c, NOW + 1);
+        send_due(&ob, &e.store, &account(), &c, NOW + 1, &std::sync::atomic::AtomicBool::new(false));
         e.server.state().fail_next_write = Some("[OVERQUOTA] mailbox full".into());
         let rep = e.run();
         assert_eq!(rep.failed.len(), 1, "{rep:?}");
         assert!(rep.failed[0].contains("was sent, but the copy") && rep.failed[0].contains("OVERQUOTA"), "{:?}", rep.failed);
         assert_eq!(smtp.state().received.len(), 2);
         assert!(e.pending().is_empty());
+    }
+
+    /// A connector that tells when a mail is on its way and waits for a signal before it connects (the gate hook of the JOB-031 tests).
+    struct Gated {
+        inner: TestSmtp,
+        reached: std::sync::mpsc::Sender<()>,
+        gate: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+
+    impl SmtpConnector for Gated {
+        fn connect(&self) -> Result<Smtp, SmtpError> {
+            let _ = self.reached.send(());
+            let _ = self.gate.lock().unwrap().recv_timeout(std::time::Duration::from_secs(20));
+            self.inner.connect()
+        }
+    }
+
+    type Gate = (Gated, std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>);
+
+    fn gated(s: &FakeSmtp) -> Gate {
+        let (reached, reached_rx) = std::sync::mpsc::channel();
+        let (open, gate) = std::sync::mpsc::channel();
+        (Gated { inner: connector(s), reached, gate: std::sync::Mutex::new(gate) }, reached_rx, open)
+    }
+
+    /// Run the sending of the account's due mails as its task, the way the mail view does, and `during` while it waits at the gate.
+    fn with_task(busy: &crate::busy::Busy, e: &Env, ob: &Outbox, c: &Gated, reached: &std::sync::mpsc::Receiver<()>, during: impl FnOnce()) -> SendReport {
+        let mut task = busy.begin(crate::mail::ui::MAIL_SEND.with("acct1"), "Sending mail from Ada…").expect("the account is idle");
+        let cancel = task.cancellable().flag();
+        std::thread::scope(|sc| {
+            let job = sc.spawn(move || {
+                let r = send_due(ob, &e.store, &account(), c, NOW, &cancel);
+                drop(task);
+                r
+            });
+            reached.recv_timeout(std::time::Duration::from_secs(20)).expect("the mail is on its way");
+            during();
+            job.join().unwrap()
+        })
+    }
+
+    // spec: JOB-031
+    #[test]
+    fn job_031_a_send_is_a_task_listed_while_it_runs_that_ends_with_the_job_and_is_never_started_twice() {
+        let smtp = FakeSmtp::start(MailSecurity::ImplicitTls);
+        let (c, reached, open) = gated(&smtp);
+        let (e, ob) = with_sent("job031a");
+        queue(&ob, "Plans", "Hallo");
+        let busy = crate::busy::Busy::default();
+        let r = with_task(&busy, &e, &ob, &c, &reached, || {
+            let info = busy.info(&crate::mail::ui::MAIL_SEND.with("acct1")).expect("listed while it runs");
+            assert_eq!(info.label, "Sending mail from Ada…");
+            assert!(info.cancellable && !info.cancelling);
+            assert!(busy.begin(crate::mail::ui::MAIL_SEND.with("acct1"), "again").is_none(), "never two sends of one account");
+            let other = busy.begin(crate::mail::ui::MAIL_SEND.with("acct2"), "other");
+            assert!(other.is_some(), "another account sends side by side");
+            drop(other);
+            open.send(()).unwrap();
+        });
+        assert_eq!((r.sent.len(), r.failed.len(), r.cancelled), (1, 0, false), "{r:?}");
+        assert!(busy.list().is_empty(), "the task ended with the job");
+        assert_eq!(smtp.state().received.len(), 1);
+    }
+
+    // spec: JOB-031
+    #[test]
+    fn job_031_cancel_finishes_the_mail_on_its_way_and_leaves_the_next_ones_queued_and_a_later_send_goes_on() {
+        let smtp = FakeSmtp::start(MailSecurity::ImplicitTls);
+        let (c, reached, open) = gated(&smtp);
+        let (e, ob) = with_sent("job031b");
+        let first = queue(&ob, "First", "one");
+        let second = queue(&ob, "Second", "two");
+        let busy = crate::busy::Busy::default();
+        let r = with_task(&busy, &e, &ob, &c, &reached, || {
+            let info = busy.info(&crate::mail::ui::MAIL_SEND.with("acct1")).unwrap();
+            assert!(busy.cancel(info.id));
+            assert!(busy.info(&crate::mail::ui::MAIL_SEND.with("acct1")).is_some_and(|t| t.cancelling), "it says Stopping… until the mail is through");
+            open.send(()).unwrap();
+        });
+        assert!(r.cancelled && r.sent.len() == 1 && r.failed.is_empty() && r.unsure.is_empty(), "{r:?}");
+        assert!(busy.list().is_empty());
+        assert_eq!(smtp.state().received.len(), 1, "the mail on its way was not torn down");
+        let state = |id: &str| ob.get("acct1", id).unwrap().state;
+        let states = (state(&first.id), state(&second.id));
+        assert!(matches!(states, (State::Sent, State::Queued) | (State::Queued, State::Sent)), "one went out, the other waits: {states:?}");
+        // a send that is cancelled before it starts takes nothing from the Outbox
+        let cancelled = std::sync::atomic::AtomicBool::new(true);
+        let plain = connector(&smtp);
+        let r = send_due(&ob, &e.store, &account(), &plain, NOW, &cancelled);
+        assert!(r.cancelled && r.sent.is_empty(), "{r:?}");
+        assert_eq!((plain.connects.load(Ordering::SeqCst), smtp.state().received.len()), (0, 1));
+        // the next run sends the rest, once
+        let r = send_due(&ob, &e.store, &account(), &plain, NOW, &std::sync::atomic::AtomicBool::new(false));
+        assert_eq!((r.sent.len(), r.cancelled), (1, false), "{r:?}");
+        assert_eq!(smtp.state().received.len(), 2);
     }
 
     // spec: MAIL-141
@@ -600,7 +703,7 @@ pub mod tests {
         queue(&ob, "Gmail style", "text");
         let mut a = account();
         a.server_stores_sent = true;
-        let r = send_due(&ob, &e.store, &a, &c, NOW);
+        let r = send_due(&ob, &e.store, &a, &c, NOW, &std::sync::atomic::AtomicBool::new(false));
         assert_eq!(r.sent.len(), 1);
         assert!(sent_list(&e).is_empty() && e.pending().is_empty(), "the server keeps its own copy");
         assert!(ob.list(None).iter().all(|i| i.copy_done));
@@ -609,7 +712,7 @@ pub mod tests {
         let store = MailStore::open(&root).unwrap();
         let ob2 = Outbox::new(&root);
         queue_draft(&ob2, &account(), &draft("acct1", "No folder", "x"), 0, NOW, DATE).unwrap();
-        let r = send_due(&ob2, &store, &account(), &c, NOW);
+        let r = send_due(&ob2, &store, &account(), &c, NOW, &std::sync::atomic::AtomicBool::new(false));
         assert_eq!(r.sent.len(), 1);
         assert!(r.notes.iter().any(|n| n.contains("no Sent folder")), "{:?}", r.notes);
         assert!(ob2.list(None)[0].copy_done);
@@ -625,21 +728,21 @@ pub mod tests {
         let c = connector(&smtp);
         let (e, ob) = with_sent("t6");
         let item = queue(&ob, "Refused", "x");
-        let r = send_due(&ob, &e.store, &account(), &c, NOW);
+        let r = send_due(&ob, &e.store, &account(), &c, NOW, &std::sync::atomic::AtomicBool::new(false));
         assert_eq!(r.failed.len(), 1);
         assert!(r.failed[0].1.contains("550"), "{r:?}");
         let it = ob.get("acct1", &item.id).unwrap();
         assert_eq!(it.state, State::Failed);
         assert!(it.error.unwrap().contains("bob@x.de"));
         for t in 1..4 {
-            assert_eq!(send_due(&ob, &e.store, &account(), &c, NOW + t), SendReport::default());
+            assert_eq!(send_due(&ob, &e.store, &account(), &c, NOW + t, &std::sync::atomic::AtomicBool::new(false)), SendReport::default());
         }
         assert_eq!(c.connects.load(Ordering::SeqCst), 1, "not even a connection is made for it again");
         assert!(sent_list(&e).is_empty() && e.pending().is_empty(), "no Sent copy of a mail that was not sent");
         // the person's retry sends it
         smtp.state().fail_rcpt = None;
         ob.retry("acct1", &item.id, NOW + 10).unwrap();
-        assert_eq!(send_due(&ob, &e.store, &account(), &c, NOW + 10).sent.len(), 1);
+        assert_eq!(send_due(&ob, &e.store, &account(), &c, NOW + 10, &std::sync::atomic::AtomicBool::new(false)).sent.len(), 1);
     }
 
     // spec: MAIL-133
@@ -650,19 +753,19 @@ pub mod tests {
         let c = connector(&smtp);
         let (e, ob) = with_sent("t7");
         let item = queue(&ob, "Unsure", "x");
-        let r = send_due(&ob, &e.store, &account(), &c, NOW);
+        let r = send_due(&ob, &e.store, &account(), &c, NOW, &std::sync::atomic::AtomicBool::new(false));
         assert_eq!(r.unsure, vec![item.id.clone()]);
         assert_eq!(ob.get("acct1", &item.id).unwrap().state, State::Unsure);
         assert_eq!(smtp.state().received.len(), 1, "it did arrive: nobody could have known");
         for t in 1..4 {
-            send_due(&ob, &e.store, &account(), &c, NOW + t);
+            send_due(&ob, &e.store, &account(), &c, NOW + t, &std::sync::atomic::AtomicBool::new(false));
         }
         assert_eq!(smtp.state().received.len(), 1, "and it is not sent again by itself");
         assert!(sent_list(&e).is_empty());
         // the person looked in Sent and sends it again on purpose
         smtp.state().drop_after_data = false;
         ob.send_again("acct1", &item.id, NOW + 9).unwrap();
-        assert_eq!(send_due(&ob, &e.store, &account(), &c, NOW + 9).sent.len(), 1);
+        assert_eq!(send_due(&ob, &e.store, &account(), &c, NOW + 9, &std::sync::atomic::AtomicBool::new(false)).sent.len(), 1);
         assert_eq!(smtp.state().received.len(), 2);
     }
 
@@ -675,15 +778,15 @@ pub mod tests {
         let d = draft("acct1", "Undo me", "x");
         let item = queue_draft(&ob, &account(), &d, 10, NOW, DATE).unwrap();
         assert_eq!(item.send_after, NOW + 10);
-        assert_eq!(send_due(&ob, &e.store, &account(), &c, NOW + 9), SendReport::default());
+        assert_eq!(send_due(&ob, &e.store, &account(), &c, NOW + 9, &std::sync::atomic::AtomicBool::new(false)), SendReport::default());
         assert_eq!(c.connects.load(Ordering::SeqCst), 0);
         let back = ob.undo("acct1", &item.id, NOW + 9, DATE).unwrap();
         assert_eq!(back.subject, "Undo me");
-        assert_eq!(send_due(&ob, &e.store, &account(), &c, NOW + 99), SendReport::default());
+        assert_eq!(send_due(&ob, &e.store, &account(), &c, NOW + 99, &std::sync::atomic::AtomicBool::new(false)), SendReport::default());
         assert!(smtp.state().received.is_empty());
     }
 
-    // spec: MAIL-133
+    // spec: MAIL-133, MAIL-141
     #[test]
     fn a_crash_after_sent_before_the_copy_is_recorded_makes_the_copy_at_the_next_run_once() {
         let smtp = FakeSmtp::start(MailSecurity::ImplicitTls);

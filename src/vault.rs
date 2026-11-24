@@ -566,6 +566,12 @@ impl Vault {
         Ok(v)
     }
 
+    /// Which state of which vault the file list shows: (`uid`, scans merged, `generation`). The
+    /// files, folders and their times only change when a scan is merged (PERF-011).
+    pub(crate) fn tree_state(&self) -> (u64, u64, u64) {
+        (self.uid, self.rescan_epoch, self.generation)
+    }
+
     pub fn abs(&self, rel: &Path) -> PathBuf {
         self.root.join(rel)
     }
@@ -1067,8 +1073,14 @@ impl Vault {
     /// target once, as written, in the order of the text. A link that a file of the vault answers
     /// to is not one (MEDIA-014).
     pub fn outside_targets(&self, text: &str, rel: &Path) -> Vec<String> {
+        self.outside_among(markdown::find_links(text).iter().map(|l| l.target.as_str()), rel)
+    }
+
+    /// The outside targets among `targets` (the links of `rel`), each once: [`Vault::outside_targets`]
+    /// for a list that is not a text, such as the pictures of a drawing (MEDIA-031).
+    pub fn outside_among<'a>(&self, targets: impl Iterator<Item = &'a str>, rel: &Path) -> Vec<String> {
         let mut seen = HashSet::new();
-        markdown::find_links(text).into_iter().filter(|l| l.is_outside() && self.resolve(&l.target, Some(rel)).is_none() && seen.insert(l.target.clone())).map(|l| l.target).collect()
+        targets.filter(|t| outside::spot(t).is_some() && self.resolve(t, Some(rel)).is_none() && seen.insert(*t)).map(str::to_string).collect()
     }
 
     /// Every outside link of the vault, from the index (no file system access): for the background
@@ -2495,6 +2507,29 @@ mod tests {
         assert_eq!(text(&v, "b/Note.md"), "![p](pic.png) ![q](../b/pic.png) [s](../Root.md) [t](../a/Sib.md) ![[pic.png]]");
         let n = &v.notes[Path::new("b/Note.md")];
         assert!(n.resolved.iter().all(|r| r.is_some()), "{:?}", n.resolved);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-016, VAULT-041, LINK-001
+    #[test]
+    fn a_markdown_link_with_a_title_resolves_is_a_backlink_and_follows_a_rename_and_a_move() {
+        let note = "[a](Target.md \"the title\") [b](<Target.md> 'it\\'s') [c](../Target.md (t)) ![p](pic.png \"pic\") [d](Target.md#Intro 't')";
+        let (mut v, d) = vault_with("mdtitle", &[("Target.md", "# Intro\n"), ("pic.png", ""), ("a/Src.md", note), ("Top.md", "[t](a/../Target.md \"x\")")]);
+        // resolved, and so in the backlinks
+        let n = &v.notes[Path::new("a/Src.md")];
+        assert_eq!(n.links.len(), 5);
+        assert!(n.resolved.iter().all(|r| r.is_some()), "{:?}", n.resolved);
+        let mut from: Vec<PathBuf> = v.backlinks(Path::new("Target.md")).into_iter().map(|(p, _)| p).collect();
+        from.sort();
+        assert_eq!(from, vec![PathBuf::from("Top.md"), PathBuf::from("a/Src.md")]);
+        v.rename(Path::new("Target.md"), Path::new("Goal Note.md"), true).unwrap();
+        v.rename(Path::new("pic.png"), Path::new("cover.png"), true).unwrap();
+        // the targets change, the titles stay as they were
+        assert_eq!(text(&v, "a/Src.md"), "[a](Goal%20Note.md \"the title\") [b](<Goal Note.md> 'it\\'s') [c](../Goal%20Note.md (t)) ![p](cover.png \"pic\") [d](Goal%20Note.md#Intro 't')");
+        assert!(v.notes[Path::new("a/Src.md")].resolved.iter().all(|r| r.is_some()));
+        v.move_into(Path::new("Goal Note.md"), Path::new("a")).unwrap();
+        assert!(v.notes[Path::new("a/Src.md")].resolved.iter().all(|r| r.is_some()));
+        assert!(text(&v, "a/Src.md").contains(" \"the title\")") && text(&v, "a/Src.md").contains(" 'it\\'s')"), "{}", text(&v, "a/Src.md"));
         let _ = fs::remove_dir_all(&d);
     }
 

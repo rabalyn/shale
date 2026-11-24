@@ -15,23 +15,52 @@
 //! memory only. Media addresses on other servers (picture CDNs) are fetched without any login.
 
 pub mod accounts_ui;
+pub mod actions;
 pub mod bluesky;
+pub mod clips;
+pub mod compose;
+pub mod compose_extras_ui;
+pub mod compose_pictures;
+pub mod compose_ui;
 #[cfg(test)]
 mod dataflow_tests;
 pub mod demo;
 #[cfg(test)]
+mod extras_tests;
+#[cfg(test)]
 pub(crate) mod fake_server;
 pub mod feed_ui;
 pub mod images;
+pub mod language;
 pub mod markup;
 pub mod mastodon;
 pub mod note;
+pub mod notifications;
+#[cfg(test)]
+mod notifications_tests;
+pub mod notifications_ui;
+#[cfg(test)]
+mod pictures_tests;
+pub mod poll;
 pub mod post_index;
 #[cfg(test)]
 mod post_index_tests;
+#[cfg(test)]
+mod quote_tests;
+pub mod schedule;
 pub mod state;
+pub mod thread;
+#[cfg(test)]
+mod thread_tests;
+pub mod thread_ui;
 #[cfg(test)]
 mod ui_tests;
+pub mod video;
+pub mod viewer;
+#[cfg(test)]
+mod viewer_tests;
+#[cfg(test)]
+mod write_tests;
 
 use crate::calendar::dav::{self, check_url, Origin};
 use crate::calendar::time as t;
@@ -79,6 +108,14 @@ pub struct Account {
     /// Mastodon: "ada@mastodon.social"; Bluesky: "ada.bsky.social" (what you sign in with)
     pub handle: String,
     pub display_name: String,
+    /// Mastodon: the permissions the token was given at sign-in ("read write"); None when not
+    /// known (an account from before, a pasted token). Not a secret (SOC-056).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scopes: Option<String>,
+    /// The language this account's posts started with last (ISO 639-1, "" = none); None: the
+    /// setting "Post language" decides (SOC-065). Not a secret.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_language: Option<String>,
 }
 
 /// An account as the settings file holds it: the account and, only when no system keyring took
@@ -119,7 +156,17 @@ impl Account {
     /// A new account; the id is made from network and handle.
     pub fn new(network: Network, server: &str, handle: &str, display_name: &str) -> Account {
         let handle = handle.trim().trim_start_matches('@').to_string();
-        Account { id: format!("{}:{handle}", network.key()), network, server: server.trim().trim_end_matches('/').to_string(), handle, display_name: display_name.to_string() }
+        Account { id: format!("{}:{handle}", network.key()), network, server: server.trim().trim_end_matches('/').to_string(), handle, display_name: display_name.to_string(), scopes: None, post_language: None }
+    }
+
+    /// Whether the account may write: `Some(false)` for a Mastodon token that was given only
+    /// `read` (SOC-056), `None` when it is not known (the server decides). Bluesky app passwords can write.
+    pub fn may_write(&self) -> Option<bool> {
+        match (self.network, &self.scopes) {
+            (Network::Bluesky, _) => Some(true),
+            (Network::Mastodon, None) => None,
+            (Network::Mastodon, Some(s)) => Some(s.split_whitespace().any(|x| x == "write" || x.starts_with("write:"))),
+        }
     }
 }
 
@@ -203,6 +250,44 @@ pub struct Post {
     pub reply_count: u32,
     pub boost_count: u32,
     pub like_count: u32,
+    /// what the signed-in account did with this post (SOC-050)
+    #[serde(default)]
+    pub mine: Mine,
+    /// Bluesky: the first post of the conversation, for a reply (SOC-051)
+    #[serde(default)]
+    pub reply_root: Option<PostRef>,
+    /// Mastodon: "public", "unlisted", "private" or "direct" (a reply starts with it)
+    #[serde(default)]
+    pub visibility: Option<String>,
+    /// Mastodon: the poll of the status (SOC-061)
+    #[serde(default)]
+    pub poll: Option<poll::Poll>,
+    /// Set on the entries of the Notifications feed: why the post is there and who did it (SOC-078)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<Box<notifications::Notice>>,
+}
+
+/// What the signed-in account did with a post: liked / favourited and boosted / reposted it. On
+/// Bluesky the records that undo it are kept too.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Mine {
+    pub liked: bool,
+    pub boosted: bool,
+    /// Bluesky: the `at://` address of the like record
+    pub like_record: Option<String>,
+    /// Bluesky: the `at://` address of the repost record
+    pub boost_record: Option<String>,
+    /// the state is not known: a quoted Bluesky record carries none (SOC-060). The flags above
+    /// say "no" then, which is not an answer.
+    #[serde(default)]
+    pub unknown: bool,
+}
+
+/// A post as Bluesky points to it: address and content id.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PostRef {
+    pub uri: String,
+    pub cid: String,
 }
 
 /// One timeline: Mastodon "Home" or a list; Bluesky "Following" or a custom feed.
@@ -219,6 +304,22 @@ pub struct Feed {
 pub struct FeedRef {
     pub account: String,
     pub feed: String,
+    /// the id of a post whose conversation the tab shows instead of the feed (SOC-045); the tab
+    /// is a step in the history of the feed's tab and is never saved
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<String>,
+}
+
+impl FeedRef {
+    /// A feed (no conversation).
+    pub fn new(account: impl Into<String>, feed: impl Into<String>) -> FeedRef {
+        FeedRef { account: account.into(), feed: feed.into(), thread: None }
+    }
+
+    /// The same feed without a conversation.
+    pub fn feed_only(&self) -> FeedRef {
+        FeedRef { thread: None, ..self.clone() }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -264,6 +365,8 @@ pub struct ApiError {
     /// Bluesky error name (`ExpiredToken`) or Mastodon's `error` text; may be empty
     pub code: String,
     pub message: String,
+    /// the JSON the server answered (Null when it was none); never holds a secret we sent
+    pub body: Value,
 }
 
 impl std::fmt::Display for ApiError {
@@ -280,7 +383,7 @@ impl From<ApiError> for String {
 
 impl ApiError {
     fn plain(message: impl Into<String>) -> ApiError {
-        ApiError { status: 0, code: String::new(), message: message.into() }
+        ApiError { status: 0, code: String::new(), message: message.into(), body: Value::Null }
     }
 }
 
@@ -332,7 +435,13 @@ fn json_text(v: &Value) -> Zeroizing<String> {
 /// One JSON request to an API. `token`: sent as `Authorization: Bearer …` (inside curl's input,
 /// never on its command line); only ever to this one address.
 pub(crate) fn api(method: &str, url: &str, token: Option<&str>, body: Option<&Value>) -> Result<Value, ApiError> {
+    api_with(method, url, token, body, &[])
+}
+
+/// Like `api` with more headers (`Idempotency-Key: …`, SOC-057): nothing secret may be in them.
+pub(crate) fn api_with(method: &str, url: &str, token: Option<&str>, body: Option<&Value>, extra: &[&str]) -> Result<Value, ApiError> {
     let mut hs = vec!["Accept: application/json"];
+    hs.extend_from_slice(extra);
     // the body can hold a password or client secret, the header holds the token: both are wiped
     let text = body.map(json_text).unwrap_or_default();
     if body.is_some() {
@@ -347,6 +456,28 @@ pub(crate) fn api(method: &str, url: &str, token: Option<&str>, body: Option<&Va
         hs.push(&auth);
     }
     let r = dav::request_bytes(method, url, &hs, &text, &no_login(), MAX_JSON).map_err(ApiError::plain)?;
+    answer_of(r)
+}
+
+/// One request whose body is a file (a picture, SOC-053): `Upload::Raw` (Bluesky: the bytes;
+/// `content_type` says what they are) or `Upload::Form` (Mastodon: a multipart form). The token
+/// goes as in `api`, only to this address.
+pub(crate) fn api_upload(method: &str, url: &str, token: &str, content_type: Option<&str>, upload: dav::Upload) -> Result<Value, ApiError> {
+    if token.chars().any(char::is_control) {
+        return Err(ApiError::plain("the access token contains line breaks or control characters"));
+    }
+    let auth = crate::secret::concat(&["Authorization: Bearer ", token]);
+    let ct = content_type.map(|c| format!("Content-Type: {c}"));
+    let mut hs: Vec<&str> = vec!["Accept: application/json", &auth];
+    if let Some(c) = &ct {
+        hs.push(c);
+    }
+    let r = dav::request_upload(method, url, &hs, upload, &no_login(), MAX_JSON).map_err(ApiError::plain)?;
+    answer_of(r)
+}
+
+/// The JSON answer of a server, or its error in words.
+fn answer_of(r: dav::BytesResponse) -> Result<Value, ApiError> {
     let (status, answer) = (r.status, Zeroizing::new(r.body));
     let json: Value = serde_json::from_slice(&answer).unwrap_or(Value::Null);
     if (200..300).contains(&status) {
@@ -361,14 +492,19 @@ pub(crate) fn api(method: &str, url: &str, token: Option<&str>, body: Option<&Va
         429 => "the server says: too many requests, try again in a few minutes".to_string(),
         s => format!("the server answered with status {s}{}", if detail.is_empty() { String::new() } else { format!(": {detail}") }),
     };
-    Err(ApiError { status, code, message })
+    Err(ApiError { status, code, message, body: json })
 }
 
 /// Download a media file (no login is sent). At most `MAX_MEDIA_BYTES`. Returns the bytes and
 /// the content type, if the server named one.
 pub fn download(url: &str) -> Result<(Vec<u8>, Option<String>), String> {
+    download_up_to(url, MAX_MEDIA_BYTES)
+}
+
+/// Like `download`, with a smaller or larger limit (tests use a small one).
+pub(crate) fn download_up_to(url: &str, limit: u64) -> Result<(Vec<u8>, Option<String>), String> {
     check_url(url)?;
-    let r = dav::request_bytes("GET", url, &[], "", &no_login(), MAX_MEDIA_BYTES)?;
+    let r = dav::request_bytes("GET", url, &[], "", &no_login(), limit)?;
     if !(200..300).contains(&r.status) {
         return Err(format!("the server answered with status {}", r.status));
     }
@@ -516,6 +652,10 @@ pub fn self_thread(root: Post, ancestors: Vec<Post>, descendants: Vec<Post>) -> 
 /// Most replies of other people that are kept with a saved post.
 pub const MAX_REPLIES: usize = 300;
 
+/// What fetching the conversation of a post gives: its self-thread, the replies of other people and
+/// the id of the post that starts the conversation (SOC-070).
+pub type ThreadFetch = (Vec<Post>, Vec<Reply>, Option<String>);
+
 /// A reply of somebody else (or a reply of the author to somebody else), shown below the thread.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Reply {
@@ -555,6 +695,43 @@ pub fn conversation(thread: &[Post], descendants: &[Post]) -> Vec<Reply> {
     out
 }
 
+/// The conversation around one post, as the thread view shows it (SOC-045).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ThreadView {
+    /// what the post replies to, from the top of the conversation down to its parent
+    pub ancestors: Vec<Post>,
+    /// the post that was opened
+    pub post: Post,
+    /// everything below it as a tree (depth first, oldest first among siblings); depth 0 answers `post`
+    pub replies: Vec<Reply>,
+    /// the server's answer left replies out: it was cut off at its depth limit, or the replies are
+    /// hidden from this account
+    pub cut: bool,
+}
+
+impl ThreadView {
+    /// Every post of the view.
+    pub fn posts_mut(&mut self) -> impl Iterator<Item = &mut Post> {
+        self.ancestors.iter_mut().chain(std::iter::once(&mut self.post)).chain(self.replies.iter_mut().map(|r| &mut r.post))
+    }
+}
+
+/// Put a thread view together from a context answer: the ancestors, the opened post, and all
+/// posts below it in any order (`conversation` makes the tree).
+pub fn thread_view_of(post: &Post, ancestors: Vec<Post>, descendants: &[Post]) -> ThreadView {
+    let post = Post { reposted_by: None, ..post.clone() };
+    let replies = conversation(std::slice::from_ref(&post), descendants);
+    // a post that counts more replies than the tree holds below it: the answer was cut off
+    let mut below: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
+    for r in &replies {
+        if let Some(parent) = &r.post.reply_to {
+            *below.entry(parent.as_str()).or_default() += 1;
+        }
+    }
+    let cut = replies.len() < descendants.len().min(MAX_REPLIES) || std::iter::once(&post).chain(replies.iter().map(|r| &r.post)).any(|p| p.reply_count > below.get(p.id.as_str()).copied().unwrap_or(0));
+    ThreadView { ancestors, post, replies, cut }
+}
+
 // ---------------------------------------------------------------- the client
 
 /// A signed-in account ready to use: one type for both networks. It is `Clone + Send`: give a
@@ -568,8 +745,12 @@ pub struct Client {
 
 #[derive(Clone)]
 enum Backend {
-    Mastodon { token: Secret },
-    Bluesky(bluesky::Api),
+    Mastodon {
+        token: Secret,
+        /// the id of the account on its server, once it is known ("Your posts", SOC-074)
+        me: Option<String>,
+    },
+    Bluesky(Box<bluesky::Api>),
 }
 
 impl std::fmt::Debug for Client {
@@ -582,8 +763,8 @@ impl Client {
     /// `secret`: the Mastodon access token or the Bluesky app password. Nothing is sent yet.
     pub fn new(account: Account, secret: &str) -> Client {
         let backend = match account.network {
-            Network::Mastodon => Backend::Mastodon { token: Secret::new(secret.trim()) },
-            Network::Bluesky => Backend::Bluesky(bluesky::Api::new(&account.server, &account.handle, secret)),
+            Network::Mastodon => Backend::Mastodon { token: Secret::new(secret.trim()), me: None },
+            Network::Bluesky => Backend::Bluesky(Box::new(bluesky::Api::new(&account.server, &account.handle, secret))),
         };
         Client { account, backend }
     }
@@ -591,7 +772,7 @@ impl Client {
     /// The timelines to choose from.
     pub fn feeds(&mut self) -> Result<Vec<Feed>, String> {
         match &mut self.backend {
-            Backend::Mastodon { token } => mastodon::feeds(&self.account.server, token.expose()),
+            Backend::Mastodon { token, .. } => mastodon::feeds(&self.account.server, token.expose()),
             Backend::Bluesky(api) => bluesky::feeds(api),
         }
     }
@@ -600,33 +781,64 @@ impl Client {
     /// `Page::cursor` of the page before.
     pub fn timeline(&mut self, feed: &Feed, cursor: Option<&str>) -> Result<Page, String> {
         match &mut self.backend {
-            Backend::Mastodon { token } => mastodon::timeline(&self.account.server, token.expose(), feed, cursor),
-            Backend::Bluesky(api) => bluesky::timeline(api, feed, cursor),
+            Backend::Mastodon { token, me } => mastodon::timeline(&self.account.server, token.expose(), feed, cursor, me),
+            Backend::Bluesky(api) => bluesky::timeline(api, feed, cursor).map(|mut page| {
+                bluesky::hydrate(api, page.posts.iter_mut());
+                page
+            }),
         }
     }
 
     /// The posts newer than the known ones, newest first, at most `MAX_NEW` (see `Fresh`).
     pub fn newer(&mut self, feed: &Feed, since: &Since) -> Result<Fresh, String> {
         match &mut self.backend {
-            Backend::Mastodon { token } => mastodon::newer(&self.account.server, token.expose(), feed, since.top.as_deref(), MAX_NEW),
-            Backend::Bluesky(api) => bluesky::newer(api, feed, &since.known, MAX_NEW),
+            Backend::Mastodon { token, me } => mastodon::newer(&self.account.server, token.expose(), feed, since.top.as_deref(), MAX_NEW, me),
+            Backend::Bluesky(api) => bluesky::newer(api, feed, &since.known, MAX_NEW).map(|mut fresh| {
+                bluesky::hydrate(api, fresh.posts.iter_mut());
+                fresh
+            }),
+        }
+    }
+
+    /// Tell the server that the notifications up to `mark` (`Notice::mark` of the newest one shown)
+    /// were read (SOC-079).
+    pub fn mark_notifications(&mut self, mark: &str) -> Result<(), String> {
+        match &mut self.backend {
+            Backend::Mastodon { token, .. } => notifications::mastodon_mark(&self.account.server, token.expose(), mark),
+            Backend::Bluesky(api) => notifications::bluesky_mark(api, mark),
         }
     }
 
     /// One post by its id (to open a search hit the index and the feed no longer hold, SOC-039).
     pub fn fetch_post(&mut self, id: &str) -> Result<Post, String> {
         match &mut self.backend {
-            Backend::Mastodon { token } => mastodon::fetch_post(&self.account.server, token.expose(), id),
-            Backend::Bluesky(api) => bluesky::fetch_post(api, id),
+            Backend::Mastodon { token, .. } => mastodon::fetch_post(&self.account.server, token.expose(), id),
+            Backend::Bluesky(api) => bluesky::fetch_post(api, id).map(|mut p| {
+                bluesky::hydrate(api, std::iter::once(&mut p));
+                p
+            }),
         }
     }
 
     /// The whole self-thread of a post (see `self_thread`), in reading order, including the post, and the
     /// replies of other people below it (see `conversation`).
-    pub fn thread_with_replies(&mut self, post: &Post) -> Result<(Vec<Post>, Vec<Reply>), String> {
+    /// The self-thread, the replies of other people and the id of the post that starts the whole
+    /// conversation when `post` is a reply (SOC-070).
+    pub fn thread_with_replies(&mut self, post: &Post) -> Result<ThreadFetch, String> {
         match &mut self.backend {
-            Backend::Mastodon { token } => mastodon::thread_full(&self.account.server, token.expose(), post),
+            Backend::Mastodon { token, .. } => mastodon::thread_full(&self.account.server, token.expose(), post),
             Backend::Bluesky(api) => bluesky::thread_full(api, post),
+        }
+    }
+
+    /// The conversation around `post`: what it replies to and everything below it (SOC-045).
+    pub fn thread_view(&mut self, post: &Post) -> Result<ThreadView, String> {
+        match &mut self.backend {
+            Backend::Mastodon { token, .. } => mastodon::thread_view(&self.account.server, token.expose(), post),
+            Backend::Bluesky(api) => bluesky::thread_view(api, post).map(|mut v| {
+                bluesky::hydrate(api, v.posts_mut());
+                v
+            }),
         }
     }
 
@@ -639,8 +851,9 @@ impl Client {
     }
 
     /// Fetch the thread of `post` and all its media in one go, ready for `note::post_note`.
-    pub fn save(&mut self, post: &Post) -> note::SavedPost {
-        note::fetch_saved(self, post)
+    /// `None` when `stop` said so, between two requests (JOB-036).
+    pub fn save(&mut self, post: &Post, stop: &dyn Fn() -> bool) -> Option<note::SavedPost> {
+        note::fetch_saved(self, post, stop)
     }
 }
 
@@ -679,6 +892,11 @@ pub(crate) mod tests {
             reply_count: 0,
             boost_count: 0,
             like_count: 0,
+            mine: Mine::default(),
+            reply_root: None,
+            visibility: None,
+            poll: None,
+            notice: None,
         }
     }
 
@@ -696,6 +914,7 @@ pub(crate) mod tests {
         assert_eq!(parse_rfc3339("2024-02-29Tä2:30:45Z"), None);
     }
 
+    // spec: SOC-015
     #[test]
     fn urls_and_names() {
         assert_eq!(url_encode("a b&c/ü"), "a%20b%26c%2F%C3%BC");
@@ -711,6 +930,24 @@ pub(crate) mod tests {
         assert_eq!(file_name_from_url("https://files.m.test/", "x.jpg"), "x.jpg");
     }
 
+    // spec: SOC-015
+    #[test]
+    fn downloads_and_answers_are_limited_and_a_download_is_refused_unless_it_is_https_or_local() {
+        assert_eq!((MAX_MEDIA_BYTES, MAX_JSON), (64_000_000, 20_000_000), "64 MB for downloads, 20 MB for answers");
+        assert!(download("http://example.invalid/x.png").unwrap_err().contains("https"), "plain http to another computer");
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let (base, handle) = crate::calendar::dav::tests::mock_http(2, |_, path, headers, _| {
+            assert!(!headers.to_ascii_lowercase().contains("authorization"), "no login goes to a file server: {headers}");
+            (200, if path == "/big" { "x".repeat(3000) } else { "small".into() })
+        });
+        assert_eq!(download_up_to(&format!("{base}/small"), 1000).unwrap().0, b"small");
+        assert!(download_up_to(&format!("{base}/big"), 1000).is_err(), "a file over the limit is refused");
+        handle.join().unwrap();
+    }
+
+    // spec: SOC-003, SEC-016
     #[test]
     fn network_names_and_debug_redaction() {
         assert_eq!(Network::Bluesky.key(), "bluesky");
@@ -722,6 +959,19 @@ pub(crate) mod tests {
         assert!(!format!("{b:?}").contains("pw-secret-2"));
         let json = serde_json::to_string(&c.account).unwrap();
         assert!(json.contains("mastodon") && !json.contains("tok-secret"));
+    }
+
+    // spec: SOC-056
+    #[test]
+    fn an_account_keeps_its_permissions_without_a_secret_and_one_from_before_has_none() {
+        let old: Account = serde_json::from_str(r#"{"id":"mastodon:a@m.test","network":"mastodon","server":"https://m.test","handle":"a@m.test","display_name":"A"}"#).unwrap();
+        assert_eq!((old.scopes.clone(), old.may_write()), (None, None), "not known: the server decides");
+        assert!(!serde_json::to_string(&old).unwrap().contains("scopes"));
+        let signed = Account { scopes: Some("read write".into()), ..old };
+        let json = serde_json::to_string(&signed).unwrap();
+        assert!(json.contains(r#""scopes":"read write""#));
+        assert_eq!(serde_json::from_str::<Account>(&json).unwrap(), signed);
+        assert_eq!(Account { scopes: Some("read".into()), ..signed }.may_write(), Some(false));
     }
 
     // spec: SOC-019
@@ -737,6 +987,7 @@ pub(crate) mod tests {
         assert!(conversation(&thread, &[]).is_empty());
     }
 
+    // spec: SOC-014
     #[test]
     fn self_thread_rule() {
         let p = |id: &str, a: &str, t: i64, r: Option<&str>| post(id, a, t, r);
@@ -751,5 +1002,31 @@ pub(crate) mod tests {
         let anc = vec![p("a1", "ada", 1, None), p("b1", "bob", 2, Some("a1"))];
         let ids: Vec<String> = self_thread(p("a2", "ada", 3, Some("b1")), anc, vec![]).into_iter().map(|p| p.id).collect();
         assert_eq!(ids, ["a2"]);
+    }
+
+    // spec: SOC-045, SOC-046
+    #[test]
+    fn a_thread_view_is_the_tree_below_the_post_and_notices_replies_that_are_missing() {
+        let counted = |p: Post, n: u32| Post { reply_count: n, ..p };
+        let root = Post { reposted_by: Some(Author::default()), ..counted(post("r", "ada", 10, Some("up")), 2) };
+        let all = vec![counted(post("b", "cy", 30, Some("r")), 0), counted(post("a", "bob", 20, Some("r")), 1), post("a1", "ada", 25, Some("a"))];
+        let v = thread_view_of(&root, vec![post("up", "bob", 5, None)], &all);
+        assert_eq!(v.replies.iter().map(|r| (r.post.id.as_str(), r.depth)).collect::<Vec<_>>(), [("a", 0), ("a1", 1), ("b", 0)], "depth first, oldest first among siblings");
+        assert!(v.post.reposted_by.is_none(), "the opened post is the post, not a boost of it");
+        assert!(!v.cut);
+        // a reply whose parent the server did not send, a post that counts more replies than it has below it
+        assert!(thread_view_of(&root, vec![], &[post("lost", "cy", 40, Some("gone"))]).cut);
+        assert!(thread_view_of(&counted(root, 5), vec![], &all).cut);
+        assert!(!thread_view_of(&post("alone", "ada", 1, None), vec![], &[]).cut);
+    }
+
+    // spec: SOC-045
+    #[test]
+    fn a_feed_ref_names_a_conversation_only_in_memory() {
+        let f = FeedRef { thread: Some("12".into()), ..FeedRef::new("mastodon:ada", "home") };
+        assert_eq!(f.feed_only(), FeedRef::new("mastodon:ada", "home"));
+        // the saved form of a tab has no conversation, and the state files from before still load
+        assert_eq!(serde_json::to_string(&f.feed_only()).unwrap(), r#"{"account":"mastodon:ada","feed":"home"}"#);
+        assert_eq!(serde_json::from_str::<FeedRef>(r#"{"account":"mastodon:ada","feed":"home"}"#).unwrap().thread, None);
     }
 }

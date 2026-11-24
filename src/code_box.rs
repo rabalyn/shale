@@ -205,7 +205,7 @@ mod tests {
         t.split('\n').collect()
     }
 
-    // spec: EDIT-090
+    // spec: EDIT-090, EDIT-091
     #[test]
     fn the_code_of_a_block_is_its_lines_as_written_without_the_fences_and_the_last_newline() {
         let t = lines("a\n```sh\ncargo build\n  --release\n\n```\nb");
@@ -215,7 +215,7 @@ mod tests {
         assert_eq!(code_of(&lines("```rust\nfn a() {}\r\n```"), 0).as_deref(), Some("fn a() {}"), "no carriage return");
     }
 
-    // spec: EDIT-090
+    // spec: EDIT-090, EDIT-091
     #[test]
     fn an_empty_block_has_empty_code_and_an_unclosed_one_runs_to_the_end_without_its_blank_lines() {
         assert_eq!(code_of(&lines("```\n```"), 0).as_deref(), Some(""));
@@ -223,7 +223,7 @@ mod tests {
         assert_eq!(code_of(&lines("```\nx\ny"), 0).as_deref(), Some("x\ny"));
     }
 
-    // spec: EDIT-090
+    // spec: EDIT-090, EDIT-091
     #[test]
     fn the_indentation_of_the_opening_fence_is_taken_off_every_line() {
         let t = lines("- item\n    ```sh\n    ls\n      -la\n  odd\n    ```\n- next");
