@@ -796,9 +796,14 @@ fn calendar_with_series(w: &mut W) -> Vec<crate::calendar::store::Occ> {
 }
 
 /// What the open Import dialog holds, to compare two ways into it.
+/// The clock reads of the file (the stamp lines) differ when two dialogs are made across a second
+/// boundary, which says nothing about the dialog: they are left out.
 fn dialog_state(w: &W) -> String {
     let d = w.dialog();
-    let (ev, calendar, original) = w.dialog_event();
+    let (mut ev, calendar, original) = w.dialog_event();
+    let stamp = |l: &str| l.starts_with("DTSTAMP") || l.starts_with("LAST-MODIFIED");
+    ev.src.retain(|l| !stamp(l));
+    let original = original.map(|(name, bytes)| (name, String::from_utf8_lossy(&bytes).lines().filter(|l| !stamp(l)).collect::<Vec<_>>().join("\n")));
     format!("{ev:?}|{calendar}|{original:?}|{}|{:?}|{}|{}", d.folder, d.link_into, d.link_on, d.items[0].title)
 }
 
