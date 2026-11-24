@@ -35,14 +35,14 @@ impl ShaleApp {
                 b.current = infos.first().map(|i| i.rel.clone());
             }
             let keys = self.modal.is_none() && !egui::Popup::is_any_open(&ctx) && ctx.memory(|m| m.focused().is_none());
-            let mut env = Env { vault, scenes: &mut self.scenes, dark: self.cfg.dark_canvas, advanced: &mut self.cfg.search.advanced };
+            let mut env = Env { vault, worker: &mut self.search_worker, scenes: &mut self.scenes, dark: self.cfg.dark_canvas, advanced: &mut self.cfg.search.advanced };
             match b.current.clone() {
                 Some(rel) => {
                     let text = vault.notes.get(&rel).map(|n| n.text.as_str()).unwrap_or_default();
                     let board = Board::parse(text);
                     let props = file::props(text);
                     let queries: Vec<&str> = board.lanes.iter().map(|l| l.query()).collect();
-                    b.runs.update(&mut self.search_worker, vault, &rel, &queries);
+                    b.runs.update(&mut *env.worker, vault, &rel, &queries);
                     let lanes = b.shown.get(vault, &rel, text, &board, props.every_lane, &b.runs);
                     let data = Data { boards: &infos, current: Some(&rel), props: &props, lanes, selected: b.selected.as_deref(), keys };
                     view::show(ui, &mut b.view, &data, &mut env)

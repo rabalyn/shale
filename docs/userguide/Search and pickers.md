@@ -38,7 +38,9 @@ that is not complete yet (an empty tag, a property without a value) is not in th
 names of the properties in the notes' front matter, and for the name you chose the values seen with it. Click into an empty
 field and the list shows everything, alphabetically; type and it narrows (what starts with your letters first, then
 what contains them). **↓ / ↑** (or Ctrl+J / Ctrl+K) choose, **Enter** or **Tab** take the entry, a click takes it too,
-and **Esc** closes only the list. A long list scrolls. `created` and `modified` are not suggested.
+and **Esc** closes only the list. A long list scrolls. `created` and `modified` are not suggested. In a very large vault the first list may say
+"Loading…" for a moment while the suggestions are collected in the background; the form stays usable, and the list
+fills in by itself.
 
 ![[picker-form.png]]
 

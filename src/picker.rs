@@ -336,8 +336,8 @@ pub fn show(ctx: &Context, p: &mut Picker, data: &Ctx, worker: &mut SearchWorker
                 }
                 if f.p.form_open {
                     let count = f.p.results.counts().map(|c| c.matches_text(listed, search_all::GROUP_LIMIT));
-                    let opts = crate::search_form::Opts { vault: data.vault, prefixes: cfg.prefixes(), host_box: true, count: count.as_deref() };
-                    let changed = crate::search_form::show(ui, &mut f.p.form, &mut f.p.query, &mut f.p.check, &mut cfg.advanced, None, &opts);
+                    let mut opts = crate::search_form::Opts { vault: data.vault, worker: &mut *f.worker, prefixes: cfg.prefixes(), host_box: true, count: count.as_deref() };
+                    let changed = crate::search_form::show(ui, &mut f.p.form, &mut f.p.query, &mut f.p.check, &mut cfg.advanced, None, &mut opts);
                     f.save |= changed.advanced;
                     if changed.query {
                         // what the form wrote is searched like what was typed, at once

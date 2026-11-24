@@ -5,6 +5,7 @@ use super::complete::{Complete, Slot, Spec};
 use super::sort::{self, Key};
 use super::{DueCmp, Fit, Mode, Row, State, What};
 use crate::search_all::query::Cache;
+use crate::search_all::SearchWorker;
 use crate::search_sources::{self, Prefixes};
 use crate::theme;
 use crate::vault::Vault;
@@ -25,6 +26,8 @@ pub struct Changed {
 pub struct Opts<'a> {
     /// the vault, for the lists of the tags and properties it knows (QUERY-029)
     pub vault: &'a Vault,
+    /// the search worker, which builds the lists' vocabulary off the window's thread (QUERY-030)
+    pub worker: &'a mut SearchWorker,
     /// the letters of the prefixes (NAV-050); none in a lane
     pub prefixes: Prefixes,
     /// The host has a text box of its own for the query (the picker, the sidebar): Advanced adds
@@ -54,19 +57,19 @@ fn finish(r: egui::Response, value: &mut String) -> bool {
 }
 
 /// The value fields of one row; true when one changed.
-fn fields(ui: &mut Ui, what: &mut What, i: usize, comp: &mut Complete, vault: &Vault) -> bool {
+fn fields(ui: &mut Ui, what: &mut What, i: usize, comp: &mut Complete, vault: &Vault, worker: &mut SearchWorker) -> bool {
     fn spec<'a>(row: usize, slot: Slot, key: &'a str, hint: &'a str, width: f32) -> Spec<'a> {
         Spec { row, slot, key, hint, width }
     }
     match what {
         What::Tag(v) => {
             let width = (ui.available_width() - 8.0).max(100.0);
-            comp.field(ui, vault, &spec(i, Slot::Tag, "", "tag", width), v)
+            comp.field(ui, vault, worker, &spec(i, Slot::Tag, "", "tag", width), v)
         }
         What::Prop { key, value } => {
-            let changed = comp.field(ui, vault, &spec(i, Slot::Key, "", "name", 90.0), key);
+            let changed = comp.field(ui, vault, worker, &spec(i, Slot::Key, "", "name", 90.0), key);
             let width = (ui.available_width() - 8.0).max(90.0);
-            changed | comp.field(ui, vault, &spec(i, Slot::Value, key, "value", width), value)
+            changed | comp.field(ui, vault, worker, &spec(i, Slot::Value, key, "value", width), value)
         }
         What::Due { cmp, day } => {
             let before = *cmp;
@@ -107,9 +110,9 @@ fn add_menu(ui: &mut Ui, label: &str, choices: impl FnOnce(&mut Ui)) {
 }
 
 /// The filter rows (QUERY-021); true when the rows changed.
-fn filter_rows(ui: &mut Ui, st: &mut State, vault: &Vault) -> bool {
+fn filter_rows(ui: &mut Ui, st: &mut State, vault: &Vault, worker: &mut SearchWorker) -> bool {
     let mut edited = false;
-    st.complete.begin();
+    st.complete.begin(vault, worker);
     let mut remove = None;
     let comp = &mut st.complete;
     for (i, row) in st.rows.iter_mut().enumerate() {
@@ -121,7 +124,7 @@ fn filter_rows(ui: &mut Ui, st: &mut State, vault: &Vault) -> bool {
                 }
                 ui.label(RichText::new(row.what.label()).color(theme::palette().muted));
                 edited |= ui.checkbox(&mut row.not, "not").changed();
-                edited |= fields(ui, &mut row.what, i, comp, vault);
+                edited |= fields(ui, &mut row.what, i, comp, vault, worker);
             });
             if let Some((slot, entry)) = comp.list(ui, i) {
                 take_entry(&mut row.what, slot, entry);
@@ -221,7 +224,7 @@ fn sort_rows(ui: &mut Ui, st: &mut sort::State) -> bool {
 /// It edits the text it is given, and says what it changed. `cache` checks the text (QUERY-013);
 /// `advanced` is the remembered Advanced switch (QUERY-026), which the form turns on by itself
 /// while the query does not fit it (QUERY-025).
-pub fn show(ui: &mut Ui, st: &mut State, text: &mut String, cache: &mut Cache, advanced: &mut bool, sort: Option<&mut String>, opts: &Opts) -> Changed {
+pub fn show(ui: &mut Ui, st: &mut State, text: &mut String, cache: &mut Cache, advanced: &mut bool, sort: Option<&mut String>, opts: &mut Opts) -> Changed {
     let mut changed = Changed::default();
     let checked = cache.get(text, opts.prefixes).clone();
     st.sync(text, &checked);
@@ -281,7 +284,7 @@ pub fn show(ui: &mut Ui, st: &mut State, text: &mut String, cache: &mut Cache, a
             theme::hint(ui, count);
         }
     } else {
-        let edited = filter_rows(ui, st, opts.vault) | mode_clicked;
+        let edited = filter_rows(ui, st, opts.vault, opts.worker) | mode_clicked;
         if !opts.host_box {
             if let Some(e) = checked.error() {
                 theme::problem(ui, e.reason.clone());
@@ -344,6 +347,9 @@ mod tests {
         advanced: bool,
         host_box: bool,
         vault: Vault,
+        worker: SearchWorker,
+        /// a frame first waits for the worker to answer (a test that holds the worker back says no)
+        wait: bool,
         with_sort: bool,
         count: Option<String>,
         /// what the frames reported, since the last `take_changed`
@@ -359,8 +365,23 @@ mod tests {
             let dir = std::env::temp_dir().join(format!("shale-form-{}-{}", std::process::id(), TEST_VAULTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
             std::fs::create_dir_all(&dir).unwrap();
             let vault = Vault::open(&dir).unwrap();
-            let mut h =
-                Host { vault, ctx, t: 0.0, st: State::default(), text: text.into(), sort: String::new(), cache: Cache::default(), advanced: false, host_box: false, with_sort: false, count: None, changed: Changed::default(), nodes: vec![] };
+            let mut h = Host {
+                vault,
+                worker: SearchWorker::default(),
+                wait: true,
+                ctx,
+                t: 0.0,
+                st: State::default(),
+                text: text.into(),
+                sort: String::new(),
+                cache: Cache::default(),
+                advanced: false,
+                host_box: false,
+                with_sort: false,
+                count: None,
+                changed: Changed::default(),
+                nodes: vec![],
+            };
             h.frames(3);
             h
         }
@@ -375,10 +396,15 @@ mod tests {
         fn frame(&mut self, events: Vec<Event>) {
             self.t += 0.05;
             let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(520.0, 700.0))), time: Some(self.t), events, ..Default::default() };
-            let Host { ctx, st, text, sort, cache, advanced, host_box, with_sort, count, changed, vault, .. } = self;
+            let Host { ctx, st, text, sort, cache, advanced, host_box, with_sort, count, changed, vault, worker, wait, .. } = self;
+            while *wait && worker.busy() {
+                worker.begin_frame(ctx);
+                std::thread::yield_now();
+            }
+            worker.begin_frame(ctx);
             let mut out = ctx.run_ui(raw, |ui| {
-                let opts = Opts { vault, prefixes: Prefixes::default(), host_box: *host_box, count: count.as_deref() };
-                let c = show(ui, st, text, cache, advanced, with_sort.then_some(sort), &opts);
+                let mut opts = Opts { vault, worker, prefixes: Prefixes::default(), host_box: *host_box, count: count.as_deref() };
+                let c = show(ui, st, text, cache, advanced, with_sort.then_some(sort), &mut opts);
                 changed.query |= c.query;
                 changed.sort |= c.sort;
                 changed.advanced |= c.advanced;
@@ -478,7 +504,12 @@ mod tests {
 
         /// A note of the vault, as the index has it.
         fn note(&mut self, name: &str, text: &str) {
-            self.vault.set_note_text(std::path::Path::new(name), text);
+            let rel = std::path::Path::new(name);
+            // (a note of the vault is a file as well: the vocabulary is read from the files)
+            if !self.vault.notes.contains_key(rel) {
+                self.vault.create_file(rel, "").unwrap();
+            }
+            self.vault.set_note_text(rel, text);
             self.frames(2);
         }
 
@@ -790,8 +821,7 @@ mod tests {
         h.click_at(r.center());
         assert_eq!(h.listed(), strings(&["alpha", "beta", "Bug", "project/shale", "shale-ui", "x"]), "all, without regard to case");
         assert!(list_open(&h.ctx));
-        h.vault.set_note_text(std::path::Path::new("d.md"), "#Zed #apple");
-        h.frames(2);
+        h.note("d.md", "#Zed #apple");
         assert_eq!(h.listed().first().map(String::as_str), Some("alpha"), "the vocabulary follows the vault");
         assert!(h.listed().contains(&"Zed".to_string()) && h.listed().contains(&"apple".to_string()), "{:?}", h.listed());
     }
@@ -886,5 +916,128 @@ mod tests {
         h.type_into(0, "owner");
         h.type_into(1, "");
         assert_eq!(h.listed(), strings(&["Adam", "zoe"]));
+    }
+
+    /// The runner of a worker that is held back until `RELEASE`; it counts the vocabularies it builds.
+    static RELEASE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    static BUILT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    fn held(c: &mut crate::search_all::worker::Conns, req: &crate::search_all::Request, cancel: &std::sync::atomic::AtomicBool) -> Option<crate::search_all::Found> {
+        while !RELEASE.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        BUILT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        crate::search_all::worker::run_search(c, req, cancel)
+    }
+
+    /// Frames until the worker has answered, then two more (the list takes the answer in).
+    fn drain(h: &mut Host) {
+        h.wait = true;
+        h.frames(3);
+        assert!(!h.worker.busy());
+    }
+
+    // spec: QUERY-030
+    #[test]
+    fn query_030_the_list_says_loading_while_the_worker_builds_and_then_lists() {
+        RELEASE.store(false, std::sync::atomic::Ordering::SeqCst);
+        let mut h = vault_host();
+        h.worker = SearchWorker::with_runner(held);
+        h.wait = false;
+        h.pick("+ Add filter", "tag is");
+        let r = h.edits()[0];
+        h.click_at(r.center());
+        assert!(h.worker.busy(), "the vocabulary is asked of the worker");
+        assert!(h.st.complete.is_loading() && h.says("Loading…"), "a muted line says so");
+        assert!(h.listed().is_empty());
+        RELEASE.store(true, std::sync::atomic::Ordering::SeqCst);
+        drain(&mut h);
+        assert!(!h.says("Loading…"));
+        assert_eq!(h.listed(), strings(&["alpha", "beta", "Bug", "project/shale", "shale-ui", "x"]));
+    }
+
+    // spec: QUERY-030
+    #[test]
+    fn query_030_the_previous_vocabulary_is_shown_while_a_new_state_builds_and_a_vault_change_builds_once() {
+        RELEASE.store(false, std::sync::atomic::Ordering::SeqCst);
+        BUILT.store(0, std::sync::atomic::Ordering::SeqCst);
+        let mut h = vault_host();
+        h.pick("+ Add filter", "tag is");
+        let r = h.edits()[0];
+        h.click_at(r.center());
+        drain(&mut h);
+        assert_eq!(h.listed().len(), 6);
+        // the vault changes while the next build is held back: the old list stays, no "Loading…"
+        h.worker = SearchWorker::with_runner(held);
+        h.wait = false;
+        h.note("d.md", "#Zed");
+        h.frames(2);
+        assert!(h.worker.busy());
+        assert_eq!(h.listed().len(), 6, "the previous vocabulary: {:?}", h.listed());
+        assert!(!h.says("Loading…"));
+        RELEASE.store(true, std::sync::atomic::Ordering::SeqCst);
+        drain(&mut h);
+        assert!(h.listed().contains(&"Zed".to_string()), "{:?}", h.listed());
+        h.frames(5);
+        assert_eq!(BUILT.load(std::sync::atomic::Ordering::SeqCst), 1, "one build for the change, none for the frames");
+    }
+
+    // spec: QUERY-030
+    #[test]
+    fn query_030_an_answer_for_an_older_state_of_the_vault_is_dropped() {
+        RELEASE.store(false, std::sync::atomic::Ordering::SeqCst);
+        let mut h = vault_host();
+        h.worker = SearchWorker::with_runner(held);
+        h.wait = false;
+        h.pick("+ Add filter", "tag is");
+        let r = h.edits()[0];
+        h.click_at(r.center());
+        // the first request is held; the vault changes; the form asks again for the new state
+        h.note("d.md", "#Zed");
+        h.frames(2);
+        RELEASE.store(true, std::sync::atomic::Ordering::SeqCst);
+        drain(&mut h);
+        assert!(h.listed().contains(&"Zed".to_string()), "the list is of the newer state: {:?}", h.listed());
+        let stamp = (h.vault.uid, h.vault.generation);
+        assert_eq!(h.st.complete.vocab_stamp(), Some(stamp));
+    }
+
+    // spec: QUERY-030
+    #[test]
+    fn query_030_a_form_that_is_dropped_gives_its_queue_back_and_cancels_its_build() {
+        use std::sync::atomic::Ordering;
+        static SAW_CANCEL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        static STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        fn noting(_: &mut crate::search_all::worker::Conns, _: &crate::search_all::Request, cancel: &std::sync::atomic::AtomicBool) -> Option<crate::search_all::Found> {
+            STARTED.store(true, Ordering::SeqCst);
+            while !cancel.load(Ordering::SeqCst) {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            SAW_CANCEL.store(true, Ordering::SeqCst);
+            None
+        }
+        let mut h = vault_host();
+        h.worker = SearchWorker::with_runner(noting);
+        h.wait = false;
+        for _ in 0..4 {
+            // a form is opened (as a lane popover is) and its build is on its way ...
+            h.st = State::default();
+            h.pick("+ Add filter", "tag is");
+            let r = h.edits()[0];
+            h.click_at(r.center());
+            assert!(h.worker.busy());
+            while !STARTED.swap(false, Ordering::SeqCst) {
+                std::thread::yield_now();
+            }
+            // ... and the form is dropped: the build is given up and the queue is forgotten
+            h.st = State::default();
+            h.frames(2);
+            while h.worker.busy() {
+                h.worker.begin_frame(&h.ctx);
+                std::thread::yield_now();
+            }
+            assert!(SAW_CANCEL.swap(false, Ordering::SeqCst), "the build was told to stop");
+            assert_eq!(h.worker.queues(), 0, "no queue is left behind");
+        }
     }
 }

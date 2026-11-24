@@ -4,69 +4,17 @@
 //! is laid out below the row, not in a window of its own), so it is inside the popover of a lane and
 //! the window of the picker, and a click on it is a click in the form.
 
-use super::key_ok;
+use super::vocab::Vocab;
 use crate::link_assist::{down_key, up_key};
-use crate::markdown;
+use crate::search_all::{Lease, Request, SearchWorker, Snapshot};
+use crate::theme;
 use crate::vault::Vault;
 use eframe::egui::{self, Id, Key, Modifiers, Rect, RichText, Ui};
 use egui::text::{CCursor, CCursorRange};
-use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 /// The most the list shows before it scrolls.
 const MAX_HEIGHT: f32 = 170.0;
-
-/// The properties Shale stamps on a note: a day and a time is no value to filter for (equality).
-const STAMPS: [&str; 2] = ["created", "modified"];
-
-/// What the vault knows: the tags, the names of the properties and, for each, the values that stand
-/// in the front matter of the notes. Every list is sorted without regard to case.
-#[derive(Default)]
-struct Vocab {
-    tags: Vec<String>,
-    keys: Vec<String>,
-    values: HashMap<String, Vec<String>>,
-}
-
-/// Sort without regard to case (then by case, so that the order is the same every time) and drop
-/// the entries that are the same word in another case.
-fn tidy(set: HashSet<String>) -> Vec<String> {
-    let mut v: Vec<String> = set.into_iter().collect();
-    v.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| a.cmp(b)));
-    v.dedup_by(|a, b| a.to_lowercase() == b.to_lowercase());
-    v
-}
-
-impl Vocab {
-    /// Read the vault's tags (as indexed) and the front matter of its notes. A property's name is
-    /// one the language reads (`key_ok`), and not `created` or `modified`; a value is one a query
-    /// can say (no quote, not starting with `//`). A list value gives one entry for each item, as
-    /// the query matcher reads it.
-    fn of(vault: &Vault) -> Vocab {
-        let mut tags = HashSet::new();
-        let mut keys = HashSet::new();
-        let mut values: HashMap<String, HashSet<String>> = HashMap::new();
-        for note in vault.notes.iter().filter(|(p, _)| !vault.is_shadow_copy(p)).map(|(_, n)| n) {
-            tags.extend(note.tags.iter().cloned());
-            for (key, items) in markdown::front_matter_values(&note.text) {
-                if !key_ok(&key) || STAMPS.contains(&key.to_ascii_lowercase().as_str()) {
-                    continue;
-                }
-                let seen = values.entry(key.clone()).or_default();
-                seen.extend(items.iter().map(|v| v.trim()).filter(|v| !v.is_empty() && !v.contains('"') && !v.starts_with("//")).map(str::to_string));
-                keys.insert(key);
-            }
-        }
-        Vocab { tags: tidy(tags), keys: tidy(keys), values: values.into_iter().map(|(k, v)| (k, tidy(v))).collect() }
-    }
-
-    fn entries(&self, slot: Slot, key: &str) -> &[String] {
-        match slot {
-            Slot::Tag => &self.tags,
-            Slot::Key => &self.keys,
-            Slot::Value => self.values.get(key).map_or(&[][..], Vec::as_slice),
-        }
-    }
-}
 
 /// Which field of a row has a list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -115,7 +63,13 @@ pub(super) struct Spec<'a> {
 /// The state of the lists of one form: at most one field has its list.
 #[derive(Default)]
 pub struct Complete {
-    vocab: Option<((u64, u64), Vocab)>,
+    /// what the vault knew when it was last built, and for which state of the vault (it is shown
+    /// while a newer one is built)
+    vocab: Option<((u64, u64), Arc<Vocab>)>,
+    /// the request on the search worker (QUERY-030): for which state of the vault, and its number
+    asked: Option<((u64, u64), u64)>,
+    /// the queue of this form on the worker
+    queue: Option<Lease>,
     /// the field the list belongs to: the id of its text box, the row, which of its fields
     field: Option<(Id, usize, Slot)>,
     /// Esc or a pick closed it; typing in the field or coming back to it opens it
@@ -141,9 +95,43 @@ fn cursor_to(ctx: &egui::Context, id: Id, chars: usize) {
 }
 
 impl Complete {
-    /// Before the rows: what was shown is what the keys of this frame are for.
-    pub(super) fn begin(&mut self) {
+    /// Before the rows: what was shown is what the keys of this frame are for. A vocabulary that
+    /// was needed once is built again, in the background, when the vault changed (QUERY-030).
+    pub(super) fn begin(&mut self, vault: &Vault, worker: &mut SearchWorker) {
         self.was = std::mem::take(&mut self.shown);
+        if self.vocab.is_some() || self.asked.is_some() {
+            self.sync(vault, worker);
+        }
+    }
+
+    /// Ask the search worker for the vocabulary of the vault as it is now, when it is not there or
+    /// on its way, and take it in when it has come (QUERY-030). A request for an older state of the
+    /// vault is replaced at once by the new one, so its answer is never used.
+    fn sync(&mut self, vault: &Vault, worker: &mut SearchWorker) {
+        let stamp = (vault.uid, vault.generation);
+        let queue = self.queue.get_or_insert_with(|| worker.lease()).slot;
+        if self.asked.is_some_and(|(at, _)| at != stamp) || (self.asked.is_none() && self.vocab.as_ref().map(|v| v.0) != Some(stamp)) {
+            let id = worker.submit(queue, Request::vocabulary(Snapshot::of(vault)));
+            self.asked = Some((stamp, id));
+        }
+        let Some((at, id)) = self.asked else { return };
+        if let Some(vocab) = worker.take(queue, id).and_then(|f| f.vocab) {
+            self.vocab = Some((at, vocab));
+        } else if worker.gave_up(queue, id) {
+            // (a build that ended without an answer is not asked again for the same state)
+            let old = self.vocab.take().map(|v| v.1);
+            self.vocab = Some((at, old.unwrap_or_default()));
+        } else {
+            return;
+        }
+        self.asked = None;
+        // (what was listed was made from the old vocabulary)
+        self.made_for = None;
+    }
+
+    /// Is the first vocabulary on its way, with nothing to list until it comes?
+    fn loading(&self) -> bool {
+        self.vocab.is_none() && self.asked.is_some()
     }
 
     /// The keys of the open list, before its field is drawn; true when one took an entry into `value`.
@@ -184,7 +172,7 @@ impl Complete {
     }
 
     /// A text box of a row with the list of its slot. True when `value` changed.
-    pub(super) fn field(&mut self, ui: &mut Ui, vault: &Vault, spec: &Spec, value: &mut String) -> bool {
+    pub(super) fn field(&mut self, ui: &mut Ui, vault: &Vault, worker: &mut SearchWorker, spec: &Spec, value: &mut String) -> bool {
         let id = ui.scope_id().with(("complete", spec.slot as u8));
         let mut changed = self.take_keys(ui, id, value);
         let r = ui.add(egui::TextEdit::singleline(value).id(id).hint_text(spec.hint).desired_width(spec.width));
@@ -201,8 +189,8 @@ impl Complete {
         if self.field.map(|f| f.0) == Some(id) {
             let over = self.rect.zip(ui.input(|i| i.pointer.hover_pos())).is_some_and(|(r, p)| r.contains(p));
             if (r.has_focus() || (over && self.was)) && !self.closed {
-                self.make(vault, spec, value);
-                self.shown = !self.items.is_empty();
+                self.make(vault, worker, spec, value);
+                self.shown = !self.items.is_empty() || self.loading();
             } else if !r.has_focus() && !over {
                 self.field = None;
             }
@@ -211,14 +199,12 @@ impl Complete {
     }
 
     /// List what fits `typed`, when that is not already what is listed.
-    fn make(&mut self, vault: &Vault, spec: &Spec, typed: &str) {
+    fn make(&mut self, vault: &Vault, worker: &mut SearchWorker, spec: &Spec, typed: &str) {
+        self.sync(vault, worker);
         let stamp = (vault.uid, vault.generation);
         let made_for = (spec.slot, spec.key.to_string(), typed.to_string(), stamp);
         if self.made_for.as_ref() == Some(&made_for) {
             return;
-        }
-        if self.vocab.as_ref().map(|v| v.0) != Some(stamp) {
-            self.vocab = Some((stamp, Vocab::of(vault)));
         }
         let all = self.vocab.as_ref().map_or(&[][..], |v| v.1.entries(spec.slot, spec.key));
         self.items = narrow(typed, all);
@@ -245,6 +231,9 @@ impl Complete {
         let mut clicked = None;
         let frame = egui::Frame::popup(ui.style()).show(ui, |ui| {
             egui::ScrollArea::vertical().id_salt(("form-complete", at)).max_height(MAX_HEIGHT).auto_shrink([false, true]).show(ui, |ui| {
+                if self.items.is_empty() {
+                    ui.label(RichText::new("Loading…").color(theme::palette().muted));
+                }
                 for (i, entry) in self.items.iter().enumerate() {
                     let r = ui.selectable_label(self.sel == Some(i), RichText::new(entry));
                     if self.sel == Some(i) && std::mem::take(&mut self.moved) {
@@ -265,6 +254,18 @@ impl Complete {
         self.shown = false;
         self.sel = None;
         Some((slot, picked))
+    }
+
+    /// For which state of the vault the vocabulary was built (tests).
+    #[cfg(test)]
+    pub(super) fn vocab_stamp(&self) -> Option<(u64, u64)> {
+        self.vocab.as_ref().map(|v| v.0)
+    }
+
+    /// Does the list say "Loading…" (tests)?
+    #[cfg(test)]
+    pub(super) fn is_loading(&self) -> bool {
+        self.shown && self.items.is_empty() && self.loading()
     }
 
     /// The entries the list shows now (tests).

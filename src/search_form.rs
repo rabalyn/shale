@@ -11,6 +11,7 @@
 mod complete;
 pub mod sort;
 mod view;
+pub mod vocab;
 
 pub use complete::list_open;
 pub use view::{show, Opts};

@@ -339,7 +339,7 @@ fn query_029_the_picker_form_lists_the_tags_and_esc_closes_the_list_before_the_p
     assert!(w.has("tag is"), "the choice of the menu added the row, the picker stays open");
     let field = w.edits()[2];
     w.hl.click(&mut w.app, field.center(), PointerButton::Primary);
-    w.hl.frames(&mut w.app, 2);
+    w.hl.settle(&mut w.app);
     assert!(crate::search_form::list_open(w.hl.ctx()), "the field lists the tags of the vault");
     w.press(Key::Escape, Modifiers::NONE);
     assert!(w.app.modal.is_some(), "Esc closed the list only");
@@ -363,14 +363,41 @@ fn query_029_the_sidebar_form_lists_the_property_names_and_their_values() {
     w.pick("+ Add filter", "property is");
     let name = w.edits()[1];
     w.hl.click(&mut w.app, name.center(), PointerButton::Primary);
-    w.hl.frames(&mut w.app, 2);
+    w.hl.settle(&mut w.app);
     assert!(w.has("status"), "the names of the properties of the vault");
     w.press(Key::ArrowDown, Modifiers::NONE);
     w.press(Key::Enter, Modifiers::NONE);
     let value = w.edits()[2];
     w.hl.click(&mut w.app, value.center(), PointerButton::Primary);
-    w.hl.frames(&mut w.app, 2);
+    w.hl.settle(&mut w.app);
     assert!(w.has("doing") && w.has("done"), "the values of status");
     w.click("done");
     assert_eq!(w.app.search.query, "status:done");
+}
+
+// spec: QUERY-030, DEV-041
+#[test]
+fn query_030_settle_waits_for_the_vocabulary_and_the_list_says_loading_until_then() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static RELEASE: AtomicBool = AtomicBool::new(false);
+    fn held(c: &mut crate::search_all::worker::Conns, req: &crate::search_all::Request, cancel: &AtomicBool) -> Option<crate::search_all::Found> {
+        while !RELEASE.load(Ordering::SeqCst) {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        crate::search_all::worker::run_search(c, req, cancel)
+    }
+    let mut w = W::new("vocabulary-settle");
+    w.app.search_worker.set_runner(held);
+    w.open_sidebar();
+    w.click("\u{2699}");
+    w.pick("+ Add filter", "tag is");
+    let field = w.edits()[1];
+    w.hl.click(&mut w.app, field.center(), PointerButton::Primary);
+    assert!(w.says("Loading\u{2026}"), "the list waits for the worker");
+    assert!(w.app.busy_jobs().contains(&"the search"), "a settling test waits for the vocabulary");
+    let later = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    assert!(w.app.busy.list_at(later).is_empty(), "and it is no task of the busy indicator");
+    RELEASE.store(true, Ordering::SeqCst);
+    w.hl.settle(&mut w.app);
+    assert!(!w.says("Loading\u{2026}") && w.has("todo"), "the tags are listed when it has settled");
 }

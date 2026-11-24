@@ -10,6 +10,8 @@
 //!   of a board): a newer query in a slot sets the cancel flag of the older one, which the search
 //!   checks per line, and a result whose number is not the latest of its slot is dropped
 //!   (QUERY-017).
+//! - The same thread builds the vocabulary of the lists of the filter form (QUERY-030): a request of
+//!   a queue of its own that answers with the tags and properties of the snapshot, no hits.
 //! - The window never waits for the thread: [`SearchWorker::take`] gives a list when it is there
 //!   (QUERY-018), and [`SearchWorker::busy`] tells `Headless::settle` that a query is on its way
 //!   (QUERY-020).
@@ -19,15 +21,16 @@ use super::query::Checked;
 use super::{search_in, Ctx, Found, Query, Snapshot};
 use crate::busy::{self, Busy, Cancel, Key, Task};
 use crate::mail::db;
+use crate::search_form::vocab::Vocab;
 use crate::search_sources::{Prefixes, Selection};
 use crate::social::post_index::{Home, PostIndex};
 use eframe::egui;
 use rusqlite::Connection;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /// A queue of the worker: a newer query of a slot gives up the older one of the same slot, and
 /// queries of other slots are not touched.
@@ -56,6 +59,25 @@ impl Slot {
     pub fn lane(n: usize) -> Slot {
         Slot(Slot::LANES + n as u64)
     }
+
+    /// A queue of its own for the vocabulary of one form (QUERY-030), above the lanes: a newer
+    /// request of a form gives up its older one and no other queue.
+    fn vocabulary() -> Slot {
+        static NEXT: AtomicU64 = AtomicU64::new(1 << 32);
+        Slot(NEXT.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+/// A queue of one owner, handed out by [`SearchWorker::lease`].
+pub struct Lease {
+    pub slot: Slot,
+    retired: Arc<Mutex<Vec<Slot>>>,
+}
+
+impl Drop for Lease {
+    fn drop(&mut self) {
+        self.retired.lock().unwrap_or_else(|e| e.into_inner()).push(self.slot);
+    }
 }
 
 /// The task of a search in the busy registry, once per queue (JOB-038).
@@ -76,6 +98,8 @@ pub struct Request {
     snapshot: Arc<Snapshot>,
     /// a lane: the notes the checked query matches, as a whole each, and no hits (QUERY-004)
     lane: bool,
+    /// the vocabulary of the notes for the lists of the filter form (QUERY-030), and no hits
+    vocab: bool,
     text: String,
     note_lines: usize,
     limit: usize,
@@ -96,6 +120,7 @@ impl Request {
         Request {
             snapshot: Arc::new(Snapshot::of(ctx.vault)),
             lane: false,
+            vocab: false,
             text: query.text.to_string(),
             note_lines: query.note_lines,
             limit: query.limit,
@@ -110,7 +135,25 @@ impl Request {
     /// The question one lane of a board asks (QUERY-019): the notes of `snapshot` that `checked`
     /// matches. The snapshot is shared by the lanes of one vault state.
     pub fn lane(snapshot: Arc<Snapshot>, checked: Checked) -> Request {
-        Request { snapshot, lane: true, text: checked.text.clone(), note_lines: 0, limit: 0, prefixes: Prefixes::default(), shown: Selection::ALL, checked: Some(checked), mail: None, posts: Home::Memory("lane".into()) }
+        Request { snapshot, lane: true, vocab: false, text: checked.text.clone(), note_lines: 0, limit: 0, prefixes: Prefixes::default(), shown: Selection::ALL, checked: Some(checked), mail: None, posts: Home::Memory("lane".into()) }
+    }
+
+    /// The question the lists of the filter form ask (QUERY-030): what the tags and the front matter
+    /// of the notes of `snapshot` say.
+    pub fn vocabulary(snapshot: Snapshot) -> Request {
+        Request {
+            snapshot: Arc::new(snapshot),
+            lane: false,
+            vocab: true,
+            text: String::new(),
+            note_lines: 0,
+            limit: 0,
+            prefixes: Prefixes::default(),
+            shown: Selection::ALL,
+            checked: None,
+            mail: None,
+            posts: Home::Memory("vocabulary".into()),
+        }
     }
 
     fn query(&self) -> Query<'_> {
@@ -142,9 +185,12 @@ fn post_reader<'a>(kept: &'a mut Option<(Home, PostIndex)>, home: &Home) -> Opti
 }
 
 /// Run one request with the connections of the thread. None when it was given up (QUERY-017).
-fn run_search(conns: &mut Conns, req: &Request, cancel: &AtomicBool) -> Option<Found> {
+pub(crate) fn run_search(conns: &mut Conns, req: &Request, cancel: &AtomicBool) -> Option<Found> {
     if req.lane {
         return run_lane(req, cancel);
+    }
+    if req.vocab {
+        return Vocab::of(&req.snapshot, cancel).map(|v| Found { vocab: Some(Arc::new(v)), ..Found::default() });
     }
     let Conns { mail, posts } = conns;
     let mail = req.mail.as_deref().and_then(|p| mail_reader(mail, p));
@@ -206,6 +252,8 @@ pub struct SearchWorker {
     ready: HashMap<Slot, (u64, Found)>,
     /// queries whose reply has not been read yet
     in_flight: usize,
+    /// the queues whose owner is gone, to forget with the next frame (QUERY-030)
+    retired: Arc<Mutex<Vec<Slot>>>,
 }
 
 impl Default for SearchWorker {
@@ -216,7 +264,7 @@ impl Default for SearchWorker {
 
 impl SearchWorker {
     pub(crate) fn with_runner(run: Runner) -> SearchWorker {
-        SearchWorker { thread: None, run, repaint: egui::Context::default(), next: 0, latest: HashMap::new(), given_up: HashMap::new(), busy: Busy::default(), ready: HashMap::new(), in_flight: 0 }
+        SearchWorker { thread: None, run, repaint: egui::Context::default(), next: 0, latest: HashMap::new(), given_up: HashMap::new(), busy: Busy::default(), ready: HashMap::new(), in_flight: 0, retired: Arc::default() }
     }
 
     /// Tests: another runner for the worker the window was built with, which keeps its registry
@@ -242,6 +290,10 @@ impl SearchWorker {
 
     /// Read the replies: keep the newest of each slot, drop the others (QUERY-017).
     fn pump(&mut self) {
+        let retired = std::mem::take(&mut *self.retired.lock().unwrap_or_else(|e| e.into_inner()));
+        for slot in retired {
+            self.forget(slot);
+        }
         let Some(thread) = &self.thread else { return };
         while let Ok(r) = thread.replies.try_recv() {
             self.in_flight -= 1;
@@ -285,6 +337,23 @@ impl SearchWorker {
         // (the thread ends only when this side is dropped: a send does not fail)
         let _ = thread.jobs.send(Job { slot, id, request, cancel, repaint: self.repaint.clone() });
         id
+    }
+
+    /// A queue of its own, for as long as the lease lives (QUERY-030): when it is dropped the
+    /// worker forgets the queue with its next frame, and gives up its query on its way.
+    pub fn lease(&self) -> Lease {
+        Lease { slot: Slot::vocabulary(), retired: self.retired.clone() }
+    }
+
+    /// Give up the query of the slot and drop everything the worker keeps for it.
+    fn forget(&mut self, slot: Slot) {
+        self.cancel(slot);
+    }
+
+    /// How many queues the worker keeps something for (tests).
+    #[cfg(test)]
+    pub fn queues(&self) -> usize {
+        self.latest.len() + self.ready.len() + self.given_up.len()
     }
 
     /// Give up the query of the slot that is on its way, if any: its answer is dropped.
@@ -369,7 +438,7 @@ mod tests {
 
     /// A request that searches nothing: the runners of the tests only read its text.
     fn bare(text: &str) -> Request {
-        Request { snapshot: Arc::default(), lane: false, text: text.into(), note_lines: 3, limit: 20, prefixes: Prefixes::default(), shown: Selection::ALL, checked: None, mail: None, posts: Home::Memory("none".into()) }
+        Request { snapshot: Arc::default(), lane: false, vocab: false, text: text.into(), note_lines: 3, limit: 20, prefixes: Prefixes::default(), shown: Selection::ALL, checked: None, mail: None, posts: Home::Memory("none".into()) }
     }
 
     fn titles(f: &Found) -> Vec<String> {
