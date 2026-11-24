@@ -28,6 +28,10 @@ struct W {
 impl W {
     /// A window of this size on a vault with the note Trip in three versions, open in one pane.
     fn new(tag: &str, size: Vec2) -> W {
+        // the saves below stamp `modified:` with the clock; a second boundary between the two would add
+        // a changed line to the newest change (+3 instead of +2), so the clock stands still (at today,
+        // for the "Today" heading of the list)
+        let _clock = crate::calendar::time::pin_now(crate::calendar::time::now());
         let mut t = setup(tag, false);
         write(&t.vault, "Trip.md", &format!("{PROPS}{V1}"));
         t.app.vault.as_mut().unwrap().rescan();
