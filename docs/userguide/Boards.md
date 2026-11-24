@@ -138,7 +138,8 @@ card further away.
 # Dependencies
 
 A note says what it waits for in its front matter: `blocked-by: [[Foundation]], [[Permit]]`, next to `due:` and
-`start:`. The links are read by name, like links in the vault.
+`start:`. The links are read by name, like links in the vault. You can write the line by hand or set the blockers in
+the board (below).
 
 ![[board-dependencies.png]]
 
@@ -154,6 +155,21 @@ A note says what it waits for in its front matter: `blocked-by: [[Foundation]], 
   earlier due day comes first, then the higher priority, then the title. Pinned cards stay on top.
 - Cards in a **cycle** (A waits for B, B for A) cannot be ordered. They are marked **circular** and listed after
   the others, with the cards that only wait for them.
+- **Set a blocker without editing the note.** The peek of a card has two lines under its title: **Blocked by** (the
+  notes it waits for) and **Blocks** (the notes that wait for it), each with a **✕** that takes the link away.
+  **+ Add blocker** and **+ Add blocked card** open a field: type part of a note's name, the list shows the cards of the
+  board first and then other notes (↓ / ↑ and Enter, or a click, choose; Esc closes the field, the next Esc the peek).
+  The link is written to the **waiting** note's `blocked-by:`, next to its other blockers, in its front matter; the
+  last ✕ removes the line. The note's `modified:` day does not change, and Ctrl+Z in the note undoes it.
+![[board-blockers.png]]
+
+- **Drag to connect**: the selected card has a small round handle at its top right. Drag it onto another card; the
+  hint says "A blocks B" and the arrow runs from the blocker to the card that waits, as the selected card shows it. Esc
+  cancels. A **right click** on a card has **Add blocker…**, **Add blocked card…** and, when it has some, **Remove
+  blocker ▸** and **Remove blocked card ▸**.
+- A card cannot block itself and a blocker is not added twice. A blocker that makes a **cycle** is still added; Shale
+  tells you, and the cards show **circular**. Names that `[[ ]]` cannot hold (a `#` in a mail note's name) are
+  written as a markdown link, `[Mail #12](<Inbox/Mail %2312.md>)`, which `blocked-by:` reads too.
 - The **▾** menu next to **+ Add lane** has the preset **My dependency chain**: a lane with
   `query: blocked OR blocking` and `sort: dependencies`. Put it as the last lane: a card is in the first lane that
   matches it.

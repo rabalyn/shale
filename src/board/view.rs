@@ -65,6 +65,18 @@ pub enum Act {
     OpenTab(PathBuf),
     /// a card was dropped on a lane (BOARD-019 to BOARD-022)
     Drop(Dropped),
+    /// `blocker` blocks `waiting`: the handle of a card was dragged onto another (BOARD-045)
+    Block {
+        blocker: PathBuf,
+        waiting: PathBuf,
+    },
+    /// `blocker` does not block `waiting` any more (the card's menu, BOARD-046)
+    Unblock {
+        blocker: PathBuf,
+        waiting: PathBuf,
+    },
+    /// the peek of the card with the field of "+ Add blocker" (or, with `true`, "+ Add blocked card") open (BOARD-046)
+    AddBlock(PathBuf, Rect, bool),
     /// a note, drawing or folder of the file list was dropped on the board (BOARD-035 to BOARD-037)
     TreeDrop(TreeDropped),
     /// the Advanced switch of the form is a setting (QUERY-026)
@@ -203,6 +215,12 @@ pub struct State {
     drag: Option<(PathBuf, usize)>,
     /// where the dragged card would land now: the lane and the place among its cards
     pub(crate) over: Option<(usize, usize)>,
+    /// the card whose link handle is dragged: the blocker that is being connected (BOARD-045)
+    connect: Option<PathBuf>,
+    /// the card the link is over now
+    pub(crate) connect_over: Option<PathBuf>,
+    /// where the handle of the selected card was drawn in this frame
+    pub(crate) handle: Option<Rect>,
     /// where the lanes were drawn in this frame
     places: Vec<Place>,
     /// the arrows drawn in this frame (BOARD-025)
@@ -254,7 +272,7 @@ impl State {
 
     /// Is a card being dragged? Esc then cancels the drag and nothing else.
     pub fn dragging(&self) -> bool {
-        self.drag.is_some()
+        self.drag.is_some() || self.connect.is_some()
     }
 
     /// Is a drag from the file list over the board in this frame? The window then leaves the drag to the board.
@@ -317,6 +335,7 @@ pub fn show(ui: &mut Ui, st: &mut State, data: &Data, env: &mut Env) -> Vec<Act>
     }
     let height = ui.available_height();
     st.places.clear();
+    st.handle = None;
     st.lane_offsets.resize(data.lanes.len(), 0.0);
     let mut area = egui::ScrollArea::horizontal().id_salt("board-lanes").auto_shrink([false, false]);
     if st.auto.board != 0.0 {
@@ -338,6 +357,7 @@ pub fn show(ui: &mut Ui, st: &mut State, data: &Data, env: &mut Env) -> Vec<Act>
         paint_arrow(ui, *a);
     }
     drag_end(ui, st, data, &mut acts);
+    connect_end(ui, st, data, &mut acts);
     tree_drag_end(ui, st, data, env, &mut acts);
     confirm_delete(ui.ctx(), st, &mut acts);
     acts
@@ -397,6 +417,66 @@ fn drag_end(ui: &Ui, st: &mut State, data: &Data, acts: &mut Vec<Act>) {
         }
         st.drag = None;
         st.over = None;
+    }
+}
+
+/// Where the card `rel` was drawn in this frame.
+fn card_rect(places: &[Place], data: &Data, rel: &Path) -> Option<Rect> {
+    places.iter().zip(data.lanes).find_map(|(p, lane)| lane.cards.iter().position(|c| c.rel == rel).and_then(|c| p.cards.get(c).copied()))
+}
+
+/// The card under `pos` that shows its cards there (a card scrolled out of its lane is not).
+fn card_at(places: &[Place], data: &Data, pos: Pos2) -> Option<PathBuf> {
+    places.iter().zip(data.lanes).find(|(p, _)| p.body.contains(pos)).and_then(|(p, lane)| p.cards.iter().position(|r| r.contains(pos)).and_then(|c| lane.cards.get(c)).map(|c| c.rel.clone()))
+}
+
+/// While a link is dragged from the handle of the selected card (BOARD-045): an arrow runs from the
+/// card to the pointer, and a hint says what letting go makes, "A blocks B". Letting go on another
+/// card makes that card wait for this one; Esc, and letting go anywhere else, do nothing.
+fn connect_end(ui: &Ui, st: &mut State, data: &Data, acts: &mut Vec<Act>) {
+    let Some(from) = st.connect.clone() else {
+        st.connect_over = None;
+        return;
+    };
+    if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+        st.connect = None;
+        st.connect_over = None;
+        return;
+    }
+    let pos = ui.input(|i| i.pointer.interact_pos());
+    st.connect_over = pos.and_then(|p| card_at(&st.places, data, p));
+    let title = |rel: &Path| data.lanes.iter().flat_map(|l| &l.cards).find(|c| c.rel == rel).map(|c| c.title.clone()).unwrap_or_default();
+    let ctx = ui.ctx();
+    ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
+    let pal = theme::palette();
+    let painter = ctx.layer_painter(LayerId::new(Order::Tooltip, Id::unique("board-connect")));
+    if let (Some(p), Some(rect)) = (pos, card_rect(&st.places, data, &from)) {
+        let start = Pos2::new(if p.x < rect.center().x { rect.left() } else { rect.right() }, rect.center().y);
+        let end = match st.connect_over.as_ref().and_then(|o| card_rect(&st.places, data, o)) {
+            Some(target) => Pos2::new(if p.x < target.center().x { target.left() } else { target.right() }, target.center().y),
+            None => p,
+        };
+        let (back, line) = ((start - end).normalized(), Stroke::new(2.0, pal.accent));
+        painter.line_segment([start, end], line);
+        for angle in [0.45_f32, -0.45] {
+            let (sin, cos) = angle.sin_cos();
+            painter.line_segment([end, end + Vec2::new(back.x * cos - back.y * sin, back.x * sin + back.y * cos) * 10.0], line);
+        }
+        let text = match st.connect_over.as_ref() {
+            Some(o) if *o == from => format!("{} cannot block itself", title(&from)),
+            Some(o) => format!("{} blocks {}", title(&from), title(o)),
+            None => format!("{} blocks …", title(&from)),
+        };
+        let galley = painter.layout_no_wrap(text, egui::FontId::proportional(13.0), pal.text_strong);
+        let hint = Rect::from_min_size(p + Vec2::new(14.0, 10.0), galley.size() + Vec2::new(16.0, 10.0));
+        painter.rect(hint, CornerRadius::same(6), pal.bg_primary.gamma_multiply(0.95), Stroke::new(1.0, pal.accent), egui::StrokeKind::Inside);
+        painter.galley(hint.min + Vec2::new(8.0, 5.0), galley, pal.text_strong);
+    }
+    if ui.input(|i| i.pointer.any_released()) {
+        if let Some(waiting) = st.connect_over.take().filter(|o| *o != from) {
+            acts.push(Act::Block { blocker: from, waiting });
+        }
+        st.connect = None;
     }
 }
 
@@ -861,6 +941,10 @@ fn card_ui(ui: &mut Ui, lane: usize, card: &Card, data: &Data, st: &mut State, e
     if resp.drag_started() {
         st.drag = Some((card.rel.clone(), lane));
     }
+    if selected && !card.drawing {
+        link_handle(ui, rect, card, st);
+    }
+    resp.context_menu(|ui| card_menu(ui, rect, card, env.vault, acts));
     if resp.clicked() {
         if ui.input(|i| i.modifiers.ctrl || i.modifiers.command) {
             acts.push(Act::OpenTab(card.rel.clone()));
@@ -869,6 +953,59 @@ fn card_ui(ui: &mut Ui, lane: usize, card: &Card, data: &Data, st: &mut State, e
         }
     }
     rect
+}
+
+/// The handle at the top right of the selected card: dragging it onto another card makes that card wait
+/// for this one (BOARD-045).
+fn link_handle(ui: &mut Ui, card: Rect, c: &Card, st: &mut State) {
+    let pal = theme::palette();
+    let rect = Rect::from_center_size(Pos2::new(card.right() - 14.0, card.top() + 14.0), Vec2::splat(18.0));
+    st.handle = Some(rect);
+    let resp = ui.interact(rect, ui.scope_id().with(("board-link-handle", &c.rel)), Sense::drag()).on_hover_cursor(egui::CursorIcon::Crosshair).on_hover_text("Drag onto another card: that card waits for this one");
+    let color = if resp.hovered() || resp.dragged() { pal.accent } else { pal.muted };
+    let painter = ui.painter();
+    painter.circle_stroke(rect.center(), 7.0, Stroke::new(1.5, color));
+    painter.circle_filled(rect.center(), 2.5, color);
+    if resp.drag_started() {
+        st.connect = Some(c.rel.clone());
+    }
+}
+
+/// The menu of a card (BOARD-046): add a blocker or a blocked card, take one away.
+fn card_menu(ui: &mut Ui, rect: Rect, card: &Card, vault: &Vault, acts: &mut Vec<Act>) {
+    let title = |rel: &Path| vault.file(rel).map(|f| f.title()).unwrap_or_else(|| rel.to_string_lossy().into_owned());
+    // (a drawing has no front matter: it neither waits nor is waited for)
+    if card.drawing {
+        return;
+    }
+    if ui.button("Add blocker…").on_hover_text("A note this card waits for").clicked() {
+        acts.push(Act::AddBlock(card.rel.clone(), rect, false));
+        ui.close();
+    }
+    if !card.dep.blockers.is_empty() {
+        ui.menu_button("Remove blocker", |ui| {
+            for b in &card.dep.blockers {
+                if ui.button(title(b)).clicked() {
+                    acts.push(Act::Unblock { blocker: b.clone(), waiting: card.rel.clone() });
+                    ui.close();
+                }
+            }
+        });
+    }
+    if ui.button("Add blocked card…").on_hover_text("A card that waits for this one").clicked() {
+        acts.push(Act::AddBlock(card.rel.clone(), rect, true));
+        ui.close();
+    }
+    if !card.dep.dependants.is_empty() {
+        ui.menu_button("Remove blocked card", |ui| {
+            for w in &card.dep.dependants {
+                if ui.button(title(w)).clicked() {
+                    acts.push(Act::Unblock { blocker: card.rel.clone(), waiting: w.clone() });
+                    ui.close();
+                }
+            }
+        });
+    }
 }
 
 #[cfg(test)]

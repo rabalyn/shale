@@ -3,9 +3,12 @@
 //! when the view changes it. The pieces are in `src/board/`.
 
 use super::{handle_editor_action, ShaleApp, View};
+use crate::board::blockers;
+use crate::board::deps::Graph;
 use crate::board::drag::{self, Dropped, TreeDropped};
 use crate::board::file::{self, Board, Chip, Key};
 use crate::board::lanes::PRESETS;
+use crate::board::links::{Edit, Lists, Picker};
 use crate::board::peek::{Peek, With};
 use crate::board::view::{self, Act, Data, Env};
 use crate::link_preview::{clamp_size, size_of};
@@ -146,6 +149,16 @@ impl ShaleApp {
                 self.open(&rel, true);
             }
             Act::Drop(d) => self.drop_card(d),
+            Act::Block { blocker, waiting } => self.block(&blocker, &waiting),
+            Act::Unblock { blocker, waiting } => self.unblock(&blocker, &waiting),
+            Act::AddBlock(rel, anchor, blocked) => {
+                self.boards.selected = Some(rel.clone());
+                self.open_peek(rel.clone(), anchor, ctx);
+                let worker = &self.search_worker;
+                if let Some(peek) = self.boards.peek.as_mut().filter(|p| p.rel == rel) {
+                    peek.picker = Some(Picker::new(worker, blocked));
+                }
+            }
             Act::TreeDrop(d) => self.drop_from_tree(d),
             Act::SaveSettings => self.save_config(),
         }
@@ -218,6 +231,61 @@ impl ShaleApp {
             });
         }
         true
+    }
+
+    /// `blocker` blocks `waiting` (BOARD-041): its link is added to the `blocked-by:` of the waiting
+    /// note, which keeps its other blockers and its formatting. A card cannot block itself, a blocker
+    /// that is there is not added again (BOARD-043), and one that closes a cycle is added with a hint.
+    /// The note is changed as a drop changes it (`edit_note_text`): the checked save, one undo step,
+    /// `modified:` as it was.
+    pub(crate) fn block(&mut self, blocker: &Path, waiting: &Path) {
+        let Some(vault) = self.vault.as_ref() else { return };
+        let title = |rel: &Path| vault.file(rel).map(|f| f.title()).unwrap_or_else(|| crate::vault::rel_to_string(rel));
+        if blocker == waiting {
+            self.toast(format!("“{}” cannot block itself", title(blocker)));
+            return;
+        }
+        let (Some(key), Some(seen)) = (blockers::key(vault, blocker), vault.notes.get(waiting).map(|n| n.text.clone())) else {
+            self.toast(format!("“{}” and “{}” must both be notes: only a note has a blocked-by line", title(blocker), title(waiting)));
+            return;
+        };
+        if !vault.notes.contains_key(blocker) {
+            self.toast(format!("“{}” is no note, so it cannot block", title(blocker)));
+            return;
+        }
+        let Some(new) = blockers::add(&seen, &blockers::link(vault, waiting, blocker), &key) else {
+            self.toast(format!("“{}” is blocked by “{}” already", title(waiting), title(blocker)));
+            return;
+        };
+        let cycle = Graph::new(vault, &std::collections::HashSet::new()).waits_for(blocker, waiting);
+        let (name_blocker, name_waiting) = (title(blocker), title(waiting));
+        self.edit_note_text(waiting, &seen, |_| Some(new.clone()));
+        if !self.names_blocker(waiting, &key, true) {
+            self.toast(format!("“{name_waiting}” changed in the meantime or cannot be written, so the blocker was not added"));
+        } else if cycle {
+            self.toast(format!("“{name_waiting}” now waits for “{name_blocker}”, which already waits for it: a cycle, the cards show “circular”"));
+        }
+    }
+
+    /// Does the note `rel` now name the blocker `key` in its `blocked-by:` (or, with `false`, not any more)? The
+    /// answer after a change, which the note may have been stamped with `created:` besides (VAULT-045).
+    fn names_blocker(&self, rel: &Path, key: &str, named: bool) -> bool {
+        self.vault.as_ref().and_then(|v| v.notes.get(rel)).is_some_and(|n| crate::search_all::deps::blocked_by(&n.text).iter().any(|k| k == key) == named)
+    }
+
+    /// `blocker` does not block `waiting` any more (BOARD-042): its entry leaves the `blocked-by:` of the
+    /// waiting note, and the line goes with the last one.
+    pub(crate) fn unblock(&mut self, blocker: &Path, waiting: &Path) {
+        let Some(vault) = self.vault.as_ref() else { return };
+        let (Some(key), Some(seen)) = (blockers::key(vault, blocker), vault.notes.get(waiting).map(|n| n.text.clone())) else { return };
+        let Some(new) = blockers::remove(&seen, &key) else {
+            self.toast(format!("“{}” does not name “{}” in its blocked-by line (a hand edit?)", crate::vault::rel_to_string(waiting), crate::vault::rel_to_string(blocker)));
+            return;
+        };
+        self.edit_note_text(waiting, &seen, |_| Some(new.clone()));
+        if !self.names_blocker(waiting, &key, false) {
+            self.toast(format!("“{}” changed in the meantime or cannot be written, so the blocker was not removed", crate::vault::rel_to_string(waiting)));
+        }
     }
 
     /// The keys of the boards (BOARD-033) moved the selected card `step` lanes on (1 next, -1 previous): the same as a drop
@@ -340,6 +408,15 @@ impl ShaleApp {
 
     /// Draw the peek and carry out what was done in it (BOARD-013).
     fn boards_peek(&mut self, ctx: &egui::Context) {
+        let Some(board) = self.boards.current.clone() else { return };
+        // (what the card waits for and what waits for it, and the cards the field offers first)
+        let (blockers, dependants, cards) = {
+            let (Some(peek), Some(vault)) = (self.boards.peek.as_ref(), self.vault.as_ref()) else { return };
+            let lanes = self.boards.shown.lanes();
+            let dep = lanes.iter().flat_map(|l| &l.cards).find(|c| c.rel == peek.rel).map(|c| c.dep.clone()).unwrap_or_default();
+            let named = |list: &[PathBuf]| list.iter().map(|r| (r.clone(), vault.file(r).map(|f| f.title()).unwrap_or_default())).collect::<Vec<_>>();
+            (named(&dep.blockers), named(&dep.dependants), lanes.iter().flat_map(|l| l.cards.iter().map(|c| c.rel.clone())).collect::<Vec<_>>())
+        };
         let (Some(peek), Some(vault)) = (self.boards.peek.as_mut(), self.vault.as_ref()) else { return };
         let rel = peek.rel.clone();
         let Some(doc) = self.notes.get_mut(&rel) else {
@@ -350,7 +427,8 @@ impl ShaleApp {
         peek.editor.apply_settings(&self.cfg, &self.vdata.settings.people_dir, &self.media);
         let title = vault.file(&rel).map(|f| f.title()).unwrap_or_default();
         let priority = note_props::priority(&doc.text);
-        let out = peek.show(ctx, With { doc, vault, undo: &mut self.undo, fonts: &fonts, ctrl_to_follow: self.cfg.ctrl_to_follow, title: &title, priority });
+        let lists = Lists { card: &rel, board: &board, blockers: &blockers, dependants: &dependants, cards: &cards };
+        let out = peek.show(ctx, With { doc, vault, undo: &mut self.undo, fonts: &fonts, ctrl_to_follow: self.cfg.ctrl_to_follow, title: &title, priority, lists, worker: &mut self.search_worker });
         if out.changed {
             if let Some(doc) = self.notes.get_mut(&rel) {
                 doc.dirty = true;
@@ -365,6 +443,11 @@ impl ShaleApp {
             // the front matter only: the body is the same, so `modified:` stays (VAULT-046)
             let seen = self.notes.get(&rel).map(|d| d.text.clone()).unwrap_or_default();
             self.edit_note_text(&rel, &seen, |t| Some(note_props::with_priority(t, p)));
+        }
+        match out.edit {
+            Some(Edit::Add { blocker, waiting }) => self.block(&blocker, &waiting),
+            Some(Edit::Remove { blocker, waiting }) => self.unblock(&blocker, &waiting),
+            None => {}
         }
         if let Some(a) = out.action {
             handle_editor_action(&mut self.actions, a, &rel);
@@ -395,7 +478,12 @@ impl ShaleApp {
         if self.boards.view.dragging() {
             return;
         }
-        let Some(peek) = self.boards.peek.as_ref() else { return };
+        let Some(peek) = self.boards.peek.as_mut() else { return };
+        // (Esc in the field of a blocker closes the field only, BOARD-044)
+        if peek.picker.is_some() && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            peek.picker = None;
+            return;
+        }
         let in_insert = peek.editor.vim_enabled && peek.editor.vim.mode != crate::vim::Mode::Normal;
         // (Esc in an open list of the form of a lane closes the list only)
         if !in_insert && !crate::search_form::list_open(ui.ctx()) && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
