@@ -24,6 +24,9 @@ mod align_ui_tests;
 mod app;
 #[cfg(feature = "bench")]
 mod bench;
+mod bibliography;
+#[cfg(test)]
+mod bibliography_tests;
 mod board;
 mod busy;
 mod calendar;

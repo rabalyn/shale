@@ -763,6 +763,30 @@ fn cfg_076_the_import_tab_has_the_leave_out_quoted_setting() {
     assert!(!p.app.cfg.import_leave_out_quoted);
 }
 
+// spec: CFG-079
+#[test]
+fn cfg_079_the_vault_tab_has_the_bibliography_setting_and_says_what_the_file_and_the_open_note_hold() {
+    let mut p =
+        P::with_files("settings-bibliography", &[("refs.bib", "@misc{smith, title = {S}, year = {2000}}\n@misc{jones, title = {J}, year = {2001}}\n@misc{broken, title = {never closed\n"), ("Thesis.md", "Cites [@smith] and [@nobody].\n")]);
+    p.app.open_settings(SettingsTab::Vault);
+    assert!(p.shows(Show::Modals, "Bibliography file"), "the vault tab has the setting");
+    assert!(!p.shows(Show::Modals, "entries"), "nothing is said while no file is set");
+    p.app.vdata.settings.bibliography = "refs.bib".into();
+    p.app.open(std::path::Path::new("Thesis.md"), true);
+    let ctx = p.ctx.clone();
+    for _ in 0..1000 {
+        p.app.bib_tick(&ctx);
+        if !p.app.bib.running() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(p.shows(Show::Modals, "refs.bib: 2 entries, 1 skipped as bad"), "the file: its entries and the bad one that was skipped");
+    assert!(p.shows(Show::Modals, "Thesis.md uses refs.bib and cites 2 keys; not in the bibliography: nobody"), "the open note: its keys and the missing one");
+    p.app.vdata.settings.bibliography = "gone.bib".into();
+    assert!(p.shows(Show::Modals, "The bibliography “gone.bib” is not a file of the vault."));
+}
+
 // spec: CFG-021
 #[test]
 fn set_002_settings_open_on_a_short_page() {

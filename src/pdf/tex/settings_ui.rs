@@ -49,6 +49,8 @@ impl Notice {
 pub enum TaskKind {
     Install,
     Update,
+    /// Installing the packages of the list that the managed TeX Live lacks (TEX-052).
+    Packages,
     Remove,
     Test,
     /// Importing or updating a template set (TEX-006).
@@ -60,7 +62,7 @@ pub enum TaskKind {
 impl TaskKind {
     /// Cancel can stop the job: it looks at the flag of its handle between two steps.
     fn can_stop(self) -> bool {
-        matches!(self, TaskKind::Install | TaskKind::Update | TaskKind::Import)
+        matches!(self, TaskKind::Install | TaskKind::Update | TaskKind::Packages | TaskKind::Import)
     }
 }
 
@@ -200,6 +202,7 @@ impl TexState {
         let label = match kind {
             TaskKind::Install => "Installing TeX Live…",
             TaskKind::Update => "Updating TeX Live…",
+            TaskKind::Packages => "Installing the missing TeX Live packages…",
             TaskKind::Remove => "Removing the TeX Live…",
             TaskKind::Test => "Compiling the test document…",
             TaskKind::Import => "Importing the template set…",
@@ -225,6 +228,20 @@ impl TexState {
             self.start(ctx, TaskKind::Install, "Installing TeX Live…", move |h, n| done_notice(install::install(&env, h, n), "The install"));
         }
     }
+
+    /// Start installing the packages of the list that the managed TeX Live lacks (TEX-052), once the
+    /// person pressed Install: exactly `names`, as a job with progress and Cancel. The look for TeX
+    /// is done again when it ends, so the line that offered it goes away.
+    pub fn begin_packages(&mut self, ctx: &Context, cfg: &TexConfig, names: Vec<String>) {
+        if let Some(env) = self.env(cfg) {
+            self.start(ctx, TaskKind::Packages, "Installing the missing TeX Live packages…", move |h, n| done_notice(install::install_missing(&env, &names, h, n), "The install of the packages"));
+        }
+    }
+}
+
+/// "The managed TeX Live misses: geometry", the line with the Install button (TEX-052).
+pub fn missing_line(missing: &[String]) -> String {
+    format!("The managed TeX Live misses: {}", missing.join(", "))
 }
 
 /// The notice for what an install or update ended with.
@@ -286,6 +303,7 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &mut TexConfig) -> bool {
     });
 
     theme::section(ui, "Which TeX is used");
+    let mut install_packages = None;
     match (&st.detection, st.detecting.is_some()) {
         (_, true) | (None, _) => {
             crate::busy::ui::status(ui, &st.busy, &TEX_PROBE);
@@ -295,7 +313,15 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &mut TexConfig) -> bool {
                 let size = if e.kind == Kind::Managed { d.managed_bytes.map(|b| format!(", {} on disk", crate::data_usage::human_bytes(b))).unwrap_or_default() } else { String::new() };
                 ui.label(format!("Using {} (LaTeX kernel {}){size}", engine_name(e), e.kernel));
                 crate::theme::hint(ui, e.bin_dir.to_string_lossy());
-                if !e.missing.is_empty() {
+                if !e.missing.is_empty() && e.kind == Kind::Managed {
+                    // the packages of the list that came after its install (TEX-052)
+                    ui.horizontal_wrapped(|ui| {
+                        crate::theme::problem(ui, missing_line(&e.missing));
+                        if ui.add_enabled(st.task.is_none(), egui::Button::new("Install")).on_hover_text(format!("tlmgr install {}", e.missing.join(" "))).clicked() {
+                            install_packages = Some(e.missing.clone());
+                        }
+                    });
+                } else if !e.missing.is_empty() {
                     crate::theme::problem(ui, format!("It misses these packages: {}. Use the TeX Live that Shale installs.", e.missing.join(", ")));
                 }
             }
@@ -303,6 +329,9 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &mut TexConfig) -> bool {
                 crate::theme::problem(ui, format!("No TeX can be used: {why}"));
             }
         },
+    }
+    if let Some(names) = install_packages {
+        st.begin_packages(&ctx, cfg, names);
     }
     if let Some(d) = &st.detection {
         if cfg.engine == TexChoice::Auto {
@@ -387,7 +416,7 @@ fn managed_section(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig, ctx: &Contex
     if let Some(t) = &st.task {
         // an import and a test page are shown with the template sets
         if !matches!(t.kind, TaskKind::Import | TaskKind::TestPage) {
-            if matches!(t.kind, TaskKind::Install | TaskKind::Update) {
+            if matches!(t.kind, TaskKind::Install | TaskKind::Update | TaskKind::Packages) {
                 let p = t.handle.progress();
                 ui.add(egui::ProgressBar::new(p.fraction()).text(p.text()).desired_width(420.0));
             }
@@ -442,7 +471,7 @@ fn managed_section(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig, ctx: &Contex
         return;
     }
     ui.horizontal(|ui| {
-        if ui.button("Update").on_hover_text("Update TeX Live and its packages (tlmgr update --self --all)").clicked() {
+        if ui.button("Update").on_hover_text("Update TeX Live and its packages (tlmgr update --self --all), and install the packages of Shale's list that it lacks").clicked() {
             if let Some(env) = st.env(cfg) {
                 st.start(ctx, TaskKind::Update, "Updating TeX Live…", move |h, n| done_notice(install::update(&env, h, n), "The update"));
             }

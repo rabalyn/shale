@@ -48,13 +48,14 @@ mod post_index_tests;
 #[cfg(test)]
 mod quote_tests;
 pub mod schedule;
+pub mod sidebar_pane;
 pub mod state;
 pub mod thread;
 #[cfg(test)]
 mod thread_tests;
 pub mod thread_ui;
 #[cfg(test)]
-mod ui_tests;
+pub(crate) mod ui_tests;
 pub mod video;
 pub mod viewer;
 #[cfg(test)]

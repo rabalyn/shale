@@ -236,6 +236,25 @@ Shale typesets formulas itself, with the bundled font STIX Two Math (SIL Open Fo
 
 With the Markdown preview on, a formula takes the place of its TeX; the line with the cursor shows the TeX, as with every other markup (the TeX stays in the note, so the cursor, selection and search work on it). The same formulas are drawn in the [[Reading view]], in table cells, in the headings of the outline and in the [[PDF]] export. A formula Shale cannot typeset (an unknown command, braces that do not match, `\left` without `\right`, more than 64 levels of nesting or more than 10 000 characters) stays as its TeX in the code style, and the reason shows when you point at it. Word files imported with pandoc bring their formulas as `$…$` and `$$…$$` (see [[Import]]).
 
+# The bibliography of a thesis
+
+For a thesis or a paper, a note can name a **bibliography**: a BibLaTeX or BibTeX `.bib` file in the vault, as
+Zotero (with Better BibTeX), JabRef or Citavi export it. This is the first part of thesis writing; what Shale
+does with it so far is to read it and to check the keys.
+
+- **Which file.** The property `bibliography:` of the note (a path in the vault, a file name or `[[refs.bib]]`; a list
+  names several), or, for a note without it, the **Bibliography file** of Settings → Vault ([[Settings reference]]).
+- **What Shale reads.** The file is read in the background ([[Background work]]) into an index of the keys with their
+  authors, year, title and type, and read again when the file changes. An entry that cannot be read is skipped and
+  counted; a file that is missing or holds no entry means no bibliography, and Settings says why.
+- **What Settings shows.** Under the field: what the file holds ("refs.bib: 231 entries, 2 skipped as bad"), and for
+  the note you have open, the file it uses and which keys it cites that the file does not have.
+- **How a citation is written.** In Pandoc's way: `[@key]`, `[@key, p. 12]`, `[see @key, p. 12]`, `[@a; @b]`,
+  `[-@key]`, and `@key` in the text when the author is the subject (a bare `@key` counts only when the bibliography
+  has the key, so `@todo` and `@name@host.social` stay plain text). Figures, tables, equations and sections get a
+  label `{#fig:results}` and are referred to as `@fig:results`. Nothing in code, math, links, addresses or mails
+  is read as a citation. The editor does not colour these yet.
+
 # Code
 
 Code is coloured: write the language after the opening fence, as in ```` ```js ````

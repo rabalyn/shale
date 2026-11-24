@@ -19,7 +19,7 @@ too: it is plain text with a description above every setting.
 
 ![[settings-vault.png]]
 
-The **Vault** tab is the short page Settings opens on: the vault folder, the button that closes the vault, the people folder and the check of file names for Windows and macOS.
+The **Vault** tab is the short page Settings opens on: the vault folder, the button that closes the vault, the people folder, the bibliography file (the `.bib` file that notes use for citations, see [[Editor#The bibliography of a thesis]]) and the check of file names for Windows and macOS.
 
 ![[settings-editor.png]]
 
@@ -111,8 +111,8 @@ loading the entries on screen once you stop scrolling.
 | `fonts.editor_raw` | Shale's font, 15.5 | Fonts, "Editor: raw markdown": the markdown text in the editor, and the raw lines around the cursor in the preview |
 | `fonts.editor_rendered` | Shale's font, 15.5 | Fonts, "Editor: rendered text and reading view": the rendered lines of the preview and the reading view |
 | `fonts.mail` | Shale's font, 14 | Fonts, "Mail" |
-| `fonts.calendar` | Shale's font, 14 | Fonts, "Calendar" (the calendar view and the calendar of the right sidebar) |
-| `fonts.social` | Shale's font, 14 | Fonts, "Feeds" |
+| `fonts.calendar` | Shale's font, 14 | Fonts, "Calendar" (the calendar view, the calendar of the right sidebar and the Calendar pane) |
+| `fonts.social` | Shale's font, 14 | Fonts, "Feeds" (the Feeds tab and the Feeds pane of the right sidebar) |
 
 Inside each of these tables: `family` and `size`. The old `font_size` of earlier versions became the
 size of the two editor areas when you updated.
@@ -149,8 +149,8 @@ size of the two editor areas when you updated.
 | `show_left` | on | the left sidebar toggle of the ribbon |
 | `show_right` | on | the right sidebar toggle of the ribbon |
 | `sidebars` | empty (default icons and layout) | dragging icons, see [[Window layout]] |
-| `sidebars.ribbon` | empty: default order | drag the icons of the ribbon; `files`, `search` and `tags` in this list and in `sidebars.right` at once are a copy (see [[Window layout]]) |
-| `sidebars.right` | empty: one view with all panels | drag panel icons, and Files, Search and Tags (`files`, `search`, `tags`), into views |
+| `sidebars.ribbon` | empty: default order | drag the icons of the ribbon; `files`, `search`, `tags`, `mail`, `calendar` and `social` in this list and in `sidebars.right` at once are a copy (see [[Window layout]]) |
+| `sidebars.right` | empty: one view with all panels | drag panel icons, and Files, Search, Tags, Mail, Calendar and Feeds (`files`, `search`, `tags`, `mail`, `calendar`, `social`), into views |
 | `sidebars.hidden` | empty | right-click an icon: Remove / Restore |
 | `right[].icons`, `right[].active`, `right[].weight` | per view: its icons, the shown icon, its share of the height (0 = equal) | the right sidebar's views |
 
@@ -299,6 +299,7 @@ Some behaviour is decided by a note's own properties (front matter) instead of a
 `print-paper`, `print-margins`, `print-font`, `print-font-size`, `print-line-spacing`, `print-paragraph-spacing`, `print-align`,
 `print-heading-color`, `print-heading-weight`, `print-heading-sizes`, `print-break-before`, `print-title`, `print-toc` and `print-toc-page-break` (any of them also switches on the plain paper look of the PDF); each has its values, default and effect in the table of
 [[PDF#Print properties of a note]]. Every one is optional, and a value that cannot be read is ignored.
+`bibliography` names the `.bib` file of the note's citations, or several as a list; it wins over the vault's bibliography file ([[Editor#The bibliography of a thesis]]).
 Shale itself writes `created` and `modified` (full ISO 8601 times) into every Markdown note it saves, and reads an optional `priority` (`highest`, `high`, `medium`, `low`, `lowest`); there is no setting for them (see [[Editor#Created, modified and priority]]).
 
 # Vault settings (`<vault>/.shale/settings.json`)
@@ -307,6 +308,7 @@ Shale itself writes `created` and `modified` (full ISO 8601 times) into every Ma
 |---|---|---|
 | `version` | 1 | written by Shale |
 | `people_dir` | `Adressbuch` | Settings → Vault → People, "People folder" ([[Tags and people]]) |
+| `bibliography` | empty (not in the file while empty; the `.bib` file, as a path in the vault, a file name or `[[refs.bib]]`, that a note without its own `bibliography:` property uses) | Settings → Vault → Bibliography, "Bibliography file" ([[Editor#The bibliography of a thesis]]) |
 | `sync` | the group of the four keys below | Settings → Sync |
 | `sync.enabled` | on (only matters when the vault is a git repository; a folder with its own `.git` asks first when it is opened, "Don't sync" sets it off) | Settings → Sync, "Sync this vault automatically" ([[Git sync]]) |
 | `sync.interval_minutes` | 5 (1 to 1440) | Git sync, "Every … minutes" |

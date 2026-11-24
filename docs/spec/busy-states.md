@@ -3,7 +3,7 @@
 **IS NOW** = true of the code today · **SHOULD BE** = agreed target.
 Format: [ADR-0001](../decisions/0001-spec-driven-development.md). Issue: #397.
 
-The rules are JOB-003 to JOB-038 in [engineering.md](engineering.md#background-jobs-job): every action that
+The rules are JOB-003 to JOB-039 in [engineering.md](engineering.md#background-jobs-job): every action that
 loads or runs longer than a moment is a task of the busy registry (`busy::Busy`), shows a spinner and
 what happens, cannot be started twice, offers Cancel where the work can stop (or Close for a dialog
 whose work goes on), and shows in the indicator at the top right of the editor pane while it runs.
@@ -29,6 +29,7 @@ would leave a mess (JOB-006).
 | Copy the outside media of a note into the vault (MEDIA-021) | thread (`app/outside_copy.rs`) | yes, between two files (the copied ones keep their new links) | a toast when done | **IS NOW** (JOB-023): task `outside-copy`, "Copying media into the vault…", with Cancel |
 | Open an outside media file with the system's program (MEDIA-017) | thread (`app/outside_open.rs`) | no | a busy card in the player | **IS NOW** (JOB-023): one task per file, "Opening ‹name›…"; no Cancel |
 | Tag learning (`import/tagwords.rs`) | thread | yes, between two notes (nothing is written) | nothing | **IS NOW** (JOB-022, JOB-023): task `tag-learning`, "Learning the words of the tags…", listed after 2 s, with Cancel |
+| Reading a bibliography (`.bib` file, `bibliography/state.rs`, EDIT-123) | thread | no (one file is read and nothing written) | the status in Settings → Vault, "Reading the bibliography…" | **IS NOW** (JOB-039): task `bibliography-read` per file, "Reading the bibliography “refs.bib”…", listed after 2 s; no Cancel |
 | Data usage: counting, Clear, Prune (USE) | thread (`data_usage`) | no | the task's spinner and text at the cache, "counting…" in the dialog | **IS NOW** (JOB-023): one task per cache ("Clearing the social pictures…", "Cleaning up …"); the two counts and a prune are listed after 2 s; no Cancel |
 | Link preview download (`link_preview.rs`) | thread, one at a time | no (a timeout ends it) | spinner in the preview card | not a task: it belongs to its card |
 | PDF page rendering of the reader (`pdf/view.rs`) | thread | no | spinner in the page | not a task: it belongs to its page |

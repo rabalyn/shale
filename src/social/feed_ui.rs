@@ -762,7 +762,7 @@ pub(super) fn column(ui: &mut Ui, width: f32, f: impl FnOnce(&mut Ui)) {
     });
 }
 
-fn account_label(e: &SocialAccountEntry) -> String {
+pub(super) fn account_label(e: &SocialAccountEntry) -> String {
     format!("{} · @{}", e.account.network.label(), e.account.handle)
 }
 

@@ -1,8 +1,8 @@
 # ADR-0038: Mail, Calendar and Feeds as compact companions in the right sidebar
 
-- **Status**: Accepted (2026-11-24); step 1 (the shared placing and Mail) is built, Calendar and Feeds follow
+- **Status**: Accepted (2026-11-24); all three steps are built (1: the shared placing and Mail, 2: Calendar, 3: Feeds)
 - **Date**: 2026-11-24
-- **Specs**: LAY-028…LAY-034
+- **Specs**: LAY-028…LAY-037
 - **Issues**: rabalyn/shale#610
 - **Amends**: [ADR-0033](0033-views-on-either-side.md) (its last consequence, which refuses Mail, Feeds and Calendar in the sidebar, and decision 4, one state for a view shown twice)
 
@@ -25,7 +25,7 @@ message), the Calendar a grid and a side bar, Feeds a column of tabs and a threa
      message list of the chosen folder, with the unread state. A click on a message opens it in
      the Mail tab of the main area (opening the tab when there is none). Reading, writing,
      searching, moving and the settings stay in the tab.
-   - **Calendar**: a small month and the agenda of the next days. A click on an event opens it in
+   - **Calendar**: a small month and the agenda of the next 14 days. A click on an event opens it in
      the Calendar tab.
    - **Feeds**: the home timeline in one column. A click opens the thread in the Feeds tab.
 2. **Independent view state.** The pane has its own account, folder or feed selection, its own
@@ -49,7 +49,7 @@ message), the Calendar a grid and a side bar, Feeds a column of tabs and a threa
 4. **Built in steps.** Step 1 makes the placing work for all views that have a pane and builds
    the Mail pane. An icon that has no pane yet is refused at the drop like before (no-drop cue,
    no menu entries) and a stored one in a right view goes back to the ribbon, so nobody can place
-   an empty pane. Step 2 adds the Calendar pane and step 3 the Feeds pane; each only adds its
+   an empty pane. Step 2 added the Calendar pane and step 3 the Feeds pane; each only added its
    pane and its state to the set of views that can be placed, no change of the placing.
 
 ## Why the state is independent here and shared for Files, Search and Tags
@@ -73,8 +73,8 @@ would lose the place it was put there to hold.
 
 ## Consequences
 
-- "An icon exists once" holds for every icon except the movable views, which are now Files, Search,
-  Tags and Mail (later also Calendar and Feeds).
+- "An icon exists once" holds for every icon except the movable views, which are Files, Search,
+  Tags, Mail, Calendar and Feeds.
 - The window has a small container of view states for these panes (`SideState::panes`), one field per
   view; a copy of Files, Search and Tags has no entry there.
 - The data stays in `MailView`, which counts how often it read the index (`refreshed`), so a pane
@@ -82,5 +82,11 @@ would lose the place it was put there to hold.
 - The pane opens the store like the tab does (it needs an account in the settings) but the tab's
   watch of the open folder and the Inboxes (MAIL-230) runs only while the tab is shown, so a
   sidebar alone shows what the last sync and the automatic sync brought.
+- The data of Feeds stays in `SocialState`. The Feeds pane asks for the first load of what it
+  shows (the feed list, the first page) with the same `ensure_feeds` and `ensure_timeline` as the
+  tab, which do nothing for data that is there or on its way, so a feed fills without a Feeds tab
+  and is never fetched twice. It loads no older pages and checks for no new posts: the timer
+  (`SocialState::tick`) checks only the feeds open in a tab, so a sidebar alone shows the posts of
+  the first load and what the tab brought.
 - Taking Mail out of the ribbon (Move) takes away the ribbon's way into the tab; that is the
   owner's choice and "Restore" and Copy bring it back.

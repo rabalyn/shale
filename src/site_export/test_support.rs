@@ -14,7 +14,10 @@ pub struct Fixture {
 
 impl Fixture {
     pub fn new(tag: &str) -> Fixture {
-        let root = std::env::temp_dir().join(format!("shale-site-{tag}-{}", std::process::id()));
+        // one folder per fixture: `cargo test` runs tests as threads of one process, and tests share a tag
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!("shale-site-{tag}-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let dir = root.join("vault");
         std::fs::create_dir_all(&dir).unwrap();

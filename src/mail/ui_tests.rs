@@ -721,6 +721,10 @@ fn mail_240_the_player_plays_from_the_temp_copy_when_asked_and_leaving_the_messa
     let file = w.app.mail.att_audio.as_ref().and_then(|a| a.files[0].clone()).expect("the temp copy");
     assert!(w.app.media.current().is_none());
     // the round button of the card starts it
+    // a click on a file the disk was not asked about yet is dropped (the card is still "busy"), so the
+    // look-up of the copy finishes first, however long a loaded machine takes for it (MEDIA-024)
+    let ctx = w.ctx.clone();
+    crate::media::look::Looks::of(&ctx).settle_with(|| w.frame(vec![]));
     let card = w.rect("mail:att-player:0");
     let art = crate::media::widget::geometry(&file, card.width()).art.center();
     w.click_at(card.min + art.to_vec2(), Modifiers::NONE);

@@ -929,6 +929,28 @@ mod tests {
             texts
         }
 
+        /// Frames until the page has its final layout (#659). The first frame starts the look for
+        /// git and for where the vault is; when they end, the lines above the buttons change
+        /// (the spinner row becomes the detection lines), so a click at a rect of an earlier frame
+        /// misses the button, and only on a loaded machine. A job's task ends before its result is
+        /// sent: once no job is left, one frame takes the results and the next lays them out.
+        fn settle(&mut self, app: &mut ShaleApp) {
+            let t = Instant::now();
+            loop {
+                self.frame(app, vec![]);
+                let jobs = [&crate::gitsync::install_ui::GIT_DETECT, &crate::gitsync::install_ui::GIT_CHECK, &crate::gitsync::wizard::VAULT_PLACE];
+                if !jobs.iter().any(|k| app.busy.is_running(k)) {
+                    let before = app.sync.rects.clone();
+                    self.frame(app, vec![]);
+                    if app.sync.rects == before {
+                        return;
+                    }
+                }
+                assert!(t.elapsed() < Duration::from_secs(30), "the page did not settle");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+
         fn click(&mut self, app: &mut ShaleApp, key: &str) -> bool {
             let p = app.sync.rects.iter().find(|r| r.0 == key).unwrap_or_else(|| panic!("no {key}: {:?}", app.sync.rects)).1.center();
             let b = |pressed| egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
@@ -1047,7 +1069,7 @@ mod tests {
         let mut app = app_on(&v);
         app.sync.git = git;
         let mut h = H { ctx: egui::Context::default(), t: 0.0 };
-        h.frame(&mut app, vec![]);
+        h.settle(&mut app);
         assert!(app.busy.list().is_empty());
         h.click(&mut app, "sync-now");
         let task = app.busy.info(&GIT_SYNC).expect("the running sync is listed");
@@ -1202,7 +1224,7 @@ mod tests {
         app.refresh_lfs();
         assert!(app.sync.lfs.version.is_some() && !app.sync.lfs.stores_media);
         let mut h = H { ctx: egui::Context::default(), t: 0.0 };
-        h.frame(&mut app, vec![]);
+        h.settle(&mut app);
         h.click(&mut app, "lfs-setup");
         wait(&mut app);
         assert!(app.sync.lfs.stores_media, "{:?}", app.toasts);

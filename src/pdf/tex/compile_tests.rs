@@ -191,6 +191,8 @@ fn the_log_of_a_failed_compile_is_kept_under_a_unique_name_and_a_missing_log_or_
 #[cfg(unix)]
 pub(crate) mod fake {
     use super::*;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
     use std::time::{Duration, Instant};
 
     /// A folder with a fake `lualatex` and `biber`, and the state they keep in `state/`.
@@ -250,7 +252,7 @@ if [ -f "$S/toc.$n" ]; then cp "$S/toc.$n" "$stem.toc"; fi"#,
 
         pub fn biber(&self, exit: i32, output: &str) {
             let st = self.state();
-            script(&self.dir.join("bin"), "biber", &format!("echo \"$@\" >> '{0}/biber.calls'\ncat <<'EOF'\n{1}\nEOF\nexit {2}", st.display(), output, exit));
+            script(&self.dir.join("bin"), "biber", &format!("echo \"$@\" >> '{0}/biber.calls'\ncat <<'EOF' | tee \"$1.blg\"\n{1}\nEOF\nexit {2}", st.display(), output, exit));
         }
 
         pub fn put(&self, name: &str, text: &str) {
@@ -271,6 +273,8 @@ if [ -f "$S/toc.$n" ]; then cp "$S/toc.$n" "$stem.toc"; fi"#,
             let _ = std::fs::remove_dir_all(&self.dir);
         }
     }
+
+    const CITING_BCF: &str = "<bcf:controlfile><bcf:section number=\"0\"><bcf:citekey order=\"1\">shale</bcf:citekey></bcf:section></bcf:controlfile>";
 
     fn work_with_main() -> WorkDir {
         let w = WorkDir::new().unwrap();
@@ -358,30 +362,144 @@ if [ -f "$S/toc.$n" ]; then cp "$S/toc.$n" "$stem.toc"; fi"#,
         assert_eq!(compile(&f.engine(), work_with_main(), "main.tex", &Options::default()).unwrap().runs, 1);
     }
 
-    // spec: TEX-004
+    // spec: TEX-004, TEX-043
     #[test]
-    fn it_stops_after_five_runs_when_the_log_never_stops_asking() {
-        let f = Fake::new("five");
+    fn it_stops_after_four_runs_when_the_log_never_stops_asking_and_says_the_numbers_may_be_stale() {
+        let f = Fake::new("four");
         f.lualatex();
         f.put("log.last", RERUN);
         let out = compile(&f.engine(), work_with_main(), "main.tex", &Options::default()).unwrap();
-        assert_eq!(out.runs, 5);
-        assert_eq!(f.get("count").trim(), "5");
+        assert_eq!(out.runs, 4);
+        assert_eq!(f.get("count").trim(), "4", "a fifth run is not started");
+        assert!(out.warnings.iter().any(|w| w.contains("may be stale")), "{:?}", out.warnings);
         let out = compile(&f.engine(), work_with_main(), "main.tex", &Options { max_runs: 2, ..Options::default() }).unwrap();
         assert_eq!(out.runs, 2, "the limit is an option");
     }
 
-    // spec: TEX-004
+    // spec: TEX-004, TEX-043
     #[test]
     fn biber_runs_when_a_bcf_appears_and_again_only_when_it_changed() {
         let f = Fake::new("biber");
         f.lualatex();
         f.biber(0, "INFO - done");
         f.put("log.last", "no rerun asked\n");
-        f.put("bcf", "<bcf>1</bcf>");
+        f.put("bcf", CITING_BCF);
         let out = compile(&f.engine(), work_with_main(), "main.tex", &Options::default()).unwrap();
         assert_eq!(out.runs, 2, "after biber a new run");
         assert_eq!(f.get("biber.calls").lines().collect::<Vec<_>>(), ["main"], "biber ran once, for the job name");
+        assert!(out.warnings.is_empty(), "{:?}", out.warnings);
+    }
+
+    // spec: TEX-043
+    #[test]
+    fn a_bcf_without_citations_or_no_bcf_runs_once_and_never_starts_biber() {
+        for (tag, bcf) in [("nocite", Some("<bcf:controlfile><bcf:bibdata section=\"0\"/></bcf:controlfile>")), ("nobcf", None)] {
+            let f = Fake::new(tag);
+            f.lualatex();
+            f.biber(0, "INFO - done");
+            f.put("log.last", "all done\n");
+            if let Some(b) = bcf {
+                f.put("bcf", b);
+            }
+            let out = compile(&f.engine(), work_with_main(), "main.tex", &Options::default()).unwrap();
+            assert_eq!(out.runs, 1, "{tag}");
+            assert!(!f.state().join("biber.calls").exists(), "{tag}: biber was not run");
+        }
+    }
+
+    // spec: TEX-043
+    #[test]
+    fn biber_and_lualatex_get_bibinputs_and_the_bib_is_copied_into_the_work_folder() {
+        let f = Fake::new("bibinputs");
+        f.lualatex();
+        script(&f.dir.join("bin"), "biber", &format!("echo \"$@\" >> '{0}/biber.calls'\nenv > '{0}/biber.env'\nls > '{0}/biber.ls'", f.state().display()));
+        f.put("log.last", "no rerun asked\n");
+        f.put("bcf", CITING_BCF);
+        let templates = std::env::temp_dir().join("bib templates");
+        let src = f.dir.join("lit.bib");
+        std::fs::write(&src, "@book{shale,title={T}}").unwrap();
+        let opts = Options { tex_inputs: vec![templates.clone()], bib_files: vec![src], ..Options::default() };
+        compile(&f.engine(), work_with_main(), "main.tex", &opts).unwrap();
+        let env = f.get("biber.env");
+        assert_eq!(env.lines().find_map(|l| l.strip_prefix("BIBINPUTS=")), Some(format!("{}//:", templates.display()).as_str()));
+        assert!(f.get("biber.ls").lines().any(|l| l == "lit.bib"), "{}", f.get("biber.ls"));
+        // a bibliography that is not there is a failure before anything runs
+        let missing = Options { bib_files: vec![f.dir.join("nothing.bib")], ..Options::default() };
+        let e = compile(&f.engine(), work_with_main(), "main.tex", &missing).unwrap_err();
+        assert!(e.headline.contains("could not be copied"), "{e}");
+    }
+
+    // spec: TEX-043
+    #[test]
+    fn a_key_biber_does_not_find_is_a_warning_and_the_pdf_is_kept() {
+        let f = Fake::new("biber-warn");
+        f.lualatex();
+        f.biber(0, "WARN - I didn't find a database entry for 'nokey' (section 0)\nWARN - I didn't find a database entry for 'nokey' (section 0)");
+        f.put("log.last", "no rerun asked\n");
+        f.put("bcf", CITING_BCF);
+        let out = compile(&f.engine(), work_with_main(), "main.tex", &Options::default()).unwrap();
+        assert_eq!(out.warnings, ["citation key 'nokey' was not found in the bibliography"], "once, not per line");
+        assert!(out.pdf.starts_with(b"%PDF"));
+    }
+
+    // spec: TEX-043
+    #[test]
+    fn a_tex_without_biber_gives_the_pdf_without_a_bibliography_and_says_so() {
+        let f = Fake::new("biber-missing");
+        f.lualatex();
+        f.put("log.last", "no rerun asked\n");
+        f.put("bcf", CITING_BCF);
+        let out = compile(&f.engine(), work_with_main(), "main.tex", &Options::default()).unwrap();
+        assert_eq!(out.runs, 1, "no biber, no run after it");
+        assert_eq!(out.warnings.len(), 1);
+        assert!(out.warnings[0].contains("biber could not be started") && out.warnings[0].contains("no bibliography"), "{:?}", out.warnings);
+    }
+
+    // spec: TEX-043
+    #[test]
+    fn a_biber_that_runs_too_long_is_killed_and_a_failed_one_names_its_log() {
+        let f = Fake::new("biber-slow");
+        f.lualatex();
+        script(&f.dir.join("bin"), "biber", "echo started\nsleep 30");
+        f.put("log.last", "ok\n");
+        f.put("bcf", CITING_BCF);
+        let t = Instant::now();
+        let e = compile(&f.engine(), work_with_main(), "main.tex", &Options { timeout: Duration::from_secs(1), ..Options::default() }).unwrap_err();
+        assert!(t.elapsed() < Duration::from_secs(15), "{:?}", t.elapsed());
+        assert!(e.headline.starts_with("biber ran for more than 1 seconds"), "{}", e.headline);
+        f.biber(2, "ERROR - Cannot find 'x.bib'!");
+        let e = compile(&f.engine(), work_with_main(), "main.tex", &Options::default()).unwrap_err();
+        assert!(e.headline.contains("main.blg"), "{}", e.headline);
+        assert!(e.log_tail.contains("Cannot find 'x.bib'"), "the end of biber's log: {}", e.log_tail);
+        assert_eq!(e.problems[0].text(), "Cannot find 'x.bib'!");
+    }
+
+    // spec: TEX-043
+    #[test]
+    fn a_cancel_stops_every_pass_before_the_next_run_starts() {
+        let f = Fake::new("cancel");
+        f.lualatex();
+        f.put("log.last", RERUN);
+        // set before: nothing is started
+        let flag = Arc::new(AtomicBool::new(true));
+        let e = compile(&f.engine(), work_with_main(), "main.tex", &Options { cancel: Some(flag), ..Options::default() }).unwrap_err();
+        assert_eq!(e.headline, "the compile was cancelled");
+        assert_eq!(f.get("count"), "", "no run was started");
+        // set while the first run is still going (it lingers for a moment): the second one is never started
+        let bin = f.dir.join("bin");
+        std::fs::rename(bin.join("lualatex"), bin.join("lualatex.real")).unwrap();
+        script(&bin, "lualatex", "\"$(dirname \"$0\")/lualatex.real\" \"$@\"\nsleep 5");
+        let flag = Arc::new(AtomicBool::new(false));
+        let (state, f2) = (f.state(), flag.clone());
+        std::thread::spawn(move || {
+            while !state.join("count").exists() {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            f2.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+        let e = compile(&f.engine(), work_with_main(), "main.tex", &Options { cancel: Some(flag), ..Options::default() }).unwrap_err();
+        assert_eq!(e.headline, "the compile was cancelled");
+        assert_eq!(f.get("count").trim(), "1");
     }
 
     // spec: TEX-004
@@ -391,9 +509,9 @@ if [ -f "$S/toc.$n" ]; then cp "$S/toc.$n" "$stem.toc"; fi"#,
         f.lualatex();
         f.biber(2, "INFO - start\nERROR - BibTeX subsystem: x.bib, line 3, syntax error");
         f.put("log.last", "ok\n");
-        f.put("bcf", "<bcf/>");
+        f.put("bcf", CITING_BCF);
         let e = compile(&f.engine(), work_with_main(), "main.tex", &Options::default()).unwrap_err();
-        assert_eq!(e.headline, "biber stopped with an error");
+        assert_eq!(e.headline, "biber stopped with an error (its log is main.blg)");
         assert!(e.problems[0].text().contains("syntax error"), "{e}");
         assert!(e.log_tail.contains("ERROR - BibTeX"));
     }
@@ -581,6 +699,29 @@ fn tex_env_a_document_with_biblatex_runs_biber_and_resolves_the_citation() {
     let out = container_compile(&[("test.tex", TEST_DOCUMENT), ("test.bib", TEST_BIB)], "test.tex", &Options::default()).unwrap_or_else(|e| panic!("{e}\n{}", e.log_tail));
     assert!(out.runs >= 2, "LuaLaTeX, biber, LuaLaTeX: {} runs", out.runs);
     assert!(!out.font_cache_built, "the image has the font names database, a fresh container does not build it (#327)");
+}
+
+// spec: TEX-043
+#[test]
+#[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
+fn tex_env_a_citation_and_a_section_reference_are_resolved_by_the_passes() {
+    crate::env_lock::hold();
+    let tex = "\\documentclass{article}\n\\usepackage[backend=biber]{biblatex}\n\\addbibresource{lit.bib}\n\\begin{document}\n\\section{Intro}\\label{sec:intro}\nAs Lovelace showed \\autocite{shale}, see Section~\\ref{sec:intro}.\n\\printbibliography\n\\end{document}\n";
+    let bib = std::env::temp_dir().join(format!("shale-tex-env-bib-{}", std::process::id()));
+    std::fs::create_dir_all(&bib).unwrap();
+    std::fs::write(bib.join("lit.bib"), TEST_BIB).unwrap();
+    let work = WorkDir::new().unwrap();
+    work.write("main.tex", tex.as_bytes()).unwrap();
+    let engine = container_engine(work.path());
+    let opts = Options { bib_files: vec![bib.join("lit.bib")], ..Options::default() };
+    let out = compile(&engine, work, "main.tex", &opts).unwrap_or_else(|e| panic!("{e}\n{}", e.log_tail));
+    let _ = std::fs::remove_dir_all(&bib);
+    assert!((3..=4).contains(&out.runs), "LuaLaTeX, biber, LuaLaTeX, LuaLaTeX: {} runs", out.runs);
+    assert!(out.warnings.is_empty(), "{:?}", out.warnings);
+    let text = super::pdf_text::squashed(out.pdf);
+    assert!(text.contains("[1]") && text.contains("Section1"), "the citation and the section number are resolved: {text}");
+    assert!(text.contains("Lovelace") && text.contains("Notes"), "the bibliography entry is printed: {text}");
+    assert!(!text.contains("??") && !text.contains("Rerun"), "{text}");
 }
 
 // spec: TEX-004

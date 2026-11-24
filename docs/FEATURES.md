@@ -274,7 +274,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   drawing card its vector drawing), then the notes of the cards in portrait through the book export, lane by lane, a
   card of several lanes once, with a contents page (the board first), bookmarks and a link from each card to its note.
   The dialog also offers the **LaTeX template** engine (BOARD-031, #605): the same order through the book templates,
-  the board on `pdflscape` landscape pages (three lanes side by side, more go on further pages, "(continued)"), the
+  the board on real landscape pages with the template's header and footer in place (three lanes side by side, more go on further pages, "(continued)"), the
   lanes as parts and the cards as chapters.
 - **A folder through a LaTeX template** (#309): the folder's export dialog has the engine choice of a note's.
   With **LaTeX template** and a kind of the article or book family (publication, report, exercise, thesis,
@@ -290,7 +290,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   updates and removes the managed TeX Live. It shows the sizes (about 100 MB to download, 330 MB on
   disk) before anything is downloaded, shows the progress, and can be cancelled; the compile that
   the export will use runs LuaLaTeX and biber in a temporary folder with a timeout and turns the log
-  into readable errors (TEX-001 to TEX-004). After an install or update the font list of TeX is built once, a font that cannot be loaded is repaired by installing the font packages again from another mirror, and the result names the mirror (#362).
+  into readable errors (TEX-001 to TEX-004); a document with citations or references is compiled in passes (LuaLaTeX, biber, LuaLaTeX again, at most 4 LuaLaTeX runs), a missing citation key is a warning, and a TeX without biber gives the PDF without a bibliography and says so (TEX-043). After an install or update the font list of TeX is built once, a font that cannot be loaded is repaired by installing the font packages again from another mirror, and the result names the mirror (#362).
 
   ![The LaTeX tab of Settings with the question before the install](userguide/z_media/screenshots/settings-latex.png)
 
@@ -707,7 +707,21 @@ The settings stay open until closed (✕, Esc or the ⋯ button; a click outside
   on a message opens it in the Mail tab (the tab is opened when there is none). The pane keeps its own account, folder,
   selection and scroll, so the sidebar can show the Inbox while the tab shows another folder; the mail data and the syncs
   are shared. A copy keeps the Mail icon in the ribbon, which still opens the tab; the left sidebar never shows Mail.
-  Calendar and Feeds follow with their own compact panes.
+- **Calendar in the right sidebar** (LAY-029, LAY-033, LAY-036, rabalyn/shale#610, ADR-0038): Calendar is placed the same
+  way (drag and **Move or copy?**, or right-click **Move to / Copy to the right sidebar**), apart from the Calendar panel.
+  The pane is a compact companion of the Calendar tab: a small month (‹ › and Today, today marked, a dot under the days
+  with events) and under it the agenda of 14 days from the chosen day, all-day events first, each with its time and title.
+  A click on a day moves the agenda there; a click on an event opens it in the Calendar tab (opened when there is none) with
+  its details. The pane has its own month and chosen day, separate from the tab; the events and the sync are shared. It says
+  when there is no calendar, when nothing is coming up and while the calendars load.
+- **Feeds in the right sidebar** (LAY-034, LAY-035, LAY-037, rabalyn/shale#610, ADR-0038): Feeds is placed the same way. The
+  pane is a compact companion of the Feeds tab: the accounts, a feed picker (the home timeline first) and the posts as small
+  rows (author, age, who boosted it, the first two lines of text, the number of pictures; a content warning stays closed).
+  A click on a post opens its conversation in a Feeds tab (the active one, else one of that feed, else a new tab). The pane has
+  its own account, feed and scroll, separate from the tab; the accounts, the posts and the fetches are shared. It asks for
+  the first load of what it shows like the tab does (so it fills without a Feeds tab), loads no older pages and checks for
+  no new posts (only feeds open in a tab are checked). It says when there is no account, while the feeds or the feed load
+  and when a load failed or there is nothing yet. Reading, reacting, writing and saving stay in the tab.
 - Drag the border between two views up or down to change their heights (they start equal; a
   view never gets lower than a small minimum).
 - A middle click on the **Mail**, **Feeds** or **Calendar** icon opens that view in a new tab.
@@ -1265,7 +1279,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   second, and text with an error is not saved (quitting puts it in the recovery folder instead of losing it). An old `config.json` is moved over at the first start.
 
   ![The settings file in a tab of its own](userguide/z_media/screenshots/settings-file.png)
-- Each vault keeps its own settings in `.shale/settings.json` (people folder, git sync) and its
+- Each vault keeps its own settings in `.shale/settings.json` (people folder, bibliography, git sync) and its
   session in `.shale/state.json` (open notes, last import folder, recent tags), so a vault
   behaves the same on every computer. The undo histories of the notes (`u` in vim-style editing)
   are kept for 30 days (a setting) in `.shale/undo/`, one file per note; that folder stays on the computer
@@ -1273,6 +1287,16 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   histories are kept outside the vault, in Shale's data folder, so two computers do not overwrite each other's
   tabs, and leftover `.shale-tmp-*` files and `state.sync-conflict-*` copies are removed. Settings of the program itself (appearance, calendars,
   known vaults) stay in `~/.config/shale/config.toml`.
+- **The bibliography of a thesis** (EDIT-122, EDIT-123, CFG-079, #645; the first part of thesis writing, ADR-0039, #642).
+  A note names its literature in the property `bibliography:` (a path in the vault, a file name or `[[refs.bib]]`;
+  a list names several), and **Settings → Vault → Bibliography file** is the default for notes without the
+  property. The file is a BibLaTeX or BibTeX `.bib` file as Zotero (Better BibTeX), JabRef or Citavi export it. Shale
+  reads it in the background into an index of the keys (author, year, title, type), skips and counts an entry
+  that cannot be read, rebuilds the index when the file changes, and says in Settings what the file holds and which
+  keys the open note cites that the file lacks. A file that is missing or has no entry means no bibliography in
+  effect, with a message. The one scanner of `@` (citations `[@key, p. 12]` and `@key`, the labels `{#fig:x}` and the
+  references `@fig:x`) is built and tested, and rules out e-mail addresses, mentions, code, math and links; the editor, the
+  exports and the pickers that use it are the next phases.
 - The files carry a format version and are upgraded on load. A settings file that can't be read
   is kept as `….broken-<date>` and you are told; a file from a newer Shale is used but not
   changed.
@@ -1555,6 +1579,8 @@ Whatever runs longer than a moment says what it does, cannot be started twice an
   the import of a template set, the test compiles and the check, download and install of an update are tasks with their own text. An
   install, an update, the check for a newer git, an import and the check or download of an update can be cancelled (what was downloaded is
   removed); the rest cannot be stopped half way.
+- **The bibliography** (JOB-039, #645): reading a `.bib` file is a task per file ("Reading the bibliography “refs.bib”…", listed after
+  two seconds); it cannot be started twice and is read again when the file changes.
 - **Moved so far:** the git sync and the Git LFS setup, the check of the vault's names (Cancel stops it) the PDF export of a
   folder, of a note and of a drawing (Cancel stops it before the next picture and writes no half file, JOB-017), the export through LaTeX (JOB-018), the export to Word with its new spinner (JOB-019) and the conversion of Word files of the Import dialog (JOB-020); closing such a dialog stops its work (JOB-010). Also the check of the mail index (JOB-015: it starts with the window when a mail account is set up, so the mail view finds the index ready, and the view shows "Checking the mail index…" with a spinner when it is opened earlier). The rebuild of the mail index is a task too, with Cancel between two folders (JOB-016), and so is the sync of each mail account, with its own Cancel between two batches (JOB-021). Sending mail is a task per account too (JOB-031): "Sending mail from ‹account›…" with Cancel, which stops before the next mail is taken from the Outbox and never tears down a mail that is on its way. So is the browser sign-in of a mail account (JOB-032): "Signing in ‹account› in the browser…" with Cancel; closing the account dialog stops it. The load of each CalDAV calendar is a task of its own, "Syncing the calendar “Work”…" (JOB-033; the timer's load is listed after 2 seconds), and so is finding the calendars of an account (JOB-034); both have Cancel at the next request. In the feeds the first page, the next page, the check for new posts and "Load more in between" are tasks per feed with Cancel (JOB-035), saving a post is one too (JOB-036), and so is the sign-in of a feed account, which keeps no token when it is stopped (JOB-037). The other long actions follow; the list of all of them, with what each shows today, is
   [docs/spec/busy-states.md](spec/busy-states.md).

@@ -60,6 +60,20 @@ fn md_text() -> impl Strategy<Value = String> {
         1 => Just("<div align='RIGHT' >".to_string()),
         2 => Just("</div>".to_string()),
         1 => Just("<div style=\"page-break-after: always;\"></div>".to_string()),
+        2 => Just("[@a]".to_string()),
+        1 => Just("[see @a, p. 1; -@b]".to_string()),
+        2 => Just(" @key".to_string()),
+        1 => Just("@ada@host.org".to_string()),
+        1 => Just("@fig:x".to_string()),
+        2 => Just("{#fig:x}".to_string()),
+        1 => Just("{#eq:y}".to_string()),
+        1 => Just("{#tbl:z}".to_string()),
+        1 => Just("{#sec:s}".to_string()),
+        1 => Just("$$ x $$ {#eq:y}".to_string()),
+        1 => Just("```math {#eq:y}\n".to_string()),
+        1 => Just("type: email\n".to_string()),
+        1 => Just("![[p.png]]".to_string()),
+        1 => Just("|a|b|\n: cap ".to_string()),
         1 => Just("é".to_string()),
         1 => Just("日本".to_string()),
         1 => Just("😀".to_string()),
@@ -383,6 +397,424 @@ proptest! {
         }
         if let Some((_, _, title)) = heads.first() {
             prop_assert!(find_heading(&text, title).is_some());
+        }
+    }
+}
+
+// ------------------------------------------------------------------ citations, labels, references (EDIT-122)
+
+mod edit_122 {
+    use crate::markdown::citations::{key_len, reserved_prefix, scan, Group, Item, Kind, Label, Target, Token};
+    use crate::markdown::find_tags;
+    use proptest::prelude::*;
+
+    /// The keys of the bibliography in effect in these tests.
+    const HELD: [&str; 8] = ["smith", "jones", "doe2020", "a", "b", "ada", "ada.bsky.social", "key"];
+
+    fn held(key: &str) -> bool {
+        HELD.contains(&key)
+    }
+
+    /// Every token as the text it covers.
+    fn spans(text: &str, bib: bool) -> Vec<&str> {
+        let bib: Option<&dyn Fn(&str) -> bool> = bib.then_some(&held);
+        scan(text, bib).iter().map(|t| &text[t.range().clone()]).collect()
+    }
+
+    fn groups(text: &str, bib: bool) -> Vec<Group> {
+        let bib: Option<&dyn Fn(&str) -> bool> = bib.then_some(&held);
+        scan(text, bib).into_iter().filter_map(|t| if let Token::Group(g) = t { Some(g) } else { None }).collect()
+    }
+
+    fn labels(text: &str) -> Vec<Label> {
+        scan(text, None).into_iter().filter_map(|t| if let Token::Label(l) = t { Some(l) } else { None }).collect()
+    }
+
+    fn item(g: &Group, i: usize) -> &Item {
+        &g.items[i]
+    }
+
+    fn cite(key: &str) -> Target {
+        Target::Citation(key.into())
+    }
+
+    fn reference(kind: Kind, id: &str) -> Target {
+        Target::Reference { kind, id: id.into() }
+    }
+
+    // spec: EDIT-122
+    #[test]
+    fn edit_122_the_key_grammar_ends_before_the_full_stop_of_a_sentence() {
+        for (text, len) in [("smith", 5), ("smith.", 5), ("smith2020,", 9), ("a.b-c:d+e/f", 11), ("_x", 2), ("1abc", 4), ("a..b", 1), ("a:", 1), ("müller", 7), ("", 0), (".a", 0), ("-a", 0), (":a", 0)] {
+            assert_eq!(key_len(text), len, "{text:?}");
+        }
+        assert_eq!(reserved_prefix("fig:results"), Some(Kind::Figure));
+        assert_eq!(reserved_prefix("gls:x"), Some(Kind::Glossary));
+        assert_eq!(reserved_prefix("fig:"), None);
+        assert_eq!(reserved_prefix("figure:x"), None);
+        assert_eq!(reserved_prefix("smith"), None);
+    }
+
+    // spec: EDIT-122
+    #[test]
+    fn edit_122_a_bracketed_citation_with_one_key() {
+        let g = groups("As shown [@smith] here.", true);
+        assert_eq!(g.len(), 1);
+        assert!(g[0].bracketed);
+        assert_eq!(item(&g[0], 0).target, cite("smith"));
+        assert_eq!(item(&g[0], 0).known, Some(true));
+        assert_eq!((item(&g[0], 0).prefix.as_str(), item(&g[0], 0).suffix.as_str(), item(&g[0], 0).suppress_author), ("", "", false));
+        assert_eq!(spans("As shown [@smith] here.", true), ["[@smith]"]);
+    }
+
+    // spec: EDIT-122
+    #[test]
+    fn edit_122_a_citation_with_a_locator() {
+        let g = groups("[@smith, p. 12]", true);
+        assert_eq!((item(&g[0], 0).prefix.as_str(), item(&g[0], 0).suffix.as_str()), ("", "p. 12"));
+        assert_eq!(&"[@smith, p. 12]"[item(&g[0], 0).range.clone()], "@smith");
+    }
+
+    // spec: EDIT-122
+    #[test]
+    fn edit_122_a_citation_with_a_prefix_and_a_locator() {
+        let g = groups("[see @smith, p. 12]", true);
+        assert_eq!((item(&g[0], 0).prefix.as_str(), item(&g[0], 0).suffix.as_str()), ("see", "p. 12"));
+    }
+
+    // spec: EDIT-122
+    #[test]
+    fn edit_122_several_citations_in_one_bracket() {
+        let g = groups("[@smith, p. 3; see also @jones; @doe2020]", true);
+        assert_eq!(g.len(), 1);
+        assert_eq!(g[0].items.len(), 3);
+        assert_eq!(g[0].items.iter().map(|i| i.target.clone()).collect::<Vec<_>>(), [cite("smith"), cite("jones"), cite("doe2020")]);
+        assert_eq!((item(&g[0], 0).suffix.as_str(), item(&g[0], 1).prefix.as_str()), ("p. 3", "see also"));
+    }
+
+    // spec: EDIT-122
+    #[test]
+    fn edit_122_a_bare_citation_where_the_author_is_the_subject() {
+        let text = "Then @smith says that it works.";
+        let g = groups(text, true);
+        assert_eq!(g.len(), 1);
+        assert!(!g[0].bracketed);
+        assert_eq!(&text[g[0].range.clone()], "@smith");
+        assert_eq!(item(&g[0], 0).target, cite("smith"));
+        // a full stop after the key is not part of it
+        assert_eq!(spans("As @smith.", true), ["@smith"]);
+    }
+
+    // spec: EDIT-122
+    #[test]
+    fn edit_122_a_bare_citation_with_a_locator() {
+        let text = "@smith [p. 12] shows it";
+        let g = groups(text, true);
+        assert_eq!(&text[g[0].range.clone()], "@smith [p. 12]");
+        assert_eq!(item(&g[0], 0).suffix, "p. 12");
+        assert_eq!(&text[item(&g[0], 0).range.clone()], "@smith");
+        // a link after the bracket is no locator
+        assert_eq!(spans("@smith [p. 12](x.md)", true), ["@smith"]);
+    }
+
+    // spec: EDIT-122
+    #[test]
+    fn edit_122_a_citation_that_leaves_out_the_author() {
+        let text = "[-@smith]";
+        let g = groups(text, true);
+        assert!(item(&g[0], 0).suppress_author);
+        assert_eq!(&text[item(&g[0], 0).range.clone()], "-@smith");
+        assert!(!item(&groups("[see -@smith, p. 2]", true)[0], 0).prefix.is_empty());
+        // `-@` outside a bracket starts nothing
+        assert_eq!(spans("a -@smith b", true), Vec::<&str>::new());
+    }
+
+    // spec: EDIT-122
+    #[test]
+    fn edit_122_references_to_labels_abbreviations_and_terms() {
+        for (text, kind, id) in [
+            ("see @fig:results", Kind::Figure, "results"),
+            ("in @tbl:runs.", Kind::Table, "runs"),
+            ("by @eq:energy", Kind::Equation, "energy"),
+            ("in @sec:method", Kind::Section, "method"),
+            ("the @abbr:ml", Kind::Abbreviation, "ml"),
+            ("the @gls:entropy", Kind::Glossary, "entropy"),
+        ] {
+            let g = groups(text, false);
+            assert_eq!(g.len(), 1, "{text}");
+            assert_eq!(item(&g[0], 0).target, reference(kind, id), "{text}");
+            assert_eq!(item(&g[0], 0).known, None);
+        }
+        let g = groups("[@fig:a; @fig:b] and [-@fig:c]", false);
+        assert_eq!(g.len(), 2);
+        assert_eq!(g[0].items.iter().map(|i| i.target.clone()).collect::<Vec<_>>(), [reference(Kind::Figure, "a"), reference(Kind::Figure, "b")]);
+        assert!(item(&g[1], 0).suppress_author);
+    }
+
+    // spec: EDIT-122
+    #[test]
+    fn edit_122_a_figure_label_after_an_embed_on_its_own_line() {
+        for text in ["![[plot.png|Results of run 2]]{#fig:results}", "![[plot.png|Results]] {#fig:results}", "  ![[plot.png]]{#fig:results}  ", "![a](plot.png){#fig:results}"] {
+            let l = labels(text);
+            assert_eq!(l.len(), 1, "{text:?}");
+            assert_eq!((l[0].kind, l[0].id.as_str()), (Kind::Figure, "results"));
+            assert_eq!(&text[l[0].range.clone()], "{#fig:results}");
+        }
+        for text in ["text ![[plot.png]]{#fig:results}", "![[plot.png]] more {#fig:results}", "![[plot.png]]  {#fig:results}", "[[plot.png]]{#fig:results}", "Fig {#fig:results}"] {
+            assert!(labels(text).is_empty(), "{text:?}");
+        }
+    }
+
+    // spec: EDIT-122
+    #[test]
+    fn edit_122_a_table_label_in_the_caption_line_below_the_table() {
+        let text = "| a | b |\n|---|---|\n| 1 | 2 |\n: The caption {#tbl:runs}\n";
+        let l = labels(text);
+        assert_eq!((l.len(), l[0].kind, l[0].id.as_str()), (1, Kind::Table, "runs"));
+        assert_eq!(&text[l[0].range.clone()], "{#tbl:runs}");
+        // not below a table, or not a caption line
+        assert!(labels("Some text\n: The caption {#tbl:runs}").is_empty());
+        assert!(labels("| a |\n|---|\nThe caption {#tbl:runs}").is_empty());
+        assert!(labels("| a |\n|---|\n\n: The caption {#tbl:runs}").is_empty());
+    }
+
+    // spec: EDIT-122
+    #[test]
+    fn edit_122_an_equation_label_after_the_closing_dollars() {
+        for text in ["$$ E = mc^2 $$ {#eq:energy}", "$$E=mc^2$${#eq:energy}", "$$\nE = mc^2\n$$ {#eq:energy}", "$$\nE = mc^2\n$${#eq:energy}\nafter", "```math {#eq:energy}\nE = mc^2\n```"] {
+            let l = labels(text);
+            assert_eq!(l.len(), 1, "{text:?}");
+            assert_eq!((l[0].kind, l[0].id.as_str()), (Kind::Equation, "energy"), "{text:?}");
+            assert_eq!(&text[l[0].range.clone()], "{#eq:energy}");
+        }
+        // no label for a formula that is no display, or for two blanks
+        assert!(labels("$ x $ {#eq:a}").is_empty());
+        assert!(labels("$x$ {#eq:a}").is_empty());
+        assert!(labels("$$x$$  {#eq:a}").is_empty());
+        assert!(labels("text {#eq:a}").is_empty());
+    }
+
+    // spec: EDIT-122
+    #[test]
+    fn edit_122_a_section_label_at_the_end_of_a_heading() {
+        let text = "## Method {#sec:method}\n";
+        let l = labels(text);
+        assert_eq!((l.len(), l[0].kind, l[0].id.as_str()), (1, Kind::Section, "method"));
+        assert_eq!(&text[l[0].range.clone()], "{#sec:method}");
+        assert!(labels("Method {#sec:method}").is_empty());
+        assert!(labels("## Method {#sec:method} more").is_empty());
+        assert!(labels("## Method {#tbl:method}").is_empty(), "a table label does not belong to a heading");
+    }
+
+    // spec: EDIT-122
+    #[test]
+    fn edit_122_rule_1_only_prose_counts_not_front_matter_code_math_or_links() {
+        for text in [
+            "---\ntitle: [@smith] and @smith\n---\nbody",
+            "```\n[@smith] @smith\n```",
+            "~~~\n[@smith]\n~~~",
+            "`[@smith]` and `@smith`",
+            "$a [@smith] b$ and $@smith$",
+            "$$ [@smith] @smith $$",
+            "$$\n[@smith] @smith\n$$",
+            "$$\n[@smith] @smith\n$$ {#eq:x}",
+            "```math\n[@smith] @smith\n```",
+            "[text](http://example.org/@smith)",
+            "[text](@smith.md)",
+            "see https://example.org/x/@smith/y",
+            "mail mailto:x@smith.org now",
+            "<ada@host.org> and <https://x.org/@smith>",
+            "<span title=\"@smith\">x</span>",
+            "<!-- [@smith] -->",
+            "[[@smith]] and ![[@smith.png]]",
+            "[[Note#@smith]]",
+        ] {
+            let found: Vec<&str> = spans(text, true).into_iter().filter(|s| s.contains("smith")).collect();
+            assert!(found.is_empty(), "{text:?} gave {found:?}");
+        }
+        assert_eq!(spans("`code` then [@smith] and $x$", true), ["[@smith]"]);
+        // the text after code on the same line is still prose
+        assert_eq!(spans("`x` @smith", true), ["@smith"]);
+    }
+
+    // spec: EDIT-122
+    #[test]
+    fn edit_122_rule_1_the_text_of_a_mail_or_a_post_is_somebody_elses() {
+        for kind in ["email", "social-post", "Email"] {
+            let text = format!("---\ntype: {kind}\n---\n[@smith] @smith @fig:a\n![[p.png]]{{#fig:x}}\n## H {{#sec:h}}\n");
+            assert!(scan(&text, None).is_empty(), "{kind}");
+            assert!(scan(&text, Some(&held)).is_empty(), "{kind}");
+        }
+        assert_eq!(spans("---\ntype: note\n---\n[@smith]", true), ["[@smith]"]);
+    }
+
+    // spec: EDIT-122
+    #[test]
+    fn edit_122_rule_2_an_at_starts_only_at_a_word_boundary() {
+        for text in ["ada@host.org", "a [x@smith]", "x@smith", "a_@smith", "a.@smith", "a-@smith", "a+@smith", "a/@smith", "1@smith", "é@smith", "[a@smith]", "[see x@smith]", "(see)@smith"] {
+            assert!(groups(text, true).is_empty(), "{text:?}");
+        }
+        for text in ["@smith", "x @smith", "(@smith)", "(see @smith)", "x;@smith", "x,@smith", "\"@smith\"", "'@smith'", "“@smith”", "x\t@smith", "[@smith", "- @smith"] {
+            assert_eq!(groups(text, true).len(), 1, "{text:?}");
+        }
+        // in a bracket too: after a blank, a comma, a bracket or an opening quote
+        for text in ["[see @smith]", "[see,@smith]", "[(@smith)]", "[\"@smith\"]", "[x; @smith]", "[x;@smith]"] {
+            assert_eq!(groups(text, true).len(), 1, "{text:?}");
+        }
+    }
+
+    // spec: EDIT-122
+    #[test]
+    fn edit_122_rule_3_a_mention_is_no_citation() {
+        for text in ["@ada@mastodon.social", "hi @ada@mastodon.social!", "[@ada@mastodon.social]", "[see @ada@host]", "@ada@b"] {
+            assert!(groups(text, true).is_empty(), "{text:?}");
+        }
+        // a lone `@` after the key is no mention, an `@` before a non-letter is none either
+        assert_eq!(groups("@ada @ x", true).len(), 1);
+        assert_eq!(groups("@ada@.", true).len(), 1);
+        assert_eq!(groups("[@ada; @b]", true)[0].items.len(), 2);
+        // the second item of a bracket may be the one that is a mention
+        assert_eq!(groups("[@a; @b@host.org]", true)[0].items.len(), 1);
+    }
+
+    // spec: EDIT-122
+    #[test]
+    fn edit_122_rule_4_a_bare_key_counts_only_when_the_bibliography_holds_it() {
+        // no bibliography in effect: plain text
+        for text in ["@smith", "@todo", "@here", "@ada.bsky.social"] {
+            assert!(groups(text, false).is_empty(), "{text:?}");
+        }
+        // a bibliography that lacks the key: plain text, no mark
+        for text in ["@todo", "@here", "@bob.bsky.social", "@Smith", "@SMITH", "@smit"] {
+            assert!(groups(text, true).is_empty(), "{text:?}");
+        }
+        // a bibliography that holds it, case-sensitive; the key with dots is one key
+        assert_eq!(spans("@smith and @ada.bsky.social.", true), ["@smith", "@ada.bsky.social"]);
+    }
+
+    // spec: EDIT-122
+    #[test]
+    fn edit_122_rule_5_a_bracket_is_a_group_unless_it_is_a_link_a_reference_link_or_a_definition() {
+        for text in ["[@smith](x.md)", "[@smith](https://x.org)", "[@smith][ref]", "[@smith]: https://x.org", "[see @smith](x)", "![@smith](p.png)"] {
+            let found = spans(text, true);
+            assert!(!found.iter().any(|s| s.starts_with("[@smith") || s.starts_with("[see")), "{text:?} gave {found:?}");
+        }
+        // a bracket with `@key` after prefix text is a group
+        assert_eq!(spans("[and also @smith in the text]", true), ["[and also @smith in the text]"]);
+        // a bracket without a key is no group, and an item without a key is left out
+        assert!(groups("[nothing here]", true).is_empty());
+        assert!(groups("[a@b.org]", true).is_empty());
+        assert_eq!(groups("[for example; @smith]", true)[0].items.len(), 1);
+        // a footnote or a task box is no group
+        assert!(groups("[^1] [ ] [x]", true).is_empty());
+        // nested brackets in the prefix or the locator
+        assert_eq!(spans("[see [1] @smith]", true), ["[see [1] @smith]"]);
+        // a bracket that is not closed
+        assert!(groups("[@smith", true).len() == 1 && !groups("[@smith", true)[0].bracketed);
+    }
+
+    // spec: EDIT-122
+    #[test]
+    fn edit_122_rule_5_unknown_keys_are_marked_and_without_a_bibliography_the_group_is_plain() {
+        let g = groups("[@smith; @missing]", true);
+        assert_eq!((item(&g[0], 0).known, item(&g[0], 1).known), (Some(true), Some(false)));
+        let g = groups("[@smith; @missing]", false);
+        assert_eq!((item(&g[0], 0).known, item(&g[0], 1).known), (None, None), "no bibliography: the group is plain text, the TeX export warns");
+        // a key with other case than the one the bibliography holds
+        assert_eq!(item(&groups("[@Smith]", true)[0], 0).known, Some(false));
+    }
+
+    // spec: EDIT-122
+    #[test]
+    fn edit_122_rule_6_the_reserved_prefixes_always_make_a_reference() {
+        for bib in [false, true] {
+            for prefix in ["fig", "tbl", "eq", "sec", "abbr", "gls"] {
+                let text = format!("@{prefix}:x and [@{prefix}:y]");
+                let g = groups(&text, bib);
+                assert_eq!(g.len(), 2, "{text} {bib}");
+                assert!(matches!(item(&g[0], 0).target, Target::Reference { .. }) && matches!(item(&g[1], 0).target, Target::Reference { .. }));
+            }
+        }
+        // `fig:` alone, or another word before the colon, is a key
+        assert!(groups("@fig", true).is_empty());
+        assert_eq!(item(&groups("[@figure:x]", true)[0], 0).target, cite("figure:x"));
+        // the bibliography holding such a key does not make it a citation
+        let has_all = |_: &str| true;
+        let g = scan("@fig:x", Some(&has_all));
+        assert!(matches!(&g[0], Token::Group(g) if matches!(g.items[0].target, Target::Reference { .. })));
+    }
+
+    // spec: EDIT-122
+    #[test]
+    fn edit_122_rule_7_a_label_is_read_only_at_its_places_and_is_no_tag() {
+        for text in ["text {#fig:x} text", "a {#sec:x}", "{#fig:x}", "## H {#fig:x}", "`![[a.png]]{#fig:x}`", "{#other:x}", "{#fig:}", "{#fig x}", "## H {#sec:a b}", "## H {# sec:x}", "## H {#sec:x"] {
+            assert!(labels(text).is_empty(), "{text:?}");
+        }
+        assert_eq!(labels("## H {#sec:a_b-c.d:e}")[0].id, "a_b-c.d:e");
+        // `{#…}` is no tag, as the tag rule needs a blank, a bracket or the line start before the `#`
+        for text in ["{#fig:x}", "## H {#sec:x}", "a {#abc} b", "{#abc}"] {
+            assert!(find_tags(text).is_empty(), "{text:?}");
+        }
+        assert_eq!(find_tags("a #real {#fig:x}").len(), 1);
+    }
+
+    // spec: EDIT-122
+    #[test]
+    fn edit_122_rule_8_a_backslash_makes_the_at_a_plain_character() {
+        assert!(groups("\\@smith", true).is_empty());
+        assert!(groups("[\\@smith]", true).is_empty());
+        assert!(groups("\\@fig:x", false).is_empty());
+    }
+
+    // spec: EDIT-122
+    #[test]
+    fn edit_122_the_tokens_come_in_the_order_of_the_text_and_are_kept_to_the_text() {
+        let text = "## Intro {#sec:intro}\nFirst [@smith, p. 1] then @jones and @fig:a.\n\n![[a.png]]{#fig:a}\nÄ ünï [@doe2020]\n";
+        let tokens = scan(text, Some(&held));
+        let found: Vec<&str> = tokens.iter().map(|t| &text[t.range().clone()]).collect();
+        assert_eq!(found, ["{#sec:intro}", "[@smith, p. 1]", "@jones", "@fig:a", "{#fig:a}", "[@doe2020]"]);
+        assert!(tokens.windows(2).all(|w| w[0].range().end <= w[1].range().start));
+        // windows line endings
+        let crlf = text.replace('\n', "\r\n");
+        assert_eq!(scan(&crlf, Some(&held)).len(), 6);
+    }
+
+    // spec: EDIT-122
+    #[test]
+    fn edit_122_a_labelled_display_formula_hides_its_body_from_the_scanner() {
+        use crate::markdown::find_math;
+        let text = "$$\n[@smith] x@y\n$$ {#eq:x}\n@smith\n";
+        let math = find_math(text);
+        assert_eq!(math.len(), 1);
+        assert_eq!(&text[math[0].range.clone()], "$$\n[@smith] x@y\n$$");
+        assert_eq!(spans(text, true), ["{#eq:x}", "@smith"]);
+        // a math fence with a label in its info string is math, and another word is not
+        let fence = "```math {#eq:y}\na\n```\n```math more\n[@smith]\n```";
+        assert_eq!(find_math(fence).len(), 1);
+    }
+
+    proptest! {
+        #![proptest_config(crate::property_test_support::config())]
+
+        // spec: EDIT-122, LINK-018
+        #[test]
+        fn edit_122_the_scanner_never_panics_and_its_ranges_lie_inside_the_text_in_order(text in super::md_text()) {
+            for bib in [None, Some(&held as &dyn Fn(&str) -> bool)] {
+                let tokens = scan(&text, bib);
+                for t in &tokens {
+                    prop_assert_eq!(super::inside(&text, t.range()), Ok(()));
+                    if let Token::Group(g) = t {
+                        prop_assert!(!g.items.is_empty());
+                        for i in &g.items {
+                            prop_assert_eq!(super::inside(&text, &i.range), Ok(()));
+                            prop_assert!(g.range.start <= i.range.start && i.range.end <= g.range.end, "{:?}", g);
+                            prop_assert!(text[i.range.clone()].contains('@'));
+                        }
+                    }
+                }
+                let ranges: Vec<_> = tokens.iter().map(|t| t.range().clone()).collect();
+                prop_assert_eq!(super::in_order(&ranges), Ok(()));
+            }
         }
     }
 }

@@ -163,6 +163,7 @@ pub enum RightPanel {
     Thread,
 }
 
+mod bib;
 mod boards;
 #[cfg(test)]
 mod busy_jobs;
@@ -358,6 +359,13 @@ pub enum Action {
     ShowViewInNewTab(View),
     /// show a day (a day number) in the calendar: the sidebar's, else the big one (EDIT-108)
     OpenCalendarDay(i64),
+    /// show an event in the Calendar tab (opened when there is none), from the sidebar's Calendar pane (LAY-033)
+    OpenCalendarEvent(Box<crate::calendar::store::Occ>),
+    /// open the conversation of a post of the sidebar's Feeds pane in a Feeds tab (opened when there is none, LAY-034)
+    OpenFeedPost {
+        feed: crate::social::FeedRef,
+        post: Box<crate::social::Post>,
+    },
     /// open a post found by the search in its feed, in a new tab (SOC-035)
     OpenPost(Box<crate::social::post_index::PostHit>),
     /// open a mail found by the search in the mail view (NAV-025)
@@ -476,6 +484,8 @@ pub struct ShaleApp {
     pub(crate) drag: drops::DragState,
     /// the tag words learned from the vault, and the job that learns them (see tagwords)
     pub tag_learner: crate::import::tagwords::TagLearner,
+    /// the `.bib` files that notes ask for, read in the background (EDIT-123)
+    pub bib: crate::bibliography::Bibliographies,
     pub scenes: SceneCache,
     /// the one media player state (MEDIA-007); the players in the views draw from it
     pub media: crate::media::MediaPlayer,
@@ -747,6 +757,7 @@ impl ShaleApp {
             ctx: None,
             drag: drops::DragState::default(),
             tag_learner: crate::import::tagwords::TagLearner::new(),
+            bib: Default::default(),
             scenes: SceneCache::default(),
             media: crate::media::MediaPlayer::default(),
             modal: None,
@@ -2212,6 +2223,20 @@ impl ShaleApp {
         }
     }
 
+    /// Show an event of the sidebar's Calendar pane in the Calendar tab (LAY-033): the tab is
+    /// opened when there is none, shows the month of the event with its day selected and its
+    /// details popup open.
+    pub fn open_calendar_event(&mut self, occ: crate::calendar::store::Occ) {
+        let day = occ.start_day();
+        self.show_view(View::Calendar, false);
+        let view = &mut self.cal.main;
+        view.mode = crate::calendar::ui::Mode::Month;
+        view.anchor = day;
+        view.selected = day;
+        let at = self.ctx.as_ref().map(|c| c.content_rect().center()).unwrap_or_default();
+        view.open_popup(occ, at);
+    }
+
     /// Do what the calendar panel asked for.
     pub fn calendar_action(&mut self, a: crate::calendar::ui::CalAction) {
         use crate::calendar::ui::CalAction;
@@ -2512,8 +2537,31 @@ impl ShaleApp {
             Some(Ok(e)) => TexStatus::Ready(format!("Using {} (LaTeX kernel {})", crate::pdf::tex::settings_ui::engine_name(e), e.kernel)),
             Some(Err(why)) => TexStatus::Missing(why),
         };
+        // the packages of the list the managed TeX Live lacks, and what a board needs of them (TEX-052)
+        let (managed, missing) = match self.tex.detection.as_ref().map(|det| det.selected(self.cfg.tex.engine)) {
+            Some(Ok(e)) if e.kind == crate::pdf::tex::engine::Kind::Managed => (true, e.missing.clone()),
+            _ => (false, vec![]),
+        };
+        let board = d.book.as_ref().is_some_and(|b| b.board);
+        let installing = self.tex.task.as_ref().filter(|t| t.kind == crate::pdf::tex::settings_ui::TaskKind::Packages).map(|t| t.handle.progress().text());
         let tex = d.tex.as_mut()?;
         tex.status = status;
+        (tex.managed, tex.missing) = (managed, missing);
+        tex.needs = if board { crate::pdf::tex::engine::BOARD_NEEDS.iter().map(|n| n.to_string()).collect() } else { vec![] };
+        if tex.installing.is_some() && installing.is_none() {
+            // the install of the packages ended: the look for TeX is done again, a failure stays in the dialog
+            match self.tex.notice.as_ref() {
+                Some(n) if !n.ok => tex.install_error = Some(n.text.clone()),
+                _ => tex.failure = None,
+            }
+        }
+        tex.installing = installing;
+        if std::mem::take(&mut tex.install_requested) {
+            tex.install_error = None;
+            let names = tex.wanted_packages();
+            self.tex.begin_packages(ctx, &self.cfg.tex, names);
+            tex.installing = self.tex.task.as_ref().filter(|t| t.kind == crate::pdf::tex::settings_ui::TaskKind::Packages).map(|t| t.handle.progress().text());
+        }
         let made = tex.poll()?;
         let saved = self.save_pdf(&d.path, &made.pdf);
         if saved.is_ok() {
@@ -2542,6 +2590,9 @@ impl ShaleApp {
         let v = self.vault.as_ref().ok_or("No vault is open")?;
         let busy = d.busy().clone();
         let tex = d.tex.as_mut().ok_or("This note has no LaTeX choices")?;
+        if let Some(n) = tex.blocked_by().first() {
+            return Err(format!("The managed TeX Live misses the package {n}, which this document needs: press Install, then export"));
+        }
         let (set, kind) = (tex.current_set().ok_or("Choose a template set first: import one in Settings → LaTeX")?, tex.current_kind().ok_or("Choose a kind of document")?);
         let doc = match &d.book {
             // a folder: its book as it is in the vault now, which has the saved notes (BOOK-014)
@@ -2761,7 +2812,9 @@ impl ShaleApp {
                 Action::ShowViewInNewTab(v) => self.show_view(v, true),
                 Action::OpenCalendarDay(day) => self.open_calendar_day(day),
                 Action::OpenPost(hit) => self.open_post_hit(&hit),
+                Action::OpenFeedPost { feed, post } => self.open_feed_post(feed, &post),
                 Action::OpenMail(msg) => self.open_mail_hit(*msg),
+                Action::OpenCalendarEvent(occ) => self.open_calendar_event(*occ),
                 Action::CloseTab(i) => self.close_tab(i),
                 Action::SplitTabRight { pane, tab } => {
                     self.focus_pane(pane);
@@ -3387,6 +3440,7 @@ impl ShaleApp {
         self.update_dialogs(ui.ctx());
         self.handle_drops(ui);
         self.learn_tags_tick();
+        self.bib_tick(ui.ctx());
         self.usage_tick();
         self.paint_toasts(ui);
         self.paint_recovery_notice(ui);
