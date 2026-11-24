@@ -2,22 +2,20 @@
 //! of contents, opening the file afterwards, and the export as a background job (DOCX-002, JOB-001).
 
 use super::Job;
+use crate::busy::{self, Busy, Key};
 use crate::theme;
 use eframe::egui::{self, Rect, Ui};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Receiver;
-use std::sync::Arc;
+
+/// The export of a note to Word, as a task of the busy registry (JOB-019).
+pub const DOCX_EXPORT: Key = Key::new("docx-export");
 
 /// A running export. Dropping it (the dialog closed, or Cancel) stops pandoc.
-struct Running {
-    rx: Receiver<Result<Result<Vec<u8>, String>, String>>,
-    cancel: Arc<AtomicBool>,
-}
+struct Running(busy::Job<Result<Vec<u8>, String>>);
 
 impl Drop for Running {
     fn drop(&mut self) {
-        self.cancel.store(true, Ordering::SeqCst);
+        self.0.cancel();
     }
 }
 
@@ -36,6 +34,7 @@ pub struct DocxDialog {
     pub open_after: bool,
     pub error: Option<String>,
     job: Option<Running>,
+    busy: Busy,
     /// screen rect of every control (used by the UI tests)
     pub rects: Vec<(String, Rect)>,
 }
@@ -49,19 +48,32 @@ pub enum DialogResult {
 
 impl DocxDialog {
     pub fn new(rel: PathBuf, name: String, path: PathBuf, pandoc: Option<PathBuf>, original: Option<PathBuf>, toc: bool, toc_break: bool) -> Self {
-        DocxDialog { rel, name, path: path.to_string_lossy().into_owned(), pandoc, use_original: original.is_some(), original, toc, toc_break, open_after: false, error: None, job: None, rects: vec![] }
+        DocxDialog { rel, name, path: path.to_string_lossy().into_owned(), pandoc, use_original: original.is_some(), original, toc, toc_break, open_after: false, error: None, job: None, busy: Busy::default(), rects: vec![] }
+    }
+
+    /// The registry the export is a task of (the window's; a dialog made without one has its own).
+    pub fn with_busy(mut self, busy: &Busy) -> Self {
+        self.busy = busy.clone();
+        self
     }
 
     pub fn working(&self) -> bool {
         self.job.is_some()
     }
 
-    /// Run the export as a job; `notify` is called when it has ended (to repaint the window).
-    pub fn start(&mut self, job: Job, notify: impl FnOnce() + Send + 'static) {
-        let cancel = Arc::new(AtomicBool::new(false));
-        let flag = cancel.clone();
-        let rx = crate::jobs::spawn(move || super::export(&job, &flag), notify);
-        self.job = Some(Running { rx, cancel });
+    /// Whether Export can be pressed: pandoc is there and no Word export runs (in this dialog or in
+    /// one that was closed while its export was still stopping, JOB-005).
+    pub fn can_export(&self) -> bool {
+        self.pandoc.is_some() && self.job.is_none() && !self.busy.is_running(&DOCX_EXPORT)
+    }
+
+    /// Run the export as a task of the registry (JOB-019); `notify` is called when it has ended (to
+    /// repaint the window). False: a Word export already runs, and nothing starts.
+    pub fn start(&mut self, job: Job, notify: impl FnOnce() + Send + 'static) -> bool {
+        let Some(mut task) = self.busy.begin(DOCX_EXPORT, format!("Exporting “{}” to Word…", self.name)) else { return false };
+        let cancel = task.cancellable().flag();
+        self.job = Some(Running(task.run(move || super::export(&job, &cancel), notify)));
+        true
     }
 
     /// Stop the export that is running.
@@ -71,7 +83,7 @@ impl DocxDialog {
 
     /// What the finished job made, once: the Word file or why not.
     pub fn poll(&mut self) -> Option<Result<Vec<u8>, String>> {
-        let got = self.job.as_ref()?.rx.try_recv().ok()?;
+        let got = self.job.as_ref()?.0.try_recv().ok()?;
         self.job = None;
         Some(got.and_then(|r| r))
     }
@@ -109,7 +121,10 @@ pub fn show(ui: &mut Ui, d: &mut DocxDialog) {
         None => rec("pandoc", theme::problem(ui, crate::import::docx::MISSING)),
     };
     if busy {
-        rec("working", ui.label(muted("Exporting to Word… Cancel stops it.")));
+        ui.horizontal(|ui| {
+            ui.add(egui::Spinner::new().size(14.0));
+            rec("working", ui.label(muted("Exporting to Word… Cancel stops it.")));
+        });
     }
     d.rects = rects;
 }
@@ -120,7 +135,7 @@ pub fn footer(ui: &mut Ui, d: &mut DocxDialog) -> DialogResult {
     if let Some(e) = &d.error {
         theme::problem(ui, e);
     }
-    let ready = d.pandoc.is_some() && !d.working();
+    let ready = d.can_export();
     ui.horizontal(|ui| {
         let mut rec = |k: &str, r: egui::Response| -> egui::Response {
             d.rects.push((k.to_string(), r.rect));

@@ -20,7 +20,7 @@ impl ShaleApp {
         let original = crate::docx_export::original_of(v, rel, &text);
         let path = v.root.join("exports").join(format!("{name}.docx"));
         let pandoc = crate::import::docx::locate(&self.cfg.pandoc_path);
-        self.modal = Some(Modal::ExportDocx(Box::new(DocxDialog::new(rel.to_path_buf(), name, path, pandoc, original, opts.toc, opts.toc_break))));
+        self.modal = Some(Modal::ExportDocx(Box::new(DocxDialog::new(rel.to_path_buf(), name, path, pandoc, original, opts.toc, opts.toc_break).with_busy(&self.busy))));
     }
 
     /// Run the export of the dialog as a job (DOCX-002). The text is the note as the window has it.
@@ -34,7 +34,9 @@ impl ShaleApp {
         let original = d.original.as_deref().filter(|_| d.use_original);
         let job = crate::docx_export::Job::new(pandoc, v, &d.rel, &self.note_text(&d.rel), original, d.toc, d.toc_break);
         let ctx = ctx.clone();
-        d.start(job, move || ctx.request_repaint());
+        if !d.start(job, move || ctx.request_repaint()) {
+            return Err("Another Word export is still running".into());
+        }
         Ok(())
     }
 

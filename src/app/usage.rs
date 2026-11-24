@@ -3,7 +3,8 @@
 
 use super::{LeftPanel, Modal, ShaleApp};
 use crate::data_usage::dialog::Ask;
-use crate::data_usage::{finished_text, CacheId, Finished, Kind};
+use crate::data_usage::{finished_text, CacheId, Finished, Kind, Rebuild};
+use crate::mail::ui::MAIL_REBUILD;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -81,8 +82,11 @@ impl ShaleApp {
             return;
         }
         let mail = if id == CacheId::MailIndex && kind == Kind::Clear {
+            // a task of the registry that Cancel can stop (JOB-016); it ends with the job
+            let Some(mut task) = self.busy.begin(MAIL_REBUILD, "Rebuilding the mail index…") else { return };
+            let cancel = task.cancellable();
             match self.mail.begin_rebuild() {
-                Ok(s) => Some(s),
+                Ok(store) => Some(Rebuild { store, cancel, task }),
                 Err(why) => {
                     let f = Finished { id, kind, result: Err(format!("not now: {why}")) };
                     self.usage.record.note(&f, crate::calendar::time::now());

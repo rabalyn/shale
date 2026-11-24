@@ -6,15 +6,21 @@
 use super::compile::compile_test_document;
 use super::engine::{self, Detection, Engine, Kind, TexChoice, TexConfig};
 use super::install::{self, Env, Handle, DISK_MB, DOWNLOAD_MB};
-use crate::busy::{self, Busy, Key};
+use crate::busy::{self, Key};
 use crate::theme;
 use eframe::egui::{self, Context, Ui};
 use std::ffi::OsString;
 use std::path::PathBuf;
+use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
-/// Looking for a TeX (TEX-001) as a quiet task (JOB-029): the page does it whenever it is shown.
-pub(crate) const TEX_DETECT: Key = Key::quiet("tex-detect");
+/// The task of the look for TeX (TEX-001, JOB-023). It cannot be stopped: it runs a few programs
+/// with `--version`.
+pub const TEX_PROBE: crate::busy::Key = crate::busy::Key::new("tex-probe");
+
+/// What the look for TeX says it does.
+pub const TEX_PROBE_TEXT: &str = "Looking for TeX on this computer…";
+
 /// The install, update and removal of the managed TeX Live, the test compile, the import of a
 /// template set and the test page of a set (JOB-029): one at a time. An install, an update and an
 /// import can be stopped (what they did is taken back); the others cannot.
@@ -74,7 +80,9 @@ pub struct TexState {
     /// What detection found, until something changes it.
     pub detection: Option<Detection>,
     /// The look for TeX that runs (a job), if any.
-    pub(super) detecting: Option<busy::Job<Detection>>,
+    pub(super) detecting: Option<(Receiver<Result<Detection, String>>, crate::busy::Task)>,
+    /// the registry that lists the look for TeX (the window's, set by `ShaleApp`)
+    pub busy: crate::busy::Busy,
     pub task: Option<Task>,
     /// The person pressed Install and has not agreed yet.
     pub consent: bool,
@@ -88,8 +96,6 @@ pub struct TexState {
     pub setup: super::setup::TexSetup,
     /// "Set up LaTeX export…" was pressed: the window opens the guided setup.
     pub setup_requested: bool,
-    /// The window's registry of running tasks (the window sets it; JOB-003).
-    pub(crate) busy: Busy,
 }
 
 impl TexState {
@@ -104,13 +110,13 @@ impl TexState {
             let fake = std::env::var_os("SHALE_FAKE_DATA_DIR").map(PathBuf::from);
             (Some(fake.unwrap_or_else(|| std::env::temp_dir().join(format!("shale-texdata-{tag}-{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst))))), None)
         };
-        TexState { data, path_var, detection: None, detecting: None, task: None, consent: false, confirm_remove: false, notice: None, sets: Default::default(), setup: Default::default(), setup_requested: false, busy: Busy::default() }
+        TexState { data, path_var, detection: None, detecting: None, busy: Default::default(), task: None, consent: false, confirm_remove: false, notice: None, sets: Default::default(), setup: Default::default(), setup_requested: false }
     }
 
     /// Take what the jobs have finished; call it every frame.
     pub fn poll(&mut self, ctx: &Context) {
-        if let Some(job) = &self.detecting {
-            if let Ok(r) = job.try_recv() {
+        if let Some((rx, _)) = &self.detecting {
+            if let Ok(r) = rx.try_recv() {
                 self.detecting = None;
                 match r {
                     Ok(d) => self.detection = Some(d),
@@ -163,7 +169,8 @@ impl TexState {
         self.detection = None;
         let (data, path) = (self.data.clone(), self.path_var.clone());
         let ctx = ctx.clone();
-        self.detecting = self.busy.spawn(TEX_DETECT, "Looking for a TeX…", move || engine::detect(data.as_deref(), path.as_deref()), move || ctx.request_repaint());
+        let Some(task) = self.busy.begin(TEX_PROBE, TEX_PROBE_TEXT) else { return };
+        self.detecting = Some((crate::jobs::spawn(move || engine::detect(data.as_deref(), path.as_deref()), move || ctx.request_repaint()), task));
     }
 
     /// Start a job of the page; its answer is a notice.
@@ -281,7 +288,7 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &mut TexConfig) -> bool {
     theme::section(ui, "Which TeX is used");
     match (&st.detection, st.detecting.is_some()) {
         (_, true) | (None, _) => {
-            busy::ui::status(ui, &st.busy, &TEX_DETECT);
+            crate::busy::ui::status(ui, &st.busy, &TEX_PROBE);
         }
         (Some(d), false) => match d.selected(cfg.engine) {
             Ok(e) => {
@@ -316,7 +323,8 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &mut TexConfig) -> bool {
     });
     crate::settings::anchor::anchor(ui, "tex.test", |ui| {
         ui.horizontal(|ui| {
-            if busy::ui::button(ui, &st.busy, &[&TEX_DETECT, &TEX_JOB], egui::Button::new("Check again")).on_hover_text("Look for a TeX again").clicked() {
+            let again = ui.add_enabled_ui(st.task.is_none(), |ui| crate::busy::ui::button(ui, &st.busy, &[&TEX_PROBE], egui::Button::new("Check again"))).inner;
+            if again.on_hover_text("Look for a TeX again").clicked() {
                 st.check_again(&ctx);
             }
             let engine = st.detection.as_ref().and_then(|d| d.selected(cfg.engine).ok()).cloned();

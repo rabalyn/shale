@@ -186,12 +186,13 @@ fn cache_ui(ui: &mut Ui, u: &mut DataUsage, r: &mut CacheRetention, now: i64, ou
                 ui.label(RichText::new(id.name()).strong());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let running = u.running(id);
-                    let b = ui.add_enabled(!running && u.confirm.is_none(), egui::Button::new(id.clear_label()));
+                    let b = ui.add_enabled_ui(u.confirm.is_none(), |ui| crate::busy::ui::button(ui, &u.busy, &[&id.key()], egui::Button::new(id.clear_label()))).inner;
                     if b.clicked() {
                         out.extend(clear_clicked(u, id));
                     }
+                    // the spinner and what happens (JOB-004)
                     if running {
-                        ui.spinner();
+                        crate::busy::ui::status(ui, &u.busy, &id.key());
                     }
                 });
             });

@@ -185,7 +185,7 @@ fn imp_015_hover_refusal_and_busy_show_and_go_away() {
     assert!(w.app.drag.drop_busy && w.painted("Reading the dropped message"));
     w.drop_files(at, &[w.file("second.md")]);
     w.until("the Import dialog", |a| matches!(a.modal, Some(Modal::Import(_))));
-    assert!(!w.app.drag.drop_busy && w.app.drag.pending_drops.is_empty());
+    assert!(!w.app.drag.drop_busy && w.app.drag.pending_drops.is_empty() && w.app.busy.list().is_empty(), "the read of the drop left no task");
 }
 
 // spec: IMP-016
@@ -570,7 +570,7 @@ fn media_019_one_file_can_be_copied_and_another_linked_and_a_file_of_the_vault_i
     assert_eq!(s.title(), "Imported 2 files and 1 linked file");
 }
 
-// spec: IMP-035, IMP-036
+// spec: IMP-035, IMP-036, JOB-020
 #[cfg(unix)]
 #[test]
 fn imp_035_a_word_file_is_converted_in_a_job_while_the_dialog_waits_and_then_becomes_a_note() {
@@ -600,11 +600,15 @@ fn imp_035_a_word_file_is_converted_in_a_job_while_the_dialog_waits_and_then_bec
     d.folder = "Sub".into();
     assert!(!w.app.import_action(&mut d, crate::import::dialog::ImportAction::Import), "the dialog stays while pandoc works");
     assert!(d.converting.is_some());
+    // the conversion is a task of the registry with its text and Cancel (JOB-020)
+    let listed = w.app.busy.info(&crate::import::dialog::IMPORT_CONVERT);
+    assert!(listed.as_ref().is_some_and(|t| t.cancellable && t.label == "Converting the Word files with pandoc…"), "{listed:?}");
     w.app.modal = Some(Modal::Import(d));
     w.frames(2);
     assert!(w.dialog_open() && w.painted("Converting the Word files with pandoc"), "the window is not blocked: it says what is going on");
     std::fs::write(&gate, b"").unwrap();
     w.until("the note", |a| a.modal.is_none());
+    assert!(w.app.busy.list().is_empty(), "the task is gone with its job");
     let root = w.app.vault.as_ref().unwrap().root.clone();
     let note = std::fs::read_to_string(root.join("Sub/Quarterly Plan.md")).unwrap();
     let (y, m, _) = crate::media::local_date();
@@ -856,4 +860,38 @@ fn cal_034_import_without_a_vault_says_so() {
     w.app.calendar_action(crate::calendar::ui::CalAction::Import(occs[0].clone()));
     assert!(w.app.toasts.iter().any(|(t, _)| t.contains("Open a vault first")), "{:?}", w.app.toasts);
     assert!(!w.dialog_open());
+}
+
+// spec: IMP-015, JOB-023
+#[test]
+fn imp_015_reading_dropped_files_or_stored_mails_is_a_task_each_until_the_items_have_arrived() {
+    let mut w = W::new("read-task");
+    let labels = |w: &W| w.app.busy.list().iter().map(|t| t.label.clone()).collect::<Vec<_>>();
+    // the reads are held by their channels: nothing depends on how fast a thread is
+    let (drop_tx, drop_rx) = std::sync::mpsc::channel();
+    let (mail_tx, mail_rx) = std::sync::mpsc::channel();
+    w.app.drag.read_started(&w.app.busy, "Reading the dropped files…", drop_rx, None);
+    w.app.drag.read_started(&w.app.busy, "Reading the mails…", mail_rx, None);
+    assert_eq!(labels(&w), ["Reading the dropped files…", "Reading the mails…"], "two reads go side by side");
+    assert!(w.app.busy.list().iter().all(|t| !t.cancellable), "a read of dropped things cannot be taken back");
+    w.frames(3);
+    assert!(!w.dialog_open() && w.app.drag.pending_drops.len() == 2, "the window goes on and waits for the items");
+    drop_tx.send(Ok((vec![], vec!["the files".into()]))).unwrap();
+    w.until("the Import dialog", |a| matches!(a.modal, Some(Modal::Import(_))));
+    assert_eq!(labels(&w), ["Reading the mails…"], "the read that has arrived is gone, the other stays");
+    mail_tx.send(Ok((vec![], vec!["the mails".into()]))).unwrap();
+    w.until("the second read", |a| a.drag.pending_drops.is_empty());
+    assert!(labels(&w).is_empty());
+}
+
+// spec: IMP-015, JOB-002, JOB-023
+#[test]
+fn imp_015_a_read_that_crashes_ends_its_task_and_tells_in_the_dialog() {
+    let mut w = W::new("read-crash");
+    let (tx, rx) = std::sync::mpsc::channel();
+    w.app.drag.read_started(&w.app.busy, "Reading the dropped files…", rx, None);
+    tx.send(Err("boom".to_string())).unwrap();
+    w.until("the Import dialog", |a| matches!(a.modal, Some(Modal::Import(_))));
+    assert!(w.dialog().notes.iter().any(|n| n.contains("Reading the drop failed: boom")), "{:?}", w.dialog().notes);
+    assert!(w.app.busy.list().is_empty());
 }

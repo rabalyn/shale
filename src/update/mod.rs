@@ -33,7 +33,7 @@ use std::time::{Duration, Instant};
 /// check is quiet (it also runs by itself, every day) and can stop; the download can stop and its
 /// partial file is removed; the install cannot, because it is a few file operations that undo
 /// themselves on an error and must not end half way.
-pub(crate) const UPDATE_CHECK: Key = Key::quiet("update-check");
+pub(crate) const UPDATE_CHECK: Key = Key::new("update-check");
 pub(crate) const UPDATE_DOWNLOAD: Key = Key::new("update-download");
 pub(crate) const UPDATE_INSTALL: Key = Key::new("update-install");
 
@@ -317,7 +317,9 @@ impl UpdateState {
     /// Run `f` as the task `key`, with a new cancel flag that the task's Cancel sets when `stoppable`.
     /// None: the task of this key is still listed (a job that was dropped by `quiet` has not ended yet).
     fn start_job<T: Send + 'static>(&mut self, ctx: &eframe::egui::Context, key: Key, label: String, stoppable: bool, f: impl FnOnce(&AtomicBool) -> Result<T, String> + Send + 'static) -> Option<Job<T>> {
-        let mut task = self.busy.begin(key, label)?;
+        // the check also runs by itself, every day: quiet, like the other housekeeping
+        let wait = if key == UPDATE_CHECK { busy::LISTED_AFTER } else { Duration::ZERO };
+        let mut task = self.busy.begin_listed_after(key, label, wait)?;
         self.cancel = Arc::new(AtomicBool::new(false));
         if stoppable {
             task.cancellable_with(self.cancel.clone().into());

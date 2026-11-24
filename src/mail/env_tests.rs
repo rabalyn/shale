@@ -226,6 +226,56 @@ fn mail_env_password_account_syncs_end_to_end_and_changes_nothing_on_the_server(
     let _ = std::fs::remove_dir_all(dir);
 }
 
+// spec: JOB-021
+#[test]
+#[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
+fn mail_env_job_021_a_sync_of_the_stack_is_a_task_and_a_stop_leaves_a_sound_index() {
+    use crate::mail::imap_sync::{start, Progress};
+    use crate::mail::ui::MAIL_SYNC;
+    let _turn = turn();
+    let dir = std::env::temp_dir().join(format!("shale-mailenv-job021-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let store = Arc::new(MailStore::open(&dir).expect("the mail store"));
+    let auth: Arc<dyn AuthFactory> = Arc::new(PasswordAuth { user: "alice@shale.test".into(), password: "shale-test-pw".into() });
+    let busy = crate::busy::Busy::default();
+    let begin = || {
+        let mut task = busy.begin(MAIL_SYNC.with("alice"), "Syncing Alice…").expect("the account is idle");
+        let cancel = task.cancellable().flag();
+        (task, cancel)
+    };
+    let opts = SyncOptions { parallel: 1, batch_size: 1, ..SyncOptions::default() };
+    let (task, cancel) = begin();
+    assert_eq!(busy.info(&MAIL_SYNC.with("alice")).map(|t| t.label), Some("Syncing Alice…".to_string()));
+    let rx = start(store.clone(), "alice".into(), "Alice".into(), Arc::new(EnvConnector { auth: auth.clone() }), opts, cancel, task);
+    // Cancel (the registry's) as soon as the first batch is reported
+    let mut summary = None;
+    while let Ok(e) = rx.recv_timeout(Duration::from_secs(120)) {
+        match e {
+            Progress::Folder { .. } => {
+                if let Some(t) = busy.info(&MAIL_SYNC.with("alice")) {
+                    busy.cancel(t.id);
+                }
+            }
+            Progress::Finished(s) => {
+                summary = Some(s);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let summary = summary.expect("the sync ends");
+    assert!(summary.cancelled, "{summary:?}");
+    assert!(busy.list().is_empty(), "the task ended with the job");
+    crate::mail::db::quick_check(&store.index_path()).expect("the index passes its check after a stop (MAIL-006)");
+    // the next sync continues normally and brings everything
+    let (task, cancel) = begin();
+    let rx = start(store.clone(), "alice".into(), "Alice".into(), Arc::new(EnvConnector { auth }), SyncOptions::default(), cancel, task);
+    let done = std::iter::from_fn(|| rx.recv_timeout(Duration::from_secs(120)).ok()).find_map(|e| if let Progress::Finished(s) = e { Some(s) } else { None }).expect("the sync ends");
+    assert!(!done.cancelled && done.errors.is_empty(), "{done:?}");
+    assert_eq!(store.reader().unwrap().count_messages().unwrap(), 11);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 fn oauth_account() -> MailAccount {
     MailAccount {
         id: "mailenv-oauth".into(),

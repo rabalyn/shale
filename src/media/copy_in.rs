@@ -23,6 +23,8 @@ pub struct Copied {
     pub missing: Vec<String>,
     /// the targets whose file could not be copied, with the reason
     pub failed: Vec<(String, String)>,
+    /// Cancel ended the copy before the last target: the rest stays as it was (JOB-006)
+    pub stopped: bool,
 }
 
 impl Copied {
@@ -40,6 +42,9 @@ impl Copied {
         if !self.failed.is_empty() {
             let list: Vec<String> = self.failed.iter().map(|(t, e)| format!("{t} ({e})")).collect();
             out.push_str(&format!(". Could not copy: {}", list.join(", ")));
+        }
+        if self.stopped {
+            out.push_str(". Stopped: the links that were not copied stay as they are");
         }
         out
     }
@@ -59,10 +64,16 @@ impl Copied {
 /// Copy the files that the outside links `targets` name into the vault at `root` (a file that
 /// several targets name is copied once). Only an outside link that resolves to a file that is there
 /// is copied (`Outside::Found`); the rest is reported. Nothing outside the vault is changed.
-pub fn copy_into(root: &std::path::Path, libraries: &[Library], targets: &[String], date: (i32, u32, u32)) -> Copied {
+/// `cancel` is looked at between two files: the files copied so far are in `done` and keep their
+/// links' new targets, the rest is left alone (`stopped`).
+pub fn copy_into(root: &std::path::Path, libraries: &[Library], targets: &[String], date: (i32, u32, u32), cancel: &crate::busy::Cancel) -> Copied {
     let mut out = Copied::default();
     let mut copies: HashMap<PathBuf, PathBuf> = HashMap::new();
     for target in targets {
+        if cancel.is_cancelled() {
+            out.stopped = true;
+            break;
+        }
         let Some(spot) = spot(target) else { continue };
         match resolve(&spot, libraries) {
             Outside::Found { abs, .. } => {
@@ -157,7 +168,7 @@ mod tests {
         fs::write(d.videos.join("b.png"), b"picture").unwrap();
         let by_address = crate::media::testdata::file_address(&d.videos.join("2024/a.mp4"));
         let targets: Vec<String> = ["@Videos/2024/a.mp4", &by_address, "@Videos/b.png", "@Videos/gone.mp3", "@Nowhere/c.mp3", "@Videos/../x.png", "plain.png"].map(String::from).to_vec();
-        let c = copy_into(&d.vault, &d.libraries(), &targets, DATE);
+        let c = copy_into(&d.vault, &d.libraries(), &targets, DATE, &crate::busy::Cancel::default());
         assert_eq!(c.done.len(), 3);
         assert_eq!(c.done[0].1, c.done[1].1, "a library link and a file address of one file are one copy");
         assert_eq!(c.files(), 2);
@@ -182,7 +193,7 @@ mod tests {
         fs::write(d.videos.join("a.mp4"), b"x").unwrap();
         // the media folder of the vault is a file: no copy can be made there
         fs::write(d.vault.join("z_media"), b"in the way").unwrap();
-        let c = copy_into(&d.vault, &d.libraries(), &["@Videos/a.mp4".to_string()], DATE);
+        let c = copy_into(&d.vault, &d.libraries(), &["@Videos/a.mp4".to_string()], DATE, &crate::busy::Cancel::default());
         assert!(c.done.is_empty() && c.missing.is_empty());
         assert_eq!(c.failed.len(), 1);
         assert_eq!(c.failed[0].0, "@Videos/a.mp4");
@@ -196,7 +207,7 @@ mod tests {
         fs::create_dir_all(d.vault.join("pics")).unwrap();
         fs::write(d.vault.join("pics/a.png"), b"x").unwrap();
         let target = crate::media::testdata::file_address(&d.vault.join("pics/a.png"));
-        let c = copy_into(&d.vault, &[], std::slice::from_ref(&target), DATE);
+        let c = copy_into(&d.vault, &[], std::slice::from_ref(&target), DATE, &crate::busy::Cancel::default());
         assert_eq!(c.done, vec![(target, PathBuf::from("pics/a.png"))], "linked in place, not copied again");
         assert!(!d.vault.join("z_media").exists());
     }
@@ -230,5 +241,22 @@ mod tests {
         let r = relink("Ünï ![[@Videos/ä.mp4]]", &[done("@Videos/ä.mp4", "z_media/ä.mp4")]).unwrap();
         assert_eq!(r.text, "Ünï ![[z_media/ä.mp4]]");
         assert_eq!(r.changes[0].0, 7..20);
+    }
+
+    // spec: MEDIA-021, JOB-006, JOB-023
+    #[test]
+    fn a_cancelled_copy_stops_before_the_next_file_and_says_so() {
+        let d = Dirs::new("cancel");
+        fs::write(d.videos.join("a.mp4"), b"a").unwrap();
+        fs::write(d.videos.join("b.mp4"), b"b").unwrap();
+        let targets: Vec<String> = ["@Videos/a.mp4", "@Videos/b.mp4"].map(String::from).to_vec();
+        let cancel = crate::busy::Cancel::default();
+        cancel.cancel();
+        let c = copy_into(&d.vault, &d.libraries(), &targets, DATE, &cancel);
+        assert!(c.stopped && c.done.is_empty(), "nothing was copied: the token is looked at before each file");
+        assert!(!d.vault.join("z_media").exists(), "nothing was written");
+        assert_eq!(c.message(), "No file was copied into the vault. Stopped: the links that were not copied stay as they are");
+        let all = copy_into(&d.vault, &d.libraries(), &targets, DATE, &crate::busy::Cancel::default());
+        assert!(!all.stopped && all.files() == 2);
     }
 }

@@ -23,12 +23,12 @@ const CHECK_EVERY: Duration = Duration::from_secs(7 * 24 * 3600);
 const CHECK_RETRY: Duration = Duration::from_secs(3600);
 
 /// Looking for git on this computer (SYNC-023) as a quiet task (JOB-028): the page does it whenever it is shown.
-pub(crate) const GIT_DETECT: Key = Key::quiet("git-detect");
+pub(crate) const GIT_DETECT: Key = Key::new("git-detect");
 /// The install, the update and the removal of Shale's own git (SYNC-025, SYNC-027): one at a time.
 /// An install and an update can stop, and what was downloaded is removed (JOB-006); a removal cannot.
 pub(crate) const GIT_MANAGED: Key = Key::new("git-managed");
 /// The look for a newer git (SYNC-027) as a quiet task that can stop: it also runs by itself, weekly.
-pub(crate) const GIT_CHECK: Key = Key::quiet("git-check");
+pub(crate) const GIT_CHECK: Key = Key::new("git-check");
 
 /// What the person is told after a job.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -199,7 +199,7 @@ impl ManagedState {
         self.detected_for = choice;
         let (data, path) = (self.data.clone(), self.path_var.clone());
         let ctx = ctx.clone();
-        self.detecting = self.busy.spawn(GIT_DETECT, "Looking for git…", move || managed::detect(choice, data.as_deref(), path.as_deref()), move || ctx.request_repaint());
+        self.detecting = self.busy.spawn_quiet(GIT_DETECT, "Looking for git…", move || managed::detect(choice, data.as_deref(), path.as_deref()), move || ctx.request_repaint());
     }
 
     /// The dialog that started the work was closed (JOB-010): ask the install, the update and the
@@ -280,10 +280,10 @@ impl ManagedState {
         let Some(installed) = self.data.as_deref().and_then(|d| Installed::read(&managed::managed_root(d))) else { return };
         let (sources, platform) = (self.sources.clone(), self.platform.clone());
         let ctx = ctx.clone();
-        let job = self.busy.spawn_cancellable(
+        let job = self.busy.spawn_cancellable_quiet(
             GIT_CHECK,
             "Looking for a newer git…",
-            move |cancel| install::check_latest(&sources, &platform, &installed, &|url| install::fetch_api(url, sources.allow_http, cancel.flag())),
+            move |cancel| install::check_latest(&sources, &platform, &installed, &|url| install::fetch_api(url, sources.allow_http, &cancel.flag())),
             move || ctx.request_repaint(),
         );
         self.checking = job.map(|job| (job, forced));

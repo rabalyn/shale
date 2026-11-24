@@ -6,10 +6,12 @@ use crate::keys::{Action as KeyAction, Scope};
 use crate::layout::{icon_button, paint_icon, Icon};
 use crate::markdown;
 use crate::theme;
+use crate::tree_rows::{self, Row, TreeRows};
 use crate::vault::{rel_to_string, FileKind};
 use eframe::egui::{self, CornerRadius, FontId, Key, Modifiers, Pos2, Rect, Sense, Ui, Vec2};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 impl ShaleApp {
     pub fn left_sidebar(&mut self, ui: &mut Ui) {
@@ -98,8 +100,7 @@ impl ShaleApp {
                     }
                 }
             }
-            let root = PathBuf::new();
-            self.tree(ui, &root, 0);
+            self.tree(ui);
             // right-click on empty space
             let rest = ui.allocate_response(Vec2::new(ui.available_width(), (ui.available_height()).max(40.0)), Sense::click());
             rest.context_menu(|ui| {
@@ -135,42 +136,19 @@ impl ShaleApp {
         });
     }
 
-    /// The files of a folder in the order the file list shows them (its sort setting).
-    pub(crate) fn sorted_files_in(&self, dir: &Path) -> Vec<(PathBuf, String, FileKind)> {
-        let Some(v) = &self.vault else { return vec![] };
-        let sort = self.cfg.file_sort;
-        let mut entries: Vec<&crate::vault::FileEntry> = v.files.iter().filter(|f| f.rel.parent() == Some(dir)).collect();
-        entries.sort_by(|a, b| sort_order(sort, &a.display_name().to_lowercase(), &b.display_name().to_lowercase(), (a.created, a.modified), (b.created, b.modified)));
-        entries.into_iter().map(|f| (f.rel.clone(), f.display_name(), f.kind)).collect()
-    }
-
-    /// The subfolders of a folder in the order the file list shows them.
-    pub(crate) fn sorted_folders_in(&self, dir: &Path) -> Vec<PathBuf> {
-        let Some(v) = &self.vault else { return vec![] };
-        let sort = self.cfg.file_sort;
-        let mut folders: Vec<PathBuf> = v.folders.iter().filter(|f| f.parent() == Some(dir)).cloned().collect();
-        let fname = |p: &PathBuf| p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
-        folders.sort_by(|a, b| {
-            let (ta, tb) = (v.folder_times.get(a).copied().unwrap_or_default(), v.folder_times.get(b).copied().unwrap_or_default());
-            sort_order(sort, &fname(a), &fname(b), ta, tb)
-        });
-        folders
+    /// The rows the file list shows right now, top to bottom (PERF-011): made again only when the
+    /// vault, the sort setting or the open folders changed.
+    pub(crate) fn tree_rows(&mut self) -> Arc<Vec<Row>> {
+        match &self.vault {
+            Some(v) => self.tree.rows.get(v, self.cfg.file_sort, &self.tree.expanded),
+            None => Arc::default(),
+        }
     }
 
     /// The rows the file list shows right now, top to bottom: (path, is a folder).
     pub(crate) fn visible_tree_rows(&self) -> Vec<(PathBuf, bool)> {
-        fn walk(app: &ShaleApp, dir: &Path, out: &mut Vec<(PathBuf, bool)>) {
-            for f in app.sorted_folders_in(dir) {
-                out.push((f.clone(), true));
-                if app.tree.expanded.contains(&f) {
-                    walk(app, &f, out);
-                }
-            }
-            out.extend(app.sorted_files_in(dir).into_iter().map(|(p, _, _)| (p, false)));
-        }
-        let mut out = Vec::new();
-        walk(self, Path::new(""), &mut out);
-        out
+        let Some(v) = &self.vault else { return vec![] };
+        tree_rows::build(v, self.cfg.file_sort, &self.tree.expanded).into_iter().map(|r| (r.rel.clone(), r.is_folder())).collect()
     }
 
     /// Keys while the file list has the keyboard: j / k files, Ctrl+J / Ctrl+K folders, Space
@@ -182,8 +160,8 @@ impl ShaleApp {
             self.tree.sel = None;
             return;
         }
-        let rows = self.visible_tree_rows();
-        let Some(cur) = rows.iter().position(|(r, _)| *r == sel).or(if rows.is_empty() { None } else { Some(0) }) else {
+        let rows = self.tree_rows();
+        let Some(cur) = rows.iter().position(|r| r.rel == sel).or(if rows.is_empty() { None } else { Some(0) }) else {
             self.tree.sel = None;
             return;
         };
@@ -192,7 +170,7 @@ impl ShaleApp {
         let (next, prev, next_dir, prev_dir, space) = (is(KeyAction::TreeNextFile), is(KeyAction::TreePrevFile), is(KeyAction::TreeNextFolder), is(KeyAction::TreePrevFolder), is(KeyAction::TreeToggleFolder));
         // the next row of the wanted kind in that direction (stays put at the ends)
         let step = |down: bool, dirs: bool| -> usize {
-            let pick = |i: &usize| rows[*i].1 == dirs;
+            let pick = |i: &usize| rows[*i].is_folder() == dirs;
             let found = if down { (cur + 1..rows.len()).find(pick) } else { (0..cur).rev().find(pick) };
             found.unwrap_or(cur)
         };
@@ -207,7 +185,7 @@ impl ShaleApp {
         } else {
             cur
         };
-        let (path, is_dir) = rows[new].clone();
+        let (path, is_dir) = (rows[new].rel.clone(), rows[new].is_folder());
         self.tree.scroll |= new != cur;
         self.tree.sel = Some(path.clone());
         if (space || enter) && is_dir {
@@ -232,14 +210,47 @@ impl ShaleApp {
         }
     }
 
-    fn tree(&mut self, ui: &mut Ui, dir: &Path, depth: usize) {
-        let folders = self.sorted_folders_in(dir);
-        let files = self.sorted_files_in(dir);
+    /// The file list: only the rows in view (and a margin) are drawn, the others are one empty
+    /// space each side, as all rows are as high as one another (PERF-011).
+    fn tree(&mut self, ui: &mut Ui) {
+        let rows = self.tree_rows();
         let current = self.current_path();
-        for f in folders {
+        let pitch = TREE_ROW_H + ui.spacing().item_spacing.y;
+        let top = ui.cursor().min.y;
+        let clip = ui.clip_rect();
+        let rows_at = |y: f32| ((y - top) / pitch).max(0.0);
+        let first = (rows_at(clip.min.y - TREE_MARGIN).floor() as usize).min(rows.len());
+        let end = (rows_at(clip.max.y + TREE_MARGIN).ceil() as usize).min(rows.len()).max(first);
+        if self.tree.scroll {
+            // the selected row is out of the drawn rows: scroll to where it would be; it is
+            // drawn (and outlined) in the frame after
+            let at = self.tree.sel.as_ref().and_then(|s| rows.iter().position(|r| r.rel == *s));
+            if let Some(i) = at.filter(|i| !(first..end).contains(i)) {
+                let y = top + i as f32 * pitch;
+                ui.scroll_to_rect(Rect::from_min_size(Pos2::new(clip.min.x, y), Vec2::new(clip.width(), TREE_ROW_H)), Some(egui::Align::Center));
+                ui.ctx().request_repaint();
+            }
+        }
+        if first > 0 {
+            ui.add_space(first as f32 * pitch);
+        }
+        for row in &rows[first..end] {
+            if row.is_folder() {
+                self.tree_folder(ui, row);
+            } else {
+                self.tree_file(ui, row, current.as_deref() == Some(row.rel.as_path()));
+            }
+        }
+        if end < rows.len() {
+            ui.add_space((rows.len() - end) as f32 * pitch);
+        }
+    }
+
+    fn tree_folder(&mut self, ui: &mut Ui, row: &Row) {
+        {
+            let f = row.rel.clone();
             let open = self.tree.expanded.contains(&f);
-            let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let resp = tree_row(ui, depth, &name, Some(open), false, theme::palette().text, "");
+            let resp = tree_row(ui, row.depth, &row.name, Some(open), false, theme::palette().text, "");
             self.mark_tree_sel(ui, &f, &resp);
             self.drag.add_drop_zone(resp.rect.intersect(ui.clip_rect()), f.clone(), None);
             self.drag.tree_targets.push((resp.rect.intersect(ui.clip_rect()), f.clone(), !open));
@@ -280,21 +291,14 @@ impl ShaleApp {
                     ui.close();
                 }
             });
-            if open {
-                self.tree(ui, &f, depth + 1);
-            }
         }
-        for (rel, name, kind) in files {
-            let active = current.as_deref() == Some(rel.as_path());
-            let badge = match kind {
-                FileKind::Drawing if crate::drawing::canvas::is_canvas_path(&rel) => "canvas",
-                FileKind::Drawing => "drawing",
-                FileKind::Other => rel.extension().and_then(|e| e.to_str()).unwrap_or(""),
-                FileKind::Note if self.vault.as_ref().is_some_and(|v| v.conflict_of(&rel).is_some() || !v.copies_of(&rel).is_empty()) => "conflict",
-                FileKind::Note => "",
-            };
+    }
+
+    fn tree_file(&mut self, ui: &mut Ui, row: &Row, active: bool) {
+        {
+            let (rel, kind) = (row.rel.clone(), row.kind.unwrap_or(FileKind::Other));
             let color = if kind == FileKind::Other { theme::palette().muted } else { theme::palette().text };
-            let resp = tree_row(ui, depth, &name, None, active, color, badge);
+            let resp = tree_row(ui, row.depth, &row.name, None, active, color, &row.badge);
             self.mark_tree_sel(ui, &rel, &resp);
             // dropping on a file puts the dragged thing next to it
             self.drag.tree_targets.push((resp.rect.intersect(ui.clip_rect()), rel.parent().map(|p| p.to_path_buf()).unwrap_or_default(), false));
@@ -1139,8 +1143,8 @@ impl ShaleApp {
         if let Modal::Export(d) = &mut modal {
             let title = if d.book.is_some() { format!("Export the folder “{}” to PDF", d.name) } else { format!("Export “{}” to PDF", d.name) };
             // a LaTeX export that is running or has just ended (TEX-016), or the book of a folder (BOOK-010)
-            let finished = self.tex_export_tick(d, &ctx).or_else(|| self.book_export_tick(d));
-            if d.tex.as_ref().is_some_and(|t| t.working()) || d.book.as_ref().is_some_and(|b| b.working()) {
+            let finished = self.tex_export_tick(d, &ctx).or_else(|| self.book_export_tick(d)).or_else(|| self.note_export_tick(d));
+            if d.tex.as_ref().is_some_and(|t| t.working()) || d.book.as_ref().is_some_and(|b| b.working()) || d.note_working() {
                 ctx.request_repaint_after(std::time::Duration::from_millis(250));
             }
             let mut st = (&mut **d, crate::pdf::export_dialog::DialogResult::Open);
@@ -1173,13 +1177,9 @@ impl ShaleApp {
                         b.cancel();
                     }
                 }
-                crate::pdf::export_dialog::DialogResult::Export => match self.run_export(d) {
-                    Ok(out) => {
-                        done(self, d, out);
-                        keep = false;
-                    }
-                    Err(e) => d.error = Some(e),
-                },
+                // Cancel stops the export of a note that is running, and a second one closes the dialog (JOB-010)
+                crate::pdf::export_dialog::DialogResult::Cancel if d.note_working() => d.cancel_note(),
+                crate::pdf::export_dialog::DialogResult::Export => d.error = self.start_note_export(d, &ctx).err(),
                 crate::pdf::export_dialog::DialogResult::Cancel => keep = false,
                 crate::pdf::export_dialog::DialogResult::Open => {}
             }
@@ -1218,6 +1218,8 @@ pub struct FileTree {
     pub sel: Option<PathBuf>,
     /// scroll the selected file list row into view on the next frame
     pub(crate) scroll: bool,
+    /// the rows of the open folders, kept while nothing they come from changes (PERF-011)
+    pub(crate) rows: TreeRows,
 }
 
 /// One row in the file tree. `open` is Some for folders.
@@ -1225,8 +1227,13 @@ pub struct FileTree {
 #[derive(Clone, Debug)]
 pub struct TreeDrag(pub PathBuf);
 
+/// The height of a row of the file list.
+const TREE_ROW_H: f32 = 26.0;
+/// How far above and below the view rows are drawn too, so a scroll step finds them ready.
+const TREE_MARGIN: f32 = 150.0;
+
 fn tree_row(ui: &mut Ui, depth: usize, name: &str, open: Option<bool>, active: bool, color: egui::Color32, badge: &str) -> egui::Response {
-    let h = 26.0;
+    let h = TREE_ROW_H;
     // click to open, drag to move into another folder
     let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::click_and_drag());
     if active {
@@ -1263,7 +1270,13 @@ fn tree_row(ui: &mut Ui, depth: usize, name: &str, open: Option<bool>, active: b
 }
 
 /// Order two tree entries. Times are (created, modified); ties fall back to the name.
-fn sort_order(sort: crate::config::FileSort, name_a: &str, name_b: &str, ta: (Option<std::time::SystemTime>, Option<std::time::SystemTime>), tb: (Option<std::time::SystemTime>, Option<std::time::SystemTime>)) -> std::cmp::Ordering {
+pub(crate) fn sort_order(
+    sort: crate::config::FileSort,
+    name_a: &str,
+    name_b: &str,
+    ta: (Option<std::time::SystemTime>, Option<std::time::SystemTime>),
+    tb: (Option<std::time::SystemTime>, Option<std::time::SystemTime>),
+) -> std::cmp::Ordering {
     use crate::config::FileSort::*;
     let by_name = name_a.cmp(name_b);
     match sort {

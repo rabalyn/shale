@@ -208,6 +208,6 @@ impl ShaleApp {
                 }
             },
         );
-        self.drag.pending_drops.push((rx, None));
+        self.drag.read_started(&self.busy, "Reading the mails…", rx, None);
     }
 }

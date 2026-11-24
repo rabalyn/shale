@@ -295,6 +295,29 @@ fn job_015_the_store_opens_at_start_when_there_is_an_account_though_the_mail_vie
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// spec: JOB-016
+#[test]
+fn job_016_the_mail_view_shows_the_rebuild_of_the_index_with_a_spinner_and_cancel_while_its_task_runs() {
+    use crate::mail::ui::{StoreState, MAIL_REBUILD};
+    let (mut app, mut h, dir) = window("mail-rebuild");
+    app.show_view(crate::app::View::Mail, false);
+    let store = std::sync::Arc::new(crate::mail::store::MailStore::open(&dir.join("mail-test")).unwrap());
+    app.mail.store = StoreState::Rebuilding(store);
+    let mut task = app.busy.begin(MAIL_REBUILD, "Rebuilding the mail index…").expect("the registry of the window is the mail view's");
+    let cancel = task.cancellable();
+    h.frames(&mut app, 3);
+    assert!(painted_at(&h, "Rebuilding the mail index…").is_some(), "the view says what runs");
+    assert!(painted_at(&h, "Rebuilding the mail index from the message files…").is_none());
+    let button = h.find_label(&mut app, "Cancel");
+    h.click(&mut app, button.center(), PointerButton::Primary);
+    assert!(cancel.is_cancelled(), "Cancel in the view reaches the job");
+    drop(task);
+    h.frames(&mut app, 3);
+    assert!(painted_at(&h, "Rebuilding the mail index…").is_none());
+    assert!(painted_at(&h, "Rebuilding the mail index from the message files…").is_some(), "no task: the plain line");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 fn window(tag: &str) -> (ShaleApp, Headless, std::path::PathBuf) {
     let dir = std::env::temp_dir().join(format!("shale-busy-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -371,31 +394,132 @@ fn job_007_the_summary_is_the_text_of_one_task_or_the_number_of_several_and_time
     assert_eq!((ui::elapsed(Duration::from_secs(5)), ui::elapsed(Duration::from_secs(59)), ui::elapsed(Duration::from_secs(125))), ("5 s".into(), "59 s".into(), "2 min".into()));
 }
 
-// spec: JOB-024
+// spec: JOB-021
 #[test]
-fn job_024_a_quiet_task_is_known_to_its_views_at_once_but_listed_only_after_two_seconds() {
-    const QUIET: Key = Key::quiet("test-quiet");
+fn job_021_a_key_with_a_subject_is_its_own_key() {
     let busy = Busy::default();
-    let (job, release) = gated(&busy, QUIET, "Saving a version…");
-    let (loud, release_loud) = gated(&busy, SYNC, "Syncing with git…");
-    assert!(busy.is_running(&QUIET) && busy.info(&QUIET).is_some(), "the view of the action sees it at once");
-    assert_eq!(busy.list().iter().map(|t| t.label.as_str()).collect::<Vec<_>>(), ["Syncing with git…"], "the indicator does not list it yet");
-    assert!(busy.begin(QUIET, "again").is_none(), "and a second one is refused as for any task");
-    std::thread::sleep(QUIET_FOR + Duration::from_millis(100));
-    assert_eq!(busy.list().len(), 2, "after two seconds it is listed");
-    release.send(()).unwrap();
-    release_loud.send(()).unwrap();
-    assert_eq!(result(&job), Ok(7));
-    assert_eq!(result(&loud), Ok(7));
-    assert!(busy.list().is_empty());
+    let a = busy.begin(SYNC.with("a"), "Syncing A…").expect("first");
+    assert!(busy.begin(SYNC.with("a"), "again").is_none(), "the same subject: refused");
+    let b = busy.begin(SYNC.with("b"), "Syncing B…").expect("another subject runs beside it");
+    let plain = busy.begin(SYNC, "plain").expect("the plain key is not a subject's key");
+    assert_eq!(busy.list().len(), 3);
+    assert!(busy.is_running(&SYNC.with("a")) && busy.info(&SYNC.with("b")).is_some_and(|t| t.label == "Syncing B…"));
+    drop(a);
+    assert!(busy.info(&SYNC.with("a")).is_none() && busy.info(&SYNC.with("b")).is_some(), "ending one leaves the other");
+    drop((b, plain));
 }
 
-// spec: JOB-003
+// spec: JOB-021
 #[test]
-fn job_003_a_closing_window_can_wait_for_a_job_a_moment() {
+fn job_021_the_mail_view_lists_each_running_sync_with_its_own_cancel_and_says_a_stopped_one_stopped() {
+    use crate::mail::ui::{StoreState, SyncRun, MAIL_SYNC};
+    use std::sync::atomic::AtomicBool;
+    let (mut app, mut h, dir) = window("mail-sync");
+    app.show_view(crate::app::View::Mail, false);
+    let store = std::sync::Arc::new(crate::mail::store::MailStore::open(&dir.join("mail-test")).unwrap());
+    app.mail.store = StoreState::Ready(store);
+    app.cfg.mail_accounts = vec![crate::config::MailAccount { id: "a".into(), name: "Work".into(), ..Default::default() }, crate::config::MailAccount { id: "b".into(), name: "Home".into(), ..Default::default() }];
+    let mut keep = vec![];
+    let mut tokens = vec![];
+    for (id, name) in [("a", "Work"), ("b", "Home")] {
+        let mut task = app.busy.begin(MAIL_SYNC.with(id), format!("Syncing {name}…")).unwrap();
+        let cancel = task.cancellable();
+        let (tx, rx) = channel();
+        app.mail.syncs.insert(id.into(), SyncRun { rx, cancel: cancel.flag(), folder: String::new(), done: 0, total: 0, added: 0, errors: vec![], finished: None });
+        keep.push((task, tx));
+        tokens.push(cancel);
+    }
+    h.frames(&mut app, 3);
+    assert!(painted_at(&h, "Syncing Work…").is_some() && painted_at(&h, "Syncing Home…").is_some(), "every running account is shown: {:?}", h.text);
+    let first = h.text.iter().filter(|(t, _)| t == "Cancel").map(|(_, p)| *p).min_by(|a, b| a.y.total_cmp(&b.y)).expect("a Cancel next to the first account");
+    h.click(&mut app, first, PointerButton::Primary);
+    assert!(tokens[0].is_cancelled() && !tokens[1].is_cancelled(), "the Cancel of one account stops that one");
+    // a stopped sync is said plainly
+    drop(keep);
+    app.mail.syncs.clear();
+    let (tx, rx) = channel();
+    drop(tx);
+    let summary = crate::mail::imap_sync::SyncSummary { cancelled: true, ..Default::default() };
+    app.mail.syncs.insert("a".into(), SyncRun { rx, cancel: std::sync::Arc::new(AtomicBool::new(true)), folder: String::new(), done: 0, total: 0, added: 0, errors: vec![], finished: Some(summary) });
+    h.frames(&mut app, 3);
+    assert!(painted_at(&h, "Syncing Work…").is_none());
+    assert!(h.text.iter().any(|(t, _)| t.starts_with("Sync stopped")), "{:?}", h.text);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// spec: JOB-022
+#[test]
+fn job_022_a_task_that_waits_to_be_listed_is_running_at_once_and_listed_after_its_time() {
     let busy = Busy::default();
-    let (job, release) = gated(&busy, SYNC, "Syncing with git…");
+    let after = Duration::from_secs(2);
+    let task = busy.begin_listed_after(SYNC, "Reading the vault folder…", after).expect("begins");
+    let started = busy.info(&SYNC).expect("running at once").started;
+    assert!(busy.is_running(&SYNC) && busy.begin(SYNC, "again").is_none(), "the key is taken from the start, a second one is refused (JOB-005)");
+    // the clock is given: nothing sleeps
+    assert!(busy.list_at(started).is_empty(), "not listed at the start");
+    assert!(busy.list_at(started + Duration::from_millis(1999)).is_empty(), "not listed just before its time");
+    let listed = busy.list_at(started + after);
+    assert_eq!(listed.iter().map(|t| t.label.as_str()).collect::<Vec<_>>(), ["Reading the vault folder…"], "listed when its time has come");
+    assert_eq!(busy.next_listing(started), Some(after), "the indicator wakes when the time has come");
+    assert_eq!(busy.next_listing(started + after), None, "nothing waits any more");
+    // an ordinary task has no wait
+    let other = busy.begin(OTHER, "Working…").expect("begins");
+    assert_eq!(busy.list_at(started + Duration::from_millis(1)).len(), 1, "an ordinary task is listed from its start");
+    drop((task, other));
+    assert!(busy.list_at(started + after).is_empty() && busy.next_listing(started).is_none(), "a task that ended leaves nothing");
+}
+
+// spec: JOB-022
+#[test]
+fn job_022_runs_of_one_action_with_their_own_number_go_side_by_side_and_the_same_number_is_refused() {
+    let busy = Busy::default();
+    let one = busy.begin(Key::new("test-open").with("1"), "Opening a.mp4…").expect("begins");
+    let two = busy.begin(Key::new("test-open").with("2"), "Opening b.mp4…").expect("another file runs next to it");
+    assert!(busy.begin(Key::new("test-open").with("1"), "Opening a.mp4…").is_none(), "the same file twice is refused");
+    assert_eq!(busy.list().len(), 2);
+    drop(one);
+    assert!(busy.begin(Key::new("test-open").with("1"), "Opening a.mp4…").is_some(), "free again when it ended");
+    drop(two);
+}
+
+// spec: JOB-022
+#[test]
+fn job_022_the_indicator_draws_nothing_for_a_task_that_waits_and_asks_to_be_drawn_again_for_its_time() {
+    let ctx = egui::Context::default();
+    let busy = Busy::default();
+    let _task = busy.begin_listed_after(SYNC, "Learning the words of the tags…", Duration::from_secs(3600)).expect("begins");
+    let mut out = ctx.run_ui(RawInput::default(), |ui| ui::indicator(ui.ctx(), &busy, Pos2::new(600.0, 10.0)));
+    out.textures_delta.clear();
+    let drawn = out.shapes.iter().any(|s| matches!(&s.shape, egui::epaint::Shape::Text(_)));
+    assert!(!drawn, "nothing is drawn while the task waits");
+    let delay = out.viewport_output.values().map(|v| v.repaint_delay).min().expect("a viewport");
+    assert!(delay <= Duration::from_secs(3600), "the window comes back when the time has come: {delay:?}");
+}
+
+// spec: JOB-024
+#[test]
+fn job_024_housekeeping_spawns_wait_to_be_listed_and_run_at_once_and_a_token_can_come_from_a_flag() {
+    let busy = Busy::default();
+    let (tx, rx) = channel::<()>();
+    let job = busy.spawn_quiet(SYNC, "Saving a version…", move || rx.recv_timeout(WAIT).is_ok(), || {}).expect("not running yet");
+    assert!(busy.is_running(&SYNC) && busy.info(&SYNC).is_some_and(|i| !i.cancellable));
+    assert!(busy.list().is_empty() && busy.list_at(Instant::now() + LISTED_AFTER).len() == 1, "listed only after its time");
+    assert!(busy.spawn_quiet(SYNC, "again", || (), || {}).is_none(), "and never twice");
+    // a cancellable one, whose token is a flag that other code looks at
+    let flag = Arc::new(AtomicBool::new(false));
+    let mut task = busy.begin_listed_after(OTHER, "Checking…", LISTED_AFTER).unwrap();
+    task.cancellable_with(flag.clone().into());
+    let id = busy.info(&OTHER).unwrap().id;
+    assert!(busy.cancel(id) && flag.load(Ordering::SeqCst), "Cancel sets the flag");
+    drop(task);
+    let (tx2, rx2) = channel::<()>();
+    let seen = busy.spawn_cancellable_quiet(OTHER, "Looking…", move |c| (rx2.recv_timeout(WAIT).is_ok(), c.is_cancelled()), || {}).unwrap();
+    assert!(busy.info(&OTHER).is_some_and(|i| i.cancellable));
+    busy.cancel(busy.info(&OTHER).unwrap().id);
+    tx2.send(()).unwrap();
+    assert_eq!(result(&seen), Ok((true, true)));
+    // a closing window waits for a job a moment
     assert!(matches!(job.recv_timeout(Duration::from_millis(10)), Err(std::sync::mpsc::RecvTimeoutError::Timeout)));
-    release.send(()).unwrap();
-    assert_eq!(job.recv_timeout(WAIT), Ok(Ok(7)));
+    tx.send(()).unwrap();
+    assert_eq!(job.recv_timeout(WAIT), Ok(Ok(true)));
 }

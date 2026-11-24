@@ -75,18 +75,20 @@ impl<'a> Body<'a> {
     }
 
     fn quote(&self, lines: &[QuoteLine]) -> String {
+        // the bar of the built-in export, which a note with `print-*` properties does not have (PDF-025)
+        let env = if self.opts.paper_look { "quote" } else { "shalequote" };
         let (mut out, mut depth, mut fresh) = (String::new(), 0, true);
         for q in lines {
             while depth < q.depth {
                 if !out.ends_with('\n') && !out.is_empty() {
                     out.push('\n');
                 }
-                out.push_str("\\begin{quote}\n");
+                out.push_str(&format!("\\begin{{{env}}}\n"));
                 depth += 1;
                 fresh = true;
             }
             while depth > q.depth {
-                out.push_str("\n\\end{quote}\n");
+                out.push_str(&format!("\n\\end{{{env}}}\n"));
                 depth -= 1;
                 fresh = true;
             }
@@ -102,7 +104,7 @@ impl<'a> Body<'a> {
             }
         }
         for _ in 0..depth {
-            out.push_str("\n\\end{quote}\n");
+            out.push_str(&format!("\n\\end{{{env}}}\n"));
         }
         out.push('\n');
         out
@@ -286,7 +288,14 @@ impl<'a> Body<'a> {
             let pictures = pages.iter().enumerate().map(|(n, (w, h))| frame(&name, &format!("page={},", n + 1), crate::embed_size::pdf_page(Vec2::new(*w, *h) * 1.5, column).x / column)).collect();
             return figure(pictures, &caption);
         }
-        // a sound or a video cannot be on paper
+        if crate::media::is_media(&abs) {
+            // the card of the built-in export (PDF-004, MEDIA-003, MEDIA-009) as a vector PDF
+            let card = crate::media::widget::card_size(&abs, column, link.embed_width());
+            let named = self.look.files.borrow().named(&rel);
+            let name = named.unwrap_or_else(|| self.keep(&rel, "player", "pdf", crate::pdf::export::export_player_card(&abs, card)));
+            return figure(vec![frame(&name, "", card.x / column)], &caption);
+        }
+        // any other file cannot be on paper
         self.placeholder(&format!("{}: not in a PDF", link.target))
     }
 

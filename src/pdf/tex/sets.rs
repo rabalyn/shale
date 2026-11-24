@@ -352,7 +352,27 @@ pub(super) fn class_and_preamble(k: &KindManifest, s: &SetSettings, department_l
 /// Unicode stays Unicode: the engine is LuaLaTeX.
 pub fn tex_escape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
+    let mut in_emoji = false;
     for c in text.chars() {
+        // a run of emoji is set in the emoji font that travels with the document (TEX-041)
+        if is_emoji(c) || (in_emoji && c == '\u{200d}') {
+            if !in_emoji {
+                out.push_str("\\shaleemoji{");
+                in_emoji = true;
+            }
+            if c != '\u{200d}' {
+                out.push(c);
+            }
+            continue;
+        }
+        // the variation selectors only choose between a text and a picture look of the character before
+        if matches!(c, '\u{fe0e}' | '\u{fe0f}') {
+            continue;
+        }
+        if in_emoji {
+            out.push('}');
+            in_emoji = false;
+        }
         match c {
             '\\' => out.push_str("\\textbackslash{}"),
             '{' | '}' | '$' | '&' | '#' | '_' | '%' => {
@@ -370,7 +390,24 @@ pub fn tex_escape(text: &str) -> String {
             c => out.push(c),
         }
     }
+    if in_emoji {
+        out.push('}');
+    }
     out
+}
+
+/// The name of the emoji font in the work folder (TEX-041).
+pub const EMOJI_FONT_FILE: &str = "shale-emoji.ttf";
+
+/// The emoji font of the document: the one the built-in export draws with (Noto Emoji, monochrome).
+pub fn emoji_font() -> &'static [u8] {
+    epaint_default_fonts::NOTO_EMOJI_REGULAR
+}
+
+/// A character of the emoji and pictograph blocks (a calendar, a check mark, an hourglass, a
+/// cross mark, a star) that the text fonts of the templates have no glyph for.
+fn is_emoji(c: char) -> bool {
+    matches!(c as u32, 0x1F000..=0x1FAFF | 0x2600..=0x27BF | 0x231A..=0x231B | 0x23E9..=0x23FA | 0x2B50 | 0x2B55 | 0x2B05..=0x2B07)
 }
 
 /// The value a field gets in a sample document: its default, the department or author of the

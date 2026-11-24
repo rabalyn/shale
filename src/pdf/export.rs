@@ -6,6 +6,7 @@
 //! - Drawings: vector output (shapes, hatching, arrows and the hand-drawn text as outlines), on a
 //!   page that fits the drawing or on a paper size, with a white, dark or no background.
 
+use crate::busy::Cancel;
 use crate::drawing::{self, Element, Scene, View};
 use crate::markdown;
 use crate::pdf::write::{Bookmark, Dest, Doc, FontKind, Image, Page, Rgba, TextStyle};
@@ -705,6 +706,8 @@ pub(super) struct Writer<'a> {
     pub(super) jumps: Vec<(usize, [f32; 4], String)>,
     /// the pictures drawn inside lines by file: their image of the document and size in pixels (PDF-030); none for one that cannot be read
     inline_images: HashMap<PathBuf, Option<(usize, Vec2)>>,
+    /// a note's export as a task: asked between two pictures, the layout ends early (JOB-017)
+    cancel: Option<Cancel>,
 }
 
 impl<'a> Writer<'a> {
@@ -713,7 +716,11 @@ impl<'a> Writer<'a> {
         let mut doc = Doc::new(title);
         let page = doc.add_page(w, h);
         let [top, right, bottom, left] = opts.margins();
-        Writer { doc, opts, w, h, top, right, bottom, left, page, y: top, members: None, book_links: vec![], heads: vec![PageHead::default()], running: None, jumps: Vec::new(), inline_images: HashMap::new() }
+        Writer { doc, opts, w, h, top, right, bottom, left, page, y: top, members: None, book_links: vec![], heads: vec![PageHead::default()], running: None, jumps: Vec::new(), inline_images: HashMap::new(), cancel: None }
+    }
+    /// Whether Cancel was asked for: the layout stops before the next picture.
+    fn stopped(&self) -> bool {
+        self.cancel.as_ref().is_some_and(Cancel::is_cancelled)
     }
     pub(super) fn cw(&self) -> f32 {
         self.w - self.left - self.right
@@ -1087,6 +1094,9 @@ impl<'a> Writer<'a> {
                 // a picture, PDF or sound of a library or a file outside the vault is printed too (MEDIA-016)
                 let target = vault.resolve_media(&line_links[0].target, Some(rel)).file(vault);
                 if let (Some((t, abs)), true) = (target, opts.embeds) {
+                    if self.stopped() {
+                        return places;
+                    }
                     let kind = vault.file(&t).map(|f| f.kind).unwrap_or(FileKind::Other);
                     // the link under the thumbnail (PDF-004); the size the editor gives it (PDF-005)
                     let caption = crate::caption::text(&line_links[0]);
@@ -1123,6 +1133,9 @@ impl<'a> Writer<'a> {
                         if let Ok(r) = crate::fsutil::read(&abs).map_err(|e| e.to_string()).and_then(|d| crate::pdf::view::render_pages(d, 40, 2.0)) {
                             let last = r.images.len().saturating_sub(1);
                             for (n, img) in r.images.iter().enumerate() {
+                                if self.stopped() {
+                                    return places;
+                                }
                                 if let Some(rgba) = rgba_of(img) {
                                     // the editor shows its pages rendered at 1.5; these are at 2.0
                                     let size = self.page_size(crate::embed_size::pdf_page(Vec2::new(img.size[0] as f32, img.size[1] as f32) * 0.75, ref_w));
@@ -1585,55 +1598,12 @@ impl<'a> Writer<'a> {
     /// places (`media::widget::geometry`), as big in proportion to the text, with the cover or
     /// first frame as the artwork, the name, the empty progress bar and the length.
     fn player_card(&mut self, abs: &Path, asked: Option<f32>, caption: Option<&str>) {
-        use crate::media::widget;
-        let video = crate::media::is_video(abs);
-        let look = if video { crate::media::video::look(abs, crate::media::ffmpeg::locate).look } else { crate::media::cover::look(abs) };
-        let card = widget::card_size(abs, self.opts.column(), asked);
+        let look = media_look(abs);
+        let card = crate::media::widget::card_size(abs, self.opts.column(), asked);
         let size = self.page_size(card);
-        let k = size.x / card.x;
-        let geo = widget::geometry(abs, card.x);
         self.need(size.y + 6.0 + self.caption_room(caption));
-        let (ox, oy) = (self.left, self.y);
-        let at = |r: egui::Rect| [ox + r.left() * k, oy + r.top() * k, r.width() * k, r.height() * k];
-        let name = abs.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-        let ink = Rgba(30, 30, 30, 255);
-        let grey = Rgba(105, 105, 110, 255);
-        let page = self.page;
-        let cover = look.cover.as_ref().and_then(rgba_of).map(|img| (self.doc.add_image(pdf_image(&img)), img.width() as f32, img.height() as f32));
-        let p = self.doc.page(page);
-        p.rect(ox, oy, size.x, size.y, Some(Rgba(246, 246, 248, 255)), Some((Rgba(200, 200, 205, 255), 0.8)));
-        let [ax, ay, aw, ah] = at(geo.art);
-        match cover {
-            Some((idx, iw, ih)) => {
-                p.rect(ax, ay, aw, ah, Some(Rgba(20, 20, 20, 255)), None);
-                let f = (aw / iw).min(ah / ih);
-                p.image(idx, ax + (aw - iw * f) / 2.0, ay + (ah - ih * f) / 2.0, iw * f, ih * f);
-            }
-            None => {
-                p.rect(ax, ay, aw, ah, Some(Rgba(226, 226, 230, 255)), None);
-                let size = 11.0 * k;
-                let shown = crate::caption::fit(&name, aw - 12.0 * k, |t| crate::pdf::write::text_width(FontKind::Sans, size, t));
-                p.text(TextStyle::plain(FontKind::Sans, size, grey), ax + 6.0 * k, ay + ah - 8.0 * k, &shown);
-            }
-        }
-        // the round play button over the artwork
-        let (cx, cy, r) = (ax + aw / 2.0, ay + ah / 2.0, widget::BUTTON_RADIUS * k);
-        p.circle(cx, cy, r, Some(Rgba(50, 50, 55, 255)), None);
-        p.path(&[[cx - 0.35 * r, cy - 0.5 * r], [cx - 0.35 * r, cy + 0.5 * r], [cx + 0.55 * r, cy]], true, Some(Rgba(255, 255, 255, 255)), None);
-        // name, progress bar with its times, volume
-        let x0 = ox + geo.text_x * k;
-        let width = size.x - (geo.text_x + 12.0) * k;
-        let top = oy + geo.top * k;
-        let name_size = 14.0 * k;
-        let shown = crate::caption::fit(&name, width, |t| crate::pdf::write::text_width(FontKind::Sans, name_size, t));
-        p.text(TextStyle::plain(FontKind::Sans, name_size, ink), x0, top + 10.0 * k + name_size, &shown);
-        p.rect(x0, top + 54.0 * k, width, 4.0 * k, Some(Rgba(205, 205, 210, 255)), None);
-        let time = 11.0 * k;
-        let total = look.duration.map(crate::media::player::clock).unwrap_or_else(|| "–:––".into());
-        p.text(TextStyle::plain(FontKind::Sans, time, grey), x0, top + 66.0 * k + time, "0:00");
-        let tw = crate::pdf::write::text_width(FontKind::Sans, time, &total);
-        p.text(TextStyle::plain(FontKind::Sans, time, grey), x0 + width - tw, top + 66.0 * k + time, &total);
-        p.rect(x0, top + 90.0 * k, (width / k * 0.4).clamp(60.0, 120.0) * k, 4.0 * k, Some(Rgba(205, 205, 210, 255)), None);
+        let (ox, oy, page) = (self.left, self.y, self.page);
+        draw_card(&mut self.doc, page, [ox, oy], size, card, abs, &look);
         self.y += size.y;
         self.picture_end(caption);
     }
@@ -1656,6 +1626,76 @@ impl<'a> Writer<'a> {
     }
 }
 
+/// The length and the cover (the first frame, with ffmpeg) of a sound or video.
+fn media_look(abs: &Path) -> crate::media::cover::Look {
+    if crate::media::is_video(abs) {
+        crate::media::video::look(abs, crate::media::ffmpeg::locate).look
+    } else {
+        crate::media::cover::look(abs)
+    }
+}
+
+/// The card of a sound or video (MEDIA-001) on `page` of `doc`, `card` big in the editor's points
+/// and drawn `size` big at `origin`: the parts of the editor's card (`media::widget::geometry`),
+/// the cover or first frame as the artwork, the name, the empty progress bar and the length. The
+/// one drawing of the note export (PDF-004) and of the TeX export (TEX-015, `export_player_card`).
+fn draw_card(doc: &mut Doc, page: usize, origin: [f32; 2], size: Vec2, card: Vec2, abs: &Path, look: &crate::media::cover::Look) {
+    use crate::media::widget;
+    let k = size.x / card.x;
+    let geo = widget::geometry(abs, card.x);
+    let [ox, oy] = origin;
+    let at = |r: egui::Rect| [ox + r.left() * k, oy + r.top() * k, r.width() * k, r.height() * k];
+    let name = abs.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let ink = Rgba(30, 30, 30, 255);
+    let grey = Rgba(105, 105, 110, 255);
+    let cover = look.cover.as_ref().and_then(rgba_of).map(|img| (doc.add_image(pdf_image(&img)), img.width() as f32, img.height() as f32));
+    let p = doc.page(page);
+    p.rect(ox, oy, size.x, size.y, Some(Rgba(246, 246, 248, 255)), Some((Rgba(200, 200, 205, 255), 0.8)));
+    let [ax, ay, aw, ah] = at(geo.art);
+    match cover {
+        Some((idx, iw, ih)) => {
+            p.rect(ax, ay, aw, ah, Some(Rgba(20, 20, 20, 255)), None);
+            let f = (aw / iw).min(ah / ih);
+            p.image(idx, ax + (aw - iw * f) / 2.0, ay + (ah - ih * f) / 2.0, iw * f, ih * f);
+        }
+        None => {
+            p.rect(ax, ay, aw, ah, Some(Rgba(226, 226, 230, 255)), None);
+            let size = 11.0 * k;
+            let shown = crate::caption::fit(&name, aw - 12.0 * k, |t| crate::pdf::write::text_width(FontKind::Sans, size, t));
+            p.text(TextStyle::plain(FontKind::Sans, size, grey), ax + 6.0 * k, ay + ah - 8.0 * k, &shown);
+        }
+    }
+    // the round play button over the artwork
+    let (cx, cy, r) = (ax + aw / 2.0, ay + ah / 2.0, widget::BUTTON_RADIUS * k);
+    p.circle(cx, cy, r, Some(Rgba(50, 50, 55, 255)), None);
+    p.path(&[[cx - 0.35 * r, cy - 0.5 * r], [cx - 0.35 * r, cy + 0.5 * r], [cx + 0.55 * r, cy]], true, Some(Rgba(255, 255, 255, 255)), None);
+    // name, progress bar with its times, volume
+    let x0 = ox + geo.text_x * k;
+    let width = size.x - (geo.text_x + 12.0) * k;
+    let top = oy + geo.top * k;
+    let name_size = 14.0 * k;
+    let shown = crate::caption::fit(&name, width, |t| crate::pdf::write::text_width(FontKind::Sans, name_size, t));
+    p.text(TextStyle::plain(FontKind::Sans, name_size, ink), x0, top + 10.0 * k + name_size, &shown);
+    p.rect(x0, top + 54.0 * k, width, 4.0 * k, Some(Rgba(205, 205, 210, 255)), None);
+    let time = 11.0 * k;
+    let total = look.duration.map(crate::media::player::clock).unwrap_or_else(|| "–:––".into());
+    p.text(TextStyle::plain(FontKind::Sans, time, grey), x0, top + 66.0 * k + time, "0:00");
+    let tw = crate::pdf::write::text_width(FontKind::Sans, time, &total);
+    p.text(TextStyle::plain(FontKind::Sans, time, grey), x0 + width - tw, top + 66.0 * k + time, &total);
+    p.rect(x0, top + 90.0 * k, (width / k * 0.4).clamp(60.0, 120.0) * k, 4.0 * k, Some(Rgba(205, 205, 210, 255)), None);
+}
+
+/// The card of a sound or video as a small vector PDF of its own, one page `card` big (the
+/// editor's points; the TeX export scales it, TEX-015): the same drawing as the note export's.
+/// `card` comes from `media::widget::card_size`.
+pub fn export_player_card(abs: &Path, card: Vec2) -> Vec<u8> {
+    let look = media_look(abs);
+    let mut doc = Doc::new("");
+    let page = doc.add_page(card.x, card.y);
+    draw_card(&mut doc, page, [0.0, 0.0], card, card, abs, &look);
+    doc.finish()
+}
+
 /// A frame or cover (as the player shows it) as an image for the PDF.
 fn rgba_of(img: &egui::ColorImage) -> Option<image::RgbaImage> {
     let bytes: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
@@ -1674,17 +1714,28 @@ fn natural_size(w: u32, h: u32) -> Vec2 {
 /// `print-heading-color` are read from `text` here (PDF-013); its paper, margins, text size, title
 /// and contents are the dialog's choices in `opts`, which start from the note's
 /// ([`ExportOptions::with_note_properties`]).
+#[cfg(test)]
 pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) -> Result<Vec<u8>, String> {
-    let _flow = tracing::info_span!("flow.pdf_export", peer = "export").entered();
-    // the paper always has Shale's colours, whatever the theme of the window (CFG-061, PDF-007)
-    theme::with_palette(theme::Palette::shale(), || export_note_in_shale(vault, rel, text, opts))
+    export_note_until(vault, rel, text, opts, None)
 }
 
-fn export_note_in_shale(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) -> Result<Vec<u8>, String> {
+/// What an export that was stopped says (a book's export says the same).
+pub const CANCELLED: &str = "The export was cancelled";
+
+/// [`export_note`] as a task: `cancel` is looked at before each picture, and a note that was stopped
+/// is an error, never a half-made PDF (JOB-017).
+pub fn export_note_until(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions, cancel: Option<&Cancel>) -> Result<Vec<u8>, String> {
+    let _flow = tracing::info_span!("flow.pdf_export", peer = "export").entered();
+    // the paper always has Shale's colours, whatever the theme of the window (CFG-061, PDF-007)
+    theme::with_palette(theme::Palette::shale(), || export_note_in_shale(vault, rel, text, opts, cancel))
+}
+
+fn export_note_in_shale(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions, cancel: Option<&Cancel>) -> Result<Vec<u8>, String> {
     let opts = &opts.clone().with_note_text_properties(text);
     // the title line's text: no `.md`, no date prefix (VAULT-025)
     let name = vault.file(rel).map(|f| f.title()).unwrap_or_else(|| crate::vault::title_of(&rel.to_string_lossy()).to_string());
     let mut w = Writer::new(&name, opts);
+    w.cancel = cancel.cloned();
     let base = opts.font_pt;
     let heads = markdown::heading_numbers(text);
     // a first heading `# Title` that says the same as the title makes the title a second print of it (PDF-008)
@@ -1716,6 +1767,9 @@ fn export_note_in_shale(vault: &Vault, rel: &Path, text: &str, opts: &ExportOpti
     let contents: Vec<&(usize, usize, String, Option<String>)> = heads.iter().filter(|h| opts.toc && (1..=3).contains(&h.1)).collect();
     let slots = if contents.is_empty() { vec![] } else { w.reserve_contents(contents.len()) };
     let places = tracing::info_span!("flow.pdf_export.layout", peer = "vault").in_scope(|| w.note_body(vault, rel, text, &numbers, None));
+    if w.stopped() {
+        return Err(CANCELLED.into());
+    }
     let label = |line: usize, title: &str| match numbers.get(&line) {
         Some(n) => format!("{n} {}", markdown::heading_plain(title)),
         None => markdown::heading_plain(title),

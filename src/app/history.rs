@@ -42,11 +42,11 @@ const LIST_LIMIT: usize = 300;
 /// The snapshots of the file history as tasks (JOB-025): housekeeping that is over in a moment, so
 /// the indicator lists one only after 2 seconds. They cannot be stopped: a snapshot waits for the
 /// tree lock and then commits.
-pub(crate) const HISTORY_SNAPSHOT: Key = Key::quiet("history-snapshot");
+pub(crate) const HISTORY_SNAPSHOT: Key = Key::new("history-snapshot");
 /// The thinning of a local-only history (SYNC-070), likewise.
-pub(crate) const HISTORY_THIN: Key = Key::quiet("history-thin");
+pub(crate) const HISTORY_THIN: Key = Key::new("history-thin");
 /// A read of the history (versions, a text at a version, deleted notes, a comparison), likewise.
-pub(crate) const HISTORY_QUERY: Key = Key::quiet("history-query");
+pub(crate) const HISTORY_QUERY: Key = Key::new("history-query");
 
 /// A snapshot to make and what happens after it.
 struct Queued {
@@ -291,7 +291,7 @@ impl ShaleApp {
     fn history_start_snapshot(&mut self, ctx: &egui::Context, vault: PathBuf, queued: Queued) {
         let Some((git, root, hist, opts)) = self.history_job_data() else { return };
         let (tree, req, repaint) = (self.sync.tree.clone(), queued.req.clone(), ctx.clone());
-        let job = self.busy.spawn(
+        let job = self.busy.spawn_quiet(
             HISTORY_SNAPSHOT,
             "Saving a version of the changed notes…",
             move || {
@@ -311,7 +311,7 @@ impl ShaleApp {
     fn history_start_thin(&mut self, ctx: &egui::Context, vault: PathBuf, now: u64) {
         let Some((git, root, hist, _)) = self.history_job_data() else { return };
         let (tree, repaint) = (self.sync.tree.clone(), ctx.clone());
-        let job = self.busy.spawn(
+        let job = self.busy.spawn_quiet(
             HISTORY_THIN,
             "Thinning out the old versions…",
             move || {
@@ -330,7 +330,7 @@ impl ShaleApp {
         let Some(query) = self.history.queries.pop_front() else { return };
         let Some((git, root, hist, _)) = self.history_job_data() else { return };
         let (job_query, repaint, job_root) = (query.clone(), ctx.clone(), root.clone());
-        let job = self.busy.spawn(
+        let job = self.busy.spawn_quiet(
             HISTORY_QUERY,
             "Reading the history…",
             move || {

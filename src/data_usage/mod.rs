@@ -15,6 +15,7 @@ pub mod dialog;
 pub mod files;
 pub mod scan;
 
+use crate::busy::{Busy, Cancel, Key, Task};
 use crate::config::CacheRetention;
 use crate::mail::store::MailStore;
 use serde::{Deserialize, Serialize};
@@ -72,6 +73,24 @@ impl CacheId {
             CacheId::MailBroken => Some("The damaged copies of the mail index are deleted. They cannot be made again; Shale never needs them, they were kept in case you want to look into them."),
             CacheId::UndoHistories => Some("The undo history of every note of this vault is deleted, with the damaged copies of history files. u has nothing to undo afterwards, in the open notes too. They cannot be made again."),
             _ => None,
+        }
+    }
+
+    /// The task of a clear or prune of this cache: one at a time per cache (USE-007, JOB-005).
+    /// The rebuild of the mail index is the task of the mail view (JOB-016, `MAIL_REBUILD`), with Cancel.
+    pub fn key(self) -> crate::busy::Key {
+        match self {
+            CacheId::MailIndex => crate::mail::ui::MAIL_REBUILD,
+            _ => crate::busy::Key::new("data-usage-clear").with(&(self as u64).to_string()),
+        }
+    }
+
+    /// What a clear or prune of this cache does, as the text of its task (JOB-004).
+    pub fn working_text(self, kind: Kind) -> String {
+        match (self, kind) {
+            (CacheId::MailIndex, Kind::Clear) => "Rebuilding the mail index…".to_string(),
+            (_, Kind::Clear) => format!("Clearing the {}…", self.name().to_lowercase()),
+            (_, Kind::Prune) => format!("Cleaning up the {}…", self.name().to_lowercase()),
         }
     }
 
@@ -189,7 +208,7 @@ pub fn stats(id: CacheId, places: &Places) -> Result<CacheStats, String> {
 
 /// Empty a cache (USE-010…USE-017). The mail index needs its open store (it is rebuilt by
 /// the store's writer); the window resets what it holds in memory when the result arrives.
-pub fn clear(id: CacheId, places: &Places, mail: Option<&MailStore>) -> Result<Freed, String> {
+pub fn clear(id: CacheId, places: &Places, mail: Option<(&MailStore, &Cancel)>) -> Result<Freed, String> {
     let _flow = tracing::info_span!("flow.data_usage_clear", peer = "app").entered();
     let _step = tracing::info_span!("flow.data_usage_clear.remove_files", peer = "disk").entered();
     match id {
@@ -199,9 +218,9 @@ pub fn clear(id: CacheId, places: &Places, mail: Option<&MailStore>) -> Result<F
             None => Ok(Freed::default()),
         },
         CacheId::MailIndex => {
-            let store = mail.ok_or("the mail store is not open")?;
+            let (store, cancel) = mail.ok_or("the mail store is not open")?;
             let before = stats(id, places)?.bytes;
-            let n = store.rebuild_index().map_err(|e| e.0)?;
+            let n = store.rebuild_index(cancel).map_err(|e| e.0)?.ok_or(REBUILD_CANCELLED)?;
             let after = stats(id, places)?.bytes;
             Ok(Freed { bytes: before.saturating_sub(after), entries: n as u64 })
         }
@@ -218,6 +237,9 @@ pub fn clear(id: CacheId, places: &Places, mail: Option<&MailStore>) -> Result<F
         CacheId::DebugLog => empty_log(&places.debug_log),
     }
 }
+
+/// What a rebuild of the mail index that Cancel stopped reports (USE-012).
+pub const REBUILD_CANCELLED: &str = "the rebuild was stopped; the folders it had not reached keep their messages as they were, and another rebuild goes on with them";
 
 /// Empty the debug log in place: a recording that is on goes on appending to it (USE-016).
 fn empty_log(path: &std::path::Path) -> Result<Freed, String> {
@@ -287,6 +309,14 @@ pub enum Kind {
     Prune,
 }
 
+/// What the rebuild of the mail index needs besides the store (USE-012, JOB-016): the token that
+/// Cancel sets, and the task of the window's registry that is listed while the job runs.
+pub struct Rebuild {
+    pub store: Arc<MailStore>,
+    pub cancel: Cancel,
+    pub task: crate::busy::Task,
+}
+
 /// A clear or prune that ended; the window applies what it means for what it holds in memory.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Finished {
@@ -331,17 +361,33 @@ pub const SETTLE: Duration = Duration::from_secs(2);
 
 /// What a cache-statistics job sends back: every cache's numbers, or why the job died.
 type StatsResult = Result<Vec<(CacheId, Result<CacheStats, String>)>, String>;
-/// A running clear or prune: what it does and where its result arrives.
-type ClearJob = (Kind, Receiver<Result<Result<Freed, String>, String>>);
+/// A running clear or prune: what it does, where its result arrives, and the task that lists it.
+struct ClearJob {
+    kind: Kind,
+    rx: Receiver<Result<Result<Freed, String>, String>>,
+    _task: Option<Task>,
+}
+
+/// The task of counting the files that Shale keeps (USE-005).
+fn count_files() -> Key {
+    Key::new("data-usage-count").with("files")
+}
+/// The task of measuring the caches (USE-005).
+fn count_caches() -> Key {
+    Key::new("data-usage-count").with("caches")
+}
+/// The counting and the scheduled prune are listed in the busy indicator only when they take this
+/// long: they happen on their own and are usually over in a moment (JOB-023).
+pub const LISTED_AFTER: Duration = Duration::from_secs(2);
 
 /// The sub-state of the window: the dialog's numbers, the running jobs, the schedule.
 pub struct DataUsage {
     pub places: Places,
     /// what the last count found (None: still counting)
     pub saved: Option<Result<scan::Saved, String>>,
-    saved_job: Option<Receiver<Result<scan::Saved, String>>>,
+    saved_job: Option<(Receiver<Result<scan::Saved, String>>, Task)>,
     pub stats: HashMap<CacheId, Result<CacheStats, String>>,
-    stats_job: Option<Receiver<StatsResult>>,
+    stats_job: Option<(Receiver<StatsResult>, Task)>,
     jobs: HashMap<CacheId, ClearJob>,
     pub record: cleanup::Record,
     /// a cache asked about before it is cleared (USE-008)
@@ -353,6 +399,8 @@ pub struct DataUsage {
     last_cleanup: Option<Instant>,
     /// a problem loading the record file, to tell once
     pub problem: Option<String>,
+    /// the registry that lists the jobs (the window's, set by `ShaleApp`)
+    pub busy: Busy,
 }
 
 impl DataUsage {
@@ -371,6 +419,7 @@ impl DataUsage {
             started: Instant::now(),
             last_cleanup: None,
             problem: loaded.problem,
+            busy: Busy::default(),
         }
     }
 
@@ -378,13 +427,16 @@ impl DataUsage {
     pub fn refresh(&mut self, notify: impl Fn() + Send + Clone + 'static) {
         let places = self.places.clone();
         self.saved = None;
-        self.saved_job = Some(crate::jobs::spawn(move || scan::saved(&places), notify.clone()));
+        // the count that is superseded ends its task before the new one begins
+        self.saved_job = None;
+        self.saved_job = self.busy.begin_listed_after(count_files(), "Counting what Shale keeps on this computer…", LISTED_AFTER).map(|task| (crate::jobs::spawn(move || scan::saved(&places), notify.clone()), task));
         self.refresh_stats(notify);
     }
 
     fn refresh_stats(&mut self, notify: impl Fn() + Send + 'static) {
         let places = self.places.clone();
-        self.stats_job = Some(crate::jobs::spawn(move || CacheId::ALL.iter().map(|id| (*id, stats(*id, &places))).collect(), notify));
+        self.stats_job = None;
+        self.stats_job = self.busy.begin_listed_after(count_caches(), "Measuring the caches…", LISTED_AFTER).map(|task| (crate::jobs::spawn(move || CacheId::ALL.iter().map(|id| (*id, stats(*id, &places))).collect(), notify), task));
     }
 
     /// Whether a clear or prune of this cache runs (its button is disabled, USE-007).
@@ -397,21 +449,37 @@ impl DataUsage {
     }
 
     /// Start a clear or prune of one cache in the background; false if one already runs.
-    pub fn start(&mut self, id: CacheId, kind: Kind, retention: &CacheRetention, mail: Option<Arc<MailStore>>, notify: impl FnOnce() + Send + 'static) -> bool {
+    pub fn start(&mut self, id: CacheId, kind: Kind, retention: &CacheRetention, mail: Option<Rebuild>, notify: impl FnOnce() + Send + 'static) -> bool {
         if self.running(id) {
             return false;
         }
+        // a clear was asked for by the person and is listed at once; a prune is the cleanup that
+        // runs on its own, and is listed when it takes long
+        let listed_after = if kind == Kind::Clear { Duration::ZERO } else { LISTED_AFTER };
+        // (a rebuild of the mail index brings its own task, which the job holds)
+        let task = if mail.is_some() {
+            None
+        } else {
+            match self.busy.begin_listed_after(id.key(), id.working_text(kind), listed_after) {
+                Some(t) => Some(t),
+                None => return false,
+            }
+        };
         let places = self.places.clone();
         let r = retention.clone();
         let now = crate::calendar::time::now();
         let rx = crate::jobs::spawn(
-            move || match kind {
-                Kind::Clear => clear(id, &places, mail.as_deref()),
-                Kind::Prune => prune(id, &places, &r, now),
+            move || {
+                // the registry's task (JOB-016) is listed until the job has ended, before its result can be taken in
+                let held = mail.map(|Rebuild { store, cancel, task }| (store, cancel, task));
+                match kind {
+                    Kind::Clear => clear(id, &places, held.as_ref().map(|(store, cancel, _)| (&**store, cancel))),
+                    Kind::Prune => prune(id, &places, &r, now),
+                }
             },
             notify,
         );
-        self.jobs.insert(id, (kind, rx));
+        self.jobs.insert(id, ClearJob { kind, rx, _task: task });
         true
     }
 
@@ -441,13 +509,13 @@ impl DataUsage {
     /// Collect what ended: the counts, and the clears and prunes (recorded, USE-024). A clear
     /// or prune that ended counts the caches again.
     pub fn poll(&mut self, notify: impl Fn() + Send + 'static) -> Vec<Finished> {
-        if let Some(rx) = &self.saved_job {
+        if let Some((rx, _)) = &self.saved_job {
             if let Ok(r) = rx.try_recv() {
                 self.saved = Some(r);
                 self.saved_job = None;
             }
         }
-        if let Some(rx) = &self.stats_job {
+        if let Some((rx, _)) = &self.stats_job {
             if let Ok(r) = rx.try_recv() {
                 match r {
                     Ok(v) => self.stats.extend(v),
@@ -457,9 +525,9 @@ impl DataUsage {
             }
         }
         let mut done = vec![];
-        self.jobs.retain(|id, (kind, rx)| match rx.try_recv() {
+        self.jobs.retain(|id, job| match job.rx.try_recv() {
             Ok(r) => {
-                done.push(Finished { id: *id, kind: *kind, result: r.and_then(|r| r) });
+                done.push(Finished { id: *id, kind: job.kind, result: r.and_then(|r| r) });
                 false
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => true,
@@ -491,6 +559,7 @@ impl DataUsage {
 pub fn finished_text(f: &Finished) -> String {
     let name = f.id.name();
     match (&f.result, f.kind, f.id) {
+        (Err(e), Kind::Clear, CacheId::MailIndex) if e == REBUILD_CANCELLED => format!("Mail index: {e}."),
         (Err(e), Kind::Clear, _) => format!("{name}: could not {}: {e}", f.id.clear_label().to_lowercase()),
         (Err(e), Kind::Prune, _) => format!("{name}: the cleanup failed: {e}"),
         (Ok(fr), Kind::Clear, CacheId::MailIndex) => format!("Mail index rebuilt from the message files: {} message(s).", fr.entries),

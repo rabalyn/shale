@@ -111,7 +111,7 @@ type Job = busy::Job<Result<Msg, String>>;
 /// leaves it running and in the indicator, and its result is dropped.
 pub(crate) const WIZARD_CALL: busy::Key = busy::Key::new("git-wizard-call");
 /// Looking at where the vault is (SYNC-061), as a quiet task (JOB-027): it runs whenever the page is shown for a new vault.
-pub(crate) const VAULT_PLACE: busy::Key = busy::Key::quiet("vault-place");
+pub(crate) const VAULT_PLACE: busy::Key = busy::Key::new("vault-place");
 /// Moving `.git` out of the vault (SYNC-063): not stopped half way.
 pub(crate) const MOVE_OUT: busy::Key = busy::Key::new("git-move-out");
 /// Advanced → Connect, which may move a local history into the vault (SYNC-072): not stopped half way.
@@ -319,7 +319,7 @@ impl Setup {
             return;
         }
         let (v, ctx) = (vault.to_path_buf(), ctx.clone());
-        let Some(job) = busy.spawn(VAULT_PLACE, "Looking at where the vault is…", move || super::detect::detect_real(&v), move || ctx.request_repaint()) else { return };
+        let Some(job) = busy.spawn_quiet(VAULT_PLACE, "Looking at where the vault is…", move || super::detect::detect_real(&v), move || ctx.request_repaint()) else { return };
         self.detect.for_vault = Some(vault.to_path_buf());
         self.detect.findings.clear();
         self.detect.job = Some(job);

@@ -380,7 +380,7 @@ fn dialogs_export_writes_the_pdf_where_asked_and_says_when_it_cannot() {
     p.click(Show::Modals, "Landscape");
     assert!(matches!(&p.app.modal, Some(Modal::Export(d)) if d.opts.landscape));
     p.click(Show::Modals, "Export");
-    assert!(p.app.modal.is_none());
+    until(&mut p, Show::Modals, "the export has saved the PDF", |p| p.app.modal.is_none());
     let pdf = std::fs::read(&target).unwrap();
     assert!(pdf.starts_with(b"%PDF"), "a PDF file");
     assert!(p.app.toasts.iter().any(|(t, _)| t.starts_with("Exported to") && t.contains("Welcome.pdf")), "{:?}", p.app.toasts);
@@ -392,6 +392,7 @@ fn dialogs_export_writes_the_pdf_where_asked_and_says_when_it_cannot() {
         d.path = p.dir.join("in-the-way/out.pdf").to_string_lossy().into_owned();
     }
     p.click(Show::Modals, "Export");
+    until(&mut p, Show::Modals, "the export has failed to save", |p| matches!(&p.app.modal, Some(Modal::Export(d)) if d.error.is_some()));
     let Some(Modal::Export(d)) = &p.app.modal else { panic!("the dialog closed") };
     let error = d.error.clone().expect("an error");
     assert!(error.contains("Could not create the folder"), "{error}");
@@ -401,6 +402,7 @@ fn dialogs_export_writes_the_pdf_where_asked_and_says_when_it_cannot() {
         d.path.clear();
     }
     p.click(Show::Modals, "Export");
+    until(&mut p, Show::Modals, "the export has said where to save", |p| matches!(&p.app.modal, Some(Modal::Export(d)) if d.error.as_deref() == Some("Choose where to save the PDF")));
     assert!(p.shows(Show::Modals, "Choose where to save the PDF"));
     // Cancel
     p.click(Show::Modals, "Cancel");
@@ -755,7 +757,7 @@ fn nav_028_export_to_pdf_keeps_export_and_cancel_in_view_in_a_short_window() {
     let target = p.dir.join("exports/Welcome.pdf");
     assert!(!target.exists());
     p.click(Show::Modals, "Export");
-    assert!(p.app.modal.is_none());
+    until(&mut p, Show::Modals, "the export has saved the PDF", |p| p.app.modal.is_none());
     assert!(std::fs::read(&target).unwrap().starts_with(b"%PDF"));
     // Cancel closes it without writing
     p.app.open_export_dialog(Path::new("Ideas.md"));

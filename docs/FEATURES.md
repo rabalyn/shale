@@ -340,13 +340,13 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   `recipient:` and so on), switch the table of contents, and Export compiles the note with LuaLaTeX in
   the background (a spinner, Cancel). Headings become sections, chapters, slides or poster boxes by how
   they are nested; emphasis, code in colours, lists, tasks, tables with their column sizes, quotes,
-  links, colours, pictures, drawings (as vector graphics) and PDF pages are written, with every special
+  links, colours, pictures, drawings (as vector graphics), PDF pages and the player cards of sounds and videos (#623, as in the built-in export) are written, quotes with their bar, tags in violet and emoji in a bundled emoji font, with every special
   character kept as text; code sits on a light box, a picture inside a line is as high as the line, and a
   link to a heading of the note jumps there in the PDF (links to other notes are link-coloured text). A failure shows the file and line of the error or the package that is missing,
   and **Save the .tex** writes the document and its pictures into a folder for debugging with your own
   TeX. The dialog remembers the last engine, set and kind per vault, and a note can name its template
   with `latex-template: tuda/thesis`; a template the vault does not have, or a kind a folder's book cannot use, is said in the dialog (TEX-008 to
-  TEX-016, TEX-018, TEX-019, TEX-030 to TEX-033).
+  TEX-016, TEX-018, TEX-019, TEX-030 to TEX-033, TEX-041, TEX-042).
 
   ![The export dialog with the LaTeX template engine](userguide/z_media/screenshots/pdf-export-dialog-latex.png)
 
@@ -1217,7 +1217,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   the mail index, its daily backups, damaged copies of the mail index, the learned tag words, the
   undo histories of the notes of the open vault and the keyboard debug log. Each row shows its size, entries, oldest entry and last cleanup, and
   has a **Clear** button. The mail index is **rebuilt** from the message files instead (it asks
-  first; not while mail syncs or a change waits for the server), and damaged copies are only
+  first; not while mail syncs or a change waits for the server; it is a background task with Cancel, JOB-016), and damaged copies are only
   deleted after you confirm; Clear on the undo histories asks first too (every `u` history of the
   vault goes, damaged copies included) and empties the histories of the open notes.
 - How long each cache is kept is a setting (on its row, and in Settings under "How long caches
@@ -1411,7 +1411,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 ## Busy states: spinner, what is happening, Cancel
 
-Whatever runs longer than a moment says what it does, cannot be started twice and shows in one place (JOB-003 to JOB-015, JOB-024 to JOB-030, #397, #385, #526).
+Whatever runs longer than a moment says what it does, cannot be started twice and shows in one place (JOB-003 to JOB-030, #397, #385, #524, #525, #526).
 
 - **A spinner and what happens.** A running action shows a spinner and a short phrase that names it
   ("Syncing with git…", "Checking file names and links…", "Exporting “Handbook” to PDF…"). Where the work can stop, **Cancel**
@@ -1431,8 +1431,8 @@ Whatever runs longer than a moment says what it does, cannot be started twice an
   the import of a template set, the test compiles and the check, download and install of an update are tasks with their own text. An
   install, an update, the check for a newer git, an import and the check or download of an update can be cancelled (what was downloaded is
   removed); the rest cannot be stopped half way.
-- **Moved so far:** the git sync and the Git LFS setup, the check of the vault's names (Cancel stops it) and the PDF export of a
-  folder (Cancel stops it), and the check of the mail index (JOB-015: it starts with the window when a mail account is set up, so the mail view finds the index ready, and the view shows "Checking the mail index…" with a spinner when it is opened earlier). The other long actions follow; the list of all of them, with what each shows today, is
+- **Moved so far:** the git sync and the Git LFS setup, the check of the vault's names (Cancel stops it) the PDF export of a
+  folder, of a note and of a drawing (Cancel stops it before the next picture and writes no half file, JOB-017), the export through LaTeX (JOB-018), the export to Word with its new spinner (JOB-019) and the conversion of Word files of the Import dialog (JOB-020); closing such a dialog stops its work (JOB-010). Also the check of the mail index (JOB-015: it starts with the window when a mail account is set up, so the mail view finds the index ready, and the view shows "Checking the mail index…" with a spinner when it is opened earlier). The rebuild of the mail index is a task too, with Cancel between two folders (JOB-016), and so is the sync of each mail account, with its own Cancel between two batches (JOB-021). The other long actions follow; the list of all of them, with what each shows today, is
   [docs/spec/busy-states.md](spec/busy-states.md).
 
 ## Keyboard
