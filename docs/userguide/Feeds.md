@@ -7,6 +7,9 @@ features:
 Read your Mastodon and Bluesky timelines next to your notes. The ribbon's speech-bubble button
 opens **Feeds** in a **new tab** every time. Back to [[Start here]].
 
+The **Feeds** icon can also be placed in the right sidebar (drag it there or right-click it, see [[Window layout]]): there it
+is a compact companion of this tab, the posts of one feed as small rows. A click on a post opens its conversation in a Feeds tab.
+
 # Accounts
 
 **Accounts…** adds a Mastodon account (server, sign-in in the browser, paste the code; or an

@@ -26,6 +26,7 @@ impl ShaleApp {
             ("the search", self.search_worker.busy()),
             ("the opening of the mail index", matches!(self.mail.store, crate::mail::ui::StoreState::Opening)),
             ("the loading of the calendars", self.calendar.is_loading()),
+            ("the loading of the feeds", self.social.feeds.values().any(|f| matches!(f, crate::social::state::FeedsState::Loading)) || self.social.timelines.values().any(|t| t.loading || t.checking || t.filling)),
         ];
         jobs.into_iter().filter(|(_, busy)| *busy).map(|(name, _)| name).collect()
     }

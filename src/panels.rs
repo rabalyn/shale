@@ -55,6 +55,14 @@ impl ShaleApp {
                     self.actions.push(Action::OpenCalendarEvent(Box::new(o)));
                 }
             }
+            // a click on a post opens its conversation in the Feeds tab (LAY-034)
+            crate::sidebar::Item::Social => {
+                let font = self.fonts.area(crate::fonts::Area::Social);
+                let clicked = crate::fonts::with_area(ui, &font, |ui| self.side.panes.social.show(ui, &mut self.social, &self.cfg.social_accounts));
+                if let Some((feed, post)) = clicked {
+                    self.actions.push(Action::OpenFeedPost { feed, post: Box::new(post) });
+                }
+            }
             _ => {}
         }
     }

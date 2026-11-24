@@ -11,7 +11,7 @@ Settings → Fonts sets the font and the text size of six areas of the window:
   stay raw in the markdown preview.
 - **Editor: rendered text and reading view**: the lines the preview draws rendered, and the reading
   view. It can have another font and size than the raw text.
-- **Mail**, **Calendar** (also the calendar of the right sidebar) and **Feeds**.
+- **Mail**, **Calendar** (also the calendar of the right sidebar) and **Feeds** (also its pane in the right sidebar).
 
 **Use the same font and size everywhere** is on at first: one row, one font and size for everything
 (the editor text is drawn a little larger than a dialog's, as it always was). Switch it off to get a

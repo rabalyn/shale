@@ -839,7 +839,7 @@ fn lay_022_dragging_a_view_back_to_the_ribbon_asks_unless_it_is_there_and_a_move
 #[test]
 fn lay_020_the_main_views_without_a_pane_and_commands_are_still_refused_on_the_right_and_a_movable_view_is_accepted() {
     let mut w = W::new("movable-cue");
-    for item in [Item::Graph, Item::Social, Item::Import] {
+    for item in [Item::Graph, Item::Tasks, Item::Import] {
         w.drag_to(w.ribbon_icon(item).center(), w.bar(0).center());
         assert_eq!(w.app.side.cue, Cue::Refused, "{item:?}");
         w.release(w.bar(0).center());
@@ -1004,9 +1004,9 @@ fn lay_028_dragging_mail_to_the_right_sidebar_asks_and_both_answers_work_and_the
     assert_eq!(movable_places(&w2, Item::Mail), (false, true));
 }
 
-// spec: LAY-028, LAY-035
+// spec: LAY-028, LAY-006
 #[test]
-fn lay_028_the_icon_menu_moves_mail_and_back_and_feeds_is_still_refused() {
+fn lay_028_the_icon_menu_moves_mail_and_back_and_graph_and_tasks_are_still_refused() {
     let mut w = W::with_mail("mail-menu");
     w.right_click_at(w.ribbon_icon(Item::Mail).center());
     let (mv, _) = w.app.side.menu.to_other.expect("Mail has Move and Copy");
@@ -1017,15 +1017,16 @@ fn lay_028_the_icon_menu_moves_mail_and_back_and_feeds_is_still_refused() {
     w.click_at(mv.center());
     assert_eq!(movable_places(&w, Item::Mail), (true, false));
     assert_eq!(w.app.side.layout.ribbon.last(), Some(&Item::Mail));
-    // Feeds has no pane yet (LAY-035)
-    let item = Item::Social;
-    w.right_click_at(w.ribbon_icon(item).center());
-    assert!(w.app.side.menu.to_other.is_none(), "{item:?}");
-    w.press_esc();
-    w.drag_to(w.ribbon_icon(item).center(), w.bar(0).center());
-    assert_eq!(w.app.side.cue, Cue::Refused, "{item:?}");
-    w.release(w.bar(0).center());
-    assert_eq!(movable_places(&w, item), (true, false));
+    // the main views without a pane are refused (LAY-006)
+    for item in [Item::Graph, Item::Tasks] {
+        w.right_click_at(w.ribbon_icon(item).center());
+        assert!(w.app.side.menu.to_other.is_none(), "{item:?}");
+        w.press_esc();
+        w.drag_to(w.ribbon_icon(item).center(), w.bar(0).center());
+        assert_eq!(w.app.side.cue, Cue::Refused, "{item:?}");
+        w.release(w.bar(0).center());
+        assert_eq!(movable_places(&w, item), (true, false));
+    }
 }
 
 // spec: LAY-030
@@ -1478,4 +1479,294 @@ fn lay_036_the_pane_says_so_while_the_calendars_load() {
     w.hl.settle(&mut w.app);
     w.frames(3);
     assert!(w.right_has("Nothing in the next"), "{:?}", w.right_text());
+}
+
+impl W {
+    /// The demo account with two feeds of 40 posts each ("home": h0…h39, "list:1": l0…l39) and a
+    /// pretend server that answers a request for a page; no tab shows Feeds yet.
+    fn with_feeds(tag: &str) -> (W, std::sync::Arc<crate::social::ui_tests::Script>) {
+        use crate::social::state::Timeline;
+        let mut w = W::new(tag);
+        let entry = crate::social::demo::account();
+        w.app.cfg.social_accounts = vec![entry.clone()];
+        w.app.social.load_demo(&entry);
+        for (f, p) in [("home", "h"), ("list:1", "l")] {
+            w.app.social.timelines.insert((entry.account.id.clone(), f.into()), Timeline { posts: crate::social::ui_tests::feed_posts(p, 40), loaded: true, ..Default::default() });
+        }
+        let script = std::sync::Arc::new(crate::social::ui_tests::Script::default());
+        w.app.social.source = Some(script.clone());
+        w.frames(3);
+        (w, script)
+    }
+
+    /// Where the Feeds pane of the right sidebar drew a control (see `SocialPane::rects`).
+    fn feed_pane(&self, name: &str) -> Rect {
+        let rects = &self.app.side.panes.social.rects;
+        rects.iter().find(|(n, _)| n == name).unwrap_or_else(|| panic!("the Feeds pane drew no {name}: {:?}", rects.iter().map(|(n, _)| n).collect::<Vec<_>>())).1
+    }
+
+    fn feed_pane_count(&self, prefix: &str) -> usize {
+        self.app.side.panes.social.rects.iter().filter(|(n, _)| n.starts_with(prefix)).count()
+    }
+
+    fn feeds_tabs(&self) -> usize {
+        self.app.tabbar.tabs.iter().filter(|t| matches!(t.view, View::Social(_))).count()
+    }
+
+    /// The feed and conversation the active tab shows.
+    fn tab_feed(&self) -> crate::social::FeedRef {
+        match &self.app.tabbar.tabs[self.app.tabbar.active].view {
+            View::Social(Some(f)) => f.clone(),
+            v => panic!("the active tab is no Feeds tab: {v:?}"),
+        }
+    }
+}
+
+fn demo_account_id() -> String {
+    crate::social::demo::account().account.id
+}
+
+// spec: LAY-035
+#[test]
+fn lay_035_dragging_feeds_to_the_right_sidebar_asks_and_both_answers_work_and_the_ribbon_icon_still_opens_the_tab() {
+    let (mut w, _) = W::with_feeds("feeds-drag");
+    let before = w.app.side.layout.clone();
+    let at = Pos2::new(w.bar(0).max.x - 4.0, w.bar(0).center().y);
+    w.drag_to(w.ribbon_icon(Item::Social).center(), at);
+    assert!(matches!(w.app.side.cue, Cue::Bar { .. }), "{:?}", w.app.side.cue);
+    w.release(at);
+    assert!(w.app.side.ask.is_some());
+    assert_eq!(w.app.side.layout, before, "nothing changed before the answer");
+    w.answer(|b| b.copied);
+    assert_eq!(movable_places(&w, Item::Social), (true, true), "a copy: the ribbon keeps it");
+    assert_eq!(w.app.side.layout.views[0].active, Item::Social);
+    assert_eq!(w.app.cfg.sidebars.right[0].icons.last().map(String::as_str), Some("social"), "stored under its own id");
+    assert!(w.right_has("text of h0"), "{:?}", w.right_text());
+    // the ribbon icon still opens the Feeds tab; the pane stays
+    w.click_at(w.ribbon_icon(Item::Social).center());
+    w.frames(2);
+    assert!(matches!(w.app.tabbar.tabs[w.app.tabbar.active].view, View::Social(_)));
+    assert!(w.right_has("text of h0"));
+    // a drag of the copy to the ribbon, which has the view: the copy leaves the right side, nothing is asked
+    w.drag_and_drop(w.bar_icon(0, Item::Social).center(), w.ribbon_icon(Item::Files).center());
+    assert_eq!(movable_places(&w, Item::Social), (true, false));
+    // Move to the right: the ribbon loses it; the left sidebar never shows it as a pane
+    w.drag_to_first_bar(w.ribbon_icon(Item::Social).center());
+    w.answer(|b| b.moved);
+    assert_eq!(movable_places(&w, Item::Social), (false, true));
+    assert!(w.app.left_view().is_some(), "the left sidebar shows Files, Search or Tags");
+    assert!(w.right_has("text of h0"));
+    // it survives a restart
+    let w2 = w.restarted("feeds-drag-2");
+    assert_eq!(movable_places(&w2, Item::Social), (false, true));
+}
+
+// spec: LAY-035
+#[test]
+fn lay_035_the_icon_menu_moves_feeds_and_back() {
+    let (mut w, _) = W::with_feeds("feeds-menu");
+    w.right_click_at(w.ribbon_icon(Item::Social).center());
+    let (mv, _) = w.app.side.menu.to_other.expect("Feeds has Move and Copy");
+    w.click_at(mv.center());
+    assert_eq!((movable_places(&w, Item::Social), w.views()[0].last()), ((false, true), Some(&Item::Social)));
+    w.right_click_at(w.bar_icon(0, Item::Social).center());
+    let (mv, _) = w.app.side.menu.to_other.expect("and back");
+    w.click_at(mv.center());
+    assert_eq!(movable_places(&w, Item::Social), (true, false));
+    assert_eq!(w.app.side.layout.ribbon.last(), Some(&Item::Social));
+}
+
+// spec: LAY-034
+#[test]
+fn lay_034_the_pane_lists_the_home_timeline_as_rows_with_author_age_text_and_pictures() {
+    use crate::social::{Media, MediaKind};
+    let (mut w, _) = W::with_feeds("feeds-pane");
+    let key = (demo_account_id(), "home".to_string());
+    let picture = Media { kind: MediaKind::Image, url: String::new(), preview_url: String::new(), alt: String::new(), file_name_hint: String::new(), blob_cid: None };
+    {
+        let posts = &mut w.app.social.timelines.get_mut(&key).unwrap().posts;
+        posts[0].media = vec![picture.clone(), picture];
+        posts[1].content_warning = Some("spoilers".into());
+        posts[1].text_markdown = "the secret text".into();
+        posts[2].reposted_by = Some(crate::social::tests::post("x", "carol", 0, None).author);
+        posts[3].text_markdown = "Hello [world](https://x.test/page)".into();
+        posts[4].created_at = crate::calendar::time::now() - 3 * 3600;
+    }
+    w.copy_right(Item::Social);
+    let text = w.right_text();
+    assert!(w.right_has("Home"), "the feed picker names the feed shown: {text:?}");
+    assert!(w.right_has("BOB"), "{text:?}");
+    assert!(w.right_has("text of h0") && w.right_has("2 pictures"), "{text:?}");
+    assert!(w.right_has("Content warning: spoilers") && !w.right_has("the secret text"), "{text:?}");
+    assert!(w.right_has("CAROL"), "who boosted it: {text:?}");
+    assert!(w.right_has("Hello world") && !w.right_has("https://x.test"), "{text:?}");
+    assert!(w.right_has("3h"), "the age: {text:?}");
+    // one account: no row of names; a long list is drawn in part only
+    assert_eq!(w.feed_pane_count("feedpane:account:"), 0);
+    let rows = w.feed_pane_count("feedpane:row:");
+    assert!(rows > 3 && rows < 40, "{rows} rows");
+    assert_eq!(w.app.side.panes.social.shown, Some(key));
+    assert_eq!(w.feeds_tabs(), 0, "the pane needs no tab");
+}
+
+// spec: LAY-034
+#[test]
+fn lay_034_a_click_on_a_post_opens_its_conversation_in_the_feeds_tab_and_opens_the_tab_when_there_is_none() {
+    let (mut w, _) = W::with_feeds("feeds-click");
+    w.copy_right(Item::Social);
+    assert_eq!(w.feeds_tabs(), 0, "no Feeds tab yet");
+    let thread = |id: &str| crate::social::FeedRef { thread: Some(id.into()), ..crate::social::FeedRef::new(demo_account_id(), "home") };
+    w.click_at(w.feed_pane("feedpane:row:1").center());
+    w.frames(3);
+    assert_eq!(w.feeds_tabs(), 1, "the tab was opened");
+    assert_eq!(w.tab_feed(), thread("h1"));
+    // another post: the same tab, one step further in its history
+    w.click_at(w.feed_pane("feedpane:row:3").center());
+    w.frames(3);
+    assert_eq!(w.feeds_tabs(), 1, "no second tab");
+    assert_eq!(w.tab_feed(), thread("h3"));
+    assert_eq!(w.app.tabbar.tabs[w.app.tabbar.active].back.last(), Some(&View::Social(Some(thread("h1")))));
+    // another tab in front: the Feeds tab is brought back, not a new one opened
+    let feeds_tab = w.app.tabbar.active;
+    w.click_at(w.app.tabbar.tab_rects[0].0.center());
+    w.frames(2);
+    assert_ne!(w.app.tabbar.active, feeds_tab, "a note is in front");
+    w.click_at(w.feed_pane("feedpane:row:5").center());
+    w.frames(3);
+    assert_eq!((w.feeds_tabs(), w.app.tabbar.active), (1, feeds_tab));
+    assert_eq!(w.tab_feed(), thread("h5"));
+}
+
+// spec: LAY-031
+#[test]
+fn lay_031_the_feeds_pane_and_the_tab_choose_their_account_and_feed_separately() {
+    use crate::social::state::{FeedsState, Timeline};
+    use crate::social::{Account, Feed, FeedRef, Network, SocialAccountEntry};
+    let (mut w, _) = W::with_feeds("feeds-independent");
+    let (a1, a2) = (demo_account_id(), "mastodon:bob@other.social".to_string());
+    let other = SocialAccountEntry { account: Account::new(Network::Mastodon, "https://other.social", "bob@other.social", "Bob"), secret: Default::default() };
+    assert_eq!(other.account.id, a2);
+    w.app.cfg.social_accounts.push(other);
+    w.app.social.feeds.insert(a2.clone(), FeedsState::Ready(vec![Feed { id: "home".into(), title: "Home".into() }]));
+    let posts: Vec<_> = crate::social::ui_tests::feed_posts("o", 5).into_iter().map(|mut p| (p.text_markdown = format!("other {}", p.id), p).1).collect();
+    w.app.social.timelines.insert((a2.clone(), "home".into()), Timeline { posts, loaded: true, ..Default::default() });
+    w.copy_right(Item::Social);
+    w.click_at(w.ribbon_icon(Item::Social).center());
+    w.frames(3);
+    assert_eq!(w.tab_feed(), FeedRef::new(&a1, "home"));
+    assert_eq!(w.app.side.panes.social.shown, Some((a1.clone(), "home".into())));
+    // the pane picks another feed of the account, the tab stays
+    w.click_at(w.feed_pane("feedpane:feed").center());
+    w.frames(2);
+    w.click_at(w.feed_pane("feedpane:feed:list:1").center());
+    w.frames(2);
+    assert_eq!(w.app.side.panes.social.shown, Some((a1.clone(), "list:1".into())));
+    assert!(w.right_has("text of l0") && !w.right_has("text of h0"), "{:?}", w.right_text());
+    assert_eq!(w.tab_feed(), FeedRef::new(&a1, "home"));
+    // the pane picks the other account: it starts at that account's first feed, the tab stays
+    w.click_at(w.feed_pane(&format!("feedpane:account:{a2}")).center());
+    w.frames(2);
+    assert_eq!(w.app.side.panes.social.shown, Some((a2.clone(), "home".into())));
+    assert!(w.right_has("other o0"), "{:?}", w.right_text());
+    assert_eq!(w.tab_feed(), FeedRef::new(&a1, "home"));
+    // the tab goes to a list, the pane stays
+    w.app.open_feed(FeedRef::new(&a1, "list:1"), false);
+    w.frames(3);
+    assert_eq!(w.tab_feed(), FeedRef::new(&a1, "list:1"));
+    assert_eq!(w.app.side.panes.social.shown, Some((a2, "home".into())));
+}
+
+// spec: LAY-031
+#[test]
+fn lay_031_the_feeds_pane_scrolls_on_its_own_and_shows_the_posts_of_the_tab() {
+    let (mut w, _) = W::with_feeds("feeds-scroll");
+    w.copy_right(Item::Social);
+    w.hl.set_size(Vec2::new(1500.0, 420.0));
+    w.click_at(w.ribbon_icon(Item::Social).center());
+    w.frames(4);
+    assert_eq!(w.app.side.panes.social.scroll, 0.0);
+    let tab_top = w.app.social.post_rects[0].1.min.y;
+    // the pane scrolls, the tab does not
+    let at = w.feed_pane("feedpane:row:1").center();
+    w.wheel(at, -300.0);
+    assert!(w.app.side.panes.social.scroll > 100.0, "the pane scrolled: {}", w.app.side.panes.social.scroll);
+    assert!((w.app.social.post_rects[0].1.min.y - tab_top).abs() < 1.0, "the tab stayed");
+    // the tab scrolls, the pane does not
+    let pane_scroll = w.app.side.panes.social.scroll;
+    w.wheel(Pos2::new(500.0, 250.0), -400.0);
+    assert!(w.app.social.post_rects[0].1.min.y < tab_top - 100.0, "the tab scrolled");
+    assert_eq!(w.app.side.panes.social.scroll, pane_scroll);
+    // a post that comes into the shared list shows in the pane
+    let key = (demo_account_id(), "home".to_string());
+    let mut fresh = crate::social::tests::post("fresh", "dave", crate::calendar::time::now(), None);
+    fresh.text_markdown = "brand new post".into();
+    w.app.social.timelines.get_mut(&key).unwrap().posts.insert(0, fresh);
+    w.wheel(at, 5000.0);
+    assert_eq!(w.app.side.panes.social.scroll, 0.0);
+    assert!(w.right_has("brand new post"), "{:?}", w.right_text());
+}
+
+// spec: LAY-037
+#[test]
+fn lay_037_the_feeds_pane_says_why_it_is_empty() {
+    use crate::social::state::{FeedsState, Timeline};
+    // no account
+    let mut w = W::new("feeds-none");
+    w.copy_right(Item::Social);
+    assert!(w.right_has("No feed account yet"), "{:?}", w.right_text());
+    assert!(w.app.side.panes.social.rects.is_empty());
+    // an account whose feeds are not known yet, or could not be loaded
+    let (mut w, _) = W::with_feeds("feeds-empty");
+    let id = demo_account_id();
+    w.copy_right(Item::Social);
+    w.app.social.feeds.insert(id.clone(), FeedsState::Loading);
+    w.frames(2);
+    assert!(w.right_has("Loading the feeds"), "{:?}", w.right_text());
+    w.app.social.feeds.insert(id.clone(), FeedsState::Failed("no route".into()));
+    w.frames(2);
+    assert!(w.right_has("Could not load the feeds: no route"), "{:?}", w.right_text());
+    w.app.social.feeds.insert(id.clone(), FeedsState::Ready(crate::social::demo::feeds()));
+    // a feed that is on its way, one that failed, one that is empty, one that has older posts
+    let key = (id.clone(), "home".to_string());
+    for (timeline, says) in [
+        (Timeline { loading: true, ..Default::default() }, "Loading the feed"),
+        (Timeline { error: Some("boom".into()), ..Default::default() }, "Could not load posts: boom"),
+        (Timeline { loaded: true, ..Default::default() }, "Nothing here yet."),
+        (Timeline { loaded: true, posts: crate::social::ui_tests::feed_posts("h", 2), cursor: Some("next".into()), ..Default::default() }, "Older posts are in the Feeds tab."),
+    ] {
+        w.app.social.timelines.insert(key.clone(), timeline);
+        w.frames(2);
+        assert!(w.right_has(says), "{says}: {:?}", w.right_text());
+    }
+    // the notifications feed has its own words
+    w.app.social.timelines.insert((id, crate::social::notifications::NOTIFICATIONS.into()), Timeline { loaded: true, ..Default::default() });
+    w.app.side.panes.social.feed = Some(crate::social::notifications::NOTIFICATIONS.into());
+    w.frames(2);
+    assert!(w.right_has("No notifications yet."), "{:?}", w.right_text());
+}
+
+// spec: LAY-034, LAY-037
+#[test]
+fn lay_034_the_pane_asks_for_the_first_page_once_also_while_the_tab_opens_and_without_any_tab() {
+    let (mut w, script) = W::with_feeds("feeds-first-page");
+    let key = (demo_account_id(), "home".to_string());
+    w.app.social.timelines.remove(&key);
+    let (release, gate) = std::sync::mpsc::channel::<()>();
+    *script.page_gate.lock().unwrap() = Some(gate);
+    *script.first_page.lock().unwrap() = Some(crate::social::Page { posts: crate::social::ui_tests::feed_posts("n", 3), cursor: None, top: None });
+    w.copy_right(Item::Social);
+    // no tab shows Feeds: the pane starts the first page, which is on its way
+    assert_eq!(w.feeds_tabs(), 0);
+    assert!(w.app.social.timelines[&key].loading);
+    assert!(w.right_has("Loading the feed"), "{:?}", w.right_text());
+    // the tab opens meanwhile and does not ask again
+    w.click_at(w.ribbon_icon(Item::Social).center());
+    w.frames(3);
+    assert_eq!(w.feeds_tabs(), 1);
+    // the server answers: the pane and the tab show the posts, and the server was asked once
+    drop(release);
+    w.hl.settle(&mut w.app);
+    w.frames(2);
+    assert!(w.right_has("text of n0"), "{:?}", w.right_text());
+    assert_eq!(*script.page_calls.lock().unwrap(), ["home"]);
 }
