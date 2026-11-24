@@ -174,6 +174,10 @@ fn job_028_a_running_install_is_a_task_with_progress_and_cancel_and_the_page_sho
     t.wait_until("the job ends", |t| t.app.sync.managed.task.is_none());
     assert!(t.shows("The install was cancelled."), "{:?}", t.painted());
     assert!(t.app.busy.list().is_empty(), "the task ends with the job");
+    // the end of the install made the window look for git again; when that look ends, the lines above
+    // the buttons change (the spinner row becomes the detection lines), so a click at the rect of an
+    // earlier frame misses Cancel, and only on a loaded machine: let the look end first
+    t.wait_for_job();
     // an update is a task too, and the end of the job is taken by the window
     t.app.sync.managed.start(&ctx, TaskKind::Update, "Updating Shale's git…", until_cancelled("The update is done: x."));
     assert!(t.shows("Updating Shale's git…") && t.shows("Cancel"));
