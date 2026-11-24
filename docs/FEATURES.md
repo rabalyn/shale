@@ -707,7 +707,6 @@ The settings stay open until closed (✕, Esc or the ⋯ button; a click outside
   on a message opens it in the Mail tab (the tab is opened when there is none). The pane keeps its own account, folder,
   selection and scroll, so the sidebar can show the Inbox while the tab shows another folder; the mail data and the syncs
   are shared. A copy keeps the Mail icon in the ribbon, which still opens the tab; the left sidebar never shows Mail.
-  Feeds follows with its own compact pane.
 - **Calendar in the right sidebar** (LAY-029, LAY-033, LAY-036, rabalyn/shale#610, ADR-0038): Calendar is placed the same
   way (drag and **Move or copy?**, or right-click **Move to / Copy to the right sidebar**), apart from the Calendar panel.
   The pane is a compact companion of the Calendar tab: a small month (‹ › and Today, today marked, a dot under the days
@@ -715,6 +714,14 @@ The settings stay open until closed (✕, Esc or the ⋯ button; a click outside
   A click on a day moves the agenda there; a click on an event opens it in the Calendar tab (opened when there is none) with
   its details. The pane has its own month and chosen day, separate from the tab; the events and the sync are shared. It says
   when there is no calendar, when nothing is coming up and while the calendars load.
+- **Feeds in the right sidebar** (LAY-034, LAY-035, LAY-037, rabalyn/shale#610, ADR-0038): Feeds is placed the same way. The
+  pane is a compact companion of the Feeds tab: the accounts, a feed picker (the home timeline first) and the posts as small
+  rows (author, age, who boosted it, the first two lines of text, the number of pictures; a content warning stays closed).
+  A click on a post opens its conversation in a Feeds tab (the active one, else one of that feed, else a new tab). The pane has
+  its own account, feed and scroll, separate from the tab; the accounts, the posts and the fetches are shared. It asks for
+  the first load of what it shows like the tab does (so it fills without a Feeds tab), loads no older pages and checks for
+  no new posts (only feeds open in a tab are checked). It says when there is no account, while the feeds or the feed load
+  and when a load failed or there is nothing yet. Reading, reacting, writing and saving stay in the tab.
 - Drag the border between two views up or down to change their heights (they start equal; a
   view never gets lower than a small minimum).
 - A middle click on the **Mail**, **Feeds** or **Calendar** icon opens that view in a new tab.

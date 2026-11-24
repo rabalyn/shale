@@ -51,12 +51,12 @@ pub struct SideState {
 
 /// The state of the views of the right sidebar that are companions of a main view: the account,
 /// folder or feed chosen there, the selection and the scroll. Each is separate from the main tab
-/// of the same kind (ADR-0038); the data and the background work are shared. Feeds gets its
-/// field with its pane (rabalyn/shale#610).
+/// of the same kind (ADR-0038); the data and the background work are shared.
 #[derive(Default)]
 pub(crate) struct PaneStates {
     pub mail: crate::mail::sidebar_pane::MailPane,
     pub calendar: crate::calendar::sidebar_pane::CalendarPane,
+    pub social: crate::social::sidebar_pane::SocialPane,
 }
 
 /// A drop of Files, Search or Tags on the other side that waits for the answer to "Move or copy?".

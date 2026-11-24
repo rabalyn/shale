@@ -19,6 +19,9 @@ use std::time::{Duration, Instant};
 pub(crate) struct Script {
     pub newer: Mutex<Vec<(String, Fresh)>>,
     pub first_page: Mutex<Option<Page>>,
+    /// the feeds whose pages were asked for (feed id, in order), and a gate that holds a request for a page until it is sent a message (LAY-037)
+    pub page_calls: Mutex<Vec<String>>,
+    pub page_gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
     /// what the page after the first holds, given once (none: an empty page)
     pub next_page: Mutex<Option<Page>>,
     /// what fetching a post by id gives (SOC-039); missing ids fail
@@ -116,7 +119,11 @@ impl Source for Script {
     fn instance(&self) -> Result<InstanceInfo, String> {
         Ok(self.info.lock().unwrap().clone().unwrap_or_else(|| InstanceInfo::defaults(super::Network::Mastodon)))
     }
-    fn page(&self, _feed: &Feed, cursor: Option<&str>) -> Result<Page, String> {
+    fn page(&self, feed: &Feed, cursor: Option<&str>) -> Result<Page, String> {
+        self.page_calls.lock().unwrap().push(feed.id.clone());
+        if let Some(rx) = self.page_gate.lock().unwrap().as_ref() {
+            let _ = rx.recv();
+        }
         Ok(if cursor.is_none() { self.first_page.lock().unwrap().clone().unwrap_or_default() } else { self.next_page.lock().unwrap().take().unwrap_or_default() })
     }
     fn post(&self, id: &str) -> Result<Post, String> {
