@@ -430,3 +430,54 @@ fn caldav_env_certificate_and_address_rules() {
     // no user name or password inside an address
     assert!(dav::request_with("GET", &format!("https://{USER}:{PASSWORD}@localhost:15232/"), &[], "", &Account { username: String::new(), ..a.clone() }).is_err());
 }
+
+// spec: JOB-033, JOB-034
+#[test]
+#[ignore = "needs the containers: tests/caldav-env/caldav-env.sh up"]
+fn caldav_env_job_033_a_sync_of_the_stack_is_a_task_and_a_stop_leaves_the_calendar_as_it_was_or_fully_loaded() {
+    use crate::busy::Cancel;
+    use crate::calendar::store::load_calendar;
+    let _env = Env::start();
+    let range = (0, 4_000_000_000);
+    // a stop that is there before the first request: no request, the stop is the answer
+    let stopped = Cancel::default();
+    stopped.cancel();
+    assert_eq!(load_calendar(&cal("work"), &acct("work"), None, range, &stopped).unwrap_err(), dav::STOPPED);
+    assert_eq!(dav::discover_until(&acct_for(SERVER, PASSWORD), &stopped).unwrap_err(), dav::STOPPED);
+    // the same calls with a live token load and find the seeded calendars
+    let live = Cancel::default();
+    let loaded = load_calendar(&cal("work"), &acct("work"), None, range, &live).expect("load");
+    assert!(loaded.events.is_some_and(|e| e.iter().any(|e| e.uid.starts_with("seed-"))));
+    assert_eq!(dav::discover_until(&acct_for(SERVER, PASSWORD), &live).expect("discovery").len(), 3);
+
+    // through the store: every calendar is a task of its own; Cancel for all of them lands on either side
+    // of a safe point, and either way a calendar is as it was or fully loaded, the tasks are gone and the next sync completes
+    let (_dir, mut store) = store("job033");
+    let busy = store.busy.clone();
+    store.refresh_remote();
+    let tasks = busy.list();
+    assert!(tasks.len() <= 3 && tasks.iter().all(|t| t.cancellable && t.label.starts_with("Syncing the calendar “")), "{tasks:?}");
+    for t in &tasks {
+        busy.cancel(t.id);
+    }
+    let start = std::time::Instant::now();
+    while store.is_loading() {
+        store.poll();
+        assert!(start.elapsed() < Duration::from_secs(60), "the calendars did not stop or finish: {:?}", store.status);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    store.poll();
+    assert!(busy.list().is_empty());
+    for id in ["work", "private", "moves"] {
+        let status = store.status.get(id).map(String::as_str).unwrap_or_default();
+        match store.events.get(id) {
+            None => assert_eq!(status, "sync stopped", "{id}"),
+            Some(_) => assert!(status.contains("events"), "{id}: {status}"),
+        }
+    }
+    for id in ["work", "private", "moves"] {
+        store.sync_now(id);
+    }
+    load(&mut store);
+    assert!(["work", "private", "moves"].iter().all(|id| store.status[*id].contains("events") && store.events.contains_key(*id)), "{:?}", store.status);
+}

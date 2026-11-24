@@ -19,6 +19,7 @@
 //! are on the same server as the calendar, so a server can't make Shale send the password to
 //! somewhere else.
 
+use crate::busy::Cancel;
 use crate::calendar::ics::{self, Event};
 use roxmltree::{Document, Node};
 use std::io::Write;
@@ -591,9 +592,27 @@ fn useful(body: &str) -> bool {
     parse(body).map(|d| responses(&d).iter().any(|r| r.is_calendar() || r.prop_href(CALDAV, "calendar-home-set").is_some() || r.prop_href(DAV, "current-user-principal").is_some())).unwrap_or(false)
 }
 
+/// What a load or a discovery that Cancel stopped reports instead of a result (JOB-033, JOB-034).
+pub const STOPPED: &str = "stopped";
+
+/// A safe point of a discovery: between two requests, never inside one.
+fn go_on(cancel: &Cancel) -> Result<(), String> {
+    if cancel.is_cancelled() {
+        Err(STOPPED.into())
+    } else {
+        Ok(())
+    }
+}
+
 /// Find the calendars of an account. The address may be a calendar, the calendar home, the
 /// principal, or just the server (then `/.well-known/caldav` is tried).
+#[cfg(test)]
 pub fn discover(acct: &Account) -> Result<Vec<FoundCalendar>, String> {
+    discover_until(acct, &Cancel::default())
+}
+
+/// [`discover`] that stops between two requests when `cancel` is set, with the error [`STOPPED`] (JOB-034).
+pub fn discover_until(acct: &Account, cancel: &Cancel) -> Result<Vec<FoundCalendar>, String> {
     let _flow = tracing::info_span!("flow.caldav_discover", peer = "calendar").entered();
     let entered = acct.url.trim();
     if entered.is_empty() {
@@ -601,8 +620,10 @@ pub fn discover(acct: &Account) -> Result<Vec<FoundCalendar>, String> {
     }
     check_url(entered)?;
     let first_props = propfind_body(&format!("<d:current-user-principal/><c:calendar-home-set/>{CAL_PROPS}"));
+    go_on(cancel)?;
     let first = tracing::info_span!("flow.caldav_discover.probe", peer = "caldav").in_scope(|| propfind_following(entered, "0", &first_props, acct))?;
     let r = if matches!(first.status, 404 | 405) || (is_2xx(first.status) && !useful(&first.body)) {
+        go_on(cancel)?;
         let wk = tracing::info_span!("flow.caldav_discover.well_known", peer = "caldav").in_scope(|| propfind_following(&resolve(entered, "/.well-known/caldav"), "0", &first_props, acct))?;
         if is_2xx(wk.status) || !is_2xx(first.status) {
             wk
@@ -624,6 +645,7 @@ pub fn discover(acct: &Account) -> Result<Vec<FoundCalendar>, String> {
     if home.is_none() {
         if let Some(p) = resps.iter().find_map(|x| x.prop_href(DAV, "current-user-principal")) {
             let purl = resolve(&r.url, &p);
+            go_on(cancel)?;
             let pr = tracing::info_span!("flow.caldav_discover.principal", peer = "caldav").in_scope(|| propfind_following(&purl, "0", &propfind_body("<c:calendar-home-set/>"), acct))?;
             check(&pr, &purl)?;
             let pdoc = parse(&pr.body)?;
@@ -631,6 +653,7 @@ pub fn discover(acct: &Account) -> Result<Vec<FoundCalendar>, String> {
         }
     }
     let home = home.unwrap_or_else(|| r.url.clone());
+    go_on(cancel)?;
     let hr = tracing::info_span!("flow.caldav_discover.calendars", peer = "caldav").in_scope(|| propfind_following(&home, "1", &propfind_body(CAL_PROPS), acct))?;
     check(&hr, &home)?;
     let hdoc = parse(&hr.body)?;

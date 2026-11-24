@@ -1,12 +1,14 @@
 //! Calendar sources (local .ics files and CalDAV calendars), their loaded events, background
 //! refresh of remote calendars, and sample events for trying the views out.
 
+use crate::busy::{Busy, Cancel, Job as BusyJob, Key, LISTED_AFTER};
 use crate::calendar::dav::{self, Account};
 use crate::calendar::ics::{self, Event};
 use crate::calendar::time::{self as t, days_from_civil};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::mpsc::TryRecvError;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -80,9 +82,9 @@ type Fix = (String, String, String, Option<String>);
 
 /// The result of loading one CalDAV calendar.
 #[derive(Debug)]
-struct Loaded {
+pub(crate) struct Loaded {
     /// None: unchanged since the last load
-    events: Option<Vec<Event>>,
+    pub(crate) events: Option<Vec<Event>>,
     tag: Option<String>,
     read_only: Option<bool>,
 }
@@ -233,16 +235,19 @@ impl Occ {
     }
 }
 
-type Pending = Arc<Mutex<Vec<(String, Result<Loaded, String>)>>>;
+/// The task of a CalDAV calendar that loads (JOB-033): one per calendar, side by side.
+pub const CAL_SYNC: Key = Key::new("calendar-sync");
 
 pub struct CalendarStore {
+    /// what runs in the background, shared with the window: each load of a calendar is a task (JOB-033)
+    pub busy: Busy,
     pub sources: Vec<CalendarSource>,
     /// events per source id
     pub events: HashMap<String, Vec<Event>>,
     /// last error / info per source id
     pub status: HashMap<String, String>,
-    pending: Pending,
-    inflight: HashSet<String>,
+    /// the loads that run, per source id
+    running: HashMap<String, BusyJob<Result<Loaded, String>>>,
     /// calendars to load once more when their running load is done (changed meanwhile)
     again: HashSet<String>,
     /// when each CalDAV calendar was last loaded (its own sync timer)
@@ -276,14 +281,37 @@ type DayRange = (i64, i64);
 /// More than a month view, a week and a day at a time are not kept.
 const RANGES_KEPT: usize = 6;
 
+/// The job of a calendar's sync: the state request, then the events when the version tag changed.
+/// Cancel is looked at between the requests and the answer of one that ran is dropped; nothing is
+/// written here, the events are taken in by `poll` as a whole, so a stop leaves the calendar as it
+/// was (JOB-033).
+pub(crate) fn load_calendar(url: &str, acct: &Account, known: Option<&str>, (from, to): (i64, i64), cancel: &Cancel) -> Result<Loaded, String> {
+    let stopped = || cancel.is_cancelled().then(|| Err::<Loaded, String>(dav::STOPPED.into()));
+    if let Some(r) = stopped() {
+        return r;
+    }
+    let _flow = tracing::info_span!("flow.caldav_load", peer = "calendar").entered();
+    // a failing state request (old servers) just means: load everything
+    let st = tracing::info_span!("flow.caldav_load.calendar_state", peer = "caldav").in_scope(|| dav::calendar_state(url, acct)).unwrap_or_default();
+    let loaded = if st.tag.is_some() && st.tag.as_deref() == known {
+        Ok(Loaded { events: None, tag: st.tag, read_only: st.read_only })
+    } else if let Some(r) = stopped() {
+        r
+    } else {
+        tracing::info_span!("flow.caldav_load.fetch_events", peer = "caldav").in_scope(|| dav::fetch_events(url, acct, from, to)).map(|ev| Loaded { events: Some(ev), tag: st.tag, read_only: st.read_only })
+    };
+    // a stop that came while a request ran drops its answer
+    stopped().unwrap_or(loaded)
+}
+
 impl CalendarStore {
     pub fn new(sources: Vec<CalendarSource>, local_dir: PathBuf) -> Self {
         let mut s = CalendarStore {
             sources,
             events: HashMap::new(),
             status: HashMap::new(),
-            pending: Default::default(),
-            inflight: HashSet::new(),
+            busy: Busy::default(),
+            running: HashMap::new(),
             again: HashSet::new(),
             last_sync: HashMap::new(),
             known: HashMap::new(),
@@ -345,42 +373,38 @@ impl CalendarStore {
         }
     }
 
-    /// Load one calendar again (CalDAV in the background; local files right away).
+    /// Load one calendar again (CalDAV in the background, listed in the indicator at once;
+    /// local files right away).
     pub fn refresh_source(&mut self, id: &str) {
+        self.start_sync(id, false);
+    }
+
+    /// The load of a calendar as a task. `quiet`: the timer started it, so the indicator lists it
+    /// only when it runs longer than [`LISTED_AFTER`] (JOB-022, JOB-033).
+    fn start_sync(&mut self, id: &str, quiet: bool) {
         let Some(s) = self.sources.iter().find(|s| s.id == id && s.enabled).cloned() else { return };
         let SourceKind::Caldav { url, username, password } = &s.kind else {
             self.reload_local();
             return;
         };
         self.last_sync.insert(s.id.clone(), Instant::now());
-        if !self.inflight.insert(s.id.clone()) {
+        let wait = if quiet { LISTED_AFTER } else { Duration::ZERO };
+        let task = if self.running.contains_key(&s.id) { None } else { self.busy.begin_listed_after(CAL_SYNC.with(&s.id), format!("Syncing the calendar “{}”…", s.name), wait) };
+        let Some(mut task) = task else {
             // a load is running that may have started before a change: load again after it
             self.again.insert(s.id.clone());
             return;
-        }
-        self.status.insert(s.id.clone(), "syncing…".into());
+        };
+        let cancel = task.cancellable();
         let today = t::today();
         let (from, to) = ((today - 120) * 86_400, (today + 400) * 86_400);
         // the loaded range moves with the days: a calendar loaded on another day is loaded fully
         let known = self.known.get(&s.id).filter(|(_, day)| *day == today).map(|(tag, _)| tag.clone());
-        let (id, url, acct, pending) = (s.id.clone(), url.clone(), Account { url: url.clone(), username: username.clone(), password: password.clone() }, self.pending.clone());
+        let (url, acct) = (url.clone(), Account { url: url.clone(), username: username.clone(), password: password.clone() });
         // the job records in the dispatcher of whoever started it (DEV-026, DEV-028)
         let dispatch = tracing::dispatcher::get_default(|d| d.clone());
-        crate::jobs::run(
-            move || {
-                tracing::dispatcher::with_default(&dispatch, || {
-                    let _flow = tracing::info_span!("flow.caldav_load", peer = "calendar").entered();
-                    // a failing state request (old servers) just means: load everything
-                    let st = tracing::info_span!("flow.caldav_load.calendar_state", peer = "caldav").in_scope(|| dav::calendar_state(&url, &acct)).unwrap_or_default();
-                    if st.tag.is_some() && st.tag == known {
-                        Ok(Loaded { events: None, tag: st.tag, read_only: st.read_only })
-                    } else {
-                        tracing::info_span!("flow.caldav_load.fetch_events", peer = "caldav").in_scope(|| dav::fetch_events(&url, &acct, from, to)).map(|ev| Loaded { events: Some(ev), tag: st.tag, read_only: st.read_only })
-                    }
-                })
-            },
-            move |r| pending.lock().unwrap().push((id, r.and_then(|r| r))),
-        );
+        let job = task.run(move || tracing::dispatcher::with_default(&dispatch, || load_calendar(&url, &acct, known.as_deref(), (from, to), &cancel)), || {});
+        self.running.insert(s.id.clone(), job);
     }
 
     /// Load a calendar again now, completely (also when the server says nothing changed).
@@ -406,7 +430,7 @@ impl CalendarStore {
     pub fn due_sources(&self, now: Instant) -> Vec<String> {
         self.sources
             .iter()
-            .filter(|s| s.enabled && !s.is_local() && !self.inflight.contains(&s.id))
+            .filter(|s| s.enabled && !s.is_local() && !self.running.contains_key(&s.id))
             .filter(|s| match self.last_sync.get(&s.id) {
                 None => true,
                 Some(_) if s.sync_minutes == 0 => false,
@@ -419,12 +443,22 @@ impl CalendarStore {
     /// Take finished downloads and start the syncs that are due. True if anything changed.
     pub fn poll(&mut self) -> bool {
         for id in self.due_sources(Instant::now()) {
-            self.refresh_source(&id);
+            self.start_sync(&id, true);
         }
-        let done: Vec<_> = std::mem::take(&mut *self.pending.lock().unwrap());
+        let mut done = vec![];
+        self.running.retain(|id, job| match job.try_recv() {
+            Err(TryRecvError::Empty) => true,
+            Ok(r) => {
+                done.push((id.clone(), r.and_then(|r| r)));
+                false
+            }
+            Err(TryRecvError::Disconnected) => {
+                done.push((id.clone(), Err("the sync stopped unexpectedly".into())));
+                false
+            }
+        });
         let changed = !done.is_empty() | self.apply_fixes();
         for (id, r) in done {
-            self.inflight.remove(&id);
             match r {
                 Ok(sync) => {
                     let (_, secs) = t::utc_to_local(t::now());
@@ -452,12 +486,17 @@ impl CalendarStore {
                     let ro = if self.read_only.contains(&id) { " · read-only" } else { "" };
                     self.status.insert(id.clone(), format!("{n} events{ro} · synced {}", t::hhmm(secs)));
                 }
+                Err(e) if e == dav::STOPPED => {
+                    // the person stopped it: a start that was queued behind it is dropped too
+                    self.again.remove(&id);
+                    self.status.insert(id, "sync stopped".into());
+                }
                 Err(e) => {
                     self.status.insert(id, e);
                 }
             }
         }
-        let again: Vec<String> = self.again.iter().filter(|id| !self.inflight.contains(*id)).cloned().collect();
+        let again: Vec<String> = self.again.iter().filter(|id| !self.running.contains_key(*id)).cloned().collect();
         for id in again {
             self.again.remove(&id);
             self.refresh_source(&id);
@@ -469,7 +508,7 @@ impl CalendarStore {
     }
 
     pub fn is_loading(&self) -> bool {
-        !self.inflight.is_empty()
+        !self.running.is_empty()
     }
 
     /// Occurrences touching the local days [from_day, to_day], all-day first, then by start. Made
@@ -1315,5 +1354,85 @@ pub(crate) mod tests {
         assert_eq!(files.len(), 1);
         let kept = std::fs::read_to_string(&files[0]).unwrap();
         assert!(kept.contains("SUMMARY:Standup (late)") && !kept.contains("20260119T090000"), "the series with its changed date, before the change: {kept}");
+    }
+
+    /// A pretend CalDAV server whose first PROPFIND of `held` waits for the test: it says it is
+    /// there (`entered`), and answers when `release` is used or dropped. Every answer is an empty list.
+    fn held_server(held: &'static str) -> (String, std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
+        let (entered_tx, entered) = std::sync::mpsc::channel::<()>();
+        let (release, gate) = std::sync::mpsc::channel::<()>();
+        let first = std::sync::atomic::AtomicBool::new(true);
+        let (base, _h) = crate::calendar::dav::tests::mock_http(60, move |m, path, _, _| {
+            if m == "PROPFIND" && path == held && first.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                let _ = entered_tx.send(());
+                let _ = gate.recv_timeout(Duration::from_secs(20));
+            }
+            (207, r#"<d:multistatus xmlns:d="DAV:"/>"#.to_string())
+        });
+        (base, entered, release)
+    }
+
+    fn poll_until_idle(store: &mut CalendarStore) {
+        let start = Instant::now();
+        while store.is_loading() {
+            store.poll();
+            assert!(start.elapsed() < Duration::from_secs(20), "the sync ends");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        store.poll();
+    }
+
+    // spec: JOB-033
+    #[test]
+    fn job_033_each_calendar_syncs_as_its_own_task_that_cancel_stops_before_the_events_are_taken_in_and_the_next_run_completes() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let (base, entered, release) = held_server("/a/");
+        let mut store = CalendarStore::new(vec![], tmp("job033"));
+        let busy = store.busy.clone();
+        store.set_sources(vec![dav_source("a", format!("{base}/a/")), dav_source("b", format!("{base}/b/"))]);
+        entered.recv_timeout(Duration::from_secs(20)).expect("the first request of calendar a is on its way");
+        // both run as tasks of their own, listed at once, with the calendar's name
+        let labels: Vec<String> = busy.list().into_iter().map(|t| t.label).collect();
+        assert_eq!(labels, ["Syncing the calendar “a”…", "Syncing the calendar “b”…"]);
+        // a second start of the same calendar is refused, and the task is not made twice
+        assert!(busy.begin(CAL_SYNC.with("a"), "again").is_none());
+        store.refresh_source("a");
+        assert_eq!(busy.list().len(), 2);
+        // Cancel of one stops only that calendar
+        let a = busy.info(&CAL_SYNC.with("a")).unwrap();
+        assert!(a.cancellable && busy.cancel(a.id));
+        assert!(busy.info(&CAL_SYNC.with("a")).is_some_and(|t| t.cancelling) && !busy.info(&CAL_SYNC.with("b")).is_some_and(|t| t.cancelling));
+        release.send(()).unwrap();
+        poll_until_idle(&mut store);
+        assert!(busy.list().is_empty(), "every task has ended");
+        assert_eq!(store.status.get("a").map(String::as_str), Some("sync stopped"));
+        assert!(!store.events.contains_key("a"), "a stopped load takes nothing in: the calendar is as it was");
+        assert!(store.status["b"].contains("0 events"), "{:?}", store.status);
+        // the next run of the stopped calendar completes
+        store.sync_now("a");
+        poll_until_idle(&mut store);
+        assert!(store.status["a"].contains("0 events") && store.events.contains_key("a"), "{:?}", store.status);
+    }
+
+    // spec: JOB-033
+    #[test]
+    fn job_033_the_timer_starts_a_quiet_sync_that_the_indicator_lists_only_after_two_seconds() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let (base, entered, release) = held_server("/a/");
+        let mut store = CalendarStore::new(vec![dav_source("a", format!("{base}/a/"))], tmp("job033-quiet"));
+        let busy = store.busy.clone();
+        // a calendar that was never loaded is due: `poll` starts it, as the timer does
+        store.poll();
+        entered.recv_timeout(Duration::from_secs(20)).expect("the request is on its way");
+        assert!(busy.info(&CAL_SYNC.with("a")).is_some(), "it runs, the views and the second-start check see it");
+        assert!(busy.list().is_empty(), "but the indicator does not list it yet");
+        assert_eq!(busy.list_at(Instant::now() + LISTED_AFTER).len(), 1, "after two seconds it does");
+        release.send(()).unwrap();
+        poll_until_idle(&mut store);
+        assert!(busy.list().is_empty() && store.status["a"].contains("0 events"), "{:?}", store.status);
     }
 }

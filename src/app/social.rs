@@ -149,7 +149,7 @@ impl ShaleApp {
     }
 
     pub fn open_social_accounts(&mut self) {
-        self.modal = Some(Modal::Social(Box::default()));
+        self.modal = Some(Modal::Social(Box::new(crate::social::accounts_ui::SocialDialog::new().with_busy(&self.busy))));
     }
 
     /// Every frame: collect finished jobs, show their messages, and open the Import dialog for
@@ -173,7 +173,7 @@ impl ShaleApp {
             if let (Some(a), true) = (account, self.modal.is_none() || matches!(self.modal, Some(Modal::Social(_)))) {
                 let mut d = match self.modal.take() {
                     Some(Modal::Social(d)) => d,
-                    _ => Box::default(),
+                    _ => Box::new(crate::social::accounts_ui::SocialDialog::new().with_busy(&self.busy)),
                 };
                 d.start_edit(&a);
                 self.modal = Some(Modal::Social(d));

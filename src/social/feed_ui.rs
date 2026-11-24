@@ -947,10 +947,8 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
                     let r = ui.add(egui::Label::new(RichText::new(format!("Could not look for new posts: {e}")).size(crate::fonts::px(11.5)).color(theme::palette().link_missing)).truncate());
                     st.rects.push(("check-error".into(), r.rect));
                 } else if checking {
-                    ui.horizontal(|ui| {
-                        ui.add(egui::Spinner::new().size(12.0));
-                        ui.label(RichText::new("Checking…").size(crate::fonts::px(11.5)).color(theme::palette().muted));
-                    });
+                    // the task of the check: its text and Cancel (JOB-035)
+                    crate::busy::ui::status(ui, &st.busy, &super::state::FEED_CHECK.with(&super::state::feed_subject(&aid, &feed.id)));
                 } else {
                     let text = match last {
                         Some(t) => format!("Up to date · checked {}", checked_ago(t.elapsed().as_secs())),
@@ -987,7 +985,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
     let mut post_rects: Vec<(String, Rect)> = vec![];
     let mut content_top = 0.0;
     let out = {
-        let SocialState { images, revealed, saving, rects, card_heights, viewer, writes, polls, .. } = st;
+        let SocialState { images, revealed, saving, rects, card_heights, viewer, writes, polls, busy, .. } = st;
         if card_heights.len() > 50_000 {
             card_heights.clear();
         }
@@ -1041,8 +1039,9 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
                         retry = r.clicked();
                     });
                 } else if loading {
+                    // the task of the page: its text and, for the next page, Cancel (JOB-035)
                     ui.vertical_centered(|ui| {
-                        ui.spinner();
+                        crate::busy::ui::status(ui, busy, &super::state::FEED_LOAD.with(&super::state::feed_subject(&aid, &feed.id)));
                     });
                 } else if loaded && posts.is_empty() {
                     ui.label(RichText::new(if feed.id == super::notifications::NOTIFICATIONS { "No notifications yet." } else { "Nothing here yet." }).color(theme::palette().muted));
@@ -1120,13 +1119,23 @@ pub(super) mod tests {
         t: f64,
         /// the tab shown (a `Resolve` answer fills in its feed, as the app does)
         pub tab: TabCtx,
+        /// the text painted by the last frame
+        pub text: Vec<String>,
+    }
+
+    fn collect_text(shape: &egui::Shape, out: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(t) => out.push(t.galley.text().to_string()),
+            egui::Shape::Vec(v) => v.iter().for_each(|s| collect_text(s, out)),
+            _ => {}
+        }
     }
 
     impl H {
         pub fn new() -> H {
             let ctx = egui::Context::default();
             crate::theme::install_fonts(&ctx);
-            H { ctx, t: 0.0, tab: TabCtx { id: 1, feed: None, last: None, keys: true, vault: None, media: crate::media::MediaPlayer::default() } }
+            H { ctx, t: 0.0, tab: TabCtx { id: 1, feed: None, last: None, keys: true, vault: None, media: crate::media::MediaPlayer::default() }, text: vec![] }
         }
         pub fn frame(&mut self, events: Vec<Ev>, st: &mut SocialState, accounts: &[SocialAccountEntry]) -> Vec<Ask> {
             self.t += 0.05;
@@ -1139,6 +1148,10 @@ pub(super) mod tests {
                 });
             });
             out.textures_delta.clear();
+            self.text.clear();
+            for s in &out.shapes {
+                collect_text(&s.shape, &mut self.text);
+            }
             let mut keep = vec![];
             for a in asks {
                 match a {
@@ -1164,6 +1177,34 @@ pub(super) mod tests {
         let accounts = vec![demo::account()];
         st.load_demo(&accounts[0]);
         (st, accounts)
+    }
+
+    // spec: JOB-035
+    #[test]
+    fn job_035_the_view_shows_the_task_of_a_check_and_of_a_page_with_cancel_where_it_had_a_spinner() {
+        let (mut st, accounts) = demo_state();
+        let mut h = H::new();
+        h.frame(vec![], &mut st, &accounts);
+        let key = ("demo".to_string(), "home".to_string());
+        let key = st.timelines.keys().next().cloned().unwrap_or(key);
+        let subject = super::super::state::feed_subject(&key.0, &key.1);
+        assert!(!h.text.iter().any(|t| t == "Cancel"), "idle: nothing to cancel");
+        // a check runs
+        let mut task = st.busy.begin(super::super::state::FEED_CHECK.with(&subject), "Checking the feed of @ada…").unwrap();
+        task.cancellable();
+        st.timelines.get_mut(&key).unwrap().checking = true;
+        h.frame(vec![], &mut st, &accounts);
+        assert!(h.text.iter().any(|t| t == "Checking the feed of @ada…") && h.text.iter().any(|t| t == "Cancel"), "{:?}", h.text);
+        drop(task);
+        st.timelines.get_mut(&key).unwrap().checking = false;
+        // the next page runs
+        let mut task = st.busy.begin(super::super::state::FEED_LOAD.with(&subject), "Loading more posts of “Home”…").unwrap();
+        task.cancellable();
+        let t = st.timelines.get_mut(&key).unwrap();
+        (t.loading, t.cursor) = (true, None);
+        h.frame(vec![], &mut st, &accounts);
+        assert!(h.text.iter().any(|t| t == "Loading more posts of “Home”…") && h.text.iter().any(|t| t == "Cancel"), "{:?}", h.text);
+        drop(task);
     }
 
     // spec: SOC-007

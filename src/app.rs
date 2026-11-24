@@ -770,6 +770,8 @@ impl ShaleApp {
         };
         // the mail view's check of the index is a task of the window's registry (JOB-015)
         app.mail.busy = app.busy.clone();
+        app.calendar.busy = app.busy.clone();
+        app.social.busy = app.busy.clone();
         app.sync.managed.busy = app.busy.clone();
         app.update.busy = app.busy.clone();
         app.usage.busy = app.busy.clone();

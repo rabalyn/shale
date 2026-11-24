@@ -851,8 +851,9 @@ impl Client {
     }
 
     /// Fetch the thread of `post` and all its media in one go, ready for `note::post_note`.
-    pub fn save(&mut self, post: &Post) -> note::SavedPost {
-        note::fetch_saved(self, post)
+    /// `None` when `stop` said so, between two requests (JOB-036).
+    pub fn save(&mut self, post: &Post, stop: &dyn Fn() -> bool) -> Option<note::SavedPost> {
+        note::fetch_saved(self, post, stop)
     }
 }
 

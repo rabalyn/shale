@@ -54,7 +54,11 @@ pub struct SavedPost {
 
 /// Fetch the self-thread of `post` and download all media of all its posts (blocking: use a
 /// background thread). Problems with single files or the thread are not fatal, see the fields.
-pub fn fetch_saved(client: &mut Client, post: &Post) -> SavedPost {
+/// `stop` is asked before the thread and before each file: when it says yes, nothing is returned (JOB-036).
+pub fn fetch_saved(client: &mut Client, post: &Post, stop: &dyn Fn() -> bool) -> Option<SavedPost> {
+    if stop() {
+        return None;
+    }
     let (mut thread, thread_error, replies, root) = match client.thread_with_replies(post) {
         Ok((t, r, root)) if t.iter().any(|p| p.id == post.id) => (t, None, r, root),
         Ok(_) => (vec![post.clone()], None, vec![], None),
@@ -68,6 +72,9 @@ pub fn fetch_saved(client: &mut Client, post: &Post) -> SavedPost {
     let mut n = 0;
     for (pi, p) in saved.thread.clone().iter().enumerate() {
         for (mi, m) in p.media.iter().enumerate() {
+            if stop() {
+                return None;
+            }
             n += 1;
             match client.download_media(p, m) {
                 Ok((data, content_type)) => saved.media.push(SavedMedia { file_name: media_file_name(p, m, n, content_type.as_deref()), data, post: pi, item: mi }),
@@ -75,7 +82,7 @@ pub fn fetch_saved(client: &mut Client, post: &Post) -> SavedPost {
             }
         }
     }
-    saved
+    Some(saved)
 }
 
 /// "ada_m.test-1.jpg": author and running number, the extension from the address or the content type.
@@ -540,5 +547,41 @@ mod tests {
         let m = Media { file_name_hint: "weird".into(), ..m };
         assert_eq!(media_file_name(&p, &m, 1, Some("image/webp")), "ada_m.test-1.webp");
         assert_eq!(media_file_name(&p, &m, 2, None), "ada_m.test-2.bin");
+    }
+
+    // spec: JOB-036
+    #[test]
+    fn job_036_saving_asks_to_stop_before_the_thread_and_before_each_file_and_gives_nothing_when_it_does() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let l2 = log.clone();
+        let (base, _h) = crate::calendar::dav::tests::mock_http(40, move |m, path, _, _| {
+            l2.lock().unwrap().push(format!("{m} {path}"));
+            if path.starts_with("/m") {
+                (200, "PNGDATA".into())
+            } else {
+                (404, String::new())
+            }
+        });
+        let mut p = post("1", "ada", 1_715_941_800, None);
+        p.media = vec![media(MediaKind::Image, &format!("{base}/m1.png"), ""), media(MediaKind::Image, &format!("{base}/m2.png"), "")];
+        let mut client = Client::new(Account::new(Network::Mastodon, &base, "ada@127.0.0.1", "Ada"), "tok");
+        let files = || log.lock().unwrap().iter().filter(|l| l.contains(" /m")).cloned().collect::<Vec<_>>();
+        // asked before the thread: no request at all
+        assert!(fetch_saved(&mut client, &p, &|| true).is_none());
+        assert!(log.lock().unwrap().is_empty());
+        // the third question (before the second file) says stop: the first file was fetched, the second never
+        let asked = std::cell::Cell::new(0);
+        let stop = || {
+            asked.set(asked.get() + 1);
+            asked.get() >= 3
+        };
+        assert!(fetch_saved(&mut client, &p, &stop).is_none());
+        assert_eq!(files(), ["GET /m1.png"]);
+        // never asked to stop: both files
+        let saved = fetch_saved(&mut client, &p, &|| false).expect("saved");
+        assert_eq!(saved.media.len(), 2);
     }
 }
