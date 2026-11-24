@@ -306,6 +306,9 @@ actions! {
     NormalToggleTask => "normal.toggle_task", "Check or uncheck the task", MainViews, ["Space Space"];
     // BOARD-008
     MainBoards => "main.boards", "Show the boards", MainViews, ["Space B"];
+    // BOARD-033: Alt+Shift, because Alt+Left / Alt+Right are back / forward (Global)
+    BoardCardNextLane => "board.card_next_lane", "Boards: move the selected card to the next lane", MainViews, ["Alt+Shift+Right"];
+    BoardCardPrevLane => "board.card_prev_lane", "Boards: move the selected card to the previous lane", MainViews, ["Alt+Shift+Left"];
     NormalLinkPreview => "normal.link_preview", "Preview the link under the cursor (again: into the preview)", EditorNormal, ["Shift+K"];
     TreeNextFile => "files.next_file", "Next file", FileList, ["J", "Down"];
     TreePrevFile => "files.prev_file", "Previous file", FileList, ["K", "Up"];
@@ -778,7 +781,7 @@ mod tests {
             assert_eq!(mac.display(d.action), on_mac, "{}", d.id);
         }
         assert_eq!(DEFS.iter().filter(|d| d.scope == Scope::NoteView).count(), 26 + 5);
-        assert_eq!(DEFS.len(), 32 + 37 + 7 + 12 + 7 + 26 + 5 + 4);
+        assert_eq!(DEFS.len(), 32 + 37 + 7 + 12 + 7 + 26 + 5 + 4 + 2);
     }
 
     // spec: KEY-014

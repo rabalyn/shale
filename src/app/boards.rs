@@ -166,6 +166,22 @@ impl ShaleApp {
         self.boards.view.reveal();
     }
 
+    /// The keys of the boards (BOARD-033) moved the selected card `step` lanes on (1 next, -1 previous): the same as a drop
+    /// below the pinned cards of that lane. Nothing happens in another view, with a text field or the peek's editor
+    /// holding the keyboard, without a selected card, or at the first or last lane.
+    pub(crate) fn board_move_card(&mut self, ctx: &egui::Context, step: isize) {
+        let in_boards = self.tabbar.tabs.get(self.tabbar.active).map(|t| &t.view) == Some(&View::Boards);
+        if !in_boards || self.boards.view.dragging() || ctx.memory(|m| m.focused().is_some()) || egui::Popup::is_any_open(ctx) {
+            return;
+        }
+        let Some(card) = self.boards.selected.clone() else { return };
+        let lanes = self.boards.shown.lanes();
+        let Some(from) = lanes.iter().position(|l| l.cards.iter().any(|c| c.rel == card)) else { return };
+        let Some(to) = from.checked_add_signed(step).filter(|t| *t < lanes.len()) else { return };
+        let index = lanes[to].pinned;
+        self.drop_card(Dropped { card, from, to, index });
+    }
+
     /// Set the `key:` line of lane `i` (the form of the lane, QUERY-028).
     fn set_lane_line(&mut self, i: usize, key: Key, value: &str) {
         self.edit_board(|b| {
