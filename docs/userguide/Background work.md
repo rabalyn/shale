@@ -27,6 +27,12 @@ and you cannot start it twice by accident.
   between two folders or two batches of messages, never in the middle of a message, so nothing is half
   saved; the view says "Sync stopped" and the next sync goes on with what is missing. The other accounts
   keep syncing. Waiting for new mail (IDLE) is not a task.
+- **Sending mail is a task per account**: "Sending mail from ‹account›…" shows in the indicator and, with a
+  spinner and **Cancel**, in the mail view above the account's name while its mails go out. A mail that is
+  already on its way is never torn down (it could be half sent), so Cancel lets it finish, says "Stopping…"
+  meanwhile, and keeps the mails after it waiting in the Outbox; nothing is sent again by itself until you
+  queue, retry or send one again. A mail the server refuses stays in the Outbox as failed with the server's
+  words, and the view says "A mail was not sent: …".
 - **Things that happen on their own are listed only when they take long.** Reading the vault folder for
   changes made by other programs ("Reading the vault folder…", on a slow network share), learning which
   words belong to your tags ("Learning the words of the tags…", **Cancel** stops it) and counting what Shale

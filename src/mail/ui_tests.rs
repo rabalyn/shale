@@ -2242,6 +2242,40 @@ fn compose_with_c_complete_an_address_send_with_ctrl_enter_and_the_mail_appears_
     assert!(w.subjects().contains(&"Plans für Köln".to_string()));
 }
 
+// spec: JOB-031
+#[test]
+fn job_031_the_mail_view_lists_a_send_with_its_account_while_it_runs_and_a_failure_ends_the_task_and_says_so() {
+    use crate::mail::ui::MAIL_SEND;
+    let (mut w, _smtp) = compose_world("job031", 0);
+    let (reached_tx, reached) = std::sync::mpsc::channel();
+    let (open, gate) = std::sync::mpsc::channel::<()>();
+    let gate = std::sync::Mutex::new(gate);
+    w.app.mail.smtp_factory = Arc::new(move |_, _| {
+        let _ = reached_tx.send(());
+        let _ = gate.lock().unwrap().recv_timeout(Duration::from_secs(30));
+        Err("the SMTP server is down".to_string())
+    });
+    let acct = w.app.cfg.mail_accounts[0].clone();
+    let key = MAIL_SEND.with(&acct.id);
+    w.press_text(Key::C, Modifiers::NONE, "c");
+    w.typ("mail:compose:to", "bob@x.de");
+    w.typ("mail:compose:subject", "Plans");
+    w.write_body("Hallo Bob");
+    w.ctrl_enter();
+    // the send starts by itself and, held at the gate, is a task with the account's name and a Cancel
+    w.until("the send is on its way", |a| a.mail.busy.is_running(&key));
+    reached.recv_timeout(Duration::from_secs(30)).expect("the connector was asked");
+    let info = w.app.mail.busy.info(&key).expect("listed");
+    assert_eq!(info.label, format!("Sending mail from {}…", if acct.name.is_empty() { &acct.host } else { &acct.name }));
+    assert!(info.cancellable);
+    assert!(w.shows(&info.label), "the mail view shows what is sending");
+    open.send(()).unwrap();
+    // it ends with the job and says what went wrong, in the view's problem line and in the Outbox
+    w.until("the failure is reported", |a| !a.mail.busy.is_running(&key) && a.mail.problems.iter().any(|p| p.contains("A mail was not sent") && p.contains("the SMTP server is down")));
+    assert!(w.app.mail.busy.list().is_empty());
+    assert!(w.items().iter().all(|i| i.state == OutState::Failed), "{:?}", w.items());
+}
+
 // spec: MAIL-126, MAIL-150
 #[test]
 fn reply_reply_all_and_forward_start_with_the_right_fields_and_quote_the_original() {
