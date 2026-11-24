@@ -1,9 +1,9 @@
 # ADR-0039: Thesis writing: Pandoc citations, labelled figures, tables, equations and sections, a BibTeX bibliography, and three engines
 
-- **Status**: Proposed (owner decisions of 2026-11-24 are in; the points marked "to confirm" below are the writer's and wait for the owner)
+- **Status**: Accepted (2026-11-24; owner: "sounds kinda fine", with the changes of §3, caption positions, and §9, the toolbar). Only the points of "To confirm" at the end are open.
 - **Date**: 2026-11-24
-- **Specs**: TEX-043 to TEX-051 ([`docs/spec/tex-export.md`](../spec/tex-export.md)), BOOK-020, BOOK-021 ([`docs/spec/book-export.md`](../spec/book-export.md)), EDIT-122 to EDIT-129 ([`docs/spec/links-and-editor.md`](../spec/links-and-editor.md)), PDF-032, PDF-033 ([`docs/spec/features.md`](../spec/features.md)), SITE-077 ([`docs/spec/site-export.md`](../spec/site-export.md)), DOCX-014 ([`docs/spec/word-export.md`](../spec/word-export.md))
-- **Issues**: #642 (epic), #643 (this ADR); phases #644 to #654
+- **Specs**: TEX-043 to TEX-051 ([`docs/spec/tex-export.md`](../spec/tex-export.md)), BOOK-020, BOOK-021 ([`docs/spec/book-export.md`](../spec/book-export.md)), EDIT-122 to EDIT-132, CFG-078 ([`docs/spec/links-and-editor.md`](../spec/links-and-editor.md)), PDF-032, PDF-033 ([`docs/spec/features.md`](../spec/features.md)), SITE-077 ([`docs/spec/site-export.md`](../spec/site-export.md)), DOCX-014 ([`docs/spec/word-export.md`](../spec/word-export.md))
+- **Issues**: #642 (epic), #643 (this ADR); phases #644 to #654; #656 (toolbar)
 - **Builds on**: [ADR-0019](0019-latex-export-managed-texlive.md) (managed TeX Live), [ADR-0001](0001-spec-driven-development.md) (spec-driven)
 
 ## Context
@@ -79,8 +79,17 @@ The **document's language** is, in this order: the property `language:` of the n
 of the top folder note), the `language` of the template set's settings (TEX-005), English.
 (To confirm: the order, and a property named `language`.)
 
-Captions read "Abbildung 3: …" / "Figure 3: …". Tables carry their caption above, figures below
-(the usual order of KOMA-Script; the template may change it). Numbering is **continuous** in a
+Captions read "Abbildung 3: …" / "Figure 3: …". **Where a caption stands is configurable,
+separately for tables and for figures** (owner, 2026-11-24): the properties `table-caption:` and
+`figure-caption:` (`above` or `below`; named like the other export properties: lower case,
+hyphens, one subject), in the note, or in a book in the top folder note (one convention for the
+book). The fallback order: the property; the template set's or kind's default (the manifest keys
+`table_caption` and `figure_caption`, so a journal's or an institute's set carries its own rule);
+the built-in default, **tables above, figures below** (the convention of most theses and
+journals). Other conventions (everything below, or everything above, as some institutes and
+styles ask) are the same two keys. TeX places `\caption` before or after the body and sets
+`\captionsetup[…]{position=…}` (with KOMA's `captions=tableheading` or `figureheading` for the
+spacing); the built-in PDF and the site place the caption the same way. Numbering is **continuous** in a
 single note, **per chapter** (3.1, 3.2) in a book, and the property `float-numbering:` of the
 note or top folder note (`continuous` or `chapter`) overrides either. It counts figures, tables
 and equations alike. (To confirm: per chapter as the default of a book.)
@@ -182,6 +191,43 @@ name. The marker `<!-- shale: list-of-abbreviations -->` prints the list, and `l
 the glossary (the TeX export: `glossaries-extra` with `\makenoidxglossaries`, which needs no extra
 program; confirmed in #652, fallback `acro`).
 
+### 9. The toolbar for the thesis syntax: hidden by default (#656)
+
+The owner wants toolbar actions for the new syntax, but thesis writing is a specialised use, so
+the default interface must not grow. What the formatting toolbar (EDIT-026, EDIT-066, EDIT-111)
+holds today: about 25 buttons in groups: inline styles (bold, italic, strikethrough, highlight,
+code), the heading menu, lists and tasks, quote, code block, rule, page break, alignment (three),
+links and embed, table, the two colour split buttons, clear formatting. The new actions are:
+insert citation (key picker), insert reference (label picker), label (figure, table, equation,
+section), markers (bibliography, lists of), the abbreviation and glossary blocks, the thesis
+parts and the caption positions: eight to ten more buttons or menus.
+
+Options:
+
+- **A. A second bar, the thesis bar, under the formatting toolbar**, off by default, shown by a
+  setting, by the note's own properties (`bibliography:`, `thesis-part:`, `float-numbering:`,
+  `latex-template:`), or switched on for the tab with an action or the note menu.
+- **B. An overflow "More" menu at the end of the one bar** that holds the new actions: no new
+  row, but the pickers always sit behind two clicks, the menu is there for everybody, and a menu
+  shows no state (no bibliography in effect, a marker already there).
+- **C. A "Thesis" group inside the one bar**, shown only when switched on: no second row, but
+  the bar gets longer and wraps (EDIT-026 already wraps into rows), so it becomes a second row
+  anyway, in an unpredictable place.
+- **D. Split the existing bar too** into basic and advanced (page break, alignment, colours,
+  clear, table, code block moving out). Rejected: it moves buttons people use today (#225 and
+  EDIT-111 were asked for), changes muscle memory and the rows EDIT-026, EDIT-066, EDIT-111 and
+  KEY-015, for a gain the thesis bar does not need.
+
+**Recommendation: A.** No existing action moves. The thesis bar is a row of its own, so it is
+switched as a unit and can show state (Label disabled where nothing can be labelled, a marker
+already in the note greyed). It appears by itself in a note that is plainly a thesis (a
+bibliography or a thesis part in its front matter), which is an opt-in the person made by writing
+the property, so the default interface stays as it is for everyone else. Whoever wants no bar
+still has every action as a definable action with an Alt key (KEY-015), and the note's ⋯ menu
+has **Thesis tools**. What costs no interface stays on with the bar off: the scanner, the
+colouring and the broken-key mark of citations, the peek, the reading view and all exports. Rows:
+EDIT-130 to EDIT-132, CFG-078.
+
 ## Alternatives considered
 
 - **CSL-JSON as the bibliography**: Zotero and Pandoc read it, but the owner chose BibLaTeX only;
@@ -209,8 +255,19 @@ program; confirmed in #652, fallback `acro`).
   reserved prefix.
 - The Word export's filter has to number as the other engines do; the shared rules (§3) are
   tested in each engine against the same sample.
+- The thesis bar (§9) is a second row of the editor with its own switches.
 - Points to confirm by the owner: the document language order, per-chapter numbering as the
   default of a book, `authoryear` as the default style, the property names (`bibliography`,
   `citation-style`, `float-numbering`, `thesis-part`, `language`), the marker syntax
   (`<!-- shale: … -->`), the `abbreviations` / `glossary` blocks and the `abbr:` / `gls:` prefixes,
   and that a figure needs a label to be numbered.
+
+## To confirm
+
+- The toolbar split of §9: a separate thesis bar (option A) that appears by the setting, by the
+  note's properties or by a per-tab toggle, and that **no existing button moves**; against a
+  "More" menu (B), a group in the one bar (C) or a split of the existing bar (D).
+- That the properties `bibliography:`, `thesis-part:`, `float-numbering:` and `latex-template:`
+  show the thesis bar by themselves.
+- The earlier points of the Consequences (language order, numbering and style defaults, names of
+  properties and markers, a label as the opt-in for numbering).
