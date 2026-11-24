@@ -180,7 +180,7 @@ fn board_031_the_cards_of_a_group_are_the_rows_of_one_table_that_latex_breaks_wi
     assert_eq!(board_tables(&tex), 1, "{tex}");
     let table = &tex[at(&tex, "\\begin{longtable}")..at(&tex, "\\end{longtable}")];
     let body = &table[at(table, "\\endhead") + 8..];
-    assert_eq!(body.matches("\\\\\n").count(), 30, "{body}");
+    assert_eq!(body.matches("\\\\[12pt]\n").count(), 30, "{body}");
     assert!(!table.contains("\\clearpage"), "{table}");
     assert_eq!(table.matches("{\\bfseries Many}").count(), 1, "the first head");
     assert_eq!(table.matches("{\\bfseries Many (continued)}").count(), 1, "the head of the next pages");

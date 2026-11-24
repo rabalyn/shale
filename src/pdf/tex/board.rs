@@ -99,7 +99,7 @@ fn card(c: &Boxed) -> String {
         None => title,
     };
     let chips = if c.chips.is_empty() { String::new() } else { format!("\\par{{\\footnotesize {}}}", c.chips.iter().map(|t| tex_escape(t)).collect::<Vec<_>>().join(" \\textperiodcentered{} ")) };
-    format!("\\noindent\\fbox{{\\begin{{minipage}}{{\\dimexpr\\linewidth-2\\fboxsep-2\\fboxrule\\relax}}\\raggedright\\bfseries {title}{chips}\\end{{minipage}}}}\\par\\smallskip")
+    format!("\\noindent{{\\setlength{{\\fboxsep}}{{3pt}}\\fbox{{\\begin{{minipage}}{{\\dimexpr\\linewidth-2\\fboxsep-2\\fboxrule\\relax}}\\raggedright\\bfseries {title}{chips}\\end{{minipage}}}}}}\\par")
 }
 
 /// The head of a lane's column: the name with the number of cards, and on the first head the reason
@@ -128,7 +128,7 @@ fn table(title: &str, group: &[LaneView], cards: &[Vec<Boxed>], continued: bool)
     let rows = cards.iter().map(Vec::len).max().unwrap_or(0);
     for r in 0..rows {
         let cells: Vec<String> = cards.iter().map(|c| c.get(r).map(card).unwrap_or_default()).collect();
-        out.push_str(&format!("{}\\\\\n", cells.join(" &\n")));
+        out.push_str(&format!("{}\\\\[12pt]\n", cells.join(" &\n")));
     }
     if rows == 0 {
         // a table needs a row to end on
