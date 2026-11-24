@@ -322,6 +322,7 @@ Shale itself writes `created` and `modified` (full ISO 8601 times) into every Ma
 | `publish.include_folders`, `publish.include_tags` | empty lists (the notes in these folders, the notes with these tags) | Settings → Publishing, "Publish the notes in these folders" and "… with these tags" |
 | `publish.exclude_folders`, `publish.exclude_tags` | empty lists (never published, they win over the include rules) | Settings → Publishing, "Never publish the notes in these folders" and "… with these tags" |
 | `publish.private_types` | empty (`email`, `event`, `post`, `person` notes stay out of "all notes" unless named here) | Settings → Publishing, "Also publish" |
+| `publish.site_address` | empty (the public address of the built site, for the `sitemap.xml`, the `robots.txt` and links below a path; only `http://` or `https://`, no password) | Settings → Publishing, "Address of the site" |
 | `publish.url`, `publish.branch` | empty (the repository the site is pushed to, and its branch, `main` when empty; an address with a password is not kept) | Settings → Publishing, "Address of the publish repository" and "Branch" |
 
 Settings → Sync starts with **Turn on sync…** ([[Turn on sync]]), which sets up the history, a folder another app syncs, or a git server; the
