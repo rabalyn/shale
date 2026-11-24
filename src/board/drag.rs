@@ -47,7 +47,7 @@ pub fn property(query: &str, drop: &str) -> Option<(String, String)> {
 /// The link to `card` for a pin (BOARD-004): its name when that finds it from the board, else its
 /// path; a name or path that `[[ ]]` cannot hold (`#`, `|`, `^`, brackets) is a markdown link with
 /// the path, see [`pin_item`].
-fn pin_text(vault: &Vault, board: &Path, card: &Path) -> String {
+pub(super) fn pin_text(vault: &Vault, board: &Path, card: &Path) -> String {
     let name = card.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let by_name = vault.resolve(markdown::strip_md_ext(&name), Some(board)).as_deref() == Some(card) || vault.resolve(&name, Some(board)).as_deref() == Some(card);
     // (a drawing keeps its extension in the link, a note does not: `strip_md_ext` leaves it)
