@@ -3,16 +3,17 @@
 **IS NOW** = true of the code today (⚠ = known defect) · **SHOULD BE** = agreed target.
 Format: [ADR-0001](../decisions/0001-spec-driven-development.md). Issue: #630.
 
-A vault, synced by git to a server, is browsable online as a wiki built with Hugo. Shale writes a
-Hugo content tree with `shale export-site <vault> <out>` (headless, no window); Hugo builds the
-site from it, Pagefind adds search, and the web server serves it. Notes are chosen by
-publishing rules in the vault's settings, so an old vault needs no per-note edits (SITE-051 to
-SITE-059). Two ways lead to the server: git sync pushes the vault and the server builds from it,
-or a local export pushes only the generated tree to a separate site remote (SITE-060 to
-SITE-062). The export is opt-in and private by default (SITE-001 to SITE-010). Phases: **1** MVP
-(notes, links, heading links, picture embeds, math, colours, tags,
-backlinks, search, publishing rules, theme, server recipe); **2** drawings, layouts per note
-type, players, the graph page; **3** board snapshots. Every row is `SHOULD BE`; the phase of a row
+A vault is browsable online as a wiki built with Hugo. Shale writes a Hugo site tree (content,
+data, config and theme) and pushes it from the app to a publish remote, a git repository of its own
+(SITE-062 to SITE-072). That is the only way to the server: the vault itself is never needed
+there, and the server builds no export; it checks out the tree, runs Hugo and Pagefind and serves
+the result (SITE-049). Every publish is a snapshot push, so only the published notes and their
+media, off-vault media included (SITE-036), ever leave the device. Notes are chosen by publishing
+rules in the vault's settings, so an old vault needs no per-note edits (SITE-051 to SITE-059). The
+export is opt-in and private by default (SITE-001 to SITE-010). Phases: **1** MVP (notes, links,
+heading links, picture embeds, math, colours, tags, backlinks, search, publishing rules, theme,
+publishing, server recipe); **2** drawings, layouts per note type, players, the graph page; **3**
+board snapshots. Every row is `SHOULD BE`; the phase of a row
 is 1 unless the row says otherwise. Tests are named `file.rs::test_fn` (under `src/`).
 
 ## What is published (privacy first)
@@ -35,7 +36,7 @@ is 1 unless the row says otherwise. Tests are named `file.rs::test_fn` (under `s
 | ID | Rule | Status | Code | Test |
 |---|---|---|---|---|
 | SITE-051 | **Publishing is off until it is switched on** in Settings (a Publishing section); while it is off, `shale export-site` writes an empty site and says that publishing is off. | SHOULD BE (#630) | — | — |
-| SITE-052 | **The rules live in the vault's settings,** `<vault>/.shale/settings.json` (CFG-005, CFG-006), which travel with the vault, so the export on the server reads the same rules the app wrote. | SHOULD BE (#630) | — | — |
+| SITE-052 | **The rules live in the vault's settings,** `<vault>/.shale/settings.json` (CFG-005, CFG-006), which travel with the vault, so every device of the vault publishes the same notes; the publish remote's URL and branch (SITE-064) are vault settings too, but their credentials are device-local secrets as for git sync. | SHOULD BE (#630) | — | — |
 | SITE-053 | **Include rules combine freely and a note is chosen when any one matches:** all notes; all notes in one or more vault folders (with their subfolders); all notes with one or more tags (front matter or inline, TAG-001). | SHOULD BE (#630) | — | — |
 | SITE-054 | **A nested tag matches the rule of its parent:** a note tagged `#a/b` is chosen by a rule for the tag `#a` as well as by one for `#a/b`. | SHOULD BE (#630) | — | — |
 | SITE-055 | **Exclude rules (folders, tags) win over include rules:** a note in an excluded folder or with an excluded tag is never chosen by a rule. | SHOULD BE (#630) | — | — |
@@ -48,7 +49,7 @@ is 1 unless the row says otherwise. Tests are named `file.rs::test_fn` (under `s
 
 | ID | Rule | Status | Code | Test |
 |---|---|---|---|---|
-| SITE-011 | **`shale export-site <vault> <out>`** opens the folder `<vault>` as a vault, writes the Hugo content tree to `<out>` and exits without opening a window, like `--export-pdf` (BOOK-011). | SHOULD BE (#630) | — | — |
+| SITE-011 | **`shale export-site <vault> <out>`** opens the folder `<vault>` as a vault, writes the complete site tree of SITE-070 to `<out>` without pushing it and exits without opening a window, like `--export-pdf` (BOOK-011); it is for tests and for people with their own pipeline. | SHOULD BE (#630) | — | — |
 | SITE-012 | **The command line takes exactly a vault folder and an output folder** (and `--dry-run`); anything else, or a vault folder that does not exist, exits 1 with the reason on stderr and writes nothing. | SHOULD BE (#630) | — | — |
 | SITE-013 | **A failed run leaves `<out>` as it was:** the new tree is written next to `<out>` and moved in only when it is complete (SITE-014 says which files it replaces). | SHOULD BE (#630) | — | — |
 | SITE-014 | **Only Shale's own files are replaced:** a file of `<out>` that an earlier export did not write (listed in `<out>/.shale-export.json`) is kept. | SHOULD BE (#630) | — | — |
@@ -93,7 +94,7 @@ is 1 unless the row says otherwise. Tests are named `file.rs::test_fn` (under `s
 | SITE-033 | **A picture embed shows its picture:** `![[x.png]]` and `![](x.png)` of a published note write the file (SITE-006) and show it. | SHOULD BE (#630) | — | — |
 | SITE-034 | **A picture embed keeps its width and alias:** `![[x.png\|300]]` shows the picture 300 pixels wide (EDIT-052), and its alias is the alt text (EDIT-053). | SHOULD BE (#630) | — | — |
 | SITE-035 | **Audio, video and PDF embeds show a player** (phase 2); in phase 1 they show a link to the file. | SHOULD BE (#630) | — | — |
-| SITE-036 | **Library and `file://` media are never published:** an embed or link of `@Name/…` or `file://` (ADR-0030, MEDIA-014, MEDIA-015, MEDIA-018) writes no file and shows a placeholder that names the file. | SHOULD BE (#630) | — | — |
+| SITE-036 | **Off-vault media are copied in when they resolve on this device:** a library link `@Name/…` or a `file://` link (ADR-0030, MEDIA-014, MEDIA-015, MEDIA-018) that a published note embeds or links and that resolves here (the device-local `media_libraries` setting) is copied into the tree under a stable path and published like vault media (SITE-006, SITE-069); one that does not resolve here writes no file, shows a placeholder that names the file, and is listed as a warning in the publish summary (SITE-067). | SHOULD BE (#630) | — | — |
 
 ## Drawings
 
@@ -121,13 +122,23 @@ is 1 unless the row says otherwise. Tests are named `file.rs::test_fn` (under `s
 | SITE-046 | **Shale ships a Hugo theme** (a Hugo module) with the render hooks, layouts and config the export needs, so a site builds with it and no further setup. | SHOULD BE (#630) | — | — |
 | SITE-047 | **The theme's config sets Goldmark right:** the `extras` of Goldmark have subscript off (`~~` is strike-through), unsafe HTML is on, and math passes through to the build. | SHOULD BE (#630) | — | — |
 | SITE-048 | **Full-text search with Pagefind:** the site has a search box that finds words of published notes, and of nothing else. | SHOULD BE (#630) | — | — |
-| SITE-049 | **A server recipe is documented:** `git pull` with git-lfs (SYNC-020), `shale export-site`, `hugo`, `pagefind`, then swapping the output folder in; as a Forgejo Actions job or a post-receive hook. | SHOULD BE (#630) | — | — |
+| SITE-049 | **A server recipe is documented:** on a push to the publish branch (a Forgejo Actions job or a post-receive hook) the server checks out with git-lfs, runs `hugo` and `pagefind` and swaps the output folder in; no Shale runs on the server. | SHOULD BE (#630) | — | — |
 | SITE-050 | **Access control is the web server's** (basic auth or an OIDC proxy): Shale writes no login; the recipe says so and says that the site is public otherwise. | SHOULD BE (#630) | — | — |
 
-## Getting the site to the server
+## Publishing to the server
 
 | ID | Rule | Status | Code | Test |
 |---|---|---|---|---|
-| SITE-060 | **The usual way is git sync:** Shale's git sync pushes the vault, including `.shale/settings.json`, to the git remote; the server (the same remote, or a machine that pulls from it) runs the recipe of SITE-049 on each push. | SHOULD BE (#630) | — | — |
-| SITE-061 | **On the git sync way (SITE-060) the publishing rules are applied on the server,** from the synced settings, so a rule change takes effect with the next sync; on the way of SITE-062 the app applies them before it pushes. | SHOULD BE (#630) | — | — |
-| SITE-062 | **A local export can be pushed to a separate site remote** (phase 3): the app runs the export itself and pushes only the generated tree to a second git remote, so a wiki server that is not trusted with the whole vault never receives an unpublished note. It needs git sync to support a second remote (SYNC rows know one remote, `origin`, today). | SHOULD BE (#630) | — | — |
+| SITE-060 | *Retired* (replaced by SITE-062): the server was to build from the vault synced by git; the vault is never needed on the wiki server. | Retired | — | — |
+| SITE-061 | *Retired* (replaced by SITE-062): the rules were to be applied on the server; the app applies them before it pushes. | Retired | — | — |
+| SITE-062 | **The only way to the server is a push from the app (phase 1):** a publish runs the export of the chosen notes (SITE-002) and pushes the generated tree to the publish remote; the server never receives the vault and builds no export. | SHOULD BE (#630) | — | — |
+| SITE-063 | **The publish repository is a git repository of its own** in Shale's device-local data folder, not inside the vault and not the vault's repository: the vault's git sync and its `origin` never receive it (SYNC-004), and the publish remote never receives the vault. | SHOULD BE (#630) | — | — |
+| SITE-064 | **Settings → Publishing hold the publish remote's URL and branch;** the URL is accepted by the rules of SYNC-004 and refused with a password in it (SEC-010), credentials and SSH host keys are handled as for git sync (SYNC-052 to SYNC-056), and git is the managed or system git of SYNC-024 (ADR-0027). | SHOULD BE (#630) | — | — |
+| SITE-065 | **A Publish action runs export and push:** a command and a button in the Publishing settings start it as a task that shows its progress and can be cancelled (JOB-003 to JOB-006); a cancelled or failed publish leaves the remote as it was. | SHOULD BE (#630) | — | — |
+| SITE-066 | **`shale export-site --publish <vault>` does the same without a window** (like BOOK-011): it publishes the vault's chosen notes to the publish remote of its settings, prints the summary of SITE-015 and exits 0, or exits 1 with the reason on stderr. | SHOULD BE (#630) | — | — |
+| SITE-067 | **The publish summary** says how many notes and media files were published, how many links became plain text, and lists every warning, among them each off-vault file that did not resolve on this device (SITE-036). | SHOULD BE (#630) | — | — |
+| SITE-068 | **Each publish is one snapshot commit with no parent,** force-pushed to the publish branch, so the remote holds only the current published state: a note that is no longer published is gone from the branch and its history after the next publish. | SHOULD BE (#630) | — | — |
+| SITE-069 | **Media go through git LFS with the patterns of the vault** (SYNC-017, SYNC-021): only files that a published note embeds or links are in the tree (SITE-006), and a media file already on the remote's LFS store is not uploaded again. | SHOULD BE (#630) | — | — |
+| SITE-070 | **The tree is a complete Hugo site:** content, data files, the Hugo config and the Shale theme (SITE-046) vendored in, so the server needs only `hugo` and `pagefind` (no Shale, no download of Hugo modules). | SHOULD BE (#630) | — | — |
+| SITE-071 | **LFS objects of media that are no longer published stay on the LFS server** until it collects them; the Publishing settings and the user guide say so. | SHOULD BE (#630) | — | — |
+| SITE-072 | **The last publish wins:** two devices may publish to one remote without coordination (SITE-068); the Publishing settings show from which device and when the remote was last published, read from the commit's message, which names the device and the time like SYNC-036. | SHOULD BE (#630) | — | — |
