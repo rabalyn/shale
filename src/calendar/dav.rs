@@ -1255,9 +1255,9 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    // spec: SEC-026
     #[test]
     fn a_windows_path_is_plain_for_curl_and_quoted_in_its_config_and_curl_syntax_is_not() {
-        // spec: SEC-026
         assert!(curl_plain(r"C:\Users\RUNNER~1\AppData\Local\Temp\shale-1234\pic.png"));
         assert!(curl_plain("image/png") && curl_plain("/tmp/shale x/pic.png"));
         for bad in ["a\"b.png", "a;b.png", "a,b.png", "a\nb.png", "a\rb", "image/png;filename=x", "a\0b"] {
