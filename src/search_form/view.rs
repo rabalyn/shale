@@ -921,6 +921,9 @@ mod tests {
     /// The runner of a worker that is held back until `RELEASE`; it counts the vocabularies it builds.
     static RELEASE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     static BUILT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    /// `Runner` is a plain fn, so the state above is shared by the whole process: the tests that use
+    /// it (`cargo test` runs tests as threads) take turns, or one's RELEASE/BUILT disturbs another.
+    static HELD: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn held(c: &mut crate::search_all::worker::Conns, req: &crate::search_all::Request, cancel: &std::sync::atomic::AtomicBool) -> Option<crate::search_all::Found> {
         while !RELEASE.load(std::sync::atomic::Ordering::SeqCst) {
@@ -940,6 +943,7 @@ mod tests {
     // spec: QUERY-030
     #[test]
     fn query_030_the_list_says_loading_while_the_worker_builds_and_then_lists() {
+        let _turn = HELD.lock().unwrap_or_else(|e| e.into_inner());
         RELEASE.store(false, std::sync::atomic::Ordering::SeqCst);
         let mut h = vault_host();
         h.worker = SearchWorker::with_runner(held);
@@ -959,6 +963,7 @@ mod tests {
     // spec: QUERY-030
     #[test]
     fn query_030_the_previous_vocabulary_is_shown_while_a_new_state_builds_and_a_vault_change_builds_once() {
+        let _turn = HELD.lock().unwrap_or_else(|e| e.into_inner());
         RELEASE.store(false, std::sync::atomic::Ordering::SeqCst);
         BUILT.store(0, std::sync::atomic::Ordering::SeqCst);
         let mut h = vault_host();
@@ -985,6 +990,7 @@ mod tests {
     // spec: QUERY-030
     #[test]
     fn query_030_an_answer_for_an_older_state_of_the_vault_is_dropped() {
+        let _turn = HELD.lock().unwrap_or_else(|e| e.into_inner());
         RELEASE.store(false, std::sync::atomic::Ordering::SeqCst);
         let mut h = vault_host();
         h.worker = SearchWorker::with_runner(held);

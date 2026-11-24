@@ -206,6 +206,38 @@ impl SyncSettings {
     }
 }
 
+/// The publishing rules of a vault (SITE-051…SITE-057, SITE-052): which notes go on the Hugo site
+/// and where it is pushed. Off by default; a vault that never published has no `publish` key.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct PublishSettings {
+    /// The switch of the vault (SITE-051).
+    pub enabled: bool,
+    /// Include rule: all notes (but the private types, SITE-056).
+    pub all_notes: bool,
+    /// Include rule: the notes in these vault folders and their subfolders.
+    pub include_folders: Vec<String>,
+    /// Include rule: the notes with one of these tags (a nested tag matches its parent, SITE-054).
+    pub include_tags: Vec<String>,
+    /// Exclude rules, which win over the include rules (SITE-055).
+    pub exclude_folders: Vec<String>,
+    pub exclude_tags: Vec<String>,
+    /// The private note types that "all notes" takes in as well, ticked by the person (SITE-056):
+    /// `email`, `event`, `post`, `person`.
+    pub private_types: Vec<String>,
+    /// The publish remote (SITE-064) and its branch; stored, nothing pushes yet.
+    pub url: String,
+    pub branch: String,
+    #[serde(flatten)]
+    pub other: Map<String, Value>,
+}
+
+impl PublishSettings {
+    fn is_default(&self) -> bool {
+        *self == PublishSettings::default()
+    }
+}
+
 /// `<vault>/.shale/settings.json`
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
@@ -214,13 +246,16 @@ pub struct VaultSettings {
     /// Folder of the contact notes (for `[[p …` links and people found when importing).
     pub people_dir: String,
     pub sync: SyncSettings,
+    /// What is published as a Hugo site (SITE-052); left out of the file while it is all default.
+    #[serde(skip_serializing_if = "PublishSettings::is_default")]
+    pub publish: PublishSettings,
     #[serde(flatten)]
     pub other: Map<String, Value>,
 }
 
 impl Default for VaultSettings {
     fn default() -> Self {
-        VaultSettings { version: Self::CURRENT, people_dir: crate::import::people::DEFAULT_DIR.into(), sync: SyncSettings::default(), other: Map::new() }
+        VaultSettings { version: Self::CURRENT, people_dir: crate::import::people::DEFAULT_DIR.into(), sync: SyncSettings::default(), publish: PublishSettings::default(), other: Map::new() }
     }
 }
 

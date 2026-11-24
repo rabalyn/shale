@@ -1,0 +1,25 @@
+:root { --bg: #fff; --fg: #1d1f23; --muted: #667; --line: #dde0e6; --link: #1f5fbf; --panel: #f5f6f8; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #17181b; --fg: #e4e6ea; --muted: #99a; --line: #33363d; --link: #7aa7ee; --panel: #202226; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
+a { color: var(--link); }
+.site-header { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid var(--line); }
+.site-title { font-weight: 600; font-size: 1.1em; color: var(--fg); text-decoration: none; }
+.search { flex: 1 1 280px; max-width: 460px; }
+main { max-width: 46rem; margin: 0 auto; padding: 24px 20px 64px; }
+h1 { line-height: 1.2; }
+img { max-width: 100%; height: auto; }
+pre { overflow-x: auto; padding: 12px; border-radius: 6px; }
+table { border-collapse: collapse; }
+th, td { border: 1px solid var(--line); padding: 4px 10px; }
+blockquote { margin-left: 0; padding-left: 16px; border-left: 3px solid var(--line); color: var(--muted); }
+math[display="block"] { display: block; margin: 1em 0; overflow-x: auto; }
+.tags { color: var(--muted); }
+.tag { margin-right: 6px; text-decoration: none; }
+.page-list { padding-left: 1.2em; }
+.date { color: var(--muted); font-size: 0.85em; }
+.backlinks { margin-top: 48px; padding: 4px 18px; background: var(--panel); border-radius: 8px; }
+.backlinks h2 { font-size: 1em; color: var(--muted); }
+.backlinks ul { padding-left: 1.2em; }

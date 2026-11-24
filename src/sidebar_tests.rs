@@ -142,6 +142,8 @@ impl W {
 impl Drop for W {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.dir);
+        let _ = std::fs::remove_dir_all(&self.app.mail.root);
+        let _ = std::fs::remove_dir_all(&self.app.calendar.local_dir);
     }
 }
 
@@ -311,7 +313,7 @@ fn lay_005_icons_are_dragged_between_menubars_right_to_right_left_to_right_and_r
 fn lay_006_a_ribbon_icon_that_cannot_live_on_the_right_is_refused_with_a_no_drop_cue() {
     let mut w = W::new("refused");
     let before = w.app.side.layout.clone();
-    let mail = w.ribbon_icon(Item::Mail).center();
+    let mail = w.ribbon_icon(Item::Graph).center();
     // over a menubar of the right sidebar
     let bar = w.bar(0).center();
     w.drag_to(mail, bar);
@@ -354,7 +356,7 @@ fn lay_007_taking_the_last_icon_out_of_a_view_removes_the_view_and_an_empty_side
     assert!(w.right_has("Drag a panel icon here"), "{:?}", w.right_text());
     // a drop on the empty sidebar makes the first view; a ribbon icon is refused there
     let area = w.app.side.right_rect.unwrap().center();
-    w.drag_and_drop(w.ribbon_icon(Item::Mail).center(), area);
+    w.drag_and_drop(w.ribbon_icon(Item::Graph).center(), area);
     assert!(w.views().is_empty());
     w.drag_and_drop(w.ribbon_icon(panel(RightPanel::Calendar)).center(), area);
     assert_eq!(w.views(), vec![vec![panel(RightPanel::Calendar)]]);
@@ -835,9 +837,9 @@ fn lay_022_dragging_a_view_back_to_the_ribbon_asks_unless_it_is_there_and_a_move
 
 // spec: LAY-006, LAY-020
 #[test]
-fn lay_020_the_main_views_and_commands_are_still_refused_on_the_right_and_a_movable_view_is_accepted() {
+fn lay_020_the_main_views_without_a_pane_and_commands_are_still_refused_on_the_right_and_a_movable_view_is_accepted() {
     let mut w = W::new("movable-cue");
-    for item in [Item::Mail, Item::Social, Item::Calendar, Item::Import] {
+    for item in [Item::Graph, Item::Social, Item::Import] {
         w.drag_to(w.ribbon_icon(item).center(), w.bar(0).center());
         assert_eq!(w.app.side.cue, Cue::Refused, "{item:?}");
         w.release(w.bar(0).center());
@@ -881,8 +883,8 @@ fn lay_024_the_icon_menu_moves_and_copies_a_view_to_the_other_side_without_the_m
     w.click_at(mv.center());
     assert_eq!((movable_places(&w, Item::Search), w.views().len()), ((true, false), 0));
     assert_eq!(w.app.side.layout.ribbon.last(), Some(&Item::Search), "at the end of the ribbon");
-    // the main views have no such entries
-    w.right_click_at(w.ribbon_icon(Item::Mail).center());
+    // the main views that have no pane yet have no such entries
+    w.right_click_at(w.ribbon_icon(Item::Graph).center());
     assert!(w.app.side.menu.to_other.is_none());
 }
 
@@ -925,4 +927,555 @@ fn lay_024_two_copies_of_a_view_share_one_state() {
     w.frames(2);
     assert!(w.left_has("Welcome") && w.right_has("Welcome"), "the same search is shown on both sides: {:?}", w.hl.text);
     assert!(w.app.side.layout.on_left(Item::Search) && w.app.side.layout.on_right(Item::Search));
+}
+
+impl W {
+    /// An account with the demo store (Inbox with 8 mails, 2 of them unread, Sent, Trash, Projects/Hall B);
+    /// returns when the index is open.
+    fn with_mail(tag: &str) -> W {
+        let mut w = W::new(tag);
+        crate::mail::demo::seed(&w.app.mail.root).unwrap();
+        w.app.cfg.mail_accounts = vec![crate::config::MailAccount { id: crate::mail::demo::ACCOUNT.into(), name: "Demo mail".into(), host: "imap.example.com".into(), user: "ada@example.com".into(), ..Default::default() }];
+        // no sync, no watch, no timer that marks a message read and no server: only what the test does changes the index
+        w.app.cfg.mail_sync_minutes = 0;
+        w.app.cfg.mail_mark_read = false;
+        w.app.mail.watch.enabled = false;
+        w.app.mail.factory = std::sync::Arc::new(|_, _| Err("no server in this test".to_string()));
+        w.hl.settle(&mut w.app);
+        w.frames(3);
+        w
+    }
+
+    /// Mail copied to the first right view (the way the icon menu does it).
+    fn copy_mail_right(&mut self) {
+        self.right_click_at(self.ribbon_icon(Item::Mail).center());
+        self.click_at(self.app.side.menu.to_other.expect("Mail has the entries").1.center());
+        self.frames(3);
+    }
+
+    /// Where the pane of the right sidebar drew a control (see `MailPane::rects`).
+    fn pane(&self, name: &str) -> Rect {
+        let rects = &self.app.side.panes.mail.rects;
+        rects.iter().find(|(n, _)| n == name).unwrap_or_else(|| panic!("the Mail pane drew no {name}: {:?}", rects.iter().map(|(n, _)| n).collect::<Vec<_>>())).1
+    }
+
+    fn mail_folder(&self, name: &str) -> i64 {
+        self.app.mail.folders.iter().find(|f| f.name == name).unwrap_or_else(|| panic!("no folder {name}")).id
+    }
+
+    fn pane_unread(&self) -> usize {
+        self.app.side.panes.mail.rects.iter().filter(|(n, _)| n.starts_with("mail:unread:")).count()
+    }
+}
+
+// spec: LAY-028
+#[test]
+fn lay_028_dragging_mail_to_the_right_sidebar_asks_and_both_answers_work_and_the_ribbon_icon_still_opens_the_tab() {
+    let mut w = W::with_mail("mail-drag");
+    let before = w.app.side.layout.clone();
+    // the drop is no longer refused: the cue is the bar's and the question opens
+    let at = Pos2::new(w.bar(0).max.x - 4.0, w.bar(0).center().y);
+    w.drag_to(w.ribbon_icon(Item::Mail).center(), at);
+    assert!(matches!(w.app.side.cue, Cue::Bar { .. }), "{:?}", w.app.side.cue);
+    assert_eq!(w.hl.cursor, egui::CursorIcon::Grabbing);
+    w.release(at);
+    assert!(w.app.side.ask.is_some());
+    assert_eq!(w.app.side.layout, before, "nothing changed before the answer");
+    w.answer(|b| b.copied);
+    assert_eq!(movable_places(&w, Item::Mail), (true, true), "a copy: the ribbon keeps it");
+    assert_eq!(w.app.side.layout.views[0].active, Item::Mail);
+    assert_eq!(w.app.cfg.sidebars.right[0].icons.last().map(String::as_str), Some("mail"), "stored under its own id");
+    // the ribbon icon still opens the Mail tab; the pane stays
+    w.click_at(w.ribbon_icon(Item::Mail).center());
+    w.frames(2);
+    assert_eq!(w.app.tabbar.tabs[w.app.tabbar.active].view, View::Mail);
+    assert!(w.right_has("INBOX"), "{:?}", w.right_text());
+    // a drag of the copy to the ribbon, which has the view: the copy leaves the right side, nothing is asked
+    w.drag_and_drop(w.bar_icon(0, Item::Mail).center(), w.ribbon_icon(Item::Files).center());
+    assert_eq!(movable_places(&w, Item::Mail), (true, false));
+    // Move to the right: the ribbon loses it; the left sidebar never shows it as a pane
+    w.drag_to_first_bar(w.ribbon_icon(Item::Mail).center());
+    w.answer(|b| b.moved);
+    assert_eq!(movable_places(&w, Item::Mail), (false, true));
+    assert!(w.app.left_view().is_some(), "the left sidebar shows Files, Search or Tags");
+    assert!(w.right_has("INBOX"));
+    // it survives a restart
+    let w2 = w.restarted("mail-drag-2");
+    assert_eq!(movable_places(&w2, Item::Mail), (false, true));
+}
+
+// spec: LAY-028, LAY-035
+#[test]
+fn lay_028_the_icon_menu_moves_mail_and_back_and_feeds_is_still_refused() {
+    let mut w = W::with_mail("mail-menu");
+    w.right_click_at(w.ribbon_icon(Item::Mail).center());
+    let (mv, _) = w.app.side.menu.to_other.expect("Mail has Move and Copy");
+    w.click_at(mv.center());
+    assert_eq!((movable_places(&w, Item::Mail), w.views()[0].last()), ((false, true), Some(&Item::Mail)));
+    w.right_click_at(w.bar_icon(0, Item::Mail).center());
+    let (mv, _) = w.app.side.menu.to_other.expect("and back");
+    w.click_at(mv.center());
+    assert_eq!(movable_places(&w, Item::Mail), (true, false));
+    assert_eq!(w.app.side.layout.ribbon.last(), Some(&Item::Mail));
+    // Feeds has no pane yet (LAY-035)
+    let item = Item::Social;
+    w.right_click_at(w.ribbon_icon(item).center());
+    assert!(w.app.side.menu.to_other.is_none(), "{item:?}");
+    w.press_esc();
+    w.drag_to(w.ribbon_icon(item).center(), w.bar(0).center());
+    assert_eq!(w.app.side.cue, Cue::Refused, "{item:?}");
+    w.release(w.bar(0).center());
+    assert_eq!(movable_places(&w, item), (true, false));
+}
+
+// spec: LAY-030
+#[test]
+fn lay_030_the_pane_lists_the_folders_with_unread_counts_and_the_messages_with_their_unread_state() {
+    let mut w = W::with_mail("mail-pane");
+    w.copy_mail_right();
+    // the first folder of the first account, the Inbox, is listed
+    let text = w.right_text();
+    assert!(text.iter().any(|t| t.starts_with("INBOX") && t.contains("(2)")), "{text:?}");
+    for name in ["Sent", "Trash", "Hall B"] {
+        assert!(w.right_has(name), "{name}: {text:?}");
+    }
+    assert!(w.right_has("8 messages"), "{text:?}");
+    assert!(w.right_has("Lecture hall B"), "{text:?}");
+    assert_eq!(w.pane_unread(), 2, "two of the eight are unread");
+    // a folder click lists that folder: Sent has one mail, read
+    w.click_at(w.pane(&format!("mailpane:folder:{}", w.mail_folder("Sent"))).center());
+    w.frames(2);
+    assert!(w.right_has("1 message") && !w.right_has("1 messages"), "{:?}", w.right_text());
+    assert_eq!(w.pane_unread(), 0);
+    assert_eq!(w.app.side.panes.mail.folder, Some(w.mail_folder("Sent")));
+}
+
+// spec: LAY-030
+#[test]
+fn lay_030_a_click_on_a_message_opens_it_in_the_mail_tab_and_opens_the_tab_when_there_is_none() {
+    let mut w = W::with_mail("mail-click");
+    w.copy_mail_right();
+    let mail_tabs = |w: &W| w.app.tabbar.tabs.iter().filter(|t| t.view == View::Mail).count();
+    assert_eq!(mail_tabs(&w), 0, "no Mail tab yet");
+    w.click_at(w.pane("mailpane:row:1").center());
+    w.frames(3);
+    assert_eq!(mail_tabs(&w), 1, "the tab was opened");
+    assert_eq!(w.app.tabbar.tabs[w.app.tabbar.active].view, View::Mail);
+    let clicked = w.app.side.panes.mail.selected.expect("the pane marks the message");
+    assert_eq!(w.app.mail.open.as_ref().map(|o| o.msg.id), Some(clicked), "the tab shows that message");
+    assert_eq!(w.app.mail.folder, w.app.side.panes.mail.folder);
+    // another message: the same tab
+    w.click_at(w.pane("mailpane:row:3").center());
+    w.frames(3);
+    assert_eq!(mail_tabs(&w), 1, "no second tab");
+    assert_ne!(w.app.mail.open.as_ref().map(|o| o.msg.id), Some(clicked));
+    assert_eq!(w.app.mail.open.as_ref().map(|o| o.msg.id), w.app.side.panes.mail.selected);
+}
+
+// spec: LAY-032
+#[test]
+fn lay_032_the_pane_says_why_it_is_empty() {
+    // no account
+    let mut w = W::new("mail-none");
+    w.copy_mail_right();
+    assert!(w.right_has("No mail account yet"), "{:?}", w.right_text());
+    assert!(w.app.side.panes.mail.rects.is_empty());
+    // the index is opening, or could not be opened
+    w.app.cfg.mail_accounts = vec![crate::config::MailAccount { id: "a".into(), name: "A".into(), ..Default::default() }];
+    w.app.mail.store = crate::mail::ui::StoreState::Opening;
+    w.frames(2);
+    assert!(w.right_has("Opening the mail index"), "{:?}", w.right_text());
+    w.app.mail.store = crate::mail::ui::StoreState::Failed("disk full".into());
+    w.frames(2);
+    assert!(w.right_has("could not be opened: disk full"), "{:?}", w.right_text());
+    // an empty folder, and an account that has no folder yet
+    let mut w = W::with_mail("mail-empty");
+    w.copy_mail_right();
+    w.click_at(w.pane(&format!("mailpane:folder:{}", w.mail_folder("Trash"))).center());
+    w.frames(2);
+    assert!(w.right_has("No messages here."), "{:?}", w.right_text());
+    w.app.cfg.mail_accounts.push(crate::config::MailAccount { id: "empty".into(), name: "Empty account".into(), ..Default::default() });
+    w.frames(2);
+    w.click_at(w.pane("mailpane:account:empty").center());
+    w.frames(2);
+    assert!(w.right_has("No folders yet"), "{:?}", w.right_text());
+    assert_eq!(w.app.side.panes.mail.folder, None);
+    // back to the first account: its first folder is listed again
+    w.click_at(w.pane(&format!("mailpane:account:{}", crate::mail::demo::ACCOUNT)).center());
+    w.frames(2);
+    assert_eq!(w.app.side.panes.mail.folder, Some(w.mail_folder("INBOX")));
+}
+
+// spec: LAY-031
+#[test]
+fn lay_031_the_pane_and_the_tab_choose_their_folders_separately() {
+    let mut w = W::with_mail("mail-independent");
+    w.copy_mail_right();
+    let (inbox, sent, trash) = (w.mail_folder("INBOX"), w.mail_folder("Sent"), w.mail_folder("Trash"));
+    assert_eq!((w.app.side.panes.mail.folder, w.app.mail.folder), (Some(inbox), Some(inbox)));
+    // the pane goes to Sent: the tab's folder stays
+    w.click_at(w.pane(&format!("mailpane:folder:{sent}")).center());
+    w.frames(2);
+    assert_eq!((w.app.side.panes.mail.folder, w.app.mail.folder), (Some(sent), Some(inbox)));
+    // the tab goes to Trash: the pane stays at Sent
+    let cfg = w.app.cfg.clone();
+    w.app.mail.select_folder(&cfg, trash);
+    w.frames(3);
+    assert_eq!((w.app.side.panes.mail.folder, w.app.mail.folder), (Some(sent), Some(trash)));
+    assert!(w.right_has("Re: Schedule for the autumn workshop"), "{:?}", w.right_text());
+    // a message selected in the tab is not the pane's selection
+    w.app.mail.cursor = Some(0);
+    w.frames(2);
+    assert_eq!(w.app.side.panes.mail.selected, None);
+}
+
+// spec: LAY-031
+#[test]
+fn lay_031_the_pane_and_the_tab_scroll_separately_and_share_one_index() {
+    let mut w = W::with_mail("mail-scroll");
+    w.copy_mail_right();
+    // a low window: eight rows do not fit in the pane
+    w.hl.set_size(Vec2::new(1500.0, 420.0));
+    w.click_at(w.ribbon_icon(Item::Mail).center());
+    w.frames(4);
+    assert_eq!(w.app.side.panes.mail.scroll, 0.0);
+    let list = w.pane("mailpane:row:0");
+    w.wheel(list.center(), -120.0);
+    assert!(w.app.side.panes.mail.scroll > 0.0, "the pane's list scrolled: {}", w.app.side.panes.mail.scroll);
+    assert_eq!(w.app.mail.visible.start, 0, "the tab's list did not");
+    // what the tab changes in the index shows in the pane: it reads the newest unread mail
+    w.wheel(list.center(), 500.0);
+    assert_eq!(w.pane_unread(), 2);
+    w.app.mail.cursor = Some(0);
+    let m = w.app.mail.cursor_message().expect("the tab has a first message");
+    let cfg = w.app.cfg.clone();
+    w.app.mail.toggle_read_on(&cfg, vec![m]);
+    w.frames(3);
+    assert_eq!(w.pane_unread(), 1, "the pane read the index again");
+}
+
+impl W {
+    /// A local calendar with the sample events (a normal day today, all-day events, a busy day).
+    fn with_calendar(tag: &str) -> W {
+        let mut w = W::new(tag);
+        let src = w.app.calendar.new_local_source("Test", &[]);
+        let id = src.id.clone();
+        w.app.cfg.calendars = vec![src];
+        w.app.calendar.set_sources(w.app.cfg.calendars.clone());
+        w.app.calendar.fill_sample(&id).unwrap();
+        w.hl.settle(&mut w.app);
+        w.frames(3);
+        w
+    }
+
+    /// An item copied to the first right view (the way the icon menu does it).
+    fn copy_right(&mut self, item: Item) {
+        self.right_click_at(self.ribbon_icon(item).center());
+        self.click_at(self.app.side.menu.to_other.expect("the item has the entries").1.center());
+        self.frames(3);
+    }
+
+    /// Where the Calendar pane of the right sidebar drew a control (see `CalendarPane::rects`).
+    fn cal_pane(&self, name: &str) -> Rect {
+        let rects = &self.app.side.panes.calendar.rects;
+        rects.iter().find(|(n, _)| n == name).unwrap_or_else(|| panic!("the Calendar pane drew no {name}: {:?}", rects.iter().map(|(n, _)| n).collect::<Vec<_>>())).1
+    }
+
+    fn cal_pane_has(&self, name: &str) -> bool {
+        self.app.side.panes.calendar.rects.iter().any(|(n, _)| n == name)
+    }
+
+    fn cal_pane_count(&self, prefix: &str) -> usize {
+        self.app.side.panes.calendar.rects.iter().filter(|(n, _)| n.starts_with(prefix)).count()
+    }
+
+    fn calendar_tabs(&self) -> usize {
+        self.app.tabbar.tabs.iter().filter(|t| t.view == View::Calendar).count()
+    }
+}
+
+/// "November 2026", the title of the month `day` is in.
+fn month_title(day: i64) -> String {
+    let (y, m, _) = crate::calendar::time::civil_from_days(day);
+    format!("{} {y}", crate::calendar::time::MONTHS[m as usize - 1])
+}
+
+// spec: LAY-029
+#[test]
+fn lay_029_dragging_calendar_to_the_right_sidebar_asks_and_both_answers_work_and_the_ribbon_icon_still_opens_the_tab() {
+    let mut w = W::with_calendar("cal-drag");
+    let before = w.app.side.layout.clone();
+    let at = Pos2::new(w.bar(0).max.x - 4.0, w.bar(0).center().y);
+    w.drag_to(w.ribbon_icon(Item::Calendar).center(), at);
+    assert!(matches!(w.app.side.cue, Cue::Bar { .. }), "{:?}", w.app.side.cue);
+    w.release(at);
+    assert!(w.app.side.ask.is_some());
+    assert_eq!(w.app.side.layout, before, "nothing changed before the answer");
+    w.answer(|b| b.copied);
+    assert_eq!(movable_places(&w, Item::Calendar), (true, true), "a copy: the ribbon keeps it");
+    assert_eq!(w.app.side.layout.views[0].active, Item::Calendar);
+    assert_eq!(w.app.cfg.sidebars.right[0].icons.last().map(String::as_str), Some("calendar"), "stored under its own id");
+    // the ribbon icon still opens the Calendar tab; the pane stays
+    w.click_at(w.ribbon_icon(Item::Calendar).center());
+    w.frames(2);
+    assert_eq!(w.app.tabbar.tabs[w.app.tabbar.active].view, View::Calendar);
+    assert!(w.right_has(&month_title(crate::calendar::time::today())), "{:?}", w.right_text());
+    // a drag of the copy to the ribbon, which has the view: the copy leaves the right side, nothing is asked
+    w.drag_and_drop(w.bar_icon(0, Item::Calendar).center(), w.ribbon_icon(Item::Files).center());
+    assert_eq!(movable_places(&w, Item::Calendar), (true, false));
+    // Move to the right: the ribbon loses it; the left sidebar never shows it as a pane
+    w.drag_to_first_bar(w.ribbon_icon(Item::Calendar).center());
+    w.answer(|b| b.moved);
+    assert_eq!(movable_places(&w, Item::Calendar), (false, true));
+    assert!(w.app.left_view().is_some(), "the left sidebar shows Files, Search or Tags");
+    assert!(w.right_has(&month_title(crate::calendar::time::today())));
+    // it survives a restart
+    let w2 = w.restarted("cal-drag-2");
+    assert_eq!(movable_places(&w2, Item::Calendar), (false, true));
+}
+
+// spec: LAY-029
+#[test]
+fn lay_029_the_icon_menu_moves_calendar_and_back_and_the_calendar_panel_is_another_icon() {
+    let mut w = W::with_calendar("cal-menu");
+    w.right_click_at(w.ribbon_icon(Item::Calendar).center());
+    let (mv, _) = w.app.side.menu.to_other.expect("Calendar has Move and Copy");
+    w.click_at(mv.center());
+    assert_eq!((movable_places(&w, Item::Calendar), w.views()[0].last()), ((false, true), Some(&Item::Calendar)));
+    assert!(w.views().iter().any(|v| v.contains(&panel(RightPanel::Calendar))), "the Calendar panel is still there");
+    w.right_click_at(w.bar_icon(0, Item::Calendar).center());
+    let (mv, _) = w.app.side.menu.to_other.expect("and back");
+    w.click_at(mv.center());
+    assert_eq!(movable_places(&w, Item::Calendar), (true, false));
+    assert_eq!(w.app.side.layout.ribbon.last(), Some(&Item::Calendar));
+}
+
+// spec: LAY-033
+#[test]
+fn lay_033_the_pane_shows_the_month_with_today_and_busy_days_and_the_agenda_of_the_next_days() {
+    use crate::calendar::time as t;
+    let mut w = W::with_calendar("cal-pane");
+    w.copy_right(Item::Calendar);
+    let today = t::today();
+    let text = w.right_text();
+    assert!(text.iter().any(|x| x == &month_title(today)), "{text:?}");
+    assert!(w.cal_pane_has(&format!("calpane:today:{today}")), "today is marked");
+    assert_eq!(w.cal_pane_count("calpane:today:"), 1);
+    assert!(w.cal_pane_has(&format!("calpane:busy:{today}")), "a day with events has its dot");
+    // the agenda starts today: the events with their times, all-day events with "all day"
+    assert!(w.right_has("Today · "), "{text:?}");
+    for e in ["Design review", "Lunch with Sam", "Focus time"] {
+        assert!(w.cal_pane_has(&format!("calpane:event:{e}:{today}")), "{e}");
+    }
+    for time in ["10:00", "12:30", "14:00"] {
+        assert!(w.right_has(time), "{time}: {text:?}");
+    }
+    let (review, lunch) = (w.cal_pane(&format!("calpane:event:Design review:{today}")), w.cal_pane(&format!("calpane:event:Lunch with Sam:{today}")));
+    assert!(review.min.y < lunch.min.y, "by time");
+    assert!(w.right_has("Tomorrow · ") && w.cal_pane_has(&format!("calpane:event:Report deadline:{}", today + 1)));
+    assert!(w.right_has("all day"));
+    // the agenda reaches 14 days from the chosen day, the chosen day included: the conference on day 7 is in, the holiday on day 14 is not
+    assert_eq!(crate::calendar::sidebar_pane::AGENDA_DAYS, 14);
+    assert!(w.cal_pane_has(&format!("calpane:event:Conference:{}", today + 7)));
+    assert!(!w.right_has("Public holiday"), "{text:?}");
+}
+
+// spec: LAY-033
+#[test]
+fn lay_033_all_day_events_come_before_the_timed_ones_of_their_day() {
+    use crate::calendar::time as t;
+    let mut w = W::with_calendar("cal-allday");
+    w.copy_right(Item::Calendar);
+    // the three days of the conference: on a weekday the team standup (09:00) is there too
+    let weekday = (7..=9).map(|n| t::today() + n).find(|d| t::weekday(*d) < 5).expect("three days have a weekday");
+    w.click_at(w.cal_pane(&format!("calpane:day:{weekday}")).center());
+    w.frames(2);
+    let (conf, standup) = (w.cal_pane(&format!("calpane:event:Conference:{weekday}")), w.cal_pane(&format!("calpane:event:Team standup:{weekday}")));
+    assert!(conf.min.y < standup.min.y, "all day first, though the standup is at 09:00");
+}
+
+// spec: LAY-033
+#[test]
+fn lay_033_the_month_is_navigated_with_the_arrows_and_today_brings_it_back() {
+    use crate::calendar::time as t;
+    let mut w = W::with_calendar("cal-nav");
+    w.copy_right(Item::Calendar);
+    let today = t::today();
+    let this_month = w.app.side.panes.calendar.shown_month();
+    assert_eq!(this_month, today - t::civil_from_days(today).2 as i64 + 1);
+    w.click_at(w.cal_pane("calpane:next").center());
+    w.frames(2);
+    let next = w.app.side.panes.calendar.shown_month();
+    assert!(next > this_month && w.right_has(&month_title(next)), "{:?}", w.right_text());
+    assert_eq!(w.app.side.panes.calendar.chosen_day(), today, "the agenda stays where it was");
+    // two months back from this one (a month on from the arrow above): no event is there
+    for _ in 0..3 {
+        w.click_at(w.cal_pane("calpane:prev").center());
+        w.frames(2);
+    }
+    let (y, m, _) = t::civil_from_days(this_month);
+    let (y, m) = t::add_months(y, m, -2);
+    assert_eq!(w.app.side.panes.calendar.shown_month(), t::days_from_civil(y, m, 1), "two months back");
+    let dots: Vec<_> = w.app.side.panes.calendar.rects.iter().filter(|(n, _)| n.starts_with("calpane:busy:")).map(|(n, _)| n.clone()).collect();
+    assert_eq!(dots, Vec::<String>::new(), "no dots two months ago");
+    assert!(w.right_has(&month_title(w.app.side.panes.calendar.shown_month())));
+    // Today: the month and the day of today
+    w.click_at(w.cal_pane("calpane:today").center());
+    w.frames(2);
+    assert_eq!((w.app.side.panes.calendar.shown_month(), w.app.side.panes.calendar.selected, w.app.side.panes.calendar.month), (this_month, None, None));
+    assert!(w.cal_pane_has(&format!("calpane:busy:{today}")));
+}
+
+// spec: LAY-033
+#[test]
+fn lay_033_a_click_on_a_day_moves_the_agenda_to_that_day() {
+    use crate::calendar::time as t;
+    let mut w = W::with_calendar("cal-day");
+    w.copy_right(Item::Calendar);
+    // the busy day two days from now (its month may be the next one)
+    let busy = t::today() + 2;
+    while w.app.side.panes.calendar.shown_month() != busy - t::civil_from_days(busy).2 as i64 + 1 {
+        w.click_at(w.cal_pane("calpane:next").center());
+        w.frames(2);
+    }
+    assert!(w.cal_pane_has(&format!("calpane:event:Design review:{}", t::today())), "the agenda starts today");
+    w.click_at(w.cal_pane(&format!("calpane:day:{busy}")).center());
+    w.frames(2);
+    assert_eq!(w.app.side.panes.calendar.selected, Some(busy));
+    assert!(w.cal_pane_has(&format!("calpane:event:Retro:{busy}")), "{:?}", w.right_text());
+    assert!(!w.cal_pane_has(&format!("calpane:event:Design review:{}", t::today())), "today is before the chosen day");
+    assert!(w.right_has(&t::long_date(busy)));
+    // the agenda is 14 days from there: the holiday (today + 14) is in now
+    assert!(w.cal_pane_has(&format!("calpane:event:Public holiday:{}", t::today() + 14)));
+}
+
+// spec: LAY-033
+#[test]
+fn lay_033_a_click_on_an_event_opens_it_in_the_calendar_tab_and_opens_the_tab_when_there_is_none() {
+    use crate::calendar::time as t;
+    let mut w = W::with_calendar("cal-click");
+    w.copy_right(Item::Calendar);
+    assert_eq!(w.calendar_tabs(), 0, "no Calendar tab yet");
+    let today = t::today();
+    w.click_at(w.cal_pane(&format!("calpane:event:Design review:{today}")).center());
+    w.frames(3);
+    assert_eq!(w.calendar_tabs(), 1, "the tab was opened");
+    assert_eq!(w.app.tabbar.tabs[w.app.tabbar.active].view, View::Calendar);
+    assert_eq!((w.app.cal.main.mode, w.app.cal.main.selected), (crate::calendar::ui::Mode::Month, today));
+    let shown = w.app.cal.main.popup.as_ref().and_then(|p| w.app.calendar.event(&p.occ)).map(|e| e.summary.clone());
+    assert_eq!(shown.as_deref(), Some("Design review"), "the tab shows the event's details");
+    // another event: the same tab
+    w.click_at(w.cal_pane(&format!("calpane:event:Lunch with Sam:{today}")).center());
+    w.frames(3);
+    assert_eq!(w.calendar_tabs(), 1, "no second tab");
+    let shown = w.app.cal.main.popup.as_ref().and_then(|p| w.app.calendar.event(&p.occ)).map(|e| e.summary.clone());
+    assert_eq!(shown.as_deref(), Some("Lunch with Sam"));
+}
+
+// spec: LAY-031
+#[test]
+fn lay_031_the_pane_and_the_tab_show_their_own_month_and_day() {
+    use crate::calendar::time as t;
+    let mut w = W::with_calendar("cal-independent");
+    w.copy_right(Item::Calendar);
+    let today = t::today();
+    w.click_at(w.ribbon_icon(Item::Calendar).center());
+    w.frames(3);
+    // the pane goes to the next month, the tab stays
+    let (tab_anchor, tab_selected) = (w.app.cal.main.anchor, w.app.cal.main.selected);
+    w.click_at(w.cal_pane("calpane:next").center());
+    w.frames(2);
+    assert!(w.app.side.panes.calendar.shown_month() > today);
+    assert_eq!((w.app.cal.main.anchor, w.app.cal.main.selected), (tab_anchor, tab_selected));
+    // the tab goes to another day and month, the pane stays
+    let pane_month = w.app.side.panes.calendar.shown_month();
+    w.app.cal.main.anchor = today + 90;
+    w.app.cal.main.selected = today + 90;
+    w.frames(3);
+    assert_eq!((w.app.side.panes.calendar.shown_month(), w.app.side.panes.calendar.selected), (pane_month, None));
+    assert!(w.right_has(&month_title(pane_month)));
+    // a day chosen in the pane is not the tab's selection
+    let d = pane_month + 3;
+    w.click_at(w.cal_pane(&format!("calpane:day:{d}")).center());
+    w.frames(2);
+    assert_eq!((w.app.side.panes.calendar.selected, w.app.cal.main.selected), (Some(d), today + 90));
+    // the Calendar panel of the right sidebar is a third state
+    assert_eq!(w.app.cal.side.selected, today);
+}
+
+// spec: LAY-031
+#[test]
+fn lay_031_the_calendar_pane_scrolls_on_its_own_and_shares_the_events_of_the_tab() {
+    use crate::calendar::time as t;
+    let mut w = W::with_calendar("cal-scroll");
+    w.copy_right(Item::Calendar);
+    w.hl.set_size(Vec2::new(1500.0, 420.0));
+    w.click_at(w.ribbon_icon(Item::Calendar).center());
+    w.frames(4);
+    assert_eq!(w.app.side.panes.calendar.scroll, 0.0);
+    let at = w.cal_pane(&format!("calpane:day:{}", t::today())).center();
+    w.wheel(at, -300.0);
+    assert!(w.app.side.panes.calendar.scroll > 0.0, "the pane scrolled: {}", w.app.side.panes.calendar.scroll);
+    // an event the tab deletes or adds shows in the pane: the same store, one cache
+    w.wheel(at, 1000.0);
+    assert!(w.cal_pane_has(&format!("calpane:event:Gym:{}", t::today())));
+    let id = w.app.calendar.sources[0].id.clone();
+    let gym = w.app.calendar.events[&id].iter().find(|e| e.summary == "Gym").cloned().unwrap();
+    crate::calendar::store::tests::wait(&w.app.calendar.delete_event(&id, gym, None).unwrap()).unwrap();
+    w.app.calendar.after_write(std::slice::from_ref(&id));
+    w.frames(3);
+    assert!(!w.cal_pane_has(&format!("calpane:event:Gym:{}", t::today())), "the pane read the store again");
+}
+
+// spec: LAY-036
+#[test]
+fn lay_036_the_pane_says_why_it_is_empty() {
+    // no calendar
+    let mut w = W::new("cal-none");
+    w.copy_right(Item::Calendar);
+    assert!(w.right_has("No calendar yet"), "{:?}", w.right_text());
+    assert!(w.app.side.panes.calendar.rects.is_empty());
+    // a calendar without events: the month is there, the agenda says so
+    let src = w.app.calendar.new_local_source("Empty", &[]);
+    w.app.cfg.calendars = vec![src];
+    w.app.calendar.set_sources(w.app.cfg.calendars.clone());
+    w.frames(3);
+    assert!(w.right_has(&format!("Nothing in the next {} days.", crate::calendar::sidebar_pane::AGENDA_DAYS)), "{:?}", w.right_text());
+    assert!(w.cal_pane_has("calpane:next") && w.cal_pane_count("calpane:event:") == 0);
+}
+
+// spec: LAY-036
+#[test]
+fn lay_036_the_pane_says_so_while_the_calendars_load() {
+    if std::process::Command::new("curl").arg("--version").output().is_err() {
+        return;
+    }
+    // a server that answers when the test lets it
+    let (open, gate) = std::sync::mpsc::channel::<()>();
+    let gate = std::sync::Mutex::new(gate);
+    let (base, _h) = crate::calendar::dav::tests::mock_http(10, move |_, _, _, _| {
+        let _ = gate.lock().unwrap().recv();
+        (207, r#"<d:multistatus xmlns:d="DAV:"/>"#.to_string())
+    });
+    let mut w = W::new("cal-loading");
+    w.copy_right(Item::Calendar);
+    let src = crate::calendar::store::CalendarSource {
+        id: "dav".into(),
+        name: "Server".into(),
+        color: "#1971c2".into(),
+        enabled: true,
+        sync_minutes: 0,
+        kind: crate::calendar::store::SourceKind::Caldav { url: format!("{base}/a/"), username: "ada".into(), password: "x".into() },
+    };
+    w.app.cfg.calendars = vec![src];
+    w.app.calendar.set_sources(w.app.cfg.calendars.clone());
+    w.frames(3);
+    assert!(w.app.calendar.is_loading());
+    assert!(w.right_has("Loading the calendars"), "{:?}", w.right_text());
+    assert!(w.cal_pane_has("calpane:next"), "the month is there meanwhile");
+    // the server answers: nothing in the range
+    drop(open);
+    w.hl.settle(&mut w.app);
+    w.frames(3);
+    assert!(w.right_has("Nothing in the next"), "{:?}", w.right_text());
 }

@@ -1,0 +1,2 @@
+{{- $d := .Destination -}}{{- if and (strings.HasPrefix $d "/") (not (strings.HasPrefix $d "//")) }}{{ $d = relURL $d }}{{ end -}}
+<a href="{{ $d | safeURL }}"{{ with .Title }} title="{{ . }}"{{ end }}>{{ .Text | safeHTML }}</a>{{- /* no space after the link */ -}}

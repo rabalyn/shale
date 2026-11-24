@@ -692,7 +692,7 @@ The settings stay open until closed (✕, Esc or the ⋯ button; a click outside
 - Drag a panel icon over the content of the right sidebar: the area lights up ("Drop to open
   this icon in a new view") and dropping makes a new view below it. Drag icons from one
   menubar to another, from a view to the ribbon (it then is a shortcut that shows the panel
-  below the views) and back. Icons that are no panels and no views of the left sidebar (Mail, Feeds, …) cannot go to the right
+  below the views) and back. Icons that are no panels, no views of the left sidebar and not Mail (Feeds, Calendar, Graph, …) cannot go to the right
   sidebar: the pointer shows "not allowed" and nothing changes. Taking the last icon out of a
   view removes the view. Esc cancels a drag.
 - **Files, Search and Tags on either side** (LAY-020 to LAY-027): drag the icon of Files, Search or Tags from the
@@ -701,6 +701,20 @@ The settings stay open until closed (✕, Esc or the ⋯ button; a click outside
   changes nothing). Right-click the icon for **Move to / Copy to the right (left) sidebar** instead of dragging. A copy
   shows the same state: one file tree, one search. If the left sidebar's view has moved, it shows the next one (or says
   none is left); Ctrl+Shift+F shows Search where it is. The places are kept in the settings (`sidebars`).
+- **Mail in the right sidebar** (LAY-028 to LAY-032, rabalyn/shale#610, ADR-0038): Mail is placed like Files, Search and Tags
+  (drag and **Move or copy?**, or right-click **Move to / Copy to the right sidebar**). The pane is a compact companion
+  of the Mail tab: the accounts, the folders with their unread counts, and the message list with the unread state. A click
+  on a message opens it in the Mail tab (the tab is opened when there is none). The pane keeps its own account, folder,
+  selection and scroll, so the sidebar can show the Inbox while the tab shows another folder; the mail data and the syncs
+  are shared. A copy keeps the Mail icon in the ribbon, which still opens the tab; the left sidebar never shows Mail.
+  Feeds follows with its own compact pane.
+- **Calendar in the right sidebar** (LAY-029, LAY-033, LAY-036, rabalyn/shale#610, ADR-0038): Calendar is placed the same
+  way (drag and **Move or copy?**, or right-click **Move to / Copy to the right sidebar**), apart from the Calendar panel.
+  The pane is a compact companion of the Calendar tab: a small month (‹ › and Today, today marked, a dot under the days
+  with events) and under it the agenda of 14 days from the chosen day, all-day events first, each with its time and title.
+  A click on a day moves the agenda there; a click on an event opens it in the Calendar tab (opened when there is none) with
+  its details. The pane has its own month and chosen day, separate from the tab; the events and the sync are shared. It says
+  when there is no calendar, when nothing is coming up and while the calendars load.
 - Drag the border between two views up or down to change their heights (they start equal; a
   view never gets lower than a small minimum).
 - A middle click on the **Mail**, **Feeds** or **Calendar** icon opens that view in a new tab.
@@ -1321,6 +1335,32 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   Settings shows the version, how this copy was installed and why it cannot update itself where that is so.
 
   ![The Updates tab of Settings](userguide/z_media/screenshots/settings-updates.png)
+
+## A vault as a website (Hugo)
+
+- **`shale export-site <vault> <out>`** (#630, SITE-011 to SITE-016) writes the notes a vault chooses to publish as a
+  complete [Hugo](https://gohugo.io) site tree (content, data files, config and the Shale theme) and exits without a
+  window; `--dry-run` lists every note and media file it would write and writes nothing. The tree is made next to
+  `<out>` and moved in when it is whole, only the files an earlier export wrote (`.shale-export.json`) are replaced or
+  removed, the vault is never changed, and the last line says how many notes, media files and links were written and
+  how many links became plain text. `hugo` and then `pagefind --site public` turn the tree into the site. Publishing
+  from the app (a Publish button, a push to a server) and the Settings page for the rules are still to come.
+- **Opt-in and private by default** (SITE-001 to SITE-010, SITE-051 to SITE-057): a vault publishes nothing until
+  `publish.enabled` is on in its `.shale/settings.json`. The rules choose notes by folder, by tag (a nested tag
+  matches its parent) or all notes; an exclude rule wins; "all notes" leaves out mail, events, posts and people unless
+  their type is ticked; a note's own `publish: true` or `false` wins over every rule. Nothing of a note that is not
+  chosen is written, not its text, name, tags, links or backlinks; a link to one is its text. Hidden files,
+  conflict copies, sync debris and mail originals are never written, and a picture or file is written only when a
+  chosen note embeds or links it.
+- **The pages** (SITE-017 to SITE-043): wiki and Markdown links become links between the pages, a heading link lands on
+  the anchor Hugo makes; the title is the title line, tags are Hugo tags and the properties of the note are page
+  parameters. Highlights, colours, `<sub>`/`<sup>`/`<u>` and aligned blocks stay, math is typeset when the site is
+  built (no script in the browser), tables, footnotes, task lists and code blocks show as in the editor, and a
+  picture keeps its width and alt text. Audio, video and PDFs are a link to the file; a file outside the vault is
+  copied when it resolves on this computer, else a placeholder names it. Folders become sections (a folder note is
+  the section's text), every page has a backlinks panel, and the index page lists the sections and the latest notes.
+- **Search and theme** (SITE-046 to SITE-048): the Shale theme is part of the tree, so the server needs only `hugo` and
+  `pagefind`; the pages carry a search box for Pagefind that indexes the notes and nothing else. Hugo 0.158 or newer.
 
 ## Git sync
 

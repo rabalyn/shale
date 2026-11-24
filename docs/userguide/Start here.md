@@ -44,6 +44,7 @@ Your other data:
 - [[Import]]: mails, events and files become notes, and notes become Word files.
 - [[Thread view]]: the mails of one conversation, in date order, and keys to step through them.
 - [[PDF]]: export notes, read PDFs.
+- [[Publishing a vault]]: your notes as a website, built with Hugo.
 
 Keeping it safe and tidy:
 

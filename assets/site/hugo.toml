@@ -1,0 +1,29 @@
+# The Hugo site of a Shale vault (SITE-047, SITE-070): written by `shale export-site`, built with
+# `hugo` and then `pagefind --site public`. Do not edit: the next export writes it again.
+baseURL = "/"
+locale = "en"
+theme = "shale"
+# a page for every note, section and tag; no feed or sitemap, whose URLs need a real base URL
+disableKinds = ["RSS", "sitemap", "robotsTXT"]
+
+# Hugo takes the Markdown settings of the site, not of a theme (a theme's `markup` is ignored).
+[markup]
+  [markup.goldmark]
+    [markup.goldmark.renderer]
+      # the colours and spans of a note are HTML (EDIT-028, EDIT-051)
+      unsafe = true
+    [markup.goldmark.extensions]
+      [markup.goldmark.extensions.extras]
+        # `==x==` is a highlight, `^x^` raises; `~x~` does not lower: `~~x~~` is strike-through
+        [markup.goldmark.extensions.extras.mark]
+          enable = true
+        [markup.goldmark.extensions.extras.superscript]
+          enable = true
+        [markup.goldmark.extensions.extras.subscript]
+          enable = false
+      # math passes through to the render hooks, which typeset it at build time (SITE-028)
+      [markup.goldmark.extensions.passthrough]
+        enable = true
+        [markup.goldmark.extensions.passthrough.delimiters]
+          block = [['$$', '$$']]
+          inline = [['$', '$']]

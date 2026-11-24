@@ -4,6 +4,7 @@
 //!   shale                       open the last vault (or the start screen)
 //!   shale --vault <folder>      open a specific folder as vault
 //!   shale --export-pdf <folder> <file.pdf>   write the notes of a folder as one PDF (a book), without a window
+//!   shale export-site <vault> <out> [--dry-run]   write the notes a vault publishes as a Hugo site (SITE-011), without a window
 //!   shale --screenshot out.png  start with a demo vault, draw ~120 frames, save a picture, exit
 //!   shale --screenshot out.png --view tasks|graph|drawing|reading|calendar|mail   (same, other view)
 //!   shale --screenshot out.png --keys 'click:@Sync|waitfor:@Compose'   (scripted input, see script.rs)
@@ -146,6 +147,7 @@ mod sidebar;
 #[cfg(test)]
 mod sidebar_tests;
 mod sidebar_ui;
+mod site_export;
 mod social;
 #[cfg(test)]
 mod start_dialog_tests;
@@ -225,7 +227,7 @@ fn window(size: [f32; 2]) -> egui::ViewportBuilder {
     egui::ViewportBuilder::default().with_title("Shale").with_app_id("shale").with_icon(icon()).with_inner_size(size).with_min_inner_size(MIN_WINDOW)
 }
 
-const USAGE: &str = "usage: shale [<folder> | --vault <folder>] [(--screenshot <file.png> | --record <file.webm>) [--view <name>] [--size WIDTHxHEIGHT] [--keys <script>]]\n       shale --export-pdf <folder> <file.pdf>";
+const USAGE: &str = "usage: shale [<folder> | --vault <folder>] [(--screenshot <file.png> | --record <file.webm>) [--view <name>] [--size WIDTHxHEIGHT] [--keys <script>]]\n       shale --export-pdf <folder> <file.pdf>\n       shale export-site <vault folder> <output folder> [--dry-run]";
 
 /// What the command line asked for.
 #[derive(Debug, PartialEq)]
@@ -339,6 +341,10 @@ fn main() -> eframe::Result {
         if gitsync::credentials::askpass_requested(std::env::var_os(gitsync::credentials::ASKPASS_ENV).as_deref(), &args) {
             std::process::exit(gitsync::credentials::run_askpass(&args[0]));
         }
+    }
+    // the site of a vault: a command of its own, no window, no instance lock (SITE-011)
+    if std::env::args().nth(1).as_deref() == Some("export-site") {
+        std::process::exit(site_export::cli::run(std::env::args().skip(2)));
     }
     let Cli { screenshot, record, vault, view, keys, size, export_pdf, restarted } = match parse_args(std::env::args().skip(1)) {
         Parsed::Run(cli) => cli,

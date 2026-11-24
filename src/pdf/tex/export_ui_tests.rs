@@ -425,7 +425,7 @@ fn managed_missing(missing: &[&str]) -> super::engine::Detection {
     found(Err("no lualatex in PATH"), Ok(good(Kind::Managed, missing)), Some(1))
 }
 
-// spec: TEX-043
+// spec: TEX-052
 #[test]
 fn a_managed_tex_live_that_misses_packages_says_so_with_an_install_button_and_a_plain_note_can_still_be_exported() {
     let mut t = T::new("dlg-missing-note", managed_missing(&["geometry"]));
@@ -445,7 +445,7 @@ fn a_managed_tex_live_that_misses_packages_says_so_with_an_install_button_and_a_
     assert!(!has(&t, "install-packages") && !t.shows("The managed TeX Live misses"), "{:?}", t.painted());
 }
 
-// spec: TEX-043
+// spec: TEX-052
 #[test]
 fn a_board_export_waits_for_a_package_the_managed_tex_live_lacks_and_starts_no_compile() {
     let mut t = T::new("dlg-missing-board", managed_missing(&["geometry"]));
@@ -491,7 +491,7 @@ fn recording_tex(tag: &str) -> (crate::pdf::tex::compile_tests::fake::Fake, Path
 mod fake {
     use super::*;
 
-    // spec: TEX-043
+    // spec: TEX-052
     #[test]
     fn install_runs_tlmgr_install_of_the_missing_packages_in_a_job_looks_again_and_then_the_board_exports() {
         use crate::pdf::tex::compile_tests::fake::script;
@@ -531,7 +531,7 @@ mod fake {
         assert!(std::fs::read_to_string(state.join("main.tex")).unwrap().contains("\\usepackage[pass]{geometry}"));
     }
 
-    // spec: TEX-043
+    // spec: TEX-052
     #[test]
     fn a_failed_install_of_the_packages_says_why_and_keeps_the_button() {
         let mut t = T::new("dlg-install-fails", managed_missing(&["geometry"]));
@@ -547,7 +547,7 @@ mod fake {
         assert!(t.shows("no TeX Live programs"), "{:?}", t.painted());
     }
 
-    // spec: TEX-043
+    // spec: TEX-052
     #[test]
     fn a_compile_that_fails_for_a_package_of_the_list_points_to_the_install_button() {
         let mut t = T::new("dlg-pointer", usable());

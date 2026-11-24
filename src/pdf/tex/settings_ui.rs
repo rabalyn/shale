@@ -49,7 +49,7 @@ impl Notice {
 pub enum TaskKind {
     Install,
     Update,
-    /// Installing the packages of the list that the managed TeX Live lacks (TEX-043).
+    /// Installing the packages of the list that the managed TeX Live lacks (TEX-052).
     Packages,
     Remove,
     Test,
@@ -229,7 +229,7 @@ impl TexState {
         }
     }
 
-    /// Start installing the packages of the list that the managed TeX Live lacks (TEX-043), once the
+    /// Start installing the packages of the list that the managed TeX Live lacks (TEX-052), once the
     /// person pressed Install: exactly `names`, as a job with progress and Cancel. The look for TeX
     /// is done again when it ends, so the line that offered it goes away.
     pub fn begin_packages(&mut self, ctx: &Context, cfg: &TexConfig, names: Vec<String>) {
@@ -239,7 +239,7 @@ impl TexState {
     }
 }
 
-/// "The managed TeX Live misses: geometry", the line with the Install button (TEX-043).
+/// "The managed TeX Live misses: geometry", the line with the Install button (TEX-052).
 pub fn missing_line(missing: &[String]) -> String {
     format!("The managed TeX Live misses: {}", missing.join(", "))
 }
@@ -314,7 +314,7 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &mut TexConfig) -> bool {
                 ui.label(format!("Using {} (LaTeX kernel {}){size}", engine_name(e), e.kernel));
                 crate::theme::hint(ui, e.bin_dir.to_string_lossy());
                 if !e.missing.is_empty() && e.kind == Kind::Managed {
-                    // the packages of the list that came after its install (TEX-043)
+                    // the packages of the list that came after its install (TEX-052)
                     ui.horizontal_wrapped(|ui| {
                         crate::theme::problem(ui, missing_line(&e.missing));
                         if ui.add_enabled(st.task.is_none(), egui::Button::new("Install")).on_hover_text(format!("tlmgr install {}", e.missing.join(" "))).clicked() {

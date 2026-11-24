@@ -610,7 +610,7 @@ wr("$dir/bin/$plat/biber", "#!/bin/sh\nexit 0\n");
         std::fs::read_to_string(f.dir.join("calls")).unwrap_or_default().lines().map(String::from).collect()
     }
 
-    // spec: TEX-043
+    // spec: TEX-052
     #[test]
     fn install_missing_runs_tlmgr_install_of_exactly_the_given_packages_on_one_mirror() {
         let f = Fake::new("install-missing");
@@ -631,7 +631,7 @@ wr("$dir/bin/$plat/biber", "#!/bin/sh\nexit 0\n");
         assert!(install_missing(&env(&f.dir.join("empty"), &repo), &["geometry".to_string()], &Handle::default(), &|| {}).unwrap_err().contains("no TeX Live programs"));
     }
 
-    // spec: TEX-043
+    // spec: TEX-052
     #[test]
     fn install_missing_leaves_a_mirror_older_than_the_install_for_a_fresh_one_and_says_what_tlmgr_said_when_it_fails() {
         let f = Fake::new("install-missing-older");
@@ -651,7 +651,7 @@ wr("$dir/bin/$plat/biber", "#!/bin/sh\nexit 0\n");
         assert!(e.contains("tlmgr failed") && e.contains("repository is down"), "{e}");
     }
 
-    // spec: TEX-003, TEX-044
+    // spec: TEX-003, TEX-053
     #[test]
     fn an_update_also_installs_the_packages_of_the_list_the_installation_lacks_and_only_then() {
         let f = Fake::new("update-missing");

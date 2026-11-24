@@ -40,11 +40,13 @@ way it is. They are append-only. *What* Shale does today is in the living specs 
 | [0030](0030-media-outside-the-vault.md) | Media outside the vault: library links and file links | Accepted |
 | [0031](0031-performance-gates-on-the-workstation.md) | Performance gates only on the owner's workstation (a flagged time regression is confirmed by an interleaved re-run); statistics only on GitHub, nothing on Forgejo | Accepted |
 | [0032](0032-thread-links-of-imported-items.md) | Thread links of imported mails and posts: `previous` / `next` wikilinks, a `thread-id`, reply-header matching, a thread view in the right sidebar | Accepted |
-| [0033](0033-views-on-either-side.md) | Files, Search and Tags on either side of the window: move or copy, one shared state, the same stored layout | Accepted |
+| [0033](0033-views-on-either-side.md) | Files, Search and Tags on either side of the window: move or copy, one shared state, the same stored layout | Accepted, amended by 0038 |
 | [0034](0034-kanban-boards.md) | Kanban boards as notes, one query language with a validator and budget, a background search worker, note properties (created, modified, priority), dependencies, board PDF | Accepted |
 | [0035](0035-windowed-editor.md) | A windowed editor for very long notes: stitched block layouts first, a window over the text only if that is not enough | Proposed |
 | [0036](0036-browser-extension-clipper.md) | A companion browser extension saves web pages into the vault (native messaging into a spool folder, allowlist capture, images only from the browser) | Proposed |
 | [0037](0037-signed-release-files.md) | Release files are signed by the owner with an SSH ed25519 key (SSHSIG, namespace per file), the public key is built into Shale and the updater requires the signature | Accepted |
+| [0038](0038-main-views-as-sidebar-companions.md) | Mail, Calendar and Feeds as compact companions in the right sidebar: placed by move or copy like Files, a view state of their own per place, shared data | Accepted |
+| [0039](0039-thesis-citations-and-references.md) | Thesis writing: Pandoc citations, `{#fig:x}` labels with `@fig:x` references for figures, tables, equations and sections, a BibTeX `.bib` bibliography, biblatex+biber in TeX, hayagriva for the built-in PDF and site, pandoc `--citeproc` for Word | Accepted |
 
 Format: Context, Decision, Consequences (and Alternatives if any). Statuses: *Proposed* →
 *Accepted* → (*Superseded by NNNN*). An accepted ADR is not edited; a new one supersedes it.

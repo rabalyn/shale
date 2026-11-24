@@ -566,7 +566,7 @@ pub fn update(env: &Env, handle: &Handle, notify: &dyn Fn()) -> Result<Done, Str
         tlmgr
     })?;
     add_mirror(&mut mirrors, &used);
-    // the packages of the list the installation lacks, such as one that was put on the list after it was made (TEX-044)
+    // the packages of the list the installation lacks, such as one that was put on the list after it was made (TEX-053)
     let lacking = WorkDir::new().map_err(|e| format!("no temporary folder ({e})")).and_then(|w| engine::missing_in(&engine, w.path())).unwrap_or_default();
     if !lacking.is_empty() {
         let used = install_on_mirror(&engine, handle, notify, repo, mirror_of(&mirrors), &lacking)?;
@@ -592,7 +592,7 @@ fn install_on_mirror(engine: &Engine, handle: &Handle, notify: &dyn Fn(), repo: 
     })
 }
 
-/// Install the packages of the list that the managed TeX Live lacks (TEX-043): `tlmgr install` of
+/// Install the packages of the list that the managed TeX Live lacks (TEX-052): `tlmgr install` of
 /// exactly these names, from one mirror, the way the install does it. Only names of
 /// `assets/tex/packages.txt` are taken, so that nothing else can be put on a command line.
 pub fn install_missing(env: &Env, names: &[String], handle: &Handle, notify: &dyn Fn()) -> Result<Done, String> {

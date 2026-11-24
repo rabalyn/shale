@@ -286,7 +286,7 @@ fn update_starts_a_job_and_a_failure_is_reported() {
     assert!(!n.ok && n.text.contains("The update failed"), "{n:?}");
 }
 
-// spec: TEX-043, TEX-023
+// spec: TEX-052, TEX-023
 #[test]
 fn a_managed_tex_live_that_misses_packages_says_so_with_an_install_button_that_starts_a_job() {
     let mut t = T::new("missing", found(Err("no lualatex in PATH"), Ok(good(Kind::Managed, &["geometry", "ulem"])), Some(1)));

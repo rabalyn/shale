@@ -8,7 +8,7 @@ Shale keeps settings in two places:
 
 | Where | What | Travels with the vault? |
 |---|---|---|
-| `<vault>/.shale/settings.json` | people folder, git sync | yes (git sync commits it, [[Git sync]]) |
+| `<vault>/.shale/settings.json` | people folder, git sync, what is published as a website ([[Publishing a vault]]) | yes (git sync commits it, [[Git sync]]) |
 | `<vault>/.shale/state.json` | open tabs with their cursor, scroll and view and which are pinned, the folded blocks of your notes, the toolbar's colours, last import folder, recent tags, the last LaTeX export choices | yes, but it is only session state |
 | `~/.config/shale/config.toml` | the program itself: appearance, calendars, mail and Feeds accounts, keybindings, the list of known vaults with their names | no, this computer only |
 

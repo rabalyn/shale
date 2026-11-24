@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="{{ site.Language.Locale | default "en" }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ if .IsHome }}{{ site.Title }}{{ else }}{{ .Title }} – {{ site.Title }}{{ end }}</title>
+<link rel="stylesheet" href="{{ "shale-site.css" | relURL }}">
+</head>
+<body>
+<header class="site-header">
+<a class="site-title" href="{{ "/" | relURL }}">{{ site.Title }}</a>
+{{ partial "search.html" . }}
+</header>
+<main>
+{{ block "main" . }}{{ end }}
+</main>
+</body>
+</html>

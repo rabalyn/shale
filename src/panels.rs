@@ -32,13 +32,29 @@ impl ShaleApp {
         [self.side.left, LeftPanel::Files, LeftPanel::Search, LeftPanel::Tags].into_iter().find(|p| in_ribbon(*p))
     }
 
-    /// The body of a view of the right sidebar that is a view of the left one (LAY-020). A copy
-    /// draws the same state as the one on the other side (LAY-024).
+    /// The body of a view of the right sidebar that is a view of the left one (LAY-020) or the
+    /// companion of a main view (LAY-028). A copy of Files, Search or Tags draws the same state
+    /// as the one on the other side (LAY-024); Mail has a state of its own (LAY-031).
     pub(crate) fn movable_view_body(&mut self, ui: &mut Ui, item: crate::sidebar::Item) {
         match item {
             crate::sidebar::Item::Files => self.file_explorer(ui),
             crate::sidebar::Item::Search => self.search_panel(ui),
             crate::sidebar::Item::Tags => self.tags_panel(ui),
+            // a click on a message opens it in the Mail tab (LAY-030)
+            crate::sidebar::Item::Mail => {
+                if let Some(m) = self.side.panes.mail.show(ui, &self.mail, &self.cfg) {
+                    self.actions.push(Action::OpenMail(Box::new(m)));
+                }
+            }
+            // a click on an event shows it in the Calendar tab (LAY-033)
+            crate::sidebar::Item::Calendar => {
+                let monday = self.cfg.week_starts_monday;
+                let font = self.fonts.area(crate::fonts::Area::Calendar);
+                let clicked = crate::fonts::with_area(ui, &font, |ui| self.side.panes.calendar.show(ui, &self.calendar, monday));
+                if let Some(o) = clicked {
+                    self.actions.push(Action::OpenCalendarEvent(Box::new(o)));
+                }
+            }
             _ => {}
         }
     }

@@ -9,6 +9,7 @@ mod env_tests;
 pub(crate) mod ics;
 #[cfg(test)]
 mod ics_tests;
+pub(crate) mod sidebar_pane;
 pub(crate) mod store;
 #[cfg(test)]
 mod store_failure_tests;

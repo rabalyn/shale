@@ -133,7 +133,7 @@ mod fake {
         CHECKED.iter().map(|(_, f)| *f).collect()
     }
 
-    // spec: TEX-043
+    // spec: TEX-052
     #[test]
     fn the_managed_tex_live_is_used_although_it_misses_packages_and_they_are_listed() {
         let f = Fake::new("managed-missing");
@@ -250,7 +250,7 @@ fn the_pretend_tex_of_the_screenshots_is_found_as_the_managed_one_and_makes_a_pd
     assert!(opener.success());
 }
 
-// spec: TEX-043
+// spec: TEX-052
 #[test]
 fn a_file_that_tex_could_not_find_is_traced_to_the_package_of_the_list_that_brings_it() {
     assert_eq!(package_of_file("geometry.sty"), Some("geometry"));

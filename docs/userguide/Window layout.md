@@ -24,7 +24,7 @@ of **views**.
   Calendar, History, Thread) and shows the panel of the selected icon, so several panels can be open at once.
 - Drag a panel icon over the right sidebar ("Drop to open this icon in a new view") to make a
   new view below it. Drag icons between menubars, to the ribbon (a shortcut that shows the panel
-  below the views) and back. Icons that are no panels and no views of the left sidebar (Mail, Feeds, …) cannot go there. Taking
+  below the views) and back. Icons that are no panels and no views (Feeds, Graph, …) cannot go there. Taking
   the last icon out of a view removes the view. Esc cancels a drag.
 - **Files, Search and Tags can be on either side.** Drag the icon of Files, Search or Tags from the ribbon to
   the menubar or the content of the right sidebar (or back from a right menubar to the ribbon). When you let go,
@@ -32,6 +32,20 @@ of **views**.
   (the same file tree or search, with the same state), **Cancel** (or Esc) changes nothing. Without dragging, right-click
   the icon and choose **Move to the right sidebar** or **Copy to the right sidebar** (in a right menubar: to the left
   sidebar). If the view the left sidebar showed has moved, it shows the next one that is still in the ribbon.
+- **Mail can be in the right sidebar too.** Place the Mail icon like Files, Search or Tags (drag it to a right menubar or to the
+  right sidebar's content and answer **Move or copy?**, or right-click it and choose **Move to the right sidebar** or
+  **Copy to the right sidebar**). The pane is a compact companion of the Mail tab: the accounts, the folders with their unread
+  counts and the list of messages with the unread dots. Click a message to open it in the Mail tab (Shale opens the tab if
+  there is none). The pane has its own folder choice and scroll, separate from the tab, so it can keep showing the Inbox
+  while the tab shows another folder; the mail itself and the sync are the same. With **Copy** the ribbon keeps its Mail
+  icon, which still opens the tab; the left sidebar never shows Mail. Feeds will follow.
+- **Calendar can be in the right sidebar too.** Place the Calendar icon the same way (not the *Calendar* panel icon, which
+  is a different, older view with its own month). The pane is a compact companion of the Calendar tab: a small month with ‹ ›
+  and **Today** (today is marked, a dot is under every day with events) and under it the agenda of the next 14 days from the
+  chosen day, all-day events first, each with its time and title. Click a day to move the agenda to it; click an event to open
+  it in the Calendar tab (Shale opens the tab if there is none) with its details. The pane has its own month and day, separate
+  from the tab; the events and the sync are the same. It says so when no calendar is set up, when nothing is coming up and
+  while the calendars load. See [[Calendar]].
 - Drag the border between two views to change their heights.
 - Drag the border of the left or of the right sidebar to change its width; Shale keeps the widths
   (`left_sidebar_width`, `right_sidebar_width`), and **Reset layout** goes back to the default widths.

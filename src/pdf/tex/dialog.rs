@@ -51,7 +51,7 @@ pub struct Failure {
     pub document: Arc<Document>,
     /// The set it was compiled against, for the command line in the saved folder.
     pub set_dir: PathBuf,
-    /// The packages of Shale's list (`assets/tex/packages.txt`) whose files TeX did not find (TEX-043).
+    /// The packages of Shale's list (`assets/tex/packages.txt`) whose files TeX did not find (TEX-052).
     pub missing: Box<[String]>,
 }
 
@@ -112,13 +112,13 @@ pub struct TexExport {
     /// The note's `latex-template:` names a set or kind the vault does not have, or one a folder
     /// cannot use: what was not found and what is used instead (TEX-033). Gone once the person picks a set or kind.
     pub template_warning: Option<String>,
-    /// The engine in use is the managed TeX Live (set by the window every frame, TEX-043).
+    /// The engine in use is the managed TeX Live (set by the window every frame, TEX-052).
     pub managed: bool,
     /// The packages of the list that this engine lacks, when it is the managed one: a line with an
-    /// Install button says so (TEX-043).
+    /// Install button says so (TEX-052).
     pub missing: Vec<String>,
     /// The packages this document needs besides what every document has (a board: `geometry` and `tools`):
-    /// while one of them is in `missing`, Export is off (TEX-043).
+    /// while one of them is in `missing`, Export is off (TEX-052).
     pub needs: Vec<String>,
     /// Install was pressed: the window starts `tlmgr install` of [`TexExport::wanted_packages`].
     pub install_requested: bool,
@@ -276,7 +276,7 @@ impl TexExport {
     }
 
     /// The packages this document needs that the managed TeX Live lacks: the compile would fail
-    /// with "package ... is missing", so Export waits for the Install button (TEX-043).
+    /// with "package ... is missing", so Export waits for the Install button (TEX-052).
     pub fn blocked_by(&self) -> Vec<&str> {
         self.needs.iter().map(String::as_str).filter(|n| self.missing.iter().any(|m| m == n)).collect()
     }
@@ -322,7 +322,7 @@ impl TexExport {
     }
 
     /// The line "The managed TeX Live misses: geometry" with its Install button, what the install is
-    /// doing, and why Export waits (TEX-043).
+    /// doing, and why Export waits (TEX-052).
     fn packages_block(&mut self, ui: &mut Ui, rec: &mut dyn FnMut(&str, egui::Response) -> egui::Response) {
         let wanted = self.wanted_packages();
         if let Some(what) = &self.installing {

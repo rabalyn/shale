@@ -808,80 +808,8 @@ impl MailView {
     }
 
     fn paint_row(&self, ui: &mut Ui, i: usize, m: &MessageSummary, now: i64, rects: &mut Vec<(String, Rect)>) -> egui::Response {
-        let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_H), Sense::click());
-        let p = ui.painter_at(rect);
-        let cursor = self.cursor == Some(i);
-        let opened = self.open.as_ref().is_some_and(|o| o.msg.id == m.id);
-        if cursor {
-            p.rect_filled(rect, 0, theme::palette().accent.gamma_multiply(0.25));
-        } else if opened {
-            p.rect_filled(rect, 0, theme::palette().bg_active);
-        } else if resp.hovered() {
-            p.rect_filled(rect, 0, theme::palette().bg_hover);
-        }
-        if self.marked.contains_key(&m.id) {
-            p.rect_filled(Rect::from_min_size(rect.min, Vec2::new(4.0, rect.height())), 0, theme::palette().accent);
-        }
-        p.line_segment([Pos2::new(rect.min.x, rect.max.y), Pos2::new(rect.max.x, rect.max.y)], Stroke::new(1.0, theme::palette().border));
-        let leaving = m.pending.as_deref().is_some_and(|k| k != "flags" && k != "append");
-        let dim = if m.gone_on_server || leaving { 0.45 } else { 1.0 };
-        let unread = !m.is_seen() && m.state != STATE_TOO_LARGE;
-        let strong = |c: Color32| c.gamma_multiply(dim);
-        let from = if m.from.trim().is_empty() { "(unknown sender)".to_string() } else { display_name(&m.from) };
-        let date = list_date(m.date, now);
-        let date_g = p.layout_no_wrap(date, crate::fonts::font(12.0), strong(theme::palette().muted));
-        let x0 = rect.min.x + 16.0;
-        let date_x = rect.max.x - 10.0 - date_g.size().x;
-        if unread {
-            p.circle_filled(Pos2::new(rect.min.x + 8.0, rect.min.y + 14.0), 3.0, theme::palette().accent);
-            rects.push((format!("mail:unread:{i}"), Rect::from_center_size(Pos2::new(rect.min.x + 8.0, rect.min.y + 14.0), Vec2::splat(8.0))));
-        }
-        if m.is_flagged() {
-            // a small flag: a pole and a pennant
-            let (x, y) = (rect.min.x + 5.0, rect.min.y + 28.0);
-            let c = strong(theme::palette().link_missing);
-            p.line_segment([Pos2::new(x, y), Pos2::new(x, y + 12.0)], Stroke::new(1.4, c));
-            p.add(egui::Shape::convex_polygon(vec![Pos2::new(x, y), Pos2::new(x + 8.0, y + 3.0), Pos2::new(x, y + 6.0)], c, Stroke::NONE));
-            rects.push((format!("mail:flag-mark:{i}"), Rect::from_min_size(Pos2::new(x - 2.0, y), Vec2::new(11.0, 12.0))));
-        }
-        p.galley(Pos2::new(date_x, rect.min.y + 7.0), date_g, Color32::WHITE);
-        let from_g = p.layout_no_wrap(from, crate::fonts::font(14.0), strong(if unread { theme::palette().text_strong } else { theme::palette().text }));
-        let from_clip = p.with_clip_rect(Rect::from_min_max(Pos2::new(x0, rect.min.y), Pos2::new(date_x - 8.0, rect.max.y)));
-        from_clip.galley(Pos2::new(x0, rect.min.y + 6.0), from_g.clone(), Color32::WHITE);
-        if unread {
-            // bold: the same text once more, a little to the right (the fonts have no bold face)
-            from_clip.galley(Pos2::new(x0 + 0.7, rect.min.y + 6.0), from_g, Color32::WHITE);
-        }
-        let mut subject = if m.subject.trim().is_empty() { "(no subject)".to_string() } else { m.subject.clone() };
-        if self.results.is_some() && self.search_all {
-            subject = format!("[{}] {subject}", crate::mail::ui::folder_label_of(&m.folder));
-        }
-        let mut right_edge = rect.max.x - 10.0;
-        if m.has_attachments {
-            paint_clip(&p, Pos2::new(right_edge - 6.0, rect.min.y + 33.0), strong(theme::palette().muted));
-            right_edge -= 18.0;
-        }
-        if m.state == STATE_HEADER || m.state == STATE_TOO_LARGE {
-            let g = p.layout_no_wrap("not downloaded".into(), crate::fonts::font(11.0), strong(theme::palette().faint));
-            right_edge -= g.size().x;
-            p.galley(Pos2::new(right_edge, rect.min.y + 26.0), g, Color32::WHITE);
-            right_edge -= 8.0;
-        }
-        if let Some(kind) = &m.pending {
-            let g = p.layout_no_wrap(pending_word(kind).into(), crate::fonts::font(11.0), strong(theme::palette().accent));
-            right_edge -= g.size().x;
-            let at = Pos2::new(right_edge, rect.min.y + 26.0);
-            rects.push((format!("mail:pending-mark:{i}"), Rect::from_min_size(at, g.size())));
-            p.galley(at, g, Color32::WHITE);
-            right_edge -= 8.0;
-        }
-        let subj_g = p.layout_no_wrap(subject, crate::fonts::font(13.0), strong(if unread { theme::palette().text } else { theme::palette().muted }));
-        let subj_clip = p.with_clip_rect(Rect::from_min_max(Pos2::new(x0, rect.min.y), Pos2::new(right_edge, rect.max.y)));
-        subj_clip.galley(Pos2::new(x0, rect.min.y + 25.0), subj_g.clone(), Color32::WHITE);
-        if unread {
-            subj_clip.galley(Pos2::new(x0 + 0.6, rect.min.y + 25.0), subj_g, Color32::WHITE);
-        }
-        resp
+        let state = RowState { cursor: self.cursor == Some(i), opened: self.open.as_ref().is_some_and(|o| o.msg.id == m.id), marked: self.marked.contains_key(&m.id), folder_prefix: self.results.is_some() && self.search_all };
+        paint_message_row(ui, i, m, state, now, rects)
     }
 
     fn reading_pane(&mut self, ui: &mut Ui, cfg: &Config, actions: &mut Vec<MailAction>, rects: &mut Vec<(String, Rect)>) {
@@ -1304,6 +1232,95 @@ struct StripOut {
 
 /// The status strip above a signed or encrypted mail (MAIL-174): built from GnuPG's verdicts only, in its own widget and colours,
 /// never from anything in the mail. Each line is a framed label; a body text can not be drawn in here.
+/// What a message row shows besides the message itself.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct RowState {
+    /// the row of the cursor (the selected message)
+    pub cursor: bool,
+    /// the message is the open one
+    pub opened: bool,
+    pub marked: bool,
+    /// the subject is prefixed with its folder (a search over all folders)
+    pub folder_prefix: bool,
+}
+
+/// Draw one row of a message list; the same row is the sidebar's (LAY-030).
+pub(crate) fn paint_message_row(ui: &mut Ui, i: usize, m: &MessageSummary, state: RowState, now: i64, rects: &mut Vec<(String, Rect)>) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_H), Sense::click());
+    let p = ui.painter_at(rect);
+    let RowState { cursor, opened, marked, folder_prefix } = state;
+    if cursor {
+        p.rect_filled(rect, 0, theme::palette().accent.gamma_multiply(0.25));
+    } else if opened {
+        p.rect_filled(rect, 0, theme::palette().bg_active);
+    } else if resp.hovered() {
+        p.rect_filled(rect, 0, theme::palette().bg_hover);
+    }
+    if marked {
+        p.rect_filled(Rect::from_min_size(rect.min, Vec2::new(4.0, rect.height())), 0, theme::palette().accent);
+    }
+    p.line_segment([Pos2::new(rect.min.x, rect.max.y), Pos2::new(rect.max.x, rect.max.y)], Stroke::new(1.0, theme::palette().border));
+    let leaving = m.pending.as_deref().is_some_and(|k| k != "flags" && k != "append");
+    let dim = if m.gone_on_server || leaving { 0.45 } else { 1.0 };
+    let unread = !m.is_seen() && m.state != STATE_TOO_LARGE;
+    let strong = |c: Color32| c.gamma_multiply(dim);
+    let from = if m.from.trim().is_empty() { "(unknown sender)".to_string() } else { display_name(&m.from) };
+    let date = list_date(m.date, now);
+    let date_g = p.layout_no_wrap(date, crate::fonts::font(12.0), strong(theme::palette().muted));
+    let x0 = rect.min.x + 16.0;
+    let date_x = rect.max.x - 10.0 - date_g.size().x;
+    if unread {
+        p.circle_filled(Pos2::new(rect.min.x + 8.0, rect.min.y + 14.0), 3.0, theme::palette().accent);
+        rects.push((format!("mail:unread:{i}"), Rect::from_center_size(Pos2::new(rect.min.x + 8.0, rect.min.y + 14.0), Vec2::splat(8.0))));
+    }
+    if m.is_flagged() {
+        // a small flag: a pole and a pennant
+        let (x, y) = (rect.min.x + 5.0, rect.min.y + 28.0);
+        let c = strong(theme::palette().link_missing);
+        p.line_segment([Pos2::new(x, y), Pos2::new(x, y + 12.0)], Stroke::new(1.4, c));
+        p.add(egui::Shape::convex_polygon(vec![Pos2::new(x, y), Pos2::new(x + 8.0, y + 3.0), Pos2::new(x, y + 6.0)], c, Stroke::NONE));
+        rects.push((format!("mail:flag-mark:{i}"), Rect::from_min_size(Pos2::new(x - 2.0, y), Vec2::new(11.0, 12.0))));
+    }
+    p.galley(Pos2::new(date_x, rect.min.y + 7.0), date_g, Color32::WHITE);
+    let from_g = p.layout_no_wrap(from, crate::fonts::font(14.0), strong(if unread { theme::palette().text_strong } else { theme::palette().text }));
+    let from_clip = p.with_clip_rect(Rect::from_min_max(Pos2::new(x0, rect.min.y), Pos2::new(date_x - 8.0, rect.max.y)));
+    from_clip.galley(Pos2::new(x0, rect.min.y + 6.0), from_g.clone(), Color32::WHITE);
+    if unread {
+        // bold: the same text once more, a little to the right (the fonts have no bold face)
+        from_clip.galley(Pos2::new(x0 + 0.7, rect.min.y + 6.0), from_g, Color32::WHITE);
+    }
+    let mut subject = if m.subject.trim().is_empty() { "(no subject)".to_string() } else { m.subject.clone() };
+    if folder_prefix {
+        subject = format!("[{}] {subject}", crate::mail::ui::folder_label_of(&m.folder));
+    }
+    let mut right_edge = rect.max.x - 10.0;
+    if m.has_attachments {
+        paint_clip(&p, Pos2::new(right_edge - 6.0, rect.min.y + 33.0), strong(theme::palette().muted));
+        right_edge -= 18.0;
+    }
+    if m.state == STATE_HEADER || m.state == STATE_TOO_LARGE {
+        let g = p.layout_no_wrap("not downloaded".into(), crate::fonts::font(11.0), strong(theme::palette().faint));
+        right_edge -= g.size().x;
+        p.galley(Pos2::new(right_edge, rect.min.y + 26.0), g, Color32::WHITE);
+        right_edge -= 8.0;
+    }
+    if let Some(kind) = &m.pending {
+        let g = p.layout_no_wrap(pending_word(kind).into(), crate::fonts::font(11.0), strong(theme::palette().accent));
+        right_edge -= g.size().x;
+        let at = Pos2::new(right_edge, rect.min.y + 26.0);
+        rects.push((format!("mail:pending-mark:{i}"), Rect::from_min_size(at, g.size())));
+        p.galley(at, g, Color32::WHITE);
+        right_edge -= 8.0;
+    }
+    let subj_g = p.layout_no_wrap(subject, crate::fonts::font(13.0), strong(if unread { theme::palette().text } else { theme::palette().muted }));
+    let subj_clip = p.with_clip_rect(Rect::from_min_max(Pos2::new(x0, rect.min.y), Pos2::new(right_edge, rect.max.y)));
+    subj_clip.galley(Pos2::new(x0, rect.min.y + 25.0), subj_g.clone(), Color32::WHITE);
+    if unread {
+        subj_clip.galley(Pos2::new(x0 + 0.6, rect.min.y + 25.0), subj_g, Color32::WHITE);
+    }
+    resp
+}
+
 fn security_strip(ui: &mut Ui, sec: &crate::mail::crypto::Security, rects: &mut Vec<(String, Rect)>, out: &mut StripOut) {
     use crate::mail::crypto::{Encryption, Level};
     if sec.is_empty() {

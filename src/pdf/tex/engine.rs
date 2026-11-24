@@ -154,7 +154,7 @@ pub const CHECKED: &[(&str, &str)] = &[
 /// The packages of `packages.txt` a document needs besides what every document has, by what it is:
 /// a board stands on `geometry` for its landscape pages and on `longtable` (the TeX Live package `tools`)
 /// for its columns of cards (BOARD-031). A managed TeX Live that was installed without one of them
-/// lacks it, and then the compile would fail (TEX-043).
+/// lacks it, and then the compile would fail (TEX-052).
 pub const BOARD_NEEDS: &[&str] = &["geometry", "tools"];
 
 /// The package of the list that brings this file (`geometry.sty` is `geometry`, `scrartcl.cls` is

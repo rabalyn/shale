@@ -70,6 +70,12 @@ pub enum CalAction {
     Import(Occ),
 }
 
+/// The first day of the week that holds `day`.
+pub(crate) fn week_start_of(day: i64, monday: bool) -> i64 {
+    let off = if monday { t::weekday(day) as i64 } else { (t::weekday(day) as i64 + 1) % 7 };
+    day - off
+}
+
 /// Round a time up to the next full or half hour (local clock); a time already on one stays.
 pub fn next_half_hour(utc: i64) -> i64 {
     let (day, secs) = t::utc_to_local(utc);
@@ -140,7 +146,7 @@ pub struct CalendarView {
     import_asked: Option<Occ>,
 }
 
-fn parse_hex(c: &str) -> Color32 {
+pub(crate) fn parse_hex(c: &str) -> Color32 {
     crate::drawing::parse_color(c).unwrap_or(theme::palette().accent)
 }
 
@@ -274,8 +280,13 @@ impl CalendarView {
     }
 
     fn week_start(&self, day: i64, monday: bool) -> i64 {
-        let off = if monday { t::weekday(day) as i64 } else { (t::weekday(day) as i64 + 1) % 7 };
-        day - off
+        week_start_of(day, monday)
+    }
+
+    /// Show the details popup of `occ` at `pos` (the sidebar's Calendar pane opens an event in
+    /// the tab this way, LAY-033).
+    pub fn open_popup(&mut self, occ: Occ, pos: Pos2) {
+        self.popup = Some(Popup { occ, pos, opened_frame: self.frame, confirm: None });
     }
 
     fn header_nav(&mut self, ui: &mut Ui) {

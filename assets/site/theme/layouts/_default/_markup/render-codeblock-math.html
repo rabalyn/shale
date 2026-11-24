@@ -1,0 +1,2 @@
+{{- $opts := dict "output" "mathml" "displayMode" true -}}
+{{- with try (transform.ToMath .Inner $opts) -}}{{ with .Err }}{{ warnidf "shale-math" "%s" . }}<pre><code>{{ $.Inner }}</code></pre>{{ else }}{{ .Value }}{{ end }}{{- end -}}

@@ -45,6 +45,18 @@ pub struct SideState {
     pub(crate) cue: Cue,
     /// where the buttons of the question were drawn
     pub(crate) ask_buttons: AskButtons,
+    /// the view state of the compact panes of the main views, one per place (LAY-031)
+    pub(crate) panes: PaneStates,
+}
+
+/// The state of the views of the right sidebar that are companions of a main view: the account,
+/// folder or feed chosen there, the selection and the scroll. Each is separate from the main tab
+/// of the same kind (ADR-0038); the data and the background work are shared. Feeds gets its
+/// field with its pane (rabalyn/shale#610).
+#[derive(Default)]
+pub(crate) struct PaneStates {
+    pub mail: crate::mail::sidebar_pane::MailPane,
+    pub calendar: crate::calendar::sidebar_pane::CalendarPane,
 }
 
 /// A drop of Files, Search or Tags on the other side that waits for the answer to "Move or copy?".

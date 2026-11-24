@@ -111,7 +111,7 @@ loading the entries on screen once you stop scrolling.
 | `fonts.editor_raw` | Shale's font, 15.5 | Fonts, "Editor: raw markdown": the markdown text in the editor, and the raw lines around the cursor in the preview |
 | `fonts.editor_rendered` | Shale's font, 15.5 | Fonts, "Editor: rendered text and reading view": the rendered lines of the preview and the reading view |
 | `fonts.mail` | Shale's font, 14 | Fonts, "Mail" |
-| `fonts.calendar` | Shale's font, 14 | Fonts, "Calendar" (the calendar view and the calendar of the right sidebar) |
+| `fonts.calendar` | Shale's font, 14 | Fonts, "Calendar" (the calendar view, the calendar of the right sidebar and the Calendar pane) |
 | `fonts.social` | Shale's font, 14 | Fonts, "Feeds" |
 
 Inside each of these tables: `family` and `size`. The old `font_size` of earlier versions became the
@@ -313,6 +313,13 @@ Shale itself writes `created` and `modified` (full ISO 8601 times) into every Ma
 | `sync.commit_prefix` | empty | Git sync, "Commit message prefix" |
 | `sync.commit_suffix` | empty | Git sync, "suffix" |
 | `sync.lfs_download` | `on_demand` (a media file stored with Git LFS is downloaded when you play or open it; `always`: after every sync) | Git sync, "Download media files after every sync" (shown only when `git-lfs` is installed) |
+| `publish` | the group of the keys below; it is not in the file while all of them are default | the file only, for now ([[Publishing a vault]]) |
+| `publish.enabled` | off (nothing is published; `shale export-site` writes an empty site) | the file only |
+| `publish.all_notes` | off (on: every note but the private types) | the file only |
+| `publish.include_folders`, `publish.include_tags` | empty lists (the notes in these folders, the notes with these tags) | the file only |
+| `publish.exclude_folders`, `publish.exclude_tags` | empty lists (never published, they win over the include rules) | the file only |
+| `publish.private_types` | empty (`email`, `event`, `post`, `person` notes stay out of "all notes" unless named here) | the file only |
+| `publish.url`, `publish.branch` | empty (the server the site will be pushed to, kept for later) | the file only |
 
 Settings → Sync starts with **Turn on sync…** ([[Turn on sync]]), which sets up the history, a folder another app syncs, or a git server; the
 address field and **Connect** are under **Advanced**. The wizard adds no setting of its own: it turns `history.enabled` on, and for a server it
