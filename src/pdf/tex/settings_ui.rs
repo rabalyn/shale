@@ -6,6 +6,7 @@
 use super::compile::compile_test_document;
 use super::engine::{self, Detection, Engine, Kind, TexChoice, TexConfig};
 use super::install::{self, Env, Handle, DISK_MB, DOWNLOAD_MB};
+use crate::busy::{self, Key};
 use crate::theme;
 use eframe::egui::{self, Context, Ui};
 use std::ffi::OsString;
@@ -19,6 +20,11 @@ pub const TEX_PROBE: crate::busy::Key = crate::busy::Key::new("tex-probe");
 
 /// What the look for TeX says it does.
 pub const TEX_PROBE_TEXT: &str = "Looking for TeX on this computer…";
+
+/// The install, update and removal of the managed TeX Live, the test compile, the import of a
+/// template set and the test page of a set (JOB-029): one at a time. An install, an update and an
+/// import can be stopped (what they did is taken back); the others cannot.
+pub(crate) const TEX_JOB: Key = Key::new("tex-job");
 
 /// What the person is told after a job.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -51,11 +57,18 @@ pub enum TaskKind {
     TestPage,
 }
 
-/// A running install, update, removal or test.
+impl TaskKind {
+    /// Cancel can stop the job: it looks at the flag of its handle between two steps.
+    fn can_stop(self) -> bool {
+        matches!(self, TaskKind::Install | TaskKind::Update | TaskKind::Import)
+    }
+}
+
+/// A running install, update, removal or test: its progress (the task of the registry has the text and Cancel).
 pub struct Task {
     pub kind: TaskKind,
     pub handle: Handle,
-    pub(super) rx: Receiver<Result<Notice, String>>,
+    pub(crate) job: busy::Job<Notice>,
 }
 
 /// The state of the LaTeX page of the settings.
@@ -112,7 +125,7 @@ impl TexState {
             }
         }
         if let Some(t) = &self.task {
-            if let Ok(r) = t.rx.try_recv() {
+            if let Ok(r) = t.job.try_recv() {
                 let kind = t.kind;
                 self.task = None;
                 let mut notice = r.unwrap_or_else(|e| Notice::new(e, false));
@@ -139,6 +152,15 @@ impl TexState {
         }
     }
 
+    /// The dialog that started the work was closed (JOB-010): ask the install, the update and the
+    /// import to stop; they end at the next safe point and take back what they did. A removal and
+    /// the compiles finish first.
+    pub(crate) fn stop_jobs(&self) {
+        if let Some(t) = &self.task {
+            t.job.cancel();
+        }
+    }
+
     /// Look for a TeX again, in a job.
     pub fn check_again(&mut self, ctx: &Context) {
         if self.detecting.is_some() {
@@ -152,15 +174,44 @@ impl TexState {
     }
 
     /// Start a job of the page; its answer is a notice.
-    pub(super) fn start(&mut self, ctx: &Context, kind: TaskKind, work: impl FnOnce(&Handle, &dyn Fn()) -> Notice + Send + 'static) {
+    pub(super) fn start(&mut self, ctx: &Context, kind: TaskKind, label: impl Into<String>, work: impl FnOnce(&Handle, &dyn Fn()) -> Notice + Send + 'static) {
+        self.start_with(ctx, kind, label, Handle::default(), work);
+    }
+
+    /// The same with a handle that exists already.
+    fn start_with(&mut self, ctx: &Context, kind: TaskKind, label: impl Into<String>, handle: Handle, work: impl FnOnce(&Handle, &dyn Fn()) -> Notice + Send + 'static) {
         if self.task.is_some() {
             return;
         }
-        let handle = Handle::default();
+        let Some(mut task) = self.busy.begin(TEX_JOB, label) else { return };
+        if kind.can_stop() {
+            task.cancellable_with(handle.token());
+        }
         let (h, c1, c2) = (handle.clone(), ctx.clone(), ctx.clone());
-        let rx = crate::jobs::spawn(move || work(&h, &|| c1.request_repaint()), move || c2.request_repaint());
-        self.task = Some(Task { kind, handle, rx });
+        let job = task.run(move || work(&h, &|| c1.request_repaint()), move || c2.request_repaint());
+        self.task = Some(Task { kind, handle, job });
         self.notice = None;
+    }
+
+    /// Tests: a job of this kind that runs until `rx` sends its notice (or is dropped), with a
+    /// handle the test made, standing in for an install, an update or an import.
+    #[cfg(test)]
+    pub(crate) fn inject(&mut self, kind: TaskKind, handle: Handle, rx: std::sync::mpsc::Receiver<Result<Notice, String>>) {
+        let label = match kind {
+            TaskKind::Install => "Installing TeX Live…",
+            TaskKind::Update => "Updating TeX Live…",
+            TaskKind::Remove => "Removing the TeX Live…",
+            TaskKind::Test => "Compiling the test document…",
+            TaskKind::Import => "Importing the template set…",
+            TaskKind::TestPage => "Compiling the test page…",
+        };
+        self.start_with(&Context::default(), kind, label, handle, move |_, _| loop {
+            match rx.recv_timeout(Duration::from_millis(5)) {
+                Ok(r) => return r.unwrap_or_else(|e| Notice::new(e, false)),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return Notice::new("The job of the test ended.", true),
+            }
+        });
     }
 
     fn env(&self, cfg: &TexConfig) -> Option<Env> {
@@ -171,7 +222,7 @@ impl TexState {
     /// the guided setup show the sizes and the folder first and call this from their button.
     pub(super) fn begin_install(&mut self, ctx: &Context, cfg: &TexConfig) {
         if let Some(env) = self.env(cfg) {
-            self.start(ctx, TaskKind::Install, move |h, n| done_notice(install::install(&env, h, n), "The install"));
+            self.start(ctx, TaskKind::Install, "Installing TeX Live…", move |h, n| done_notice(install::install(&env, h, n), "The install"));
         }
     }
 }
@@ -277,10 +328,11 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &mut TexConfig) -> bool {
                 st.check_again(&ctx);
             }
             let engine = st.detection.as_ref().and_then(|d| d.selected(cfg.engine).ok()).cloned();
-            let can_test = engine.is_some() && st.task.is_none();
-            if ui.add_enabled(can_test, egui::Button::new("Test")).on_hover_text("Compile a small document with the chosen TeX: fonts, packages and the bibliography").clicked() {
+            let can_test = engine.is_some();
+            let test = ui.add_enabled_ui(can_test, |ui| busy::ui::button(ui, &st.busy, &[&TEX_JOB], egui::Button::new("Test")).on_hover_text("Compile a small document with the chosen TeX: fonts, packages and the bibliography")).inner;
+            if test.clicked() {
                 if let Some(e) = engine {
-                    st.start(&ctx, TaskKind::Test, move |_, _| test_notice(&e));
+                    st.start(&ctx, TaskKind::Test, "Compiling the test document…", move |_, _| test_notice(&e));
                 }
             }
         });
@@ -331,31 +383,16 @@ fn managed_section(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig, ctx: &Contex
         return;
     };
     let folder = engine::managed_root(&data);
-    // a job runs: its progress and Cancel
+    // a job runs: its progress, what it does and Cancel where it can stop
     if let Some(t) = &st.task {
-        let p = t.handle.progress();
-        match t.kind {
-            TaskKind::Install | TaskKind::Update => {
+        // an import and a test page are shown with the template sets
+        if !matches!(t.kind, TaskKind::Import | TaskKind::TestPage) {
+            if matches!(t.kind, TaskKind::Install | TaskKind::Update) {
+                let p = t.handle.progress();
                 ui.add(egui::ProgressBar::new(p.fraction()).text(p.text()).desired_width(420.0));
-                let label = if t.kind == TaskKind::Install { "Cancel install" } else { "Cancel update" };
-                if ui.button(label).on_hover_text("Stop; what was downloaded for an install is removed").clicked() {
-                    t.handle.cancel();
-                }
             }
-            TaskKind::Remove => {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label("Removing the TeX Live…");
-                });
-            }
-            TaskKind::Test => {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label("Compiling the test document…");
-                });
-            }
-            // shown with the template sets
-            TaskKind::Import | TaskKind::TestPage => {}
+            busy::ui::status(ui, &st.busy, &TEX_JOB);
+            crate::theme::hint(ui, "Closing this window stops it at the next safe point; a removal finishes first.");
         }
         return;
     }
@@ -392,7 +429,7 @@ fn managed_section(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig, ctx: &Contex
             ui.horizontal(|ui| {
                 if ui.button("Remove the TeX Live folder").clicked() {
                     st.confirm_remove = false;
-                    st.start(ctx, TaskKind::Remove, move |_, _| match install::remove(&data) {
+                    st.start(ctx, TaskKind::Remove, "Removing the TeX Live…", move |_, _| match install::remove(&data) {
                         Ok(()) => Notice::new("The TeX Live was removed.", true),
                         Err(e) => Notice::new(e, false),
                     });
@@ -407,7 +444,7 @@ fn managed_section(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig, ctx: &Contex
     ui.horizontal(|ui| {
         if ui.button("Update").on_hover_text("Update TeX Live and its packages (tlmgr update --self --all)").clicked() {
             if let Some(env) = st.env(cfg) {
-                st.start(ctx, TaskKind::Update, move |h, n| done_notice(install::update(&env, h, n), "The update"));
+                st.start(ctx, TaskKind::Update, "Updating TeX Live…", move |h, n| done_notice(install::update(&env, h, n), "The update"));
             }
         }
         if ui.button("Remove…").on_hover_text("Delete the managed TeX Live").clicked() {

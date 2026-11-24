@@ -119,7 +119,7 @@ impl ShaleApp {
     fn end_tex_setup(&mut self, finished: bool) {
         let set = self.tex.chosen_set().map(|s| s.id.clone());
         if let Some(t) = self.tex.task.as_ref().filter(|_| !finished) {
-            t.handle.cancel();
+            t.job.cancel();
         }
         let ret = std::mem::take(&mut self.tex.setup.ret);
         self.tex.setup = Default::default();

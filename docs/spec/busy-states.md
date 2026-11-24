@@ -3,7 +3,7 @@
 **IS NOW** = true of the code today · **SHOULD BE** = agreed target.
 Format: [ADR-0001](../decisions/0001-spec-driven-development.md). Issue: #397.
 
-The rules are JOB-003 to JOB-020 in [engineering.md](engineering.md#background-jobs-job): every action that
+The rules are JOB-003 to JOB-030 in [engineering.md](engineering.md#background-jobs-job): every action that
 loads or runs longer than a moment is a task of the busy registry (`busy::Busy`), shows a spinner and
 what happens, cannot be started twice, offers Cancel where the work can stop (or Close for a dialog
 whose work goes on), and shows in the indicator at the top right of the editor pane while it runs.
@@ -40,10 +40,10 @@ would leave a mess (JOB-006).
 |---|---|---|---|---|
 | Git sync (`gitsync::sync`, every interval and "Sync now", SYNC-002) | thread | unsafe (between commit and push) | spinner and the text, "Sync now" off | **IS NOW** (JOB-011): "Syncing with git…" |
 | Store media with Git LFS (SYNC-017) | thread | unsafe | spinner and the text, button off | **IS NOW** (JOB-011): "Setting up Git LFS…" |
-| LFS download of a file or of the vault (SYNC-020) | thread, one at a time, a queue behind it | no | the player's busy card | planned: "Downloading LFS files…" |
-| File history: snapshot and queries (HIST) | thread (`app/history.rs`) | no (a snapshot waits for the tree lock) | the panel's own state | planned: listed only after 2 s |
-| Turn-on wizard: detect, test sync, create a repository (SYNC-047…) | thread (`gitsync/wizard`) | detection and provider calls: a flag; the test sync: no | spinner and text on the wizard page, Next off | planned, with the dialog's Close or Cancel (JOB-010) |
-| Managed git: detect, install, check for a newer one, remove (SYNC-023…) | thread (`gitsync/install_ui.rs`) | install and download: yes (flag) | spinner with "Looking for git…", "Removing Shale's git…", a progress line, Cancel | planned: install and download are listed; Close for the dialog |
+| LFS download of a file or of the vault (SYNC-020) | thread, one at a time, a queue behind it | no (`git lfs pull` writes the files itself) | the player's busy card; spinner and text in Settings → Sync | **IS NOW** (JOB-026): "Downloading ‹file› from Git LFS…" |
+| File history: snapshot, thinning and queries (HIST) | thread (`app/history.rs`) | no (a snapshot waits for the tree lock) | the panel's "Reading the history…" with a spinner | **IS NOW** (JOB-025), listed in the indicator after 2 s (JOB-024) |
+| Turn-on wizard: detect, test sync, provider calls, move out, Advanced connect (SYNC-047…) | thread (`gitsync/wizard`) | dialog calls: yes, at the next safe point (before the token is kept, the key or repository made); the move out and Advanced connect: no | spinner and text on the wizard page and in Settings → Sync, Next off | **IS NOW** (JOB-027): closing the dialog stops its call (JOB-010) |
+| Managed git: detect, install, check for a newer one, remove (SYNC-023…) | thread (`gitsync/install_ui.rs`) | install, update and the check: yes (flag, what was downloaded is removed); removal: no | spinner, text, a progress bar and Cancel | **IS NOW** (JOB-028) |
 
 ## Export
 
@@ -69,9 +69,9 @@ would leave a mess (JOB-006).
 
 | Action | Runs today | Stop | Shows today | Registry |
 |---|---|---|---|---|
-| TeX install (managed TeX Live, CTAN packages, TEX) | thread (`pdf/tex/install`) | yes (handle) | spinner, progress line and Cancel in Settings and the setup dialog | planned: listed; Close keeps it running |
-| TeX test page and template set import (`tex/settings_ui.rs`, `sets_ui.rs`) | thread | yes (handle) | spinner, "Compiling the test document…" | planned |
-| Update check, download, install (UPD, `update/mod.rs`) | thread, one `cancel` flag for all three | yes | spinner next to "Check for updates now"; the banner shows progress | planned: "Checking for updates…", "Downloading Shale 0.8.0…", "Installing…" |
+| TeX install, update, removal (managed TeX Live, CTAN packages, TEX) | thread (`pdf/tex/install`) | install and update: yes (handle); removal: no | spinner, progress bar and Cancel in Settings and the setup dialog | **IS NOW** (JOB-029) |
+| TeX test compile, test page of a set and template set import (`tex/settings_ui.rs`, `sets_ui.rs`) | thread | import: yes (handle); the two compiles: no (the compile does not look at the flag) | spinner and text, progress and Cancel for the import | **IS NOW** (JOB-029) |
+| Update check, download, install (UPD, `update/mod.rs`) | thread, one `cancel` flag for all three | check and download: yes; install: no (a few file operations that undo themselves on an error) | spinner next to "Check for updates now"; the notice shows the text with a spinner and Cancel | **IS NOW** (JOB-030): "Checking for updates…", "Downloading Shale ‹version›…", "Installing Shale ‹version›…" |
 
 ## Mail
 

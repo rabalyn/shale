@@ -32,7 +32,6 @@ pub enum Act {
     Cancel,
     Finish,
     Install,
-    CancelJob,
     Import,
     UseLogo,
     UseDepartmentLogo,
@@ -95,13 +94,11 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig, acts: &mut Vec<Act>
 
 fn tex_step(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig, acts: &mut Vec<Act>) {
     crate::theme::paragraph(ui, "To make a PDF from a template, Shale needs a program called TeX.");
-    // the install runs: its progress and Cancel
+    // the install runs: its progress, what it does and Cancel (what was downloaded is removed)
     if let Some(t) = st.task.as_ref().filter(|t| t.kind == TaskKind::Install) {
         let p = t.handle.progress();
         ui.add(egui::ProgressBar::new(p.fraction()).text(p.text()).desired_width(420.0));
-        if ui.button("Cancel install").on_hover_text("Stop; what was downloaded is removed").clicked() {
-            acts.push(Act::CancelJob);
-        }
+        crate::busy::ui::status(ui, &st.busy, &super::settings_ui::TEX_JOB);
         return;
     }
     match st.tex_fact(cfg) {
@@ -148,13 +145,11 @@ fn templates_step(ui: &mut Ui, st: &mut TexState, acts: &mut Vec<Act>) {
         crate::theme::problem(ui, "Open a vault first: the templates are kept in it.");
         return;
     }
-    // an import runs: its progress and Cancel
+    // an import runs: its progress, what it does and Cancel (the vault stays as it was)
     if let Some(t) = st.task.as_ref().filter(|t| t.kind == TaskKind::Import) {
         let p = t.handle.progress();
         ui.add(egui::ProgressBar::new(p.fraction()).text(p.text()).desired_width(420.0));
-        if ui.button("Cancel import").on_hover_text("Stop; the vault stays as it was").clicked() {
-            acts.push(Act::CancelJob);
-        }
+        crate::busy::ui::status(ui, &st.busy, &super::settings_ui::TEX_JOB);
         return;
     }
     if let Some(s) = st.chosen_set() {
@@ -394,11 +389,6 @@ pub fn apply(st: &mut TexState, ctx: &Context, cfg: &TexConfig, acts: Vec<Act>) 
             Act::Cancel => end = Some(false),
             Act::Finish => end = Some(true),
             Act::Install => st.begin_install(ctx, cfg),
-            Act::CancelJob => {
-                if let Some(t) = &st.task {
-                    t.handle.cancel();
-                }
-            }
             Act::Import => st.setup_import(ctx, cfg),
             Act::UseLogo => {
                 let p = expand_home(&st.setup.logo_path);

@@ -4,8 +4,10 @@
 
 use super::provider::{self, Kind, PRESETS};
 use super::test_sync;
-use super::{api, ssh, Choice, Method, Msg, Step, Test, Wizard};
+use super::{api, ssh, Choice, Method, Msg, Step, Test, Wizard, CONNECT, MOVE_OUT, WIZARD_CALL};
+use crate::app::sync::GIT_SYNC;
 use crate::app::{Modal, ShaleApp};
+use crate::busy::{self, Busy};
 use crate::gitsync::detect::{self, Finding};
 use crate::gitsync::install_ui::{self, ManagedState};
 use crate::gitsync::managed::GitConfig;
@@ -38,7 +40,7 @@ struct Cx {
     findings: Vec<Finding>,
     has_dot_git: bool,
     has_remote: bool,
-    moving: bool,
+    busy: Busy,
     moved: Option<(String, bool)>,
 }
 
@@ -47,7 +49,7 @@ impl ShaleApp {
     pub(crate) fn open_sync_wizard(&mut self) {
         let Some(root) = self.vault.as_ref().map(|v| v.root.clone()) else { return };
         let ctx = self.ctx.clone().unwrap_or_default();
-        self.sync.setup.detect_for(&root, &ctx);
+        self.sync.setup.detect_for(&root, &ctx, &self.busy);
         self.sync.setup.wizard = Some(Wizard::default());
         self.modal = Some(Modal::SyncWizard);
     }
@@ -62,7 +64,7 @@ impl ShaleApp {
             findings: root.as_deref().map(|r| self.sync.setup.findings(r).to_vec()).unwrap_or_default(),
             has_dot_git: root.as_deref().is_some_and(gitsync::is_repo),
             has_remote: self.sync.remote.is_some(),
-            moving: self.sync.setup.moveout.running(),
+            busy: self.busy.clone(),
             moved: self.sync.setup.moveout.result.clone(),
         };
         let mut out: (Option<Ask>, bool) = (None, false);
@@ -87,6 +89,10 @@ impl ShaleApp {
             keep &= self.wizard_do(ctx, a);
         }
         if !keep {
+            // closing the dialog stops its call at the next safe point; the result is dropped (JOB-010)
+            if let Some(job) = self.sync.setup.wizard.as_ref().and_then(|w| w.job.as_ref()) {
+                job.cancel();
+            }
             self.sync.setup.wizard = None;
         }
         keep
@@ -145,19 +151,25 @@ impl ShaleApp {
                 if let Some(server) = w.server.clone() {
                     let (user, token) = (w.user.clone(), w.token.clone());
                     w.message = None;
-                    self.wizard_job(&mut w, "signing in", ctx, move || super::sign_in(&server, &user, &token).map(Msg::SignedIn));
+                    self.wizard_job(&mut w, "Signing in to the server…", ctx, move |c| super::sign_in(&server, &user, &token, c).map(Msg::SignedIn));
                 }
             }
             Ask::MakeKey => {
                 if let (Some(server), Some(home)) = (w.server.clone(), self.sync.setup.home()) {
                     let git = self.sync.git.clone();
-                    self.wizard_job(&mut w, "making a key", ctx, move || ssh::generate(&git, &home, &server.host, &gitsync::host_name()).map(Msg::Key));
+                    self.wizard_job(&mut w, "Making an SSH key…", ctx, move |c| {
+                        super::stop_point(c)?;
+                        ssh::generate(&git, &home, &server.host, &gitsync::host_name()).map(Msg::Key)
+                    });
                 }
             }
             Ask::CreateRepo => {
                 if let (Some(server), true) = (w.server.clone(), w.signed_in) {
                     let (token, name) = (crate::secrets::git_token(&gitsync::credentials::server_key(&server.base()).unwrap_or_default(), &w.user).unwrap_or_else(|| w.token.clone()), w.new_name.trim().to_string());
-                    self.wizard_job(&mut w, "creating the repository", ctx, move || api::create(&server, &token, &name, "Notes, kept by Shale").map(Msg::Created).map_err(|e| e.message()));
+                    self.wizard_job(&mut w, "Creating the repository…", ctx, move |c| {
+                        super::stop_point(c)?;
+                        api::create(&server, &token, &name, "Notes, kept by Shale").map(Msg::Created).map_err(|e| e.message())
+                    });
                 }
             }
             Ask::RepoNext => self.wizard_repo_next(&mut w, ctx),
@@ -171,9 +183,9 @@ impl ShaleApp {
     }
 
     /// Start a job of the wizard.
-    fn wizard_job(&mut self, w: &mut Wizard, what: &'static str, ctx: &egui::Context, f: impl FnOnce() -> Result<Msg, String> + Send + 'static) {
+    fn wizard_job(&mut self, w: &mut Wizard, label: &'static str, ctx: &egui::Context, f: impl FnOnce(&busy::Cancel) -> Result<Msg, String> + Send + 'static) {
         let ctx = ctx.clone();
-        w.job = Some((what, crate::jobs::spawn(f, move || ctx.request_repaint())));
+        w.job = self.busy.spawn_cancellable(WIZARD_CALL, label, f, move || ctx.request_repaint());
     }
 
     /// "Next" of the server step: read the address.
@@ -257,9 +269,9 @@ impl ShaleApp {
         // a local-only history moves into the new `.git` (SYNC-072): saved notes first, no snapshot beside it
         self.flush_all();
         let (tree, history_root, guard) = (self.sync.tree.clone(), self.usage.places.history.clone(), self.sync.setup.joining.begin());
-        self.wizard_job(w, "asking the server", ctx, move || {
+        self.wizard_job(w, "Asking the server what the repository holds…", ctx, move |c| {
             let _guard = guard;
-            super::connect_and_inspect(&git, &root, &url, key.as_deref(), &history_root, &tree).map(|(r, n, m)| Msg::Inspected(r, n, m))
+            super::connect_and_inspect(&git, &root, &url, key.as_deref(), &history_root, &tree, c).map(|(r, n, m)| Msg::Inspected(r, n, m))
         });
     }
 
@@ -309,8 +321,8 @@ impl ShaleApp {
         self.moveout_tick(ctx);
         self.join_tick(ctx);
         let Some(mut w) = self.sync.setup.wizard.take() else { return };
-        if let Some((_, rx)) = &w.job {
-            match rx.try_recv() {
+        if let Some(job) = &w.job {
+            match job.try_recv() {
                 Ok(r) => {
                     w.job = None;
                     self.wizard_job_done(ctx, &mut w, r);
@@ -360,7 +372,9 @@ impl ShaleApp {
         self.flush_all();
         let (git, tree, history_root, ctx) = (self.sync.git.clone(), self.sync.tree.clone(), self.usage.places.history.clone(), self.ctx.clone());
         let job_root = root.clone();
-        let rx = crate::jobs::spawn(
+        let job = self.busy.spawn(
+            MOVE_OUT,
+            "Moving the repository out of the vault…",
             move || moveout::move_out(&git, &job_root, &history_root, &tree, moveout::TREE_WAIT),
             move || {
                 if let Some(c) = ctx {
@@ -368,7 +382,7 @@ impl ShaleApp {
                 }
             },
         );
-        self.sync.setup.moveout = super::MoveOut { job: Some((root, rx)), result: None };
+        self.sync.setup.moveout = super::MoveOut { job: job.map(|j| (root, j)), result: None };
     }
 
     /// Advanced → Connect for a vault with a local-only history: the move and the connection run in a
@@ -384,7 +398,9 @@ impl ShaleApp {
         self.flush_all();
         let (git, tree, history_root, ctx) = (self.sync.git.clone(), self.sync.tree.clone(), self.usage.places.history.clone(), self.ctx.clone());
         let (job_root, job_url, guard) = (root.clone(), url.clone(), self.sync.setup.joining.begin());
-        let rx = crate::jobs::spawn(
+        let job = self.busy.spawn(
+            CONNECT,
+            "Connecting the vault to the remote…",
             move || {
                 let _guard = guard;
                 gitsync::connect_moving(&git, &job_root, &job_url, &history_root, &tree)
@@ -395,13 +411,13 @@ impl ShaleApp {
                 }
             },
         );
-        self.sync.setup.joining.job = Some((root, url, rx));
+        self.sync.setup.joining.job = job.map(|j| (root, url, j));
     }
 
     /// Take a finished Advanced connection (SYNC-072).
     fn join_tick(&mut self, ctx: &egui::Context) {
-        let Some((root, url, rx)) = &self.sync.setup.joining.job else { return };
-        let r = match rx.try_recv() {
+        let Some((root, url, job)) = &self.sync.setup.joining.job else { return };
+        let r = match job.try_recv() {
             Ok(r) => r.unwrap_or_else(Err),
             Err(std::sync::mpsc::TryRecvError::Empty) => {
                 ctx.request_repaint_after(Duration::from_millis(100));
@@ -427,8 +443,8 @@ impl ShaleApp {
 
     /// Take a finished move.
     fn moveout_tick(&mut self, ctx: &egui::Context) {
-        let Some((root, rx)) = &self.sync.setup.moveout.job else { return };
-        let r = match rx.try_recv() {
+        let Some((root, job)) = &self.sync.setup.moveout.job else { return };
+        let r = match job.try_recv() {
             Ok(r) => r.unwrap_or_else(Err),
             Err(std::sync::mpsc::TryRecvError::Empty) => {
                 ctx.request_repaint_after(Duration::from_millis(100));
@@ -459,19 +475,20 @@ fn done_text(c: Choice) -> String {
 
 /// The warnings about where the vault is, and the offer to move the repository out (SYNC-061,
 /// SYNC-062). True: the person pressed **Move the repository out**.
-pub(crate) fn warnings_ui(ui: &mut Ui, findings: &[Finding], has_dot_git: bool, has_remote: bool, moving: bool, moved: Option<&(String, bool)>) -> bool {
+pub(crate) fn warnings_ui(ui: &mut Ui, findings: &[Finding], has_dot_git: bool, has_remote: bool, busy: &Busy, moved: Option<&(String, bool)>) -> bool {
     let mut ask = false;
     if has_dot_git {
         if let Some(w) = detect::repo_warning(findings, has_remote) {
             theme::problem(ui, w);
             if !has_remote {
                 ui.horizontal(|ui| {
-                    if ui.add_enabled(!moving, egui::Button::new("Move the repository out")).on_hover_text("Copy the repository to a private place on this computer, check the copy, then remove the .git folder of the vault").clicked() {
+                    if busy::ui::button(ui, busy, &[&MOVE_OUT], egui::Button::new("Move the repository out"))
+                        .on_hover_text("Copy the repository to a private place on this computer, check the copy, then remove the .git folder of the vault")
+                        .clicked()
+                    {
                         ask = true;
                     }
-                    if moving {
-                        ui.spinner();
-                    }
+                    busy::ui::status(ui, busy, &MOVE_OUT);
                 });
             }
         }
@@ -498,12 +515,10 @@ fn message(ui: &mut Ui, w: &Wizard) {
     }
 }
 
-fn spinner_line(ui: &mut Ui, w: &Wizard, text: &str) {
-    if w.job.is_some() {
-        ui.horizontal(|ui| {
-            ui.spinner();
-            ui.label(text);
-        });
+/// The call that runs: a spinner and what it does (JOB-004).
+fn spinner_line(ui: &mut Ui, busy: &Busy) {
+    if busy::ui::status(ui, busy, &WIZARD_CALL) {
+        theme::hint(ui, "Cancel (or closing this window) stops it at the next safe point.");
     }
 }
 
@@ -520,7 +535,7 @@ fn body(ui: &mut Ui, w: &mut Wizard, cx: &Cx, managed: &mut ManagedState, gitcfg
                 changed = install_ui::show(ui, managed, gitcfg);
                 return (None, changed);
             }
-            if warnings_ui(ui, &cx.findings, cx.has_dot_git, cx.has_remote, cx.moving, cx.moved.as_ref()) {
+            if warnings_ui(ui, &cx.findings, cx.has_dot_git, cx.has_remote, &cx.busy, cx.moved.as_ref()) {
                 ask = Some(Ask::MoveOut);
             }
             for (choice, title, text) in [
@@ -565,7 +580,7 @@ fn body(ui: &mut Ui, w: &mut Wizard, cx: &Cx, managed: &mut ManagedState, gitcfg
             }
             theme::hint(ui, "A folder on this computer or a network share also works (an absolute path): no sign-in is needed.");
             message(ui, w);
-            spinner_line(ui, w, "Asking the server…");
+            spinner_line(ui, &cx.busy);
         }
         Step::SignIn => {
             let Some(server) = w.server.clone() else { return (None, false) };
@@ -628,7 +643,7 @@ fn body(ui: &mut Ui, w: &mut Wizard, cx: &Cx, managed: &mut ManagedState, gitcfg
                 }
             }
             message(ui, w);
-            spinner_line(ui, w, "Working…");
+            spinner_line(ui, &cx.busy);
         }
         Step::Repo => {
             let Some(server) = w.server.clone() else { return (None, false) };
@@ -665,7 +680,7 @@ fn body(ui: &mut Ui, w: &mut Wizard, cx: &Cx, managed: &mut ManagedState, gitcfg
                 ui.add(egui::TextEdit::singleline(&mut w.repo_text).hint_text("owner/name or the address of the repository").desired_width(460.0));
             }
             message(ui, w);
-            spinner_line(ui, w, "Asking the server…");
+            spinner_line(ui, &cx.busy);
         }
         Step::Test => {
             ui.label(egui::RichText::new("Test the sync").strong().size(15.0));
@@ -685,10 +700,13 @@ fn body(ui: &mut Ui, w: &mut Wizard, cx: &Cx, managed: &mut ManagedState, gitcfg
                     theme::hint(ui, "The test is one real sync: Shale fetches from the server and uploads your notes.");
                 }
                 Test::Pending | Test::Running => {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label("Syncing…");
-                    });
+                    // the test is one real sync, a task of its own (JOB-011)
+                    if !busy::ui::status(ui, &cx.busy, &GIT_SYNC) {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("Syncing…");
+                        });
+                    }
                 }
                 Test::Worked(text) => {
                     theme::paragraph(ui, text.clone());
@@ -704,7 +722,7 @@ fn body(ui: &mut Ui, w: &mut Wizard, cx: &Cx, managed: &mut ManagedState, gitcfg
             if let Some(t) = &w.done {
                 theme::paragraph(ui, t.clone());
             }
-            if warnings_ui(ui, &cx.findings, cx.has_dot_git, cx.has_remote, cx.moving, cx.moved.as_ref()) {
+            if warnings_ui(ui, &cx.findings, cx.has_dot_git, cx.has_remote, &cx.busy, cx.moved.as_ref()) {
                 ask = Some(Ask::MoveOut);
             }
         }

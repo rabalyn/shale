@@ -14,7 +14,7 @@
 use crate::jobs;
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Receiver, TryRecvError};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, TryRecvError};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -41,10 +41,22 @@ impl Key {
     }
 }
 
+/// How long housekeeping that is usually over in a moment (a snapshot of the file history, a look
+/// for git or TeX, a check for updates) runs before the indicator lists it (JOB-022, JOB-024).
+pub const LISTED_AFTER: Duration = Duration::from_secs(2);
+
 /// The request to stop, shared by the window, the indicator and the job, which looks at it between
 /// two steps of its work.
 #[derive(Clone, Debug, Default)]
 pub struct Cancel(Arc<AtomicBool>);
+
+impl From<Arc<AtomicBool>> for Cancel {
+    /// A flag that code of its own already looks at (the handle of an install, the flag of the
+    /// update) becomes the token of a task, so that Cancel in a view or in the indicator sets it.
+    fn from(flag: Arc<AtomicBool>) -> Cancel {
+        Cancel(flag)
+    }
+}
 
 impl Cancel {
     pub fn cancel(&self) {
@@ -133,6 +145,19 @@ impl Busy {
         Some(task.run(move || f(&cancel), notify))
     }
 
+    /// [`Busy::spawn`] for housekeeping: the task is listed in the indicator only when it has run for
+    /// [`LISTED_AFTER`] (JOB-022, JOB-024); the views of the action see it at once.
+    pub fn spawn_quiet<T: Send + 'static>(&self, key: Key, label: impl Into<String>, f: impl FnOnce() -> T + Send + 'static, notify: impl FnOnce() + Send + 'static) -> Option<Job<T>> {
+        Some(self.begin_listed_after(key, label, LISTED_AFTER)?.run(f, notify))
+    }
+
+    /// [`Busy::spawn_cancellable`] for housekeeping, as [`Busy::spawn_quiet`].
+    pub fn spawn_cancellable_quiet<T: Send + 'static>(&self, key: Key, label: impl Into<String>, f: impl FnOnce(&Cancel) -> T + Send + 'static, notify: impl FnOnce() + Send + 'static) -> Option<Job<T>> {
+        let mut task = self.begin_listed_after(key, label, LISTED_AFTER)?;
+        let cancel = task.cancellable();
+        Some(task.run(move || f(&cancel), notify))
+    }
+
     /// The task of this action, if it runs.
     pub fn info(&self, key: &Key) -> Option<TaskInfo> {
         self.tasks().list.iter().find(|e| e.key == *key).map(Entry::info)
@@ -191,10 +216,16 @@ impl Task {
     /// Make the task one that Cancel can stop, and hand out the token its work looks at.
     pub fn cancellable(&mut self) -> Cancel {
         let cancel = self.cancel.get_or_insert_with(Cancel::default).clone();
-        if let Some(e) = self.busy.tasks().list.iter_mut().find(|e| e.id == self.id) {
-            e.cancel = Some(cancel.clone());
-        }
+        self.cancellable_with(cancel.clone());
         cancel
+    }
+
+    /// The same with a token that the work already has (see `From<Arc<AtomicBool>>`).
+    pub fn cancellable_with(&mut self, cancel: Cancel) {
+        self.cancel = Some(cancel.clone());
+        if let Some(e) = self.busy.tasks().list.iter_mut().find(|e| e.id == self.id) {
+            e.cancel = Some(cancel);
+        }
     }
 
     /// Run `f` on a new thread under this task: the task ends before the job's result can be
@@ -228,6 +259,11 @@ impl<T> Job<T> {
     /// The result if the job has ended: its value, or the message of a panic. `Empty` while it runs.
     pub fn try_recv(&self) -> Result<Result<T, String>, TryRecvError> {
         self.rx.try_recv()
+    }
+
+    /// Wait for the result for at most `limit` (the window that closes waits for the last job a moment).
+    pub fn recv_timeout(&self, limit: Duration) -> Result<Result<T, String>, RecvTimeoutError> {
+        self.rx.recv_timeout(limit)
     }
 
     /// Ask the job to stop (nothing happens for a task that cannot be stopped).

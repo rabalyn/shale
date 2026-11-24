@@ -177,7 +177,7 @@ mod git_ask;
 mod git_ask_tests;
 #[cfg(test)]
 mod handover_tests;
-mod history;
+pub(crate) mod history;
 mod history_ui;
 mod link_preview;
 mod mail;
@@ -188,7 +188,7 @@ pub mod panes;
 mod rescan;
 mod screenshot;
 mod social;
-mod sync;
+pub(crate) mod sync;
 mod tabs;
 mod tex_setup;
 mod thread_ui;
@@ -770,6 +770,8 @@ impl ShaleApp {
         };
         // the mail view's check of the index is a task of the window's registry (JOB-015)
         app.mail.busy = app.busy.clone();
+        app.sync.managed.busy = app.busy.clone();
+        app.update.busy = app.busy.clone();
         app.usage.busy = app.busy.clone();
         app.tex.busy = app.busy.clone();
         app.word.busy = app.busy.clone();
