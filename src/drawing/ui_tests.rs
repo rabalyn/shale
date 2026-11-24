@@ -14,13 +14,15 @@ struct H {
     actions: Vec<DrawingAction>,
     /// modifier keys held down
     mods: Modifiers,
+    /// the texts painted in the last frame (tooltips included)
+    texts: Vec<String>,
 }
 
 impl H {
     fn new() -> Self {
         let ctx = egui::Context::default();
         crate::theme::install_fonts(&ctx);
-        H { ctx, t: 0.0, vault: crate::vault::Vault::default(), actions: vec![], mods: Modifiers::NONE }
+        H { ctx, t: 0.0, vault: crate::vault::Vault::default(), actions: vec![], mods: Modifiers::NONE, texts: vec![] }
     }
 
     fn frame(&mut self, d: &mut DrawingDoc, mut events: Vec<Event>) {
@@ -36,6 +38,15 @@ impl H {
         });
         self.actions.extend(asked);
         out.textures_delta.clear();
+        fn walk(s: &egui::Shape, texts: &mut Vec<String>) {
+            match s {
+                egui::Shape::Text(t) => texts.push(t.galley.job.text.clone()),
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, texts)),
+                _ => {}
+            }
+        }
+        self.texts.clear();
+        out.shapes.iter().for_each(|c| walk(&c.shape, &mut self.texts));
     }
 
     fn settle(&mut self, d: &mut DrawingDoc) {
@@ -479,6 +490,31 @@ fn double_brackets_in_a_drawing_suggest_notes_and_the_link_can_be_followed() {
     h.click_at(&mut d, centre);
     h.mods = Modifiers::NONE;
     assert!(matches!(h.actions.as_slice(), [DrawingAction::Editor(crate::editor::EditorAction::OpenLink { target, .. })] if target == "Ideas"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+// spec: DRAW-015
+#[test]
+fn draw_015_hovering_a_link_mark_shows_where_it_goes() {
+    let (mut h, mut d, dir) = editing_label("hover");
+    h.type_text(&mut d, " [[Ide");
+    h.key(&mut d, egui::Key::Enter, Modifiers::NONE);
+    h.key(&mut d, egui::Key::Escape, Modifiers::NONE);
+    h.settle(&mut d);
+    let view = View { origin: H::rect(&d, "canvas").min, offset: d.offset, zoom: d.zoom };
+    let mark = d.links_on_screen(&view).into_iter().find(|l| l.0 == "s1").expect("a link mark on the shape").2;
+    // away from the mark: no tooltip
+    let corner = H::rect(&d, "canvas").min + Vec2::new(2.0, 2.0);
+    h.frame(&mut d, vec![Event::PointerMoved(corner)]);
+    h.settle(&mut d);
+    assert!(!h.texts.iter().any(|t| t.contains("Open")), "{:?}", h.texts);
+    // on the mark, and still: the tooltip names the target and says how to follow it
+    h.frame(&mut d, vec![Event::PointerMoved(mark.center())]);
+    for _ in 0..30 {
+        h.frame(&mut d, vec![]);
+    }
+    assert!(h.texts.iter().any(|t| t == "Open “Ideas”"), "{:?}", h.texts);
+    assert!(h.texts.iter().any(|t| t.starts_with("Click to follow")), "{:?}", h.texts);
     let _ = std::fs::remove_dir_all(dir);
 }
 

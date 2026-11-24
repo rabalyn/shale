@@ -2,8 +2,7 @@
 
 **IS NOW** = true of the code today (⚠ = known defect, described as it behaves) ·
 **SHOULD BE** = agreed target. Format: [ADR-0001](../decisions/0001-spec-driven-development.md).
-Tests are named `file.rs::test_fn` (all under `src/`); "partly" means the test covers only part
-of the rule.
+Tests are named `file.rs::test_fn` (all under `src/`).
 
 ## Vault
 
