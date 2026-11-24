@@ -171,8 +171,8 @@ link to the card's chapter, and the chips; up to three lanes side by side, the n
 columns that do not fit the page go on with "(continued)"), then a part for each lane that has cards with the cards as
 chapters, and the contents with the board first. A drawing card's chapter is its drawing. A lane whose query is wrong has
 the reason under its name. The board note's properties (`author`, `latex-template` …) fill the fields like a folder
-note's. LaTeX decides the paper, so the dialog's paper choice does not apply; the heights of the cards on the board page
-are estimated, so a board with unusually tall cards may need a look at the result.
+note's. LaTeX decides the paper, so the dialog's paper choice does not apply. LaTeX also fills each landscape page
+with as many cards as fit (a card is never cut in two).
 
 # Try it
 

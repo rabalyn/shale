@@ -36,9 +36,9 @@ fn at(tex: &str, what: &str) -> usize {
     tex.find(what).unwrap_or_else(|| panic!("{what} is not in\n{tex}"))
 }
 
-/// The pages of the board: each starts with the board's title.
-fn board_pages(tex: &str) -> usize {
-    tex.matches("\\noindent{\\large\\bfseries ").count()
+/// The groups of lanes of the board: each is a table of its own.
+fn board_tables(tex: &str) -> usize {
+    tex.matches("\\begin{longtable}").count()
 }
 
 const SPRINT: &str = "---\ntype: board\n---\n# Sprint\n\n## Todo\nquery: status:todo\n\n## Doing\nquery: status:doing\n";
@@ -60,9 +60,13 @@ fn board_031_the_board_is_on_landscape_pages_and_the_cards_notes_follow_as_parts
     // the lanes are columns with their cards, the chips of card-shows follow the title
     let board = &tex[begin..end];
     assert!(board.contains("{\\large\\bfseries Board}"), "{board}");
-    assert_eq!(board.matches("\\begin{minipage}[t]{0.32\\linewidth}").count(), 2, "{board}");
-    assert!(board.contains("{\\bfseries Todo}") && board.contains("{\\bfseries Doing}"), "{board}");
-    assert!(board.find("Alpha").unwrap() < board.find("{\\bfseries Doing}").unwrap(), "{board}");
+    // one table, a column for each lane, the head of the first page and the head of the next ones
+    assert_eq!(board.matches("\\begin{longtable}{@{}p{0.32\\linewidth}@{\\hspace{0.02\\linewidth}}p{0.32\\linewidth}@{}}").count(), 1, "{board}");
+    assert!(board.contains("{\\bfseries Todo}") && board.contains("{\\bfseries Doing}") && board.contains("{\\bfseries Todo (continued)}"), "{board}");
+    assert!(at(board, "\\endfirsthead") < at(board, "\\endhead") && at(board, "\\endhead") < at(board, "Alpha"), "{board}");
+    assert!(at(board, "{\\bfseries Doing}") < at(board, "\\endfirsthead"), "{board}");
+    // row 1: the first card of each lane
+    assert!(at(board, "Alpha") < at(board, "Beta") && !board[at(board, "Alpha")..at(board, "Beta")].contains("\\\\"), "{board}");
     assert!(board.contains("todo \\textperiodcentered{} high") || board.contains("todo") && board.contains("high"), "{board}");
     // the cards link to their chapters; the note left out with export: false stays on the board only
     assert!(board.contains("\\hyperlink{shale-2}{Alpha}") && board.contains("\\hyperlink{shale-4}{Beta}"), "{board}");
@@ -133,7 +137,7 @@ fn board_031_a_board_without_lanes_or_cards_is_the_board_page_only() {
     let (v, d) = vault("nolanes", &[("Board.md", b"---\ntype: board\n---\n# Empty\n")]);
     let tex = tex_of(&v, "thesis");
     assert!(tex.contains("This board has no lanes.") && tex.contains("{\\large\\bfseries Board}") && !tex.contains("\\chapter") && !tex.contains("\\part"), "{tex}");
-    assert_eq!(board_pages(&tex), 1);
+    assert_eq!(board_tables(&tex), 0, "no lanes, no table");
     let (v2, d2) = vault("nocards", &[("Board.md", b"---\ntype: board\n---\n# Empty\n\n## Todo\nquery: status:todo\n")]);
     let tex = tex_of(&v2, "thesis");
     assert!(tex.contains("{\\bfseries Todo}") && !tex.contains("\\chapter") && !tex.contains("\\part"), "{tex}");
@@ -153,8 +157,9 @@ fn board_031_more_than_three_lanes_make_more_groups_of_landscape_pages() {
     files.extend(notes.iter().map(|(n, b)| (n.as_str(), b.as_slice())));
     let (v, d) = vault("groups", &files);
     let tex = tex_of(&v, "thesis");
-    assert_eq!(board_pages(&tex), 2, "three lanes and two");
-    assert!(tex.contains("{\\large\\bfseries Board}\\par") && tex.contains("{\\large\\bfseries Board (continued)}"), "{tex}");
+    assert_eq!(board_tables(&tex), 2, "three lanes and two");
+    assert!(tex.contains("{\\large\\bfseries Board}") && tex.contains("{\\large\\bfseries Board (continued)}"), "{tex}");
+    assert_eq!(tex.matches("\n\\clearpage\n").count(), 1, "the second group starts a page");
     assert!(at(&tex, "Lane3") < at(&tex, "Lane4"), "{tex}");
     assert_eq!(tex.matches("\\addcontentsline{toc}{chapter}{Board}").count(), 1, "the board is listed once");
     let _ = std::fs::remove_dir_all(d);
@@ -162,7 +167,7 @@ fn board_031_more_than_three_lanes_make_more_groups_of_landscape_pages() {
 
 // spec: BOARD-031
 #[test]
-fn board_031_cards_that_do_not_fit_a_page_go_on_the_next_landscape_page_with_continued_lanes() {
+fn board_031_the_cards_of_a_group_are_the_rows_of_one_table_that_latex_breaks_with_continued_heads() {
     let mut board = String::from("---\ntype: board\n---\n# Long\n\n## Many\nquery: status:many\nsort: title\n\n## Few\nquery: status:few\n");
     board.push('\n');
     let mut notes: Vec<(String, Vec<u8>)> = (1..=30).map(|n| (format!("Card {n:02}.md"), b"---\nstatus: many\n---\nx\n".to_vec())).collect();
@@ -171,12 +176,18 @@ fn board_031_cards_that_do_not_fit_a_page_go_on_the_next_landscape_page_with_con
     files.extend(notes.iter().map(|(n, b)| (n.as_str(), b.as_slice())));
     let (v, d) = vault("long", &files);
     let tex = tex_of(&v, "thesis");
-    let pages = board_pages(&tex);
-    assert!(pages >= 2, "{pages} pages\n{tex}");
-    assert_eq!(tex.matches("\n\\clearpage\n").count(), pages - 1, "a page of the board ends where the next one starts");
-    assert_eq!(tex.matches("{\\bfseries Many (continued)}").count(), pages - 1, "{tex}");
-    assert_eq!(tex.matches("{\\bfseries Few}").count(), 1, "the group goes on with the same columns");
-    assert_eq!(tex.matches("{\\bfseries Few (continued)}").count(), pages - 1);
+    // no page height is estimated: one table, 30 rows (the shorter lane has empty cells), LaTeX breaks it
+    assert_eq!(board_tables(&tex), 1, "{tex}");
+    let table = &tex[at(&tex, "\\begin{longtable}")..at(&tex, "\\end{longtable}")];
+    let body = &table[at(table, "\\endhead") + 8..];
+    assert_eq!(body.matches("\\\\\n").count(), 30, "{body}");
+    assert!(!table.contains("\\clearpage"), "{table}");
+    assert_eq!(table.matches("{\\bfseries Many}").count(), 1, "the first head");
+    assert_eq!(table.matches("{\\bfseries Many (continued)}").count(), 1, "the head of the next pages");
+    assert_eq!(table.matches("{\\bfseries Few}").count(), 1);
+    assert_eq!(table.matches("{\\bfseries Few (continued)}").count(), 1);
+    assert_eq!(table.matches("{\\large\\bfseries Board}").count(), 1);
+    assert_eq!(table.matches("{\\large\\bfseries Board (continued)}").count(), 1);
     // every card is on the board exactly once, and in order
     for n in 1..=30 {
         assert_eq!(tex.matches(&format!("{{Card {n:02}}}")).count(), 2, "Card {n}: its link on the board and its chapter");

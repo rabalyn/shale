@@ -72,6 +72,13 @@ fn tex_env_board_031_a_board_compiles_with_real_landscape_pages_parts_and_chapte
         assert!(board_pages.len() >= 3, "{id}: the pages of the board in {pages:?}\n{}", doc.tex);
         assert!(board_pages[0] <= 1 && board_pages.windows(2).all(|w| w[1] == w[0] + 1), "{id}: {board_pages:?}");
         assert!(board_pages[1..].iter().all(|i| pages[*i].contains("(continued)")));
+        // LaTeX breaks the table where the page is full: no page is a third full as with an estimate
+        let cards: Vec<usize> = board_pages.iter().map(|i| pages[*i].replace(' ', "").matches("Todocard").count()).collect();
+        eprintln!("{id}: cards of the lane Todo on the pages of the board: {cards:?}");
+        assert_eq!(cards.iter().sum::<usize>(), 24, "{id}: every card once on the board: {cards:?}");
+        if id == "report" {
+            assert!(board_pages.len() <= 2 && cards.iter().any(|c| *c >= 12), "{id}: the board of 24 cards needs at most two pages: {cards:?}");
+        }
         // real landscape pages (#641), the notes after them portrait again, the footer of the class at the bottom
         assert_real_landscape_pages(&pdf, &board_pages, id);
         // the board and the two lanes with cards, their cards as chapters
