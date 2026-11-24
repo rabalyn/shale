@@ -639,9 +639,23 @@ fn a_drive_that_does_not_answer_does_not_stop_the_window_it_shows_loading_and_th
         assert_eq!(drawn_now(&mut fx), 0, "{view}: no picture yet");
     }
     assert!(start.elapsed() < std::time::Duration::from_secs(10), "the frames did not wait for the drive");
-    let mut asked = asked.lock().unwrap().clone();
-    asked.sort();
-    assert_eq!(asked, vec![o.folder.join("a.png"), o.folder.join("gone.png")], "one check for each file, none for the library that is not set up, however many frames and views");
+    // the checks run on workers and start a little after the frame that asked: wait for them (the frames above
+    // are not a clock, a loaded machine starts the workers late), then show that more frames and views add none
+    let noted = || {
+        let mut asked = asked.lock().unwrap().clone();
+        asked.sort();
+        asked
+    };
+    let wait = std::time::Instant::now();
+    while noted().len() < 2 && wait.elapsed() < std::time::Duration::from_secs(60) {
+        fx.hl.frame(&mut fx.app, vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    for reading in [true, false, true] {
+        fx.show(reading);
+    }
+    fx.hl.frames(&mut fx.app, 5);
+    assert_eq!(noted(), vec![o.folder.join("a.png"), o.folder.join("gone.png")], "one check for each file, none for the library that is not set up, however many frames and views");
     gate.open();
     fx.settle();
     assert_eq!(drawn(&mut fx), 1, "the editor shows the picture once the drive answered");
