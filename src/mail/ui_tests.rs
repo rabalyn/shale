@@ -3034,11 +3034,13 @@ fn dev_017_opening_the_mail_settings_in_a_plain_harness_runs_no_gnupg() {
     }
 }
 
-/// A stand-in for `gpg` (or `gpgsm`) that answers after a second, like a slow start of the agent.
+/// A stand-in for `gpg` (or `gpgsm`) that answers only once the `gate` file exists, like a slow start of the agent (a
+/// fixed sleep raced with a loaded machine, raba/shale#659); it gives up waiting after about a minute.
 #[cfg(unix)]
-fn slow_gnupg_script(dir: &Path, name: &str, real: &str) -> String {
+fn slow_gnupg_script(dir: &Path, name: &str, real: &str, gate: &Path) -> String {
     let script = dir.join(name);
-    crate::test_exec::write_script(&script, &format!("#!/bin/sh\nsleep 1\nexec {real} \"$@\"\n"));
+    let gate = gate.to_string_lossy();
+    crate::test_exec::write_script(&script, &format!("#!/bin/sh\nn=0\nwhile [ ! -e '{gate}' ] && [ $n -lt 3000 ]; do sleep 0.02; n=$((n+1)); done\nexec {real} \"$@\"\n"));
     script.to_string_lossy().into_owned()
 }
 
@@ -3059,6 +3061,8 @@ fn encryption_layouts(height: f32) -> [Vec<(String, Rect)>; 3] {
     w.size = Vec2::new(1500.0, height);
     let dir = std::env::temp_dir().join(format!("shale-encstay-{height}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let gate = dir.join("gate");
     let bob = TestHome::new();
     bob.gen_pgp("Bob Test", "bob@example.org", "never", None);
     // an answer longer than the room kept for it: several secret keys across both standards
@@ -3066,7 +3070,7 @@ fn encryption_layouts(height: f32) -> [Vec<(String, Rect)>; 3] {
         bob.gen_pgp(&format!("{name} Test"), &format!("{}@example.org", name.to_lowercase()), "never", None);
         bob.gen_smime(&format!("{name} Cert"), &format!("{}-{i}@example.org", name.to_lowercase()));
     }
-    w.app.mail.gnupg = crate::mail::gpg::Gnupg { gpg: slow_gnupg_script(&dir, "slow-gpg", "gpg"), gpgsm: slow_gnupg_script(&dir, "slow-gpgsm", "gpgsm"), ..bob.g.clone() };
+    w.app.mail.gnupg = crate::mail::gpg::Gnupg { gpg: slow_gnupg_script(&dir, "slow-gpg", "gpg", &gate), gpgsm: slow_gnupg_script(&dir, "slow-gpgsm", "gpgsm", &gate), ..bob.g.clone() };
     w.app.open_mail_settings();
     w.settle();
     w.click("md:enc-header");
@@ -3077,6 +3081,7 @@ fn encryption_layouts(height: f32) -> [Vec<(String, Rect)>; 3] {
     assert!(w.app.mail.gnupg_info.is_none() && w.shows("Looking…"), "the result is still on its way");
     let pending = settings_layout(&w);
     assert!(pending.iter().any(|r| r.0 == "md:enc-detect") && pending.iter().any(|r| r.0 == "md:done"));
+    std::fs::write(&gate, "").unwrap();
     w.until("GnuPG was looked at", |a| a.mail.gnupg_info.is_some());
     w.settle();
     assert!(!w.shows("Looking…") && w.shows("OpenPGP (gpg)"));
