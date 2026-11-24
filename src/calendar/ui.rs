@@ -1090,8 +1090,15 @@ mod tests {
         }
     }
 
+    /// One directory per call: `cargo test` runs the tests as threads of one process, and many share a tag.
+    fn unique_dir(tag: &str) -> std::path::PathBuf {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        std::env::temp_dir().join(format!("shale-calui-{tag}-{}-{n}", std::process::id()))
+    }
+
     fn store_with_samples(tag: &str) -> (CalendarStore, String) {
-        let dir = std::env::temp_dir().join(format!("shale-calui-{tag}-{}", std::process::id()));
+        let dir = unique_dir(tag);
         let _ = std::fs::remove_dir_all(&dir);
         let mut s = CalendarStore::new(vec![], dir);
         let src = s.new_local_source("Test", &[]);
@@ -1378,7 +1385,7 @@ mod tests {
 
     #[test]
     fn empty_store_offers_to_add_a_calendar() {
-        let store = CalendarStore::new(vec![], std::env::temp_dir().join("shale-calui-empty"));
+        let store = CalendarStore::new(vec![], unique_dir("empty"));
         let mut v = CalendarView::new(Size::Small);
         let mut h = H { ctx: egui::Context::default(), t: 0.0, actions: vec![] };
         h.frame(&mut v, &store, false, vec![]);
