@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 const MIN: (u32, u32) = (0, 158);
 
 /// Whether a usable Hugo is installed; says so when not (BUILD-018).
-fn hugo_here() -> bool {
+pub(super) fn hugo_here() -> bool {
     let version = crate::program::command("hugo").arg("version").output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
     let parsed = version.as_deref().and_then(|v| v.split_whitespace().nth(1)?.strip_prefix('v')).and_then(|v| {
         let mut p = v.split('.').map(|n| n.split(['-', '+']).next().unwrap_or("").parse::<u32>().ok());
@@ -48,7 +48,7 @@ fn unpack(path: &Path) -> Vec<u8> {
 }
 
 /// Export `f` to its `out/` and build it; the folder `public/` and Hugo's messages.
-fn build(f: &Fixture) -> (PathBuf, String) {
+pub(super) fn build(f: &Fixture) -> (PathBuf, String) {
     let args = Args { vault: f.dir.clone(), out: f.out(), dry_run: false };
     export(&args, &[], &mut Vec::new(), &mut Vec::new()).unwrap();
     let public = f.root.join("public");
@@ -59,11 +59,11 @@ fn build(f: &Fixture) -> (PathBuf, String) {
     (public, said)
 }
 
-fn html(public: &Path, page: &str) -> String {
+pub(super) fn html(public: &Path, page: &str) -> String {
     std::fs::read_to_string(public.join(page).join("index.html")).unwrap_or_else(|e| panic!("{page}: {e}"))
 }
 
-fn all_files(dir: &Path, out: &mut Vec<PathBuf>) {
+pub(super) fn all_files(dir: &Path, out: &mut Vec<PathBuf>) {
     for e in std::fs::read_dir(dir).unwrap().flatten() {
         let p = e.path();
         if p.is_dir() {
@@ -93,7 +93,7 @@ fn unescape_url(s: &str) -> String {
 }
 
 /// The values of an attribute (`href`, `id`) in a page, in order.
-fn attrs(html: &str, name: &str) -> Vec<String> {
+pub(super) fn attrs(html: &str, name: &str) -> Vec<String> {
     let pat = format!(" {name}=\"");
     html.match_indices(&pat).filter_map(|(at, _)| html[at + pat.len()..].split('"').next().map(String::from)).collect()
 }

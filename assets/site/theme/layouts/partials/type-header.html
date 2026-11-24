@@ -1,0 +1,40 @@
+{{- /* The header of a note of type email, event, post or person (SITE-044). It shows only what the note's own front matter holds (the exporter wrote nothing else there, SITE-010), as it is written there: an address is not turned into a link, a field the note lacks is left out. `date` and `url` are Hugo's own keys, so the note's values are under `shale` (SITE-024). */ -}}
+{{- $p := .page.Params -}}
+{{- $s := $p.shale | default dict -}}
+{{- $type := .type -}}
+{{- $kind := "" -}}
+{{- $fields := slice -}}
+{{- if eq $type "email" -}}
+  {{- $kind = "E-mail" -}}
+  {{- $fields = slice (slice "From" (index $p "from") false) (slice "To" (index $p "to") false) (slice "Cc" (index $p "cc") false) (slice "Date" (index $s "date") false) (slice "Subject" (index $p "subject") false) (slice "People" (index $p "people") false) -}}
+{{- else if eq $type "event" -}}
+  {{- $kind = "Event" -}}
+  {{- $fields = slice (slice "Start" (index $p "start") false) (slice "End" (index $p "end") false) (slice "All day" (index $p "all-day") false) (slice "Repeats" (index $p "repeats") false) (slice "Where" (index $p "location") false) (slice "Calendar" (index $p "calendar") false) (slice "Organizer" (index $p "organizer") false) (slice "Attendees" (index $p "attendees") false) (slice "Status" (index $p "status") false) (slice "Link" (index $s "url") true) (slice "People" (index $p "people") false) -}}
+{{- else if or (eq $type "post") (eq $type "social-post") -}}
+  {{- $kind = "Post" -}}
+  {{- $fields = slice (slice "Author" (index $p "author-name") false) (slice "Handle" (index $p "author") false) (slice "Profile" (index $p "author-url") true) (slice "Network" (index $p "network") false) (slice "Posted" (index $s "date") false) (slice "Reposted by" (index $p "reposted-by") false) (slice "Thread" (index $p "thread") false) (slice "Replies" (index $p "replies") false) (slice "Source" (index $s "url") true) (slice "People" (index $p "people") false) -}}
+{{- else if eq $type "person" -}}
+  {{- $kind = "Person" -}}
+  {{- $fields = slice (slice "E-mail" (index $p "email") false) (slice "Phone" (index $p "phone") false) (slice "Organization" (index $p "organization") false) (slice "Role" (index $p "role") false) -}}
+{{- end -}}
+{{- $rows := slice -}}
+{{- range $fields }}{{ if index . 1 }}{{ $rows = $rows | append (dict "label" (index . 0) "value" (index . 1) "link" (index . 2)) }}{{ end }}{{ end -}}
+{{- if $rows }}
+<header class="note-header note-{{ $type }}">
+<p class="kind">{{ $kind }}</p>
+<dl>
+{{- range $rows }}{{ $value := .value }}{{ $link := .link }}
+<dt>{{ .label }}</dt>
+<dd>
+{{- if reflect.IsSlice $value -}}
+<ul>{{ range $value }}{{ with . }}<li>{{ . }}</li>{{ end }}{{ end }}</ul>
+{{- else if and $link (or (strings.HasPrefix (printf "%v" $value) "http://") (strings.HasPrefix (printf "%v" $value) "https://")) -}}
+<a href="{{ $value }}" rel="noopener">{{ $value }}</a>
+{{- else -}}
+{{ $value }}
+{{- end -}}
+</dd>
+{{- end }}
+</dl>
+</header>
+{{- end }}

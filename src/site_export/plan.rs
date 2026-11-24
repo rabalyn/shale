@@ -171,6 +171,12 @@ pub fn build(vault: &Vault) -> Result<Export, String> {
         files.push(OutFile { path: path.clone(), content: Content::Copy(abs) });
         media.push(path);
     }
+    // the pictures of the drawings that pages embed (SITE-037)
+    for (rel, (svg, _)) in &st.drawings {
+        let path = format!("static/{}", body::drawing_path(rel));
+        files.push(OutFile { path: path.clone(), content: Content::Text(svg.clone()) });
+        media.push(path);
+    }
     for (path, abs) in &st.outside_media {
         let path = format!("static/{path}");
         files.push(OutFile { path: path.clone(), content: Content::Copy(abs.clone()) });

@@ -6,6 +6,14 @@ theme = "shale"
 # a page for every note, section and tag; no feed or sitemap, whose URLs need a real base URL
 disableKinds = ["RSS", "sitemap", "robotsTXT"]
 
+# the graph page (SITE-040) is a second output of the home page: /graph.html, so that no note's URL can clash with it
+[outputFormats.Graph]
+  mediaType = "text/html"
+  baseName = "graph"
+  notAlternative = true
+[outputs]
+  home = ["HTML", "Graph"]
+
 # Hugo takes the Markdown settings of the site, not of a theme (a theme's `markup` is ignored).
 [markup]
   [markup.goldmark]

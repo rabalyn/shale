@@ -65,9 +65,9 @@ impl ShaleApp {
                 ui.horizontal_wrapped(|ui| {
                     ui.label("Also publish");
                     for (kind, label) in PRIVATE {
-                        let mut on = s.private_types.iter().any(|t| t == kind);
+                        let mut on = s.private_types.iter().any(|t| crate::site_export::rules::kind_of(&t.trim().to_lowercase()) == kind);
                         if ui.checkbox(&mut on, label).changed() {
-                            s.private_types.retain(|t| t != kind);
+                            s.private_types.retain(|t| crate::site_export::rules::kind_of(&t.trim().to_lowercase()) != kind);
                             if on {
                                 s.private_types.push(kind.to_string());
                             }

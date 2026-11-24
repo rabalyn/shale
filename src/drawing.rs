@@ -16,7 +16,7 @@ mod links;
 pub(crate) mod pictures;
 #[cfg(test)]
 mod ui_tests;
-pub use links::{link_lines, rewrite_link_texts, DrawingAction};
+pub use links::{element_link, link_lines, rewrite_link_texts, DrawingAction, ElementLink};
 
 /// Excalidraw font id of a text element (1 hand-drawn, 2 normal, 3 code).
 pub fn font_family_of_pub(e: &Element) -> u64 {

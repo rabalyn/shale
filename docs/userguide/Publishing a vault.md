@@ -65,7 +65,20 @@ Changing a rule changes no note. Shale reads the rules and your notes and never 
 - Highlights, colours, subscript and superscript, tables, footnotes, task lists (shown, not clickable), code with its
   language, and math (`$x^2$`, `$$…$$`, a `math` block) are shown; math is typeset when the site is built, so the
   browser runs no script for it. Page-break lines are left out, and a `<div align="center">` block stays aligned.
-- A picture keeps its width and its alias (`![[sea.png|Sea at dusk|300]]`). Audio, video and PDF are a link to the file.
+- A picture keeps its width and its alias (`![[sea.png|Sea at dusk|300]]`). An embedded sound, video or PDF
+  (`![[song.mp3]]`, `![[clip.mp4|480]]`, `![[paper.pdf]]`) is shown with a player in the page, the PDF in a frame, and
+  a link to the file inside for a browser that cannot show it; the width works for them too. A plain link
+  (`[[song.mp3]]`) stays a link.
+- A drawing (`.excalidraw`, `.excalidraw.md` or an Obsidian `.canvas`) that a note **embeds** (`![[Map.excalidraw]]`)
+  is drawn to a picture (SVG) in the site, with the width and alias of a picture. A link in the drawing to a note that
+  is published works; a link to a note that is not is only its text. A drawing that no published note embeds is not
+  written, and a drawing is never a page of its own.
+- Notes whose `type` is `email`, `event`, `post` (a saved post) or `person` show a header with their properties (an
+  e-mail: from, to, date; an event: when, where, who; a post: author, date, source; a contact: e-mail, phone,
+  organization), as they are written in the note and nothing else. Notes of any other type look like every page.
+- The site has a **Graph** page (`graph.html`, linked in the header of every page) with the published notes as dots and
+  the links between them as lines: zoom with the wheel, drag a dot or the background, click a dot to open the note. It
+  needs no server and loads nothing from another site.
 - Every folder with published notes is a page that lists its notes and subfolders; a folder note (`index.md`, `README.md`,
   or a note named like the folder) is the text of that page. The home page lists the folders and the latest notes. A
   page shows the notes that link to it in a panel below the text.
