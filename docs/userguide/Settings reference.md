@@ -111,7 +111,7 @@ loading the entries on screen once you stop scrolling.
 | `fonts.editor_raw` | Shale's font, 15.5 | Fonts, "Editor: raw markdown": the markdown text in the editor, and the raw lines around the cursor in the preview |
 | `fonts.editor_rendered` | Shale's font, 15.5 | Fonts, "Editor: rendered text and reading view": the rendered lines of the preview and the reading view |
 | `fonts.mail` | Shale's font, 14 | Fonts, "Mail" |
-| `fonts.calendar` | Shale's font, 14 | Fonts, "Calendar" (the calendar view and the calendar of the right sidebar) |
+| `fonts.calendar` | Shale's font, 14 | Fonts, "Calendar" (the calendar view, the calendar of the right sidebar and the Calendar pane) |
 | `fonts.social` | Shale's font, 14 | Fonts, "Feeds" |
 
 Inside each of these tables: `family` and `size`. The old `font_size` of earlier versions became the

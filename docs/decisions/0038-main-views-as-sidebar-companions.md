@@ -1,6 +1,6 @@
 # ADR-0038: Mail, Calendar and Feeds as compact companions in the right sidebar
 
-- **Status**: Accepted (2026-11-24); step 1 (the shared placing and Mail) is built, Calendar and Feeds follow
+- **Status**: Accepted (2026-11-24); step 1 (the shared placing and Mail) and step 2 (Calendar) are built, Feeds follows
 - **Date**: 2026-11-24
 - **Specs**: LAY-028…LAY-034
 - **Issues**: rabalyn/shale#610
@@ -25,7 +25,7 @@ message), the Calendar a grid and a side bar, Feeds a column of tabs and a threa
      message list of the chosen folder, with the unread state. A click on a message opens it in
      the Mail tab of the main area (opening the tab when there is none). Reading, writing,
      searching, moving and the settings stay in the tab.
-   - **Calendar**: a small month and the agenda of the next days. A click on an event opens it in
+   - **Calendar**: a small month and the agenda of the next 14 days. A click on an event opens it in
      the Calendar tab.
    - **Feeds**: the home timeline in one column. A click opens the thread in the Feeds tab.
 2. **Independent view state.** The pane has its own account, folder or feed selection, its own

@@ -707,7 +707,14 @@ The settings stay open until closed (✕, Esc or the ⋯ button; a click outside
   on a message opens it in the Mail tab (the tab is opened when there is none). The pane keeps its own account, folder,
   selection and scroll, so the sidebar can show the Inbox while the tab shows another folder; the mail data and the syncs
   are shared. A copy keeps the Mail icon in the ribbon, which still opens the tab; the left sidebar never shows Mail.
-  Calendar and Feeds follow with their own compact panes.
+  Feeds follows with its own compact pane.
+- **Calendar in the right sidebar** (LAY-029, LAY-033, LAY-036, rabalyn/shale#610, ADR-0038): Calendar is placed the same
+  way (drag and **Move or copy?**, or right-click **Move to / Copy to the right sidebar**), apart from the Calendar panel.
+  The pane is a compact companion of the Calendar tab: a small month (‹ › and Today, today marked, a dot under the days
+  with events) and under it the agenda of 14 days from the chosen day, all-day events first, each with its time and title.
+  A click on a day moves the agenda there; a click on an event opens it in the Calendar tab (opened when there is none) with
+  its details. The pane has its own month and chosen day, separate from the tab; the events and the sync are shared. It says
+  when there is no calendar, when nothing is coming up and while the calendars load.
 - Drag the border between two views up or down to change their heights (they start equal; a
   view never gets lower than a small minimum).
 - A middle click on the **Mail**, **Feeds** or **Calendar** icon opens that view in a new tab.
