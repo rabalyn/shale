@@ -34,7 +34,7 @@ or within, before, on, after or on or after a day: a date, `today` or `+7d`), **
 the query into the box as you go and the list follows at once; what you type in the box fills the form. A row
 that is not complete yet (an empty tag, a property without a value) is not in the query and says what it needs.
 
-**Suggestions.** The tag field, the name of a property and its value suggest what the vault knows: the tags, the
+**Suggestions.** The tag field, the folder field, the name of a property and its value suggest what the vault knows: the tags, the folders that hold notes (nested ones too, written with a trailing `/`), the
 names of the properties in the notes' front matter, and for the name you chose the values seen with it. Click into an empty
 field and the list shows everything, alphabetically; type and it narrows (what starts with your letters first, then
 what contains them). **↓ / ↑** (or Ctrl+J / Ctrl+K) choose, **Enter** or **Tab** take the entry, a click takes it too,

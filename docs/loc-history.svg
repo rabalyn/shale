@@ -6,149 +6,147 @@ text{font-family:sans-serif;font-size:12px;fill:#374151}.lbl{font-size:11px}.tip
 <rect width="960" height="420" fill="#ffffff"/>
 <line x1="64" y1="348.0" x2="936" y2="348.0" stroke="#e5e7eb"/>
 <text x="56" y="352.0" text-anchor="end">0</text>
-<line x1="64" y1="289.6" x2="936" y2="289.6" stroke="#e5e7eb"/>
-<text x="56" y="293.6" text-anchor="end">20k</text>
-<line x1="64" y1="231.2" x2="936" y2="231.2" stroke="#e5e7eb"/>
-<text x="56" y="235.2" text-anchor="end">40k</text>
-<line x1="64" y1="172.8" x2="936" y2="172.8" stroke="#e5e7eb"/>
-<text x="56" y="176.8" text-anchor="end">60k</text>
-<line x1="64" y1="114.4" x2="936" y2="114.4" stroke="#e5e7eb"/>
-<text x="56" y="118.4" text-anchor="end">80k</text>
+<line x1="64" y1="250.7" x2="936" y2="250.7" stroke="#e5e7eb"/>
+<text x="56" y="254.7" text-anchor="end">50k</text>
+<line x1="64" y1="153.3" x2="936" y2="153.3" stroke="#e5e7eb"/>
+<text x="56" y="157.3" text-anchor="end">100k</text>
 <line x1="64" y1="56.0" x2="936" y2="56.0" stroke="#e5e7eb"/>
-<text x="56" y="60.0" text-anchor="end">100k</text>
+<text x="56" y="60.0" text-anchor="end">150k</text>
 <line x1="64" y1="348" x2="936" y2="348" stroke="#6b7280"/>
 <line x1="64" y1="56" x2="64" y2="348" stroke="#6b7280"/>
 <line x1="64" y1="26" x2="92" y2="26" stroke="#2563eb" stroke-width="2.5"/>
 <text x="98" y="30">Code</text>
 <line x1="214" y1="26" x2="242" y2="26" stroke="#ea580c" stroke-width="2.5" stroke-dasharray="6 3"/>
 <text x="248" y="30">Test code</text>
-<polyline fill="none" stroke="#2563eb" stroke-width="2" points="80.0,302.5 103.3,301.0 126.7,187.8 150.0,186.4 173.3,186.4 196.7,180.5 220.0,155.5 243.3,155.5 266.7,154.5 290.0,154.5 313.3,154.5 336.7,154.5 360.0,153.0 383.3,153.0 406.7,143.2 430.0,128.6 453.3,128.5 476.7,128.5 500.0,124.5 523.3,123.7 546.7,123.7 570.0,123.7 593.3,123.5 616.7,123.5 640.0,123.5 663.3,123.5 686.7,106.4 710.0,106.4 733.3,106.4 756.7,104.0 780.0,103.6 803.3,92.2 826.7,91.3 850.0,91.2 873.3,87.6 896.7,87.6 920.0,87.6"/>
-<circle cx="80.0" cy="302.5" r="4.5" fill="#2563eb"/>
-<circle cx="103.3" cy="301.0" r="4.5" fill="#2563eb"/>
-<circle cx="126.7" cy="187.8" r="2.5" fill="#2563eb"/>
-<circle cx="150.0" cy="186.4" r="2.5" fill="#2563eb"/>
-<circle cx="173.3" cy="186.4" r="2.5" fill="#2563eb"/>
-<circle cx="196.7" cy="180.5" r="4.5" fill="#2563eb"/>
-<circle cx="220.0" cy="155.5" r="2.5" fill="#2563eb"/>
-<circle cx="243.3" cy="155.5" r="4.5" fill="#2563eb"/>
-<circle cx="266.7" cy="154.5" r="2.5" fill="#2563eb"/>
-<circle cx="290.0" cy="154.5" r="2.5" fill="#2563eb"/>
-<circle cx="313.3" cy="154.5" r="4.5" fill="#2563eb"/>
-<circle cx="336.7" cy="154.5" r="4.5" fill="#2563eb"/>
-<circle cx="360.0" cy="153.0" r="4.5" fill="#2563eb"/>
-<circle cx="383.3" cy="153.0" r="4.5" fill="#2563eb"/>
-<circle cx="406.7" cy="143.2" r="4.5" fill="#2563eb"/>
-<circle cx="430.0" cy="128.6" r="4.5" fill="#2563eb"/>
-<circle cx="453.3" cy="128.5" r="4.5" fill="#2563eb"/>
-<circle cx="476.7" cy="128.5" r="4.5" fill="#2563eb"/>
-<circle cx="500.0" cy="124.5" r="4.5" fill="#2563eb"/>
-<circle cx="523.3" cy="123.7" r="4.5" fill="#2563eb"/>
-<circle cx="546.7" cy="123.7" r="4.5" fill="#2563eb"/>
-<circle cx="570.0" cy="123.7" r="2.5" fill="#2563eb"/>
-<circle cx="593.3" cy="123.5" r="2.5" fill="#2563eb"/>
-<circle cx="616.7" cy="123.5" r="2.5" fill="#2563eb"/>
-<circle cx="640.0" cy="123.5" r="2.5" fill="#2563eb"/>
-<circle cx="663.3" cy="123.5" r="4.5" fill="#2563eb"/>
-<circle cx="686.7" cy="106.4" r="2.5" fill="#2563eb"/>
-<circle cx="710.0" cy="106.4" r="2.5" fill="#2563eb"/>
-<circle cx="733.3" cy="106.4" r="2.5" fill="#2563eb"/>
-<circle cx="756.7" cy="104.0" r="2.5" fill="#2563eb"/>
-<circle cx="780.0" cy="103.6" r="4.5" fill="#2563eb"/>
-<circle cx="803.3" cy="92.2" r="4.5" fill="#2563eb"/>
-<circle cx="826.7" cy="91.3" r="4.5" fill="#2563eb"/>
-<circle cx="850.0" cy="91.2" r="4.5" fill="#2563eb"/>
-<circle cx="873.3" cy="87.6" r="4.5" fill="#2563eb"/>
-<circle cx="896.7" cy="87.6" r="4.5" fill="#2563eb"/>
-<circle cx="920.0" cy="87.6" r="4.5" fill="#2563eb"/>
-<polyline fill="none" stroke="#ea580c" stroke-width="2" stroke-dasharray="6 3" points="80.0,337.6 103.3,336.9 126.7,224.0 150.0,221.9 173.3,221.9 196.7,215.1 220.0,194.7 243.3,194.7 266.7,192.7 290.0,192.7 313.3,192.7 336.7,192.5 360.0,190.2 383.3,189.7 406.7,177.6 430.0,169.1 453.3,168.9 476.7,168.9 500.0,164.7 523.3,160.3 546.7,159.5 570.0,159.0 593.3,157.1 616.7,157.1 640.0,154.1 663.3,154.1 686.7,141.3 710.0,141.3 733.3,141.2 756.7,138.7 780.0,138.2 803.3,117.6 826.7,115.5 850.0,115.2 873.3,105.2 896.7,105.1 920.0,105.1"/>
-<circle cx="80.0" cy="337.6" r="4.5" fill="#ea580c"/>
-<circle cx="103.3" cy="336.9" r="4.5" fill="#ea580c"/>
-<circle cx="126.7" cy="224.0" r="2.5" fill="#ea580c"/>
-<circle cx="150.0" cy="221.9" r="2.5" fill="#ea580c"/>
-<circle cx="173.3" cy="221.9" r="2.5" fill="#ea580c"/>
-<circle cx="196.7" cy="215.1" r="4.5" fill="#ea580c"/>
-<circle cx="220.0" cy="194.7" r="2.5" fill="#ea580c"/>
-<circle cx="243.3" cy="194.7" r="4.5" fill="#ea580c"/>
-<circle cx="266.7" cy="192.7" r="2.5" fill="#ea580c"/>
-<circle cx="290.0" cy="192.7" r="2.5" fill="#ea580c"/>
-<circle cx="313.3" cy="192.7" r="4.5" fill="#ea580c"/>
-<circle cx="336.7" cy="192.5" r="4.5" fill="#ea580c"/>
-<circle cx="360.0" cy="190.2" r="4.5" fill="#ea580c"/>
-<circle cx="383.3" cy="189.7" r="4.5" fill="#ea580c"/>
-<circle cx="406.7" cy="177.6" r="4.5" fill="#ea580c"/>
-<circle cx="430.0" cy="169.1" r="4.5" fill="#ea580c"/>
-<circle cx="453.3" cy="168.9" r="4.5" fill="#ea580c"/>
-<circle cx="476.7" cy="168.9" r="4.5" fill="#ea580c"/>
-<circle cx="500.0" cy="164.7" r="4.5" fill="#ea580c"/>
-<circle cx="523.3" cy="160.3" r="4.5" fill="#ea580c"/>
-<circle cx="546.7" cy="159.5" r="4.5" fill="#ea580c"/>
-<circle cx="570.0" cy="159.0" r="2.5" fill="#ea580c"/>
-<circle cx="593.3" cy="157.1" r="2.5" fill="#ea580c"/>
-<circle cx="616.7" cy="157.1" r="2.5" fill="#ea580c"/>
-<circle cx="640.0" cy="154.1" r="2.5" fill="#ea580c"/>
-<circle cx="663.3" cy="154.1" r="4.5" fill="#ea580c"/>
-<circle cx="686.7" cy="141.3" r="2.5" fill="#ea580c"/>
-<circle cx="710.0" cy="141.3" r="2.5" fill="#ea580c"/>
-<circle cx="733.3" cy="141.2" r="2.5" fill="#ea580c"/>
-<circle cx="756.7" cy="138.7" r="2.5" fill="#ea580c"/>
-<circle cx="780.0" cy="138.2" r="4.5" fill="#ea580c"/>
-<circle cx="803.3" cy="117.6" r="4.5" fill="#ea580c"/>
-<circle cx="826.7" cy="115.5" r="4.5" fill="#ea580c"/>
-<circle cx="850.0" cy="115.2" r="4.5" fill="#ea580c"/>
-<circle cx="873.3" cy="105.2" r="4.5" fill="#ea580c"/>
-<circle cx="896.7" cy="105.1" r="4.5" fill="#ea580c"/>
-<circle cx="920.0" cy="105.1" r="4.5" fill="#ea580c"/>
+<polyline fill="none" stroke="#2563eb" stroke-width="2" points="80.0,317.7 102.7,316.7 125.4,241.2 148.1,240.3 170.8,240.3 193.5,236.3 216.2,219.6 238.9,219.6 261.6,219.0 284.3,219.0 307.0,219.0 329.7,219.0 352.4,218.0 375.1,218.0 397.8,211.5 420.5,201.7 443.2,201.7 465.9,201.7 488.6,199.0 511.4,198.4 534.1,198.4 556.8,198.4 579.5,198.4 602.2,198.4 624.9,198.3 647.6,198.3 670.3,186.9 693.0,186.9 715.7,186.9 738.4,185.3 761.1,185.1 783.8,177.5 806.5,176.9 829.2,176.8 851.9,174.4 874.6,174.4 897.3,174.4 920.0,133.2"/>
+<circle cx="80.0" cy="317.7" r="4.5" fill="#2563eb"/>
+<circle cx="102.7" cy="316.7" r="4.5" fill="#2563eb"/>
+<circle cx="125.4" cy="241.2" r="2.5" fill="#2563eb"/>
+<circle cx="148.1" cy="240.3" r="2.5" fill="#2563eb"/>
+<circle cx="170.8" cy="240.3" r="2.5" fill="#2563eb"/>
+<circle cx="193.5" cy="236.3" r="4.5" fill="#2563eb"/>
+<circle cx="216.2" cy="219.6" r="2.5" fill="#2563eb"/>
+<circle cx="238.9" cy="219.6" r="4.5" fill="#2563eb"/>
+<circle cx="261.6" cy="219.0" r="2.5" fill="#2563eb"/>
+<circle cx="284.3" cy="219.0" r="2.5" fill="#2563eb"/>
+<circle cx="307.0" cy="219.0" r="4.5" fill="#2563eb"/>
+<circle cx="329.7" cy="219.0" r="4.5" fill="#2563eb"/>
+<circle cx="352.4" cy="218.0" r="4.5" fill="#2563eb"/>
+<circle cx="375.1" cy="218.0" r="4.5" fill="#2563eb"/>
+<circle cx="397.8" cy="211.5" r="4.5" fill="#2563eb"/>
+<circle cx="420.5" cy="201.7" r="4.5" fill="#2563eb"/>
+<circle cx="443.2" cy="201.7" r="4.5" fill="#2563eb"/>
+<circle cx="465.9" cy="201.7" r="4.5" fill="#2563eb"/>
+<circle cx="488.6" cy="199.0" r="4.5" fill="#2563eb"/>
+<circle cx="511.4" cy="198.4" r="4.5" fill="#2563eb"/>
+<circle cx="534.1" cy="198.4" r="4.5" fill="#2563eb"/>
+<circle cx="556.8" cy="198.4" r="2.5" fill="#2563eb"/>
+<circle cx="579.5" cy="198.4" r="2.5" fill="#2563eb"/>
+<circle cx="602.2" cy="198.4" r="2.5" fill="#2563eb"/>
+<circle cx="624.9" cy="198.3" r="2.5" fill="#2563eb"/>
+<circle cx="647.6" cy="198.3" r="4.5" fill="#2563eb"/>
+<circle cx="670.3" cy="186.9" r="2.5" fill="#2563eb"/>
+<circle cx="693.0" cy="186.9" r="2.5" fill="#2563eb"/>
+<circle cx="715.7" cy="186.9" r="2.5" fill="#2563eb"/>
+<circle cx="738.4" cy="185.3" r="2.5" fill="#2563eb"/>
+<circle cx="761.1" cy="185.1" r="4.5" fill="#2563eb"/>
+<circle cx="783.8" cy="177.5" r="4.5" fill="#2563eb"/>
+<circle cx="806.5" cy="176.9" r="4.5" fill="#2563eb"/>
+<circle cx="829.2" cy="176.8" r="4.5" fill="#2563eb"/>
+<circle cx="851.9" cy="174.4" r="4.5" fill="#2563eb"/>
+<circle cx="874.6" cy="174.4" r="4.5" fill="#2563eb"/>
+<circle cx="897.3" cy="174.4" r="4.5" fill="#2563eb"/>
+<circle cx="920.0" cy="133.2" r="2.5" fill="#2563eb"/>
+<polyline fill="none" stroke="#ea580c" stroke-width="2" stroke-dasharray="6 3" points="80.0,341.1 102.7,340.6 125.4,265.3 148.1,263.9 170.8,263.9 193.5,259.4 216.2,245.8 238.9,245.8 261.6,244.5 284.3,244.5 307.0,244.5 329.7,244.3 352.4,242.8 375.1,242.5 397.8,234.4 420.5,228.7 443.2,228.6 465.9,228.6 488.6,225.8 511.4,222.9 534.1,222.4 556.8,222.0 579.5,220.8 602.2,220.8 624.9,218.8 647.6,218.8 670.3,210.2 693.0,210.2 715.7,210.2 738.4,208.5 761.1,208.2 783.8,194.4 806.5,193.0 829.2,192.8 851.9,186.1 874.6,186.1 897.3,186.1 920.0,134.4"/>
+<circle cx="80.0" cy="341.1" r="4.5" fill="#ea580c"/>
+<circle cx="102.7" cy="340.6" r="4.5" fill="#ea580c"/>
+<circle cx="125.4" cy="265.3" r="2.5" fill="#ea580c"/>
+<circle cx="148.1" cy="263.9" r="2.5" fill="#ea580c"/>
+<circle cx="170.8" cy="263.9" r="2.5" fill="#ea580c"/>
+<circle cx="193.5" cy="259.4" r="4.5" fill="#ea580c"/>
+<circle cx="216.2" cy="245.8" r="2.5" fill="#ea580c"/>
+<circle cx="238.9" cy="245.8" r="4.5" fill="#ea580c"/>
+<circle cx="261.6" cy="244.5" r="2.5" fill="#ea580c"/>
+<circle cx="284.3" cy="244.5" r="2.5" fill="#ea580c"/>
+<circle cx="307.0" cy="244.5" r="4.5" fill="#ea580c"/>
+<circle cx="329.7" cy="244.3" r="4.5" fill="#ea580c"/>
+<circle cx="352.4" cy="242.8" r="4.5" fill="#ea580c"/>
+<circle cx="375.1" cy="242.5" r="4.5" fill="#ea580c"/>
+<circle cx="397.8" cy="234.4" r="4.5" fill="#ea580c"/>
+<circle cx="420.5" cy="228.7" r="4.5" fill="#ea580c"/>
+<circle cx="443.2" cy="228.6" r="4.5" fill="#ea580c"/>
+<circle cx="465.9" cy="228.6" r="4.5" fill="#ea580c"/>
+<circle cx="488.6" cy="225.8" r="4.5" fill="#ea580c"/>
+<circle cx="511.4" cy="222.9" r="4.5" fill="#ea580c"/>
+<circle cx="534.1" cy="222.4" r="4.5" fill="#ea580c"/>
+<circle cx="556.8" cy="222.0" r="2.5" fill="#ea580c"/>
+<circle cx="579.5" cy="220.8" r="2.5" fill="#ea580c"/>
+<circle cx="602.2" cy="220.8" r="2.5" fill="#ea580c"/>
+<circle cx="624.9" cy="218.8" r="2.5" fill="#ea580c"/>
+<circle cx="647.6" cy="218.8" r="4.5" fill="#ea580c"/>
+<circle cx="670.3" cy="210.2" r="2.5" fill="#ea580c"/>
+<circle cx="693.0" cy="210.2" r="2.5" fill="#ea580c"/>
+<circle cx="715.7" cy="210.2" r="2.5" fill="#ea580c"/>
+<circle cx="738.4" cy="208.5" r="2.5" fill="#ea580c"/>
+<circle cx="761.1" cy="208.2" r="4.5" fill="#ea580c"/>
+<circle cx="783.8" cy="194.4" r="4.5" fill="#ea580c"/>
+<circle cx="806.5" cy="193.0" r="4.5" fill="#ea580c"/>
+<circle cx="829.2" cy="192.8" r="4.5" fill="#ea580c"/>
+<circle cx="851.9" cy="186.1" r="4.5" fill="#ea580c"/>
+<circle cx="874.6" cy="186.1" r="4.5" fill="#ea580c"/>
+<circle cx="897.3" cy="186.1" r="4.5" fill="#ea580c"/>
+<circle cx="920.0" cy="134.4" r="2.5" fill="#ea580c"/>
 <line x1="80.0" y1="348" x2="80.0" y2="352" stroke="#6b7280"/>
 <text class="lbl" transform="translate(84.0,364) rotate(-45)" text-anchor="end">v0.2.0</text>
-<line x1="103.3" y1="348" x2="103.3" y2="352" stroke="#6b7280"/>
-<text class="lbl" transform="translate(107.3,364) rotate(-45)" text-anchor="end">v0.3.0</text>
-<line x1="196.7" y1="348" x2="196.7" y2="352" stroke="#6b7280"/>
-<text class="lbl" transform="translate(200.7,364) rotate(-45)" text-anchor="end">v0.4.0</text>
-<line x1="243.3" y1="348" x2="243.3" y2="352" stroke="#6b7280"/>
-<text class="lbl" transform="translate(247.3,364) rotate(-45)" text-anchor="end">v0.5.0</text>
-<line x1="313.3" y1="348" x2="313.3" y2="352" stroke="#6b7280"/>
-<text class="lbl" transform="translate(317.3,364) rotate(-45)" text-anchor="end">v0.5.1</text>
-<line x1="336.7" y1="348" x2="336.7" y2="352" stroke="#6b7280"/>
-<text class="lbl" transform="translate(340.7,364) rotate(-45)" text-anchor="end">v0.6.0</text>
-<line x1="360.0" y1="348" x2="360.0" y2="352" stroke="#6b7280"/>
-<text class="lbl" transform="translate(364.0,364) rotate(-45)" text-anchor="end">v0.6.1</text>
-<line x1="383.3" y1="348" x2="383.3" y2="352" stroke="#6b7280"/>
-<text class="lbl" transform="translate(387.3,364) rotate(-45)" text-anchor="end">v0.6.2</text>
-<line x1="406.7" y1="348" x2="406.7" y2="352" stroke="#6b7280"/>
-<text class="lbl" transform="translate(410.7,364) rotate(-45)" text-anchor="end">v0.6.3</text>
-<line x1="430.0" y1="348" x2="430.0" y2="352" stroke="#6b7280"/>
-<text class="lbl" transform="translate(434.0,364) rotate(-45)" text-anchor="end">v0.6.4</text>
-<line x1="453.3" y1="348" x2="453.3" y2="352" stroke="#6b7280"/>
-<text class="lbl" transform="translate(457.3,364) rotate(-45)" text-anchor="end">v0.6.5</text>
-<line x1="476.7" y1="348" x2="476.7" y2="352" stroke="#6b7280"/>
-<text class="lbl" transform="translate(480.7,364) rotate(-45)" text-anchor="end">v0.6.6</text>
-<line x1="500.0" y1="348" x2="500.0" y2="352" stroke="#6b7280"/>
-<text class="lbl" transform="translate(504.0,364) rotate(-45)" text-anchor="end">v0.6.7</text>
-<line x1="523.3" y1="348" x2="523.3" y2="352" stroke="#6b7280"/>
-<text class="lbl" transform="translate(527.3,364) rotate(-45)" text-anchor="end">v0.6.8</text>
-<line x1="546.7" y1="348" x2="546.7" y2="352" stroke="#6b7280"/>
-<text class="lbl" transform="translate(550.7,364) rotate(-45)" text-anchor="end">v0.6.9</text>
-<line x1="663.3" y1="348" x2="663.3" y2="352" stroke="#6b7280"/>
-<text class="lbl" transform="translate(667.3,364) rotate(-45)" text-anchor="end">v0.6.10</text>
-<line x1="780.0" y1="348" x2="780.0" y2="352" stroke="#6b7280"/>
-<text class="lbl" transform="translate(784.0,364) rotate(-45)" text-anchor="end">v0.7.0</text>
-<line x1="803.3" y1="348" x2="803.3" y2="352" stroke="#6b7280"/>
-<text class="lbl" transform="translate(807.3,364) rotate(-45)" text-anchor="end">v0.7.1</text>
-<line x1="826.7" y1="348" x2="826.7" y2="352" stroke="#6b7280"/>
-<text class="lbl" transform="translate(830.7,364) rotate(-45)" text-anchor="end">v0.7.2</text>
-<line x1="850.0" y1="348" x2="850.0" y2="352" stroke="#6b7280"/>
-<text class="lbl" transform="translate(854.0,364) rotate(-45)" text-anchor="end">v0.7.3</text>
-<line x1="873.3" y1="348" x2="873.3" y2="352" stroke="#6b7280"/>
-<text class="lbl" transform="translate(877.3,364) rotate(-45)" text-anchor="end">v0.7.4</text>
-<line x1="896.7" y1="348" x2="896.7" y2="352" stroke="#6b7280"/>
-<text class="lbl" transform="translate(900.7,364) rotate(-45)" text-anchor="end">v0.7.5</text>
-<line x1="920.0" y1="348" x2="920.0" y2="352" stroke="#6b7280"/>
-<text class="lbl" transform="translate(924.0,364) rotate(-45)" text-anchor="end">v0.7.6</text>
+<line x1="102.7" y1="348" x2="102.7" y2="352" stroke="#6b7280"/>
+<text class="lbl" transform="translate(106.7,364) rotate(-45)" text-anchor="end">v0.3.0</text>
+<line x1="193.5" y1="348" x2="193.5" y2="352" stroke="#6b7280"/>
+<text class="lbl" transform="translate(197.5,364) rotate(-45)" text-anchor="end">v0.4.0</text>
+<line x1="238.9" y1="348" x2="238.9" y2="352" stroke="#6b7280"/>
+<text class="lbl" transform="translate(242.9,364) rotate(-45)" text-anchor="end">v0.5.0</text>
+<line x1="307.0" y1="348" x2="307.0" y2="352" stroke="#6b7280"/>
+<text class="lbl" transform="translate(311.0,364) rotate(-45)" text-anchor="end">v0.5.1</text>
+<line x1="329.7" y1="348" x2="329.7" y2="352" stroke="#6b7280"/>
+<text class="lbl" transform="translate(333.7,364) rotate(-45)" text-anchor="end">v0.6.0</text>
+<line x1="352.4" y1="348" x2="352.4" y2="352" stroke="#6b7280"/>
+<text class="lbl" transform="translate(356.4,364) rotate(-45)" text-anchor="end">v0.6.1</text>
+<line x1="375.1" y1="348" x2="375.1" y2="352" stroke="#6b7280"/>
+<text class="lbl" transform="translate(379.1,364) rotate(-45)" text-anchor="end">v0.6.2</text>
+<line x1="397.8" y1="348" x2="397.8" y2="352" stroke="#6b7280"/>
+<text class="lbl" transform="translate(401.8,364) rotate(-45)" text-anchor="end">v0.6.3</text>
+<line x1="420.5" y1="348" x2="420.5" y2="352" stroke="#6b7280"/>
+<text class="lbl" transform="translate(424.5,364) rotate(-45)" text-anchor="end">v0.6.4</text>
+<line x1="443.2" y1="348" x2="443.2" y2="352" stroke="#6b7280"/>
+<text class="lbl" transform="translate(447.2,364) rotate(-45)" text-anchor="end">v0.6.5</text>
+<line x1="465.9" y1="348" x2="465.9" y2="352" stroke="#6b7280"/>
+<text class="lbl" transform="translate(469.9,364) rotate(-45)" text-anchor="end">v0.6.6</text>
+<line x1="488.6" y1="348" x2="488.6" y2="352" stroke="#6b7280"/>
+<text class="lbl" transform="translate(492.6,364) rotate(-45)" text-anchor="end">v0.6.7</text>
+<line x1="511.4" y1="348" x2="511.4" y2="352" stroke="#6b7280"/>
+<text class="lbl" transform="translate(515.4,364) rotate(-45)" text-anchor="end">v0.6.8</text>
+<line x1="534.1" y1="348" x2="534.1" y2="352" stroke="#6b7280"/>
+<text class="lbl" transform="translate(538.1,364) rotate(-45)" text-anchor="end">v0.6.9</text>
+<line x1="647.6" y1="348" x2="647.6" y2="352" stroke="#6b7280"/>
+<text class="lbl" transform="translate(651.6,364) rotate(-45)" text-anchor="end">v0.6.10</text>
+<line x1="761.1" y1="348" x2="761.1" y2="352" stroke="#6b7280"/>
+<text class="lbl" transform="translate(765.1,364) rotate(-45)" text-anchor="end">v0.7.0</text>
+<line x1="783.8" y1="348" x2="783.8" y2="352" stroke="#6b7280"/>
+<text class="lbl" transform="translate(787.8,364) rotate(-45)" text-anchor="end">v0.7.1</text>
+<line x1="806.5" y1="348" x2="806.5" y2="352" stroke="#6b7280"/>
+<text class="lbl" transform="translate(810.5,364) rotate(-45)" text-anchor="end">v0.7.2</text>
+<line x1="829.2" y1="348" x2="829.2" y2="352" stroke="#6b7280"/>
+<text class="lbl" transform="translate(833.2,364) rotate(-45)" text-anchor="end">v0.7.3</text>
+<line x1="851.9" y1="348" x2="851.9" y2="352" stroke="#6b7280"/>
+<text class="lbl" transform="translate(855.9,364) rotate(-45)" text-anchor="end">v0.7.4</text>
+<line x1="874.6" y1="348" x2="874.6" y2="352" stroke="#6b7280"/>
+<text class="lbl" transform="translate(878.6,364) rotate(-45)" text-anchor="end">v0.7.5</text>
+<line x1="897.3" y1="348" x2="897.3" y2="352" stroke="#6b7280"/>
+<text class="lbl" transform="translate(901.3,364) rotate(-45)" text-anchor="end">v0.7.6</text>
 <g class="col">
 <title>v0.2.0 · 2026-11-13
 Code: 15 570
 Test code: 3 564</title>
-<rect x="68.3" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
+<rect x="68.6" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
 <line class="guide" x1="80.0" y1="56" x2="80.0" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
 <rect class="tipbg" x="90.0" y="60" width="190" height="62" rx="6"/>
@@ -161,468 +159,481 @@ Test code: 3 564</title>
 <title>v0.3.0 · 2026-11-13
 Code: 16 082
 Test code: 3 807</title>
-<rect x="91.7" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="103.3" y1="56" x2="103.3" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="91.4" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="102.7" y1="56" x2="102.7" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="113.3" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="123.3" y="79">v0.3.0 · 2026-11-13</text>
-<text x="123.3" y="95">Code: 16 082</text>
-<text x="123.3" y="111">Test code: 3 807</text>
+<rect class="tipbg" x="112.7" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="122.7" y="79">v0.3.0 · 2026-11-13</text>
+<text x="122.7" y="95">Code: 16 082</text>
+<text x="122.7" y="111">Test code: 3 807</text>
 </g>
 </g>
 <g class="col">
 <title>v0.4.0-rc.1 · 2026-11-17
 Code: 54 875
 Test code: 42 474</title>
-<rect x="115.0" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="126.7" y1="56" x2="126.7" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="114.1" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="125.4" y1="56" x2="125.4" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="136.7" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="146.7" y="79">v0.4.0-rc.1 · 2026-11-17</text>
-<text x="146.7" y="95">Code: 54 875</text>
-<text x="146.7" y="111">Test code: 42 474</text>
+<rect class="tipbg" x="135.4" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="145.4" y="79">v0.4.0-rc.1 · 2026-11-17</text>
+<text x="145.4" y="95">Code: 54 875</text>
+<text x="145.4" y="111">Test code: 42 474</text>
 </g>
 </g>
 <g class="col">
 <title>v0.4.0-rc.2 · 2026-11-17
 Code: 55 336
 Test code: 43 181</title>
-<rect x="138.3" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="150.0" y1="56" x2="150.0" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="136.8" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="148.1" y1="56" x2="148.1" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="160.0" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="170.0" y="79">v0.4.0-rc.2 · 2026-11-17</text>
-<text x="170.0" y="95">Code: 55 336</text>
-<text x="170.0" y="111">Test code: 43 181</text>
+<rect class="tipbg" x="158.1" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="168.1" y="79">v0.4.0-rc.2 · 2026-11-17</text>
+<text x="168.1" y="95">Code: 55 336</text>
+<text x="168.1" y="111">Test code: 43 181</text>
 </g>
 </g>
 <g class="col">
 <title>v0.4.0-rc.3 · 2026-11-17
 Code: 55 336
 Test code: 43 181</title>
-<rect x="161.7" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="173.3" y1="56" x2="173.3" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="159.5" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="170.8" y1="56" x2="170.8" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="183.3" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="193.3" y="79">v0.4.0-rc.3 · 2026-11-17</text>
-<text x="193.3" y="95">Code: 55 336</text>
-<text x="193.3" y="111">Test code: 43 181</text>
+<rect class="tipbg" x="180.8" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="190.8" y="79">v0.4.0-rc.3 · 2026-11-17</text>
+<text x="190.8" y="95">Code: 55 336</text>
+<text x="190.8" y="111">Test code: 43 181</text>
 </g>
 </g>
 <g class="col">
 <title>v0.4.0 · 2026-11-17
 Code: 57 364
 Test code: 45 499</title>
-<rect x="185.0" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="196.7" y1="56" x2="196.7" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="182.2" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="193.5" y1="56" x2="193.5" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="206.7" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="216.7" y="79">v0.4.0 · 2026-11-17</text>
-<text x="216.7" y="95">Code: 57 364</text>
-<text x="216.7" y="111">Test code: 45 499</text>
+<rect class="tipbg" x="203.5" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="213.5" y="79">v0.4.0 · 2026-11-17</text>
+<text x="213.5" y="95">Code: 57 364</text>
+<text x="213.5" y="111">Test code: 45 499</text>
 </g>
 </g>
 <g class="col">
 <title>v0.4.1-rc.1 · 2026-11-17
 Code: 65 940
 Test code: 52 488</title>
-<rect x="208.3" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="220.0" y1="56" x2="220.0" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="204.9" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="216.2" y1="56" x2="216.2" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="230.0" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="240.0" y="79">v0.4.1-rc.1 · 2026-11-17</text>
-<text x="240.0" y="95">Code: 65 940</text>
-<text x="240.0" y="111">Test code: 52 488</text>
+<rect class="tipbg" x="226.2" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="236.2" y="79">v0.4.1-rc.1 · 2026-11-17</text>
+<text x="236.2" y="95">Code: 65 940</text>
+<text x="236.2" y="111">Test code: 52 488</text>
 </g>
 </g>
 <g class="col">
 <title>v0.5.0 · 2026-11-17
 Code: 65 940
 Test code: 52 488</title>
-<rect x="231.7" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="243.3" y1="56" x2="243.3" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="227.6" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="238.9" y1="56" x2="238.9" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="253.3" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="263.3" y="79">v0.5.0 · 2026-11-17</text>
-<text x="263.3" y="95">Code: 65 940</text>
-<text x="263.3" y="111">Test code: 52 488</text>
+<rect class="tipbg" x="248.9" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="258.9" y="79">v0.5.0 · 2026-11-17</text>
+<text x="258.9" y="95">Code: 65 940</text>
+<text x="258.9" y="111">Test code: 52 488</text>
 </g>
 </g>
 <g class="col">
 <title>v0.5.1-rc.1 · 2026-11-17
 Code: 66 281
 Test code: 53 173</title>
-<rect x="255.0" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="266.7" y1="56" x2="266.7" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="250.3" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="261.6" y1="56" x2="261.6" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="276.7" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="286.7" y="79">v0.5.1-rc.1 · 2026-11-17</text>
-<text x="286.7" y="95">Code: 66 281</text>
-<text x="286.7" y="111">Test code: 53 173</text>
+<rect class="tipbg" x="271.6" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="281.6" y="79">v0.5.1-rc.1 · 2026-11-17</text>
+<text x="281.6" y="95">Code: 66 281</text>
+<text x="281.6" y="111">Test code: 53 173</text>
 </g>
 </g>
 <g class="col">
 <title>v0.5.1-rc.2 · 2026-11-18
 Code: 66 281
 Test code: 53 172</title>
-<rect x="278.3" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="290.0" y1="56" x2="290.0" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="273.0" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="284.3" y1="56" x2="284.3" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="300.0" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="310.0" y="79">v0.5.1-rc.2 · 2026-11-18</text>
-<text x="310.0" y="95">Code: 66 281</text>
-<text x="310.0" y="111">Test code: 53 172</text>
+<rect class="tipbg" x="294.3" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="304.3" y="79">v0.5.1-rc.2 · 2026-11-18</text>
+<text x="304.3" y="95">Code: 66 281</text>
+<text x="304.3" y="111">Test code: 53 172</text>
 </g>
 </g>
 <g class="col">
 <title>v0.5.1 · 2026-11-18
 Code: 66 281
 Test code: 53 172</title>
-<rect x="301.7" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="313.3" y1="56" x2="313.3" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="295.7" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="307.0" y1="56" x2="307.0" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="323.3" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="333.3" y="79">v0.5.1 · 2026-11-18</text>
-<text x="333.3" y="95">Code: 66 281</text>
-<text x="333.3" y="111">Test code: 53 172</text>
+<rect class="tipbg" x="317.0" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="327.0" y="79">v0.5.1 · 2026-11-18</text>
+<text x="327.0" y="95">Code: 66 281</text>
+<text x="327.0" y="111">Test code: 53 172</text>
 </g>
 </g>
 <g class="col">
 <title>v0.6.0 · 2026-11-18
 Code: 66 281
 Test code: 53 246</title>
-<rect x="325.0" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="336.7" y1="56" x2="336.7" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="318.4" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="329.7" y1="56" x2="329.7" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="346.7" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="356.7" y="79">v0.6.0 · 2026-11-18</text>
-<text x="356.7" y="95">Code: 66 281</text>
-<text x="356.7" y="111">Test code: 53 246</text>
+<rect class="tipbg" x="339.7" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="349.7" y="79">v0.6.0 · 2026-11-18</text>
+<text x="349.7" y="95">Code: 66 281</text>
+<text x="349.7" y="111">Test code: 53 246</text>
 </g>
 </g>
 <g class="col">
 <title>v0.6.1 · 2026-11-18
 Code: 66 779
 Test code: 54 056</title>
-<rect x="348.3" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="360.0" y1="56" x2="360.0" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="341.1" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="352.4" y1="56" x2="352.4" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="370.0" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="380.0" y="79">v0.6.1 · 2026-11-18</text>
-<text x="380.0" y="95">Code: 66 779</text>
-<text x="380.0" y="111">Test code: 54 056</text>
+<rect class="tipbg" x="362.4" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="372.4" y="79">v0.6.1 · 2026-11-18</text>
+<text x="372.4" y="95">Code: 66 779</text>
+<text x="372.4" y="111">Test code: 54 056</text>
 </g>
 </g>
 <g class="col">
 <title>v0.6.2 · 2026-11-18
 Code: 66 793
 Test code: 54 219</title>
-<rect x="371.7" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="383.3" y1="56" x2="383.3" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="363.8" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="375.1" y1="56" x2="375.1" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="393.3" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="403.3" y="79">v0.6.2 · 2026-11-18</text>
-<text x="403.3" y="95">Code: 66 793</text>
-<text x="403.3" y="111">Test code: 54 219</text>
+<rect class="tipbg" x="385.1" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="395.1" y="79">v0.6.2 · 2026-11-18</text>
+<text x="395.1" y="95">Code: 66 793</text>
+<text x="395.1" y="111">Test code: 54 219</text>
 </g>
 </g>
 <g class="col">
 <title>v0.6.3 · 2026-11-19
 Code: 70 130
 Test code: 58 355</title>
-<rect x="395.0" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="406.7" y1="56" x2="406.7" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="386.5" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="397.8" y1="56" x2="397.8" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="416.7" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="426.7" y="79">v0.6.3 · 2026-11-19</text>
-<text x="426.7" y="95">Code: 70 130</text>
-<text x="426.7" y="111">Test code: 58 355</text>
+<rect class="tipbg" x="407.8" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="417.8" y="79">v0.6.3 · 2026-11-19</text>
+<text x="417.8" y="95">Code: 70 130</text>
+<text x="417.8" y="111">Test code: 58 355</text>
 </g>
 </g>
 <g class="col">
 <title>v0.6.4 · 2026-11-19
 Code: 75 130
 Test code: 61 281</title>
-<rect x="418.3" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="430.0" y1="56" x2="430.0" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="409.2" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="420.5" y1="56" x2="420.5" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="440.0" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="450.0" y="79">v0.6.4 · 2026-11-19</text>
-<text x="450.0" y="95">Code: 75 130</text>
-<text x="450.0" y="111">Test code: 61 281</text>
+<rect class="tipbg" x="430.5" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="440.5" y="79">v0.6.4 · 2026-11-19</text>
+<text x="440.5" y="95">Code: 75 130</text>
+<text x="440.5" y="111">Test code: 61 281</text>
 </g>
 </g>
 <g class="col">
 <title>v0.6.5 · 2026-11-19
 Code: 75 161
 Test code: 61 329</title>
-<rect x="441.7" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="453.3" y1="56" x2="453.3" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="431.9" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="443.2" y1="56" x2="443.2" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="463.3" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="473.3" y="79">v0.6.5 · 2026-11-19</text>
-<text x="473.3" y="95">Code: 75 161</text>
-<text x="473.3" y="111">Test code: 61 329</text>
+<rect class="tipbg" x="453.2" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="463.2" y="79">v0.6.5 · 2026-11-19</text>
+<text x="463.2" y="95">Code: 75 161</text>
+<text x="463.2" y="111">Test code: 61 329</text>
 </g>
 </g>
 <g class="col">
 <title>v0.6.6 · 2026-11-19
 Code: 75 163
 Test code: 61 330</title>
-<rect x="465.0" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="476.7" y1="56" x2="476.7" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="454.6" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="465.9" y1="56" x2="465.9" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="486.7" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="496.7" y="79">v0.6.6 · 2026-11-19</text>
-<text x="496.7" y="95">Code: 75 163</text>
-<text x="496.7" y="111">Test code: 61 330</text>
+<rect class="tipbg" x="475.9" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="485.9" y="79">v0.6.6 · 2026-11-19</text>
+<text x="485.9" y="95">Code: 75 163</text>
+<text x="485.9" y="111">Test code: 61 330</text>
 </g>
 </g>
 <g class="col">
 <title>v0.6.7 · 2026-11-19
 Code: 76 526
 Test code: 62 772</title>
-<rect x="488.3" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="500.0" y1="56" x2="500.0" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="477.3" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="488.6" y1="56" x2="488.6" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="300.0" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="310.0" y="79">v0.6.7 · 2026-11-19</text>
-<text x="310.0" y="95">Code: 76 526</text>
-<text x="310.0" y="111">Test code: 62 772</text>
+<rect class="tipbg" x="288.6" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="298.6" y="79">v0.6.7 · 2026-11-19</text>
+<text x="298.6" y="95">Code: 76 526</text>
+<text x="298.6" y="111">Test code: 62 772</text>
 </g>
 </g>
 <g class="col">
 <title>v0.6.8 · 2026-11-19
 Code: 76 826
 Test code: 64 284</title>
-<rect x="511.7" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="523.3" y1="56" x2="523.3" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="500.0" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="511.4" y1="56" x2="511.4" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="323.3" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="333.3" y="79">v0.6.8 · 2026-11-19</text>
-<text x="333.3" y="95">Code: 76 826</text>
-<text x="333.3" y="111">Test code: 64 284</text>
+<rect class="tipbg" x="311.4" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="321.4" y="79">v0.6.8 · 2026-11-19</text>
+<text x="321.4" y="95">Code: 76 826</text>
+<text x="321.4" y="111">Test code: 64 284</text>
 </g>
 </g>
 <g class="col">
 <title>v0.6.9 · 2026-11-19
 Code: 76 826
 Test code: 64 544</title>
-<rect x="535.0" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="546.7" y1="56" x2="546.7" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="522.7" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="534.1" y1="56" x2="534.1" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="346.7" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="356.7" y="79">v0.6.9 · 2026-11-19</text>
-<text x="356.7" y="95">Code: 76 826</text>
-<text x="356.7" y="111">Test code: 64 544</text>
+<rect class="tipbg" x="334.1" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="344.1" y="79">v0.6.9 · 2026-11-19</text>
+<text x="344.1" y="95">Code: 76 826</text>
+<text x="344.1" y="111">Test code: 64 544</text>
 </g>
 </g>
 <g class="col">
 <title>v0.6.10-rc.1 · 2026-11-21
 Code: 76 831
 Test code: 64 736</title>
-<rect x="558.3" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="570.0" y1="56" x2="570.0" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="545.4" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="556.8" y1="56" x2="556.8" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="370.0" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="380.0" y="79">v0.6.10-rc.1 · 2026-11-21</text>
-<text x="380.0" y="95">Code: 76 831</text>
-<text x="380.0" y="111">Test code: 64 736</text>
+<rect class="tipbg" x="356.8" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="366.8" y="79">v0.6.10-rc.1 · 2026-11-21</text>
+<text x="366.8" y="95">Code: 76 831</text>
+<text x="366.8" y="111">Test code: 64 736</text>
 </g>
 </g>
 <g class="col">
 <title>v0.6.10-rc.2 · 2026-11-21
 Code: 76 874
 Test code: 65 368</title>
-<rect x="581.7" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="593.3" y1="56" x2="593.3" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="568.1" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="579.5" y1="56" x2="579.5" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="393.3" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="403.3" y="79">v0.6.10-rc.2 · 2026-11-21</text>
-<text x="403.3" y="95">Code: 76 874</text>
-<text x="403.3" y="111">Test code: 65 368</text>
+<rect class="tipbg" x="379.5" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="389.5" y="79">v0.6.10-rc.2 · 2026-11-21</text>
+<text x="389.5" y="95">Code: 76 874</text>
+<text x="389.5" y="111">Test code: 65 368</text>
 </g>
 </g>
 <g class="col">
 <title>v0.6.10-rc.3 · 2026-11-21
 Code: 76 874
 Test code: 65 368</title>
-<rect x="605.0" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="616.7" y1="56" x2="616.7" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="590.8" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="602.2" y1="56" x2="602.2" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="416.7" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="426.7" y="79">v0.6.10-rc.3 · 2026-11-21</text>
-<text x="426.7" y="95">Code: 76 874</text>
-<text x="426.7" y="111">Test code: 65 368</text>
+<rect class="tipbg" x="402.2" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="412.2" y="79">v0.6.10-rc.3 · 2026-11-21</text>
+<text x="412.2" y="95">Code: 76 874</text>
+<text x="412.2" y="111">Test code: 65 368</text>
 </g>
 </g>
 <g class="col">
 <title>v0.6.10-rc.4 · 2026-11-21
 Code: 76 875
 Test code: 66 391</title>
-<rect x="628.3" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="640.0" y1="56" x2="640.0" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="613.5" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="624.9" y1="56" x2="624.9" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="440.0" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="450.0" y="79">v0.6.10-rc.4 · 2026-11-21</text>
-<text x="450.0" y="95">Code: 76 875</text>
-<text x="450.0" y="111">Test code: 66 391</text>
+<rect class="tipbg" x="424.9" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="434.9" y="79">v0.6.10-rc.4 · 2026-11-21</text>
+<text x="434.9" y="95">Code: 76 875</text>
+<text x="434.9" y="111">Test code: 66 391</text>
 </g>
 </g>
 <g class="col">
 <title>v0.6.10 · 2026-11-21
 Code: 76 875
 Test code: 66 391</title>
-<rect x="651.7" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="663.3" y1="56" x2="663.3" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="636.2" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="647.6" y1="56" x2="647.6" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="463.3" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="473.3" y="79">v0.6.10 · 2026-11-21</text>
-<text x="473.3" y="95">Code: 76 875</text>
-<text x="473.3" y="111">Test code: 66 391</text>
+<rect class="tipbg" x="447.6" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="457.6" y="79">v0.6.10 · 2026-11-21</text>
+<text x="457.6" y="95">Code: 76 875</text>
+<text x="457.6" y="111">Test code: 66 391</text>
 </g>
 </g>
 <g class="col">
 <title>v0.7.0-rc.1 · 2026-11-21
 Code: 82 751
 Test code: 70 804</title>
-<rect x="675.0" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="686.7" y1="56" x2="686.7" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="658.9" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="670.3" y1="56" x2="670.3" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="486.7" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="496.7" y="79">v0.7.0-rc.1 · 2026-11-21</text>
-<text x="496.7" y="95">Code: 82 751</text>
-<text x="496.7" y="111">Test code: 70 804</text>
+<rect class="tipbg" x="470.3" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="480.3" y="79">v0.7.0-rc.1 · 2026-11-21</text>
+<text x="480.3" y="95">Code: 82 751</text>
+<text x="480.3" y="111">Test code: 70 804</text>
 </g>
 </g>
 <g class="col">
 <title>v0.7.0-rc.2 · 2026-11-22
 Code: 82 751
 Test code: 70 800</title>
-<rect x="698.3" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="710.0" y1="56" x2="710.0" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="681.6" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="693.0" y1="56" x2="693.0" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="510.0" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="520.0" y="79">v0.7.0-rc.2 · 2026-11-22</text>
-<text x="520.0" y="95">Code: 82 751</text>
-<text x="520.0" y="111">Test code: 70 800</text>
+<rect class="tipbg" x="493.0" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="503.0" y="79">v0.7.0-rc.2 · 2026-11-22</text>
+<text x="503.0" y="95">Code: 82 751</text>
+<text x="503.0" y="111">Test code: 70 800</text>
 </g>
 </g>
 <g class="col">
 <title>v0.7.0-rc.3 · 2026-11-22
 Code: 82 751
 Test code: 70 809</title>
-<rect x="721.7" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="733.3" y1="56" x2="733.3" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="704.3" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="715.7" y1="56" x2="715.7" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="533.3" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="543.3" y="79">v0.7.0-rc.3 · 2026-11-22</text>
-<text x="543.3" y="95">Code: 82 751</text>
-<text x="543.3" y="111">Test code: 70 809</text>
+<rect class="tipbg" x="515.7" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="525.7" y="79">v0.7.0-rc.3 · 2026-11-22</text>
+<text x="525.7" y="95">Code: 82 751</text>
+<text x="525.7" y="111">Test code: 70 809</text>
 </g>
 </g>
 <g class="col">
 <title>v0.7.0-rc.4 · 2026-11-22
 Code: 83 556
 Test code: 71 677</title>
-<rect x="745.0" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="756.7" y1="56" x2="756.7" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="727.0" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="738.4" y1="56" x2="738.4" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="556.7" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="566.7" y="79">v0.7.0-rc.4 · 2026-11-22</text>
-<text x="566.7" y="95">Code: 83 556</text>
-<text x="566.7" y="111">Test code: 71 677</text>
+<rect class="tipbg" x="538.4" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="548.4" y="79">v0.7.0-rc.4 · 2026-11-22</text>
+<text x="548.4" y="95">Code: 83 556</text>
+<text x="548.4" y="111">Test code: 71 677</text>
 </g>
 </g>
 <g class="col">
 <title>v0.7.0 · 2026-11-22
 Code: 83 707
 Test code: 71 834</title>
-<rect x="768.3" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="780.0" y1="56" x2="780.0" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="749.7" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="761.1" y1="56" x2="761.1" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="580.0" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="590.0" y="79">v0.7.0 · 2026-11-22</text>
-<text x="590.0" y="95">Code: 83 707</text>
-<text x="590.0" y="111">Test code: 71 834</text>
+<rect class="tipbg" x="561.1" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="571.1" y="79">v0.7.0 · 2026-11-22</text>
+<text x="571.1" y="95">Code: 83 707</text>
+<text x="571.1" y="111">Test code: 71 834</text>
 </g>
 </g>
 <g class="col">
 <title>v0.7.1 · 2026-11-22
 Code: 87 610
 Test code: 78 901</title>
-<rect x="791.7" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="803.3" y1="56" x2="803.3" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="772.4" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="783.8" y1="56" x2="783.8" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="603.3" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="613.3" y="79">v0.7.1 · 2026-11-22</text>
-<text x="613.3" y="95">Code: 87 610</text>
-<text x="613.3" y="111">Test code: 78 901</text>
+<rect class="tipbg" x="583.8" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="593.8" y="79">v0.7.1 · 2026-11-22</text>
+<text x="593.8" y="95">Code: 87 610</text>
+<text x="593.8" y="111">Test code: 78 901</text>
 </g>
 </g>
 <g class="col">
 <title>v0.7.2 · 2026-11-22
 Code: 87 912
 Test code: 79 622</title>
-<rect x="815.0" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="826.7" y1="56" x2="826.7" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="795.1" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="806.5" y1="56" x2="806.5" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="626.7" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="636.7" y="79">v0.7.2 · 2026-11-22</text>
-<text x="636.7" y="95">Code: 87 912</text>
-<text x="636.7" y="111">Test code: 79 622</text>
+<rect class="tipbg" x="606.5" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="616.5" y="79">v0.7.2 · 2026-11-22</text>
+<text x="616.5" y="95">Code: 87 912</text>
+<text x="616.5" y="111">Test code: 79 622</text>
 </g>
 </g>
 <g class="col">
 <title>v0.7.3 · 2026-11-22
 Code: 87 950
 Test code: 79 713</title>
-<rect x="838.3" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="850.0" y1="56" x2="850.0" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="817.8" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="829.2" y1="56" x2="829.2" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="650.0" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="660.0" y="79">v0.7.3 · 2026-11-22</text>
-<text x="660.0" y="95">Code: 87 950</text>
-<text x="660.0" y="111">Test code: 79 713</text>
+<rect class="tipbg" x="629.2" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="639.2" y="79">v0.7.3 · 2026-11-22</text>
+<text x="639.2" y="95">Code: 87 950</text>
+<text x="639.2" y="111">Test code: 79 713</text>
 </g>
 </g>
 <g class="col">
 <title>v0.7.4 · 2026-11-23
 Code: 89 161
 Test code: 83 147</title>
-<rect x="861.7" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="873.3" y1="56" x2="873.3" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="840.5" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="851.9" y1="56" x2="851.9" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="673.3" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="683.3" y="79">v0.7.4 · 2026-11-23</text>
-<text x="683.3" y="95">Code: 89 161</text>
-<text x="683.3" y="111">Test code: 83 147</text>
+<rect class="tipbg" x="651.9" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="661.9" y="79">v0.7.4 · 2026-11-23</text>
+<text x="661.9" y="95">Code: 89 161</text>
+<text x="661.9" y="111">Test code: 83 147</text>
 </g>
 </g>
 <g class="col">
 <title>v0.7.5 · 2026-11-23
 Code: 89 161
 Test code: 83 183</title>
-<rect x="885.0" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
-<line class="guide" x1="896.7" y1="56" x2="896.7" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<rect x="863.2" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="874.6" y1="56" x2="874.6" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
-<rect class="tipbg" x="696.7" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="706.7" y="79">v0.7.5 · 2026-11-23</text>
-<text x="706.7" y="95">Code: 89 161</text>
-<text x="706.7" y="111">Test code: 83 183</text>
+<rect class="tipbg" x="674.6" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="684.6" y="79">v0.7.5 · 2026-11-23</text>
+<text x="684.6" y="95">Code: 89 161</text>
+<text x="684.6" y="111">Test code: 83 183</text>
 </g>
 </g>
 <g class="col">
 <title>v0.7.6 · 2026-11-23
 Code: 89 161
 Test code: 83 191</title>
-<rect x="908.3" y="56" width="23.3" height="364" fill="transparent" pointer-events="all"/>
+<rect x="885.9" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
+<line class="guide" x1="897.3" y1="56" x2="897.3" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
+<g class="tip">
+<rect class="tipbg" x="697.3" y="60" width="190" height="62" rx="6"/>
+<text class="tiphead" x="707.3" y="79">v0.7.6 · 2026-11-23</text>
+<text x="707.3" y="95">Code: 89 161</text>
+<text x="707.3" y="111">Test code: 83 191</text>
+</g>
+</g>
+<g class="col">
+<title>v0.8.0-rc.1 · 2026-11-24
+Code: 110 346
+Test code: 109 701</title>
+<rect x="908.6" y="56" width="22.7" height="364" fill="transparent" pointer-events="all"/>
 <line class="guide" x1="920.0" y1="56" x2="920.0" y2="348" stroke="#6b7280" stroke-dasharray="2 2"/>
 <g class="tip">
 <rect class="tipbg" x="720.0" y="60" width="190" height="62" rx="6"/>
-<text class="tiphead" x="730.0" y="79">v0.7.6 · 2026-11-23</text>
-<text x="730.0" y="95">Code: 89 161</text>
-<text x="730.0" y="111">Test code: 83 191</text>
+<text class="tiphead" x="730.0" y="79">v0.8.0-rc.1 · 2026-11-24</text>
+<text x="730.0" y="95">Code: 110 346</text>
+<text x="730.0" y="111">Test code: 109 701</text>
 </g>
 </g>
 </svg>

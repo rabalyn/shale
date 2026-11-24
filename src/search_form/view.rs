@@ -97,7 +97,10 @@ fn fields(ui: &mut Ui, what: &mut What, i: usize, comp: &mut Complete, vault: &V
             changed
         }
         What::Blocked | What::Blocking => false,
-        What::Folder(v) => text_rest(ui, v, "Folder/", 110.0, typed),
+        What::Folder(v) => {
+            let width = (ui.available_width() - 8.0).max(110.0);
+            comp.field(ui, vault, worker, &spec(i, Slot::Folder, "", "Folder/", width), v)
+        }
         What::Links(v) => text_rest(ui, v, "Note", 110.0, typed),
         What::Text(v) => text_rest(ui, v, "text, * and ? are wildcards", 150.0, typed),
     }
@@ -106,7 +109,7 @@ fn fields(ui: &mut Ui, what: &mut What, i: usize, comp: &mut Complete, vault: &V
 /// Take an entry of a list into the field it is for.
 fn take_entry(what: &mut What, slot: Slot, entry: String) {
     match (what, slot) {
-        (What::Tag(v), Slot::Tag) | (What::Prop { key: v, .. }, Slot::Key) | (What::Prop { value: v, .. }, Slot::Value) => *v = entry,
+        (What::Tag(v), Slot::Tag) | (What::Folder(v), Slot::Folder) | (What::Prop { key: v, .. }, Slot::Key) | (What::Prop { value: v, .. }, Slot::Value) => *v = entry,
         _ => {}
     }
 }
@@ -844,6 +847,30 @@ mod tests {
         h.note("d.md", "#Zed #apple");
         assert_eq!(h.listed().first().map(String::as_str), Some("alpha"), "the vocabulary follows the vault");
         assert!(h.listed().contains(&"Zed".to_string()) && h.listed().contains(&"apple".to_string()), "{:?}", h.listed());
+    }
+
+    // spec: QUERY-029
+    #[test]
+    fn query_029_the_folder_field_lists_the_folders_nested_ones_too_narrows_and_a_pick_writes_the_path() {
+        let mut h = Host::new("");
+        for name in ["Projects/a.md", "Projects/Sub/b.md", "My Notes/c.md", "Archive/d.md", "top.md"] {
+            h.note(name, "text\n");
+        }
+        h.pick("+ Add filter", "in folder");
+        assert!(h.listed().is_empty(), "no list until the field has the keyboard");
+        let r = h.edits()[0];
+        h.click_at(r.center());
+        assert_eq!(h.listed(), strings(&["Archive/", "My Notes/", "Projects/", "Projects/Sub/"]), "every folder with a trailing slash, alphabetical, nested too");
+        h.type_into(0, "sub");
+        assert_eq!(h.listed(), strings(&["Projects/Sub/"]), "typing narrows");
+        h.key(Key::Tab, Modifiers::NONE);
+        assert_eq!(h.text, "path:Projects/Sub/", "a pick fills the field");
+        // an empty field: the arrow keys choose, Enter takes; a folder with a space is quoted
+        h.type_into(0, "");
+        h.key(Key::ArrowDown, Modifiers::NONE);
+        h.key(Key::ArrowDown, Modifiers::NONE);
+        h.key(Key::Enter, Modifiers::NONE);
+        assert_eq!(h.text, "path:\"My Notes/\"");
     }
 
     // spec: QUERY-029
