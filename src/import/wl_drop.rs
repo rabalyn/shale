@@ -531,7 +531,7 @@ mod tests {
     use fake_compositor::{Answer, Rig, Seen};
     use wayland_server::protocol::wl_data_device_manager::DndAction;
 
-    // spec: IMP-009
+    // spec: IMP-009, IMP-032
     #[test]
     fn picks_the_most_useful_kind() {
         let o = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();

@@ -784,7 +784,7 @@ fn get(p: &[String], key: &str) -> Option<String> {
     p.iter().find_map(|x| x.strip_prefix(&format!("{key}: ")).map(String::from))
 }
 
-// spec: IMP-040
+// spec: IMP-040, IMP-045
 #[test]
 fn the_heading_weight_is_bold_when_heading_1_is_bold_through_its_style_its_base_or_the_defaults() {
     let weight = |defaults: &str, rest: &str| get(&props(&read(&doc(""), Some(&styles(defaults, rest)), None)), "print-heading-weight");
