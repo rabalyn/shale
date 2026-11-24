@@ -49,6 +49,24 @@ impl ShaleApp {
         self.open_feed(FeedRef { thread: Some(post.id.clone()), ..feed }, new_tab);
     }
 
+    /// Show the conversation of a post of the sidebar's Feeds pane in a Feeds tab (LAY-034): the
+    /// active tab when it is a Feeds tab, else one of this pane's tabs that shows the same feed,
+    /// else any Feeds tab; with none a new tab is opened. In a tab that is open the conversation
+    /// is a step of its history, so Back returns to what it showed.
+    pub fn open_feed_post(&mut self, feed: FeedRef, post: &crate::social::Post) {
+        let is_feeds = |t: &super::Tab| matches!(t.view, View::Social(_));
+        let bar = &self.tabbar;
+        let same_feed = |t: &super::Tab| matches!(&t.view, View::Social(Some(f)) if f.account == feed.account && f.feed == feed.feed);
+        let at = if bar.tabs.get(bar.active).is_some_and(is_feeds) { Some(bar.active) } else { bar.tabs.iter().position(same_feed).or_else(|| bar.tabs.iter().position(is_feeds)) };
+        match at {
+            Some(i) => {
+                self.tabbar.active = i;
+                self.open_thread(feed, post, false);
+            }
+            None => self.open_thread(feed, post, true),
+        }
+    }
+
     /// Open a post the search found in its feed, in a new Feeds tab scrolled to the post (SOC-035).
     /// A feed that is gone shows the account's other feed (the post goes into its list from the index).
     pub fn open_post_hit(&mut self, hit: &PostHit) {

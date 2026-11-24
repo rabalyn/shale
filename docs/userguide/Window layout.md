@@ -24,7 +24,7 @@ of **views**.
   Calendar, History, Thread) and shows the panel of the selected icon, so several panels can be open at once.
 - Drag a panel icon over the right sidebar ("Drop to open this icon in a new view") to make a
   new view below it. Drag icons between menubars, to the ribbon (a shortcut that shows the panel
-  below the views) and back. Icons that are no panels and no views (Feeds, Graph, …) cannot go there. Taking
+  below the views) and back. Icons that are no panels and no views (Graph, Tasks, …) cannot go there. Taking
   the last icon out of a view removes the view. Esc cancels a drag.
 - **Files, Search and Tags can be on either side.** Drag the icon of Files, Search or Tags from the ribbon to
   the menubar or the content of the right sidebar (or back from a right menubar to the ribbon). When you let go,
@@ -38,7 +38,7 @@ of **views**.
   counts and the list of messages with the unread dots. Click a message to open it in the Mail tab (Shale opens the tab if
   there is none). The pane has its own folder choice and scroll, separate from the tab, so it can keep showing the Inbox
   while the tab shows another folder; the mail itself and the sync are the same. With **Copy** the ribbon keeps its Mail
-  icon, which still opens the tab; the left sidebar never shows Mail. Feeds will follow.
+  icon, which still opens the tab; the left sidebar never shows Mail.
 - **Calendar can be in the right sidebar too.** Place the Calendar icon the same way (not the *Calendar* panel icon, which
   is a different, older view with its own month). The pane is a compact companion of the Calendar tab: a small month with ‹ ›
   and **Today** (today is marked, a dot is under every day with events) and under it the agenda of the next 14 days from the
@@ -46,6 +46,16 @@ of **views**.
   it in the Calendar tab (Shale opens the tab if there is none) with its details. The pane has its own month and day, separate
   from the tab; the events and the sync are the same. It says so when no calendar is set up, when nothing is coming up and
   while the calendars load. See [[Calendar]].
+- **Feeds can be in the right sidebar too.** Place the Feeds icon the same way. The pane is a compact companion of the Feeds
+  tab: the accounts (a row of names when you have several), a feed picker (the home timeline first) and the posts as small
+  rows: the author, how long ago, who boosted it, the first two lines of the text and the number of pictures (a post behind
+  a content warning shows the warning, not the text). Click a post to open its conversation in a Feeds tab (the tab you are
+  in if it is one, else a Feeds tab that shows this feed, else a new one); Back there returns to the feed. The pane has its
+  own account, feed and scroll, separate from the tab; the accounts, the posts and the fetching are the same. Shale loads
+  the first page of the feed the pane shows even when no Feeds tab is open; older posts and the check for new posts stay in
+  the tab (only feeds that are open in a tab are checked), and the pane says so under the last post. It says so when there is
+  no account, while the feeds load, and when nothing could be loaded or there is nothing yet. Reacting, writing and saving
+  stay in the tab. See [[Feeds]].
 - Drag the border between two views to change their heights.
 - Drag the border of the left or of the right sidebar to change its width; Shale keeps the widths
   (`left_sidebar_width`, `right_sidebar_width`), and **Reset layout** goes back to the default widths.

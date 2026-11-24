@@ -360,6 +360,11 @@ pub enum Action {
     OpenCalendarDay(i64),
     /// show an event in the Calendar tab (opened when there is none), from the sidebar's Calendar pane (LAY-033)
     OpenCalendarEvent(Box<crate::calendar::store::Occ>),
+    /// open the conversation of a post of the sidebar's Feeds pane in a Feeds tab (opened when there is none, LAY-034)
+    OpenFeedPost {
+        feed: crate::social::FeedRef,
+        post: Box<crate::social::Post>,
+    },
     /// open a post found by the search in its feed, in a new tab (SOC-035)
     OpenPost(Box<crate::social::post_index::PostHit>),
     /// open a mail found by the search in the mail view (NAV-025)
@@ -2774,6 +2779,7 @@ impl ShaleApp {
                 Action::ShowViewInNewTab(v) => self.show_view(v, true),
                 Action::OpenCalendarDay(day) => self.open_calendar_day(day),
                 Action::OpenPost(hit) => self.open_post_hit(&hit),
+                Action::OpenFeedPost { feed, post } => self.open_feed_post(feed, &post),
                 Action::OpenMail(msg) => self.open_mail_hit(*msg),
                 Action::OpenCalendarEvent(occ) => self.open_calendar_event(*occ),
                 Action::CloseTab(i) => self.close_tab(i),
