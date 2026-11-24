@@ -36,6 +36,12 @@ pub struct SearchBox {
 }
 
 impl SearchBox {
+    /// The query the list on show was made for (tests wait for it: a debounced query is no job of the worker, #659).
+    #[cfg(test)]
+    pub(crate) fn listed_for(&self) -> Option<&str> {
+        self.results.made_for_text()
+    }
+
     /// The hits now listed (tests).
     #[cfg(test)]
     pub fn listed(&self) -> &[crate::picker::Hit] {
