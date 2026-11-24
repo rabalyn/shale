@@ -25,7 +25,7 @@ fn run_with(script: &str, prev_published: Option<&str>) {
     assert!(!text.contains("not ok"), "{script}:\n{text}");
 }
 
-// spec: FORGE-011, DEV-025, FORGE-015
+// spec: FORGE-011, DEV-025, FORGE-015, DEV-045
 #[test]
 fn forge_011_test_land_script_passes() {
     run("scripts/test-land.sh");
@@ -43,7 +43,7 @@ fn forge_016_test_dev_metrics_script_passes() {
     run("scripts/test-dev-metrics.sh");
 }
 
-// spec: FORGE-013, FORGE-014, BUILD-034, BUILD-037, FORGE-020
+// spec: FORGE-013, FORGE-014, BUILD-034, BUILD-037, FORGE-020, DEV-045
 #[test]
 fn forge_013_forge_014_test_release_script_passes() {
     run("scripts/test-release.sh");

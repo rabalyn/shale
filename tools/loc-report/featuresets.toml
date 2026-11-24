@@ -1,0 +1,68 @@
+# Which features (top-level modules of src/) form a featureset in the lines-of-code report (DEV-044).
+# `cargo run --example loc_report` lists a feature that no set names under "Other"; a name that is
+# no top-level module of src/main.rs is an error. Every feature belongs to exactly one set. The test
+# modules that belong to no feature are the report's own section, "Shared test support".
+
+[[set]]
+name = "Editor & Markdown"
+features = [
+    "editor", "editor_cache", "editor_preview", "markdown", "lists", "fold", "fold_ui", "cursor_style",
+    "heading_levels", "format", "format_bar", "syntax", "code_box", "colour_tags", "caption", "task_box",
+    "table", "table_grid", "table_select", "math", "vim", "undo", "tag_assist", "link_assist",
+    "link_preview", "galley_index", "properties", "properties_ui", "note_props", "reader", "embed_size",
+]
+
+[[set]]
+name = "Boards"
+features = ["board"]
+
+[[set]]
+name = "Drawing & media"
+features = ["drawing", "media"]
+
+[[set]]
+name = "Vault & files"
+features = [
+    "vault", "vault_cache", "vault_check", "vault_menu", "vault_path", "vault_state", "fsutil",
+    "known_vaults", "device_local", "data_usage", "recovery", "tree_rows",
+]
+
+[[set]]
+name = "Sync & sharing"
+features = ["gitsync", "history", "conflict"]
+
+[[set]]
+name = "Search & navigation"
+features = ["search_all", "search_panel", "search_render", "search_sources", "search_form", "picker", "graph", "graph_tree"]
+
+[[set]]
+name = "Mail"
+features = ["mail", "secret", "secrets"]
+
+[[set]]
+name = "Calendar"
+features = ["calendar", "download"]
+
+[[set]]
+name = "Social"
+features = ["social"]
+
+[[set]]
+name = "Import & export"
+features = ["import", "docx_export", "pdf", "pandoc_limit", "thread", "xml_limits"]
+
+[[set]]
+name = "Settings, themes & UI shell"
+features = [
+    "app", "config", "settings", "settings_file", "theme", "themes", "fonts", "font_list", "dialog",
+    "panels", "sidebar", "sidebar_ui", "layout", "keys", "keys_ui", "key_badges", "virtual_list",
+    "userguide",
+]
+
+[[set]]
+name = "Background jobs & platform"
+features = ["main", "busy", "jobs", "program", "instance", "update", "opener", "finder_path", "console"]
+
+[[set]]
+name = "Developer tooling"
+features = ["bench", "recorder", "script", "env_lock"]
