@@ -271,7 +271,7 @@ fn showing_media_from_outside_changes_nothing_there_and_adds_nothing_to_the_vaul
 }
 
 fn note_text(fx: &Fx) -> String {
-    fx.app.notes.get(std::path::Path::new("Player.md")).expect("the note is open").text.clone()
+    crate::note_props::unstamped(&fx.app.notes.get(std::path::Path::new("Player.md")).expect("the note is open").text)
 }
 
 /// Frames until the copy into the vault has ended and the note has been changed by it.
@@ -411,7 +411,7 @@ fn copy_into_the_vault_on_the_caption_copies_the_file_keeps_the_width_and_is_one
     let at = egui::text_edit::TextEditState::load(fx.hl.ctx(), id).and_then(|st| st.cursor.char_range()).map(|r| r.primary.index.0).unwrap();
     assert!(text.chars().skip(at).collect::<String>().starts_with("ter the picture"), "the cursor moved with the text: {at}");
     fx.app.flush_all();
-    assert_eq!(std::fs::read_to_string(fx.dir.join("Player.md")).unwrap(), text);
+    assert_eq!(crate::note_props::unstamped(&std::fs::read_to_string(fx.dir.join("Player.md")).unwrap()), text);
     assert!(fx.app.vault.as_ref().unwrap().files.iter().any(|f| f.rel == copy.strip_prefix(&fx.dir).unwrap()), "the vault knows the new file");
     // one Ctrl+Z brings the outside link back
     fx.hl.frame(&mut fx.app, vec![egui::Event::Key { key: egui::Key::Z, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND }]);
@@ -437,13 +437,13 @@ fn copy_into_the_vault_in_the_reading_view_works_for_a_picture_and_for_a_player_
     copied(&mut fx);
     let text = note_text(&fx);
     assert!(text.starts_with("![[@Media/a.png|120]]") && text.contains("![[z_media/") && text.trim_end().ends_with("_tone.wav]]"), "only the sound: {text}");
-    assert_eq!(std::fs::read_to_string(fx.dir.join("Player.md")).unwrap(), text, "the reading view saves the note");
+    assert_eq!(crate::note_props::unstamped(&std::fs::read_to_string(fx.dir.join("Player.md")).unwrap()), text, "the reading view saves the note");
     let upper = fx.hl.text.iter().filter(|(t, _)| t == crate::media::outside::COPY_LABEL).map(|(_, p)| *p).next().expect("the picture still has its button");
     fx.hl.click(&mut fx.app, upper + egui::vec2(8.0, 6.0), PointerButton::Primary);
     copied(&mut fx);
     let text = note_text(&fx);
     assert!(text.starts_with("![[z_media/") && text.contains("_a.png|120]]") && !text.contains("@Media"), "{text}");
-    assert_eq!(std::fs::read_to_string(fx.dir.join("Player.md")).unwrap(), text);
+    assert_eq!(crate::note_props::unstamped(&std::fs::read_to_string(fx.dir.join("Player.md")).unwrap()), text);
     assert!(!said(&fx, crate::media::outside::COPY_LABEL), "nothing outside is left");
 }
 
@@ -515,7 +515,7 @@ fn copying_runs_one_at_a_time_says_when_there_is_nothing_to_copy_and_copes_with_
     fx.app.close_tab(tab);
     copied(&mut fx);
     assert!(toast_with(&fx, "Copied 1 file into the vault"), "{:?}", fx.app.toasts);
-    let saved = std::fs::read_to_string(fx.dir.join("Player.md")).unwrap();
+    let saved = crate::note_props::unstamped(&std::fs::read_to_string(fx.dir.join("Player.md")).unwrap());
     assert!(saved.starts_with("![[z_media/") && saved.ends_with("_a.png]]\n"), "{saved}");
     assert_eq!(walk_files(&fx.dir.join("z_media")).len(), 1);
     // the note is gone before the job ends (deleted or renamed): the file is copied, the link is left, and it is said

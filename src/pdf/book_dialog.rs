@@ -4,6 +4,7 @@
 //! indicator lists it with its own Cancel.
 
 use crate::busy::{self, Busy, Key};
+use crate::pdf::board::{self, export_board};
 use crate::pdf::book::{self, Plan};
 use crate::pdf::book_export::{export_book, Progress};
 use crate::pdf::export::ExportOptions;
@@ -31,8 +32,10 @@ impl Drop for Job {
 
 /// The choices of the dialog of a folder that a note's dialog has not.
 pub struct BookExport {
-    /// The folder: `""` is the vault.
+    /// The folder: `""` is the vault. For a board, the board note (BOARD-030).
     pub folder: PathBuf,
+    /// `folder` is a board note: the book is the board and the notes of its cards
+    pub board: bool,
     /// The reading order, or why there is no book.
     pub plan: Result<Plan, String>,
     pub job: Option<Job>,
@@ -41,7 +44,12 @@ pub struct BookExport {
 
 impl BookExport {
     pub fn new(vault: &Vault, folder: &Path, busy: &Busy) -> Self {
-        BookExport { folder: folder.to_path_buf(), plan: book::plan(vault, folder), job: None, busy: busy.clone() }
+        BookExport { folder: folder.to_path_buf(), board: false, plan: book::plan(vault, folder), job: None, busy: busy.clone() }
+    }
+
+    /// The export of the board note `rel`: the board and the notes of its cards (BOARD-030).
+    pub fn for_board(vault: &Vault, rel: &Path, busy: &Busy) -> Self {
+        BookExport { folder: rel.to_path_buf(), board: true, plan: board::plan_of(vault, rel), job: None, busy: busy.clone() }
     }
 
     pub fn working(&self) -> bool {
@@ -63,11 +71,15 @@ impl BookExport {
         };
         let Some(mut task) = self.busy.begin(PDF_EXPORT, label) else { return false };
         let progress = Arc::new(Progress::with_cancel(task.cancellable()));
-        let (p, folder) = (progress.clone(), self.folder.clone());
+        let (p, folder, board) = (progress.clone(), self.folder.clone(), self.board);
         let job = task.run(
             move || {
                 let vault = Vault::open(&root).map_err(|e| format!("Could not read the vault: {e}"))?;
-                export_book(&vault, &folder, &opts, Some(&p))
+                if board {
+                    export_board(&vault, &folder, &opts, Some(&p))
+                } else {
+                    export_book(&vault, &folder, &opts, Some(&p))
+                }
             },
             notify,
         );

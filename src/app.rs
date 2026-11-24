@@ -39,6 +39,8 @@ pub enum View {
     Drawing(PathBuf),
     Tasks,
     Graph,
+    /// the Kanban boards of the vault (BOARD-007); the board shown is `ShaleApp::boards.current`
+    Boards,
     Calendar,
     Mail,
     /// Mastodon / Bluesky feeds: the feed of this tab (None: not chosen yet, the last one is shown)
@@ -161,6 +163,7 @@ pub enum RightPanel {
     Thread,
 }
 
+mod boards;
 #[cfg(test)]
 mod busy_jobs;
 #[cfg(test)]
@@ -449,6 +452,10 @@ pub struct ShaleApp {
     pub tree: FileTree,
     /// the search box of the left sidebar and the selected result
     pub search: SearchBox,
+    /// the thread that searches for the picker and the sidebar (QUERY-014)
+    pub search_worker: crate::search_all::SearchWorker,
+    /// the Kanban boards view: the open board, the selected card and the peek (BOARD-007)
+    pub boards: crate::board::Boards,
     pub tasks: TasksFilter,
     /// the graph of the whole vault and the local one in the side panel
     pub graphs: Graphs,
@@ -713,6 +720,8 @@ impl ShaleApp {
             side: crate::sidebar_ui::SideState::new(crate::sidebar::Layout::from_config(&cfg)),
             tree: FileTree::default(),
             search: SearchBox::default(),
+            search_worker: Default::default(),
+            boards: Default::default(),
             tasks: TasksFilter::default(),
             graphs: Graphs::new(),
             calendar: {
@@ -869,6 +878,7 @@ impl ShaleApp {
                 self.open_data_usage();
             }
             Some("graph") => self.show_view(View::Graph, false),
+            Some("boards") => self.show_view(View::Boards, false),
             // the feed view with made-up posts (no network); "social-import": and the dialog for saving some of them; "social-thread": the conversation of a post
             Some(v @ ("social" | "social-import" | "social-thread" | "social-notifications")) => {
                 let demo = crate::social::demo::account();
@@ -1131,7 +1141,7 @@ impl ShaleApp {
     /// hand, with the place it was left at (NAV-045 to NAV-047). The mail view and the calendar
     /// are one each in the window, so their place is the one of the first such tab. A kind that is
     /// not known is skipped.
-    fn restore_view_tab(&mut self, kind: &str, st: &crate::vault_state::SavedTab, new_tab: bool) {
+    pub(crate) fn restore_view_tab(&mut self, kind: &str, st: &crate::vault_state::SavedTab, new_tab: bool) {
         use crate::vault_state::SavedTab;
         let view = match kind {
             SavedTab::MAIL => {
@@ -1162,6 +1172,12 @@ impl ShaleApp {
                     self.graphs.global.show_orphans = !g.hide_orphans;
                 }
                 View::Graph
+            }
+            SavedTab::BOARDS => {
+                if let Some(b) = st.board.as_deref().filter(|b| !b.is_empty()) {
+                    self.boards.current = Some(PathBuf::from(b));
+                }
+                View::Boards
             }
             SavedTab::SETTINGS_FILE => View::SettingsFile,
             _ => return,
@@ -1220,26 +1236,7 @@ impl ShaleApp {
         }
         match f.kind {
             FileKind::Note => {
-                // a buffer without edits that is behind the index (the file was replaced since it
-                // was loaded) takes the index text instead of showing a stale one
-                if let (Some(doc), Some(n)) = (self.notes.get_mut(rel), self.vault.as_ref().and_then(|v| v.notes.get(rel))) {
-                    if !doc.dirty && (doc.unreadable != n.unreadable || doc.base != crate::vault::Stamp::of(&n.text)) {
-                        doc.reload(n.text.clone(), n.unreadable.clone());
-                    }
-                }
-                if !self.notes.contains_key(rel) {
-                    // red path links whose file name exists exactly once are fixed (LINK-012);
-                    // there is no buffer for this note yet, so nothing unsaved is in the way
-                    let fixed = self.vault.as_mut().map(|v| v.auto_fix_links(rel));
-                    // a note that could not be read opens read-only, never as an empty note (DATA-008)
-                    let (text, unreadable) = self.vault.as_ref().and_then(|v| v.notes.get(rel)).map(|n| (n.text.clone(), n.unreadable.clone())).unwrap_or_default();
-                    self.notes.insert(rel.to_path_buf(), NoteDoc::loaded(text, unreadable));
-                    match fixed {
-                        Some(Ok(n)) if n > 0 => self.toast(format!("Fixed {n} link(s) whose note had moved")),
-                        Some(Err(e)) => self.toast(format!("Could not fix links: {e}")),
-                        _ => {}
-                    }
-                }
+                self.ensure_buffer(rel);
                 self.show_view(View::Note(rel.to_path_buf()), new_tab);
                 // the folds it had when it was left (EDIT-079)
                 if let (Some(saved), Some(t)) = (self.vdata.state.folds.get(&rel_to_string(rel)), self.tabbar.tabs.get_mut(self.tabbar.active)) {
@@ -1278,6 +1275,32 @@ impl ShaleApp {
             }
         }
         self.remember_open_files();
+    }
+
+    /// Make sure the note `rel` has a buffer that is the file as it is now: one without edits that is
+    /// behind the index (the file was replaced since it was loaded) takes the index text, and a note that
+    /// has none is loaded. Opening a note in a tab and the peek of a card both start here.
+    pub(crate) fn ensure_buffer(&mut self, rel: &Path) {
+        // a buffer without edits that is behind the index (the file was replaced since it
+        // was loaded) takes the index text instead of showing a stale one
+        if let (Some(doc), Some(n)) = (self.notes.get_mut(rel), self.vault.as_ref().and_then(|v| v.notes.get(rel))) {
+            if !doc.dirty && (doc.unreadable != n.unreadable || doc.base != crate::vault::Stamp::of(&n.text)) {
+                doc.reload(n.text.clone(), n.unreadable.clone());
+            }
+        }
+        if !self.notes.contains_key(rel) {
+            // red path links whose file name exists exactly once are fixed (LINK-012);
+            // there is no buffer for this note yet, so nothing unsaved is in the way
+            let fixed = self.vault.as_mut().map(|v| v.auto_fix_links(rel));
+            // a note that could not be read opens read-only, never as an empty note (DATA-008)
+            let (text, unreadable) = self.vault.as_ref().and_then(|v| v.notes.get(rel)).map(|n| (n.text.clone(), n.unreadable.clone())).unwrap_or_default();
+            self.notes.insert(rel.to_path_buf(), NoteDoc::loaded(text, unreadable));
+            match fixed {
+                Some(Ok(n)) if n > 0 => self.toast(format!("Fixed {n} link(s) whose note had moved")),
+                Some(Err(e)) => self.toast(format!("Could not fix links: {e}")),
+                _ => {}
+            }
+        }
     }
 
     /// Show an Obsidian canvas read-only (no question asked).
@@ -1541,6 +1564,49 @@ impl ShaleApp {
         }
     }
 
+    /// The key `normal.toggle_task` (KEY-045): tick or untick the task on the cursor's line of the editor
+    /// (vim normal mode), or the task row under the pointer in the reading view and the task list, as a
+    /// click on its checkbox does (TASK-003). Without a task it says so.
+    fn toggle_task_key(&mut self, ctx: &egui::Context, hovered: Option<(Option<PathBuf>, usize)>) {
+        let Some(tab) = self.tabbar.tabs.get(self.tabbar.active) else { return };
+        let editor = matches!((&tab.view, tab.reading), (View::Note(_), false));
+        let (rel, offset) = match (&tab.view, tab.reading) {
+            (View::Note(rel), false) => {
+                let text = self.notes.get(rel).map(|d| d.text.as_str()).unwrap_or_default();
+                let line = crate::editor_preview::line_of(text, markdown::char_to_byte(text, tab.editor.vim.cursor));
+                (Some(rel.clone()), markdown::find_tasks(text).into_iter().find(|t| t.line == line).map(|t| t.check_offset))
+            }
+            (View::Note(rel), true) => (Some(rel.clone()), hovered.and_then(|(r, o)| r.is_none().then_some(o))),
+            (View::Tasks, _) => hovered.and_then(|(r, o)| r.map(|r| (Some(r), Some(o)))).unwrap_or((None, None)),
+            // the peek of a card of a board (BOARD-013): its editor, in vim normal mode, as a note in a tab
+            (View::Boards, _) => match self.boards.peek.as_ref().filter(|p| p.editor.vim_normal_keys(ctx)) {
+                Some(p) => {
+                    let text = self.notes.get(&p.rel).map(|d| d.text.as_str()).unwrap_or_default();
+                    let line = crate::editor_preview::line_of(text, markdown::char_to_byte(text, p.editor.vim.cursor));
+                    (Some(p.rel.clone()), markdown::find_tasks(text).into_iter().find(|t| t.line == line).map(|t| t.check_offset))
+                }
+                None => (None, None),
+            },
+            _ => (None, None),
+        };
+        let (Some(rel), Some(offset)) = (rel, offset) else {
+            if editor {
+                self.tabbar.tabs[self.tabbar.active].editor.vim.message = Some("No task on this line".into());
+            } else {
+                self.toast("No task here: point at one");
+            }
+            return;
+        };
+        // one undo step of its own: the text of the note before and after (EDIT-021)
+        if let Some(before) = self.notes.get(&rel).map(|d| d.text.clone()) {
+            self.undo.of(&rel).checkpoint(&before);
+        }
+        self.toggle_task(&rel, offset);
+        if let Some(after) = self.notes.get(&rel).map(|d| d.text.clone()) {
+            self.undo.of(&rel).checkpoint(&after);
+        }
+    }
+
     /// Toggle a checkbox in any note (open buffer or file on disk).
     pub fn toggle_task(&mut self, rel: &Path, offset: usize) {
         let Some(_tree) = self.hold_sync_tree() else { return };
@@ -1589,6 +1655,11 @@ impl ShaleApp {
         let msg = match v.save_checked(rel, &doc.text, doc.base) {
             Ok(Saved::Written(stamp)) => {
                 doc.base = stamp;
+                // the note as written: a save adds `created:` and `modified:` (VAULT-045, VAULT-046), and the buffer has them too
+                if let Some(n) = v.notes.get(rel).filter(|n| n.text != doc.text) {
+                    self.undo.of(rel).rebase(&doc.text, &n.text);
+                    doc.text = n.text.clone();
+                }
                 doc.dirty = false;
                 doc.save_error = None;
                 self.history.note_saved(rel);
@@ -2256,6 +2327,10 @@ impl ShaleApp {
         let Some(v) = &self.vault else { return };
         let Some(f) = v.file(rel) else { return };
         let drawing = f.kind == FileKind::Drawing;
+        // a board is exported as the board and the notes of its cards (BOARD-030)
+        if !drawing && crate::board::file::is_board(&self.note_text(rel)) {
+            return self.open_export_board_dialog(rel);
+        }
         let name = f.display_name();
         let opts = if drawing {
             let scene = self.drawings.get(rel).map(|d| d.scene.clone()).or_else(|| crate::drawing::Scene::read_file(&v.abs(rel)).ok()).unwrap_or_default();
@@ -2278,6 +2353,27 @@ impl ShaleApp {
             dialog = dialog.with_latex(crate::pdf::tex::dialog::TexExport::new(&root, title, &text, prefer), engine);
         }
         self.modal = Some(Modal::Export(Box::new(dialog)));
+    }
+
+    /// Show the export dialog of the board note `rel` (BOARD-030): the board on landscape pages,
+    /// then the notes of its cards as a book. It is saved to `<vault>/exports/<name>.pdf`. It offers
+    /// the LaTeX templates that can hold a book too (BOARD-031), starting as a folder's dialog does.
+    pub fn open_export_board_dialog(&mut self, rel: &Path) {
+        use crate::pdf::export_dialog::ExportEngine;
+        self.flush_all();
+        let text = self.note_text(rel);
+        let Some(v) = &self.vault else { return };
+        let name = v.file(rel).map(|f| f.display_name()).unwrap_or_else(|| rel.to_string_lossy().into_owned());
+        let path = v.root.join("exports").join(format!("{name}.pdf"));
+        let book = crate::pdf::book_dialog::BookExport::for_board(v, rel, &self.busy);
+        let opts = crate::pdf::export::ExportOptions { numbered_headings: self.cfg.numbered_headings, ..crate::pdf::export::ExportOptions::for_note() }.with_toc_break_property(&text);
+        let last = &self.vdata.state.latex_export;
+        let noted = crate::pdf::tex::dialog::note_choice(&crate::markdown::front_matter_values(&text));
+        let engine = if noted.is_some() || last.latex { ExportEngine::Latex } else { ExportEngine::Builtin };
+        let prefer = noted.or_else(|| (!last.set.is_empty()).then(|| (last.set.clone(), last.kind.clone())));
+        let title = v.file(rel).map(|f| f.title()).unwrap_or_else(|| name.clone());
+        let tex = crate::pdf::tex::dialog::TexExport::for_folder(&v.root, title, &text, prefer);
+        self.modal = Some(Modal::Export(Box::new(crate::pdf::export_dialog::ExportDialog::new(rel.to_path_buf(), false, name, opts, path).with_book(book).with_latex(tex, engine))));
     }
 
     /// Show the export dialog for a folder as one PDF, a book (BOOK-010): `dir` is the folder, the
@@ -2445,6 +2541,11 @@ impl ShaleApp {
         let (set, kind) = (tex.current_set().ok_or("Choose a template set first: import one in Settings → LaTeX")?, tex.current_kind().ok_or("Choose a kind of document")?);
         let doc = match &d.book {
             // a folder: its book as it is in the vault now, which has the saved notes (BOOK-014)
+            // a board: the board and its cards' notes (BOARD-031)
+            Some(book) if book.board => {
+                let board = crate::board::resolve::resolve(v, &book.folder)?;
+                crate::pdf::tex::board::write_board(&crate::pdf::tex::board::BoardRequest { vault: v, board: &board, opts: &d.opts, set, kind, fields: &tex.values })?
+            }
             Some(book) => {
                 let plan = crate::pdf::book::plan(v, &book.folder)?;
                 crate::pdf::tex::book::write_book(&crate::pdf::tex::book::BookRequest { vault: v, plan: &plan, opts: &d.opts, set, kind, fields: &tex.values })?
@@ -2526,6 +2627,8 @@ impl ShaleApp {
         match tab.view {
             View::Note(_) if !tab.reading => tab.editor.vim_normal_keys(ctx),
             View::Mail | View::Drawing(_) => false,
+            // the editor of the peek of a card has the keyboard in normal mode (BOARD-013)
+            View::Boards if self.boards.peek.as_ref().is_some_and(|p| p.editor.vim_normal_keys(ctx)) => true,
             _ => ctx.memory(|m| m.focused().is_none()),
         }
     }
@@ -2542,6 +2645,7 @@ impl ShaleApp {
         match tab.view {
             View::Note(_) if !tab.reading => tab.editor.vim_normal_keys(ctx) || ctx.memory(|m| m.focused().is_none()),
             View::Drawing(_) => false,
+            View::Boards if self.boards.peek.as_ref().is_some_and(|p| p.editor.vim_normal_keys(ctx)) => true,
             View::Mail => self.mail.compose.is_none() && !self.mail.away && !ctx.text_edit_focused(),
             // another widget with the keyboard (a player after a click, a button after Tab) keeps Space
             _ => ctx.memory(|m| m.focused().is_none()),
@@ -2774,6 +2878,8 @@ impl ShaleApp {
         }
         // the keys of the open link preview come before everything the editor reads (EDIT-035)
         self.link_preview_keys(ui);
+        // Esc closes the peek of a card, also while its editor has the keyboard (BOARD-012)
+        self.boards_keys(ui);
         // the Alt keys of the buttons of a note, with the keyboard in its text or not (KEY-014, KEY-015)
         if self.note_keys_active(ui.ctx()) {
             if let Some(a) = ui.input_mut(|i| self.keymap.poll(i, Scope::NoteView)) {
@@ -2786,12 +2892,18 @@ impl ShaleApp {
         // normal mode (EDIT-015) its own; both start with Space, so one sequence reads both. A half
         // typed one is forgotten when the keys are not read any more
         let normal = self.normal_keys_active(ui.ctx());
+        // the task row under the pointer is only the one the views drew in the last frame
+        let hovered_task = crate::reader::take_hovered_task(ui.ctx());
         if normal || self.main_keys_active(ui.ctx()) {
             let scopes: &[Scope] = if normal { &[Scope::MainViews, Scope::EditorNormal] } else { &[Scope::MainViews] };
             match ui.input_mut(|i| self.keymap.poll_in(i, scopes)) {
                 Some(KeyAction::NormalAlternate) => self.swap_alternate(),
                 Some(KeyAction::NormalFindFile) => self.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::FileNames))),
                 Some(KeyAction::NormalSearchAll) => self.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::Everything))),
+                Some(KeyAction::NormalToggleTask) => self.toggle_task_key(ui.ctx(), hovered_task),
+                Some(KeyAction::MainBoards) => self.show_view(View::Boards, false),
+                Some(KeyAction::BoardCardNextLane) => self.board_move_card(ui.ctx(), 1),
+                Some(KeyAction::BoardCardPrevLane) => self.board_move_card(ui.ctx(), -1),
                 Some(KeyAction::NormalLinkPreview) => self.link_preview_key(ui.ctx()),
                 _ => {}
             }
@@ -3193,6 +3305,7 @@ impl ShaleApp {
             self.title_applied = title;
         }
         self.keyboard_guard(ui.ctx());
+        self.search_worker.begin_frame(ui.ctx());
         self.shortcuts(ui);
         self.autosave();
         self.state_tick();
@@ -3691,7 +3804,7 @@ pub(crate) mod tests {
         let v = app.vault.as_ref().unwrap();
         assert!(v.exists(&format!("{today}Plan"), None), "the link reaches the note");
         app.flush_all();
-        assert_eq!(std::fs::read_to_string(d.join("Source.md")).unwrap(), want, "saved");
+        assert_eq!(crate::note_props::unstamped(&std::fs::read_to_string(d.join("Source.md")).unwrap()), want, "saved");
         assert!(app.vault.as_ref().unwrap().backlinks(Path::new(&format!("{today}Plan.md"))).iter().any(|(p, _)| p == Path::new("Source.md")), "a backlink");
         // a relative link (LINK-010) is made where it points, with the prefix, and rewritten alike
         std::fs::write(d.join("Projects/Rel.md"), "x [[./Sub]] y\n").unwrap();

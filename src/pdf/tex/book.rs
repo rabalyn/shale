@@ -11,10 +11,11 @@ use super::body::Body;
 use super::inline::{anchor_named, Files, Look, Targets};
 use super::sets::{class_and_preamble, tex_escape, KindManifest, Mapping, SetInfo};
 use super::writer::{document, drop_title_heading, field_values, heading, nested_levels, toc_depth, Document, SECTION};
+use crate::board::resolve::Resolved;
 use crate::markdown;
 use crate::pdf::book::{Item, Plan};
 use crate::pdf::export::ExportOptions;
-use crate::vault::Vault;
+use crate::vault::{FileKind, Vault};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
@@ -104,7 +105,12 @@ impl Sections<'_> {
     }
 
     fn push(&mut self, role: Role, rank: usize, title: String, rel: Option<PathBuf>) {
-        let text = rel.as_deref().and_then(|r| self.vault.notes.get(r)).map(|n| n.text.clone()).unwrap_or_default();
+        // a drawing (a card of a board) has no text: its chapter is the drawing, embedded
+        let drawing = rel.as_deref().filter(|r| self.vault.file(r).is_some_and(|f| f.kind == FileKind::Drawing));
+        let text = match drawing {
+            Some(r) => format!("![[{}]]", r.to_string_lossy()),
+            None => rel.as_deref().and_then(|r| self.vault.notes.get(r)).map(|n| n.text.clone()).unwrap_or_default(),
+        };
         let mut blocks = blocks::parse(&text);
         if role != Role::Intro {
             drop_title_heading(&mut blocks, &title);
@@ -147,11 +153,16 @@ fn targets(secs: &[Section]) -> Targets {
 /// Write the book as one document of the kind (BOOK-014…BOOK-016). Fails with a sentence for the
 /// person when the kind cannot hold a folder or a required field has no value.
 pub fn write_book(req: &BookRequest) -> Result<Document, String> {
-    // the paper has Shale's colours, whatever the theme of the window (CFG-061)
-    tracing::info_span!("flow.tex_book.write", peer = "vault").in_scope(|| crate::theme::with_palette(crate::theme::Palette::shale(), || write_book_in_shale(req)))
+    write_with_board(req, None)
 }
 
-fn write_book_in_shale(req: &BookRequest) -> Result<Document, String> {
+/// The book, with the board of BOARD-031 on landscape pages in front of the contents when it is one.
+pub(super) fn write_with_board(req: &BookRequest, board: Option<&Resolved>) -> Result<Document, String> {
+    // the paper has Shale's colours, whatever the theme of the window (CFG-061)
+    tracing::info_span!("flow.tex_book.write", peer = "vault").in_scope(|| crate::theme::with_palette(crate::theme::Palette::shale(), || write_book_in_shale(req, board)))
+}
+
+fn write_book_in_shale(req: &BookRequest, board: Option<&Resolved>) -> Result<Document, String> {
     let (vault, plan, kind) = (req.vault, req.plan, req.kind);
     if !holds_a_folder(kind) {
         return Err(format!("“{}” cannot hold a folder. {ONLY_ARTICLES_AND_BOOKS}.", kind.name));
@@ -170,6 +181,9 @@ fn write_book_in_shale(req: &BookRequest) -> Result<Document, String> {
     // the headings have the book's anchors, not those of a single note (TEX-032)
     let no_anchors = HashSet::new();
     let mut main = String::from("\\maketitle\n");
+    if let Some(board) = board {
+        main.push_str(&super::board::pages(board, &targets, toc.then_some(if book { 1 } else { SECTION })));
+    }
     if toc {
         main.push_str("\\tableofcontents\n");
         // the top folder note's text starts a page; a chapter starts one anyway and does not make a second (BOOK-018)
@@ -199,7 +213,11 @@ fn write_book_in_shale(req: &BookRequest) -> Result<Document, String> {
             }
         }
     }
-    let head = class_and_preamble(kind, &req.set.settings, kind.shows_department_logo(req.set, req.opts.department_logo));
+    let mut head = class_and_preamble(kind, &req.set.settings, kind.shows_department_logo(req.set, req.opts.department_logo));
+    if board.is_some() {
+        // the board is on landscape pages (BOARD-031)
+        head.push_str("\\IfPackageLoadedTF{pdflscape}{}{\\usepackage{pdflscape}}\n");
+    }
     let tex = document(head, true, false, toc.then(|| toc_depth(book)), &values, &main);
     let files = files.into_inner();
     Ok(Document::new(tex, files))

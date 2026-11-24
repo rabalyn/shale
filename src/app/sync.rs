@@ -963,7 +963,7 @@ mod tests {
         assert!(app.notes[Path::new("N.md")].dirty);
         drop(guard);
         app.autosave();
-        assert_eq!(crate::fsutil::read_to_string(root.join("N.md")).unwrap(), "edited\n");
+        assert_eq!(crate::note_props::unstamped(&crate::fsutil::read_to_string(root.join("N.md")).unwrap()), "edited\n");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -995,7 +995,7 @@ mod tests {
         release_tx.send(()).unwrap();
         job.join().unwrap();
         app.autosave();
-        assert_eq!(crate::fsutil::read_to_string(root.join("N.md")).unwrap(), "edited\n");
+        assert_eq!(crate::note_props::unstamped(&crate::fsutil::read_to_string(root.join("N.md")).unwrap()), "edited\n");
         assert!(!app.notes[Path::new("N.md")].dirty);
         let _ = std::fs::remove_dir_all(&root);
     }

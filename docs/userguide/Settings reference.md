@@ -219,11 +219,12 @@ system keyring, never in this file):
 
 | Key | Default | Where |
 |---|---|---|
-| `search` | the group of the five keys below | Settings → Search |
+| `search` | the group of the six keys below | Settings → Search |
 | `search.prefix_notes` | `f` (one letter: `f:banana` looks in notes only) | Settings → Search, "Prefixes", Notes |
 | `search.prefix_mail` | `m` (one letter: `m:banana` looks in mail only) | Settings → Search, "Prefixes", Mail |
 | `search.prefix_posts` | `s` (one letter: `s:banana` looks in posts only) | Settings → Search, "Prefixes", Posts |
 | `search.hit_display` | `follow` (`follow`, `raw` or `rendered`: how the lines of notes that a search found are drawn; `follow` is rendered while the Markdown preview is on or the open note is in the reading view, raw otherwise; any other word reads as `follow`) | Settings → Search, "Hits of notes" |
+| `search.advanced` | `false` (`true` shows the query as text instead of rows in the gear filter form of the search; set by the **Advanced** switch of the form, the same in the sidebar, the picker and the boards; a query that does not fit the rows is shown as text whatever this says) | the **Advanced** switch of the filter form (gear next to the search box) |
 | `search.sources` | `["notes", "mail", "posts"]` (the sources a query without a prefix looks in and lists; an empty or unknown list means all three) | Settings → Search, "Sources", and Shift+click on a source button above the results |
 
 The three letters must differ, and no combination of them may spell a field of the mail or post search (`to`, `in`, …); letters Shale
@@ -298,6 +299,7 @@ Some behaviour is decided by a note's own properties (front matter) instead of a
 `print-paper`, `print-margins`, `print-font`, `print-font-size`, `print-line-spacing`, `print-paragraph-spacing`, `print-align`,
 `print-heading-color`, `print-heading-weight`, `print-heading-sizes`, `print-break-before`, `print-title`, `print-toc` and `print-toc-page-break` (any of them also switches on the plain paper look of the PDF); each has its values, default and effect in the table of
 [[PDF#Print properties of a note]]. Every one is optional, and a value that cannot be read is ignored.
+Shale itself writes `created` and `modified` (full ISO 8601 times) into every Markdown note it saves, and reads an optional `priority` (`highest`, `high`, `medium`, `low`, `lowest`); there is no setting for them (see [[Editor#Created, modified and priority]]).
 
 # Vault settings (`<vault>/.shale/settings.json`)
 
@@ -351,7 +353,7 @@ Kept by Shale as you work, so a vault opens as you left it ([[Tabs]], [[Import]]
 | Key | Default | Meaning |
 |---|---|---|
 | `version` | 2 | format version |
-| `tabs` | empty | the open tabs in order; each has `tabs[].file` (a note or drawing, relative to the vault) or `tabs[].feed` (a Feeds tab) and `tabs[].pinned`; a note tab also has `tabs[].cursor` (the selection as two character positions, the moving end first), `tabs[].scroll` (the scroll offset in points) and `tabs[].reading` (true in the reading view), all left out when not set; a tab of a view without a file has `tabs[].view` instead (`mail`, `calendar`, `tasks`, `graph` or `settings_file`) and, where there is something to keep, `tabs[].mail` (account, folder and the `uid` of the open message), `tabs[].calendar` (`mode` and `day`), `tabs[].tasks` (`query`, `show_done`, `only_due`) or `tabs[].graph` (`hide_missing`, `hide_orphans`), the last two only when they are not the default |
+| `tabs` | empty | the open tabs in order; each has `tabs[].file` (a note or drawing, relative to the vault) or `tabs[].feed` (a Feeds tab) and `tabs[].pinned`; a note tab also has `tabs[].cursor` (the selection as two character positions, the moving end first), `tabs[].scroll` (the scroll offset in points) and `tabs[].reading` (true in the reading view), all left out when not set; a tab of a view without a file has `tabs[].view` instead (`mail`, `calendar`, `tasks`, `graph`, `boards` or `settings_file`) and, where there is something to keep, `tabs[].mail` (account, folder and the `uid` of the open message), `tabs[].calendar` (`mode` and `day`), `tabs[].tasks` (`query`, `show_done`, `only_due`) `tabs[].graph` (`hide_missing`, `hide_orphans`), the last two only when they are not the default, or `tabs[].board` (the board note the Boards view showed, relative to the vault) |
 | `panes` | empty | the panes side by side, left to right ([[Tabs]]); each has `panes[].tabs` (as `tabs`), `panes[].active` (the open tab, an index into its tabs) and `panes[].weight` (its share of the width, 1); a file without `panes` loads as one pane made of `tabs`. `tabs` is also written as the tabs of the first pane |
 | `focused_pane` | 0 | the index of the pane that had the focus |
 | `highlight_colour`, `font_colour` | not written until a colour is picked (neon yellow `#FFFF00`, red `#E53E3E`) | the current colour of the highlight and font colour buttons of the toolbar as `#RRGGBB` ([[Editor]]); an unreadable value gives the default |

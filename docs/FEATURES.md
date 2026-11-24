@@ -268,6 +268,14 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   tree; the export is a background job with Cancel.
   `shale --export-pdf <folder> <file.pdf>` does it without a window, and `scripts/userguide-pdf.sh` makes the PDF of this
   user guide (BOOK-001 to BOOK-012, BOOK-019), which every release has as `shale-userguide-<version>.pdf`.
+- **A board as one PDF** (BOARD-030, #604): **Export PDF…** in the board view (and **Export to PDF** of a board note)
+  opens the dialog of a book. The PDF has the board on landscape pages (lanes as columns; more lanes than fit go on
+  the next pages left to right, more cards than fit continue on the next page; a card shows its title and chips, a
+  drawing card its vector drawing), then the notes of the cards in portrait through the book export, lane by lane, a
+  card of several lanes once, with a contents page (the board first), bookmarks and a link from each card to its note.
+  The dialog also offers the **LaTeX template** engine (BOARD-031, #605): the same order through the book templates,
+  the board on `pdflscape` landscape pages (three lanes side by side, more go on further pages, "(continued)"), the
+  lanes as parts and the cards as chapters.
 - **A folder through a LaTeX template** (#309): the folder's export dialog has the engine choice of a note's.
   With **LaTeX template** and a kind of the article or book family (publication, report, exercise, thesis,
   PhD; slides, letters and posters are greyed) the book is one LaTeX document: in a thesis the subfolders are
@@ -487,7 +495,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   start typing, Esc stops; x deletes a character; `dd` deletes the line (onto the clipboard,
   `p` puts it back below); v and V select with the same motions, d cuts and y copies to the
   clipboard, p pastes; `gt` follows the link under the cursor like a click (a note link or a web
-  address); **Shift+K** (definable, for example as Space Space) previews the link under the cursor in a floating frame like neovim's hover: a note as the reading view draws it (from the heading of the link), "Note does not exist yet" for a missing one, a picture, or for a web link the page's title, description and the start of its text, loaded in the background (https only, 30 s, 1.5 MB, kept per address while Shale runs). Moving the cursor, typing or Esc close it; Shift+K again moves the keyboard into it (j / k, ↓ / ↑, Ctrl+D / Ctrl+U, PageDown / PageUp scroll, Enter opens the link like `gt`, Ctrl+Enter opens it in a new pane on the right, Esc gives the keyboard back to the editor with the cursor where it was). The frame is 640 x 480 points at first; its four edges and corners are dragged to resize it, and the size is a setting (`link_preview_width`, `link_preview_height`, Settings → Editor, with Reset size) that every preview uses (EDIT-037). `u` undoes and Ctrl+R redoes, up to 200 steps per note (an insert session
+  address); **Shift+K** (definable, for example as Space P) previews the link under the cursor in a floating frame like neovim's hover: a note as the reading view draws it (from the heading of the link), "Note does not exist yet" for a missing one, a picture, or for a web link the page's title, description and the start of its text, loaded in the background (https only, 30 s, 1.5 MB, kept per address while Shale runs). Moving the cursor, typing or Esc close it; Shift+K again moves the keyboard into it (j / k, ↓ / ↑, Ctrl+D / Ctrl+U, PageDown / PageUp scroll, Enter opens the link like `gt`, Ctrl+Enter opens it in a new pane on the right, Esc gives the keyboard back to the editor with the cursor where it was). The frame is 640 x 480 points at first; its four edges and corners are dragged to resize it, and the size is a setting (`link_preview_width`, `link_preview_height`, Settings → Editor, with Reset size) that every preview uses (EDIT-037). `u` undoes and Ctrl+R redoes, up to 200 steps per note (an insert session
   from i to Esc is one step; the history is shared by all tabs of the note and kept in the vault
   for 30 days by default (a setting of the undo histories cache, see Data usage), so `u` works
   after a restart too). The status bar shows NORMAL, INSERT, VISUAL or V-LINE.
@@ -501,15 +509,30 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   count (**Notes 12 · Mail 20+ · Posts 4**, a switched-off source is counted, in grey) lists only that source on a
   click (again: back), or goes in and out of the default selection on Shift+click. Tab / Shift+Tab step through the
   sources. The default selection is saved; the letters are in Settings → Search.
-- **Search syntax** (user guide: *Search syntax*): the sources read the same text differently. **Notes** look for the whole
-  query as one piece of text inside a line, ignoring case, with `*` (any characters) and `?` (one character) as wildcards.
+- **Query language** (#597, user guide: *Search syntax*): the search over everything reads what you type as one language:
+  `AND`, `OR`, `NOT` (upper case only; `-x` is NOT), parentheses, two terms side by side are AND. Terms are text (a run of
+  plain words is one phrase), `#tag`, `status:doing` (any front-matter property), `path:Folder/`, `due:<+7d` / `due:overdue` /
+  `due:2026-12-01`, `links:[[Note]]`, `blocked` and `blocking` (from `blocked-by: [[A]], [[B]]`). Fields select notes and
+  text finds the lines inside them. A query that is not valid (an open parenthesis, `due:soon`, `priority:urgent`, too long)
+  is underlined with its reason, nothing runs and the last list stays. Mail and posts take only text and their own fields
+  (`from:`, …): for the others the search says "Mail: `status:` not supported" under the source buttons. A search has a
+  work budget: when it is used up the list is partial and says "Stopped early, narrow the query".
+- **Search syntax** (user guide: *Search syntax*): the sources read the same text differently. **Notes** look for a run of
+  plain words as one piece of text inside a line, ignoring case, with `*` (any characters) and `?` (one character) as wildcards.
   **Mail and posts** (full-text index) need all the words in any order, ignoring case and accents; every word matches the start of a word
   (`meet` finds "meeting", #491), `"phrases"` stay exact, a wildcard only cuts the word (`mee?ing` is `mee*`) and a word that starts with one is dropped; `AND`, `OR`, `NOT`
-  and `-` are plain text. Fields limit a word in mail (`from:` `to:` `cc:` `subject:` `body:`) and posts (`from:` `text:`
+  and `-` are operators of the query language and mail and posts take only words side by side. Fields limit a word in mail (`from:` `to:` `cc:` `subject:` `body:`) and posts (`from:` `text:`
   `body:` `in:` `context:` `link:` `date:`) and are plain text in notes. The mail view's own search reads the text
   the same way as mail here (#490).
   ![The search window of Space f g: notes with the found text marked, mail and posts under them, and the count buttons](userguide/z_media/screenshots/picker-search.png)
   ![The search in the sidebar with the same groups](userguide/z_media/screenshots/sidebar-search.png)
+- **The filter form** (QUERY-021…QUERY-027, #599): a **⚙** button next to the search box of the sidebar and of the picker opens a form that builds the query: **All of** / **Any of**
+  and rows (tag is, property is, due, is blocked, is blocking, in folder, links to, text contains), each with a **not** switch, added with **+ Add filter**. It writes the box's
+  text and the list follows at once; what you type in the box fills the form. **Advanced** shows the text with the live count of matches; a query that is more than one
+  level of AND or OR is "too complex for the form", is left as it is and Advanced stays on. The last Advanced choice is remembered (`search.advanced`). The same
+  widget has sort rows (field, asc or desc, drag to reorder, `dependencies` without a direction) for the lanes of a board. Keyboard: Ctrl+Shift+G opens it, Tab walks it, Esc closes the picker.
+  ![The picker with the filter form open: All of / Any of, a tag row and a property row](userguide/z_media/screenshots/picker-form.png)
+  ![The sidebar search with the same form](userguide/z_media/screenshots/sidebar-form.png)
 - **Hits of notes are shown rendered** (#483): a found line is drawn with the editor's own inline rendering (bold, italic,
   strikethrough, highlight, code, links and wiki links by their shown text, tags in their colour, a task with a painted checkbox,
   a list item with a painted dot, a heading without its `#`), in the picker and the sidebar, and the **found text is marked** in
@@ -572,6 +595,38 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - Filter by text or `#tag`, show done tasks, or only tasks with a due date
   (`📅 2026-12-01` or `due:2026-12-01`).
 
+## Kanban boards
+
+![Boards](userguide/z_media/screenshots/boards.png)
+
+- A **board is a note** with `type: board` in its front matter, so it stays searchable, linkable and readable in other
+  apps. Its lanes are `##` headings; under a heading `query:` (the query language of the search: `AND`, `OR`, `NOT`,
+  `#tag`, `status:doing`, `due:`, `path:`), `sort:` (`priority desc, due asc`), `drop:` (`status: doing`) and
+  `done: true` lines, and `- [[Note]]` lines that pin cards in that order. `cards: every-lane` shows a card in every lane
+  it matches (else it is in the first), `card-shows: due, status, priority, tags` chooses the chips of the cards. Lines
+  the board does not know stay as they are, and a hand edit of the file changes the view.
+- **Space b** (`main.boards`, definable) opens the boards, a main-area tab with a strip of every board of the vault and
+  **+ New board**, which writes a note with one starter lane. Lanes are added, renamed, moved and deleted in the view
+  (**⋯** menu of the lane), which rewrites the file; a double click on a lane's heading opens its settings: the filter and
+  sort form of the search, the `drop:` property and "Cards here are done".
+- A lane fills itself from its query on the background search worker, so the window keeps drawing; when a note changes
+  only the lanes it can change ask again. A lane whose query is wrong shows the reason in its heading and stays empty.
+- A **card** is a note (or a drawing, with its picture) with chips: the due date (red when past), the status, the
+  priority and the tags. Cards sort by `created`, `modified`, `due`, `priority` and `title`; a note without a value comes
+  last either way. A pinned card is only in the lane that pins it.
+- **Drag a card onto a lane** (the card follows the pointer, the lane and the place are marked, Esc cancels, a drop outside the lanes does nothing): the lane's `drop:` property, or the one its simple query says (`status:doing`), is written into the card's front matter (`modified:` stays, a checked save, an undo step in an open note). A lane without a drop property pins the card at the place it was dropped (`- [[Note]]`); the order of the `[[links]]` is the manual order, and a card is unpinned in the lane it came from.
+- **Keys and long boards** (BOARD-033, BOARD-034): with a card selected, **Alt+Shift+→ / Alt+Shift+←** (`board.card_next_lane`, `board.card_prev_lane`, definable) move it to the next / previous lane like a drop below that lane's pinned cards; the card stays selected and in view. A card dragged near the top or bottom edge of a lane scrolls the lane, near the left or right edge of the board scrolls the board, faster the closer it is.
+- **Dependencies**: `blocked-by: [[A]], [[B]]` in a card's note (and `due:`, `start:`). A card is **blocked** (a red chip) while a blocker exists and is not done: `status: done`, or a card in a lane marked `done: true` (the query words `blocked` and `blocking` use the status only). Selecting a card draws **arrows** to its blockers and to the cards that wait for it (a blocker that is not on the board is named on the card). `sort: dependencies` is a topological order with **step numbers** (`step 1`, `step 2`, `step 3a`, `step 3b` for parallel cards; ties by earlier due day, higher priority, title); a **cycle** is marked "circular" and listed last. The ▾ menu next to **+ Add lane** has the preset **My dependency chain** (`query: blocked OR blocking`, `sort: dependencies`).
+- A click selects a card and opens its **peek**, an editor of the note in a window the size of the link preview
+  (drag the title, resize the edges, Esc closes) with a **Priority** control that changes the front matter only. Ctrl+Click
+  or Enter opens the note in a tab; the arrow keys move the selection.
+
+![The peek of a card](userguide/z_media/screenshots/board-peek.png)
+
+![The settings of a lane](userguide/z_media/screenshots/board-lane-settings.png)
+
+![A selected card with arrows and a lane in dependency order](userguide/z_media/screenshots/board-dependencies.png)
+
 ## Linked notes and the graph
 
 ![Graph](userguide/z_media/screenshots/graph.png)
@@ -587,6 +642,11 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   (`A4 · 2.5 cm margins · 11 pt`), any other note as key and value rows. Ids and `print-*` settings are left out, a ▸ toggle shows every property, and people with a contact
   note are links. `properties::summary` gives the one line for a folded view (`email · Anna Müller · 2026-11-12 · #work #mail`). Settings → Appearance → "Properties in the editor"
   / "Properties in the reading view": folded, card or raw (defaults: folded in the editor, card in the reading view). In the editor a note's front matter starts folded, to its summary line or, with the setting card, to the typed card of the reading view (a click on it opens the lines), unless the setting is raw (EDIT-081, EDIT-084). The date of an e-mail card and the start of an event card are links: a click shows that day in the calendar (EDIT-108).
+- **Created, modified and priority** (VAULT-045 to VAULT-047, #600): every Markdown note Shale saves gets `created:` (the first save, never
+  changed) and `modified:` (the last save that changed the body; a change of the properties alone does not move it) in its front matter,
+  as ISO 8601 times with the time zone. A blank note, drawings and other files are left as they are. `priority:` takes `highest`, `high`,
+  `medium`, `low` or `lowest` (another value is ignored) and shows in the folded properties line. The file list's Created and Modified
+  sorts read these properties, then the `YYMMDD_` prefix and the file time. Edits outside Shale are noticed at the next save from Shale.
 - **Title line and date prefix** (VAULT-025, CFG-043): above line 1 a note shows its title line, its file name without `.md` and without a
   leading date prefix `YYMMDD_` (`261117_Plan.md` shows `Plan`); editing it renames the file and keeps the prefix. Tabs and the PDF title show the name without the prefix; the file
   list, the quick switcher and links keep the full name, so the list sorts by date. Settings → Editor → "Date prefix for new notes" (on by default) names a note made by Shale
@@ -1469,6 +1529,7 @@ Text editing keys and vim keys are fixed.
 | Ctrl+Shift+B | File list with the keyboard in it: j / k (or ↓ / ↑) next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
 | ↓ or Enter in the search box | Browse the results (notes, mail and posts): j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K first hit of the next / previous file or group, Enter opens the hit, Esc back to the box |
 | Tab / Shift+Tab | In the search over everything (the sidebar search, in its box and while you browse the results, and the picker of Space f g): list only the next / previous source (Notes, Mail, Posts), then the default sources again. Not while the query starts with a prefix (`f:`, `m:`, `s:`). Both can be changed in Settings → Keybindings ("Search results", "List windows") |
+| Ctrl+Shift+G | In the search over everything (the sidebar search box and the picker of Space f g): show or hide the filter form (the ⚙ button) and put the keyboard in it. Can be changed in Settings → Keybindings ("Search results", "List windows") |
 | Ctrl+Shift+M | Mail view (its keys are listed below) |
 | Alt+← / Alt+→ | Back / forward (macOS: Cmd+[ / Cmd+], because Option+← / → move by word in text) |
 | Alt+B, Alt+I, Alt+S, Alt+H, Alt+C, Alt+Y, Alt+F, Alt+Shift+Y, Alt+Shift+F, Alt+E, Alt+U, Alt+O, Alt+T, Alt+Q, Alt+K, Alt+R, Alt+J, Alt+A, Alt+L, Alt+W, Alt+M, Alt+X | The buttons of the formatting toolbar of a note, each doing what a click on it does (the keyboard stays in the text and nothing is typed): Bold, Italic, Strikethrough, Highlight, Inline code, Highlight colour and Font colour (apply the current colour: the main part of the split button; Alt+Shift+Y and Alt+Shift+F open the palette, the ▾ part, where the digits 1 to 8 pick a swatch and 0 picks none, shown as ⇧Y and ⇧F while Alt is held), Heading level (opens its menu), Bullet list, Numbered list, Task, Quote, Code block, Horizontal rule, Table, Link to a note, Web link, Embed, Clear formatting. A key whose button is not there (reading view) or is greyed out (in a table cell) does nothing |
@@ -1484,8 +1545,11 @@ Text editing keys and vim keys are fixed.
 | Space … | A started key sequence (e.g. `Space f`) shows in the status bar and is dropped after 1.5 s without a key |
 | Space f f | In every main view (editor in normal mode, reading view, mail, calendar, Feeds, tasks, graph; not while a text field has the keyboard or a dialog is open; scope "Main views" in Settings → Keybindings): find a file by name (↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens it in this tab, Esc closes) |
 | Space f g | In every main view (as Space f f): search the text of notes, mail and posts (`*` and `?` are wildcards; `f:` `m:` `s:` at the start look in notes, mail or posts only; results grouped with counts; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the hit where it belongs, Esc closes) |
+| Space Space | Check or uncheck the task: in the editor (vim normal mode) the task on the cursor's line; in the reading view and the task list the task row under the pointer; a line without a task changes nothing and says so. Not in insert mode or a text field. Definable (Settings → Keybindings, Main views) |
+| Space b | In every main view (as Space f f): show the boards, the Kanban view of Boards (a main-area tab with a strip of every note that has `type: board`). Definable (Settings → Keybindings, Main views) |
+| Alt+Shift+→ / Alt+Shift+← | In the board view, with a card selected: move the card to the next / previous lane, like a drop below the pinned cards of that lane; the card stays selected. Definable (Settings → Keybindings, Main views: `board.card_next_lane`, `board.card_prev_lane`) |
 | ↓ or Ctrl+J, ↑ or Ctrl+K, Enter, Esc | In a picker window (Space f f, Space f g), the quick switcher (Ctrl+O) and the font list: next line, previous line, open, close. The hint between the search field and the list shows the keys as they are bound now; all four can be changed in Settings → Keybindings ("List windows") |
-| Shift+K | Vim-style editing, normal mode: preview the link under the cursor (a note as in the reading view, a web page's title and text; press it again to move the keyboard into the preview: j / k or ↓ / ↑ scroll, Enter opens the link like `gt`, Ctrl+Enter opens it in a new pane on the right, Esc closes). Definable, e.g. as Space Space |
+| Shift+K | Vim-style editing, normal mode: preview the link under the cursor (a note as in the reading view, a web page's title and text; press it again to move the keyboard into the preview: j / k or ↓ / ↑ scroll, Enter opens the link like `gt`, Ctrl+Enter opens it in a new pane on the right, Esc closes). Definable, e.g. as Space P |
 | Alt+↑ / Alt+↓ | Move the current line |
 | Tab / Shift+Tab | Indent lists or change heading levels |
 | Shift+arrows | In a table cell edited in the grid: select a block of cells (formatting buttons and Delete / Backspace work on all of them; typing ends it) |

@@ -22,6 +22,7 @@ mod align_ui_tests;
 mod app;
 #[cfg(feature = "bench")]
 mod bench;
+mod board;
 mod busy;
 mod calendar;
 mod caption;
@@ -101,6 +102,7 @@ mod media;
 mod modal_keys_ui_tests;
 #[cfg(test)]
 mod netshare_env_tests;
+mod note_props;
 #[cfg(test)]
 mod notes_vault_tests;
 mod opener;
@@ -128,6 +130,9 @@ mod recorder;
 mod recovery;
 mod script;
 mod search_all;
+mod search_form;
+#[cfg(test)]
+mod search_form_ui_tests;
 mod search_panel;
 mod search_render;
 mod search_sources;

@@ -94,7 +94,7 @@ fn vault_037_switching_to_another_vault_shows_nothing_of_the_first() {
     app.notes.get_mut(Path::new("Welcome.md")).unwrap().text = "# a\n\nedited\n".into();
     app.notes.get_mut(Path::new("Welcome.md")).unwrap().dirty = true;
     app.open_vault(&c);
-    assert_eq!(std::fs::read_to_string(a.join("Welcome.md")).unwrap(), "# a\n\nedited\n", "the edit of the old vault was saved first");
+    assert_eq!(crate::note_props::unstamped(&std::fs::read_to_string(a.join("Welcome.md")).unwrap()), "# a\n\nedited\n", "the edit of the old vault was saved first");
     assert_eq!(app.vault.as_ref().map(|v| v.root.clone()), Some(c.clone()));
     // the new vault shows its own first note and nothing else
     assert_eq!(app.tabbar.tabs.len(), 1);
@@ -250,7 +250,7 @@ fn vault_036_closing_the_open_vault_saves_the_buffers_forgets_it_and_leaves_no_v
     app.notes.get_mut(Path::new("Other.md")).unwrap().text = "# changed\n".into();
     app.notes.get_mut(Path::new("Other.md")).unwrap().dirty = true;
     app.close_vault(&a, Remove::default());
-    assert_eq!(std::fs::read_to_string(a.join("Other.md")).unwrap(), "# changed\n", "the buffer was saved first");
+    assert_eq!(crate::note_props::unstamped(&std::fs::read_to_string(a.join("Other.md")).unwrap()), "# changed\n", "the buffer was saved first");
     assert!(app.vault.is_none(), "no vault is open");
     assert_nothing_of_the_old_vault(&mut app);
     assert_eq!(app.cfg.vaults.entries().iter().map(|e| e.path.clone()).collect::<Vec<_>>(), [c], "the closed vault is forgotten, the other stays");
