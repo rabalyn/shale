@@ -165,6 +165,12 @@ impl Picker {
     pub fn listed(&self) -> &[Hit] {
         self.results.hits()
     }
+
+    /// The text the list was made for (tests wait for it: a debounced query is no job of the worker, DEV-041).
+    #[cfg(test)]
+    pub(crate) fn listed_for(&self) -> Option<&str> {
+        self.results.made_for_text()
+    }
 }
 
 /// The keys every list window of the app reads (NAV-049): the actions of the scope

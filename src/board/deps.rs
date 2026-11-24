@@ -102,6 +102,25 @@ impl Graph {
         Dep { blockers: rels(&mut self.deps.blockers(i).iter().copied()), waiting: rels(&mut self.deps.waiting(i)), dependants: rels(&mut self.dependants[i].iter().copied()), step: None }
     }
 
+    /// Does `a` wait for `b`, through its blockers and theirs? (A new blocker `b` of `a` would then close a
+    /// cycle, BOARD-043.)
+    pub fn waits_for(&self, a: &Path, b: &Path) -> bool {
+        let (Some(&a), Some(&b)) = (self.index.get(a), self.index.get(b)) else { return false };
+        let mut seen = vec![false; self.rels.len()];
+        let mut todo = vec![a];
+        while let Some(i) = todo.pop() {
+            for &j in self.deps.blockers(i) {
+                if j == b {
+                    return true;
+                }
+                if !std::mem::replace(&mut seen[j], true) {
+                    todo.push(j);
+                }
+            }
+        }
+        false
+    }
+
     /// For each card the places in `cards` of the cards it waits for, the blockers that are
     /// cards of the same list (the lane); a blocker that is done is one too: done or not, it
     /// comes first.
