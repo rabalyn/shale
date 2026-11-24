@@ -99,7 +99,7 @@ fn options(host: &str) -> Options {
     Options { host: host.into(), stamp: "2026-11-21 1200".into(), ..Default::default() }
 }
 
-// spec: SYNC-054, SYNC-055, SYNC-057, SYNC-058
+// spec: SYNC-054, SYNC-055, SYNC-057, SYNC-058, SYNC-066
 #[test]
 #[ignore = "needs the Forgejo test stack: tests/forgejo-env/forgejo-env.sh up"]
 fn forgejo_env_a_token_creates_a_repository_and_git_syncs_with_it_through_the_askpass_helper() {
@@ -140,7 +140,7 @@ fn forgejo_env_a_token_creates_a_repository_and_git_syncs_with_it_through_the_as
     }
 }
 
-// spec: SYNC-058
+// spec: SYNC-058, SYNC-066
 #[test]
 #[ignore = "needs the Forgejo test stack: tests/forgejo-env/forgejo-env.sh up"]
 fn forgejo_env_a_wrong_token_a_missing_repository_and_no_server_are_told_in_plain_words() {

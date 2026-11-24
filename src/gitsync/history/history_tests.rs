@@ -103,7 +103,7 @@ fn a_vault_with_git_uses_its_own_repository() {
     assert_eq!(fs::read_dir(&h.root).unwrap().count(), 0, "nothing in the data folder");
 }
 
-// spec: SYNC-031
+// spec: SYNC-031, SYNC-064
 #[test]
 fn a_moved_vault_keeps_its_history_and_a_copy_gets_a_new_id() {
     let h = setup("hist-moved");
@@ -455,7 +455,7 @@ fn a_binary_version_has_no_line_counts() {
     assert_eq!((list[1].binary, list[1].lines), (false, Some((1, 0))));
 }
 
-// spec: SYNC-040
+// spec: SYNC-040, SYNC-043
 #[test]
 fn deleted_notes_are_listed_and_their_last_text_is_found_and_a_taken_name_gets_a_number() {
     let h = setup("hist-deleted");

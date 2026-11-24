@@ -511,7 +511,7 @@ fn remove_deletes_the_managed_folder_and_its_leftover_twins_and_nothing_else() {
 
 /// The real git-lfs of this platform, from github.com into a temporary data folder (SYNC-025,
 /// SYNC-029). Needs a network. `cargo test --locked real_ -- --ignored`
-// spec: SYNC-029
+// spec: SYNC-025, SYNC-029
 #[test]
 #[ignore = "downloads git-lfs from github.com"]
 fn real_install_of_git_lfs_from_github_and_it_runs() {
@@ -538,7 +538,7 @@ fn real_install_of_git_lfs_from_github_and_it_runs() {
 
 /// The real MinGit of Windows x86-64 downloaded, checked against its pinned SHA-256 and unpacked by the
 /// archive reader (it is not run here: it is a Windows program).
-// spec: SYNC-029
+// spec: SYNC-025, SYNC-029
 #[test]
 #[ignore = "downloads MinGit (40 MB) from github.com"]
 fn real_mingit_zip_has_the_pinned_checksum_and_unpacks_with_its_program() {
