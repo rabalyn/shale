@@ -56,6 +56,21 @@ card as in the reading view, a mail header for a mail, the time and place for an
 opens the lines, and a person with a note or a date in it works as in the reading view) or `Raw`, which opens a note
 with its properties unfolded.
 
+### Created, modified and priority
+
+Shale keeps two properties in every Markdown note it saves. `created:` is the time of the first save, written once
+and never changed afterwards. `modified:` is the time of the last save that changed the **text** of the note;
+changing only its properties (a priority, a tag, a card moved on a board) does not move it. Both are full ISO 8601
+times with the time zone, for example `2026-11-23T14:05:09+01:00`. A note without properties gets them at the top
+when you save it; an empty note stays empty, and drawings and other files are never touched. Notes that carry no
+`created:` (made before, or by another program) are dated by the `YYMMDD_` prefix of their name and then by the file
+time, so **Created** and **Modified** in the file list sort by these dates. If you edit a note in another program,
+Shale notices at its next save, which then sets `modified:`. A new note made from the text of another note (a copy, a template) does not take over `created:` and `modified:`; it gets its own when it is first saved.
+
+`priority:` is optional and yours to set, with the five levels of Obsidian Tasks: `highest`, `high`, `medium`,
+`low` or `lowest`. Any other value is ignored. A note with a priority shows it in its folded properties line.
+Boards will show it as a chip and sort by it ([[Settings reference]]).
+
 ## Mail notes
 
 A note imported from a mail (its properties say `type: email`, see [[Import]]) also starts with its quoted replies
@@ -369,7 +384,7 @@ does (a missing note is created), **Ctrl+Enter** opens it in a new pane to the r
 one (see [[Tabs]]; a web link opens in the browser as with Enter), and **Esc** closes the preview and gives the keyboard back to the
 editor, with the cursor where it was and the text unchanged. Off a link, Shift+K only says so in the
 status bar. The key is one of the definable ones (Settings → Keybindings → Vim-style editing, normal
-mode): you can give it, for example, **Space Space**.
+mode): you can give it, for example, **Space P**.
 
 The preview's size can be changed: drag one of its four edges or four corners (the mouse pointer
 turns into a resize arrow). The preview stays open while you drag, and the editor's cursor stays where

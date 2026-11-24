@@ -152,12 +152,12 @@ fn net_015_keep_this_one_puts_the_copys_text_in_the_original_and_trashes_the_cop
     w.open(COPY);
     w.press("Compare");
     w.press("Keep this copy");
-    assert_eq!(w.read("Plan.md"), COPY_TEXT);
+    assert_eq!(crate::note_props::unstamped(&w.read("Plan.md")), COPY_TEXT);
     assert!(!w.root.join(COPY).exists() && w.in_trash(COPY), "the copy is in the trash, not deleted");
-    assert_eq!(w.trash_texts("Plan (before"), ["# Plan\n\nunsaved edit\n"], "the old text of the original, with its unsaved edit, is in the trash too");
+    assert_eq!(w.trash_texts("Plan (before").iter().map(|t| crate::note_props::unstamped(t)).collect::<Vec<_>>(), ["# Plan\n\nunsaved edit\n"], "the old text of the original, with its unsaved edit, is in the trash too");
     assert_eq!(w.view().as_deref(), Some(Path::new("Plan.md")));
     let doc = &w.app.notes[Path::new("Plan.md")];
-    assert!(doc.text == COPY_TEXT && !doc.dirty, "the open buffer has the text and is saved");
+    assert!(crate::note_props::unstamped(&doc.text) == COPY_TEXT && !doc.dirty, "the open buffer has the text and is saved");
     assert!(w.app.modal.is_none());
     assert!(!w.app.vault.as_ref().unwrap().files.iter().any(|f| f.rel == Path::new(COPY)));
 }
@@ -169,7 +169,7 @@ fn net_015_keep_this_one_takes_the_edited_text_of_the_open_copy_and_writes_an_un
     w.open(COPY);
     w.edit(COPY, "# Plan\n\nedited in the copy\n");
     w.press("Keep this one");
-    assert_eq!(w.read("Plan.md"), "# Plan\n\nedited in the copy\n");
+    assert_eq!(crate::note_props::unstamped(&w.read("Plan.md")), "# Plan\n\nedited in the copy\n");
     assert_eq!(w.trash_texts("Plan (before"), [ORIGINAL_TEXT], "the old text of the unopened original is in the trash");
     assert!(!w.root.join(COPY).exists() && w.in_trash(COPY));
     assert_eq!(w.view().as_deref(), Some(Path::new("Plan.md")));
@@ -223,7 +223,7 @@ fn net_015_the_original_has_a_banner_too_and_its_buttons_mean_the_same_from_its_
     w.open("Plan.md");
     w.hl.frames(&mut w.app, 3);
     w.press("Keep the other");
-    assert_eq!(w.read("Plan.md"), COPY_TEXT);
+    assert_eq!(crate::note_props::unstamped(&w.read("Plan.md")), COPY_TEXT);
     assert!(!w.root.join(LATER).exists() && w.in_trash(LATER));
     assert_eq!(w.trash_texts("Plan (before"), [ORIGINAL_TEXT]);
     assert_eq!(w.view().as_deref(), Some(Path::new("Plan.md")));

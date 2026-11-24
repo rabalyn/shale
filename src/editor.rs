@@ -451,6 +451,12 @@ fn after_relink(at: usize, link: &Range<usize>, new_len: usize) -> usize {
 
 /// The selection `(moving end, other end)` as the text box keeps it, so that the keyboard coming back
 /// to the text leaves the cursor at the end it was (`CCursorRange::two` takes the smaller end first).
+/// (the front matter, bytes of the text after it)
+fn front_matter_extent(text: &str) -> (String, usize) {
+    let at: usize = text.split_inclusive('\n').take(markdown::front_matter_lines(text)).map(str::len).sum();
+    (text[..at].to_string(), text.len() - at)
+}
+
 fn moving_first(moving: usize, other: usize) -> CCursorRange {
     CCursorRange { primary: CCursor::new(moving), secondary: CCursor::new(other), h_pos: None }
 }
@@ -727,6 +733,9 @@ pub struct NoteEditor {
     /// The selection (char indices, as the text box has them) when the editor last had the keyboard:
     /// a press on the toolbar takes the keyboard away, and the text box then drops its selection
     last_selection: Option<(usize, usize)>,
+    /// Chars of the front matter and bytes of the body at the end of the last frame: a save that adds
+    /// `created:` and `modified:` (VAULT-045) changes the first between two frames, and the cursor follows
+    fm_seen: Option<(String, usize)>,
     /// The selection a toolbar command left and the frames it is still put into the text box for: the
     /// text box drops it in the frame it loses the keyboard, and the keyboard comes back a frame later
     keep_selection: Option<((usize, usize), u8)>,
@@ -799,6 +808,7 @@ impl NoteEditor {
             bar: Default::default(),
             format_request: None,
             last_selection: None,
+            fm_seen: None,
             keep_selection: None,
             task_boxes: Vec::new(),
             box_hold: None,
@@ -1526,8 +1536,76 @@ impl NoteEditor {
         ui.ctx().data_mut(|d| d.insert_temp(key, placed));
     }
 
+    /// Give the editor the settings of the window before it is drawn: the tab of a note and the
+    /// peek of a card of a board (BOARD-013) edit the same way.
+    pub fn apply_settings(&mut self, cfg: &crate::config::Config, people_dir: &str, media: &crate::media::MediaPlayer) {
+        self.inline_images = cfg.inline_images;
+        self.line_numbers = cfg.line_numbers;
+        self.numbered_headings = cfg.numbered_headings;
+        self.live_preview = cfg.live_preview;
+        self.preview_raw_lines = cfg.preview_raw_lines;
+        self.properties_view = cfg.properties_in_editor;
+        self.table_cell_edit = cfg.table_cell_edit;
+        self.vim_enabled = cfg.vim_mode;
+        self.cursor_style = crate::cursor_style::CursorStyle { shape: cfg.cursor_shape, normal_shape: cfg.normal_cursor_shape, blink: cfg.cursor_blink };
+        self.esc_cursor = cfg.esc_cursor;
+        self.assist.people_dir = people_dir.to_string();
+        self.assist.numbered_headings = cfg.numbered_headings;
+        self.assist.outside = cfg.outside_files;
+        self.dark_canvas = cfg.dark_canvas;
+        self.media = media.clone();
+    }
+
     /// Show the editor. Returns (text changed, action).
     pub fn show(&mut self, ui: &mut Ui, text: &mut String, vault: &Vault, note: Note, fonts: &EditorFonts, ctrl_to_follow: bool) -> (bool, Option<EditorAction>) {
+        self.follow_front_matter(ui.ctx(), text);
+        let shown = self.show_text(ui, text, vault, note, fonts, ctrl_to_follow);
+        self.fm_seen = Some(front_matter_extent(text));
+        shown
+    }
+
+    /// The front matter changed between two frames while the body stayed (a save added `created:` and
+    /// `modified:`, VAULT-045): the cursor, the selection and the steps of the text box's undo history
+    /// move with the text, and the change is no undo step, so Ctrl+Z does not take the properties away
+    /// (which the next save would put back).
+    fn follow_front_matter(&mut self, ctx: &egui::Context, text: &str) {
+        let now = front_matter_extent(text);
+        let Some(before) = self.fm_seen.take().filter(|(fm, body)| *body == now.1 && *fm != now.0) else { return };
+        self.fm_seen = Some(now.clone());
+        let (old_chars, new_chars) = (before.0.chars().count(), now.0.chars().count());
+        let shift = |i: usize| if i >= old_chars { (i + new_chars).saturating_sub(old_chars) } else { i.min(new_chars) };
+        let mut state = egui::text_edit::TextEditState::load(ctx, self.id).unwrap_or_default();
+        if let Some(r) = state.cursor.char_range() {
+            state.cursor.set_char_range(Some(moving_first(shift(r.primary.index.0), shift(r.secondary.index.0))));
+        }
+        // every undo point that starts with the old front matter has the new one
+        let carry = |(cursor, t): &(CCursorRange, String)| -> (CCursorRange, String) {
+            match t.strip_prefix(before.0.as_str()) {
+                Some(rest) => (moving_first(shift(cursor.primary.index.0), shift(cursor.secondary.index.0)), format!("{}{rest}", now.0)),
+                None => (*cursor, t.clone()),
+            }
+        };
+        // the points, newest first, by taking them out one by one; the text before the change is the current one
+        let mut undoer = state.undoer();
+        let mut at = (state.cursor.char_range().unwrap_or(CCursorRange::one(CCursor::new(0))), format!("{}{}", before.0, &text[now.0.len()..]));
+        let mut points = vec![at.clone()];
+        while let Some(prev) = undoer.undo(&at).cloned() {
+            points.push(prev.clone());
+            at = prev;
+        }
+        let mut rebuilt = egui::util::undoer::Undoer::default();
+        for point in points.iter().skip(1).rev().map(carry).filter(|(_, t)| t != text) {
+            rebuilt.add_undo(&point);
+        }
+        state.set_undoer(rebuilt);
+        state.store(ctx, self.id);
+        self.last_selection = self.last_selection.map(|(a, b)| (shift(a), shift(b)));
+        if self.vim_enabled {
+            self.vim.set_cursor(text, shift(self.vim.cursor));
+        }
+    }
+
+    fn show_text(&mut self, ui: &mut Ui, text: &mut String, vault: &Vault, note: Note, fonts: &EditorFonts, ctrl_to_follow: bool) -> (bool, Option<EditorAction>) {
         let Note { rel, undo } = note;
         // the size of what is not text of a line: pictures' captions, tables, the line numbers
         let base_size = if self.live_preview { fonts.rendered.size } else { fonts.raw.size };
@@ -5076,6 +5154,36 @@ mod tests {
             assert!(a.is_none(), "{plain:?} is pasted without asking");
             assert_eq!(text, format!("x{plain}"));
         }
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-045, EDIT-021
+    #[test]
+    fn properties_added_by_a_save_move_the_cursor_and_the_undo_points_and_are_no_step() {
+        let (v, d) = vault_for_tests("props-follow");
+        let ctx = egui::Context::default();
+        let mut t = 0.0;
+        let mut ed = NoteEditor::new(egui::Id::unique("props-ed"));
+        let mut text = String::from("one two");
+        ed.pending_cursor = Some(4);
+        paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
+        paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
+        // one typed step: " three" at the end
+        paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::Text(" three".into())]);
+        let cursor = |ctx: &egui::Context, id| egui::text_edit::TextEditState::load(ctx, id).and_then(|st| st.cursor.char_range()).map(|r| r.primary.index.0);
+        let before = cursor(&ctx, ed.id).unwrap();
+        // a save puts the properties above the text
+        let props = "---\ncreated: 2026-11-23T10:00:00+01:00\n---\n";
+        text.insert_str(0, props);
+        paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
+        assert_eq!(cursor(&ctx, ed.id), Some(before + props.chars().count()), "the cursor stays in its words");
+        // the undo points carry the properties too, and the change is no point of its own
+        let state = egui::text_edit::TextEditState::load(&ctx, ed.id).unwrap();
+        let mut undoer = state.undoer();
+        let now = (state.cursor.char_range().unwrap(), text.clone());
+        let back = undoer.undo(&now).expect("one step back").1.clone();
+        assert!(back.starts_with(props), "{back:?}");
+        assert!(back.len() < text.len(), "the typed words are what the step takes away: {back:?}");
         let _ = std::fs::remove_dir_all(&d);
     }
 

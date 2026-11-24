@@ -143,6 +143,8 @@ pub const CHECKED: &[(&str, &str)] = &[
     ("pdfx", "pdfx.sty"),
     // what the writer of the export adds to a document (TEX-008)
     ("ulem", "ulem.sty"),
+    // the landscape pages of a board (BOARD-031)
+    ("pdflscape", "pdflscape.sty"),
     ("booktabs", "booktabs.sty"),
     ("amsmath", "amsmath.sty"),
     ("amsfonts", "amssymb.sty"),

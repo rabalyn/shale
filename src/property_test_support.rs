@@ -54,6 +54,33 @@ pub fn path_text() -> impl Strategy<Value = String> {
     prop::collection::vec(piece, 0..8).prop_map(|parts| parts.concat())
 }
 
+/// Text made of the pieces of the language, in any order, and anything else.
+pub fn query_text() -> impl Strategy<Value = String> {
+    let piece = prop_oneof![
+        3 => Just("AND".to_string()),
+        3 => Just("OR".to_string()),
+        3 => Just("NOT".to_string()),
+        4 => Just("(".to_string()),
+        4 => Just(")".to_string()),
+        2 => Just("-".to_string()),
+        2 => Just("\"".to_string()),
+        2 => Just("#tag".to_string()),
+        2 => Just("status:doing".to_string()),
+        2 => Just("path:A/".to_string()),
+        2 => Just("due:<+7d".to_string()),
+        1 => Just("due:overdue".to_string()),
+        1 => Just("links:[[X]]".to_string()),
+        1 => Just("blocked".to_string()),
+        1 => Just("priority:high".to_string()),
+        2 => Just("*a*a*a*b".to_string()),
+        1 => Just("f:".to_string()),
+        3 => " ",
+        4 => "[a-zA-Z0-9*?:#\\[\\]<>+-]{0,6}",
+        2 => "\\PC{0,4}",
+    ];
+    prop::collection::vec(piece, 0..40).prop_map(|parts| parts.concat())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

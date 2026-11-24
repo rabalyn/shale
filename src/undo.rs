@@ -132,6 +132,29 @@ impl History {
         self.known = Some(text.to_string());
     }
 
+    /// The text changed from `old` to `new` without a step of the person's: a save added `created:` and
+    /// `modified:` to the front matter (VAULT-045). The steps after the changed place move with the text,
+    /// and no step is made for the change, so one undo does not take the properties away.
+    pub fn rebase(&mut self, old: &str, new: &str) {
+        self.checkpoint(old);
+        let (a, b): (Vec<char>, Vec<char>) = (old.chars().collect(), new.chars().collect());
+        let prefix = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+        let max_suffix = a.len().min(b.len()) - prefix;
+        let suffix = a.iter().rev().zip(b.iter().rev()).take(max_suffix).take_while(|(x, y)| x == y).count();
+        let (end, delta) = (a.len() - suffix, b.len() as isize - a.len() as isize);
+        // what was put in (a pure insertion, as when the properties are new): a step that starts right there takes it along
+        let put: String = if end == prefix { b[prefix..b.len() - suffix].iter().collect() } else { String::new() };
+        for e in self.undo.iter_mut().chain(self.redo.iter_mut()) {
+            if e.at > end || (e.at == end && put.is_empty()) {
+                e.at = e.at.saturating_add_signed(delta);
+            } else if e.at == end {
+                e.inserted.insert_str(0, &put);
+            }
+        }
+        self.known = Some(new.to_string());
+        self.touch();
+    }
+
     /// Undo the last step in `text`; returns the char index for the cursor (never past the end of
     /// the text), `None` when there is nothing to undo.
     pub fn undo(&mut self, text: &mut String) -> Option<usize> {
@@ -766,5 +789,39 @@ mod tests {
         let mut t = "ab".to_string();
         assert_eq!(a.of(Path::new("a.md")).undo(&mut t), Some(1), "the history is still there");
         let _ = std::fs::remove_dir_all(&root);
+    }
+    // spec: VAULT-045, EDIT-021
+    #[test]
+    fn properties_added_by_a_save_make_no_step_and_the_steps_move_with_the_text() {
+        let mut h = History::default();
+        let mut text = "one\ntwo".to_string();
+        h.checkpoint(&text);
+        text.push_str(" and three");
+        h.checkpoint(&text);
+        let stamped = format!("---\ncreated: x\n---\n{text}");
+        h.rebase(&text, &stamped);
+        let mut t = stamped.clone();
+        assert_eq!(h.undo(&mut t), Some(stamped.chars().count() - " and three".chars().count()), "the cursor lands where the typing was");
+        assert_eq!(t, "---\ncreated: x\n---\none\ntwo", "one undo takes the typing away, not the properties");
+        assert_eq!(h.undo(&mut t), None, "and there is no step for the properties");
+        h.redo(&mut t);
+        assert_eq!(t, stamped);
+    }
+
+    // spec: VAULT-045, EDIT-021
+    #[test]
+    fn a_step_that_replaced_the_whole_text_takes_the_properties_of_the_next_save_along() {
+        let mut h = History::default();
+        let mut text = "---\ncreated: x\n---\nold text".to_string();
+        h.checkpoint(&text);
+        text = "pasted over everything".to_string();
+        h.checkpoint(&text);
+        let stamped = format!("---\ncreated: y\n---\n{text}");
+        h.rebase(&text, &stamped);
+        let mut t = stamped;
+        h.undo(&mut t);
+        assert_eq!(t, "---\ncreated: x\n---\nold text", "no second front matter on top of the old one");
+        h.redo(&mut t);
+        assert_eq!(t, "---\ncreated: y\n---\npasted over everything");
     }
 }

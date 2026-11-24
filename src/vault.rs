@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -186,7 +187,7 @@ pub struct Vault {
     pub folders: Vec<PathBuf>,
     /// (created, modified) of each folder, for sorting the file tree.
     pub folder_times: HashMap<PathBuf, (Option<SystemTime>, Option<SystemTime>)>,
-    pub notes: HashMap<PathBuf, NoteIndex>,
+    pub notes: HashMap<PathBuf, Arc<NoteIndex>>,
     /// Links of drawings and canvases: `text` holds one line per element text or link that has a
     /// link (see `drawing::link_lines`); `tasks` and `tags` stay empty.
     pub drawings: HashMap<PathBuf, NoteIndex>,
@@ -647,7 +648,7 @@ impl Vault {
             seen.insert(f.rel.clone());
             let Some(read) = scan.notes.remove(&f.rel) else { continue };
             // saved or read again since the scan began: what the index holds is newer
-            if self.notes.get(&f.rel).and_then(known_stamp) != read.known {
+            if self.notes.get(&f.rel).map(|n| &**n).and_then(known_stamp) != read.known {
                 continue;
             }
             // never an empty text for a file that could not be read (DATA-008)
@@ -656,7 +657,7 @@ impl Vault {
                 Err(e) => (String::new(), Some(e)),
             };
             let differs = self.notes.get(&f.rel).map(|n| n.text != text || n.unreadable != unreadable).unwrap_or(true);
-            let entry = self.notes.entry(f.rel.clone()).or_default();
+            let entry = Arc::make_mut(self.notes.entry(f.rel.clone()).or_default());
             entry.mtime = read.stamp;
             if differs {
                 entry.text = text;
@@ -791,7 +792,7 @@ impl Vault {
         };
         for (rel, p) in parsed {
             if let Some(n) = self.notes.get_mut(&rel) {
-                p.store(n);
+                p.store(Arc::make_mut(n));
             }
         }
         let keys: Vec<PathBuf> = self.drawings.keys().cloned().collect();
@@ -822,7 +823,7 @@ impl Vault {
 
     /// Notes and drawings with their link index.
     fn linkers(&self) -> impl Iterator<Item = (&PathBuf, &NoteIndex)> {
-        self.notes.iter().chain(self.drawings.iter())
+        self.notes.iter().map(|(p, n)| (p, &**n)).chain(self.drawings.iter())
     }
 
     /// [`Vault::linkers`] without the conflict copies that have an original (NET-015).
@@ -833,7 +834,7 @@ impl Vault {
     fn reparse(&mut self, rel: &Path) {
         let parsed = self.parse_note(rel);
         if let Some(n) = self.notes.get_mut(rel) {
-            parsed.store(n);
+            parsed.store(Arc::make_mut(n));
         }
     }
 
@@ -853,11 +854,10 @@ impl Vault {
 
     /// Update the index from an editor buffer (the file itself is written separately).
     pub fn set_note_text(&mut self, rel: &Path, text: &str) {
-        let n = self.notes.entry(rel.to_path_buf()).or_default();
-        if n.text == text {
+        if self.notes.get(rel).is_some_and(|n| n.text == text) {
             return;
         }
-        n.text = text.to_string();
+        Arc::make_mut(self.notes.entry(rel.to_path_buf()).or_default()).text = text.to_string();
         self.reparse(rel);
         self.generation += 1;
     }
@@ -1090,7 +1090,7 @@ impl Vault {
         paths.sort_by_cached_key(|p| sort_key(p));
         let mut links = Vec::new();
         for rel in paths {
-            let Some(n) = self.notes.get(rel).or_else(|| self.drawings.get(rel)) else { continue };
+            let Some(n) = self.notes.get(rel).map(|n| &**n).or_else(|| self.drawings.get(rel)) else { continue };
             let mut seen = HashSet::new();
             links.extend(n.links.iter().zip(&n.resolved).filter(|(l, r)| r.is_none() && l.is_outside() && seen.insert(l.target.as_str())).map(|(l, _)| (rel.clone(), l.target.clone())));
         }
@@ -1099,14 +1099,14 @@ impl Vault {
 
     /// The links of a note or drawing, each target once, with what it resolves to.
     fn outgoing_links(&self, rel: &Path) -> Vec<(&LinkSpan, Option<PathBuf>)> {
-        let Some(n) = self.notes.get(rel).or_else(|| self.drawings.get(rel)) else { return vec![] };
+        let Some(n) = self.notes.get(rel).map(|n| &**n).or_else(|| self.drawings.get(rel)) else { return vec![] };
         let mut seen = HashSet::new();
         n.links.iter().zip(n.resolved.iter()).filter(|(l, _)| !l.target.is_empty() && seen.insert(name_key(&l.target))).map(|(l, r)| (l, r.clone())).collect()
     }
 
     /// Every task in every note, sorted by note path.
     pub fn all_tasks(&self) -> Vec<(PathBuf, Task)> {
-        let mut notes: Vec<(String, &PathBuf, &NoteIndex)> = self.notes.iter().filter(|(p, n)| !n.tasks.is_empty() && !self.is_shadow_copy(p)).map(|(p, n)| (sort_key(p), p, n)).collect();
+        let mut notes: Vec<(String, &PathBuf, &NoteIndex)> = self.notes.iter().filter(|(p, n)| !n.tasks.is_empty() && !self.is_shadow_copy(p)).map(|(p, n)| (sort_key(p), p, &**n)).collect();
         notes.sort_by(|a, b| a.0.cmp(&b.0));
         let mut out = Vec::with_capacity(notes.iter().map(|n| n.2.tasks.len()).sum());
         for (_, p, n) in notes {
@@ -1184,6 +1184,8 @@ impl Vault {
         if let Some(p) = abs.parent() {
             fs::create_dir_all(p)?;
         }
+        // a note made from the text of another (a template, a copy) is a new note: its `created:` and `modified:` come with its first save (VAULT-045)
+        let content = if kind_of(rel) == FileKind::Note { crate::note_props::unstamped(content) } else { content.to_string() };
         fsutil::create_new(&abs, content.as_bytes())?;
         self.rescan();
         Ok(rel.to_path_buf())
@@ -1220,6 +1222,10 @@ impl Vault {
                 return Ok(Saved::Conflict { copy, theirs });
             }
         }
+        // a note gets `created:` once and `modified:` when its body changed (VAULT-045, VAULT-046)
+        let disk_text = disk.as_deref().and_then(|b| std::str::from_utf8(b).ok());
+        let stamped = (kind_of(rel) == FileKind::Note && (disk.is_none() || disk_text.is_some())).then(|| crate::note_props::stamp(text, disk_text, crate::calendar::time::now())).flatten();
+        let text = stamped.as_deref().unwrap_or(text);
         if disk.as_deref() != Some(text.as_bytes()) {
             if let Some(p) = abs.parent() {
                 fs::create_dir_all(p)?;
@@ -1252,7 +1258,7 @@ impl Vault {
         }
         let mtime = FileStamp::of(&self.abs(rel));
         self.set_note_text(rel, text);
-        if let Some(n) = self.notes.get_mut(rel) {
+        if let Some(n) = self.notes.get_mut(rel).map(Arc::make_mut) {
             n.mtime = mtime;
             n.unreadable = None;
         }
@@ -1332,7 +1338,7 @@ impl Vault {
         for (src, text, links) in plan {
             let is_drawing = self.drawings.contains_key(&src);
             // changed on disk in the meantime: leave it alone rather than edit the wrong place
-            if self.notes.get(&src).or_else(|| self.drawings.get(&src)).map(|n| n.text != text).unwrap_or(true) {
+            if self.notes.get(&src).map(|n| &**n).or_else(|| self.drawings.get(&src)).map(|n| n.text != text).unwrap_or(true) {
                 self.failed_rewrites.push((src, "it was changed by another program meanwhile".into()));
                 continue;
             }
@@ -2129,8 +2135,78 @@ mod tests {
         assert!(matches!(v.save_checked(rel, "mine", base).unwrap(), Saved::Written(_)));
         let changed = v.apply_scan(scan).expect("the vault itself did not change in structure");
         assert!(changed.is_empty(), "the older read is not applied");
-        assert_eq!(v.notes[rel].text, "mine");
+        assert_eq!(crate::note_props::unstamped(&v.notes[rel].text), "mine");
         assert!(v.rescan().is_empty(), "and the index agrees with the disk");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-045, VAULT-046
+    #[test]
+    fn a_save_writes_created_once_and_modified_only_for_a_body_change() {
+        let d = temp_vault("note-props");
+        fs::create_dir_all(&d).unwrap();
+        let mut v = Vault::open(&d).unwrap();
+        let rel = Path::new("N.md");
+        let prop = |key: &str| crate::markdown::front_matter_values(&fs::read_to_string(d.join(rel)).unwrap()).into_iter().find(|(k, _)| k == key).map(|(_, v)| v[0].clone());
+        // the first save
+        let Saved::Written(base) = v.save_checked(rel, "# One\n", Stamp::default()).unwrap() else { panic!("written") };
+        let (created, modified) = (prop("created").unwrap(), prop("modified").unwrap());
+        assert!(created.contains('T') && crate::note_props::parse_timestamp(&created).is_some(), "{created}");
+        assert!(fs::read_to_string(d.join(rel)).unwrap().ends_with("---\n# One\n"));
+        assert_eq!(Stamp::of_bytes(&fs::read(d.join(rel)).unwrap()), base, "the stamp is of what is on disk");
+        assert_eq!(v.notes[rel].text, fs::read_to_string(d.join(rel)).unwrap(), "the index holds what was written");
+        // a second save of the buffer (still without the properties) with a changed body
+        let Saved::Written(base) = v.save_checked(rel, "# One\nmore\n", base).unwrap() else { panic!("written") };
+        assert_eq!(prop("created").unwrap(), created, "created is never changed");
+        assert!(crate::note_props::parse_timestamp(&prop("modified").unwrap()) >= crate::note_props::parse_timestamp(&modified));
+        // a front matter only change leaves modified alone
+        let before = prop("modified").unwrap();
+        let Saved::Written(_) = v.save_checked(rel, "---\npriority: high\n---\n# One\nmore\n", base).unwrap() else { panic!("written") };
+        assert_eq!(prop("modified").unwrap(), before);
+        assert_eq!(prop("priority").unwrap(), "high");
+        assert_eq!(prop("created").unwrap(), created);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-045
+    #[test]
+    fn a_note_made_from_the_text_of_another_does_not_inherit_its_created_and_modified() {
+        let d = temp_vault("note-props-seed");
+        fs::create_dir_all(&d).unwrap();
+        let mut v = Vault::open(&d).unwrap();
+        let source = "---\ntitle: Plan\ncreated: 2020-01-01T00:00:00Z\nmodified: 2020-02-01T00:00:00Z\n---\nbody\n";
+        v.create_file(Path::new("Copy.md"), source).unwrap();
+        assert_eq!(fs::read_to_string(d.join("Copy.md")).unwrap(), "---\ntitle: Plan\n---\nbody\n", "the other keys stay");
+        v.create_file(Path::new("Only.md"), "---\ncreated: 2020-01-01T00:00:00Z\nmodified: 2020-02-01T00:00:00Z\n---\nbody\n").unwrap();
+        assert_eq!(fs::read_to_string(d.join("Only.md")).unwrap(), "body\n", "an empty block goes");
+        // its first save writes its own
+        let rel = Path::new("Copy.md");
+        v.save_checked(rel, "---\ntitle: Plan\n---\nbody\nmore\n", Stamp::of("---\ntitle: Plan\n---\nbody\n")).unwrap();
+        let text = fs::read_to_string(d.join(rel)).unwrap();
+        assert!(!text.contains("2020-"), "{text}");
+        assert!(text.contains("created: ") && text.contains("title: Plan"));
+        // a drawing's text is not touched
+        v.create_file(Path::new("D.excalidraw.md"), "---\ncreated: 2020\n---\n{}").unwrap();
+        assert!(fs::read_to_string(d.join("D.excalidraw.md")).unwrap().contains("created: 2020"), "a drawing is written as it is");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-045, VAULT-046
+    #[test]
+    fn only_markdown_notes_get_the_properties() {
+        let d = temp_vault("note-props-skip");
+        fs::create_dir_all(&d).unwrap();
+        let mut v = Vault::open(&d).unwrap();
+        for (name, text) in [("data.txt", "plain"), ("Sketch.excalidraw.md", "{\"elements\":[]}"), ("empty.md", "")] {
+            let rel = Path::new(name);
+            v.save_checked(rel, text, Stamp::default()).unwrap();
+            assert_eq!(fs::read_to_string(d.join(rel)).unwrap(), text, "{name} is written as it is");
+        }
+        // a note whose disk bytes are not text has nothing to compare with: no properties
+        fs::write(d.join("bin.md"), [0xff, 0xfe, b'x']).unwrap();
+        let base = Stamp::of_bytes(&[0xff, 0xfe, b'x']);
+        v.save_checked(Path::new("bin.md"), "text", base).unwrap();
+        assert_eq!(fs::read_to_string(d.join("bin.md")).unwrap(), "text", "no disk text to compare: written as it is");
         let _ = fs::remove_dir_all(&d);
     }
 
@@ -2161,7 +2237,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(20));
         fs::write(d.join("Daily log.md"), "changed [[New]]").unwrap();
         // force mtime difference on coarse file systems
-        if let Some(n) = v.notes.get_mut(Path::new("Daily log.md")) {
+        if let Some(n) = v.notes.get_mut(Path::new("Daily log.md")).map(Arc::make_mut) {
             n.mtime = None;
         }
         let changed = v.rescan();

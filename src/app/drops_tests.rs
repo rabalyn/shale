@@ -810,6 +810,8 @@ fn dialog_state(w: &W) -> String {
 // spec: CAL-034
 #[test]
 fn cal_034_import_from_the_calendar_opens_the_same_dialog_as_a_drop_of_every_occurrence() {
+    // the dialog of each way holds the event's .ics written at that moment (DTSTAMP): pin the second (#626)
+    let _clock = crate::calendar::time::pin_now(1_795_000_000);
     let mut w = W::new("cal-import");
     let occs = calendar_with_series(&mut w);
     assert_eq!(occs.len(), 4);

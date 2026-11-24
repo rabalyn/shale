@@ -88,7 +88,7 @@ fn check_atomic_save(label: &str, root: &Path) {
         let text = note(i);
         let Saved::Written(s) = vault.save_checked(Path::new("N.md"), &text, base).unwrap() else { panic!("{label}: a save of our own text is no conflict") };
         base = s;
-        assert_eq!(fsutil::read_to_string(w.0.join("N.md")).unwrap(), text, "{label}: what was saved is what is read back");
+        assert_eq!(crate::note_props::unstamped(&fsutil::read_to_string(w.0.join("N.md")).unwrap()), text, "{label}: what was saved is what is read back");
     }
     let listed = names(&w.0);
     assert_eq!(listed, ["N.md"], "{label}: no temporary file is left in the folder");
@@ -107,13 +107,15 @@ fn check_outside_change(label: &str, root: &Path) {
     assert!(vault.rescan().is_empty(), "{label}: nothing changed");
     // in place, the same length, right now: the modification time may be the same
     let mut f = OpenOptions::new().write(true).open(w.0.join("N.md")).unwrap();
-    f.write_all(b"bbbb\n").unwrap();
+    let len = fs::metadata(w.0.join("N.md")).unwrap().len() as usize;
+    let same_len = |c: &str| format!("{}\n", c.repeat(len - 1));
+    f.write_all(same_len("b").as_bytes()).unwrap();
     f.sync_all().unwrap();
     drop(f);
     assert_eq!(vault.rescan(), [rel.to_path_buf()], "{label}: an in-place change of the same length is detected");
-    assert_eq!(vault.notes[rel].text, "bbbb\n");
+    assert_eq!(vault.notes[rel].text, same_len("b"));
     // another device's atomic replace: a new inode, the same length
-    fsutil::write_atomic(&w.0.join("N.md"), b"cccc\n").unwrap();
+    fsutil::write_atomic(&w.0.join("N.md"), same_len("c").as_bytes()).unwrap();
     assert_eq!(vault.rescan(), [rel.to_path_buf()], "{label}: an atomic replace of the same length is detected");
     // the modification time's granularity of this file system
     let ns: Vec<u32> = (0..3)

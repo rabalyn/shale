@@ -125,6 +125,37 @@ fn dialogs_the_sort_menu_orders_the_rows_and_names_the_choice() {
     assert!(["Alpha.md", "Bravo.md", "Charlie.md"].iter().all(|f| p.dir.join(f).is_file()));
 }
 
+// spec: NAV-003, VAULT-045, VAULT-046
+#[test]
+fn dialogs_the_time_sorts_read_the_created_and_modified_properties_before_the_file_times() {
+    let note = |c: &str, m: &str| format!("---\ncreated: {c}\nmodified: {m}\n---\nbody\n");
+    // the file times say Alpha < Bravo < Charlie; the properties say the opposite for created, and another order for modified
+    let mut p = P::with_files(
+        "sort-props",
+        &[
+            ("Alpha.md", &note("2026-03-01T10:00:00Z", "2026-05-01T10:00:00Z")),
+            ("Bravo.md", &note("2026-02-01T10:00:00Z", "2026-07-01T10:00:00Z")),
+            ("Charlie.md", &note("2026-01-01T10:00:00Z", "2026-06-01T10:00:00Z")),
+            ("261117_Delta.md", "no properties, a date prefix\n"),
+        ],
+    );
+    for (f, s) in [("Alpha.md", 1000), ("Bravo.md", 2000), ("Charlie.md", 3000), ("261117_Delta.md", 4000)] {
+        set_mtime(&p.dir.join(f), s);
+    }
+    p.app.vault.as_mut().unwrap().rescan();
+    p.look(Show::Files);
+    let choose = |p: &mut P, from: &str, to: &str| {
+        p.click(Show::Files, &format!("Sort: {from}"));
+        p.click(Show::Files, to);
+    };
+    choose(&mut p, "File name (A to Z)", "Created (old to new)");
+    // Delta has no created: its prefix is 2026-11-17, and its file time is a minute after 1970; the prefix wins
+    assert_eq!(names(&p), ["Charlie", "Bravo", "Alpha", "261117_Delta"]);
+    choose(&mut p, "Created (old to new)", "Modified (new to old)");
+    // Delta has no modified: its file time (1970) is the oldest
+    assert_eq!(names(&p), ["Bravo", "Charlie", "Alpha", "261117_Delta"]);
+}
+
 // spec: CAL-001
 #[test]
 fn dialogs_calendars_add_a_local_calendar_and_keep_it_with_done() {
@@ -948,6 +979,32 @@ fn book_010_a_folder_without_notes_says_so_and_cannot_be_exported() {
     assert!(!p.dir.join("exports").exists());
     p.click(Show::Modals, "Cancel");
     assert!(p.app.modal.is_none());
+}
+
+// spec: BOARD-030, BOARD-031
+#[test]
+fn board_030_the_export_of_a_board_note_opens_the_dialog_of_the_board_and_saves_the_pdf_where_asked() {
+    let mut p = P::with_files("board-export", &[("Board.md", "---\ntype: board\n---\n## Todo\nquery: status:todo\n"), ("Alpha.md", "---\nstatus: todo\n---\nalphabody\n"), ("Ideas.md", "# Ideas\n\nA plain note.\n")]);
+    // a note that is no board has the dialog of a note
+    p.app.open_export_dialog(Path::new("Ideas.md"));
+    assert!(matches!(&p.app.modal, Some(Modal::Export(d)) if d.book.is_none()));
+    p.app.modal = None;
+    p.app.open_export_dialog(Path::new("Board.md"));
+    p.look(Show::Modals);
+    assert!(p.shows(Show::Modals, "Export the board “Board” to PDF"));
+    let Some(Modal::Export(d)) = &p.app.modal else { panic!("the export dialog opens") };
+    assert!(d.book.as_ref().is_some_and(|b| b.board && b.plan.is_ok()) && d.tex.is_some() && !d.latex(), "the built-in engine until the person chooses LaTeX (BOARD-031)");
+    assert_eq!(Path::new(&d.path), p.dir.join("exports/Board.pdf"));
+    assert!(p.shows(Show::Modals, "LaTeX template"), "the engine choice (BOARD-031)");
+    p.click(Show::Modals, "Reading order");
+    for line in ["1  Todo", "1.1  Alpha"] {
+        assert!(p.shows(Show::Modals, line), "{line}");
+    }
+    p.click(Show::Modals, "Export");
+    until(&mut p, Show::Modals, "the board is exported and the dialog closes", |p| p.app.modal.is_none());
+    let bytes = std::fs::read(p.dir.join("exports/Board.pdf")).unwrap();
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(bytes.starts_with(b"%PDF") && text.contains("/MediaBox [0 0 842.00 595.00]") && text.contains("/MediaBox [0 0 595.00 842.00]"), "landscape pages for the board, portrait for the notes");
 }
 
 // spec: DOCX-001
