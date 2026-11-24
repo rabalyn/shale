@@ -72,6 +72,8 @@ PATH="$FAKEBIN:$PATH" expect "forge_011: a missing cargo-nextest stops the landi
 check "forge_011: a missing cargo-nextest lands nothing and starts no landing" "main_is $before && [ ! -e \"$TMP/work/.git/land/worktree\" ]"
 
 export LAND_CHECK_CMD=true
+# the lines-of-code report of DEV-045 is replaced too: it changes nothing unless a test says so
+export LAND_REPORT_CMD=true
 branch feature-b b.txt b
 branch feature-c c.txt c
 expect "two branches land in the order given" 0 "landed feature-c" feature-b feature-c
@@ -143,6 +145,23 @@ branch nocheckout i.txt i
 expect "a local main that is not checked out anywhere moves as a ref" 0 "local main is now" nocheckout
 check "the ref of local main is the landed commit" '[ "$(git rev-parse main)" = "$(git rev-parse origin/main)" ]'
 check "no landing worktree is left behind" '! git worktree list | grep -Fq land/worktree'
+
+# DEV-045: the lines-of-code report is made on the checked merge, committed on top of it and pushed with it
+branch rep1 r1.txt r1
+LAND_REPORT_CMD='mkdir -p docs && printf "report of the tree\n" > docs/loc-report.md' expect "dev_045: a changed report is made in the merged tree and committed" 0 "committed the lines-of-code report" rep1
+check "dev_045: the report commit is on top of the merge, with its message, and is pushed" '[ "$(git log -1 --format=%s origin/main)" = "no-issue: lines-of-code report for rep1 (DEV-045)" ] && [ "$(git log -1 --format=%s origin/main^)" = "Merge branch '"'"'rep1'"'"' (landed locally, FORGE-011)" ] && [ "$(git log -1 --format=%P origin/main | wc -w)" = 1 ] && [ "$(git show origin/main:r1.txt)" = r1 ] && git show origin/main:docs/loc-report.md | grep -Fq "report of the tree"'
+check "dev_045: the report is a step of the landing's record" 'hist_is landed rep1 "" && hist_has "lines-of-code report .DEV-045."'
+check "dev_045: the local main follows to the report commit" '[ "$(git rev-parse main)" = "$(git rev-parse origin/main)" ]'
+branch rep2 r2.txt r2
+before=$(git rev-parse origin/main)
+LAND_REPORT_CMD='mkdir -p docs && printf "report of the tree\n" > docs/loc-report.md' expect "dev_045: a report that did not change adds no commit" 0 "nothing to commit" rep2
+check "dev_045: the landing of an unchanged report ends in the merge commit" '[ "$(git log -1 --format=%s origin/main)" = "Merge branch '"'"'rep2'"'"' (landed locally, FORGE-011)" ] && [ "$(git log -1 --format=%P origin/main | wc -w)" = 2 ] && git merge-base --is-ancestor "$before" origin/main'
+branch rep3 r3.txt r3
+before=$(git rev-parse origin/main)
+LAND_REPORT_CMD='echo "no report today" >&2; exit 3' expect "dev_045: a failing report command fails the landing and is named" 1 "check failed: lines-of-code report (DEV-045)" rep3
+check "dev_045: nothing is pushed when the report fails" "main_is $before"
+check "dev_045: the failed landing is recorded with the report step" 'hist_is failed rep3 "lines-of-code report (DEV-045)"'
+expect "dev_045: the same branch lands when the report works again" 0 "landed rep3" rep3
 
 # the TeX Live mirror (DEV-025, #371): the check command prints what it sees of the variables
 branch tex1 t1.txt t1

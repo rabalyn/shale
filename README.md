@@ -236,6 +236,7 @@ merges a branch into `main`, runs fmt, clippy and the tests, and pushes only whe
 (`.forgejo/workflows/ci.yml`, [ADR-0018](docs/decisions/0018-tag-only-ci.md)); GitHub builds
 release tags (BUILD-012), also on macOS and Windows (BUILD-017). How landings, builds, agents,
 issues and releases are doing is exported for Prometheus and Grafana ([docs/dev-metrics.md](docs/dev-metrics.md)).
+The lines of code per feature and featureset, with the share of tests, are in [docs/loc-report.md](docs/loc-report.md), refreshed by every landing (DEV-045).
 
 ## Build and run
 

@@ -240,7 +240,7 @@ has_entries() {
 # tag_and_push <kind: check|release> <version> <issue|""> <dry-run: yes|no>
 # The whole run of FORGE-013 / FORGE-014 once the version is known.
 tag_and_push() {
-  local kind=$1 v=$2 issue=$3 dry=$4 tag="v$2" common wt branch base bump_commit merge msg note bench_rc
+  local kind=$1 v=$2 issue=$3 dry=$4 tag="v$2" common wt branch base bump_commit merge tip msg note bench_rc
   is_semver "$v" || die "$v is not a semver version (x.y.z or x.y.z-rc.n)"
   if [ "$kind" = check ]; then
     is_pre "$v" || die "a check tag is a pre-release (x.y.z-rc.n); a release is scripts/make-release.sh"
@@ -338,6 +338,12 @@ tag_and_push() {
   git fetch -q "$REMOTE"
   merge=$(git log --merges --format='%H %P' "$base..refs/remotes/$REMOTE/main" | awk -v c="$bump_commit" '$3 == c { print $1 }' | head -n 1)
   [ -n "$merge" ] || die "the landed merge of $branch is not on $REMOTE/main"
+  # land.sh commits the lines-of-code report on top of the merge (DEV-045): the tag goes on that
+  # commit, the tip of what was landed, which also names the merge it counted
+  tip=$(git rev-list --first-parent --reverse "$merge..refs/remotes/$REMOTE/main" | head -n 1)
+  if [ -n "$tip" ] && [ "$(git rev-parse "$tip^")" = "$merge" ] && [[ $(git log -1 --format=%s "$tip") == "no-issue: lines-of-code report for "*" (DEV-045)" ]]; then
+    merge=$tip
+  fi
   finish_tag "$kind" "$v" "$issue" "$merge"
 }
 

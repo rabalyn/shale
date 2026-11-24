@@ -43,7 +43,9 @@ report a security problem there, see Security below.
   Markdown report of the lines of code of the project (production and test code, comments, blank
   lines, per feature and featureset, the share of tests) from the module tree of `src/main.rs`
   (DEV-044). A new top-level module goes into a `[[set]]` of `tools/loc-report/featuresets.toml`,
-  or the report lists it under "Other" and its test fails.
+  or the report lists it under "Other" and its test fails. `scripts/land.sh` keeps
+  [`docs/loc-report.md`](docs/loc-report.md) current (DEV-045: every landing commits a fresh one), so
+  nobody commits that file by hand.
 
 ## Pull requests
 

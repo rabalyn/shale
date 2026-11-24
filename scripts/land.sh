@@ -12,7 +12,10 @@
 # `-D warnings` for Linux (also with `--features bench`), and for macOS and Windows (`scripts/cross-check.sh`), the Word schemas of the docx tests fetched into their cache (`scripts/validate-docx.sh --fetch`, DEV-036), `cargo nextest run --locked --no-fail-fast` (#451; cargo-nextest is required, a landing without it stops at the start; `--test-threads` from RUST_TEST_THREADS or the cargo config's [env], because nextest does not read it itself; also `cargo test --features bench bench::` when the change touches the harness or the build, `scripts/bench-tests-wanted.sh` (BUILD-035, #449), or with --release, and also `cargo test --release` with --release), and the real-server
 # suites of tests/caldav-env, tests/mail-env and tests/forgejo-env and the LuaLaTeX suite of tests/tex-env, each only when the
 # change touches its code or environment (`.forgejo/scripts/env-tests.sh suites`, #447); --no-env-tests skips them and
-# says so. A merge conflict is not resolved here: merge `origin/main` into the branch, resolve
+# says so. When they passed, a last step makes the lines-of-code report (DEV-045, `cargo run -q --locked
+# --example loc_report -- --out docs/loc-report.md`) and, when `docs/loc-report.md` changed, commits it on
+# top of the merge as `no-issue: lines-of-code report for <branch> (DEV-045)`; it is pushed with the merge.
+# A report that cannot be made fails the landing like a failed check. A merge conflict is not resolved here: merge `origin/main` into the branch, resolve
 # it there and run land.sh again. After the push the local branch `main` is fast-forwarded to
 # the landed commit (in the worktree that has it checked out, when that one is clean), so new
 # sessions start from it; when it has commits of its own or its checkout has changes, it is left
@@ -21,6 +24,7 @@
 # The worktree and the build folder stay in `<git dir>/land/`, so the next landing builds only
 # what changed. Environment, for the test of this script: LAND_REMOTE (default origin),
 # LAND_CHECK_CMD (a shell command run in the worktree instead of the checks above),
+# LAND_REPORT_CMD (a shell command run in the worktree instead of the report command of DEV-045),
 # SHALE_LAND_LOCK_HELD=<pid of the parent> (the parent holds the lock already: release scripts).
 #
 # A TeX Live mirror (DEV-025, #371): the real TeX Live install test and the TeX test image take TeX
@@ -40,7 +44,7 @@ for a in "$@"; do
   case $a in
     --release) RELEASE=yes ;;
     --no-env-tests) ENV_TESTS=no ;;
-    -h|--help) sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,/^set -euo/{/^#/p}' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "land.sh: unknown option $a" >&2; exit 2 ;;
     *) BRANCHES+=("$a") ;;
   esac
@@ -242,6 +246,21 @@ checks() {
   fi
 }
 
+# The lines-of-code report of DEV-045 on the checked merge in the current folder: made by the
+# report command (LAND_REPORT_CMD replaces it, run by `sh -c` like LAND_CHECK_CMD), committed on top
+# of the merge when docs/loc-report.md differs from it. A failing command fails the landing.
+report() {
+  local b=$1 cmd=${LAND_REPORT_CMD:-cargo run -q --locked --example loc_report -- --out docs/loc-report.md}
+  step "lines-of-code report (DEV-045)" sh -c "$cmd" || return 1
+  [ ! -e docs/loc-report.md ] || git add docs/loc-report.md
+  if git diff --cached --quiet -- docs/loc-report.md; then
+    echo "the lines-of-code report is current, nothing to commit"
+  else
+    git commit -q --no-verify -m "no-issue: lines-of-code report for $b (DEV-045)" -- docs/loc-report.md || return 1
+    echo "committed the lines-of-code report as $(git rev-parse --short HEAD)"
+  fi
+}
+
 # The commit to land: of a local branch and `origin/<branch>` the newer one (the other is behind
 # it); when both have commits of their own there is no answer, and the landing stops.
 resolve() {
@@ -323,6 +342,11 @@ for b in "${BRANCHES[@]}"; do
   end_step 0
   if ! (cd "$WT" && checks "$base"); then
     echo "land.sh: a check failed for $b; $REMOTE/main is unchanged." >&2
+    RESULT=failed
+    exit 1
+  fi
+  if ! (cd "$WT" && report "$b"); then
+    echo "land.sh: the lines-of-code report failed for $b; $REMOTE/main is unchanged." >&2
     RESULT=failed
     exit 1
   fi

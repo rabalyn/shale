@@ -92,7 +92,7 @@ exit "${FAKE_RECHECK_EXIT:-0}"
 FAKE
 chmod +x "$TMP/bin/fake-bench-compare"
 export BENCH_BIN="$TMP/bin/fake-shale" BENCH_COMPARE="$TMP/bin/fake-bench-compare" BENCH_LOG="$TMP/bench.log"
-export RELEASE_GH="$TMP/bin/gh" GH_LOG="$TMP/gh.log" RELEASE_DATE=2026-11-17 LAND_CHECK_CMD=true
+export RELEASE_GH="$TMP/bin/gh" GH_LOG="$TMP/gh.log" RELEASE_DATE=2026-11-17 LAND_CHECK_CMD=true LAND_REPORT_CMD=true
 
 git init -q --bare "$TMP/remote.git"
 git clone -q "$TMP/remote.git" "$TMP/work" 2>/dev/null
@@ -417,6 +417,13 @@ cp "$TMP/bin/fake-shale" "$NOJQ/fake-shale"
 check "the PATH for the next tests has no jq" '! PATH="$NOJQ" command -v jq >/dev/null'
 FAKE_COMPARE_JSON="$TMP/time-reg.json" FAKE_COMPARE_EXIT=1 FAKE_RECHECK_JSON="$TMP/recheck-real.json" PATH="$NOJQ" BENCH_BIN="$NOJQ/fake-shale" expect "bench-release.sh without jq: a time regression counts as it is, and stops the release" 1 "jq is missing, so a time regression cannot be confirmed" bench-release.sh "$BWT" 0.2.0
 FAKE_COMPARE_JSON="$TMP/time-reg.json" FAKE_COMPARE_EXIT=1 FAKE_RECHECK_JSON="$TMP/recheck-real.json" PATH="$NOJQ" BENCH_BIN="$NOJQ/fake-shale" expect "bench-release.sh without jq: --allow-perf-regression lets it pass" 0 "allowed by --allow-perf-regression" bench-release.sh "$BWT" 0.2.0 --allow-perf-regression
+
+# dev_045: the lines-of-code report that land.sh commits on top of the merge is part of the tag
+cd "$TMP/work" && git checkout -q main && git fetch -q origin && git merge -q --ff-only origin/main
+land pend45 docs/changelog-pending/I45.md $'### Fixed\n\n- Forty-five (#45).'
+LAND_REPORT_CMD='printf "report of the tree\n" > docs/loc-report.md' expect "dev_045: a check tag lands with the report commit on top" 0 "pushed the tag to origin" make-tag.sh --issue 77 patch
+TAG45="v$(version_on_main)"
+check "dev_045: the tag is on the report commit, the tip of origin/main, which sits on the merge of the bump" 'git fetch -q origin && git log -1 --format=%s origin/main | grep -Fq "no-issue: lines-of-code report for release/v" && [ "$(git rev-parse "$TAG45^{commit}")" = "$(git rev-parse origin/main)" ] && [ "$(git rev-list --parents -1 origin/main^ | wc -w)" = 3 ] && git show "$TAG45:docs/loc-report.md" | grep -Fq "report of the tree"'
 
 [ "$FAILED" = 0 ] && echo "all $N checks passed"
 exit "$FAILED"
