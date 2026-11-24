@@ -32,6 +32,8 @@ pub struct FakeOAuthState {
     pub deny: bool,
     pub email: Option<String>,
     pub redirect_token_to: Option<String>,
+    /// Set when a code is traded for tokens: plays a Cancel that comes while the exchange is on its way.
+    pub cancel_on_exchange: Option<Arc<AtomicBool>>,
 }
 
 pub struct FakeOAuth {
@@ -125,6 +127,7 @@ impl FakeOAuth {
             deny: false,
             email: Some("ada@example.com".into()),
             redirect_token_to: None,
+            cancel_on_exchange: None,
         }));
         let stop = Arc::new(AtomicBool::new(false));
         let (st, sp) = (state.clone(), stop.clone());
@@ -248,6 +251,9 @@ fn serve(mut s: TcpStream, st: &Arc<Mutex<FakeOAuthState>>) {
             let mut new_refresh: Option<String> = None;
             match get(&f, "grant_type").as_str() {
                 "authorization_code" => {
+                    if let Some(c) = &g.cancel_on_exchange {
+                        c.store(true, Ordering::SeqCst);
+                    }
                     let Some((challenge, redirect)) = g.codes.remove(&get(&f, "code")) else { return err(&mut s, "invalid_grant") };
                     let verifier = get(&f, "code_verifier");
                     if redirect != get(&f, "redirect_uri") || crate::mail::oauth::pkce_challenge(&verifier) != challenge {

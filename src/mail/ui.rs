@@ -62,6 +62,9 @@ pub const MAIL_SYNC: Key = Key::new("mail-sync");
 /// The sending of the due mails of one account (JOB-031): one task per account, `MAIL_SEND.with(account id)`.
 /// Cancel is looked at before each mail is taken from the Outbox, never inside a mail that is on its way.
 pub const MAIL_SEND: Key = Key::new("mail-send");
+/// The browser sign-in (OAuth2) of one mail account (JOB-032): one task per account, `MAIL_SIGNIN.with(account id)`,
+/// listed while the flow waits for the browser and until it has ended.
+pub const MAIL_SIGNIN: Key = Key::new("mail-signin");
 
 /// What the store is doing.
 pub enum StoreState {
@@ -1796,7 +1799,10 @@ impl MailView {
         if matches!(self.signins.get(&account.id), Some(SignInState::Waiting { .. })) {
             return;
         }
-        let cancel = Arc::new(AtomicBool::new(false));
+        let display = if account.name.is_empty() { account.host.clone() } else { account.name.clone() };
+        // the task ends with the job, before its result is taken in; a second sign-in of the account is refused while it is listed (JOB-032)
+        let Some(mut task) = self.busy.begin(MAIL_SIGNIN.with(&account.id), format!("Signing in {display} in the browser…")) else { return };
+        let cancel = task.cancellable().flag();
         self.signins.insert(account.id.clone(), SignInState::Waiting { cancel: cancel.clone(), url: None });
         let (acct, id, id2) = (account.clone(), account.id.clone(), account.id.clone());
         let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
@@ -1809,7 +1815,9 @@ impl MailView {
                         c.request_repaint();
                     }
                 };
-                crate::mail::oauth::sign_in(&acct, secret, &cancel, crate::mail::oauth::SIGN_IN_TIMEOUT, &shown).map_err(|e| e.to_string())
+                let r = crate::mail::oauth::sign_in(&acct, secret, &cancel, crate::mail::oauth::SIGN_IN_TIMEOUT, &shown).map_err(|e| e.to_string());
+                drop(task);
+                r
             },
             move |r| Event::SignedIn { account: id2, result: flatten(r) },
         );
@@ -1819,6 +1827,15 @@ impl MailView {
     pub fn cancel_sign_in(&mut self, account: &str) {
         if let Some(SignInState::Waiting { cancel, .. }) = self.signins.get(account) {
             cancel.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// The account dialog closes: its sign-ins stop with it (JOB-010, JOB-032).
+    pub fn cancel_sign_ins(&mut self) {
+        for s in self.signins.values() {
+            if let SignInState::Waiting { cancel, .. } = s {
+                cancel.store(true, Ordering::SeqCst);
+            }
         }
     }
 
