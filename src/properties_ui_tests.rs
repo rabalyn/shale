@@ -74,7 +74,7 @@ fn a_mail_card_shows_the_header_and_no_raw_yaml_or_ids() {
     assert!(date.min.x > from.max.x + 100.0, "the date is right-aligned: {date:?} {from:?}");
 }
 
-// spec: EDIT-063
+// spec: EDIT-063, CFG-052
 #[test]
 fn the_toggle_shows_all_raw_properties_and_hides_them_again() {
     let v = vault("toggle");
@@ -200,4 +200,17 @@ fn the_reading_view_has_a_copy_button_left_of_the_badge_that_copies_the_code() {
     assert_eq!(copied, vec!["let a = 1;\nlet b = 2;".to_string()]);
     let (painted, _) = frame(vec![]);
     assert!(texts(&painted).contains(&"Copied"), "{:?}", texts(&painted));
+}
+
+// spec: CFG-052
+#[test]
+fn the_folded_view_has_the_toggle_for_the_raw_lines_and_the_raw_view_has_none() {
+    let v = vault("modes-toggle");
+    let (folded, _) = run(&v, MAIL, PropertiesView::Folded, &[]);
+    assert!(texts(&folded).contains(&"▸"), "{:?}", texts(&folded));
+    let (open, _) = run(&v, MAIL, PropertiesView::Folded, &["▸"]);
+    assert!(texts(&open).iter().any(|x| x.contains("message-id")), "{:?}", texts(&open));
+    assert!(texts(&open).contains(&"▾"));
+    let (raw, _) = run(&v, MAIL, PropertiesView::Raw, &[]);
+    assert!(!texts(&raw).contains(&"▸") && !texts(&raw).contains(&"▾"), "{:?}", texts(&raw));
 }

@@ -990,7 +990,7 @@ pub(crate) mod tests {
         assert!(s.face("No Such Family", Variant::Regular).is_none());
     }
 
-    // spec: CFG-035
+    // spec: CFG-033, CFG-035
     #[test]
     fn cfg_035_fonts_are_rebuilt_only_when_the_families_change_and_a_missing_font_is_told_once() {
         let ctx = egui::Context::default();

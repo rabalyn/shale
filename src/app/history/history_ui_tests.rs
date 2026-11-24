@@ -148,7 +148,7 @@ fn hist_001_two_notes_side_by_side_have_the_panel_in_the_sidebar_even_in_a_wide_
     assert!(right.contains_rect(w.panel_rect("deleted")), "the list of the focused note is in the sidebar");
 }
 
-// spec: HIST-003
+// spec: HIST-003, SYNC-045
 #[test]
 fn hist_003_the_margin_column_is_hidden_with_its_button_and_the_choice_is_remembered() {
     let mut w = W::new("hide", WIDE);

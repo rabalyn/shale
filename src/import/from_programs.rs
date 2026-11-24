@@ -294,7 +294,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
-    // spec: IMP-008
+    // spec: IMP-008, IMP-011
     #[test]
     fn a_thunderbird_drag_with_an_empty_file_list() {
         // what Thunderbird (through the X11 bridge) sends: no file, a link, a file name
@@ -339,7 +339,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    // spec: IMP-009
+    // spec: IMP-009, IMP-011
     #[test]
     fn what_other_programs_drop() {
         let p = std::env::temp_dir().join(format!("shale drop {}.eml", std::process::id()));

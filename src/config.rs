@@ -846,7 +846,7 @@ mod tests {
         assert_eq!(Config::load().0.fonts, c.fonts);
     }
 
-    // spec: CFG-001, EDIT-016, EDIT-017, EDIT-018, EDIT-026, EDIT-030
+    // spec: CFG-001, CFG-042, CFG-043, CFG-050, CFG-053, EDIT-016, EDIT-017, EDIT-018, EDIT-026, EDIT-030
     #[test]
     fn old_config_files_still_load() {
         let (c, newer) = crate::vault_state::parse::<Config>(br#"{"vault": "/tmp/v"}"#).unwrap();
@@ -857,7 +857,7 @@ mod tests {
         assert!(!c.ctrl_to_follow);
         assert!(c.inline_images);
         assert!(c.line_numbers, "line numbers are on by default (EDIT-018)");
-        // spec: CFG-040
+        // spec: CFG-042
         assert!(c.numbered_headings, "headings are numbered by default");
         let c: Config = serde_json::from_str(r#"{"numbered_headings": false}"#).unwrap();
         assert!(!c.numbered_headings);
@@ -1240,7 +1240,7 @@ mod tests {
         assert_eq!(c.take_legacy(), legacy);
     }
 
-    // spec: CFG-004
+    // spec: CFG-004, CFG-007
     #[test]
     fn a_broken_config_is_kept_and_a_newer_one_is_not_overwritten() {
         let dir = std::env::temp_dir().join(format!("shale-config-broken-{}", std::process::id()));

@@ -449,7 +449,7 @@ fn imp_002_an_event_drop_without_a_vault_says_so_and_without_a_pointer_does_noth
     assert!(!w.dialog_open() && !w.dragging());
 }
 
-// spec: IMP-031
+// spec: IMP-031, IMP-033
 #[test]
 fn imp_031_pictures_and_pdfs_dropped_on_a_note_are_saved_as_files_and_linked_from_it() {
     let mut w = W::new("media");

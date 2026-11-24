@@ -477,7 +477,7 @@ fn keygen_available() -> bool {
     std::process::Command::new("ssh-keygen").arg("-?").stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().is_ok()
 }
 
-// spec: SYNC-056
+// spec: SYNC-050, SYNC-056
 #[test]
 fn sync_056_ssh_makes_a_key_shows_the_public_part_with_copy_and_the_provider_page_and_sets_the_remote() {
     if !keygen_available() {

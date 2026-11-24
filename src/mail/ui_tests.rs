@@ -3323,7 +3323,7 @@ fn j_and_k_act_in_the_pane_that_has_the_keyboard_only() {
     assert_eq!(w.app.mail.cursor, Some(1));
 }
 
-// spec: MAIL-061
+// spec: MAIL-061, KEY-008
 #[test]
 fn a_rebound_mail_key_works_and_the_old_one_does_not() {
     use crate::keys::{Action as KeyAction, Binding};
@@ -4156,7 +4156,7 @@ fn alt_r_a_and_f_answer_and_forward_the_open_mail() {
     assert!(!w.server.state().messages("INBOX").iter().any(|m| m.1.contains(&"\\Flagged".to_string())), "Alt+F forwards, it does not flag");
 }
 
-// spec: MAIL-229
+// spec: MAIL-229, KEY-012, KEY-016
 #[test]
 fn holding_alt_underlines_the_letter_of_each_button_and_it_follows_a_rebound_key() {
     use crate::keys::{Action as KeyAction, Binding};
@@ -4188,7 +4188,7 @@ fn holding_alt_underlines_the_letter_of_each_button_and_it_follows_a_rebound_key
     assert!(w.underlined.is_empty());
 }
 
-// spec: MAIL-229, KEY-019
+// spec: MAIL-229, KEY-019, KEY-015
 #[test]
 fn on_macos_the_alt_keys_of_the_open_mail_do_nothing_and_underline_nothing_until_one_is_bound() {
     use crate::keys::{Action as KeyAction, Binding, Keymap};

@@ -503,7 +503,7 @@ fn the_editing_settings_switch_the_toolbar_and_edit_the_colour_presets() {
     assert_eq!(p.app.cfg.highlight_colours.len(), 4, "the other palette is untouched");
 }
 
-// spec: VAULT-023
+// spec: VAULT-023, CFG-020
 #[test]
 fn panel_settings_dialog_changes_settings_and_closes() {
     let mut p = P::new("settings", &[]);
@@ -567,7 +567,7 @@ fn shown_labels(p: &mut P) -> Vec<String> {
     p.look(Show::Modals).into_iter().map(|(_, l, _)| l).collect()
 }
 
-// spec: CFG-020, TEX-023, EDIT-044
+// spec: CFG-020, TEX-023, EDIT-044, IMP-036
 #[test]
 fn set_001_every_tab_of_the_settings_shows_the_settings_of_its_domain() {
     let mut p = P::new("settings-tabs", &[]);
@@ -1013,7 +1013,7 @@ fn panel_file_tree_opens_folds_and_offers_menus() {
     }
 }
 
-// spec: DEV-020
+// spec: DEV-020, KEY-013
 #[test]
 fn dev_020_the_help_button_in_settings_opens_the_user_guide_as_the_vault() {
     let mut p = P::new("userguide-help", &[]);
