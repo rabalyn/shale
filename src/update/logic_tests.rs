@@ -1026,6 +1026,46 @@ fn upd_003_a_failed_check_is_a_result_in_words_and_is_tried_again_in_an_hour() {
     assert!(st.notice(&c).is_none());
 }
 
+// spec: UPD-003, UPD-018, UPD-019
+#[test]
+fn upd_003_the_timings_are_the_ones_the_rules_name() {
+    assert_eq!(START_DELAY, Duration::from_secs(20), "the first check, UPD-003");
+    assert_eq!(CHECK_EVERY, Duration::from_secs(24 * 3600), "then every 24 hours, UPD-003");
+    assert_eq!(RETRY_AFTER, Duration::from_secs(3600), "a failed check is tried again in an hour, UPD-003");
+    assert_eq!(BACKUP_KEPT, Duration::from_secs(30), "the backup goes 30 seconds after the start, UPD-018");
+    assert_eq!(crate::instance::RESTART_WAIT, Duration::from_secs(20), "a start after Restart now waits up to 20 seconds, UPD-019");
+}
+
+// spec: UPD-003
+#[cfg(unix)]
+#[test]
+fn upd_003_the_check_is_one_get_of_the_latest_release_with_the_github_accept_header() {
+    let github = FakeGithub::start();
+    // no release is published: the check fails with a 404, the request is what counts
+    let _ = (pretend_backend(&github, &temp("stage-head")).check)(&AtomicBool::new(false));
+    let heads = github.heads();
+    assert_eq!(heads.len(), 1, "one request: {heads:?}");
+    assert!(heads[0].starts_with("GET /repos/rabalyn/shale/releases/latest "), "{}", heads[0]);
+    assert!(heads[0].to_ascii_lowercase().contains("accept: application/vnd.github+json"), "{}", heads[0]);
+}
+
+// spec: UPD-002
+#[test]
+fn upd_002_switching_to_off_cancels_what_runs() {
+    let (backend, counts, _gate) = gated(Some("9.9.9"));
+    let mut st = state(portable_kind(), backend);
+    let mut c = cfg(UpdateMode::Notify);
+    let ctx = egui::Context::default();
+    st.tick(&ctx, &mut c);
+    assert!(st.busy(), "the check runs and waits at the gate");
+    assert!(!st.cancel.load(Ordering::SeqCst));
+    c.mode = UpdateMode::Off;
+    st.tick(&ctx, &mut c);
+    assert!(st.cancel.load(Ordering::SeqCst), "the running job is told to stop");
+    assert!(!st.busy() && st.found.is_none() && st.notice(&c).is_none());
+    assert_eq!(Counts::n(&counts.checks), 0, "the check never got its answer");
+}
+
 // spec: UPD-003
 #[test]
 fn upd_003_a_release_that_is_not_newer_is_not_offered() {

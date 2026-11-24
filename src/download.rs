@@ -117,13 +117,20 @@ mod tests {
         // a server that accepts and then says nothing
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://127.0.0.1:{}/a", listener.local_addr().unwrap().port());
-        let held = std::thread::spawn(move || listener.accept().map(|(s, _)| s));
+        let (accepted, was_accepted) = std::sync::mpsc::channel();
+        let held = std::thread::spawn(move || {
+            let s = listener.accept().map(|(s, _)| s);
+            let _ = accepted.send(());
+            s
+        });
         let to = std::env::temp_dir().join(format!("shale-download-c-{}", std::process::id()));
         let cancel = Arc::new(AtomicBool::new(false));
         let flag = cancel.clone();
         std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(400));
-            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            // the server has the connection and says nothing: now the user cancels
+            if was_accepted.recv().is_ok() {
+                flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
         });
         let e = to_file(&cancel, &Request { timeout: Duration::from_secs(60), ..req(&url, true) }, &to).unwrap_err();
         assert_eq!(e, "cancelled");

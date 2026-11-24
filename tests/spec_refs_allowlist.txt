@@ -115,7 +115,6 @@ SYNC-064: gitsync/history/history_tests.rs::a_moved_vault_keeps_its_history_and_
 SYNC-066: gitsync/wizard/forgejo_env_tests.rs::forgejo_env_a_token_creates_a_repository_and_git_syncs_with_it_through_the_askpass_helper
 SYNC-066: gitsync/wizard/forgejo_env_tests.rs::forgejo_env_a_wrong_token_a_missing_repository_and_no_server_are_told_in_plain_words
 SYNC-066: scripts/test-env-tests.sh
-UPD-001: config/text.rs::cfg_009_every_key_of_the_file_has_a_description
 USE-003: app.rs::the_data_usage_dialog_opens_counts_and_clears_and_the_mail_index_waits_for_the_store
 USE-014: usage_tests.rs::each_prune_follows_its_retention_settings
 USE-017: app.rs::the_data_usage_dialog_opens_counts_and_clears_and_the_mail_index_waits_for_the_store

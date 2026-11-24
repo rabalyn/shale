@@ -153,6 +153,25 @@ fn upd_009_the_buttons_download_install_now_and_restart_now_lead_through_the_upd
     assert!(out.viewport_output.values().any(|v| v.commands.contains(&ViewportCommand::Close)), "the window is asked to close, which saves like quitting");
 }
 
+// spec: UPD-019
+#[cfg(unix)]
+#[test]
+fn upd_019_quitting_the_window_starts_the_new_program_after_everything_is_saved() {
+    let d = temp("ui-restart");
+    let script = d.join("shale");
+    crate::test_exec::write_script(&script, &format!("#!/bin/sh\necho \"$@\" > {}\n", d.join("started").display()));
+    let mut t = T::new(UpdateMode::Notify, None, portable_kind());
+    t.app.update.restart = Some(crate::update::install::Relaunch { program: script, args: vec![crate::update::install::RESTARTED.into()] });
+    assert!(!d.join("started").exists(), "nothing starts before the window is quit");
+    eframe::App::on_exit(&mut t.app);
+    assert!(t.app.update.restart.is_none(), "on_exit used the wish");
+    let start = std::time::Instant::now();
+    while !d.join("started").exists() && start.elapsed() < Duration::from_secs(5) {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(std::fs::read_to_string(d.join("started")).unwrap().trim(), crate::update::install::RESTARTED);
+}
+
 // spec: UPD-009
 #[test]
 fn upd_009_at_next_start_is_saved_in_the_settings() {
