@@ -655,8 +655,7 @@ fn settings(anchor: &egui::Response, st: &mut State, data: &Data, i: usize, env:
         }
         ui.add_space(4.0);
         ui.label(RichText::new("When a card is dropped here, set").color(theme::palette().muted));
-        // (a done lane sets `status: done` when it has no drop line of its own, BOARD-024)
-        let derived = if lane.done { Some(super::drag::DONE_PROPERTY.to_string()) } else { drop_property(&s.query) };
+        let derived = drop_property(&s.query);
         let hint = derived.clone().unwrap_or_else(|| "a property such as status: doing".to_string());
         let r = ui.add(egui::TextEdit::singleline(&mut s.drop).hint_text(hint).desired_width(f32::INFINITY));
         if r.changed() {
