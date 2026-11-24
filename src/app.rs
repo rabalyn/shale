@@ -2299,16 +2299,24 @@ impl ShaleApp {
     }
 
     /// Show the export dialog of the board note `rel` (BOARD-030): the board on landscape pages,
-    /// then the notes of its cards as a book. It is saved to `<vault>/exports/<name>.pdf`. It has the
-    /// built-in engine only.
+    /// then the notes of its cards as a book. It is saved to `<vault>/exports/<name>.pdf`. It offers
+    /// the LaTeX templates that can hold a book too (BOARD-031), starting as a folder's dialog does.
     pub fn open_export_board_dialog(&mut self, rel: &Path) {
+        use crate::pdf::export_dialog::ExportEngine;
         self.flush_all();
+        let text = self.note_text(rel);
         let Some(v) = &self.vault else { return };
         let name = v.file(rel).map(|f| f.display_name()).unwrap_or_else(|| rel.to_string_lossy().into_owned());
         let path = v.root.join("exports").join(format!("{name}.pdf"));
         let book = crate::pdf::book_dialog::BookExport::for_board(v, rel, &self.busy);
-        let opts = crate::pdf::export::ExportOptions { numbered_headings: self.cfg.numbered_headings, ..crate::pdf::export::ExportOptions::for_note() }.with_toc_break_property(&self.note_text(rel));
-        self.modal = Some(Modal::Export(Box::new(crate::pdf::export_dialog::ExportDialog::new(rel.to_path_buf(), false, name, opts, path).with_book(book))));
+        let opts = crate::pdf::export::ExportOptions { numbered_headings: self.cfg.numbered_headings, ..crate::pdf::export::ExportOptions::for_note() }.with_toc_break_property(&text);
+        let last = &self.vdata.state.latex_export;
+        let noted = crate::pdf::tex::dialog::note_choice(&crate::markdown::front_matter_values(&text));
+        let engine = if noted.is_some() || last.latex { ExportEngine::Latex } else { ExportEngine::Builtin };
+        let prefer = noted.or_else(|| (!last.set.is_empty()).then(|| (last.set.clone(), last.kind.clone())));
+        let title = v.file(rel).map(|f| f.title()).unwrap_or_else(|| name.clone());
+        let tex = crate::pdf::tex::dialog::TexExport::for_folder(&v.root, title, &text, prefer);
+        self.modal = Some(Modal::Export(Box::new(crate::pdf::export_dialog::ExportDialog::new(rel.to_path_buf(), false, name, opts, path).with_book(book).with_latex(tex, engine))));
     }
 
     /// Show the export dialog for a folder as one PDF, a book (BOOK-010): `dir` is the folder, the
@@ -2464,6 +2472,11 @@ impl ShaleApp {
         let (set, kind) = (tex.current_set().ok_or("Choose a template set first: import one in Settings → LaTeX")?, tex.current_kind().ok_or("Choose a kind of document")?);
         let doc = match &d.book {
             // a folder: its book as it is in the vault now, which has the saved notes (BOOK-014)
+            // a board: the board and its cards' notes (BOARD-031)
+            Some(book) if book.board => {
+                let board = crate::board::resolve::resolve(v, &book.folder)?;
+                crate::pdf::tex::board::write_board(&crate::pdf::tex::board::BoardRequest { vault: v, board: &board, opts: &d.opts, set, kind, fields: &tex.values })?
+            }
             Some(book) => {
                 let plan = crate::pdf::book::plan(v, &book.folder)?;
                 crate::pdf::tex::book::write_book(&crate::pdf::tex::book::BookRequest { vault: v, plan: &plan, opts: &d.opts, set, kind, fields: &tex.values })?

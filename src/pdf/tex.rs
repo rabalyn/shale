@@ -5,6 +5,7 @@
 
 pub(crate) mod archive;
 pub(crate) mod blocks;
+pub mod board;
 mod body;
 pub mod book;
 pub mod compile;
@@ -26,6 +27,10 @@ pub use engine::TexConfig;
 
 #[cfg(test)]
 pub(crate) mod archive_tests;
+#[cfg(test)]
+mod board_env_tests;
+#[cfg(test)]
+mod board_tests;
 #[cfg(test)]
 mod book_env_tests;
 #[cfg(test)]

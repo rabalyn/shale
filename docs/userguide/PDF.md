@@ -224,7 +224,8 @@ and the reason on stderr. On Windows `shale.exe` has no console of its own, so `
 
 A board ([[Boards]]) exports as its own kind of book: the board on landscape pages, then the notes of its cards
 (see [[Boards#Export as a PDF]]). It has the dialog of a folder's book; the board pages follow the paper of the dialog,
-always landscape.
+always landscape. The dialog has the **Engine** choice too: with **LaTeX template** the board and the notes are
+written through a template kind of the article or book family (see [[Boards#Export as a PDF]]).
 
 # Read
 

@@ -126,7 +126,15 @@ save. The PDF has
 - a **contents** page whose first line is the board; each card on the board page is a link to its note, and the PDF has
   bookmarks for the board, the lanes and the cards.
 
-The LaTeX engine is not offered for a board yet.
+**Through a LaTeX template.** The dialog has the same **Engine** choice as a folder's ([[PDF#A folder through a LaTeX template]]):
+with **LaTeX template** and a kind of the article or book family the board is written as one LaTeX document. The order is
+the same: the board on landscape pages (the `pdflscape` package; lanes as columns of framed cards with the title, a
+link to the card's chapter, and the chips; up to three lanes side by side, the next lanes on the next landscape page,
+columns that do not fit the page go on with "(continued)"), then a part for each lane that has cards with the cards as
+chapters, and the contents with the board first. A drawing card's chapter is its drawing. A lane whose query is wrong has
+the reason under its name. The board note's properties (`author`, `latex-template` …) fill the fields like a folder
+note's. LaTeX decides the paper, so the dialog's paper choice does not apply; the heights of the cards on the board page
+are estimated, so a board with unusually tall cards may need a look at the result.
 
 # Try it
 
