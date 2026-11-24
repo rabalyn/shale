@@ -198,6 +198,13 @@ fn site_065_cancel_stops_the_publish_and_leaves_the_target_as_it_was() {
     let _gate = crate::gitsync::hold_git(&mut gated, &gate_dir);
     t.app.sync.git = gated;
     t.click("Publish");
+    // the publish runs on a thread: give it time (a loaded machine takes longer than a few frames) to get to its second step
+    for _ in 0..250 {
+        if t.shows("Writing the site…") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
     assert!(t.shows("Publishing the site…") && t.shows("Writing the site…"), "the task and its step: {:?}", t.hl.text);
     assert!(t.shows("Cancel"));
     t.click("Cancel");
