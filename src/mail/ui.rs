@@ -366,6 +366,9 @@ pub struct MailView {
     pub counts: HashMap<i64, (i64, i64)>,
     dirty: bool,
     last_refresh: Option<Instant>,
+    /// How often the folders, counts and lists were read again from the index: a place that keeps
+    /// its own pages (the sidebar's, LAY-030) reads them again when this has changed.
+    pub(crate) refreshed: u64,
     /// Test aid: how many times the list or counts were read from the index.
     pub queries: u64,
     /// Where the view was left when the vault was last closed, until the folders are read and the
@@ -565,6 +568,7 @@ impl MailView {
             counts: HashMap::new(),
             dirty: false,
             last_refresh: None,
+            refreshed: 0,
             queries: 0,
             restore: None,
             folder: None,
@@ -646,6 +650,11 @@ impl MailView {
             media: crate::media::MediaPlayer::default(),
             att_audio: None,
         }
+    }
+
+    /// The index to read from; None until the store is open.
+    pub(crate) fn reader(&self) -> Option<&Reader> {
+        self.reader.as_ref()
     }
 
     #[cfg(test)]
@@ -1219,6 +1228,7 @@ impl MailView {
     pub fn refresh(&mut self) {
         self.dirty = false;
         self.last_refresh = Some(Instant::now());
+        self.refreshed += 1;
         let Some(r) = self.reader.as_ref() else { return };
         self.queries += 1;
         if let Ok(f) = r.folders(None) {
