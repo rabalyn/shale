@@ -2,7 +2,7 @@
 //! note is not published (SITE-007, SITE-010).
 
 use super::hugo_tests::{attrs, build, html, hugo_here};
-use super::test_support::{everything, page, text, Fixture};
+use super::test_support::{everything, has, page, text, Fixture};
 use serde_json::Value;
 
 const BOARD: &str = "---\ntype: board\n---\n# Sprint\n\nOur sprint, in words.\n\n\
@@ -116,8 +116,45 @@ fn site_045_hugo_builds_the_board_page_read_only_with_links_to_published_cards()
     let made = board.split("</div>\n</section>").next().unwrap();
     assert!(!made.contains("<script") && !made.contains("<form") && !made.contains("<button") && !made.contains("draggable"), "read-only: {made}");
     assert!(!page.contains("Zebrafish") && !page.contains("Quokka"));
+    // a lane whose cards were all left out looks like an empty lane, as in the app
+    let hidden = board.split("<h2>Only hidden").nth(1).and_then(|l| l.split("</section>").next()).unwrap();
+    assert!(hidden.contains("<p class=\"board-note\">No cards</p>") && !hidden.contains("<li"), "{hidden}");
+    assert!(!board.split("<h2>Open").nth(1).unwrap().split("</section>").next().unwrap().contains("No cards"));
     let css = std::fs::read_to_string(public.join("shale-site.css")).unwrap();
     assert!(css.contains(".board { display: flex; gap: 12px; overflow-x: auto;"), "the lanes scroll sideways");
     // a link to the card's page works: the page of a card is built
     assert!(public.join("early-task/index.html").is_file());
+}
+
+const LANE_ONLY: &str = "---\ntype: board\n---\n# Q\n\nWords.\n\n## Open\nquery: #pub\n";
+
+fn tag_fixture(tag: &str, rules: &str, board: &str) -> Fixture {
+    Fixture::with(tag, rules, &[("Board.md", board), ("Card.md", "#pub\nCard words.\n")])
+}
+
+// spec: SITE-045, SITE-053
+#[test]
+fn site_045_a_tag_only_in_a_lane_query_does_not_choose_a_board() {
+    let f = tag_fixture("b045t1", "\"include_tags\": [\"pub\"]", LANE_ONLY);
+    let e = f.export();
+    assert!(has(&e, "content/card.md") && !has(&e, "content/board.md"), "{:?}", super::test_support::paths(&e));
+}
+
+// spec: SITE-045, SITE-053
+#[test]
+fn site_045_a_tag_in_front_matter_or_intro_chooses_a_board() {
+    let front = "---\ntype: board\ntags: [pub]\n---\n# Q\n\n## Open\nquery: #pub\n";
+    let intro = "---\ntype: board\n---\n# Q\n\nWords #pub.\n\n## Open\nquery: #pub\n";
+    for (i, board) in [front, intro].into_iter().enumerate() {
+        let f = tag_fixture(&format!("b045t2{i}"), "\"include_tags\": [\"pub\"]", board);
+        assert!(has(&f.export(), "content/board.md"), "{board}");
+    }
+}
+
+// spec: SITE-045, SITE-055
+#[test]
+fn site_045_an_exclude_rule_for_a_tag_only_in_a_lane_query_does_not_exclude_a_board() {
+    let f = tag_fixture("b045t3", "\"all_notes\": true, \"exclude_tags\": [\"pub\"]", LANE_ONLY);
+    let e = f.export();
+    assert!(has(&e, "content/board.md") && !has(&e, "content/card.md"), "{:?}", super::test_support::paths(&e));
 }

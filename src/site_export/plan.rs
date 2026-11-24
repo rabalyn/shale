@@ -104,7 +104,12 @@ pub fn chosen_notes(vault: &Vault, settings: &crate::vault_state::VaultSettings)
         .filter(|rel| {
             let n = &vault.notes[*rel];
             // a note that cannot be read is no note (DATA-008); a file that may not be written is no page (SITE-003…SITE-005)
-            n.unreadable.is_none() && body::file_allowed(rel) && vault.file(rel).is_some_and(|f| f.kind == crate::vault::FileKind::Note) && rules::chosen(publish, &settings.people_dir, &Candidate { rel, text: &n.text, tags: &n.tags })
+            if n.unreadable.is_some() || !body::file_allowed(rel) || !vault.file(rel).is_some_and(|f| f.kind == crate::vault::FileKind::Note) {
+                return false;
+            }
+            // a board's tags are those of its page, not those of its lanes' queries (SITE-045)
+            let tags = if boards::is_board(&n.text) { boards::tags(&n.text, &boards::intro(&n.text)) } else { n.tags.clone() };
+            rules::chosen(publish, &settings.people_dir, &Candidate { rel, text: &n.text, tags: &tags })
         })
         .cloned()
         .collect()

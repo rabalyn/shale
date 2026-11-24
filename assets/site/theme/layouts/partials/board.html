@@ -10,6 +10,7 @@
 <h2>{{ .name }} <span class="count">{{ len .cards }}</span></h2>
 {{- if .unresolved }}<p class="board-note">This lane could not be shown.</p>{{ end }}
 {{- if .partial }}<p class="board-note">This lane may be incomplete.</p>{{ end }}
+{{- if not .cards }}{{ if not .unresolved }}<p class="board-note">No cards</p>{{ end }}{{ end }}
 <ul class="board-cards">
 {{- range .cards }}
 <li class="board-card"><a href="{{ strings.TrimPrefix "/" .url | relURL }}">{{ .title }}</a>
