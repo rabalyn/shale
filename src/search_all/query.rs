@@ -88,6 +88,10 @@ pub enum TermKind {
     Links(String),
     Blocked,
     Blocking,
+    /// no resolved link in or out (QUERY-031)
+    Orphan,
+    /// no other note links to it (QUERY-031)
+    NoBacklinks,
 }
 
 /// A term and the bytes of the query it was read from.
@@ -536,6 +540,8 @@ fn classify(word: &str, starts_quoted: bool, span: &Range<usize>) -> Result<Term
     match word {
         "blocked" => return Ok(TermKind::Blocked),
         "blocking" => return Ok(TermKind::Blocking),
+        "orphan" => return Ok(TermKind::Orphan),
+        "no-backlinks" => return Ok(TermKind::NoBacklinks),
         _ => {}
     }
     if let Some(tag) = word.strip_prefix('#') {
@@ -640,6 +646,8 @@ mod tests {
                 TermKind::Links(l) => format!("links={l}"),
                 TermKind::Blocked => "blocked".into(),
                 TermKind::Blocking => "blocking".into(),
+                TermKind::Orphan => "orphan".into(),
+                TermKind::NoBacklinks => "no-backlinks".into(),
             },
         }
     }
@@ -696,7 +704,7 @@ mod tests {
         assert_eq!(sh("NOT \"x y\""), "(not 'x y')");
     }
 
-    // spec: QUERY-002
+    // spec: QUERY-002, QUERY-031
     #[test]
     fn query_002_fields() {
         assert_eq!(sh("#Todo"), "#todo");
@@ -711,6 +719,12 @@ mod tests {
         assert_eq!(sh("blocked AND NOT blocking"), "(and blocked (not blocking))");
         assert_eq!(sh("the blocked road"), "(and 'the' blocked 'road')", "blocked is a field, a quote makes it text");
         assert_eq!(sh("status:\"in progress\""), "status=in progress");
+        assert_eq!(sh("orphan"), "orphan");
+        assert_eq!(sh("no-backlinks"), "no-backlinks");
+        assert_eq!(sh("orphan AND NOT no-backlinks"), "(and orphan (not no-backlinks))");
+        assert_eq!(sh("\"orphan\""), "'orphan'", "a quote makes it text");
+        assert_eq!(sh("\"no-backlinks\""), "'no-backlinks'");
+        assert_eq!(sh("Orphan"), "'orphan'", "another case is text too");
         assert_eq!(sh("links:[[A (b)]] x"), "(and links=a (b) 'x')", "a link may hold parentheses");
     }
 

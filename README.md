@@ -36,6 +36,7 @@ markdown files. Notes link to each other with `[[wiki links]]`.
 - **To-do list for the whole vault**: every `- [ ] task` from every note in one list.
   Tick tasks off there (the change is saved to the note), filter them, and sort by due date
   (`📅 2026-12-01` or `due:2026-12-01`).
+- **Unlinked notes**: a view of the notes and drawings no link connects (orphans, or without backlinks), sorted by date changed or name.
 - **Kanban boards**: a note with `type: board` is a board; its lanes are `##` headings that fill themselves from a query (`status:doing`, `#todo`), with `sort:`, pinned `[[links]]` and a settings form per lane. Cards are notes (or drawings) with due, status, priority and tag chips; a click opens a small editor of the note next to the card, Ctrl+Click or Enter a tab; drag a card to another lane to set the lane's property (`status: doing`) in its note, or to pin and order it by hand; drag a note, a drawing or a folder from the file list onto a lane to pin it (a folder: all its notes) or onto the empty board for a lane that follows the folder. `blocked-by: [[A]]` makes a card blocked until A is done (`status: done` or a done lane); a selected card shows arrows to its blockers and dependants (set them in the peek, by dragging the card's link handle onto another card, or from its right-click menu), and `sort: dependencies` puts a lane in order with step numbers. **Space b** opens the boards. **Export PDF…** writes the board on landscape pages and then the notes of its cards as one PDF (BOARD-030).
 - **Updates**: Shale can look for a new release on GitHub, check its download against the release's SHA-256 file and the owner's signature (a key built into Shale) and notify, download or install it, as you choose (Settings → Updates; off by `SHALE_UPDATES=off`). A package-managed install (AUR `shale-bin`) is never touched. See `docs/userguide/Updates.md`.
 - **Turn on sync**: a short wizard in Settings → Sync asks how you want to keep your notes safe (history on this device, a folder another app already syncs, or a git server), signs you in with a token kept in the system keyring or an SSH key, creates or picks the repository (Forgejo, Gitea, GitHub), says what the first sync will do and tests it in plain words. Shale warns when a vault is in a network folder or a cloud-synced folder, and can move a `.git` folder out of one.
@@ -271,7 +272,7 @@ Other options:
 
 - `--screenshot out.png` starts with a temporary demo vault, draws about 120 frames, saves a
   picture of the window and exits. Automated checks use it.
-- `--view tasks|graph|drawing|reading|calendar|mail|social|social-import|search|keybindings|keymap|keymap:<system>:<layer>|data-usage` (with `--screenshot`) chooses which
+- `--view tasks|graph|unlinked|drawing|reading|calendar|mail|social|social-import|search|keybindings|keymap|keymap:<system>:<layer>|data-usage` (with `--screenshot`) chooses which
   view to capture; `mail` uses a made-up mail store (no server, no real mail), `social` and
   `social-import` made-up posts; `search` the vault with the made-up mail and posts indexed, for the search windows; `open:<file>` opens a file of the vault, `read-only:<file>.canvas`
   shows a canvas without the question, and `convert:<file>.canvas` converts it first.

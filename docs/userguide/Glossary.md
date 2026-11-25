@@ -173,6 +173,7 @@ the settings themselves in [[Settings reference]].
 
 | Feature | What it does | Keys | Section |
 |---|---|---|---|
+| Unlinked notes | The notes and drawings no link connects: orphans or without backlinks, by date changed or name; the ribbon icon after the keyboard ([[Unlinked notes]]) | none | none |
 | Updates | New releases: notify, download or install ([[Updates]]) | none | none |
 | User guide | This guide, built into Shale ([[Start here]]) | `F1` | Everywhere |
 

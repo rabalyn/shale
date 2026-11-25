@@ -14,6 +14,8 @@ nobody wrote yet) and green ones are drawings. Links in drawings count too ([[Dr
 Try it: this note is linked from [[Start here]], and it links to [[Tasks]], [[Drawings]] and
 [[Window layout]]. Open the graph and find it.
 
+Notes and drawings that nothing links to are listed in [[Unlinked notes]].
+
 How to arrange the panels: [[Window layout]].
 
 A Graph tab comes back after a restart with its switches (missing notes, orphans), see [[Tabs]].

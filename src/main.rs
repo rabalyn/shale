@@ -101,6 +101,7 @@ mod link_assist;
 mod link_preview;
 #[cfg(test)]
 mod link_preview_ui_tests;
+mod linkage;
 mod lists;
 mod mail;
 mod markdown;
@@ -194,6 +195,7 @@ mod ui_test_support;
 mod undo;
 #[cfg(test)]
 mod undo_tests;
+mod unlinked;
 mod update;
 mod userdirs;
 mod userguide;

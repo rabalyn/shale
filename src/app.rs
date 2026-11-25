@@ -43,6 +43,8 @@ pub enum View {
     Boards,
     /// the keyboard with every shortcut (KEY-058); its state is `ShaleApp::keymap_view`
     Keymap,
+    /// the notes and drawings no link connects (NAV-072); its state is `ShaleApp::unlinked`
+    Unlinked,
     Calendar,
     Mail,
     /// Mastodon / Bluesky feeds: the feed of this tab (None: not chosen yet, the last one is shown)
@@ -476,6 +478,8 @@ pub struct ShaleApp {
     pub boards: crate::board::Boards,
     /// The keyboard view of the Keymap tab (KEY-058).
     pub keymap_view: crate::keymap_view::State,
+    /// The mode and sort of the Unlinked notes tab and its list (NAV-072).
+    pub unlinked: crate::unlinked::Unlinked,
     pub tasks: TasksFilter,
     /// the graph of the whole vault and the local one in the side panel
     pub graphs: Graphs,
@@ -754,6 +758,7 @@ impl ShaleApp {
             search_worker: Default::default(),
             boards: Default::default(),
             keymap_view: Default::default(),
+            unlinked: Default::default(),
             tasks: TasksFilter::default(),
             graphs: Graphs::new(),
             calendar: {
@@ -915,6 +920,7 @@ impl ShaleApp {
                 self.open_data_usage();
             }
             Some("graph") => self.show_view(View::Graph, false),
+            Some("unlinked") => self.show_view(View::Unlinked, false),
             Some("boards") => self.show_view(View::Boards, false),
             // the keyboard of the Keymap tab: `keymap`, or `keymap:<system>:<layer>` (KEY-059)
             Some(v) if v == "keymap" || v.starts_with("keymap:") => {
@@ -1220,6 +1226,12 @@ impl ShaleApp {
                     self.boards.current = Some(PathBuf::from(b));
                 }
                 View::Boards
+            }
+            SavedTab::UNLINKED => {
+                if let Some(u) = &st.unlinked {
+                    self.unlinked = crate::unlinked::Unlinked::restored(&u.mode, &u.sort);
+                }
+                View::Unlinked
             }
             SavedTab::KEYMAP => View::Keymap,
             SavedTab::SETTINGS_FILE => View::SettingsFile,

@@ -394,6 +394,7 @@ mod tests {
                 let known = [
                     "tasks",
                     "graph",
+                    "unlinked",
                     "boards",
                     "drawing",
                     "reading",

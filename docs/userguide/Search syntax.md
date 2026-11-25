@@ -69,14 +69,16 @@ is underlined with its reason below the box, nothing is searched and the last li
 | `links:[[Note]]` | notes that link to Note |
 | `blocked` | the note has `blocked-by: [[A]], [[B]]` and one of them exists and is not `status: done` (on a board the cards in a done lane do not count as done here, see [[Boards]]) |
 | `blocking` | the note is not done and another note that is not done names it in `blocked-by:` |
-| `"AND"` | a quoted word is text: `"AND"`, `"#not a tag"`, `"blocked"` |
+| `orphan` | a note or drawing with no link in or out: a link must reach a note or drawing of the vault, so a link to itself, a red link, and a link to an image, a PDF or other media do not count |
+| `no-backlinks` | a note or drawing that no other note or drawing links to (it may link out; a link to itself does not count). `orphan AND NOT no-backlinks` is empty, and `no-backlinks AND NOT orphan` finds the notes that only link out |
+| `"AND"` | a quoted word is text: `"AND"`, `"#not a tag"`, `"blocked"`, `"orphan"` |
 
 You do not have to type this: the **gear** form next to the search box builds the same queries from rows and
 reads them back (see [[Search and pickers]]); a query with more than one level of `AND` and `OR` is shown as text.
 
 `AND`, `OR` and `NOT` are operators **only in upper case**: "salt and pepper" is still the phrase. A
 word with a colon is a property when it starts with a letter and has a value (`12:30`, `http://x` and
-`TODO:` are text). The words `blocked` and `blocking` are fields; quote them to search for the word.
+`TODO:` are text). The words `blocked`, `blocking`, `orphan` and `no-backlinks` are fields; quote them to search for the word.
 
 **Fields select notes, text finds lines.** `status:doing banana` lists the lines with "banana" in
 the notes that are `doing`; `status:doing` alone lists the notes. A text under `NOT` rules notes out but

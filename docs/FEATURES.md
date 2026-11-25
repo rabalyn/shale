@@ -544,7 +544,7 @@ Every layer of every system as a picture is in [KEYMAP.md](KEYMAP.md); the same 
 - **Query language** (#597, user guide: *Search syntax*): the search over everything reads what you type as one language:
   `AND`, `OR`, `NOT` (upper case only; `-x` is NOT), parentheses, two terms side by side are AND. Terms are text (a run of
   plain words is one phrase), `#tag`, `status:doing` (any front-matter property), `path:Folder/`, `due:<+7d` / `due:overdue` /
-  `due:2026-12-01`, `links:[[Note]]`, `blocked` and `blocking` (from `blocked-by: [[A]], [[B]]`). Fields select notes and
+  `due:2026-12-01`, `links:[[Note]]`, `blocked` and `blocking` (from `blocked-by: [[A]], [[B]]`), `orphan` (no link in or out) and `no-backlinks` (nothing links to it; a link to itself, a red link, an outside link and a link to an image or other non-note file do not count, drawings count like notes). Fields select notes and
   text finds the lines inside them. A query that is not valid (an open parenthesis, `due:soon`, `priority:urgent`, too long)
   is underlined with its reason, nothing runs and the last list stays. Mail and posts take only text and their own fields
   (`from:`, …): for the others the search says "Mail: `status:` not supported" under the source buttons. A search has a
@@ -559,7 +559,7 @@ Every layer of every system as a picture is in [KEYMAP.md](KEYMAP.md); the same 
   ![The search window of Space f g: notes with the found text marked, mail and posts under them, and the count buttons](userguide/z_media/screenshots/picker-search.png)
   ![The search in the sidebar with the same groups](userguide/z_media/screenshots/sidebar-search.png)
 - **The filter form** (QUERY-021…QUERY-027, #599): a **⚙** button next to the search box of the sidebar and of the picker opens a form that builds the query: **All of** / **Any of**
-  and rows (tag is, property is, due, is blocked, is blocking, in folder, links to, text contains), each with a **not** switch, added with **+ Add filter**. It writes the box's
+  and rows (tag is, property is, due, is blocked, is blocking, is an orphan, has no backlinks, in folder, links to, text contains), each with a **not** switch, added with **+ Add filter**. It writes the box's
   text and the list follows at once; what you type in the box fills the form. **Advanced** shows the text with the live count of matches; a query that is more than one
   level of AND or OR is "too complex for the form", is left as it is and Advanced stays on. The last Advanced choice is remembered (`search.advanced`). The same
   widget has sort rows (field, asc or desc, drag to reorder, `dependencies` without a direction) for the lanes of a board. Keyboard: Ctrl+Shift+G opens it, Tab walks it, Esc closes an open list or menu first, then the picker. The tag, in-folder, property name and property value fields suggest the tags, folders, names and values of the vault (QUERY-029, #631, #676): all alphabetically when empty, narrowing as you type, ↓/↑, Enter, Tab or a click take one, Esc closes the list.
@@ -665,6 +665,14 @@ The settings stay open until closed (✕, Esc or the ⋯ button; a click outside
 ![A selected card with arrows and a lane in dependency order](userguide/z_media/screenshots/board-dependencies.png)
 
 ![The peek of a card with its Blocked by and Blocks lines and the field that finds a blocker](userguide/z_media/screenshots/board-blockers.png)
+
+## Notes and drawings without links
+
+![Unlinked notes](userguide/z_media/screenshots/unlinked.png)
+
+- The **Unlinked notes** tab (the ribbon icon of two circles with a broken line, after Keymap) lists the notes and drawings that no link connects (NAV-072, #725). A switch shows one group at a time: **Orphans** (no link in or out) and **No backlinks** (nothing links to the file; it may link out). It uses the rule of the search words `orphan` and `no-backlinks` (QUERY-031): a link to itself, a red link and a link to an image, a PDF or another file do not count, a link from a drawing does.
+- The sort button orders by **date changed** (the default, newest first, or oldest first) or by **name** (NAV-073). *Date changed* is the `modified:` property of the note (the day its body was last changed, VAULT-046), else the file's time; a drawing uses the file's time.
+- A click on a name opens the note or the drawing; with none, the view says so. The list is made once per state of the vault and only the rows in view are drawn. The tab comes back after a restart with its switch and sort (NAV-074).
 
 ## Linked notes and the graph
 

@@ -8,7 +8,7 @@
 
 use super::tabs::TabBar;
 use super::{rel_to_string, ShaleApp, Tab, View};
-use crate::vault_state::{SavedCalendar, SavedGraph, SavedPane, SavedTab, SavedTasks};
+use crate::vault_state::{SavedCalendar, SavedGraph, SavedPane, SavedTab, SavedTasks, SavedUnlinked};
 use eframe::egui::Rect;
 
 /// No pane is drawn narrower than this many points (NAV-034).
@@ -295,6 +295,15 @@ impl ShaleApp {
                             SavedTab { view: Some(SavedTab::GRAPH.into()), graph: Some(saved).filter(|s| *s != SavedGraph::default()), pinned: t.pinned, ..Default::default() }
                         }
                         View::Boards => SavedTab { view: Some(SavedTab::BOARDS.into()), board: self.boards.current.as_deref().map(rel_to_string), pinned: t.pinned, ..Default::default() },
+                        View::Unlinked => {
+                            let u = &self.unlinked;
+                            let saved = SavedUnlinked {
+                                mode: if u.mode == Default::default() { String::new() } else { u.mode.name().into() },
+                                sort: if u.sort == Default::default() { String::new() } else { u.sort.name().into() },
+                                ..Default::default()
+                            };
+                            SavedTab { view: Some(SavedTab::UNLINKED.into()), unlinked: Some(saved).filter(|s| *s != SavedUnlinked::default()), pinned: t.pinned, ..Default::default() }
+                        }
                         View::Keymap => SavedTab { view: Some(SavedTab::KEYMAP.into()), pinned: t.pinned, ..Default::default() },
                         View::SettingsFile => SavedTab { view: Some(SavedTab::SETTINGS_FILE.into()), pinned: t.pinned, ..Default::default() },
                         v => match v.path() {
