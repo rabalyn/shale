@@ -17,8 +17,10 @@
 # or `docs/loc-history.tsv` (the chart per tag and its counts, DEV-046) changed, commits them on
 # top of the merge as `no-issue: lines-of-code report for <branch> (DEV-045)`; it is pushed with the merge.
 # The checks (and the podman suites) run with XDG_CONFIG_HOME, XDG_DATA_HOME, XDG_CACHE_HOME and
-# XDG_STATE_HOME pointed at a fresh empty folder in `<git dir>/land/xdg-sandbox`, and a last step fails the landing when
-# a `shale` folder is in it (DEV-047, #685): tests never touch the owner's real settings, data, cache or secrets.
+# XDG_STATE_HOME pointed at a fresh empty folder in `<git dir>/land/xdg-sandbox` (with `containers` in its data and config
+# folders linked to the real ones when they exist: rootless podman keeps its images there), and a last step fails the landing when
+# a `shale` folder is in it (DEV-047, #685): tests never touch the owner's real settings, data, cache or secrets. Afterwards the
+# `shale-test-home-<pid>` folders the test processes made in the temp folder (and whose process is gone) are removed.
 # A report that cannot be made fails the landing like a failed check. A merge conflict is not resolved here: merge `origin/main` into the branch, resolve
 # it there and run land.sh again. After the push the local branch `main` is fast-forwarded to
 # the landed commit (in the worktree that has it checked out, when that one is clean), so new
@@ -217,11 +219,29 @@ no_user_folders_touched() {
 # The checks of FORGE-011 on the merged tree in the current folder, then the check of the user's
 # folders (DEV-047). Every test runs in the environment of XDG_SANDBOX.
 checks() {
+  # rootless podman keeps its images and its config in these two folders: the sandbox links to the
+  # real ones (only when they exist, taken before the variables change) so the podman suites find them
+  local real_data=${XDG_DATA_HOME:-$HOME/.local/share} real_config=${XDG_CONFIG_HOME:-$HOME/.config} rc=0
   rm -rf "$XDG_SANDBOX"
   mkdir -p "$XDG_SANDBOX/config" "$XDG_SANDBOX/data" "$XDG_SANDBOX/cache" "$XDG_SANDBOX/state"
+  [ ! -d "$real_data/containers" ] || ln -s "$real_data/containers" "$XDG_SANDBOX/data/containers"
+  [ ! -d "$real_config/containers" ] || ln -s "$real_config/containers" "$XDG_SANDBOX/config/containers"
   export XDG_CONFIG_HOME="$XDG_SANDBOX/config" XDG_DATA_HOME="$XDG_SANDBOX/data" XDG_CACHE_HOME="$XDG_SANDBOX/cache" XDG_STATE_HOME="$XDG_SANDBOX/state"
-  run_checks "$1" || return 1
-  step "the tests left the user's folders alone (DEV-047)" no_user_folders_touched || return 1
+  touch "$XDG_SANDBOX/started"
+  run_checks "$1" && step "the tests left the user's folders alone (DEV-047)" no_user_folders_touched || rc=1
+  drop_test_homes
+  return $rc
+}
+
+# Every test process makes its own folder `shale-test-home-<pid>` in the temp folder when it saves
+# something (`src/userdirs.rs`); nothing else deletes them. After the checks, the ones made since
+# they started and whose process is gone are removed (a live one belongs to someone else's run).
+drop_test_homes() {
+  local d pid
+  for d in $(find "${TMPDIR:-/tmp}" -maxdepth 1 -type d -name 'shale-test-home-*' -newer "$XDG_SANDBOX/started" 2>/dev/null); do
+    pid=${d##*-}
+    kill -0 "$pid" 2>/dev/null || rm -rf "$d"
+  done
 }
 
 # The checks of FORGE-011 on the merged tree in the current folder. LAND_CHECK_CMD replaces them
