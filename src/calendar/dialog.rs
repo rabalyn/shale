@@ -6,6 +6,7 @@ use crate::calendar::dav::{self, Account, FoundCalendar};
 use crate::calendar::ics::{self, Alarm, Event, Freq, Repeat, RepeatEnd};
 use crate::calendar::store::{job_result, CalendarSource, CalendarStore, Job, SourceKind, CAL_SYNC, DEFAULT_SYNC_MINUTES, PALETTE};
 use crate::calendar::time as t;
+use crate::clickable::ComboBoxPointer;
 use crate::theme;
 use eframe::egui::{self, Rect, Sense, Ui, Vec2};
 use std::sync::mpsc::TryRecvError;
@@ -181,12 +182,13 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
     egui::Grid::new("cal-sources").num_columns(5).spacing([8.0, 6.0]).show(ui, |ui| {
         for (i, s) in d.sources.iter_mut().enumerate() {
             let (r, resp) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::click());
+            let resp = crate::clickable::pointer(resp);
             ui.painter().circle_filled(r.center(), 7.0, crate::drawing::parse_color(&s.color).unwrap_or(theme::palette().accent));
             if rec(format!("color:{i}"), resp.on_hover_text("Click to change the colour")).clicked() {
                 let pos = PALETTE.iter().position(|c| c.eq_ignore_ascii_case(&s.color)).map(|p| p + 1).unwrap_or(0);
                 s.color = PALETTE[pos % PALETTE.len()].to_string();
             }
-            rec(format!("enabled:{i}"), ui.checkbox(&mut s.enabled, "")).on_hover_text("Show this calendar");
+            rec(format!("enabled:{i}"), crate::clickable::pointer(ui.checkbox(&mut s.enabled, ""))).on_hover_text("Show this calendar");
             rec(format!("name:{i}"), ui.add_sized([170.0, 20.0], egui::TextEdit::singleline(&mut s.name)));
             let (kind, detail) = match &s.kind {
                 SourceKind::Local { .. } => ("Local file".to_string(), String::new()),
@@ -319,7 +321,7 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
         let entered = d.dav_url.trim().to_string();
         for (i, (c, on)) in d.found.iter_mut().enumerate() {
             ui.horizontal(|ui| {
-                rec(format!("found:{i}"), ui.checkbox(on, &c.name)).on_hover_text(&c.url);
+                rec(format!("found:{i}"), crate::clickable::pointer(ui.checkbox(on, &c.name))).on_hover_text(&c.url);
                 // the password goes wherever the calendar is: say so when that's another server
                 if !dav::same_server(&c.url, &entered) {
                     ui.label(egui::RichText::new(format!("on {}", dav::host_of(&c.url))).size(12.0).color(theme::palette().link_missing))
@@ -346,7 +348,7 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
     crate::theme::prose(ui, muted(&format!("New CalDAV calendars sync every {DEFAULT_SYNC_MINUTES} minutes; change it per calendar above. Saving an event syncs its calendar right away.")));
     crate::theme::prose(ui, muted(&format!("Only https:// addresses are accepted (http:// only for a server on this computer). {}", crate::secrets::where_stored())));
     theme::section_break(ui);
-    rec("week-monday".into(), ui.checkbox(&mut d.week_monday, "Weeks start on Monday"));
+    rec("week-monday".into(), crate::clickable::pointer(ui.checkbox(&mut d.week_monday, "Weeks start on Monday")));
     d.rects = rects;
     action
 }
@@ -1012,7 +1014,7 @@ pub fn show_event(ui: &mut Ui, d: &mut EventDialog, store: &mut CalendarStore) -
             let one_date = d.is_occurrence();
             let current = store.sources.iter().find(|s| s.id == d.calendar);
             let current_name = current.map(|s| s.name.clone()).unwrap_or_else(|| "(choose a calendar)".into());
-            let combo = egui::ComboBox::from_id_salt("event-cal").width(320.0).selected_text(current_name).show_ui(ui, |ui| {
+            let combo = egui::ComboBox::from_id_salt("event-cal").width(320.0).selected_text(current_name).show_pointer(ui, |ui| {
                 for s in &store.sources {
                     let read_only = store.read_only.contains(&s.id);
                     let kind = if s.is_local() {
@@ -1039,7 +1041,7 @@ pub fn show_event(ui: &mut Ui, d: &mut EventDialog, store: &mut CalendarStore) -
                 }
                 date_picker(ui, "start-date", &mut d.start_date, monday_first, &mut picks);
                 // one date of a series keeps the kind of time its series has
-                rec("all-day", ui.add_enabled(!one_date, egui::Checkbox::new(&mut d.all_day, "All day")));
+                rec("all-day", crate::clickable::pointer(ui.add_enabled(!one_date, egui::Checkbox::new(&mut d.all_day, "All day"))));
             });
             ui.end_row();
             ui.label(muted("Ends"));
@@ -1062,7 +1064,7 @@ pub fn show_event(ui: &mut Ui, d: &mut EventDialog, store: &mut CalendarStore) -
                 crate::theme::prose(ui, muted("One date of a repeating event: only this date changes."));
             } else {
                 ui.horizontal(|ui| {
-                    let combo = egui::ComboBox::from_id_salt("event-repeat").width(150.0).selected_text(d.repeat.label()).show_ui(ui, |ui| {
+                    let combo = egui::ComboBox::from_id_salt("event-repeat").width(150.0).selected_text(d.repeat.label()).show_pointer(ui, |ui| {
                         let was_custom = d.original.as_ref().is_some_and(|(_, e)| e.rrule.is_some() && ics::parse_repeat(e).is_none());
                         let mut modes = vec![RepeatMode::Never];
                         modes.extend(Freq::ALL.map(RepeatMode::Every));
@@ -1109,7 +1111,7 @@ pub fn show_event(ui: &mut Ui, d: &mut EventDialog, store: &mut CalendarStore) -
             if !d.is_occurrence() && matches!(d.repeat, RepeatMode::Every(_)) {
                 ui.label(muted("Ends"));
                 ui.horizontal(|ui| {
-                    let combo = egui::ComboBox::from_id_salt("event-end").width(80.0).selected_text(d.end.label()).show_ui(ui, |ui| {
+                    let combo = egui::ComboBox::from_id_salt("event-end").width(80.0).selected_text(d.end.label()).show_pointer(ui, |ui| {
                         for m in [EndMode::Never, EndMode::Until, EndMode::Count] {
                             if rec(&format!("end:{}", m.label()), ui.selectable_label(d.end == m, m.label())).clicked() {
                                 d.end = m;
@@ -1170,7 +1172,7 @@ pub fn show_event(ui: &mut Ui, d: &mut EventDialog, store: &mut CalendarStore) -
                             crate::theme::prose(ui, muted("A reminder set in another program (kept as it is)"));
                         } else {
                             rec(&format!("rem-amount:{i}"), ui.add(egui::TextEdit::singleline(&mut row.amount).desired_width(36.0)));
-                            let combo = egui::ComboBox::from_id_salt(("event-rem", i)).width(80.0).selected_text(row.unit.label()).show_ui(ui, |ui| {
+                            let combo = egui::ComboBox::from_id_salt(("event-rem", i)).width(80.0).selected_text(row.unit.label()).show_pointer(ui, |ui| {
                                 for u in Unit::ALL {
                                     if rec(&format!("rem-unit:{i}:{}", u.label()), ui.selectable_label(row.unit == u, u.label())).clicked() {
                                         row.unit = u;
@@ -1197,7 +1199,7 @@ pub fn show_event(ui: &mut Ui, d: &mut EventDialog, store: &mut CalendarStore) -
             ui.horizontal(|ui| {
                 let known = [("", "None"), ("CONFIRMED", "Confirmed"), ("TENTATIVE", "Tentative"), ("CANCELLED", "Cancelled")];
                 let shown = known.iter().find(|k| k.0 == d.status).map(|k| k.1.to_string()).unwrap_or_else(|| d.status.to_lowercase());
-                let combo = egui::ComboBox::from_id_salt("event-status").width(110.0).selected_text(shown).show_ui(ui, |ui| {
+                let combo = egui::ComboBox::from_id_salt("event-status").width(110.0).selected_text(shown).show_pointer(ui, |ui| {
                     for (value, label) in known {
                         if rec(&format!("status:{label}"), ui.selectable_label(d.status == value, label)).clicked() {
                             d.status = value.to_string();
@@ -1206,7 +1208,7 @@ pub fn show_event(ui: &mut Ui, d: &mut EventDialog, store: &mut CalendarStore) -
                 });
                 rec("status", combo.response);
                 ui.label(muted("Show as"));
-                let combo = egui::ComboBox::from_id_salt("event-busy").width(70.0).selected_text(if d.free { "Free" } else { "Busy" }).show_ui(ui, |ui| {
+                let combo = egui::ComboBox::from_id_salt("event-busy").width(70.0).selected_text(if d.free { "Free" } else { "Busy" }).show_pointer(ui, |ui| {
                     for (free, label) in [(false, "Busy"), (true, "Free")] {
                         if rec(&format!("show-as:{label}"), ui.selectable_label(d.free == free, label)).clicked() {
                             d.free = free;

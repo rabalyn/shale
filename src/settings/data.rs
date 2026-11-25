@@ -3,6 +3,7 @@
 use super::anchor::anchor;
 use super::Asks;
 use crate::app::ShaleApp;
+use crate::clickable::CollapsingPointer;
 use eframe::egui::{self, Ui};
 
 impl ShaleApp {
@@ -18,7 +19,7 @@ impl ShaleApp {
             });
         });
         anchor(ui, "data.retention", |ui| {
-            egui::CollapsingHeader::new("How long caches are kept").id_salt("settings-retention").show(ui, |ui| {
+            egui::CollapsingHeader::new("How long caches are kept").id_salt("settings-retention").show_pointer(ui, |ui| {
                 for id in crate::data_usage::CacheId::ALL.into_iter().filter(|id| !id.kept_current()) {
                     ui.label(id.name());
                     ui.indent(("retention", id), |ui| {

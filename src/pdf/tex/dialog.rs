@@ -11,6 +11,8 @@ use super::sets::{self, KindManifest, LogoStatus, Mapping, SetInfo};
 use super::setup::Step;
 use super::writer::{self, Document};
 use crate::busy::{self, Busy, Key};
+use crate::clickable::CollapsingPointer;
+use crate::clickable::ComboBoxPointer;
 use crate::pdf::export::ExportOptions;
 use crate::theme;
 use eframe::egui::{self, Ui};
@@ -370,7 +372,7 @@ impl TexExport {
                 ui.label(muted("Template set"));
                 let mut picked = None;
                 let shown = self.current_set().map(|s| s.meta.name.clone()).unwrap_or_else(|| "none".into());
-                let combo = egui::ComboBox::from_id_salt("export-tex-set").width(250.0).selected_text(shown).show_ui(ui, |ui| {
+                let combo = egui::ComboBox::from_id_salt("export-tex-set").width(250.0).selected_text(shown).show_pointer(ui, |ui| {
                     for (i, s) in self.sets.iter().enumerate() {
                         if rec(&format!("set:{}", s.id), ui.selectable_label(self.set == i, &s.meta.name)).clicked() {
                             picked = Some(i);
@@ -387,7 +389,7 @@ impl TexExport {
                 ui.label(muted("Kind"));
                 let mut picked = None;
                 let shown = self.current_kind().map(|k| k.name.clone()).unwrap_or_else(|| "none".into());
-                let combo = egui::ComboBox::from_id_salt("export-tex-kind").width(250.0).height(360.0).selected_text(shown).show_ui(ui, |ui| {
+                let combo = egui::ComboBox::from_id_salt("export-tex-kind").width(250.0).height(360.0).selected_text(shown).show_pointer(ui, |ui| {
                     for (id, k) in self.current_set().map(|s| s.kinds.clone()).unwrap_or_default() {
                         // a folder's dialog greys the kinds that cannot hold a folder, and says why
                         let label = ui.add_enabled(self.allows(&k), egui::Button::selectable(self.kind == id, &k.name));
@@ -419,19 +421,19 @@ impl TexExport {
                         // a kind without a table of contents shows the box off and greyed
                         let mut off = false;
                         let on = if toc { &mut opts.toc } else { &mut off };
-                        rec("toc", ui.checkbox(on, "Table of contents")).on_disabled_hover_text("This kind of document has no table of contents");
+                        rec("toc", crate::clickable::pointer(ui.checkbox(on, "Table of contents"))).on_disabled_hover_text("This kind of document has no table of contents");
                     });
                     let on = toc && opts.toc;
                     crate::pdf::export_dialog::toc_break_box(ui, opts, on, rec);
                     crate::pdf::export_dialog::break_before_box(ui, opts, toc, rec);
-                    rec("embeds", ui.checkbox(&mut opts.embeds, "Embedded pictures, drawings and PDFs"));
+                    rec("embeds", crate::clickable::pointer(ui.checkbox(&mut opts.embeds, "Embedded pictures, drawings and PDFs")));
                     // the set's department logo (TEX-035): off and greyed for a kind that has no place for it
                     if self.current_set().is_some_and(|s| s.department_logo.is_some()) {
                         let shows = self.kind_shows_department_logo();
                         ui.add_enabled_ui(shows, |ui| {
                             let mut off = false;
                             let on = if shows { &mut opts.department_logo } else { &mut off };
-                            rec("department-logo", ui.checkbox(on, "Department logo")).on_disabled_hover_text("This kind does not show a department logo");
+                            rec("department-logo", crate::clickable::pointer(ui.checkbox(on, "Department logo"))).on_disabled_hover_text("This kind does not show a department logo");
                         });
                     }
                 });
@@ -484,7 +486,7 @@ impl TexExport {
                 rec("problem", ui.label(egui::RichText::new(p).monospace().size(12.0)));
             }
             if !f.log_tail.is_empty() {
-                egui::CollapsingHeader::new("The end of the log").show(ui, |ui| {
+                egui::CollapsingHeader::new("The end of the log").show_pointer(ui, |ui| {
                     ui.label(egui::RichText::new(&f.log_tail).monospace().size(11.0));
                 });
             }

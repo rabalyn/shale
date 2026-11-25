@@ -296,9 +296,12 @@ pub fn icon_button_sense(ui: &mut Ui, icon: Icon, size: f32, active: bool, tip: 
         theme::palette().muted
     };
     paint_icon(ui.painter(), r.shrink(size * 0.22), icon, c);
+    if active {
+        crate::clickable::hover_ring(ui, &resp);
+    }
     crate::script::hint(ui.ctx(), tip, r);
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tip));
-    resp.on_hover_text(tip)
+    crate::clickable::pointer(resp).on_hover_text(tip)
 }
 
 impl ShaleApp {
@@ -619,6 +622,7 @@ impl ShaleApp {
             let title = self.tab_title(&self.tabbar.tabs[i].view);
             let dirty = self.tabbar.tabs[i].view.path().map(|p| self.notes.get(p).map(|d| d.dirty).unwrap_or(false) || self.drawings.get(p).map(|d| d.dirty).unwrap_or(false)).unwrap_or(false);
             let (r, resp) = child.allocate_exact_size(Vec2::new(tab_w, h - 6.0), Sense::click_and_drag());
+            let resp = crate::clickable::pointer(resp);
             let active = i == self.tabbar.active;
             let fill = if active {
                 theme::palette().bg_primary
@@ -628,6 +632,9 @@ impl ShaleApp {
                 theme::palette().bg_secondary
             };
             child.painter().rect_filled(r, CornerRadius { nw: 7, ne: 7, sw: 0, se: 0 }, fill);
+            if active {
+                crate::clickable::hover_ring(&child, &resp);
+            }
             let mut text_rect = r.shrink2(Vec2::new(10.0, 0.0));
             if self.tabbar.tabs[i].pinned {
                 let pin = Rect::from_center_size(Pos2::new(text_rect.min.x + 5.0, r.center().y), Vec2::splat(12.0));
@@ -639,6 +646,7 @@ impl ShaleApp {
             child.painter().with_clip_rect(Rect::from_min_max(text_rect.min, Pos2::new(text_rect.max.x - 18.0, text_rect.max.y))).galley(Pos2::new(text_rect.min.x, r.center().y - galley.size().y / 2.0), galley, theme::palette().text);
             let cr = Rect::from_center_size(Pos2::new(r.max.x - 14.0, r.center().y), Vec2::splat(16.0));
             let close_resp = child.interact(cr, child.scope_id().with(("tab-close", self.tabbar.tabs[i].id)), Sense::click());
+            let close_resp = crate::clickable::pointer(close_resp);
             self.tabbar.tab_rects.push((r, cr));
             crate::script::hint(ui.ctx(), &format!("Tab {}", i + 1), r);
             let failed = self.tabbar.tabs[i].view.path().map(|p| self.notes.get(p).map(|d| d.save_error.is_some()).unwrap_or(false) || self.drawings.get(p).map(|d| d.save_error.is_some()).unwrap_or(false)).unwrap_or(false);
@@ -836,7 +844,7 @@ impl ShaleApp {
                             ui.close();
                         }
                         let mut dark = self.cfg.dark_canvas;
-                        if ui.checkbox(&mut dark, "Dark canvas").changed() {
+                        if crate::clickable::pointer(ui.checkbox(&mut dark, "Dark canvas")).changed() {
                             self.cfg.dark_canvas = dark;
                             self.save_config();
                         }

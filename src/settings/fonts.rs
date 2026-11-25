@@ -23,7 +23,7 @@ impl ShaleApp {
         self.fonts.system.poll();
         let mut changed = false;
         let mut same = self.cfg.fonts.same_everywhere;
-        if anchor(ui, "fonts.same", |ui| ui.checkbox(&mut same, "Use the same font and size everywhere").on_hover_text("Off: every area below has a font and size of its own").changed()) {
+        if anchor(ui, "fonts.same", |ui| crate::clickable::pointer(ui.checkbox(&mut same, "Use the same font and size everywhere")).on_hover_text("Off: every area below has a font and size of its own").changed()) {
             if same {
                 self.cfg.fonts.same_everywhere = true;
             } else {

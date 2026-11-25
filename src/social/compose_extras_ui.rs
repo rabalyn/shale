@@ -10,6 +10,7 @@ use super::language;
 use super::poll::ComposePoll;
 use super::schedule::{when_text, ScheduleInput};
 use super::Network;
+use crate::clickable::ComboBoxPointer;
 use crate::theme;
 use eframe::egui::{self, Rect, RichText, Ui};
 
@@ -21,10 +22,10 @@ fn muted(t: impl Into<String>) -> RichText {
 pub(super) fn language_picker(ui: &mut Ui, c: &mut Compose, rects: &mut Vec<(String, Rect)>) {
     ui.horizontal(|ui| {
         ui.label(muted("Language"));
-        let combo = egui::ComboBox::from_id_salt("compose-language").selected_text(language::name(&c.language)).show_ui(ui, |ui| {
-            ui.selectable_value(&mut c.language, String::new(), language::name(""));
+        let combo = egui::ComboBox::from_id_salt("compose-language").selected_text(language::name(&c.language)).show_pointer(ui, |ui| {
+            crate::clickable::pointer(ui.selectable_value(&mut c.language, String::new(), language::name("")));
             for (code, _) in language::LANGUAGES {
-                ui.selectable_value(&mut c.language, code.to_string(), language::name(code));
+                crate::clickable::pointer(ui.selectable_value(&mut c.language, code.to_string(), language::name(code)));
             }
         });
         rects.push(("compose:language".into(), combo.response.rect));
@@ -83,16 +84,16 @@ pub(super) fn poll_section(ui: &mut Ui, c: &mut Compose, info: &InstanceInfo, re
             ui.label(muted("Open for"));
             let all = ComposePoll::durations(&limits);
             let shown = all.iter().find(|(s, _)| *s == poll.expires_in).map(|(_, w)| w.clone()).unwrap_or_default();
-            let combo = egui::ComboBox::from_id_salt("compose-poll-duration").selected_text(shown).show_ui(ui, |ui| {
+            let combo = egui::ComboBox::from_id_salt("compose-poll-duration").selected_text(shown).show_pointer(ui, |ui| {
                 for (secs, words) in &all {
-                    ui.selectable_value(&mut poll.expires_in, *secs, words);
+                    crate::clickable::pointer(ui.selectable_value(&mut poll.expires_in, *secs, words));
                 }
             });
             rects.push(("compose:poll-duration".into(), combo.response.rect));
         });
-        let r = ui.checkbox(&mut poll.multiple, "People may choose several options");
+        let r = crate::clickable::pointer(ui.checkbox(&mut poll.multiple, "People may choose several options"));
         rects.push(("compose:poll-multiple".into(), r.rect));
-        let r = ui.checkbox(&mut poll.hide_totals, "Hide the totals until the poll ends");
+        let r = crate::clickable::pointer(ui.checkbox(&mut poll.hide_totals, "Hide the totals until the poll ends"));
         rects.push(("compose:poll-hide".into(), r.rect));
         let b = ui.small_button("Remove poll");
         rects.push(("compose:poll-remove".into(), b.rect));

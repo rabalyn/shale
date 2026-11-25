@@ -7,6 +7,7 @@ use super::compile::compile_test_document;
 use super::engine::{self, Detection, Engine, Kind, TexChoice, TexConfig};
 use super::install::{self, Env, Handle, DISK_MB, DOWNLOAD_MB};
 use crate::busy::{self, Key};
+use crate::clickable::CollapsingPointer;
 use crate::theme;
 use eframe::egui::{self, Context, Ui};
 use std::ffi::OsString;
@@ -345,7 +346,7 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &mut TexConfig) -> bool {
     crate::settings::anchor::anchor(ui, "tex.engine", |ui| {
         ui.label("TeX to use");
         for c in TexChoice::ALL {
-            if ui.radio_value(&mut cfg.engine, c, c.label()).changed() {
+            if crate::clickable::pointer(ui.radio_value(&mut cfg.engine, c, c.label())).changed() {
                 changed = true;
             }
         }
@@ -375,7 +376,7 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &mut TexConfig) -> bool {
     crate::settings::anchor::anchor(ui, "tex.sets", |ui| super::sets_ui::show(ui, st, cfg));
 
     crate::settings::anchor::anchor(ui, "tex.repository", |ui| {
-        egui::CollapsingHeader::new("Download address").id_salt("tex-repository").show(ui, |ui| {
+        egui::CollapsingHeader::new("Download address").id_salt("tex-repository").show_pointer(ui, |ui| {
             crate::theme::hint(ui, "The TeX Live repository the install and the update download from.");
             if ui.add(egui::TextEdit::singleline(&mut cfg.repository).desired_width(360.0)).changed() {
                 changed = true;
@@ -397,7 +398,7 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &mut TexConfig) -> bool {
             crate::theme::problem(ui, &n.text);
         }
         if let Some(d) = &n.details {
-            egui::CollapsingHeader::new("The end of the log").id_salt("tex-log").show(ui, |ui| {
+            egui::CollapsingHeader::new("The end of the log").id_salt("tex-log").show_pointer(ui, |ui| {
                 ui.add(egui::Label::new(egui::RichText::new(d).monospace().size(11.0)).wrap());
             });
         }

@@ -3,6 +3,7 @@
 
 use super::{human_age, human_bytes, scan, CacheId, DataUsage};
 use crate::app::muted;
+use crate::clickable::CollapsingPointer;
 use crate::config::CacheRetention;
 use crate::theme;
 use eframe::egui::{self, RichText, Ui};
@@ -79,7 +80,7 @@ pub fn retention_ui(ui: &mut Ui, id: CacheId, r: &mut CacheRetention) -> bool {
                 ui.label(f.unit);
             }
             let mut unlimited = v.is_none();
-            if ui.checkbox(&mut unlimited, f.none).changed() {
+            if crate::clickable::pointer(ui.checkbox(&mut unlimited, f.none)).changed() {
                 *v = (!unlimited).then(|| default_of(f.get).clamp(*f.range.start(), *f.range.end()));
                 changed = true;
             }
@@ -134,7 +135,7 @@ fn saved_ui(ui: &mut Ui, u: &DataUsage, out: &mut Vec<Ask>) {
                 size_row(ui, l);
             }
         });
-        egui::CollapsingHeader::new(format!("Largest {} files", scan::LARGEST)).id_salt("usage-largest-files").show(ui, |ui| {
+        egui::CollapsingHeader::new(format!("Largest {} files", scan::LARGEST)).id_salt("usage-largest-files").show_pointer(ui, |ui| {
             for (rel, n) in &saved.largest_files {
                 ui.horizontal(|ui| {
                     if ui.link(rel.to_string_lossy()).on_hover_text("Open").clicked() {
@@ -144,7 +145,7 @@ fn saved_ui(ui: &mut Ui, u: &DataUsage, out: &mut Vec<Ask>) {
                 });
             }
         });
-        egui::CollapsingHeader::new(format!("Largest {} folders", scan::LARGEST)).id_salt("usage-largest-folders").show(ui, |ui| {
+        egui::CollapsingHeader::new(format!("Largest {} folders", scan::LARGEST)).id_salt("usage-largest-folders").show_pointer(ui, |ui| {
             for (rel, n) in &saved.largest_folders {
                 ui.horizontal(|ui| {
                     if ui.link(rel.to_string_lossy()).on_hover_text("Show in the file list").clicked() {

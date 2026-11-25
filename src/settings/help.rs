@@ -12,7 +12,7 @@ impl ShaleApp {
             asks.guide = true;
         }
         crate::theme::section(ui, "Troubleshooting");
-        if anchor(ui, "help.input_log", |ui| ui.checkbox(&mut self.cfg.input_log, "Record keyboard input to a file (to find keyboard problems)").changed()) {
+        if anchor(ui, "help.input_log", |ui| crate::clickable::pointer(ui.checkbox(&mut self.cfg.input_log, "Record keyboard input to a file (to find keyboard problems)")).changed()) {
             if self.cfg.input_log {
                 self.start_input_log();
             }

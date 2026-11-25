@@ -152,6 +152,7 @@ impl ShaleApp {
 /// One row: the time, the change bar and the source in words (HIST-004…HIST-006).
 fn version_row(ui: &mut Ui, v: &Version, source: &str, now: i64, selected: bool) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_H), Sense::click());
+    let resp = crate::clickable::pointer(resp);
     let p = theme::palette();
     if selected {
         ui.painter().rect_filled(rect, 4.0, p.bg_active);

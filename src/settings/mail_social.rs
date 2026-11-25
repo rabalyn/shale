@@ -3,6 +3,7 @@
 use super::anchor::anchor;
 use super::Asks;
 use crate::app::ShaleApp;
+use crate::clickable::ComboBoxPointer;
 use eframe::egui::{self, Ui};
 
 impl ShaleApp {
@@ -24,7 +25,7 @@ impl ShaleApp {
                 ui.label("minutes (0: only with the Sync button)");
             });
         });
-        changed |= anchor(ui, "mail.mark_read", |ui| ui.checkbox(&mut self.cfg.mail_mark_read, "Opening a message marks it read on the server").changed());
+        changed |= anchor(ui, "mail.mark_read", |ui| crate::clickable::pointer(ui.checkbox(&mut self.cfg.mail_mark_read, "Opening a message marks it read on the server")).changed());
         ui.add_enabled_ui(self.cfg.mail_mark_read, |ui| {
             anchor(ui, "mail.mark_read_secs", |ui| {
                 ui.horizontal(|ui| {
@@ -58,10 +59,10 @@ impl ShaleApp {
             ui.horizontal(|ui| {
                 ui.label("Post language");
                 let shown = crate::social::language::name(&self.cfg.social_post_language);
-                egui::ComboBox::from_id_salt("social-post-language").selected_text(shown).show_ui(ui, |ui| {
-                    changed |= ui.selectable_value(&mut self.cfg.social_post_language, String::new(), crate::social::language::name("")).changed();
+                egui::ComboBox::from_id_salt("social-post-language").selected_text(shown).show_pointer(ui, |ui| {
+                    changed |= crate::clickable::pointer(ui.selectable_value(&mut self.cfg.social_post_language, String::new(), crate::social::language::name(""))).changed();
                     for (code, _) in crate::social::language::LANGUAGES {
-                        changed |= ui.selectable_value(&mut self.cfg.social_post_language, code.to_string(), crate::social::language::name(code)).changed();
+                        changed |= crate::clickable::pointer(ui.selectable_value(&mut self.cfg.social_post_language, code.to_string(), crate::social::language::name(code))).changed();
                     }
                 });
                 crate::theme::hint(ui, "a new post starts with it");

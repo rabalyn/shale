@@ -5,6 +5,7 @@
 
 use super::links::{self, Edit, Lists, Picker};
 use crate::app::NoteDoc;
+use crate::clickable::ComboBoxPointer;
 use crate::editor::{EditorAction, Note, NoteEditor};
 use crate::fonts::EditorFonts;
 use crate::link_preview::{clamp_size, Grip};
@@ -170,10 +171,10 @@ fn title_row(ui: &mut Ui, id: Id, out: &mut Out, title: &str, priority: Option<P
                     out.open_tab = true;
                 }
                 let mut chosen = priority;
-                egui::ComboBox::from_id_salt((id, "priority")).selected_text(format!("Priority: {}", priority.map_or("none", Priority::name))).width(130.0).show_ui(ui, |ui| {
-                    ui.selectable_value(&mut chosen, None, "none");
+                egui::ComboBox::from_id_salt((id, "priority")).selected_text(format!("Priority: {}", priority.map_or("none", Priority::name))).width(130.0).show_pointer(ui, |ui| {
+                    crate::clickable::pointer(ui.selectable_value(&mut chosen, None, "none"));
                     for p in Priority::ALL {
-                        ui.selectable_value(&mut chosen, Some(p), p.name());
+                        crate::clickable::pointer(ui.selectable_value(&mut chosen, Some(p), p.name()));
                     }
                 });
                 if chosen != priority {

@@ -7,6 +7,7 @@
 
 use super::layout::{self as lay, anchor_point, anchor_ratios, nearest_anchor};
 use super::*;
+use crate::clickable::ComboBoxPointer;
 use eframe::egui::text::LayoutJob;
 use eframe::egui::{Align, FontFamily};
 use std::collections::HashMap;
@@ -560,6 +561,7 @@ impl DrawingDoc {
                     ui.horizontal(|ui| {
                         for c in colors {
                             let (sr, sresp) = ui.allocate_exact_size(Vec2::splat(26.0), Sense::click());
+                            let sresp = crate::clickable::pointer(sresp);
                             match parse_color(c).map(|c| if dark { dark_variant(c) } else { c }) {
                                 Some(col) => {
                                     ui.painter().rect_filled(sr.shrink(3.0), CornerRadius::same(4), col);
@@ -613,7 +615,7 @@ impl DrawingDoc {
                         changes.push(Change::Width(w));
                     }
                     label_ui(ui, "Outline pattern");
-                    let combo = egui::ComboBox::from_id_salt("stroke-style").width(200.0).selected_text(STROKE_STYLES.iter().find(|s| s.0 == sstyle).map(|s| s.1).unwrap_or("Solid")).show_ui(ui, |ui| {
+                    let combo = egui::ComboBox::from_id_salt("stroke-style").width(200.0).selected_text(STROKE_STYLES.iter().find(|s| s.0 == sstyle).map(|s| s.1).unwrap_or("Solid")).show_pointer(ui, |ui| {
                         for (v, t) in STROKE_STYLES {
                             if rec(format!("pattern:{t}"), ui.selectable_label(sstyle == v, t)).clicked() {
                                 changes.push(Change::StrokeStyle(v.into()));
@@ -819,7 +821,7 @@ impl DrawingDoc {
 
 fn head_combo(ui: &mut Ui, salt: &str, cur: &Option<String>, rec: &dyn Fn(String, egui::Response) -> egui::Response, mut set: impl FnMut(Option<String>)) {
     let shown = HEADS.iter().find(|h| h.0 == cur.as_deref()).map(|h| h.1).unwrap_or("None");
-    let combo = egui::ComboBox::from_id_salt(salt).width(200.0).selected_text(shown).show_ui(ui, |ui| {
+    let combo = egui::ComboBox::from_id_salt(salt).width(200.0).selected_text(shown).show_pointer(ui, |ui| {
         for (v, t) in HEADS {
             if rec(format!("{salt}:{t}"), ui.selectable_label(cur.as_deref() == v, t)).clicked() {
                 set(v.map(|s| s.to_string()));

@@ -371,8 +371,8 @@ impl ShaleApp {
         let resp = crate::dialog::Dialog::new("vault-close", "Close vault").width(460.0).show(ctx, |ui| {
             crate::theme::paragraph(ui, format!("Close “{name}”? It is removed from the list of vaults. Its notes and attachments stay where they are, and you can open the folder again later."));
             ui.add_space(6.0);
-            ui.checkbox(&mut remove.shale, "Also remove .shale/ (this vault's settings and state)");
-            ui.checkbox(&mut remove.trash, "Also remove .trash/");
+            crate::clickable::pointer(ui.checkbox(&mut remove.shale, "Also remove .shale/ (this vault's settings and state)"));
+            crate::clickable::pointer(ui.checkbox(&mut remove.trash, "Also remove .trash/"));
             if remove.trash {
                 crate::theme::problem(ui, ".trash/ holds the notes you deleted from this vault. Removing it deletes them for good.");
             }
@@ -427,7 +427,7 @@ impl ShaleApp {
                 }
                 if p.purpose == Purpose::Create {
                     ui.add_space(6.0);
-                    ui.checkbox(&mut p.sample, "Start with sample notes");
+                    crate::clickable::pointer(ui.checkbox(&mut p.sample, "Start with sample notes"));
                     crate::theme::hint(ui, "A folder that does not exist yet is made. Hidden files do not count as content.");
                 }
                 if let Some(e) = &p.error {

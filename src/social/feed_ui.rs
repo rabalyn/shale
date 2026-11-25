@@ -7,6 +7,7 @@ use super::images::ImageCache;
 use super::state::{post_key, FeedsState, SocialState};
 use super::viewer::{self, Viewer};
 use super::{thread_ui, FeedRef, MediaKind, Network, Post, SocialAccountEntry};
+use crate::clickable::ComboBoxPointer;
 use crate::media;
 use crate::theme;
 use eframe::egui::text::{LayoutJob, TextFormat};
@@ -299,6 +300,7 @@ fn thumb(ui: &mut Ui, cx: &mut Cx, key: String, m: &super::Media, cell: Vec2, na
         _ => cell,
     };
     let (r, resp) = ui.allocate_exact_size(size, Sense::click());
+    let resp = crate::clickable::pointer(resp);
     let radius = CornerRadius::same(6);
     ui.painter().rect_filled(r, radius, theme::palette().bg_primary);
     match &tex {
@@ -525,12 +527,7 @@ pub(super) fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, look: Look) -> CardO
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 1.0;
                 ui.horizontal(|ui| {
-                    if ui
-                        .add(egui::Label::new(RichText::new(p.author.name()).strong().size(crate::fonts::px(14.5)).color(theme::palette().text_strong)).sense(Sense::click()))
-                        .on_hover_cursor(egui::CursorIcon::PointingHand)
-                        .on_hover_text("Open the profile")
-                        .clicked()
-                    {
+                    if crate::clickable::clickable(ui, egui::Label::new(RichText::new(p.author.name()).strong().size(crate::fonts::px(14.5)).color(theme::palette().text_strong))).on_hover_text("Open the profile").clicked() {
                         open_web(&p.author.profile_url);
                     }
                     let age = age_text(p.created_at, cx.now);
@@ -660,7 +657,7 @@ pub(super) fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, look: Look) -> CardO
                 if highlight {
                     ui.label(count);
                 } else {
-                    let r = cx.rec(format!("replies:{idx}"), ui.add(egui::Label::new(count).sense(Sense::click()))).on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Show the conversation (Shift+click: in a new tab)");
+                    let r = cx.rec(format!("replies:{idx}"), crate::clickable::clickable(ui, egui::Label::new(count))).on_hover_text("Show the conversation (Shift+click: in a new tab)");
                     thread = thread.or(opens(ui, &r));
                 }
             });
@@ -823,7 +820,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
     let mut pick: Option<(FeedRef, bool)> = None;
     column(ui, width, |ui| {
         ui.horizontal(|ui| {
-            let c = egui::ComboBox::from_id_salt(("social-account", tab.id)).selected_text(account_label(&entry)).width(130.0).show_ui(ui, |ui| {
+            let c = egui::ComboBox::from_id_salt(("social-account", tab.id)).selected_text(account_label(&entry)).width(130.0).show_pointer(ui, |ui| {
                 for e in accounts {
                     if ui.selectable_label(e.account.id == aid, account_label(e)).clicked() {
                         pick = Some((FeedRef::new(e.account.id.clone(), String::new()), false));
@@ -835,7 +832,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
             match st.feeds.get(&aid) {
                 Some(FeedsState::Ready(list)) => {
                     let name = feed.as_ref().map(|f| f.title.clone()).unwrap_or_default();
-                    let c = egui::ComboBox::from_id_salt(("social-feed", tab.id)).selected_text(name).width(125.0).show_ui(ui, |ui| {
+                    let c = egui::ComboBox::from_id_salt(("social-feed", tab.id)).selected_text(name).width(125.0).show_pointer(ui, |ui| {
                         for f in list {
                             ui.horizontal(|ui| {
                                 let r = ui.selectable_label(feed.as_ref().map(|c| c.id == f.id).unwrap_or(false), &f.title);

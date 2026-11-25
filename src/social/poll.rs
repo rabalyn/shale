@@ -233,10 +233,10 @@ pub(super) fn card(ui: &mut egui::Ui, cx: &mut Cx, p: &Post, poll: &Poll, idx: u
             ui.painter().text(rect.right_center() - Vec2::new(6.0, 0.0), egui::Align2::RIGHT_CENTER, pct, egui::FontId::proportional(crate::fonts::px(13.0)), pal.text_strong);
             cx.rects.push((format!("poll:{idx}:option:{i}"), resp.rect));
         } else if poll.multiple {
-            let r = ui.checkbox(&mut sel[i], &o.title);
+            let r = crate::clickable::pointer(ui.checkbox(&mut sel[i], &o.title));
             cx.rects.push((format!("poll:{idx}:option:{i}"), r.rect));
         } else {
-            let r = ui.radio(sel[i], &o.title);
+            let r = crate::clickable::pointer(ui.radio(sel[i], &o.title));
             if r.clicked() {
                 sel.iter_mut().for_each(|s| *s = false);
                 sel[i] = true;

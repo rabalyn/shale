@@ -123,6 +123,7 @@ impl CalendarPane {
             let d = start + i;
             let r = Rect::from_min_size(grid.min + Vec2::new(cw * (i % 7) as f32, DAY_H * (i / 7) as f32), Vec2::new(cw, DAY_H)).shrink(1.0);
             let resp = ui.interact(r, ui.scope_id().with(("calendar-pane-day", d)), Sense::click());
+            let resp = crate::clickable::pointer(resp);
             rects.push((format!("calpane:day:{d}"), r));
             let p = ui.painter();
             if resp.hovered() {

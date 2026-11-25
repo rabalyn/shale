@@ -375,7 +375,7 @@ pub(crate) fn show(ui: &mut Ui, st: &mut ManagedState, cfg: &mut GitConfig) -> b
     crate::settings::anchor::anchor(ui, "sync.git_choice", |ui| {
         ui.label("Git to use");
         for c in GitChoice::ALL {
-            if ui.radio_value(&mut cfg.choice, c, c.label()).changed() {
+            if crate::clickable::pointer(ui.radio_value(&mut cfg.choice, c, c.label())).changed() {
                 changed = true;
             }
         }
@@ -489,7 +489,7 @@ fn managed_section(ui: &mut Ui, st: &mut ManagedState, cfg: &mut GitConfig, ctx:
     if d.managed.is_some() {
         ui.label("New versions");
         for u in GitUpdates::ALL {
-            if ui.radio_value(&mut cfg.updates, u, u.label()).changed() {
+            if crate::clickable::pointer(ui.radio_value(&mut cfg.updates, u, u.label())).changed() {
                 *changed = true;
             }
         }

@@ -139,6 +139,7 @@ fn tool_part(ui: &mut Ui, (s, width): (f32, f32), round: CornerRadius, on: bool,
     let hovered = enabled && resp.hovered();
     if on {
         ui.painter().rect_filled(r, round, theme::palette().bg_active);
+        crate::clickable::hover_ring(ui, &resp);
     } else if hovered {
         ui.painter().rect_filled(r, round, theme::palette().bg_hover);
     }
@@ -154,6 +155,7 @@ fn tool_part(ui: &mut Ui, (s, width): (f32, f32), round: CornerRadius, on: bool,
     draw(ui.painter(), r, c, s);
     crate::script::hint(ui.ctx(), tip, r);
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, tip));
+    let resp = if enabled { crate::clickable::pointer(resp) } else { resp };
     resp.on_hover_text(tip)
 }
 
@@ -411,6 +413,7 @@ impl FormatBar {
             ui.horizontal_wrapped(|ui| {
                 for (n, c) in presets.iter().enumerate().take(MAX_PRESETS) {
                     let (r, sw) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::click());
+                    let sw = crate::clickable::pointer(sw);
                     ui.painter().rect_filled(r.shrink(1.0), 4.0, rgb(*c));
                     ui.painter().rect_stroke(r.shrink(1.0), 4.0, Stroke::new(1.0, if sw.hovered() { theme::palette().text_strong } else { theme::palette().border }), egui::StrokeKind::Inside);
                     let digit = text_galley(ui.painter(), &(n + 1).to_string(), Label::default(), 9.5, if colour_dark(*c) { Color32::BLACK } else { Color32::WHITE });
@@ -530,7 +533,7 @@ pub fn preset_editor(ui: &mut Ui, label: &str, colours: &mut Vec<[u8; 3]>, defau
         ui.label(label);
         let mut remove = None;
         for (i, c) in colours.iter_mut().enumerate() {
-            changed |= egui::color_picker::color_edit_button_srgb(ui, c).on_hover_text(format!("{label} {}: {}", i + 1, crate::colour_tags::hex(*c))).changed();
+            changed |= crate::clickable::pointer(egui::color_picker::color_edit_button_srgb(ui, c)).on_hover_text(format!("{label} {}: {}", i + 1, crate::colour_tags::hex(*c))).changed();
             if ui.small_button("−").on_hover_text("Take this colour out").clicked() {
                 remove = Some(i);
             }

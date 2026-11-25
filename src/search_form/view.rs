@@ -4,6 +4,7 @@
 use super::complete::{Complete, Slot, Spec};
 use super::sort::{self, Key};
 use super::{DueCmp, Fit, Mode, Row, State, What};
+use crate::clickable::ComboBoxPointer;
 use crate::search_all::query::Cache;
 use crate::search_all::SearchWorker;
 use crate::search_sources::{self, Prefixes};
@@ -83,9 +84,9 @@ fn fields(ui: &mut Ui, what: &mut What, i: usize, comp: &mut Complete, vault: &V
         }
         What::Due { cmp, day } => {
             let before = *cmp;
-            egui::ComboBox::from_id_salt(("due-cmp", i)).selected_text(cmp.label()).width(80.0).show_ui(ui, |ui| {
+            egui::ComboBox::from_id_salt(("due-cmp", i)).selected_text(cmp.label()).width(80.0).show_pointer(ui, |ui| {
                 for c in DueCmp::ALL {
-                    ui.selectable_value(cmp, c, c.label());
+                    crate::clickable::pointer(ui.selectable_value(cmp, c, c.label()));
                 }
             });
             let mut changed = *cmp != before;
@@ -138,7 +139,7 @@ fn filter_rows(ui: &mut Ui, st: &mut State, vault: &Vault, worker: &mut SearchWo
                     remove = Some(i);
                 }
                 ui.label(RichText::new(row.what.label()).color(theme::palette().muted));
-                edited |= ui.checkbox(&mut row.not, "not").changed();
+                edited |= crate::clickable::pointer(ui.checkbox(&mut row.not, "not")).changed();
                 edited |= fields(ui, &mut row.what, i, comp, vault, worker, typed);
             });
             if let Some((slot, entry)) = comp.list(ui, i) {
@@ -180,9 +181,9 @@ fn sort_rows(ui: &mut Ui, st: &mut sort::State) -> bool {
                 let key = &mut st.keys[i];
                 let before = key.field;
                 let others: Vec<_> = sort::Field::ALL.into_iter().filter(|f| *f == key.field || !used.contains(f)).collect();
-                egui::ComboBox::from_id_salt(("sort-field", i)).selected_text(key.field.word()).width(110.0).show_ui(ui, |ui| {
+                egui::ComboBox::from_id_salt(("sort-field", i)).selected_text(key.field.word()).width(110.0).show_pointer(ui, |ui| {
                     for f in others {
-                        ui.selectable_value(&mut key.field, f, f.word());
+                        crate::clickable::pointer(ui.selectable_value(&mut key.field, f, f.word()));
                     }
                 });
                 if key.field != before {

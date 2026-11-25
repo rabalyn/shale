@@ -414,6 +414,8 @@ pub fn apply_palette(ctx: &egui::Context, p: &Palette) {
     style.animation_time = before.animation_time;
     style.scroll_animation = before.scroll_animation;
     style.visuals.text_cursor.blink = before.visuals.text_cursor.blink;
+    // buttons, selectable labels and checkboxes show the pointing hand (LAY-038, #692)
+    style.visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
     style.spacing.item_spacing = egui::vec2(6.0, 4.0);
     style.spacing.button_padding = egui::vec2(8.0, 4.0);
     style.spacing.scroll.bar_width = 8.0;

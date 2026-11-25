@@ -88,7 +88,7 @@ impl ShaleApp {
         changed |= anchor(ui, "import.outside_files", |ui| {
             let mut changed = false;
             for value in OutsideFiles::ALL {
-                changed |= ui.radio_value(&mut self.cfg.outside_files, value, value.label()).on_hover_text(value.tip()).changed();
+                changed |= crate::clickable::pointer(ui.radio_value(&mut self.cfg.outside_files, value, value.label())).on_hover_text(value.tip()).changed();
             }
             changed
         });
@@ -158,17 +158,17 @@ impl ShaleApp {
         let mut changed = self.outside_files_ui(ui);
         crate::theme::section(ui, "E-mails, events and posts");
         changed |= anchor(ui, "import.header_list", |ui| {
-            ui.checkbox(&mut self.cfg.import_header_list, "Header list in the note body")
+            crate::clickable::pointer(ui.checkbox(&mut self.cfg.import_header_list, "Header list in the note body"))
                 .on_hover_text("An imported e-mail or event always has its From, To, Date, When, Where … in the note's properties. Ticked: they are also written as a list below the title, for programs that do not show properties. The Import dialog starts with this choice")
                 .changed()
         });
         changed |= anchor(ui, "import.skip_signatures", |ui| {
-            ui.checkbox(&mut self.cfg.import_skip_signatures, "Skip signatures")
+            crate::clickable::pointer(ui.checkbox(&mut self.cfg.import_skip_signatures, "Skip signatures"))
                 .on_hover_text("A signed e-mail has a signature file (smime.p7s, signature.asc), and a signature block has logos and social icons. Ticked: the Import dialog starts with them unticked, and you can tick each one. The Import dialog starts with this choice")
                 .changed()
         });
         changed |= anchor(ui, "import.leave_out_quoted", |ui| {
-            ui.checkbox(&mut self.cfg.import_leave_out_quoted, "Leave out quoted mails")
+            crate::clickable::pointer(ui.checkbox(&mut self.cfg.import_leave_out_quoted, "Leave out quoted mails"))
                 .on_hover_text("Ticked: an imported e-mail keeps only what its sender wrote, not the earlier mails it quotes (the lines starting with >, the reply header such as \"On … wrote:\" and the mails quoted below Outlook's \"Original Message\" line). The Import dialog starts with this choice")
                 .changed()
         });
@@ -178,7 +178,7 @@ impl ShaleApp {
         }
         crate::theme::section(ui, "Word files (.docx)");
         changed |= anchor(ui, "import.docx", |ui| {
-            ui.checkbox(&mut self.cfg.docx_import, "Import Word files as notes (needs pandoc)")
+            crate::clickable::pointer(ui.checkbox(&mut self.cfg.docx_import, "Import Word files as notes (needs pandoc)"))
                 .on_hover_text("A .docx file dropped on the window or added in the Import dialog becomes a note; pictures are saved next to it. Off: it is saved as an attachment")
                 .changed()
         });

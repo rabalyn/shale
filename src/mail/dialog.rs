@@ -2,6 +2,8 @@
 //! password, test the connection and choose which folders are synced.
 
 use crate::app::muted;
+use crate::clickable::CollapsingPointer;
+use crate::clickable::ComboBoxPointer;
 use crate::config::{MailAccount, MailAuth, MailSecurity, OAuthProvider};
 use crate::mail::imap_sync::{kind_of, FolderKind};
 use crate::mail::ui::{MailView, SignInState, TestState};
@@ -325,7 +327,7 @@ pub fn show(ui: &mut Ui, d: &mut MailDialog, mail: &MailView) -> Option<MailDial
         ui.label("minutes while Shale runs (0 = only with the Sync button)");
     });
     ui.horizontal(|ui| {
-        let r = ui.checkbox(&mut d.mark_read, "Mark as read when opened, after");
+        let r = crate::clickable::pointer(ui.checkbox(&mut d.mark_read, "Mark as read when opened, after"));
         rects.push(("md:mark-read".into(), r.rect));
         let r = ui.add_enabled(d.mark_read, egui::TextEdit::singleline(&mut d.mark_read_secs).desired_width(36.0));
         rects.push(("md:mark-read-secs".into(), r.rect));
@@ -379,7 +381,7 @@ fn account_form(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rect
         ui.label("Security");
         ui.horizontal(|ui| {
             for (sec, text) in [(MailSecurity::ImplicitTls, "TLS (usually port 993)"), (MailSecurity::StartTls, "STARTTLS (usually port 143)")] {
-                let r = ui.radio(d.accounts[i].security == sec, text);
+                let r = crate::clickable::pointer(ui.radio(d.accounts[i].security == sec, text));
                 rects.push((format!("md:sec:{sec:?}"), r.rect));
                 if r.clicked() && d.accounts[i].security != sec {
                     // the port follows the mode as long as it is still the usual one of the old mode
@@ -401,12 +403,12 @@ fn account_form(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rect
         ui.end_row();
         ui.label("Sign in with");
         ui.horizontal(|ui| {
-            let r = ui.radio(d.accounts[i].auth == MailAuth::Password, "Password");
+            let r = crate::clickable::pointer(ui.radio(d.accounts[i].auth == MailAuth::Password, "Password"));
             rects.push(("md:auth-password".into(), r.rect));
             if r.clicked() {
                 d.accounts[i].auth = MailAuth::Password;
             }
-            let r = ui.radio(d.accounts[i].auth == MailAuth::OAuth2, "OAuth2 (in the browser)");
+            let r = crate::clickable::pointer(ui.radio(d.accounts[i].auth == MailAuth::OAuth2, "OAuth2 (in the browser)"));
             rects.push(("md:auth-oauth2".into(), r.rect));
             if r.clicked() {
                 d.accounts[i].auth = MailAuth::OAuth2;
@@ -427,7 +429,7 @@ fn account_form(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rect
     // sending (MAIL-120): folded away until it is needed, so the form stays short
     theme::section_break(ui);
     let open_now = !d.accounts[i].smtp_host.trim().is_empty();
-    let head = egui::CollapsingHeader::new(RichText::new("Sending (SMTP)").color(theme::palette().text)).id_salt(("mail-smtp", i)).default_open(open_now).show(ui, |ui| {
+    let head = egui::CollapsingHeader::new(RichText::new("Sending (SMTP)").color(theme::palette().text)).id_salt(("mail-smtp", i)).default_open(open_now).show_pointer(ui, |ui| {
         egui::Grid::new(("mail-smtp-form", i)).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
             ui.label("SMTP server");
             let r = ui.add(egui::TextEdit::singleline(&mut d.accounts[i].smtp_host).hint_text("smtp.example.com (empty: this account does not send)").desired_width(300.0));
@@ -436,7 +438,7 @@ fn account_form(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rect
             ui.label("Security");
             ui.horizontal(|ui| {
                 for (sec, text) in [(MailSecurity::ImplicitTls, "TLS (usually port 465)"), (MailSecurity::StartTls, "STARTTLS (usually port 587)")] {
-                    let r = ui.radio(d.accounts[i].smtp_security == sec, text);
+                    let r = crate::clickable::pointer(ui.radio(d.accounts[i].smtp_security == sec, text));
                     rects.push((format!("md:smtp-sec:{sec:?}"), r.rect));
                     if r.clicked() && d.accounts[i].smtp_security != sec {
                         if d.smtp_ports[i].trim() == d.accounts[i].smtp_security.smtp_default_port().to_string() {
@@ -464,9 +466,9 @@ fn account_form(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rect
             rects.push(("md:signature".into(), r.rect));
             ui.end_row();
         });
-        let r = ui.checkbox(&mut d.accounts[i].server_stores_sent, "The server saves sent mail in Sent by itself (Gmail does): Shale then does not add a copy");
+        let r = crate::clickable::pointer(ui.checkbox(&mut d.accounts[i].server_stores_sent, "The server saves sent mail in Sent by itself (Gmail does): Shale then does not add a copy"));
         rects.push(("md:server-stores".into(), r.rect));
-        let r = ui.checkbox(&mut d.accounts[i].user_agent_header, "Add a User-Agent header (tells the recipient this was written with Shale; off for privacy)");
+        let r = crate::clickable::pointer(ui.checkbox(&mut d.accounts[i].user_agent_header, "Add a User-Agent header (tells the recipient this was written with Shale; off for privacy)"));
         rects.push(("md:user-agent".into(), r.rect));
         crate::theme::prose(
             ui,
@@ -513,7 +515,7 @@ fn account_form(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rect
     // signing and encrypting (MAIL-190): which key of GnuPG belongs to this account
     theme::section_break(ui);
     let have_key = !d.accounts[i].pgp_key.is_empty() || !d.accounts[i].smime_key.is_empty();
-    let head = egui::CollapsingHeader::new(RichText::new("Signing and encrypting").color(theme::palette().text)).id_salt(("mail-keys", i)).default_open(have_key).show(ui, |ui| key_rows(ui, d, i, mail, rects));
+    let head = egui::CollapsingHeader::new(RichText::new("Signing and encrypting").color(theme::palette().text)).id_salt(("mail-keys", i)).default_open(have_key).show_pointer(ui, |ui| key_rows(ui, d, i, mail, rects));
     rects.push(("md:keys-header".into(), head.header_response.rect));
     if head.header_response.clicked() {
         d.scroll_keys = true;
@@ -537,7 +539,7 @@ fn account_form(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rect
             ui.horizontal(|ui| {
                 let (depth, label) = mail.tree_entry(f);
                 ui.add_space(depth as f32 * 14.0);
-                let r = ui.add_enabled(!never, egui::Checkbox::new(&mut on, label));
+                let r = crate::clickable::pointer(ui.add_enabled(!never, egui::Checkbox::new(&mut on, label)));
                 rects.push((format!("md:folder:{}", f.id), r.rect));
                 if r.changed() {
                     *out = Some(MailDialogAction::ToggleFolder { folder: f.id, enabled: on });
@@ -561,7 +563,7 @@ fn oauth_rows(ui: &mut Ui, d: &mut MailDialog, i: usize, id: &str, rects: &mut V
     ui.label("Provider");
     ui.horizontal(|ui| {
         for p in [OAuthProvider::Google, OAuthProvider::Microsoft, OAuthProvider::Custom] {
-            let r = ui.radio(d.accounts[i].oauth_provider == p, p.label());
+            let r = crate::clickable::pointer(ui.radio(d.accounts[i].oauth_provider == p, p.label()));
             rects.push((format!("md:provider:{}", p.label()), r.rect));
             if r.clicked() && d.accounts[i].oauth_provider != p {
                 d.accounts[i].oauth_provider = p;
@@ -649,7 +651,7 @@ fn sign_in_row(ui: &mut Ui, i: usize, id: &str, mail: &MailView, rects: &mut Vec
 /// field, the keys, and how to bring keys over from Thunderbird.
 fn encryption_section(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &mut Vec<(String, Rect)>, out: &mut Option<MailDialogAction>) {
     use crate::config::CryptoStandard;
-    let head = egui::CollapsingHeader::new(RichText::new("Encryption (OpenPGP and S/MIME)").color(theme::palette().text)).id_salt("mail-encryption").default_open(d.consent.is_some()).show(ui, |ui| {
+    let head = egui::CollapsingHeader::new(RichText::new("Encryption (OpenPGP and S/MIME)").color(theme::palette().text)).id_salt("mail-encryption").default_open(d.consent.is_some()).show_pointer(ui, |ui| {
         crate::theme::prose(ui, muted("Shale signs, verifies, encrypts and decrypts with the GnuPG on this computer (gpg for OpenPGP, gpgsm for S/MIME). It never sees your keys or passphrases: GnuPG and its passphrase dialog do that. Verifying a signature needs no setting; decrypting does.").size(12.0));
         // the red warning, always visible when the section is open
         let red = egui::Color32::from_rgb(200, 40, 40);
@@ -769,7 +771,7 @@ fn agent_block(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &mut Vec
     let info = mail.agent.info.as_ref().and_then(|i| i.as_ref().ok());
     ui.horizontal(|ui| {
         ui.label("Ask for the passphrase again after:");
-        let r = egui::ComboBox::from_id_salt("agent-choice").selected_text(d.agent.choice.label()).show_ui(ui, |ui| {
+        let r = egui::ComboBox::from_id_salt("agent-choice").selected_text(d.agent.choice.label()).show_pointer(ui, |ui| {
             for c in Choice::ALL {
                 let r = ui.selectable_label(d.agent.choice == c, c.label());
                 rects.push((format!("md:agent-choice:{}", c.key()), r.rect));
@@ -862,7 +864,7 @@ fn key_rows(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rects: &
                             .map(|k| format!("{} · {}", k.label(), crate::mail::ui::short_fingerprint(&k.fingerprint)))
                             .unwrap_or_else(|| format!("{} (not in the keyring)", crate::mail::ui::short_fingerprint(&cur)))
                     };
-                    let r = egui::ComboBox::from_id_salt(("mail-key", tag, i)).width(360.0).selected_text(shown).show_ui(ui, |ui| {
+                    let r = egui::ComboBox::from_id_salt(("mail-key", tag, i)).width(360.0).selected_text(shown).show_pointer(ui, |ui| {
                         let r = ui.selectable_label(cur.is_empty(), "(none)");
                         rects.push((format!("md:{tag}-key:none"), r.rect));
                         let mut pick: Option<String> = r.clicked().then(String::new);
@@ -893,11 +895,11 @@ fn key_rows(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rects: &
         });
     }
     ui.horizontal(|ui| {
-        let r = ui.checkbox(&mut d.accounts[i].sign_by_default, "Sign new mail by default");
+        let r = crate::clickable::pointer(ui.checkbox(&mut d.accounts[i].sign_by_default, "Sign new mail by default"));
         rects.push(("md:sign-default".into(), r.rect));
         ui.label("Standard:");
         for std in [CryptoStandard::OpenPgp, CryptoStandard::Smime] {
-            let r = ui.radio(d.accounts[i].preferred_standard == std, std.label());
+            let r = crate::clickable::pointer(ui.radio(d.accounts[i].preferred_standard == std, std.label()));
             rects.push((format!("md:std:{std:?}"), r.rect));
             if r.clicked() {
                 d.accounts[i].preferred_standard = std;

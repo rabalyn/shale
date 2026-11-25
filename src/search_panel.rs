@@ -55,13 +55,13 @@ fn row(ui: &mut Ui, contents: impl FnOnce(&mut Ui)) -> egui::Response {
         ui.set_width(ui.available_width());
         contents(ui);
     });
-    resp.response.interact(Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand)
+    crate::clickable::button_like(ui, resp.response.interact(Sense::click()))
 }
 
 /// The name of a note as the heading of its lines.
 fn note_name(ui: &mut Ui, v: &crate::vault::Vault, rel: &Path) -> egui::Response {
     let name = v.file(rel).map(|f| f.display_name()).unwrap_or_default();
-    ui.add(egui::Label::new(egui::RichText::new(name).color(theme::palette().text_strong)).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand)
+    crate::clickable::clickable(ui, egui::Label::new(egui::RichText::new(name).color(theme::palette().text_strong)))
 }
 
 /// The frame around the hit that has the keyboard.

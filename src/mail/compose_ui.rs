@@ -6,6 +6,7 @@
 //! is a plain multi-line text field (a mail is plain text; the note editor belongs to notes and a vault).
 
 use crate::app::muted;
+use crate::clickable::ComboBoxPointer;
 use crate::config::Config;
 use crate::keys::Action as KeyAction;
 use crate::mail::compose::{Confirm, Draft};
@@ -290,7 +291,7 @@ fn security_row(ui: &mut Ui, c: &mut Compose, acct: Option<&crate::config::MailA
         }
         if standards.len() > 1 {
             for s in &standards {
-                let r = ui.radio(c.draft.standard == *s, s.label());
+                let r = crate::clickable::pointer(ui.radio(c.draft.standard == *s, s.label()));
                 rec(rects, format!("mail:compose:std:{s:?}"), &r);
                 if r.clicked() && c.draft.standard != *s {
                     c.draft.standard = *s;
@@ -300,12 +301,12 @@ fn security_row(ui: &mut Ui, c: &mut Compose, acct: Option<&crate::config::MailA
         } else {
             crate::theme::prose(ui, muted(standards[0].label()).size(12.5));
         }
-        let r = ui.checkbox(&mut c.draft.sign, "Sign");
+        let r = crate::clickable::pointer(ui.checkbox(&mut c.draft.sign, "Sign"));
         rec(rects, "mail:compose:sign", &r);
         if r.on_hover_text("Sign the mail with your key: the recipient can check it is from you and was not changed").changed() {
             *touched = true;
         }
-        let r = ui.add_enabled(consent, egui::Checkbox::new(&mut c.draft.encrypt, "Encrypt"));
+        let r = crate::clickable::pointer(ui.add_enabled(consent, egui::Checkbox::new(&mut c.draft.encrypt, "Encrypt")));
         rec(rects, "mail:compose:encrypt", &r);
         let r = if consent {
             r.on_hover_text("Encrypt for every recipient (Cc and Bcc too) and for you, so the copy in Sent stays readable")
@@ -465,7 +466,7 @@ impl MailView {
                         );
                         if accounts.len() > 1 {
                             let cur = accounts.iter().find(|a| a.0 == c.draft.account).map(|a| a.1.clone()).unwrap_or_default();
-                            let r = egui::ComboBox::from_id_salt("mail-compose-account").selected_text(format!("{cur}  ·  {from}")).show_ui(ui, |ui| {
+                            let r = egui::ComboBox::from_id_salt("mail-compose-account").selected_text(format!("{cur}  ·  {from}")).show_pointer(ui, |ui| {
                                 for (id, name) in &accounts {
                                     let r = ui.selectable_label(&c.draft.account == id, name.clone());
                                     rec(rects, format!("mail:compose:account:{id}"), &r);
