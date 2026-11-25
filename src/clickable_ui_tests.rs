@@ -321,7 +321,6 @@ fn lay_038_every_allow_listed_site_still_has_a_raw_clickable_label() {
 /// git of the computer, on what the look for git found (a job that ends at an unpredictable
 /// moment and moves the widgets below it) and on the vault, so the test sets all of them and the
 /// page has the same widgets on every machine.
-#[cfg(unix)]
 fn check_sync_page(scene: &str, git_missing: bool, detection: crate::gitsync::managed::Detection, managed_folder: bool, remote: Option<&str>, advanced: bool) {
     use crate::gitsync::install_ui::ManagedState;
     use crate::gitsync::managed::{managed_root, GitChoice};
@@ -345,7 +344,6 @@ fn check_sync_page(scene: &str, git_missing: bool, detection: crate::gitsync::ma
     });
 }
 
-#[cfg(unix)]
 #[test]
 fn lay_038_the_sync_page_has_button_cursors_and_hover_looks_in_each_of_its_states() {
     use crate::gitsync::managed::{Detection, Installed, ManagedInfo, Origin, Part};

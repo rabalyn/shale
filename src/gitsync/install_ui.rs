@@ -142,13 +142,13 @@ impl ManagedState {
     }
 
     /// Tests: a state with this data folder, `PATH` and sources.
-    #[cfg(all(test, unix))]
+    #[cfg(test)]
     pub(crate) fn for_test(data: PathBuf, path_var: Option<OsString>, sources: Sources, platform: Platform) -> ManagedState {
         ManagedState { data: Some(data), path_var, sources, platform, ..Default::default() }
     }
 
     /// Tests: what the look found, as if a job had found it for this choice.
-    #[cfg(all(test, unix))]
+    #[cfg(test)]
     pub(crate) fn set_detection(&mut self, d: Detection, choice: GitChoice) {
         self.detection = Some(d);
         self.detected_for = choice;
