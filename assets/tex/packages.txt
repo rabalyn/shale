@@ -39,6 +39,10 @@ hyphen-german
 hyphen-english
 csquotes
 biblatex
+biblatex-apa
+biblatex-ieee
+cleveref
+caption
 siunitx
 tcolorbox
 pgf
