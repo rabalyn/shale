@@ -11,12 +11,15 @@ mod finish;
 pub mod look;
 mod package;
 mod reference;
+mod thesis;
 mod xml;
 
 #[cfg(test)]
 mod export_tests;
 #[cfg(test)]
 mod schema_check;
+#[cfg(test)]
+mod thesis_tests;
 
 use crate::pdf::tex::compile::WorkDir;
 use crate::pdf::tex::proc::{self, Ending};
@@ -168,15 +171,20 @@ pub struct Job {
     pub original: Option<PathBuf>,
     pub toc: bool,
     pub timeout: Duration,
+    /// what the thesis syntax of the note needs of pandoc (DOCX-014); none for a note without any
+    pub thesis: Option<thesis::Setup>,
+    /// what the export has to say about the thesis syntax (DOCX-016)
+    pub warnings: Vec<String>,
 }
 
 impl Job {
     /// The export of `text`, the text of the note `rel` as the window has it. `original`: the template, as [`original_of`] gives it; `toc_break`: a page break after the table of contents.
     pub fn new(pandoc: PathBuf, vault: &Vault, rel: &Path, text: &str, original: Option<&Path>, toc: bool, toc_break: bool) -> Job {
-        let prepared = prepare_text(text, &|target| vault.resolve(target, Some(rel)).map(|p| rel_to_string(&p)));
+        let thesis = thesis::prepare(vault, rel, text);
+        let prepared = prepare_text(&thesis.text, &|target| vault.resolve(target, Some(rel)).map(|p| rel_to_string(&p)));
         // the dialog's box says whether the table of contents is followed by a page break (DOCX-013)
         let look = PrintLook { toc_page_break: Some(toc && toc_break), ..PrintLook::of(text) };
-        Job { pandoc, root: vault.root.clone(), text: prepared, look, original: original.map(|o| vault.abs(o)), toc, timeout: TIMEOUT }
+        Job { pandoc, root: vault.root.clone(), text: prepared, look, original: original.map(|o| vault.abs(o)), toc, timeout: TIMEOUT, thesis: thesis.setup, warnings: thesis.warnings }
     }
 }
 
@@ -187,6 +195,7 @@ fn ended(run: &proc::Run, timeout: Duration) -> Result<(), String> {
         Ending::TimedOut => Err(format!("pandoc needed more than {} seconds and was stopped", timeout.as_secs_f64())),
         Ending::Cancelled => Err("stopped".into()),
         Ending::Exited(_) if crate::pandoc_limit::overflowed(run) => Err(crate::pandoc_limit::overflow_message(None)),
+        Ending::Exited(_) if run.tail.iter().any(|l| l.contains("citeproc") && (l.contains("nrecognized") || l.contains("nknown"))) => Err(thesis::OLD_PANDOC.into()),
         Ending::Exited(_) => Err(format!("pandoc could not make the Word file: {}", run.tail.iter().find(|l| !l.trim().is_empty()).map_or("it stopped without a message", |l| l.trim()))),
     }
 }
@@ -198,6 +207,15 @@ pub fn export(job: &Job, cancel: &AtomicBool) -> Result<Vec<u8>, String> {
     let write = |name: &str, bytes: &[u8]| work.write(name, bytes).map_err(|e| format!("could not write {name} to the temporary folder: {e}"));
     write("filter.lua", FILTER.as_bytes())?;
     write("note.md", job.text.as_bytes())?;
+    if let Some(t) = &job.thesis {
+        write(thesis::DATA_FILE, t.data.as_bytes())?;
+        for (name, bytes) in &t.bibliography {
+            write(name, bytes)?;
+        }
+        if let Some(csl) = &t.csl {
+            write(thesis::CSL_FILE, csl)?;
+        }
+    }
     let default = reference::default_reference(&job.pandoc, work.path(), Some(cancel))?;
     let template = match &job.original {
         Some(original) => reference::from_original(&crate::fsutil::read(original).map_err(|e| format!("the original Word file cannot be read: {e}"))?, &default)?,
@@ -208,6 +226,9 @@ pub fn export(job: &Job, cancel: &AtomicBool) -> Result<Vec<u8>, String> {
     let width = reference::text_width(&template, &job.look);
     let setup = |cmd: &mut std::process::Command| {
         cmd.args(args(&work.path().join("note.md"), &work.path().join("filter.lua"), &job.root, &work.path().join("reference.docx"), width, &out, job.toc)).current_dir(work.path());
+        if let Some(t) = &job.thesis {
+            cmd.args(thesis::args(t, work.path()));
+        }
     };
     let run = crate::pandoc_limit::run(&job.pandoc, setup, |cmd| proc::run(cmd, job.timeout, Some(cancel), |_| {})).map_err(|e| format!("pandoc could not be started: {e}"))?;
     ended(&run, job.timeout)?;

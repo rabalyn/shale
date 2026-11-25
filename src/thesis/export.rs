@@ -39,10 +39,20 @@ impl Bibliographies {
     /// The thesis document of a note that stands alone, with its citations formatted; `None` for a
     /// note with no `@` and no `{#`, which has nothing the thesis rules read.
     pub fn view(&mut self, vault: &Vault, rel: &Path, text: &str, style: Option<Style>) -> Option<Arc<View>> {
+        self.view_of(vault, rel, text, style, true)
+    }
+
+    /// [`Bibliographies::view`] with the citations not formatted, for an export that has another
+    /// program format them (the Word export, DOCX-014).
+    pub fn unformatted(&mut self, vault: &Vault, rel: &Path, text: &str, style: Option<Style>) -> Option<Arc<View>> {
+        self.view_of(vault, rel, text, style, false)
+    }
+
+    fn view_of(&mut self, vault: &Vault, rel: &Path, text: &str, style: Option<Style>, format: bool) -> Option<Arc<View>> {
         if !text.contains('@') && !text.contains("{#") {
             return None;
         }
         let effect = self.effect(vault, rel, text);
-        Some(Arc::new(View::build_styled(None, &[text], 0, text, effect, true, style)))
+        Some(Arc::new(View::build_styled(None, &[text], 0, text, effect, format, style)))
     }
 }
