@@ -82,7 +82,8 @@ pub fn anchors(text: &str) -> Vec<Anchor> {
         // a heading with no text has no id at all
         .filter(|(_, _, title)| !title.trim().is_empty())
         .map(|(_, _, title)| {
-            let plain = markdown::heading_plain(&title);
+            // a label `{#sec:x}` is no text of the heading: the site writes an anchor for it (SITE-077)
+            let plain = markdown::heading_plain(&markdown::labels::without_labels(&title));
             let base = base_id(&plain);
             let mut id = base.clone();
             let mut n = 1;

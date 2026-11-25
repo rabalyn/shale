@@ -53,3 +53,11 @@ object.drawing { display: block; max-width: 100%; height: auto; margin: 8px 0; b
 .board-chips { margin: 4px 0 0; color: var(--muted); font-size: 0.8em; }
 .board-chip { margin-right: 8px; }
 .board-note { color: var(--muted); font-size: 0.85em; margin: 4px 0; }
+/* thesis syntax: numbered figures, tables and equations, the bibliography and the lists (SITE-077) */
+.shale-figure, .shale-table { margin: 1em 0; text-align: center; }
+.shale-figure figcaption, .shale-table figcaption { color: var(--muted); font-size: 0.9em; margin: 0.3em 0; }
+.shale-equation { display: flex; align-items: center; justify-content: space-between; gap: 1em; }
+.shale-equation > p { margin: 0; }
+.shale-list { list-style: none; padding-left: 0; }
+.bib-entry { margin: 0.3em 0; padding-left: 2.5em; text-indent: -2.5em; }
+.bib-label { display: inline-block; min-width: 2em; color: var(--muted); }

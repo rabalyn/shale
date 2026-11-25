@@ -21,6 +21,7 @@ pub(crate) mod rules;
 pub(crate) mod slug;
 pub(crate) mod svg;
 pub(crate) mod theme;
+pub(crate) mod thesis;
 pub(crate) mod write;
 
 #[cfg(test)]
@@ -41,5 +42,7 @@ mod hugo_tests;
 mod svg_tests;
 #[cfg(test)]
 mod test_support;
+#[cfg(test)]
+mod thesis_tests;
 #[cfg(all(test, unix))]
 mod ui_tests;

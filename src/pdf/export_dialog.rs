@@ -180,6 +180,25 @@ pub(crate) fn toc_break_box(ui: &mut Ui, opts: &mut ExportOptions, enabled: bool
     });
 }
 
+/// The boxes of the thesis syntax (PDF-032): the lists of figures and of tables after the contents
+/// (a marker line in the note puts a list where it stands instead), and the citation style, which
+/// takes the place of the note's `citation-style:`.
+pub(crate) fn thesis_boxes(ui: &mut Ui, opts: &mut ExportOptions, rec: &mut dyn FnMut(&str, egui::Response) -> egui::Response) {
+    rec("list-of-figures", ui.checkbox(&mut opts.list_of_figures, "List of figures")).on_hover_text("After the contents; a line <!-- shale: list-of-figures --> in the note puts it there instead");
+    rec("list-of-tables", ui.checkbox(&mut opts.list_of_tables, "List of tables")).on_hover_text("After the contents; a line <!-- shale: list-of-tables --> in the note puts it there instead");
+    ui.horizontal(|ui| {
+        ui.label("Citation style");
+        let shown = opts.citation_style.map_or("From the note", |s| s.name());
+        let combo = egui::ComboBox::from_id_salt("citation-style").selected_text(shown).show_ui(ui, |ui| {
+            rec("citation-style:note", ui.selectable_value(&mut opts.citation_style, None, "From the note"));
+            for style in crate::bibliography::format::Style::ALL {
+                rec(&format!("citation-style:{}", style.name()), ui.selectable_value(&mut opts.citation_style, Some(style), style.name()));
+            }
+        });
+        rec("citation-style", combo.response);
+    });
+}
+
 pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
     d.rects.clear();
     let mut rects: Vec<(String, Rect)> = Vec::new();
@@ -316,6 +335,7 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
                 }
                 if d.book.is_none() {
                     break_before_box(ui, &mut d.opts, true, &mut rec);
+                    thesis_boxes(ui, &mut d.opts, &mut rec);
                 }
                 rec("pagenumbers", ui.checkbox(&mut d.opts.page_numbers, "Page numbers"));
                 rec("embeds", ui.checkbox(&mut d.opts.embeds, "Embedded pictures, drawings, PDFs, videos and sounds"));
@@ -533,6 +553,26 @@ mod tests {
         // a drawing has no headings, a folder as a book has its own page rules (BOOK-005)
         let (_, d) = setup(true);
         assert!(!has(&d, "break-before"));
+    }
+
+    // spec: PDF-032
+    #[test]
+    fn pdf_032_the_dialog_has_boxes_for_the_lists_of_figures_and_tables_and_a_citation_style() {
+        let has = |d: &ExportDialog, key: &str| d.rects.iter().any(|r| r.0 == key);
+        let (mut h, mut d) = setup(false);
+        assert!(has(&d, "list-of-figures") && has(&d, "list-of-tables") && has(&d, "citation-style"));
+        assert!(!d.opts.list_of_figures && !d.opts.list_of_tables && d.opts.citation_style.is_none(), "off, and the note's style, by default");
+        h.click(&mut d, "list-of-figures");
+        h.click(&mut d, "list-of-tables");
+        assert!(d.opts.list_of_figures && d.opts.list_of_tables);
+        h.click(&mut d, "list-of-figures");
+        assert!(!d.opts.list_of_figures);
+        h.click(&mut d, "citation-style");
+        h.click(&mut d, "citation-style:numeric");
+        assert_eq!(d.opts.citation_style, Some(crate::bibliography::format::Style::Numeric));
+        // a drawing has no thesis, and a folder as a book has them in a later phase
+        let (_, d) = setup(true);
+        assert!(!has(&d, "list-of-figures") && !has(&d, "citation-style"));
     }
 
     // spec: PDF-031

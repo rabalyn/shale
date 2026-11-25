@@ -890,8 +890,8 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
             }
             if let Some(b) = tables.iter().find(|b| b.lines.start == i) {
                 // the caption line `: Caption {#tbl:x}` right below the table is drawn as "Table 2: Caption", above or below it
-                let caption = thesis.and_then(|t| thesis::label_on(t, markdown::citations::Kind::Table, b.lines.end).map(|e| (t, e)));
-                let above = caption.is_some_and(|(t, _)| thesis::above(t, markdown::citations::Kind::Table));
+                let caption = thesis.and_then(|t| t.label_on(markdown::citations::Kind::Table, b.lines.end).map(|e| (t, e)));
+                let above = caption.is_some_and(|(t, _)| t.caption_above(markdown::citations::Kind::Table));
                 if let Some((t, e)) = caption.filter(|_| above) {
                     thesis::caption(ui, e, t, base);
                 }
@@ -904,7 +904,7 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
             }
             // a formula on lines of its own: `$$` lines, a `math` fence, `$$…$$` alone (EDIT-046)
             if let Some(m) = formulas.iter().find(|m| m.block && m.lines.start == i) {
-                math_block(ui, &text[m.tex.clone()], base, thesis.and_then(|t| thesis::equation_number(t, &m.lines)).as_deref());
+                math_block(ui, &text[m.tex.clone()], base, thesis.and_then(|t| t.equation_number(&m.lines)).as_deref());
                 i = m.lines.end;
                 break 'line;
             }
@@ -984,8 +984,8 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
                 }
                 bare.trim().len() == real[0].0.range.len()
             };
-            let figure = thesis.and_then(|t| thesis::label_on(t, markdown::citations::Kind::Figure, i).map(|e| (t, e)));
-            let caption_above = figure.is_some_and(|(t, _)| thesis::above(t, markdown::citations::Kind::Figure));
+            let figure = thesis.and_then(|t| t.label_on(markdown::citations::Kind::Figure, i).map(|e| (t, e)));
+            let caption_above = figure.is_some_and(|(t, _)| t.caption_above(markdown::citations::Kind::Figure));
             if alone {
                 let (l, ok) = real[0];
                 if *ok {
@@ -1037,7 +1037,7 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
                 }
             } else if markdown::is_align_edge(&wrappers, i) {
                 // the tag of a wrapper is not shown (EDIT-110)
-            } else if thesis.is_some() && thesis::is_bibliography_marker(trimmed) {
+            } else if thesis.is_some() && crate::thesis::Marker::of(trimmed) == Some(crate::thesis::Marker::Bibliography) {
                 // `<!-- shale: bibliography -->`: the list of references goes here instead of at the end
                 bibliography_drawn = true;
                 if let Some(t) = thesis {
