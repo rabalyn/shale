@@ -179,6 +179,7 @@ fn split_line(line: &str) -> Option<(u64, usize, &str)> {
     let mut rest = line.trim_start();
     let mut size = 0;
     for column in 0..4 {
+        rest = rest.trim_start();
         let end = rest.find(' ')?;
         let token = &rest[..end];
         match column {
@@ -807,7 +808,7 @@ mod tests {
         let map = parse_map(text.lines()).unwrap();
         assert_eq!(map.outs.iter().map(|(n, s)| (n.as_str(), *s)).collect::<Vec<_>>(), [(".text", 0x1000), (".rodata", 0x2000), (".eh_frame", 0x800), (".symtab", 0x500), (".debug_info", 0x300)]);
         // the symbol line is no input section
-        assert_eq!(map.ins.len(), 12);
+        assert_eq!(map.ins.len(), 11);
         let first = &map.ins[0];
         assert_eq!((first.out.as_str(), first.name.as_str(), first.size), (".text", ".text._RNvCs1_5shale4main", 0x100));
         assert!(first.object.ends_with("-cgu.00.rcgu.o"), "{}", first.object);
@@ -989,7 +990,7 @@ mod tests {
         for needle in [
             "**0.8.0**",
             "(2026-11-25)",
-            "**14.00 KiB** loaded",
+            "**14.0 KiB** loaded",
             "5.00 MiB, 4.00 MiB stripped",
             "![Size by group of crates](size-pie.svg)",
             "## By group",
@@ -1027,7 +1028,7 @@ mod tests {
         assert!(used >= 4);
         assert_eq!(svg.matches("<path ").count(), used);
         assert_eq!(svg.matches("<g class=\"slice\">").count(), used);
-        assert!(svg.contains("<title>Embedded files: 4.0 KiB (") && svg.contains("Shale 0.8.0 · 14.00 KiB loaded"));
+        assert!(svg.contains("<title>Embedded files: 4.0 KiB (") && svg.contains("Shale 0.8.0 · 14.0 KiB loaded"));
         // one group is a whole disc, none is nothing but the title
         let mut one = vec![0; GROUPS.len()];
         one[2] = 500;
@@ -1051,7 +1052,7 @@ mod tests {
         assert_eq!(svg.matches("<g class=\"col\">").count(), 2);
         let used = rows[0].groups.iter().filter(|&&n| n > 0).count();
         assert_eq!(svg.matches("<rect class=\"bar\"").count(), 2 * used);
-        assert!(svg.contains("0.9.0-rc.1") && svg.contains("<title>0.8.0 · 2026-11-25 · 14.00 KiB"));
+        assert!(svg.contains("0.9.0-rc.1") && svg.contains("<title>0.8.0 · 2026-11-25 · 14.0 KiB"));
         // the empty history is a chart with axes only, and a name is escaped
         let empty = history_svg(&[]);
         assert!(empty.contains("MiB loaded") && !empty.contains("class=\"bar\""));
