@@ -44,16 +44,38 @@ pub struct BookExport {
     /// what the export that has just ended said about fonts (PDF-037)
     warnings: Vec<String>,
     busy: Busy,
+    /// tests: the job waits until this is set (or it is cancelled), so it is listed as running
+    /// for as long as the test wants
+    #[cfg(test)]
+    gate: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl BookExport {
     pub fn new(vault: &Vault, folder: &Path, busy: &Busy) -> Self {
-        BookExport { folder: folder.to_path_buf(), board: false, plan: book::plan(vault, folder), job: None, warnings: Vec::new(), busy: busy.clone() }
+        BookExport {
+            folder: folder.to_path_buf(),
+            board: false,
+            plan: book::plan(vault, folder),
+            job: None,
+            warnings: Vec::new(),
+            busy: busy.clone(),
+            #[cfg(test)]
+            gate: None,
+        }
     }
 
     /// The export of the board note `rel`: the board and the notes of its cards (BOARD-030).
     pub fn for_board(vault: &Vault, rel: &Path, busy: &Busy) -> Self {
-        BookExport { folder: rel.to_path_buf(), board: true, plan: board::plan_of(vault, rel), job: None, warnings: Vec::new(), busy: busy.clone() }
+        BookExport {
+            folder: rel.to_path_buf(),
+            board: true,
+            plan: board::plan_of(vault, rel),
+            job: None,
+            warnings: Vec::new(),
+            busy: busy.clone(),
+            #[cfg(test)]
+            gate: None,
+        }
     }
 
     pub fn working(&self) -> bool {
@@ -76,8 +98,14 @@ impl BookExport {
         let Some(mut task) = self.busy.begin(PDF_EXPORT, label) else { return false };
         let progress = Arc::new(Progress::with_cancel(task.cancellable()));
         let (p, folder, board) = (progress.clone(), self.folder.clone(), self.board);
+        #[cfg(test)]
+        let gate = self.gate.clone();
         let job = task.run(
             move || {
+                #[cfg(test)]
+                while gate.as_ref().is_some_and(|g| !g.load(Ordering::SeqCst)) && !p.cancel.is_cancelled() {
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
                 let vault = Vault::open(&root).map_err(|e| format!("Could not read the vault: {e}"))?;
                 if board {
                     export_board(&vault, &folder, &opts, Some(&p))
@@ -164,6 +192,13 @@ impl BookExport {
 mod tests {
     use super::*;
 
+    /// Make the next jobs of `book` wait: the returned flag lets them go on.
+    fn hold(book: &mut BookExport) -> Arc<std::sync::atomic::AtomicBool> {
+        let gate = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        book.gate = Some(gate.clone());
+        gate
+    }
+
     fn wait_until_idle(busy: &Busy) {
         let start = std::time::Instant::now();
         while busy.is_running(&PDF_EXPORT) {
@@ -175,7 +210,8 @@ mod tests {
     // spec: BOOK-010, JOB-013
     #[test]
     fn cancel_stops_the_job_and_dropping_the_dialog_does_too() {
-        let dir = std::env::temp_dir().join(format!("shale-book-cancel-{}", std::process::id()));
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!("shale-book-cancel-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("B")).unwrap();
         std::fs::write(dir.join("B/a.md"), "x\n").unwrap();
@@ -183,6 +219,7 @@ mod tests {
         let busy = Busy::default();
         let mut book = BookExport::new(&vault, Path::new("B"), &busy);
         assert!(book.can_export() && !book.working() && book.progress().is_none());
+        let gate = hold(&mut book);
         assert!(book.start(dir.clone(), ExportOptions::for_note(), || {}));
         assert!(book.working() && !book.can_export(), "no second export beside the running one");
         let listed = busy.info(&PDF_EXPORT);
@@ -202,6 +239,8 @@ mod tests {
         wait_until_idle(&busy);
         // a book that was done is handed over once
         let mut book = BookExport::new(&vault, Path::new("B"), &busy);
+        gate.store(true, Ordering::SeqCst);
+        book.gate = Some(gate);
         assert!(book.start(dir.clone(), ExportOptions::for_note(), || {}));
         let start = std::time::Instant::now();
         let made = loop {
