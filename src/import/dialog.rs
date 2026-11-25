@@ -59,6 +59,8 @@ pub struct ImportDialog {
 pub enum ImportAction {
     Import,
     Cancel,
+    /// the button "Add files…": choose files with the file picker (IMP-075)
+    Browse,
     /// add the file typed in `add_path`
     AddPath,
 }
@@ -368,7 +370,10 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
         ui.add(egui::Label::new(egui::RichText::new(n).size(12.0).color(theme::palette().link_missing)).wrap());
     }
     ui.horizontal(|ui| {
-        rec("add-path".into(), ui.add(egui::TextEdit::singleline(&mut d.add_path).hint_text("~/Downloads/message.eml").desired_width(420.0)));
+        if rec("browse".into(), ui.button("Add files…")).on_hover_text("Choose one or more files: mails, events, notes, pictures, PDFs, sounds, videos, Word files or any other file").clicked() {
+            action = Some(ImportAction::Browse);
+        }
+        rec("add-path".into(), ui.add(egui::TextEdit::singleline(&mut d.add_path).hint_text("or type a path: ~/Downloads/message.eml").desired_width(320.0)));
         if rec("add".into(), ui.add_enabled(!d.add_path.trim().is_empty(), egui::Button::new("Add file"))).on_hover_text("Add an .eml, .ics or any other file").clicked() {
             action = Some(ImportAction::AddPath);
         }

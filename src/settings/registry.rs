@@ -49,6 +49,7 @@ impl Entry {
 /// Every setting of the dialog, in the order of the tabs.
 pub const ENTRIES: &[Entry] = &[
     e("vault.folder", Vault, "Vault folder", &["vault"], "open switch directory path"),
+    e("vault.system_file_dialog", Vault, "Use the system's file dialog", &["system_file_dialog"], "file picker folder chooser open dialog portal native browse new folder"),
     e("vault.close", Vault, "Close this vault", &[], "start screen"),
     e("vault.people_dir", Vault, "People folder", &[], "contacts people notes link [[p"),
     e("vault.bibliography", Vault, "Bibliography file", &[], "references citations bib bibtex biblatex thesis zotero jabref citavi"),

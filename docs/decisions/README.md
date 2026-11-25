@@ -49,6 +49,7 @@ way it is. They are append-only. *What* Shale does today is in the living specs 
 | [0039](0039-thesis-citations-and-references.md) | Thesis writing: Pandoc citations, `{#fig:x}` labels with `@fig:x` references for figures, tables, equations and sections, a BibTeX `.bib` bibliography, biblatex+biber in TeX, hayagriva for the built-in PDF and site, pandoc `--citeproc` for Word | Accepted |
 | [0040](0040-export-fonts.md) | Fonts of the exports: `print-font`, `print-font-sans`, `print-font-mono` take any family or a font file; the vault `fonts/`, then system fonts, then TeX Live; real faces; `fsType` licence bits; fontspec overrides with one retry | Accepted |
 | [0041](0041-word-export-citations-and-references.md) | Citations and cross-references in the Word export: pandoc `--citeproc` formats the citations (the same CSL styles as the built-in exports), Shale numbers and resolves the references itself and hands marks to its Lua filter; no pandoc-crossref | Accepted |
+| [0043](0043-one-file-picker.md) | One file and folder picker: the system's dialog first (rfd, off the UI thread), Shale's own picker as the fallback and by setting; one ask/answer mailbox for every place that needs a path | Accepted |
 
 Format: Context, Decision, Consequences (and Alternatives if any). Statuses: *Proposed* →
 *Accepted* → (*Superseded by NNNN*). An accepted ADR is not edited; a new one supersedes it.

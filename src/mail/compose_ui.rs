@@ -250,6 +250,9 @@ fn field_id(f: Field) -> egui::Id {
     egui::Id::unique(("mail-compose", f.key()))
 }
 
+/// The key under which "Choose files…" asks the file picker for the files to attach (MAIL-137).
+const ATTACH_PICK: &str = "mail-attach";
+
 /// What the compose view asks for.
 #[derive(Default)]
 pub struct ComposeOut {
@@ -261,6 +264,8 @@ pub struct ComposeOut {
     pub cancel_ask: bool,
     pub confirm_yes: bool,
     pub attach_path: bool,
+    /// the files the person chose with "Choose files…" (MAIL-137)
+    pub attach_files: Vec<PathBuf>,
     pub attach_vault: Option<String>,
     pub remove_att: Option<usize>,
     /// The alert of a missing attachment (by file name): restore the old file, remove the attachment, hide the alert.
@@ -552,6 +557,14 @@ impl MailView {
                         rec(rects, "mail:compose:att-add", &b);
                         if (b.clicked() || go) && !c.path.trim().is_empty() {
                             out.attach_path = true;
+                        }
+                        let b = ui.small_button("Choose files…");
+                        rec(rects, "mail:compose:att-browse", &b);
+                        if b.on_hover_text("Choose one or more files on this computer").clicked() {
+                            crate::file_picker::ask(ui.ctx(), ATTACH_PICK, crate::file_picker::Request::files("Attach files").button("Attach"));
+                        }
+                        if let Some(picked) = crate::file_picker::take(ui.ctx(), ATTACH_PICK) {
+                            out.attach_files = picked.paths;
                         }
                         let b = ui.add_enabled(have_vault, egui::Button::new("From vault…").small());
                         rec(rects, "mail:compose:att-vault", &b);

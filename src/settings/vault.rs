@@ -12,7 +12,10 @@ impl ShaleApp {
         anchor(ui, "vault.folder", |ui| {
             ui.label("Vault folder");
             ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(vault_path).desired_width(320.0));
+                ui.add(egui::TextEdit::singleline(vault_path).desired_width(240.0));
+                if ui.button("Choose…").on_hover_text("Choose the folder with the file picker").clicked() {
+                    self.ask_vault_folder(crate::vault_menu::Purpose::Open);
+                }
                 if ui.button("Open").clicked() {
                     let p = PathBuf::from(crate::layout::shellexpand(vault_path));
                     if p.is_dir() {
@@ -23,6 +26,11 @@ impl ShaleApp {
                     }
                 }
             });
+        });
+        changed |= anchor(ui, "vault.system_file_dialog", |ui| {
+            crate::clickable::pointer(ui.checkbox(&mut self.cfg.system_file_dialog, "Use the system's file dialog"))
+                .on_hover_text("On: choosing a file or folder opens the dialog of your system (the xdg-desktop-portal on Linux), which has its own shortcuts, search and New folder button. Off, or when there is none: Shale's own picker")
+                .changed()
         });
         crate::theme::section_break(ui);
         if anchor(ui, "vault.close", |ui| ui.button("Close this vault (back to the start screen)").clicked()) {

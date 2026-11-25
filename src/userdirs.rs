@@ -51,6 +51,26 @@ user_dir! {
     /// The person's documents folder.
     document_dir, dirs::document_dir, "documents"
 }
+user_dir! {
+    /// The person's desktop folder.
+    desktop_dir, dirs::desktop_dir, "desktop"
+}
+user_dir! {
+    /// The person's downloads folder.
+    download_dir, dirs::download_dir, "downloads"
+}
+user_dir! {
+    /// The person's pictures folder.
+    picture_dir, dirs::picture_dir, "pictures"
+}
+user_dir! {
+    /// The person's videos folder.
+    video_dir, dirs::video_dir, "videos"
+}
+user_dir! {
+    /// The person's music folder.
+    audio_dir, dirs::audio_dir, "music"
+}
 
 /// The folder for the person's runtime files (`$XDG_RUNTIME_DIR`). A test has none: callers then
 /// use the temp folder.
@@ -79,8 +99,8 @@ mod tests {
     // spec: DEV-047
     #[test]
     fn dev_047_in_a_test_no_user_folder_is_the_real_one() {
-        let real = [dirs::config_dir(), dirs::data_dir(), dirs::cache_dir(), dirs::home_dir(), dirs::document_dir()];
-        let fake = [config_dir(), data_dir(), cache_dir(), home_dir(), document_dir()];
+        let real = [dirs::config_dir(), dirs::data_dir(), dirs::cache_dir(), dirs::home_dir(), dirs::document_dir(), dirs::desktop_dir(), dirs::download_dir(), dirs::picture_dir(), dirs::video_dir(), dirs::audio_dir()];
+        let fake = [config_dir(), data_dir(), cache_dir(), home_dir(), document_dir(), desktop_dir(), download_dir(), picture_dir(), video_dir(), audio_dir()];
         for (real, fake) in real.iter().zip(&fake) {
             let (Some(real), Some(fake)) = (real, fake) else { continue };
             assert!(!fake.starts_with(real) && !real.starts_with(fake), "{} is the real {}", fake.display(), real.display());

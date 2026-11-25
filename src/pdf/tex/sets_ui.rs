@@ -8,6 +8,7 @@ use super::engine::{Engine, TexConfig};
 use super::import::{self, Request, What};
 use super::sets::{self, SetEntry, SetInfo, Source};
 use super::settings_ui::{Notice, TaskKind, TexState};
+use crate::file_picker::{browse_button, Filter, Request as PickRequest};
 use crate::gitsync::TreeLock;
 use crate::theme;
 use eframe::egui::{self, Context, Ui};
@@ -349,7 +350,17 @@ fn forms(ui: &mut Ui, st: &mut TexState, ctx: &Context, cfg: &TexConfig, entries
         Form::File(mut path) => {
             ui.group(|ui| {
                 ui.label("Path of a .zip or .tar.gz file, or of a folder");
-                ui.add(egui::TextEdit::singleline(&mut path).hint_text("~/Downloads/templates.zip").desired_width(380.0));
+                ui.horizontal(|ui| {
+                    ui.add(egui::TextEdit::singleline(&mut path).hint_text("~/Downloads/templates.zip").desired_width(260.0));
+                    browse_button(
+                        ui,
+                        "tex-set-archive",
+                        "Choose file…",
+                        |_| PickRequest::file("Choose the template set (a .zip or .tar.gz file)").filter(Filter::new("Archives", &["zip", "gz", "tgz"])).filter(Filter::new("All files", &[])),
+                        &mut path,
+                    );
+                    browse_button(ui, "tex-set-folder", "Choose folder…", |_| PickRequest::folder("Choose the folder of the template set"), &mut path);
+                });
                 let (go, cancel) = form_buttons(ui, "Import set");
                 if go {
                     st.start_import(ctx, cfg, What::Local(expand_home(&path)));
@@ -367,7 +378,10 @@ fn forms(ui: &mut Ui, st: &mut TexState, ctx: &Context, cfg: &TexConfig, entries
                     Slot::Department => ("Path of the department logo file (PDF or PNG)", "~/Downloads/hrz_logo.png"),
                 };
                 ui.label(what);
-                ui.add(egui::TextEdit::singleline(&mut path).hint_text(hint).desired_width(380.0));
+                ui.horizontal(|ui| {
+                    ui.add(egui::TextEdit::singleline(&mut path).hint_text(hint).desired_width(300.0));
+                    browse_button(ui, "tex-set-logo", "Choose file…", |_| PickRequest::file("Choose the logo (a PDF or PNG file)").filter(Filter::new("PDF and PNG", &["pdf", "png"])).filter(Filter::new("All files", &[])), &mut path);
+                });
                 let (go, cancel) = form_buttons(ui, "Copy logo into the set");
                 if go {
                     st.sets.form = Form::None;

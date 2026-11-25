@@ -208,6 +208,12 @@ fn lay_038_the_dialogs_have_button_cursors_and_hover_looks() {
     check("confirm trash", |w| w.app.modal = Some(Modal::ConfirmTrash { rel: "Ideas.md".into() }));
     check("data usage", |w| w.app.modal = Some(Modal::DataUsage));
     check("vault menu", |w| w.app.open_vault_menu());
+    // Shale's own file picker (PICK-004): the shortcuts, the folders and files, the kinds, New folder
+    check("file picker folder", |w| w.app.pick.ask("t", crate::file_picker::Request::folder("Choose").start(w.dir.clone())));
+    check("file picker files", |w| {
+        std::fs::write(w.dir.join("one.eml"), "x").unwrap();
+        w.app.pick.ask("t", crate::file_picker::Request::files("Add").start(w.dir.clone()).filters(crate::import::pick_filters()));
+    });
     for tab in [
         SettingsTab::Vault,
         SettingsTab::Editor,

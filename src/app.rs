@@ -192,6 +192,7 @@ mod outside_copy;
 pub(crate) use outside_copy::OUTSIDE_COPY;
 mod outside_open;
 pub mod panes;
+mod pick;
 mod rescan;
 mod screenshot;
 mod social;
@@ -451,6 +452,10 @@ pub struct ShaleApp {
     pub vault_load: vault_load::VaultLoad,
     /// which known vaults have their folder (VAULT-038), looked up off the UI thread
     pub presence: crate::vault_menu::Presence,
+    /// answers the asks for a path (PICK-001): the system's dialog first, Shale's own picker as the fallback
+    pub pick: crate::file_picker::Host,
+    /// what the folder that Open…, Create… or Locate… chooses is for, while its picker is open (VAULT-033)
+    pub vault_pick: Option<crate::vault_menu::Purpose>,
     /// the open tabs, the active one and what the tab bar drew last frame
     pub tabbar: tabs::TabBar,
     /// the panes of the middle area; `tabbar` is the tab bar of the focused one (NAV-032)
@@ -736,6 +741,8 @@ impl ShaleApp {
             vault: None,
             vault_load: Default::default(),
             presence: Default::default(),
+            pick: Default::default(),
+            vault_pick: None,
             tabbar: tabs::TabBar::new(),
             panes: panes::Panes::new(),
             notes: HashMap::new(),
@@ -3491,6 +3498,7 @@ impl ShaleApp {
         self.social_tick(ui.ctx());
         self.link_preview_ui(ui);
         self.modals(ui);
+        self.pick_tick(ui.ctx());
         self.update_dialogs(ui.ctx());
         self.handle_drops(ui);
         self.learn_tags_tick();

@@ -32,7 +32,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 pub const MEDIA_DIR: &str = "z_media";
-const IMAGE_EXTS: [&str; 6] = ["png", "jpg", "jpeg", "webp", "gif", "bmp"];
+pub const IMAGE_EXTS: [&str; 6] = ["png", "jpg", "jpeg", "webp", "gif", "bmp"];
 /// The one list of media file extensions (lower case): sounds. Import (IMP-031), the player
 /// (MEDIA-001) and the Git LFS patterns (SYNC-017) all come from `AUDIO_EXTS` and `VIDEO_EXTS` (#206).
 pub const AUDIO_EXTS: [&str; 8] = ["mp3", "ogg", "oga", "opus", "m4a", "aac", "wav", "flac"];
