@@ -189,9 +189,20 @@ pub struct FontScan {
     job: Option<Job<Scanned>>,
     /// The family names of the catalogue, made when a result is taken in (CFG-080, PDF-039).
     list: FamilyList,
+    /// tests: a scan waits until this is set, so it stays a running task as long as the test wants
+    #[cfg(test)]
+    gate: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl FontScan {
+    /// Make the next scans wait: the returned flag lets them go on (a test).
+    #[cfg(test)]
+    pub fn hold(&mut self) -> Arc<std::sync::atomic::AtomicBool> {
+        let gate = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        self.gate = Some(gate.clone());
+        gate
+    }
+
     /// Read the system fonts from these folders instead (a test).
     #[cfg(test)]
     pub fn with_system_dirs(mut self, dirs: Vec<PathBuf>) -> Self {
@@ -299,13 +310,21 @@ impl FontScan {
         // export dialog would start one, in parallel): it reads the folders it names, or none
         #[cfg(test)]
         let dirs = Some(dirs.unwrap_or_default());
+        #[cfg(test)]
+        let gate = self.gate.clone();
         self.job = Some(task.run(
-            move || Scanned {
-                system: need_system.then(|| scan_system(dirs.as_deref())),
-                vault: vault.filter(|_| need_vault).map(|(root, sig)| {
-                    let faces = scan_vault(&root);
-                    (root, sig, faces)
-                }),
+            move || {
+                #[cfg(test)]
+                while gate.as_ref().is_some_and(|g| !g.load(std::sync::atomic::Ordering::SeqCst)) {
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+                Scanned {
+                    system: need_system.then(|| scan_system(dirs.as_deref())),
+                    vault: vault.filter(|_| need_vault).map(|(root, sig)| {
+                        let faces = scan_vault(&root);
+                        (root, sig, faces)
+                    }),
+                }
             },
             notify,
         ));
