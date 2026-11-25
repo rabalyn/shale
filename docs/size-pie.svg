@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 400" width="760" height="400" role="img" aria-label="Binary size by group of crates, Shale 0.8.0-rc.5">
+<title>Binary size by group of crates, Shale 0.8.0-rc.5</title>
+<style>
+text{font-family:sans-serif;font-size:12px;fill:#374151}.lbl{font-size:11px}.slice:hover path,.slice:hover rect,.col:hover rect.bar{opacity:0.75}
+</style>
+<rect width="760" height="400" fill="#ffffff"/>
+<text x="20" y="28" style="font-size:15px;font-weight:bold">Shale 0.8.0-rc.5 · 75.27 MiB loaded</text>
+<g class="slice">
+<title>Embedded files: 13.17 MiB (17.5%)</title>
+<path d="M 190 210 L 190.00 50.00 A 160 160 0 0 1 332.56 137.36 Z" fill="#b45309" stroke="#ffffff"/>
+<rect x="400" y="50" width="12" height="12" fill="#b45309"/>
+<text x="420" y="60">Embedded files · 13.17 MiB · 17.5%</text>
+</g>
+<g class="slice">
+<title>Shale: 10.16 MiB (13.5%)</title>
+<path d="M 190 210 L 332.56 137.36 A 160 160 0 0 1 338.76 268.91 Z" fill="#2563eb" stroke="#ffffff"/>
+<rect x="400" y="70" width="12" height="12" fill="#2563eb"/>
+<text x="420" y="80">Shale · 10.16 MiB · 13.5%</text>
+</g>
+<g class="slice">
+<title>UI: 8.09 MiB (10.7%)</title>
+<path d="M 190 210 L 338.76 268.91 A 160 160 0 0 1 269.30 348.96 Z" fill="#16a34a" stroke="#ffffff"/>
+<rect x="400" y="90" width="12" height="12" fill="#16a34a"/>
+<text x="420" y="100">UI · 8.09 MiB · 10.7%</text>
+</g>
+<g class="slice">
+<title>Strings and unwind data: 7.08 MiB (9.4%)</title>
+<path d="M 190 210 L 269.30 348.96 A 160 160 0 0 1 178.38 369.58 Z" fill="#7c3aed" stroke="#ffffff"/>
+<rect x="400" y="110" width="12" height="12" fill="#7c3aed"/>
+<text x="420" y="120">Strings and unwind data · 7.08 MiB · 9.4%</text>
+</g>
+<g class="slice">
+<title>Other: 5.66 MiB (7.5%)</title>
+<path d="M 190 210 L 178.38 369.58 A 160 160 0 0 1 107.07 346.83 Z" fill="#94a3b8" stroke="#ffffff"/>
+<rect x="400" y="130" width="12" height="12" fill="#94a3b8"/>
+<text x="420" y="140">Other · 5.66 MiB · 7.5%</text>
+</g>
+<g class="slice">
+<title>Rust std: 5.44 MiB (7.2%)</title>
+<path d="M 190 210 L 107.07 346.83 A 160 160 0 0 1 55.43 296.55 Z" fill="#64748b" stroke="#ffffff"/>
+<rect x="400" y="150" width="12" height="12" fill="#64748b"/>
+<text x="420" y="160">Rust std · 5.44 MiB · 7.2%</text>
+</g>
+<g class="slice">
+<title>Citations and Unicode data: 5.19 MiB (6.9%)</title>
+<path d="M 190 210 L 55.43 296.55 A 160 160 0 0 1 31.53 232.08 Z" fill="#0891b2" stroke="#ffffff"/>
+<rect x="400" y="170" width="12" height="12" fill="#0891b2"/>
+<text x="420" y="180">Citations and Unicode data · 5.19 MiB · 6.9%</text>
+</g>
+<g class="slice">
+<title>GPU: 4.10 MiB (5.4%)</title>
+<path d="M 190 210 L 31.53 232.08 A 160 160 0 0 1 33.31 177.62 Z" fill="#9333ea" stroke="#ffffff"/>
+<rect x="400" y="190" width="12" height="12" fill="#9333ea"/>
+<text x="420" y="200">GPU · 4.10 MiB · 5.4%</text>
+</g>
+<g class="slice">
+<title>Text and fonts: 4.06 MiB (5.4%)</title>
+<path d="M 190 210 L 33.31 177.62 A 160 160 0 0 1 52.98 127.39 Z" fill="#ea580c" stroke="#ffffff"/>
+<rect x="400" y="210" width="12" height="12" fill="#ea580c"/>
+<text x="420" y="220">Text and fonts · 4.06 MiB · 5.4%</text>
+</g>
+<g class="slice">
+<title>Images, audio and regex: 3.49 MiB (4.6%)</title>
+<path d="M 190 210 L 52.98 127.39 A 160 160 0 0 1 82.47 91.52 Z" fill="#0d9488" stroke="#ffffff"/>
+<rect x="400" y="230" width="12" height="12" fill="#0d9488"/>
+<text x="420" y="240">Images, audio and regex · 3.49 MiB · 4.6%</text>
+</g>
+<g class="slice">
+<title>PDF: 3.38 MiB (4.5%)</title>
+<path d="M 190 210 L 82.47 91.52 A 160 160 0 0 1 119.69 66.27 Z" fill="#dc2626" stroke="#ffffff"/>
+<rect x="400" y="250" width="12" height="12" fill="#dc2626"/>
+<text x="420" y="260">PDF · 3.38 MiB · 4.5%</text>
+</g>
+<g class="slice">
+<title>SQLite: 1.86 MiB (2.5%)</title>
+<path d="M 190 210 L 119.69 66.27 A 160 160 0 0 1 142.71 57.15 Z" fill="#ca8a04" stroke="#ffffff"/>
+<rect x="400" y="270" width="12" height="12" fill="#ca8a04"/>
+<text x="420" y="280">SQLite · 1.86 MiB · 2.5%</text>
+</g>
+<g class="slice">
+<title>D-Bus: 1.23 MiB (1.6%)</title>
+<path d="M 190 210 L 142.71 57.15 A 160 160 0 0 1 158.68 53.10 Z" fill="#4f46e5" stroke="#ffffff"/>
+<rect x="400" y="290" width="12" height="12" fill="#4f46e5"/>
+<text x="420" y="300">D-Bus · 1.23 MiB · 1.6%</text>
+</g>
+<g class="slice">
+<title>TLS and crypto: 1.21 MiB (1.6%)</title>
+<path d="M 190 210 L 158.68 53.10 A 160 160 0 0 1 174.61 50.74 Z" fill="#db2777" stroke="#ffffff"/>
+<rect x="400" y="310" width="12" height="12" fill="#db2777"/>
+<text x="420" y="320">TLS and crypto · 1.21 MiB · 1.6%</text>
+</g>
+<g class="slice">
+<title>Syntax highlighting: 1.15 MiB (1.5%)</title>
+<path d="M 190 210 L 174.61 50.74 A 160 160 0 0 1 190.00 50.00 Z" fill="#65a30d" stroke="#ffffff"/>
+<rect x="400" y="330" width="12" height="12" fill="#65a30d"/>
+<text x="420" y="340">Syntax highlighting · 1.15 MiB · 1.5%</text>
+</g>
+</svg>

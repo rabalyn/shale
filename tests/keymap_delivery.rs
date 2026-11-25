@@ -10,9 +10,9 @@ fn read(file: &str) -> String {
     fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(file)).unwrap_or_else(|e| panic!("{file}: {e}"))
 }
 
-// spec: BUILD-045
+// spec: BUILD-046
 #[test]
-fn build_045_the_pages_workflow_deploys_the_checked_in_page_with_pinned_actions_and_least_permissions() {
+fn build_046_the_pages_workflow_deploys_the_checked_in_page_with_pinned_actions_and_least_permissions() {
     let wf = read(".github/workflows/pages.yml");
     // main (which the mirror job pushes) and by hand, and nothing else
     assert!(wf.contains("on:\n  push:\n    branches: [main]\n") && wf.contains("  workflow_dispatch:\n"));
@@ -35,9 +35,9 @@ fn build_045_the_pages_workflow_deploys_the_checked_in_page_with_pinned_actions_
     assert!(read("README.md").contains("https://rabalyn.github.io/shale/"));
 }
 
-// spec: BUILD-046
+// spec: BUILD-047
 #[test]
-fn build_046_every_release_carries_the_keymap_page_with_its_checksum_and_attestation() {
+fn build_047_every_release_carries_the_keymap_page_with_its_checksum_and_attestation() {
     let gh = read(".github/workflows/build.yml");
     assert!(gh.contains(r#"KEYMAP="shale-keymap-${LABEL}.html""#) && gh.contains(r#"cp docs/keymap/index.html "release/$KEYMAP""#), "the page is not versioned");
     assert!(gh.contains(r#"for f in "$ASSET" "$GUIDE" "$PDF" "$KEYMAP"; do sha256sum"#), "the page has no checked .sha256 file");

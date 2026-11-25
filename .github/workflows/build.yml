@@ -15,7 +15,7 @@
 #      notes from CHANGELOG.md (the tag must match the version in Cargo.toml), the three
 #      downloads (Linux tarball, macOS arm64 tarball, Windows zip, all unsigned), the zip of the
 #      user guide (DEV-020), the guide as a PDF (BUILD-023) and the interactive keymap as one
-#      HTML file (BUILD-046), their .sha256 files and the build attestation. A red macOS or Windows job stops the release.
+#      HTML file (BUILD-047), their .sha256 files and the build attestation. A red macOS or Windows job stops the release.
 #    - workflow_dispatch: the same builds and attestation without publishing, to try the
 #      workflow (the files are workflow artifacts). It is not a test run for Linux: see below.
 #    - after the release page is up, the job `bench` (BUILD-041) runs the `full` benchmark profile
@@ -143,7 +143,7 @@ jobs:
           cp shale-userguide.zip "release/$GUIDE"
           PDF="shale-userguide-${LABEL}.pdf"
           cp shale-userguide.pdf "release/$PDF"
-          # BUILD-046: the interactive keymap, the one file of docs/keymap (KEY-060)
+          # BUILD-047: the interactive keymap, the one file of docs/keymap (KEY-060)
           KEYMAP="shale-keymap-${LABEL}.html"
           cp docs/keymap/index.html "release/$KEYMAP"
           # the checksum names the file as it is downloaded, so `sha256sum -c` works on it

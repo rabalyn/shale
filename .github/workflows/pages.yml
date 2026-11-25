@@ -1,4 +1,4 @@
-# The interactive keymap on GitHub Pages (BUILD-045, KEY-060, rabalyn/shale#712): https://rabalyn.github.io/shale/
+# The interactive keymap on GitHub Pages (BUILD-046, KEY-060, rabalyn/shale#712): https://rabalyn.github.io/shale/
 # `docs/keymap/index.html` is one file made from the program's own key tables (a test keeps it up to
 # date); this publishes it. It runs for a push of `main` that changes the page (`main` reaches GitHub
 # only from Forgejo's `mirror` job after a green check tag, BUILD-016) and by hand. It builds nothing:

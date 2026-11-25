@@ -46,6 +46,10 @@ report a security problem there, see Security below.
   or the report lists it under "Other" and its test fails. `scripts/land.sh` keeps
   [`docs/loc-report.md`](docs/loc-report.md), `docs/loc-history.svg` and `docs/loc-history.tsv` current (DEV-045: every landing commits fresh ones), so
   nobody commits that file by hand.
+- **Binary size.** [`docs/size-report.md`](docs/size-report.md) shows what occupies the Linux release
+  binary, by crate group, with a pie chart and a history per version (BUILD-045). `scripts/make-tag.sh` and
+  `scripts/make-release.sh` make it (`scripts/size-report.sh` builds with a linker map, which takes minutes), so
+  nobody commits those files by hand.
 
 ## Pull requests
 

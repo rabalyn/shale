@@ -250,6 +250,7 @@ merges a branch into `main`, runs fmt, clippy and the tests, and pushes only whe
 release tags (BUILD-012), also on macOS and Windows (BUILD-017). How landings, builds, agents,
 issues and releases are doing is exported for Prometheus and Grafana ([docs/dev-metrics.md](docs/dev-metrics.md)).
 The lines of code per feature and featureset, with the share of tests and a chart per tag, are in [docs/loc-report.md](docs/loc-report.md), refreshed by every landing (DEV-045).
+What occupies the Linux release binary, by crate group with a pie chart and a history per tag, is in [docs/size-report.md](docs/size-report.md), made by every tag (BUILD-045).
 
 ## Build and run
 
