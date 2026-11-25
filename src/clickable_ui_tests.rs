@@ -158,6 +158,13 @@ fn lay_038_the_files_view_and_the_ribbon_have_button_cursors_and_hover_looks() {
     check("files", |w| w.app.side.left = LeftPanel::Files);
 }
 
+// spec: VAULT-030
+#[test]
+fn lay_038_the_vault_switcher_has_a_button_cursor_and_a_hover_look_in_the_sidebar_and_the_ribbon() {
+    check("vault switcher", |w| w.app.side.left = LeftPanel::Files);
+    check("vault switcher in the ribbon", |w| w.app.cfg.show_left = false);
+}
+
 #[test]
 fn lay_038_the_tags_view_has_button_cursors_and_hover_looks() {
     check("tags", |w| w.app.side.left = LeftPanel::Tags);

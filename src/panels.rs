@@ -100,10 +100,7 @@ impl ShaleApp {
             });
         });
         ui.add_space(4.0);
-        let vault_name = self.vault.as_ref().map(|v| self.cfg.vaults.label_of(&v.root)).unwrap_or_default();
-        let bottom_h = 30.0;
-        let avail = ui.available_height() - bottom_h;
-        egui::ScrollArea::vertical().max_height(avail).auto_shrink([false, false]).show(ui, |ui| {
+        egui::ScrollArea::vertical().max_height(ui.available_height()).auto_shrink([false, false]).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 1.0;
             // dragging near the top or bottom edge scrolls the list
             if egui::DragAndDrop::has_payload_of_type::<TreeDrag>(ui.ctx()) {
@@ -151,13 +148,6 @@ impl ShaleApp {
                     ui.close();
                 }
             });
-        });
-        ui.separator();
-        ui.horizontal(|ui| {
-            let path = self.vault.as_ref().map(|v| v.root.to_string_lossy().into_owned()).unwrap_or_default();
-            if crate::vault_menu::vault_label(ui, &vault_name, &path) {
-                self.open_vault_menu();
-            }
         });
     }
 

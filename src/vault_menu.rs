@@ -10,7 +10,7 @@ use crate::file_picker::Request;
 use crate::known_vaults::{canonical, KnownVault};
 use crate::picker::ListKeys;
 use crate::theme;
-use eframe::egui::{self, Context, Key, Ui};
+use eframe::egui::{self, Context, Key, Pos2, Rect, Sense, StrokeKind, Ui, Vec2};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -201,7 +201,11 @@ impl ShaleApp {
         let n = entries.len() + 2 + usize::from(open.is_some());
         let mut next = Next::Keep;
         let mut pick: Option<usize> = None;
-        let resp = crate::dialog::Dialog::new("vaults", "Vaults").width(460.0).show(ctx, |ui| {
+        let mut dialog = crate::dialog::Dialog::new("vaults", "Vaults").width(460.0);
+        if let Some(r) = self.side.vault_button {
+            dialog = dialog.anchored_above(r.left_top());
+        }
+        let resp = dialog.show(ctx, |ui| {
             let keys = ListKeys::take(ui, &self.keymap);
             keys.select(sel, n);
             if keys.enter {
@@ -441,7 +445,78 @@ pub struct Refusal {
     pub offer_open: bool,
 }
 
-/// The vault label at the bottom left of the window: it opens the dropdown (VAULT-030).
-pub(crate) fn vault_label(ui: &mut Ui, name: &str, path: &str) -> bool {
-    ui.add(egui::Button::new(egui::RichText::new(format!("▣  {name}  ▾")).color(theme::palette().text).size(13.0)).frame(false)).on_hover_text(path).clicked()
+/// The room of the switcher strip at the bottom of the left sidebar: the button and its margin.
+const STRIP_HEIGHT: f32 = 36.0;
+/// The height of the switcher button.
+const BUTTON_HEIGHT: f32 = 26.0;
+
+impl ShaleApp {
+    /// The name and the folder of the open vault; None on the start screen.
+    fn vault_name_path(&self) -> Option<(String, String)> {
+        let v = self.vault.as_ref()?;
+        Some((self.cfg.vaults.label_of(&v.root), v.root.to_string_lossy().into_owned()))
+    }
+
+    /// The strip at the bottom of the left sidebar, below whichever pane is open: the vault
+    /// switcher, a dropdown button (VAULT-030).
+    pub(crate) fn vault_strip(&mut self, ui: &mut Ui) {
+        let Some((name, path)) = self.vault_name_path() else { return };
+        let open = matches!(self.modal, Some(Modal::Vaults(_)));
+        egui::Panel::bottom("vault-strip").exact_size(STRIP_HEIGHT).resizable(false).frame(egui::Frame::new().inner_margin(egui::Margin { top: 5, ..Default::default() })).show(ui, |ui| {
+            let resp = vault_button(ui, &name, &path, open);
+            self.side.vault_button = Some(resp.rect);
+            if resp.clicked() {
+                self.open_vault_menu();
+            }
+        });
+    }
+
+    /// While the left sidebar is hidden the switcher is an icon of the ribbon that opens the same
+    /// dropdown (VAULT-030).
+    pub(crate) fn ribbon_vault(&mut self, ui: &mut Ui) {
+        let Some((name, path)) = self.vault_name_path() else { return };
+        if self.cfg.show_left {
+            return;
+        }
+        let open = matches!(self.modal, Some(Modal::Vaults(_)));
+        let resp = crate::layout::icon_button(ui, crate::layout::Icon::Vault, 30.0, open, &format!("Vault: {name}\n{path}"));
+        self.side.vault_button = Some(resp.rect);
+        if resp.clicked() {
+            self.open_vault_menu();
+        }
+    }
+}
+
+/// The switcher: a framed dropdown button with the vault icon, the name (shortened with … when it
+/// does not fit; the full name and the folder are the tooltip) and a ▾ (VAULT-030). Its look comes
+/// from the visuals of the theme: rest, hover, pressed, and open while the dropdown is.
+fn vault_button(ui: &mut Ui, name: &str, path: &str, open: bool) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), BUTTON_HEIGHT), Sense::click());
+    let w = &ui.visuals().widgets;
+    let look = if resp.is_pointer_button_down_on() {
+        w.active
+    } else if open {
+        w.open
+    } else if resp.hovered() {
+        w.hovered
+    } else {
+        w.inactive
+    };
+    let painter = ui.painter();
+    painter.rect(rect, look.corner_radius, look.weak_bg_fill, look.bg_stroke, StrokeKind::Inside);
+    let color = look.fg_stroke.color;
+    let icon = Rect::from_min_size(rect.left_top() + Vec2::new(6.0, 3.0), Vec2::splat(BUTTON_HEIGHT - 6.0));
+    crate::layout::paint_icon(painter, icon.shrink(2.0), crate::layout::Icon::Vault, color);
+    let arrow = painter.layout_no_wrap("▾".into(), egui::FontId::proportional(13.0), color);
+    let arrow_x = rect.right() - 8.0 - arrow.size().x;
+    painter.galley(Pos2::new(arrow_x, rect.center().y - arrow.size().y / 2.0), arrow, color);
+    let left = icon.right() + 6.0;
+    let mut job = egui::text::LayoutJob::single_section(name.to_string(), egui::TextFormat::simple(egui::FontId::proportional(13.0), color));
+    job.wrap = egui::text::TextWrapping { max_width: (arrow_x - 6.0 - left).max(10.0), max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+    let galley = painter.layout_job(job);
+    let shortened = galley.rows.len() > 1 || galley.elided;
+    painter.galley(Pos2::new(left, rect.center().y - galley.size().y / 2.0), galley, color);
+    let tip = if shortened { format!("{name}\n{path}") } else { path.to_string() };
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, format!("Vault {name}")));
+    crate::clickable::button_like(ui, resp).on_hover_text(tip)
 }
