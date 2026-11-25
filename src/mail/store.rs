@@ -42,7 +42,7 @@ const MAX_DIR_NAME: usize = 150;
 
 /// Where the mail store lives by default (`~/.local/share/shale/mail`).
 pub fn default_root() -> PathBuf {
-    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("mail")
+    crate::userdirs::data_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("mail")
 }
 
 /// Today as `YYYY-MM-DD` (local time), for names of backups and quarantined files.

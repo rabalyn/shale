@@ -669,7 +669,7 @@ impl ShaleApp {
             }
             (None, None) => last_vault(&cfg),
         };
-        let default_welcome = dirs::document_dir().or_else(dirs::home_dir).unwrap_or_default().join("Notes");
+        let default_welcome = crate::userdirs::document_dir().or_else(crate::userdirs::home_dir).unwrap_or_default().join("Notes");
         // where the data lives: the user's folders, or temporary ones for tests and screenshots
         let n = NEXT_MAIL_ROOT.fetch_add(1, Ordering::SeqCst);
         // tests: one folder per process (and app; the calendar folder per app too, because a window deletes
@@ -683,7 +683,7 @@ impl ShaleApp {
         } else {
             std::env::temp_dir().join(format!("shale-mail-{tag}-{n}"))
         };
-        let social_dir = if persist { dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("social") } else { std::env::temp_dir().join(format!("shale-social-{tag}")) };
+        let social_dir = if persist { crate::userdirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("social") } else { std::env::temp_dir().join(format!("shale-social-{tag}")) };
         let calendar_dir = if persist { crate::calendar::store::default_local_dir() } else { std::env::temp_dir().join(if screenshot.is_some() { format!("shale-calendars-{tag}") } else { format!("shale-calendars-{tag}-{n}") }) };
         let recovery_root = if persist { crate::recovery::default_root() } else { std::env::temp_dir().join(format!("shale-recovery-{tag}")) };
         if screenshot.is_some() {
@@ -3603,7 +3603,7 @@ pub(crate) mod tests {
         let (mut app, d) = test_app("usage");
         let ctx = egui::Context::default();
         app.ctx = Some(ctx.clone());
-        assert!(!app.usage.places.pictures.starts_with(dirs::cache_dir().unwrap_or_default()) || app.usage.places.pictures.starts_with(std::env::temp_dir()), "a test never sees the real caches");
+        assert!(!app.usage.places.pictures.starts_with(crate::userdirs::cache_dir().unwrap_or_default()) || app.usage.places.pictures.starts_with(std::env::temp_dir()), "a test never sees the real caches");
         assert_eq!(app.usage.places.post_index, None);
         std::fs::create_dir_all(d.join(".shale")).unwrap();
         crate::fsutil::write_atomic(&crate::import::tagwords::file_in(&d), b"{}").unwrap();

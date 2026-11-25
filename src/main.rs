@@ -187,6 +187,7 @@ mod undo;
 #[cfg(test)]
 mod undo_tests;
 mod update;
+mod userdirs;
 mod userguide;
 #[cfg(test)]
 mod userguide_ui_tests;

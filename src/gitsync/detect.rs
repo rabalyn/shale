@@ -119,7 +119,7 @@ impl Inputs {
     /// Read the real ones for `vault` (a folder that exists; touches the disk).
     pub fn real(vault: &Path) -> Inputs {
         let os = Os::current();
-        let home = dirs::home_dir();
+        let home = crate::userdirs::home_dir();
         let mut inp = Inputs::none(os);
         inp.env = ["OneDrive", "OneDriveConsumer", "OneDriveCommercial"].iter().filter_map(|k| std::env::var(k).ok().map(|v| ((*k).to_string(), v))).collect();
         let mut infos: Vec<PathBuf> = vec![];

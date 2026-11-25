@@ -1179,7 +1179,7 @@ impl ShaleApp {
 pub fn shellexpand(p: &str) -> String {
     let p = p.trim();
     if let Some(rest) = p.strip_prefix('~') {
-        if let Some(h) = dirs::home_dir() {
+        if let Some(h) = crate::userdirs::home_dir() {
             return format!("{}{}", h.to_string_lossy(), rest);
         }
     }

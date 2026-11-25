@@ -499,6 +499,7 @@ fn a_selection_behind_the_end_of_a_note_that_shrank_on_disk_is_kept_inside_it() 
 // spec: NAV-041
 #[test]
 fn the_state_is_written_every_few_seconds_only_when_it_changed_and_not_at_every_frame() {
+    let _cfg = crate::config::testing::TestConfig::new("tick");
     let mut w = W::new("tick");
     w.long_notes(&["Welcome.md"]);
     let path = crate::vault_state::VaultData::state_path(&w.dir);

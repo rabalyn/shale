@@ -304,7 +304,7 @@ impl MoveOut {
 
 impl Setup {
     pub fn home(&self) -> Option<PathBuf> {
-        self.home.clone().or_else(dirs::home_dir)
+        self.home.clone().or_else(crate::userdirs::home_dir)
     }
 
     /// Findings for this vault (empty while the job runs or when nothing was found).
@@ -405,7 +405,7 @@ pub fn connect_and_inspect(git: &Git, vault: &Path, url: &str, ssh_key: Option<&
     if let Some(cmd) = ssh::ssh_command(ssh_key, true) {
         probe.env.push(("GIT_SSH_COMMAND".into(), cmd.into()));
     }
-    let home = dirs::home_dir().unwrap_or_default();
+    let home = crate::userdirs::home_dir().unwrap_or_default();
     let remote = test_sync::inspect(&probe, vault).map_err(|e| diagnose::diagnose(&e, &diagnose::gather(&probe, vault, &home, &e)).words())?;
     Ok((remote, test_sync::vault_has_notes(vault), moved))
 }

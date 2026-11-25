@@ -41,7 +41,7 @@ fn register(root: &Path, dir: Option<PathBuf>) {
 
 /// `<data folder>/shale/vaults`: the parent of the folders of the vaults placed outside.
 pub fn default_base() -> PathBuf {
-    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("vaults")
+    crate::userdirs::data_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("vaults")
 }
 
 /// Decide where the local state of the vault at `root` lives, before it is loaded. A vault
