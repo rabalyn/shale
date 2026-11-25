@@ -19,7 +19,9 @@ too: it is plain text with a description above every setting.
 
 ![[settings-vault.png]]
 
-The **Vault** tab is the short page Settings opens on: the vault folder, the button that closes the vault, the people folder, the bibliography file (the `.bib` file that notes use for citations, see [[Editor#The bibliography of a thesis]]) and the check of file names for Windows and macOS.
+The **Vault** tab is the short page Settings opens on: the vault folder, the button that closes the vault, the people folder, the bibliography file (the `.bib` file that notes use for citations, see [[Editor#The bibliography of a thesis]]), the **fonts of the exports** and the check of file names for Windows and macOS.
+
+The section **Fonts of the exports** has three fields, **Text**, **Headings** and **Code**: the font of a PDF or LaTeX export for a note that names none (the properties `print-font`, `print-font-sans` and `print-font-mono`, see [[PDF#Fonts of an export]]). A value is a family name, a path to a font file of the vault (`fonts/Garamond.otf`) or, for the text, `sans`, `serif` or `mono`; the button beside a field lists the families Shale found. Under a field Settings says whether the font is found and where (the vault, an installed font, or "TeX Live, checked when exporting"), or why it cannot be used. **Look up fonts again** reads the installed fonts anew, for a font you installed while Shale runs; the vault's `fonts/` folder is read again by itself when its files change. The three values are `print_font`, `print_font_sans` and `print_font_mono` in `.shale/settings.json`.
 
 ![[settings-editor.png]]
 

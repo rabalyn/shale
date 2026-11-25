@@ -72,6 +72,11 @@ impl Values {
         v.map(str::trim).filter(|v| !v.is_empty()).map(String::from)
     }
 
+    /// The three values of a form's fields (PDF-039, CFG-080): an empty or blank one is a missing one.
+    pub fn of_fields(text: &str, sans: &str, mono: &str) -> Values {
+        Values { text: Values::clean(Some(text)), sans: Values::clean(Some(sans)), mono: Values::clean(Some(mono)) }
+    }
+
     /// The `print-font*` properties of a note's front matter.
     pub fn of_note(text: &str) -> Values {
         let props = crate::pdf::export::print_properties(text);

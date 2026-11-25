@@ -254,3 +254,24 @@ fn pdf_036_a_font_with_outlines_that_are_not_truetype_is_drawn_as_outlines_and_a
     assert!(gone.warnings[0].contains("Test Gone") && gone.warnings[0].ends_with("using Ubuntu Light."), "{:?}", gone.warnings);
     assert!(names_font(&font_of(&gone.bytes, "Ztext"), "UbuntuLight"));
 }
+
+// spec: PDF-039
+#[test]
+fn pdf_039_the_fields_of_the_dialog_take_the_place_of_the_notes_properties() {
+    let e = Env::new("dialog");
+    family(&e.root.join("fonts"), "Test Serif", &FOUR);
+    family(&e.root.join("fonts"), "Test Other", &[(400, false)]);
+    let note = "---\nprint-font: Test Serif\nprint-font-mono: Test Gone\n---\nZplain `Zcode`\n";
+    let with = |dialog: Values| e.export(note, &ExportOptions { font_note: Some(dialog), ..e.opts(Values::default()) });
+    // what the dialog says is used, whatever the note says
+    let other = with(Values { text: Some("Test Other".into()), ..Values::default() });
+    assert!(names_font(&font_of(&other.bytes, "Zplain"), "TestOther-400"), "{}", font_of(&other.bytes, "Zplain"));
+    assert!(other.warnings.is_empty(), "the note's missing code font is not asked for: {:?}", other.warnings);
+    // a field that was cleared is not the note's `print-font: serif` any more, nor its font
+    let serif = ExportOptions { font_note: Some(Values::default()), ..e.opts(Values::default()) };
+    let cleared = e.export("---\nprint-font: serif\n---\nZplain\n", &serif);
+    assert!(names_font(&font_of(&cleared.bytes, "Zplain"), "UbuntuLight"), "{}", font_of(&cleared.bytes, "Zplain"));
+    // a value of the dialog that cannot be used is the warning of PDF-037
+    let missing = with(Values { text: Some("Nowhere".into()), ..Values::default() });
+    assert!(missing.warnings.iter().any(|w| w.contains("`print-font`") && w.contains("Nowhere") && w.contains("was not found")), "{:?}", missing.warnings);
+}

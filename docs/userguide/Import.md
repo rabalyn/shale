@@ -174,6 +174,18 @@ as wide in proportion to the text as in the editor, and a picture followed by an
 as its alternative text. A link to another note is its words, and an embed of a note, a PDF or a sound is its name in
 italics: Word has no place for them.
 
+A note with the thesis syntax ([[Editor#The bibliography of a thesis]]) is exported with its citations and references too.
+The `bibliography:` file and the style (`citation-style:`: one of the five named styles, or the name of a `.csl` file in
+the vault) go to pandoc's `--citeproc`, so `[@key]`, `[@key, p. 12]`, `[-@key]` and `@key` come out as the style writes them,
+and the list of references stands at the end under "Literaturverzeichnis" or "References" (by the note's `language:`), or
+where the line `<!-- shale: bibliography -->` is. Figures, tables and equations with a label get their numbers and captions
+as in the other exports ("Abbildung 3: …" in Word's caption styles, above or below as `figure-caption:` and `table-caption:`
+say; an equation ends in its number in brackets), a labelled heading has its number in front of its title, and the references
+`@fig:x`, `@tbl:x`, `@eq:x` and `@sec:x` are written as "Abbildung 3" or "Figure 3" in the language of the note. The numbers
+are text, not Word fields, so Word does not update them. A key the bibliography lacks, a reference to a label nobody has and
+a label used twice are named in the toast after the export, and they stay as written. The citations need pandoc 2.11 or
+newer (the export says so when it is older); no other program is needed.
+
 What the import already lost cannot come back: the cells that were merged in a table (they come back as empty cells),
 the numbers of figures and tables (Word fields), tab stops, the line spacing of single paragraphs, small caps, and the page
 setup of every section but the last. Whatever else is in the file, check it in Word; `scripts/roundtrip-docx.sh <file.docx>`

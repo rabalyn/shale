@@ -269,11 +269,78 @@ local function blocks(list)
   return out
 end
 
+-- the thesis syntax (DOCX-014 to DOCX-016, ADR-0041): Shale wrote marks into the text, a private-use character
+-- (U+E010 citation, U+E012 text, U+E013 figure caption, U+E014 bibliography, U+E015 table caption), the number of
+-- an item of the data file that `-M shale-thesis=<file>` names, and U+E011. Here they become pandoc's own things.
+local thesis = nil
+local MARK = '(\238\128[\144\146\147\148\149])(%d*)\238\128\145'
+
+local function words(s)
+  local out = pandoc.Inlines({})
+  for w in s:gmatch('%S+') do
+    if #out > 0 then out:insert(pandoc.Space()) end
+    out:insert(pandoc.Str(w))
+  end
+  return out
+end
+
+-- a group of citations: pandoc's Cite, which `--citeproc` formats (it replaces the words that stand in it)
+local function cite(group)
+  local cs, shown = {}, pandoc.Inlines({})
+  for _, c in ipairs(group) do
+    cs[#cs + 1] = pandoc.Citation(c.id, c.mode, words(c.prefix), words(c.suffix), 0, 0)
+    if #shown > 0 then shown:insert(pandoc.Str(';')) end
+    shown:insert(pandoc.Str('@' .. c.id))
+  end
+  return pandoc.Cite(shown, cs)
+end
+
+local function thesis_str(s)
+  if not thesis or not s.text:find('\238\128', 1, true) then return nil end
+  local out, at = pandoc.Inlines({}), 1
+  while true do
+    local a, b, open, n = s.text:find(MARK, at)
+    if not a then break end
+    if a > at then out:insert(pandoc.Str(s.text:sub(at, a - 1))) end
+    if open == '\238\128\144' and thesis.cites[tonumber(n)] then
+      out:insert(cite(thesis.cites[tonumber(n)]))
+    elseif open == '\238\128\146' and thesis.texts[tonumber(n)] then
+      out:extend(words(thesis.texts[tonumber(n)]))
+    end
+    at = b + 1
+  end
+  if at == 1 then return nil end
+  if at <= #s.text then out:insert(pandoc.Str(s.text:sub(at))) end
+  return out
+end
+
+local CAPTION = {['\238\128\147'] = 'Image Caption', ['\238\128\149'] = 'Table Caption'}
+-- a paragraph that is only the mark of a caption (a paragraph of Word's caption style) or of the bibliography (pandoc's `refs`)
+local function thesis_blocks(list)
+  if not thesis then return nil end
+  local out = pandoc.Blocks({})
+  for _, b in ipairs(list) do
+    local only = (b.t == 'Para' or b.t == 'Plain') and #b.content == 1 and b.content[1].t == 'Str' and b.content[1].text
+    local a, e, open, n
+    if only then a, e, open, n = only:find('^' .. MARK .. '$') end
+    if a and CAPTION[open] and thesis.texts[tonumber(n)] then
+      out:insert(pandoc.Div({pandoc.Para(words(thesis.texts[tonumber(n)]))}, pandoc.Attr('', {}, {['custom-style'] = CAPTION[open]})))
+    elseif a and open == '\238\128\148' then
+      out:insert(pandoc.Div({}, pandoc.Attr('refs')))
+    else
+      out:insert(b)
+    end
+  end
+  return out
+end
+
 -- the title block the import writes (IMP-042, IMP-046): a centred `#` heading at the very top, with an
 -- italic line below it, becomes Word's Title and Subtitle
 local function title(doc)
   local w = doc.meta['shale-text-width']
   text_width = w and tonumber(pandoc.utils.stringify(w)) or nil
+  local data = doc.meta['shale-thesis']
+  thesis = data and dofile(pandoc.utils.stringify(data)) or nil
   local b = doc.blocks
   if not (b[1] and align_open(b[1]) == 'center' and b[2] and b[2].t == 'Header' and b[2].level == 1) then return nil end
   local sub = caption(b[3])
@@ -289,6 +356,8 @@ end
 
 return {
   {Pandoc = title},
+  {Blocks = thesis_blocks},
+  {Str = thesis_str},
   {Inlines = inlines},
   {Blocks = blocks},
 }

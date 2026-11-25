@@ -5,6 +5,8 @@
 
 use crate::busy::Busy;
 use crate::clickable::ComboBoxPointer;
+use crate::fonts::field::{font_field, FamilyList};
+use crate::fonts::resolve::{Role, Values};
 use crate::pdf::book_dialog::{BookExport, PDF_EXPORT};
 use crate::pdf::export::{Background, ExportOptions, Paper};
 use crate::pdf::note_export::NoteExport;
@@ -40,6 +42,8 @@ pub struct ExportDialog {
     /// The fonts the export will use for this note and what could not be used (PDF-034, PDF-037);
     /// filled by the window once the font scan is in (JOB-040).
     pub fonts: Option<FontsNote>,
+    /// The three font fields (PDF-039): they start with what the note (or a book's top note) says.
+    pub font_fields: FontFields,
     /// Since when the export waits for the font scan to finish (PDF-037, ADR-0040 §8); none when it does not.
     pub fonts_wait: Option<std::time::Instant>,
     busy: Busy,
@@ -47,11 +51,41 @@ pub struct ExportDialog {
     pub rects: Vec<(String, Rect)>,
 }
 
+/// The font fields of the dialog (PDF-039): text, headings and code, in the order of [`Role::ALL`].
+#[derive(Clone, Debug, Default)]
+pub struct FontFields {
+    /// The fields hold what the note says; the window fills them once, when the dialog opens.
+    pub loaded: bool,
+    pub values: [String; 3],
+    /// What an empty field comes to (the template set's or the vault's font, or the default).
+    pub hints: [String; 3],
+    /// The families the scan found.
+    pub list: FamilyList,
+    /// The generation of the scan that `list` was made from.
+    pub generation: u64,
+}
+
+impl FontFields {
+    /// The fields' values as the resolver's: an empty field is a missing value.
+    pub fn values(&self) -> Values {
+        Values::of_fields(&self.values[0], &self.values[1], &self.values[2])
+    }
+
+    /// Start the fields with the values of a note.
+    pub fn fill(&mut self, note: &Values) {
+        for (field, role) in self.values.iter_mut().zip(Role::ALL) {
+            *field = note.get(role).unwrap_or_default().to_string();
+        }
+        self.loaded = true;
+    }
+}
+
 /// The fonts of a note's export in words, for the dialog (PDF-019).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FontsNote {
-    /// What the scan and the engine of the dialog were when this was made; it is made again when they change.
-    pub stamp: (u64, bool, usize),
+    /// What the scan, the engine of the dialog and the fields were when this was made; it is made
+    /// again when they change.
+    pub stamp: (u64, bool, usize, Values),
     /// "text Garamond (system), code Hack": the roles that the note, the book or the vault set.
     pub line: String,
     pub warnings: Vec<String>,
@@ -60,25 +94,42 @@ pub struct FontsNote {
 }
 
 impl FontsNote {
-    /// The row(s) of the dialog: the fonts that are set, and why one was not used.
+    /// What the fonts come to, and why one was not used.
     fn show(&self, ui: &mut Ui, muted: &dyn Fn(&str) -> egui::RichText) {
-        if self.line.is_empty() && self.warnings.is_empty() && !self.pending {
-            return;
+        if !self.line.is_empty() {
+            ui.label(muted(&self.line));
         }
-        ui.label(muted("Fonts"));
-        ui.vertical(|ui| {
-            if !self.line.is_empty() {
-                ui.label(muted(&self.line));
-            }
-            if self.pending {
-                ui.label(muted("Looking up fonts..."));
-            }
-            for w in &self.warnings {
-                crate::theme::problem(ui, w);
+        if self.pending {
+            ui.label(muted("Looking up fonts..."));
+        }
+        for w in &self.warnings {
+            crate::theme::problem(ui, w);
+        }
+    }
+}
+
+/// The row *Fonts* (PDF-019, PDF-039): the three fields (text, headings, code) that start with
+/// what the note says, and under them the fonts the export will use and the warnings.
+fn fonts_row(ui: &mut Ui, fields: &mut FontFields, note: Option<&FontsNote>, muted: &dyn Fn(&str) -> egui::RichText, rec: &mut dyn FnMut(&str, egui::Response) -> egui::Response) {
+    ui.label(muted("Fonts"));
+    ui.vertical(|ui| {
+        egui::Grid::new("export-font-fields").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+            for (n, (role, id)) in Role::ALL.into_iter().zip(["text", "headings", "code"]).enumerate() {
+                ui.label(muted(match role {
+                    Role::Text => "Text",
+                    Role::Sans => "Headings",
+                    Role::Mono => "Code",
+                }));
+                let list = fields.list.clone();
+                font_field(ui, id, &mut fields.values[n], &fields.hints[n], &list, rec);
+                ui.end_row();
             }
         });
-        ui.end_row();
-    }
+        if let Some(note) = note {
+            note.show(ui, muted);
+        }
+    });
+    ui.end_row();
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -103,6 +154,7 @@ impl ExportDialog {
             book: None,
             note: None,
             fonts: None,
+            font_fields: FontFields::default(),
             fonts_wait: None,
             busy: Busy::default(),
             rects: vec![],
@@ -142,6 +194,11 @@ impl ExportDialog {
     pub fn with_book(mut self, book: BookExport) -> Self {
         self.book = Some(Box::new(book));
         self
+    }
+
+    /// The fonts the fields say (PDF-039); none until the window has filled them, and for a drawing.
+    pub fn font_values(&self) -> Option<Values> {
+        (self.font_fields.loaded && !self.drawing).then(|| self.font_fields.values())
     }
 
     /// Whether this export goes through LaTeX.
@@ -232,8 +289,8 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
     if let (ExportEngine::Latex, Some(tex)) = (d.engine, d.tex.as_deref_mut()) {
         tex.show(ui, &mut d.opts, &mut rec);
         egui::Grid::new("export-save-grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-            if let Some(f) = d.fonts.as_ref().filter(|_| d.book.is_none()) {
-                f.show(ui, &muted);
+            if !d.drawing {
+                fonts_row(ui, &mut d.font_fields, d.fonts.as_ref(), &muted, &mut rec);
             }
             ui.label(muted("Save as"));
             path_field(ui, &mut d.path, &mut rec);
@@ -330,9 +387,7 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
                 ui.label(muted(&label));
                 ui.end_row();
             }
-            if let Some(f) = d.fonts.as_ref().filter(|_| d.book.is_none()) {
-                f.show(ui, &muted);
-            }
+            fonts_row(ui, &mut d.font_fields, d.fonts.as_ref(), &muted, &mut rec);
             ui.label(muted("Include"));
             ui.vertical(|ui| {
                 rec("title", crate::clickable::pointer(ui.checkbox(&mut d.opts.title, if d.book.is_some() { "Title page" } else { "The note's name as a title" })));
@@ -533,7 +588,43 @@ mod tests {
         assert!(d.rects.iter().any(|r| r.0 == "paper:custom"), "the custom size is listed");
         h.click(&mut d, &format!("paper:{}", Paper::A5.label()));
         assert_eq!((d.opts.paper, d.opts.custom_mm), (Paper::A5, None));
-        assert_eq!(d.opts.text_properties_label().as_deref(), Some("paper look, serif, justified, line spacing 1.15"));
+        assert_eq!(d.opts.text_properties_label().as_deref(), Some("paper look, justified, line spacing 1.15"));
+    }
+
+    // spec: PDF-039
+    #[test]
+    fn pdf_039_the_dialog_has_three_font_fields_with_a_list_of_the_families_that_narrows_as_one_types() {
+        let has = |d: &ExportDialog, key: &str| d.rects.iter().any(|r| r.0 == key);
+        let (mut h, mut d) = setup(false);
+        for key in ["font:text", "font:headings", "font:code", "font:text:list"] {
+            assert!(has(&d, key), "{key}");
+        }
+        d.font_fields.list = FamilyList { names: std::sync::Arc::new(vec!["Alpha Sans".into(), "Beta Mono".into(), "Gamma Serif".into(), "Gamma Sans".into()]), pending: false };
+        h.frame(&mut d, vec![]);
+        // the list offers every family, and a pick fills the field it belongs to
+        h.click(&mut d, "font:code:list");
+        for name in ["Alpha Sans", "Beta Mono", "Gamma Serif", "Gamma Sans"] {
+            assert!(has(&d, &format!("font:code:pick:{name}")), "{name} is offered");
+        }
+        h.click(&mut d, "font:code:pick:Beta Mono");
+        assert_eq!(d.font_fields.values, ["", "", "Beta Mono"]);
+        assert_eq!(d.font_fields.values(), Values { text: None, sans: None, mono: Some("Beta Mono".into()) }, "an empty field is a missing value");
+        // what is typed narrows the list (ignoring case and spaces), and a typed name stays as it is
+        d.font_fields.values[1] = "gamma s".into();
+        h.frame(&mut d, vec![]);
+        h.click(&mut d, "font:headings:list");
+        assert!(has(&d, "font:headings:pick:Gamma Serif") && has(&d, "font:headings:pick:Gamma Sans"));
+        assert!(!has(&d, "font:headings:pick:Alpha Sans"), "a family that does not fit is not offered");
+        h.click(&mut d, "font:headings:pick:Gamma Sans");
+        assert_eq!(d.font_fields.values[1], "Gamma Sans");
+        d.font_fields.values[0] = "My Own Name".into();
+        h.frame(&mut d, vec![]);
+        assert_eq!(d.font_values(), None, "the window has not filled the fields yet");
+        d.font_fields.loaded = true;
+        assert_eq!(d.font_values().and_then(|v| v.text), Some("My Own Name".into()), "any typed name is a value");
+        // a drawing has no fonts to choose
+        let (_, d) = setup(true);
+        assert!(!has(&d, "font:text") && d.font_values().is_none());
     }
 
     // spec: PDF-021

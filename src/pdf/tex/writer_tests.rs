@@ -971,11 +971,13 @@ struct Fonts<'a> {
     system: Vec<(&'a str, Spec)>,
     set: SetSettings,
     settings: Values,
+    /// The fields of the export dialog (PDF-039), which take the place of the note's properties.
+    dialog: Option<Values>,
 }
 
 impl<'a> Fonts<'a> {
     fn new() -> Self {
-        Fonts { vault: vec![], system: vec![], set: SetSettings::default(), settings: Values::default() }
+        Fonts { vault: vec![], system: vec![], set: SetSettings::default(), settings: Values::default(), dialog: None }
     }
 
     /// The note written as the `pub` kind of the tuda set with these fonts.
@@ -994,7 +996,16 @@ impl<'a> Fonts<'a> {
         let catalogue = Catalogue { vault: Arc::new(scan_vault(&dir)), system: Arc::new(scan_system(Some(std::slice::from_ref(&sys)))), system_ready: true, generation: 1 };
         let input = FontInput { catalogue, vault: self.settings.clone() };
         let set = tuda_set(SetSettings { accent: "9c".into(), ..self.set.clone() });
-        let out = write(&Request { vault: &v, rel: Path::new("Plan.md"), text: note, opts: &ExportOptions::for_note(), set: &set, kind: kind(&set, "pub"), fields: &fields(&[("author", "Ada")]), fonts: Some(&input) });
+        let out = write(&Request {
+            vault: &v,
+            rel: Path::new("Plan.md"),
+            text: note,
+            opts: &ExportOptions { font_note: self.dialog.clone(), ..ExportOptions::for_note() },
+            set: &set,
+            kind: kind(&set, "pub"),
+            fields: &fields(&[("author", "Ada")]),
+            fonts: Some(&input),
+        });
         let _ = std::fs::remove_dir_all(dir);
         let _ = std::fs::remove_dir_all(sys);
         out
@@ -1057,6 +1068,18 @@ fn tex_059_the_note_wins_then_the_set_then_the_vault_for_each_role_on_its_own() 
     f.set = SetSettings { font: "  ".into(), font_sans: " Set Sans ".into(), ..SetSettings::default() };
     let tex = f.tex(&font_note(&[]));
     assert!(tex.contains("\\setmainfont{Vault Text}") && tex.contains("\\setsansfont{Set Sans}"), "{tex}");
+}
+
+// spec: PDF-039, TEX-054
+#[test]
+fn pdf_039_the_fields_of_the_dialog_take_the_place_of_the_notes_properties_in_the_latex_export() {
+    let mut f = Fonts::new();
+    f.settings.mono = Some("Vault Mono".into());
+    f.dialog = Some(Values { text: Some("Dialog Text".into()), sans: None, mono: None });
+    let tex = f.tex(&font_note(&[("print-font", "Note Text"), ("print-font-sans", "Note Sans")]));
+    assert!(tex.contains("\\setmainfont{Dialog Text}") && !tex.contains("Note Text"), "the field is the note's value: {tex}");
+    assert!(!tex.contains("Note Sans"), "a cleared field is not the note's: {tex}");
+    assert!(tex.contains("\\setmonofont{Vault Mono}"), "an empty field falls to the vault: {tex}");
 }
 
 // spec: TEX-059

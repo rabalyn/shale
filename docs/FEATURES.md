@@ -213,15 +213,16 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   the last item you trashed back.
 
   ![The PDF export dialog](userguide/z_media/screenshots/pdf-export-dialog.png)
+  ![The font fields of the export dialog, with a font of the vault and one that is missing](userguide/z_media/screenshots/pdf-export-fonts.png)
 
 - **Print properties of a note** (#339): the front matter of a note can say how its PDF is printed; all
   keys are optional and a bad value is ignored. The export dialog opens with the note's paper, margins,
-  text size, title and contents filled in (and they can be changed there); the font, the spacing, the
+  text size, title, contents and fonts filled in (and they can be changed there); the spacing, the
   alignment, the heading colour, weight and sizes are read from the note at export time. Word imports write them.
   - `print-paper`: `A4`, `A5`, `Letter`, `Legal` or `<W>x<H>mm` (a width larger than the height is landscape)
   - `print-margins`: four numbers in mm, `top right bottom left`
   - `print-font`: `serif` (Liberation Serif, Times-compatible), `sans` (Ubuntu Light) or `mono` (Hack)
-  - `print-font-sans`, `print-font-mono`, and `print-font` with a family name or a vault path to a font file: the built-in PDF sets the text, the headings (`print-font-sans`, else the text font) and the code in them, with the family's real bold and italic faces (a face it lacks is imitated, with a warning), embeds only the characters it uses and respects the font's licence; a missing font is a warning, never a failed export; a folder's book has one font, its top note's. The export dialog says which font such a value (or the vault's `print_font*` settings) resolves to. The LaTeX export uses them too (below)
+  - `print-font-sans`, `print-font-mono`, and `print-font` with a family name or a vault path to a font file: the built-in PDF sets the text, the headings (`print-font-sans`, else the text font) and the code in them, with the family's real bold and italic faces (a face it lacks is imitated, with a warning), embeds only the characters it uses and respects the font's licence; a missing font is a warning, never a failed export; a folder's book has one font, its top note's. The export dialog has three font fields (text, headings, code) that start with the note's values (a folder's: its top note's), offer the families the scan found in a list that takes any typed name, and say which font each value resolves to (or why it cannot be used); what they say is used for that export instead of the note's properties. Settings → Vault has the same three fields as the vault's default (`print_font*`) with the status of each value and a button *Look up fonts again*; the scan of the fonts is a background job. The LaTeX export uses them too (below)
   - `print-font-size`: the body text in points
   - `print-line-spacing`: a factor, 1.0 being the font's own single line height
   - `print-paragraph-spacing`: the space after a body paragraph in points
@@ -1040,6 +1041,14 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   out, compressed). Docx → note → docx keeps what the import kept: the words of the fixtures come back (all of them, 95 % of `text.docx`);
   merged cells, figure and table numbers, tab stops, line spacing of single paragraphs, small caps and all but the last section's page are lost
   at import. `scripts/roundtrip-docx.sh <file.docx>` prints the share of the words of any Word file that comes back.
+  **The thesis syntax** (DOCX-014 to DOCX-017, ADR-0041, rabalyn/shale#650): the `bibliography:` file and the style (one of the five
+  of `citation-style:`, written as CSL from the same archive the built-in PDF formats with, or a `.csl` file of the vault) go to
+  pandoc's `--citeproc`, so citations come out as the style writes them with the list of references at the end under its heading
+  in the language of the note, or at `<!-- shale: bibliography -->`; Shale writes the numbers itself with the model of the other
+  exports (labelled figures, tables and equations with captions in Word's *Image Caption* and *Table Caption* styles above or below,
+  an equation's number at its end, a labelled heading's number before its title, references as "Abbildung 3" / "Figure 3"), so
+  no pandoc-crossref is needed; a key or label that does not resolve is a warning in the toast and stays as written; a pandoc older
+  than 2.11 says so.
   `scripts/validate-docx.sh <file.docx>…` checks a Word file against Microsoft's WordprocessingML schema (the export tests do it for every file they
   write) and `scripts/docx-corpus.sh` runs the round trip, the schema check and a page count on 50 real-world Word files (developer tools). A Word
   file whose XML is nested more than 256 levels is refused at import with a message instead of crashing the program. Every pandoc run of
@@ -1320,7 +1329,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   `figure-caption:` or the set's `table_caption` and `figure_caption` say otherwise), labelled equations as numbered
   `equation`s, references as `\cref` in the language of the note, per chapter or continuous numbering, and lists of
   figures and tables (boxes of the dialog or markers).
-  **The built-in PDF and the site** write the same without TeX (PDF-032, SITE-077): formatted citations, numbered figures, tables and equations with captions above or below, references as links, the bibliography and, at `<!-- shale: list-of-figures -->` and `<!-- shale: list-of-tables -->`, the lists of figures and tables; a key or label that does not resolve is a warning of the export. A thesis of several notes in one PDF and the Word export are the next phases.
+  **The built-in PDF and the site** write the same without TeX (PDF-032, SITE-077): formatted citations, numbered figures, tables and equations with captions above or below, references as links, the bibliography and, at `<!-- shale: list-of-figures -->` and `<!-- shale: list-of-tables -->`, the lists of figures and tables; a key or label that does not resolve is a warning of the export. **A thesis of several notes** (a folder whose top note has `bibliography:`, `float-numbering:` or `citation-style:`) is one document in the built-in PDF of the folder and in its LaTeX export (BOOK-020, BOOK-021, #649): figures, tables and equations are numbered per chapter (`3.1`; `2.1.1` in the built-in PDF for the chapter `2.1`) or continuously as the top note's `float-numbering:` says, a reference such as `@fig:x` finds a label in any chapter, the one bibliography of the top note lists every cited key once, after the last chapter or at `<!-- shale: bibliography -->`, and a label used twice, a reference or key that does not resolve and a chapter's own `bibliography:` are warnings that name the notes. The Word export is the next phase.
 
   ![Completion of a citation key in the editor](userguide/z_media/screenshots/thesis-editor.png)
   ![A thesis note in the reading view](userguide/z_media/screenshots/thesis-reading.png)

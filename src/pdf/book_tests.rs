@@ -706,3 +706,129 @@ fn book_022_a_book_has_one_font_the_top_notes_and_a_chapters_own_is_ignored_with
     assert!(font_of(&made.bytes, "Contents").ends_with("TestSerif-700"), "the contents");
     assert!(!base_fonts(&made.bytes).iter().any(|n| n.contains("TestSans")), "the chapter's font is not embedded");
 }
+
+// ---------------------------------------------------------------- the thesis syntax of a book (#649)
+
+/// A three-chapter thesis: the top folder note holds the book's properties and cites `b`, each
+/// chapter has a figure and refers to the others, the last has a table, an equation and a section.
+fn thesis_book(tag: &str, top_properties: &str, extra: &[(&str, &str)]) -> (Vault, PathBuf) {
+    let top = format!("---\norder: [One, Two, Three]\nbibliography: refs.bib\n{top_properties}---\nThe book starts with [@b].\n");
+    let one = "# One {#sec:one}\n\n![[plot.png|First plot]]{#fig:one}\n\nSee @fig:two, and @tbl:t of @sec:three. Cited [@a].\n";
+    let two = "# Two {#sec:two}\n\n![[plot.png|Second plot]]{#fig:two}\n\nBack to @fig:one and [-@fig:one], as [@a; @b] say.\n";
+    let three = "# Three {#sec:three}\n\n## Method {#sec:method}\n\n| x | y |\n|---|---|\n| cellone | celltwo |\n: Runs of the day {#tbl:t}\n\n$$ E = mc^2 $$ {#eq:e}\n\nBack in @sec:two, @eq:e and @fig:two. See @sec:method.\n";
+    let mut files = vec![("refs.bib", crate::pdf::thesis_tests::BIB), ("Thesis/Thesis.md", top.as_str()), ("Thesis/One.md", one), ("Thesis/Two.md", two), ("Thesis/Three.md", three)];
+    files.extend_from_slice(extra);
+    let dir = std::env::temp_dir().join(format!("shale-book-thesis-{tag}-{}", std::process::id())).join("vault");
+    let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+    std::fs::create_dir_all(dir.join("Thesis")).unwrap();
+    image::RgbaImage::from_pixel(40, 30, image::Rgba([230, 20, 20, 255])).save(dir.join("plot.png")).unwrap();
+    for (name, text) in files {
+        std::fs::write(dir.join(name), text).unwrap();
+    }
+    (Vault::open(&dir).unwrap(), dir)
+}
+
+fn thesis_opts() -> ExportOptions {
+    ExportOptions { title: false, toc: false, page_numbers: false, ..ExportOptions::for_note() }
+}
+
+fn made(v: &Vault, opts: &ExportOptions) -> crate::pdf::export_fonts::Made {
+    crate::pdf::book_export::export_book_made(v, Path::new("Thesis"), opts, None).unwrap()
+}
+
+// spec: BOOK-020
+#[test]
+fn book_020_the_built_in_book_numbers_per_chapter_or_continuously_and_a_reference_finds_a_label_of_another_chapter() {
+    let (v, d) = thesis_book("numbers", "", &[]);
+    let m = made(&v, &thesis_opts());
+    let t = crate::pdf::thesis_tests::drawn(&m.bytes);
+    // per chapter (the default of a book): the chapter's number before the counter, in reading order
+    for want in [
+        "Figure 1.1: First plot",
+        "Figure 2.1: Second plot",
+        "Table 3.1: Runs of the day",
+        "(3.1)",
+        "See Figure 2.1, and Table 3.1 of Chapter 3.",
+        "Back to Figure 1.1 and 1.1,",
+        "Back in Chapter 2, Equation (3.1) and Figure 2.1. See Section 3.1.",
+    ] {
+        assert!(t.contains(want), "{want} in {t}");
+    }
+    assert!(!t.contains("{#") && !t.contains('@'), "no label or reference is left as written: {t}");
+    assert!(m.warnings.is_empty(), "{:?}", m.warnings);
+    // the references are links: to the chapter that has the label (each chapter starts a page)
+    let (pages, links) = page_ids_and_link_targets(&m.bytes);
+    // (the first page is the top note's text)
+    for (page, why) in [(1, "Back to Figure 1.1 of chapter Two"), (2, "See Figure 2.1 of chapter One"), (3, "Chapter 3 and Table 3.1 of chapter One")] {
+        assert!(links.contains(&pages[page]), "{why}: {links:?} {pages:?}");
+    }
+    // continuous: the top folder note says so
+    let (v2, d2) = thesis_book("continuous", "float-numbering: continuous\n", &[]);
+    let t = crate::pdf::thesis_tests::drawn(&made(&v2, &thesis_opts()).bytes);
+    for want in ["Figure 1: First plot", "Figure 2: Second plot", "Table 1: Runs of the day", "(1)", "See Figure 2, and Table 1 of Chapter 3."] {
+        assert!(t.contains(want), "{want} in {t}");
+    }
+    clean(&d);
+    clean(&d2);
+}
+
+// spec: BOOK-020
+#[test]
+fn book_020_a_chapters_own_numbering_and_caption_properties_are_ignored() {
+    let three = "---\nfloat-numbering: continuous\ntable-caption: below\n---\n# Three {#sec:three}\n\n| x | y |\n|---|---|\n| cellone | celltwo |\n: Runs of the day {#tbl:t}\n\nSee @tbl:t.\n";
+    let (v, d) = thesis_book("own", "", &[("Thesis/Three.md", three)]);
+    let t = crate::pdf::thesis_tests::drawn(&made(&v, &thesis_opts()).bytes);
+    assert!(t.contains("Table 3.1: Runs of the day") && t.contains("Figure 2.1: Second plot"), "the top note's per chapter counts: {t}");
+    assert!(t.find("Table 3.1").unwrap() < t.find("cellone").unwrap(), "the table's caption stays above it, as the book says: {t}");
+    clean(&d);
+}
+
+// spec: BOOK-020, BOOK-021
+#[test]
+fn book_020_what_does_not_resolve_in_the_book_is_a_warning_that_names_the_notes() {
+    let two = "# Two\n\n![[plot.png|Second plot]]{#fig:one}\n\nSee @fig:nowhere and [@zzz].\n";
+    let (v, d) = thesis_book("warn", "", &[("Thesis/Two.md", two), ("Thesis/Three.md", "---\nbibliography: other.bib\n---\n# Three\n\nPlain.\n")]);
+    let w = made(&v, &thesis_opts()).warnings;
+    for want in [
+        "The label {#fig:one} is in “One” and again in “Two”: the first one counts",
+        "The note “Two” refers to @fig:nowhere and no note of the book has {#fig:nowhere}: it stays text",
+        "The key “zzz” cited in the note “Two” is not in the bibliography: the citation stays text",
+        "The note “Three” names a bibliography of its own",
+    ] {
+        assert!(w.iter().any(|m| m.starts_with(want)), "{want} in {w:?}");
+    }
+    clean(&d);
+}
+
+// spec: BOOK-021
+#[test]
+fn book_021_the_built_in_book_has_one_bibliography_at_the_end_and_in_the_contents() {
+    let (v, d) = thesis_book("bib", "citation-style: numeric\n", &[]);
+    let opts = ExportOptions { toc: true, toc_break: false, ..thesis_opts() };
+    let m = made(&v, &opts);
+    let t = crate::pdf::thesis_tests::drawn(&m.bytes);
+    // `b` is cited first (the top note), so it is [1]; `a`, cited in two chapters, is one entry [2]
+    assert!(t.contains("Cited [2].") && t.contains("as [1, 2] say."), "{t}");
+    assert!(!t.contains("[3]"), "{t}");
+    assert_eq!(t.matches("Schulz").count(), 1, "one entry for a key cited in several notes: {t}");
+    assert_eq!(t.matches("Meier").count(), 1, "{t}");
+    assert_eq!(t.matches("References").count(), 2, "the heading and its line of the contents: {t}");
+    assert!(t.rfind("Back in Chapter 2").unwrap() < t.rfind("References").unwrap(), "after the last chapter: {t}");
+    // a link from the citations to the entries, which are on the last page
+    let (pages, links) = page_ids_and_link_targets(&m.bytes);
+    assert!(links.contains(pages.last().unwrap()), "the citations link to the page of the bibliography: {links:?} {pages:?}");
+    clean(&d);
+}
+
+// spec: BOOK-021
+#[test]
+fn book_021_the_marker_of_a_chapter_puts_the_bibliography_there() {
+    let two = "# Two {#sec:two}\n\n![[plot.png|Second plot]]{#fig:two}\n\nBack to @fig:one, as [@a; @b] say.\n\n<!-- shale: bibliography -->\n\nAfter the marker.\n";
+    let (v, d) = thesis_book("marker", "", &[("Thesis/Two.md", two)]);
+    let t = crate::pdf::thesis_tests::drawn(&made(&v, &thesis_opts()).bytes);
+    assert_eq!(t.matches("References").count(), 1, "once: {t}");
+    assert!(t.find("References").unwrap() < t.find("After the marker.").unwrap(), "{t}");
+    assert!(t.find("After the marker.").unwrap() < t.find("Back in").unwrap(), "chapter three follows: {t}");
+    assert!(!t.contains("shale: bibliography"), "{t}");
+    clean(&d);
+}

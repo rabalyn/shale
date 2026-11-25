@@ -69,6 +69,11 @@ impl Style {
         }
     }
 
+    /// The style as a CSL file, for a program that reads CSL itself (pandoc's `--csl`, DOCX-014): the same style the built-in exports format with.
+    pub fn csl_xml(self) -> Result<String, String> {
+        Csl::Independent(self.csl().clone()).to_xml().map_err(|e| e.to_string())
+    }
+
     fn csl(self) -> &'static IndependentStyle {
         static STYLES: [OnceLock<IndependentStyle>; 5] = [OnceLock::new(), OnceLock::new(), OnceLock::new(), OnceLock::new(), OnceLock::new()];
         let slot = Style::ALL.iter().position(|s| *s == self).unwrap_or(0);

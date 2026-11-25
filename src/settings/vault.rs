@@ -67,6 +67,7 @@ impl ShaleApp {
         });
         crate::theme::hint(ui, "A BibLaTeX or BibTeX file of the vault, as Zotero, JabRef or Citavi export it: a path, a file name or [[refs.bib]]. A note's own property bibliography: wins.");
         self.bibliography_status_ui(ui);
+        changed |= self.export_fonts_ui(ui);
         self.names_check_ui(ui);
         self.outside_check_ui(ui);
         changed
@@ -83,6 +84,52 @@ impl ShaleApp {
         for line in lines {
             crate::theme::hint(ui, &line);
         }
+    }
+
+    /// The fonts the exports use for a note without its own (CFG-080, ADR-0040 §1): three fields
+    /// with the families the scan found, what each value comes to, and the button that looks the
+    /// fonts up again (CFG-081).
+    fn export_fonts_ui(&mut self, ui: &mut Ui) -> bool {
+        use crate::fonts::resolve::Role;
+        crate::theme::section(ui, "Fonts of the exports");
+        // the first need of the fonts by Settings starts the scan (JOB-040)
+        self.font_scan.request();
+        let catalogue = self.font_scan.catalogue();
+        let list = self.font_scan.families();
+        let root = self.vault.as_ref().map(|v| v.root.clone()).unwrap_or_default();
+        let mut changed = false;
+        anchor(ui, "vault.fonts", |ui| {
+            egui::Grid::new("vault-font-fields").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+                let s = &mut self.vdata.settings;
+                for (role, id, label, value, hint) in
+                    [(Role::Text, "text", "Text", &mut s.print_font, "Ubuntu Light"), (Role::Sans, "headings", "Headings", &mut s.print_font_sans, "the text font"), (Role::Mono, "code", "Code", &mut s.print_font_mono, "Hack")]
+                {
+                    ui.label(label);
+                    ui.vertical(|ui| {
+                        changed |= crate::fonts::field::font_field(ui, id, value, hint, &list, &mut |_, r| r);
+                        if let Some(c) = crate::fonts::field::check(role, value, &root, &catalogue) {
+                            if c.problem {
+                                crate::theme::problem(ui, c.text);
+                            } else {
+                                crate::theme::hint(ui, c.text);
+                            }
+                        }
+                    });
+                    ui.end_row();
+                }
+            });
+        });
+        crate::theme::hint(ui, "The font of a PDF or LaTeX export for a note that names none (print-font, print-font-sans, print-font-mono): a family name, a font file of the vault (fonts/…), or for the text sans, serif and mono. The headings follow the text.");
+        ui.horizontal(|ui| {
+            let running = self.font_scan.running();
+            if ui.add_enabled(!running, egui::Button::new("Look up fonts again")).on_hover_text("For a font installed while Shale runs; the fonts of the vault's fonts/ folder are read again by themselves").clicked() {
+                self.font_scan.rescan();
+            }
+            if !crate::busy::ui::status(ui, &self.busy, &crate::fonts::scan::FONT_SCAN) && !catalogue.system_ready {
+                crate::theme::hint(ui, "Looking up fonts...");
+            }
+        });
+        changed
     }
 
     /// "Check names for Windows and macOS…" and its list (VAULT-028).

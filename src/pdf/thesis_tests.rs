@@ -5,7 +5,7 @@ use crate::pdf::export::{export_note_until, ExportOptions};
 use crate::vault::Vault;
 use std::path::{Path, PathBuf};
 
-const BIB: &str = "@book{a, author = {Meier, Anna}, title = {Alpha}, date = {2020}, publisher = {P}}\n@book{b, author = {Schulz, Bo}, title = {Beta}, date = {2021}, publisher = {Q}}\n";
+pub(super) const BIB: &str = "@book{a, author = {Meier, Anna}, title = {Alpha}, date = {2020}, publisher = {P}}\n@book{b, author = {Schulz, Bo}, title = {Beta}, date = {2021}, publisher = {Q}}\n";
 
 /// A vault with the bibliography `refs.bib`, a picture `plot.png` and these notes.
 fn vault_with(tag: &str, notes: &[(&str, &str)]) -> (Vault, PathBuf) {
@@ -32,7 +32,7 @@ fn export(v: &Vault, name: &str, opts: &ExportOptions) -> (Vec<u8>, Vec<String>)
 }
 
 /// Everything the PDF draws as text, in the order it is drawn.
-fn drawn(bytes: &[u8]) -> String {
+pub(super) fn drawn(bytes: &[u8]) -> String {
     let c = contents(bytes);
     let mut out = String::new();
     let mut from = 0;

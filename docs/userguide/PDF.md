@@ -50,11 +50,29 @@ the dialog opens, so nothing is stored in the settings.
 
 ![[pdf-export-dialog.png]]
 
+# Fonts of an export
+
+![[pdf-export-fonts.png]]
+
+The row **Fonts** of the export dialog has three fields: the **Text** font, the **Headings** font (the title, the headings,
+the contents and the page numbers) and the **Code** font. They start with what the note says (`print-font`,
+`print-font-sans`, `print-font-mono`; a folder's dialog starts with its top note's), and you can change them for this
+export without touching the note. The button beside a field opens the list of the families Shale found, on your computer
+and in the vault's `fonts/` folder; what you type narrows the list, and any name you type or a path to a font file in the
+vault (`fonts/Garamond.otf`) is a value too. An empty field is no value: the font then comes from the template set, from the
+vault's setting (Settings → Vault → Fonts of the exports, see [[Settings reference]]) or is the default, which the
+field's grey hint names.
+
+Under the fields the dialog says which font each part will get and where it was found, and, in red, why a font cannot
+be used (it is not there, it is not a font, its licence forbids embedding it). The export is never refused for a font: it
+uses the next one and the PDF says so. The dialog looks the installed fonts up in the background ("Looking up
+fonts…"), so it opens at once; an export that needs an installed font waits for that, a few seconds at most.
+
 # Print properties of a note
 
 A note can say how it is printed, in its properties (front matter, see [[Notes and links]]). The export dialog opens with the note's
 paper, margins, text size, title and contents already filled in, and you can still change them there; the keys that
-the dialog has no box for (the font, the line and paragraph spacing, the alignment and the heading colour) are read from the note
+the dialog has no box for (the line and paragraph spacing, the alignment and the heading colour) are read from the note
 when you export. Every key is optional, and a value Shale cannot read is ignored, so the default stays. Any note can carry these keys; a Word file imported with
 [[Import]] gets them from the document's page setup and styles.
 
@@ -617,8 +635,25 @@ is usually typeset with, for a publication, report, exercise sheet, thesis or do
 - **Lists** of figures and tables follow the contents when the boxes are on, or stand where
   `<!-- shale: list-of-figures -->` and `<!-- shale: list-of-tables -->` are.
 
-A folder with these properties in its top note is one thesis: its notes share the labels and the one
-bibliography. The packages `biblatex`, `caption` and `cleveref` come with the TeX Live of Shale (and
+A folder with these properties in its top note is one thesis, and its export ([[PDF#A folder as one PDF]], and
+the LaTeX export of the folder) is **one document**:
+
+- **Numbers** count in reading order over all the notes: per chapter (`3.1`, `3.2`, the number before the
+  title of the chapter, so `2.1.1` for the first figure of the chapter `2.1` of the second part) or
+  continuously (`1`, `2`, `3`), as the top note's `float-numbering:` (`chapter` or `continuous`, `chapter` when it
+  has none) says. The top note decides the caption positions (`table-caption:`, `figure-caption:`) and the
+  language for every chapter; the same properties in a chapter are ignored.
+- **References** find their label in any note of the book: `@fig:results` in chapter 1 can name a figure of
+  chapter 4 and is written "Figure 4.2" (a link in the PDF).
+- **One bibliography** for all the chapters: the top note's `bibliography:` (or the vault's default). A key cited
+  in several chapters is one entry, only cited keys are printed, and the numbers of a numeric style follow the
+  first citation in the whole book. The list is printed after the last chapter, in the contents, or where a
+  note has the line `<!-- shale: bibliography -->`. A chapter that names a `bibliography:` of its own is
+  ignored, and the export says so.
+- **The export warns** when a label is used in two notes (the first counts), when a reference has no label in
+  any note, when a key is not in the bibliography, and names the notes it is about.
+
+The notes of the folder share the labels and the one bibliography. The packages `biblatex`, `caption` and `cleveref` come with the TeX Live of Shale (and
 `biblatex-apa` and `biblatex-ieee` for those two styles); a managed TeX Live installed earlier lists what
 it misses with an **Install** button.
 

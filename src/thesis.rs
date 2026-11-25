@@ -5,6 +5,8 @@
 
 pub mod view;
 
+pub mod book;
+
 pub mod export;
 
 pub use view::{Book, Marker, Shown, View};
@@ -186,9 +188,9 @@ mod tests {
     #[test]
     fn edit_127_chapters_and_appendices_have_their_own_words_and_front_matter_is_named_by_title() {
         let sources = [
-            labels::Source { text: "# Abstract {#sec:abs}\n", role: labels::Role::Front, title: Some("Abstract") },
-            labels::Source { text: "# One {#sec:one}\n\n## Two {#sec:two}\n", role: labels::Role::Chapter, title: Some("One") },
-            labels::Source { text: "# Extra {#sec:extra}\n", role: labels::Role::Appendix, title: Some("Extra") },
+            labels::Source { text: "# Abstract {#sec:abs}\n", role: labels::Role::Front, title: Some("Abstract"), number: None },
+            labels::Source { text: "# One {#sec:one}\n\n## Two {#sec:two}\n", role: labels::Role::Chapter, title: Some("One"), number: None },
+            labels::Source { text: "# Extra {#sec:extra}\n", role: labels::Role::Appendix, title: Some("Extra"), number: None },
         ];
         let l = labels::of_book(&sources, None);
         let s = |id: &str| l.get(Kind::Section, id).expect("label");
