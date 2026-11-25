@@ -9,6 +9,10 @@ Turn mails, events and files into notes. Back to [[Start here]].
 - Drag e-mails from Thunderbird, events from a calendar, `.eml` or `.ics` files, or any other
   files (plans, PDFs, …) onto the window. The ribbon's Import button opens the same dialog; so
   do **Import to vault** in [[Mail]] and **Save to vault** in [[Feeds]].
+- **Add files…** (below the list) opens the file picker: choose one file or several at once; the
+  kinds of the import are the filters (mail, events, notes, pictures, PDFs, sounds and videos, Word
+  files). Your system's own dialog opens first; see [[Vault settings]] for the picker. You can still
+  type or paste a path in the field next to it.
 - A `.md` or `.markdown` file becomes a note with its text unchanged ("Markdown note"). When it has headings
   but no `#`, a ticked box "Lift headings (## → #, ### → ##, …)" moves them all up so that the highest
   becomes `#` (code and front matter stay as they are).

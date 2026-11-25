@@ -98,6 +98,7 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
     ("media_libraries.name", "The name notes use in the link, after the @ (letters and digits; capitals do not matter)."),
     ("media_libraries.path", "The folder on this computer that the name stands for."),
     ("outside_files", "What a picked, pasted or imported picture, PDF, sound or video from outside the vault gets: Ask, Copy (a copy in the media folder) or Link (the link points to the file where it is). Other files are always copied."),
+    ("system_file_dialog", "true: choosing a file or a folder opens the dialog of the system first (the xdg-desktop-portal on Linux, the native dialog of Windows and macOS), and Shale's own picker only when there is none. false: Shale's own picker always (Settings > Vault)."),
     ("calendars", "The calendars of the calendar panel: files on this computer and CalDAV calendars."),
     ("calendars.id", "A name that identifies the calendar; do not reuse it."),
     ("calendars.name", "What the calendar is called in the window."),

@@ -60,4 +60,4 @@ links (`#^id`), heading scroll in reading view, hover previews. Tasks: prioritie
 tasks, grouping. Graph: colour groups, filters, Barnes–Hut. Drawings: SVG/PDF pictures, frames, groups,
 elbow arrows, labels on arrows, rotation handles, PNG/SVG export, copy/paste between drawings.
 Other: command palette, daily notes, templates, split panes, packaging (.desktop,
-Flatpak), native folder picker.
+Flatpak).

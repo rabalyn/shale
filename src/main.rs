@@ -61,6 +61,7 @@ mod embed_size;
 mod env_lock;
 #[cfg(all(test, unix))]
 mod env_lock_tests;
+mod file_picker;
 #[cfg(any(test, target_os = "macos"))]
 mod finder_path;
 mod fold;

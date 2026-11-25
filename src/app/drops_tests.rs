@@ -902,3 +902,33 @@ fn imp_015_a_read_that_crashes_ends_its_task_and_tells_in_the_dialog() {
     assert!(w.dialog().notes.iter().any(|n| n.contains("Reading the drop failed: boom")), "{:?}", w.dialog().notes);
     assert!(w.app.busy.list().is_empty());
 }
+
+/// A system dialog that answers these files.
+struct Answers(Vec<PathBuf>);
+
+impl crate::file_picker::Native for Answers {
+    fn pick(&self, _: &crate::file_picker::Request) -> crate::file_picker::Outcome {
+        crate::file_picker::Outcome::Picked(self.0.clone())
+    }
+}
+
+// spec: IMP-075
+#[test]
+fn imp_075_add_files_asks_the_picker_and_adds_what_it_answers() {
+    use crate::import::dialog::{ImportAction, ImportDialog};
+    let mut w = W::new("browse");
+    let files = vec![w.out.join("first drop.md"), w.out.join("second.md")];
+    w.app.pick = crate::file_picker::Host::with_native(std::sync::Arc::new(Answers(files)));
+    let mut d = ImportDialog::new(vec![], vec![], String::new(), String::new(), None, false);
+    assert!(!w.app.import_action(&mut d, ImportAction::Browse), "the dialog stays");
+    crate::ui_test_support::poll_until("the files of the picker", || {
+        w.hl.frame(&mut w.app, vec![]);
+        w.app.take_import_picks(&mut d);
+        d.items.len() == 2
+    });
+    assert!(d.items.iter().all(|i| matches!(i.source, crate::import::Source::Markdown { .. })), "read like dropped files");
+    // the kinds of the import are the filters, all files first
+    let kinds = crate::import::pick_filters();
+    assert_eq!(kinds[0].name, "All files");
+    assert!(kinds.iter().any(|k| k.exts == ["eml"]) && kinds.iter().any(|k| k.exts == ["ics"]) && kinds.iter().any(|k| k.exts.contains(&"docx".to_string())));
+}

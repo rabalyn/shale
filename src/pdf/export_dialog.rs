@@ -200,6 +200,14 @@ pub(crate) fn thesis_boxes(ui: &mut Ui, opts: &mut ExportOptions, rec: &mut dyn 
     });
 }
 
+/// The "Save as" field, with the button that picks the place and name with the file picker (PICK-010).
+fn path_field(ui: &mut Ui, path: &mut String, rec: &mut impl FnMut(&str, egui::Response) -> egui::Response) {
+    ui.horizontal(|ui| {
+        rec("path", ui.add(egui::TextEdit::singleline(path).desired_width(180.0)));
+        crate::file_picker::browse_button(ui, "export-save", "Browse…", |typed| crate::file_picker::save_request("Save the PDF as", typed, crate::file_picker::Filter::new("PDF files", &["pdf"])), path);
+    });
+}
+
 pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
     d.rects.clear();
     let mut rects: Vec<(String, Rect)> = Vec::new();
@@ -228,7 +236,7 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
                 f.show(ui, &muted);
             }
             ui.label(muted("Save as"));
-            rec("path", ui.add(egui::TextEdit::singleline(&mut d.path).desired_width(250.0)));
+            path_field(ui, &mut d.path, &mut rec);
             ui.end_row();
         });
         // a folder's reading order is the same through LaTeX (BOOK-013)
@@ -346,7 +354,7 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
         }
 
         ui.label(muted("Save as"));
-        rec("path", ui.add(egui::TextEdit::singleline(&mut d.path).desired_width(250.0)));
+        path_field(ui, &mut d.path, &mut rec);
         ui.end_row();
     });
     if let Some(book) = d.book.as_deref_mut() {

@@ -2405,6 +2405,30 @@ fn a_forgotten_attachment_an_empty_subject_and_an_empty_body_each_ask_before_sen
     assert_eq!((m.attachments.len(), m.attachments[0].name.as_str()), (1, "Welcome.md"));
 }
 
+/// A system dialog that answers these files.
+struct Answers(Vec<PathBuf>);
+
+impl crate::file_picker::Native for Answers {
+    fn pick(&self, _: &crate::file_picker::Request) -> crate::file_picker::Outcome {
+        crate::file_picker::Outcome::Picked(self.0.clone())
+    }
+}
+
+// spec: MAIL-243
+#[test]
+fn mail_243_choose_files_attaches_the_files_the_picker_answers() {
+    let (mut w, _smtp) = compose_world("choose-files", 10);
+    std::fs::write(w.dir.join("b.txt"), "second").unwrap();
+    let files = vec![w.dir.join("Welcome.md"), w.dir.join("b.txt"), w.dir.join("missing.bin")];
+    w.app.pick = crate::file_picker::Host::with_native(Arc::new(Answers(files)));
+    w.press_text(Key::C, Modifiers::NONE, "c");
+    w.click("mail:compose:att-browse");
+    w.until("the two files are attached", |a| a.mail.compose.as_ref().is_some_and(|c| c.draft.attachments.len() == 2));
+    let c = w.app.mail.compose.as_ref().unwrap();
+    assert_eq!(c.draft.attachments.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(), ["Welcome.md", "b.txt"]);
+    assert!(c.error.as_deref().is_some_and(|e| e.contains("missing.bin")), "the file that cannot be read says so: {:?}", c.error);
+}
+
 // spec: MAIL-130, MAIL-131, MAIL-150, MAIL-151
 #[test]
 fn closing_with_changes_asks_keep_or_discard_and_nothing_is_lost_either_way() {

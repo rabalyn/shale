@@ -3,8 +3,9 @@
 
 use crate::app::{Modal, Options, ShaleApp};
 use crate::known_vaults::canonical;
+use crate::ui_test_support::poll_until;
 use crate::ui_test_support::Headless;
-use crate::vault_menu::{FolderPicker, Purpose, VaultModal};
+use crate::vault_menu::{Purpose, VaultModal};
 use eframe::egui::{self, Event, Key, Modifiers, PointerButton};
 use std::path::PathBuf;
 
@@ -96,6 +97,26 @@ impl W {
         assert!(matches!(self.app.modal, Some(Modal::Vaults(_))), "the label opens the dropdown");
     }
 
+    /// Wait until Shale's own picker shows (a test build has no system dialog, PICK-003).
+    fn wait_picker(&mut self) {
+        poll_until("Shale's own picker", || {
+            self.hl.frame(&mut self.app, vec![]);
+            self.app.pick.own_picker().is_some_and(|p| !p.scanning())
+        });
+        self.hl.frames(&mut self.app, 3);
+    }
+
+    /// Open the picker for `purpose` and wait for it.
+    fn ask(&mut self, purpose: Purpose) {
+        self.app.ask_vault_folder(purpose);
+        self.wait_picker();
+    }
+
+    /// What choosing `path` for `purpose` says: Ok, or the reason it is refused.
+    fn choose(&mut self, purpose: Purpose, path: PathBuf, sample: bool) -> Result<(), String> {
+        self.app.choose_vault_folder(&purpose, path, sample).map_err(|r| r.message)
+    }
+
     fn names(&self) -> Vec<String> {
         self.app.cfg.vaults.entries().iter().map(|e| e.name.clone()).collect()
     }
@@ -160,7 +181,8 @@ fn vault_030_it_works_by_keyboard_arrows_enter_and_esc() {
     w.key(Key::ArrowUp);
     w.key(Key::ArrowUp);
     w.key(Key::Enter);
-    assert!(matches!(&w.app.modal, Some(Modal::Vaults(m)) if matches!(&**m, VaultModal::Folder(p) if p.purpose == Purpose::Create)), "Up twice from the first line wraps to Create…");
+    w.wait_picker();
+    assert!(w.painted("Create a vault in an empty folder"), "Up twice from the first line wraps to Create…: {:?}", w.all_text());
 }
 
 // spec: VAULT-031, VAULT-032
@@ -206,6 +228,7 @@ fn vault_033_open_asks_for_a_folder_adds_it_to_the_known_vaults_and_opens_it() {
     let mut w = W::new("open");
     w.open_dropdown();
     w.click_text("Open…");
+    w.wait_picker();
     assert!(w.painted("Open a folder as vault"), "{:?}", w.all_text());
     std::fs::create_dir_all(w.dir("blank")).unwrap();
     w.type_over(&w.dir("blank").to_string_lossy());
@@ -218,50 +241,26 @@ fn vault_033_open_asks_for_a_folder_adds_it_to_the_known_vaults_and_opens_it() {
     // a folder that is not there is refused
     w.open_dropdown();
     w.click_text("Open…");
+    w.wait_picker();
     w.type_over(&w.dir("nowhere").to_string_lossy());
     w.key(Key::Enter);
     assert!(w.painted("That folder does not exist."));
     assert!(!w.dir("nowhere").exists(), "nothing is created");
 }
 
-// spec: VAULT-033
-#[test]
-fn vault_033_the_picker_lists_the_folders_and_goes_into_and_up_by_click() {
-    let mut w = W::new("picker");
-    std::fs::create_dir_all(w.dir("one").join("Sub")).unwrap();
-    std::fs::create_dir_all(w.dir("one").join(".hidden")).unwrap();
-    let mut p = FolderPicker::new(Purpose::Open);
-    p.go(w.dir("one"));
-    assert_eq!(p.subfolders(), ["Sub"], "hidden folders are not listed");
-    w.app.modal = Some(Modal::Vaults(Box::new(VaultModal::Folder(Box::new(p)))));
-    w.hl.frames(&mut w.app, 2);
-    w.click_text("📁  Sub");
-    let text = |w: &W| match &w.app.modal {
-        Some(Modal::Vaults(m)) => match &**m {
-            VaultModal::Folder(p) => p.text.clone(),
-            _ => panic!("the picker"),
-        },
-        _ => panic!("the picker"),
-    };
-    assert_eq!(text(&w), w.dir("one").join("Sub").to_string_lossy());
-    w.click_text("↑  Up");
-    assert_eq!(text(&w), w.dir("one").to_string_lossy());
-}
-
 // spec: VAULT-034
 #[test]
 fn vault_034_create_refuses_a_folder_with_content_and_offers_to_open_it() {
     let mut w = W::new("create-full");
-    let mut p = FolderPicker::new(Purpose::Create);
-    p.text = w.dir("three").to_string_lossy().into_owned();
-    assert!(!w.app.choose_folder(&mut p), "Welcome.md is content");
-    assert!(p.error.as_deref().is_some_and(|e| e.contains("has content")), "{:?}", p.error);
+    let e = w.choose(Purpose::Create, w.dir("three"), false).unwrap_err();
+    assert!(e.contains("has content"), "Welcome.md is content: {e}");
     assert!(w.app.actions.is_empty(), "nothing opens");
-    // through the dialog: the offer is a button
-    w.app.modal = Some(Modal::Vaults(Box::new(VaultModal::Folder(Box::new(FolderPicker::new(Purpose::Create))))));
-    w.hl.frames(&mut w.app, 2);
+    // through the dialog: the picker comes back with the reason, and the offer is a button
+    w.ask(Purpose::Create);
     w.type_over(&w.dir("three").to_string_lossy());
     w.key(Key::Enter);
+    w.wait_picker();
+    assert!(w.painted("That folder has content, so it cannot start a new vault."), "{:?}", w.all_text());
     assert!(w.painted("Open it as a vault instead"), "{:?}", w.all_text());
     w.click_text("Open it as a vault instead");
     w.settle();
@@ -276,8 +275,7 @@ fn vault_034_hidden_files_do_not_count_and_the_sample_box_writes_sample_notes() 
     std::fs::write(w.dir("empty").join(".DS_Store"), "x").unwrap();
     assert!(crate::vault_menu::is_empty_folder(&w.dir("empty")).unwrap());
     assert!(!crate::vault_menu::is_empty_folder(&w.dir("three")).unwrap());
-    w.app.modal = Some(Modal::Vaults(Box::new(VaultModal::Folder(Box::new(FolderPicker::new(Purpose::Create))))));
-    w.hl.frames(&mut w.app, 2);
+    w.ask(Purpose::Create);
     assert!(w.painted("Start with sample notes"));
     w.click_text("Start with sample notes");
     w.type_over(&w.dir("empty").to_string_lossy());
@@ -292,14 +290,10 @@ fn vault_034_hidden_files_do_not_count_and_the_sample_box_writes_sample_notes() 
 #[test]
 fn vault_034_a_folder_that_does_not_exist_is_made_and_starts_empty_without_the_box() {
     let mut w = W::new("create-new");
-    let mut p = FolderPicker::new(Purpose::Create);
-    p.text = w.dir("fresh").join("deep").to_string_lossy().into_owned();
-    assert!(w.app.choose_folder(&mut p));
+    assert!(w.choose(Purpose::Create, w.dir("fresh").join("deep"), false).is_ok());
     assert!(w.dir("fresh").join("deep").is_dir());
     assert_eq!(std::fs::read_dir(w.dir("fresh").join("deep")).unwrap().count(), 0, "no sample notes without the box");
-    let file = w.dir("one").join("Welcome.md");
-    p.text = file.to_string_lossy().into_owned();
-    assert!(!w.app.choose_folder(&mut p) && p.error.is_some(), "a file is not a folder");
+    assert!(w.choose(Purpose::Create, w.dir("one").join("Welcome.md"), false).is_err(), "a file is not a folder");
 }
 
 // spec: VAULT-038
@@ -344,6 +338,7 @@ fn vault_038_locate_points_the_entry_at_the_new_folder_and_keeps_its_name() {
     std::fs::rename(w.dir("two"), w.dir("moved")).unwrap();
     w.open_dropdown();
     w.click_text("Locate…");
+    w.wait_picker();
     assert!(w.painted("Locate the folder of the vault"), "{:?}", w.all_text());
     w.type_over(&w.dir("moved").to_string_lossy());
     w.key(Key::Enter);
@@ -352,11 +347,9 @@ fn vault_038_locate_points_the_entry_at_the_new_folder_and_keeps_its_name() {
     assert_eq!((e.name.as_str(), &e.path), ("Garden", &w.dir("moved")), "{:?}", w.app.cfg.vaults);
     assert_eq!(w.root(), Some(w.dir("one")), "Locate does not open it");
     // a folder that is not there is refused, and one that is known already
-    let mut p = FolderPicker::new(Purpose::Locate(w.dir("moved")));
-    p.text = w.dir("nowhere").to_string_lossy().into_owned();
-    assert!(!w.app.choose_folder(&mut p));
-    p.text = w.dir("one").to_string_lossy().into_owned();
-    assert!(!w.app.choose_folder(&mut p) && p.error.as_deref().is_some_and(|e| e.contains("already known")), "{:?}", p.error);
+    assert!(w.choose(Purpose::Locate(w.dir("moved")), w.dir("nowhere"), false).is_err());
+    let e = w.choose(Purpose::Locate(w.dir("moved")), w.dir("one"), false).unwrap_err();
+    assert!(e.contains("already known"), "{e}");
 }
 
 // spec: VAULT-039
@@ -365,9 +358,7 @@ fn vault_039_a_folder_inside_or_around_a_known_vault_is_allowed_and_warned_once(
     let mut w = W::new("nested");
     let inner = w.dir("one").join("inner");
     std::fs::create_dir_all(&inner).unwrap();
-    let mut p = FolderPicker::new(Purpose::Open);
-    p.text = inner.to_string_lossy().into_owned();
-    assert!(w.app.choose_folder(&mut p), "it is allowed");
+    assert!(w.choose(Purpose::Open, inner.clone(), false).is_ok(), "it is allowed");
     w.app.actions.clear();
     w.app.open_vault_in_background(&inner, crate::app::vault_load::After::Nothing);
     w.settle();
@@ -393,9 +384,7 @@ fn vault_039_locate_into_a_nested_folder_warns_too() {
     let inner = w.dir("one").join("inner");
     std::fs::create_dir_all(&inner).unwrap();
     std::fs::remove_dir_all(w.dir("two")).unwrap();
-    let mut p = FolderPicker::new(Purpose::Locate(w.dir("two")));
-    p.text = inner.to_string_lossy().into_owned();
-    assert!(w.app.choose_folder(&mut p));
+    assert!(w.choose(Purpose::Locate(w.dir("two")), inner.clone(), false).is_ok());
     assert!(w.toasted("lies inside the vault “one”"), "{:?}", w.app.toasts);
 }
 

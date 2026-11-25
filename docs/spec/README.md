@@ -17,6 +17,7 @@ How they work: [ADR-0001](../decisions/0001-spec-driven-development.md).
 | [web-clipper.md](web-clipper.md) | The browser extension that saves a page or selection into the vault: native host and spool, capture, conversion, images, clip target | CLIP |
 | [social.md](social.md) | Mastodon and Bluesky feeds, saving posts as notes | SOC |
 | [updates.md](updates.md) | Checking GitHub releases, the checksum, notify / download / install, the install kinds, restart | UPD |
+| [file-picker.md](file-picker.md) | The one file and folder picker: the system's dialog first, Shale's own picker, shortcuts, New folder | PICK |
 | [engineering.md](engineering.md) | Forge and work tracking, development rules, build and release, background jobs, performance | FORGE, DEV, BUILD, JOB, PERF |
 | [busy-states.md](busy-states.md) | The inventory of every long action: where it runs, whether it can stop, what it shows, what is moved onto the busy registry (JOB-003…JOB-014) | JOB |
 | [mail.md](mail.md) | Local mail store, IMAP account and sync, flags and moves, sending, signing and encrypting | MAIL |

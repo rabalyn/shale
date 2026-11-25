@@ -2596,7 +2596,7 @@ impl MailView {
     }
 
     /// What the compose view asked for in this frame.
-    pub fn apply_compose_out(&mut self, cfg: &Config, out: ComposeOut) {
+    pub fn apply_compose_out(&mut self, cfg: &Config, mut out: ComposeOut) {
         if out.cancel_ask {
             if let Some(c) = self.compose.as_mut() {
                 c.ask = None;
@@ -2660,6 +2660,14 @@ impl MailView {
                 match r.and_then(|a| c.add_attachment(a)) {
                     Ok(()) => c.path.clear(),
                     Err(e) => c.error = Some(e),
+                }
+            }
+        }
+        for path in std::mem::take(&mut out.attach_files) {
+            let r = read_for_attachment(&path);
+            if let Some(c) = self.compose.as_mut() {
+                if let Err(e) = r.and_then(|a| c.add_attachment(a)) {
+                    c.error = Some(e);
                 }
             }
         }

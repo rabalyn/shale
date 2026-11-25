@@ -33,6 +33,20 @@ Shale keeps settings in two places:
   removes the entry (the folder is never touched). Shale does not make that folder again by itself.
   A folder inside another known vault, or around one, may be added; Shale warns once, because the
   notes then show up in both vaults.
+- **The file picker.** Open…, Create…, Locate…, the library folders, the template sets of the
+  LaTeX export, mail attachments, the place of a PDF export and the Import dialog all choose files
+  and folders the same way: with the dialog of your system first (on Linux the portal of your
+  desktop; it has its own shortcuts, search and New folder button), or with Shale's own picker
+  when there is none or when **Use the system's file dialog** is off (Settings → Vault). Shale's
+  picker has a path field (`~` is your home folder), shortcuts on the side (Home, Desktop,
+  Documents, Downloads, Pictures, Videos, Music, your vaults, your library folders, your drives),
+  the folders and files of the shown folder, several files at once and the kinds of file. A
+  **New folder** field makes a folder inside the shown one and uses it; a name that Windows would
+  not accept (`/`, `\`, `:`, `CON`, a trailing dot, …) is refused with the reason, and a name that
+  exists offers **Use that folder**. Create… with the system's dialog makes an empty vault; the
+  box "Start with sample notes" is in Shale's own picker.
+
+  ![[file-picker.png]]
 - **Close** takes a vault off the list; its notes stay where they are. Right-click the vault in the
   list and choose **Close**, or choose **Close current vault** at the end of the list (the quick
   switcher also has a command "Switch vault", which shows the same list). A question follows: you

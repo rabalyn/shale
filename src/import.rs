@@ -579,6 +579,24 @@ fn calendar_items(ics: &[u8], calendar: &str, file_name: &str) -> Vec<Item> {
         .collect()
 }
 
+/// The kinds of file the Import dialog's picker narrows to (IMP-075): all files first (they are all
+/// importable), then each kind the import reads: mails, events, notes, pictures, PDFs, sounds and
+/// videos, Word files.
+pub fn pick_filters() -> Vec<crate::file_picker::Filter> {
+    use crate::file_picker::Filter;
+    let sounds_and_videos: Vec<&str> = media::media_extensions().collect();
+    vec![
+        Filter::new("All files", &[]),
+        Filter::new("Mail (.eml)", &["eml"]),
+        Filter::new("Events (.ics)", &["ics"]),
+        Filter::new("Notes (.md)", &["md", "markdown"]),
+        Filter::new("Pictures", &media::IMAGE_EXTS),
+        Filter::new("PDF files", &["pdf"]),
+        Filter::new("Sounds and videos", &sounds_and_videos),
+        Filter::new("Word files (.docx)", &["docx"]),
+    ]
+}
+
 /// Items for dropped / chosen files. Returns the items and messages about what was skipped.
 pub fn items_from_paths(paths: &[PathBuf]) -> (Vec<Item>, Vec<String>) {
     let mut items = Vec::new();

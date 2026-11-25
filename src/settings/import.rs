@@ -5,12 +5,16 @@
 use super::anchor::anchor;
 use crate::app::{muted, ShaleApp};
 use crate::busy::{Busy, Key, Task};
+use crate::file_picker::Request;
 use crate::import::docx;
 use crate::theme;
 use eframe::egui::{self, Ui};
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::Duration;
+
+/// The key under which the row of a new library asks the file picker for its folder (MEDIA-014).
+const NEW_LIBRARY_PICK: &str = "library-new";
 
 /// What the look for pandoc found.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -115,6 +119,18 @@ impl ShaleApp {
                     changed |= lib.path.to_string_lossy() != path.as_str();
                     lib.path = PathBuf::from(path);
                 }
+                let key = format!("library:{i}");
+                if ui.button("Browse…").on_hover_text("Choose the folder").clicked() {
+                    let mut req = Request::folder("Choose the folder of the library").button("Choose");
+                    if lib.path.is_dir() {
+                        req = req.start(lib.path.clone());
+                    }
+                    self.pick.ask(&key, req);
+                }
+                if let Some(p) = self.pick.take(&key).and_then(|p| p.paths.into_iter().next()) {
+                    changed |= lib.path != p;
+                    lib.path = p;
+                }
                 if ui.button("Remove").on_hover_text("Forget this library on this computer; notes that link into it show “not set up”").clicked() {
                     remove = Some(i);
                 }
@@ -141,6 +157,12 @@ impl ShaleApp {
             let r = ui.add(egui::TextEdit::singleline(&mut folder).hint_text("Folder, for example ~/Videos").desired_width(300.0));
             if r.lost_focus() {
                 folder = crate::layout::shellexpand(&folder);
+            }
+            if ui.button("Browse…").on_hover_text("Choose the folder").clicked() {
+                self.pick.ask(NEW_LIBRARY_PICK, Request::folder("Choose the folder of the library").button("Choose"));
+            }
+            if let Some(p) = self.pick.take(NEW_LIBRARY_PICK).and_then(|p| p.paths.into_iter().next()) {
+                folder = p.to_string_lossy().into_owned();
             }
             if ui.add_enabled(problem.is_none() && !folder.trim().is_empty(), egui::Button::new("Add library")).clicked() {
                 self.cfg.media_libraries.push(crate::media::outside::Library { name: std::mem::take(&mut name), path: PathBuf::from(crate::layout::shellexpand(&std::mem::take(&mut folder))) });

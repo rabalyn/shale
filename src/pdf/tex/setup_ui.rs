@@ -14,6 +14,7 @@ use super::settings_ui::{consent_text, Notice, TaskKind, TexState};
 use super::setup::{Choice, Outcome, Step, TexFact};
 use crate::app::muted;
 use crate::clickable::CollapsingPointer;
+use crate::file_picker::{browse_button, Filter, Request};
 use crate::theme;
 use eframe::egui::{self, Color32, Context, Ui};
 use std::path::Path;
@@ -211,7 +212,8 @@ fn logo_step(ui: &mut Ui, st: &mut TexState, acts: &mut Vec<Act>) {
             });
             crate::theme::paragraph(ui, "Then give the file to Shale: drag it onto this window, or type or paste where it is.");
             ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut st.setup.logo_path).hint_text("~/Downloads/tuda_logo.pdf").desired_width(320.0));
+                ui.add(egui::TextEdit::singleline(&mut st.setup.logo_path).hint_text("~/Downloads/tuda_logo.pdf").desired_width(240.0));
+                browse_button(ui, "tex-setup-logo", "Choose file…", logo_request, &mut st.setup.logo_path);
                 if ui.add_enabled(!st.setup.logo_path.trim().is_empty(), egui::Button::new("Use this logo")).clicked() {
                     acts.push(Act::UseLogo);
                 }
@@ -223,6 +225,11 @@ fn logo_step(ui: &mut Ui, st: &mut TexState, acts: &mut Vec<Act>) {
     if let Some(n) = &st.setup.message {
         notice(ui, n);
     }
+}
+
+/// What the picker is asked for a logo file: a PDF or a PNG.
+fn logo_request(_: &str) -> Request {
+    Request::file("Choose the logo (a PDF or PNG file)").filter(Filter::new("PDF and PNG", &["pdf", "png"])).filter(Filter::new("All files", &[]))
 }
 
 /// The optional second field of the logo step: the logo of the person's department (TEX-035).
@@ -238,7 +245,8 @@ fn department_logo(ui: &mut Ui, st: &mut TexState, acts: &mut Vec<Act>) {
         }
     }
     ui.horizontal(|ui| {
-        ui.add(egui::TextEdit::singleline(&mut st.setup.department_logo_path).hint_text("~/Downloads/department_logo.png").desired_width(320.0));
+        ui.add(egui::TextEdit::singleline(&mut st.setup.department_logo_path).hint_text("~/Downloads/department_logo.png").desired_width(240.0));
+        browse_button(ui, "tex-setup-department-logo", "Choose file…", logo_request, &mut st.setup.department_logo_path);
         if ui.add_enabled(!st.setup.department_logo_path.trim().is_empty(), egui::Button::new("Use this department logo")).clicked() {
             acts.push(Act::UseDepartmentLogo);
         }

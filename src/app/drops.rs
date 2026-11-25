@@ -1,12 +1,16 @@
 //! Drag and drop into the app (e-mails, calendar events, files, text) and the Import dialog.
 
 use super::{Action, Modal, ShaleApp};
+use crate::file_picker::Request;
 use crate::import::dialog::{ImportAction, ImportDialog};
 use crate::import::{self, Item};
 use crate::theme;
 use crate::vault::rel_to_string;
 use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Stroke, Ui, Vec2};
 use std::path::{Path, PathBuf};
+
+/// The key under which the Import dialog asks the file picker for files (IMP-075).
+const IMPORT_PICK: &str = "import-add";
 
 /// A place on screen something can be dropped on: new notes go to `folder`, and (if set)
 /// links to them are added to `note`.
@@ -220,31 +224,50 @@ impl ShaleApp {
         }
     }
 
+    /// Add the files `paths` to the items of the Import dialog (IMP-001, IMP-075): each is read as
+    /// a mail, an event, a note, a picture, … or kept as a file; what cannot be taken is told in
+    /// the dialog. True when something was added.
+    pub(crate) fn add_import_paths(&mut self, d: &mut ImportDialog, paths: &[PathBuf]) -> bool {
+        let (mut items, notes) = import::items_from_paths(paths);
+        import::word_items(&mut items, &self.word_import());
+        import::preset_how(&mut items, self.cfg.outside_files.preset());
+        if let Some(v) = &self.vault {
+            import::mark_duplicates(v, &mut items);
+            import::find_continues(v, &mut items);
+        }
+        if let Some(v) = &self.vault {
+            import::find_people(v, &self.vdata.settings.people_dir, &mut items);
+        }
+        let added = !items.is_empty();
+        d.items.extend(items);
+        if d.folder_follows {
+            d.follow_continued_folder();
+        }
+        self.suggest_tags(d);
+        d.notes = notes;
+        added
+    }
+
+    /// The files the person chose with "Add files…" are added to the Import dialog (IMP-075).
+    pub(crate) fn take_import_picks(&mut self, d: &mut ImportDialog) {
+        if let Some(picked) = self.pick.take(IMPORT_PICK) {
+            self.add_import_paths(d, &picked.paths);
+        }
+    }
+
     /// Apply what the Import dialog asked for. True when it should close.
     pub fn import_action(&mut self, d: &mut ImportDialog, a: ImportAction) -> bool {
         match a {
             ImportAction::Cancel => true,
             ImportAction::AddPath => {
                 let p = PathBuf::from(crate::layout::shellexpand(&d.add_path));
-                let (mut items, notes) = import::items_from_paths(&[p]);
-                import::word_items(&mut items, &self.word_import());
-                import::preset_how(&mut items, self.cfg.outside_files.preset());
-                if let Some(v) = &self.vault {
-                    import::mark_duplicates(v, &mut items);
-                    import::find_continues(v, &mut items);
-                }
-                if let Some(v) = &self.vault {
-                    import::find_people(v, &self.vdata.settings.people_dir, &mut items);
-                }
-                if !items.is_empty() {
+                if self.add_import_paths(d, &[p]) {
                     d.add_path.clear();
                 }
-                d.items.extend(items);
-                if d.folder_follows {
-                    d.follow_continued_folder();
-                }
-                self.suggest_tags(d);
-                d.notes = notes;
+                false
+            }
+            ImportAction::Browse => {
+                self.pick.ask(IMPORT_PICK, Request::files("Add files to import").button("Add").filters(import::pick_filters()));
                 false
             }
             ImportAction::Import => {

@@ -15,6 +15,7 @@ impl ShaleApp {
             ("the font scan", self.font_scan.running()),
             ("the loading of a vault", self.vault_load.is_loading()),
             ("the look-up of the vault folders", self.presence.pending()),
+            ("the file dialog", self.pick.running()),
             ("the rescan of the vault", self.rescan.in_flight()),
             ("the vault check", self.vault_check.running()),
             ("the data usage jobs", self.usage.any_running()),
