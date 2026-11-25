@@ -31,6 +31,6 @@ Here it is, made from the pictures of this guide:
 > ![[calendar-week.png|Week]]
 > ![[calendar-sidebar.png|In the sidebar]]
 
-The note stays plain Markdown: Obsidian and GitHub show the same lines as a quote with all the pictures, and Shale's exports (PDF, LaTeX, Word and the Hugo site, see [[PDF]] and [[Publishing a vault]]) print or publish every picture in order, the title in bold and each caption below its picture. A `[!carousel]` line with no picture after it, and any other quote or callout, stays an ordinary quote. The editor shows the lines as written, with their pictures one below the other; only the reading view has the carousel.
+The note stays plain Markdown: Obsidian and GitHub show the same lines as a quote with all the pictures, and Shale's exports (PDF, LaTeX, Word and the Hugo site, see [[PDF]] and [[Publishing a vault]]) print or publish every picture in order, the title in bold and each caption below its picture. A `[!carousel]` line with no picture after it, and any other quote or callout, stays an ordinary quote. The editor has the same carousel in its rendered state: one picture with the buttons below it. While the cursor is in the quote its lines are shown as written so you can edit them, and ← and → work under the pointer only while the text does not have the keyboard.
 
 #userguide #reading
