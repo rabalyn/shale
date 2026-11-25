@@ -22,7 +22,7 @@ markdown files. Notes link to each other with `[[wiki links]]`.
 - **Math**: `$E = mc^2$` and `$$…$$` are typeset in the text, the reading view, tables and the PDF export,
   by Shale itself with the bundled font STIX Two Math (no TeX needed).
 - **Image carousel**: a quote `> [!carousel] Title` with one picture per line is a carousel in the reading view (one
-  picture at a time, buttons, dots, caption, ← and → under the pointer); in other editors it is a quote with all the
+  picture at a time in the reading view and the editor, buttons, dots, caption, ← and → under the pointer); in other editors it is a quote with all the
   pictures, and the exports show every picture in order.
 - **Themes**: nine built-in light and dark colour themes (Shale, Dracula, Nord, Catppuccin, Gruvbox, Solarized,
   GitHub), one that follows the system's light or dark mode, and any Alacritty terminal theme file you put into

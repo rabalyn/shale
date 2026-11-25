@@ -70,6 +70,18 @@ fn edit_142_a_line_that_is_not_an_image_ends_the_carousel_and_the_rest_of_the_qu
     assert_eq!(two.iter().map(|c| (c.lines.clone(), c.slides.len())).collect::<Vec<_>>(), [(0..2, 1), (3..6, 2)]);
 }
 
+// spec: EDIT-144
+#[test]
+fn edit_144_the_editor_hides_the_lines_of_the_slides_that_are_not_shown() {
+    let text = "> [!carousel] T\n> ![[a.png]]\n> ![[b.png]]\n> ![[c.png]]\nafter\n";
+    let lines = |shown: &[Option<usize>]| hidden_lines(text, shown).into_iter().map(|r| text[r].to_string()).collect::<Vec<_>>();
+    assert_eq!(lines(&[Some(1)]), ["> ![[a.png]]\n", "> ![[c.png]]\n"]);
+    assert_eq!(lines(&[Some(2)]), ["> ![[a.png]]\n", "> ![[b.png]]\n"]);
+    assert!(lines(&[None]).is_empty(), "a raw carousel hides nothing");
+    assert!(lines(&[Some(0), Some(0)]).is_empty(), "a text with another number of carousels hides nothing");
+    assert_eq!(hidden_lines("> [!carousel]\n> ![[a.png]]\n> ![[b.png]]", &[Some(0)]), vec![27..39], "the last line has no break");
+}
+
 // spec: PDF-040
 #[test]
 fn pdf_040_the_exports_get_every_image_in_order_each_alone_with_its_caption_below() {

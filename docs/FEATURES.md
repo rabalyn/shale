@@ -25,8 +25,8 @@ section of Settings → Keybindings that holds them.
   link, with its caption, the buttons *Previous image* and *Next image*, a dot per picture and "2 / 6"; ← and → go through
   the pictures while the pointer is over it, and they go round at the ends. The shown picture is not saved in the note. The
   Markdown stays as written, so other editors show a quote with all the pictures; the PDF, LaTeX, Word and site exports show every
-  picture in order with its caption (PDF-040, TEX-060, DOCX-018, SITE-083). The editor draws the lines with their pictures
-  one below the other.
+  picture in order with its caption (PDF-040, TEX-060, DOCX-018, SITE-083). The editor's rendered state has the same carousel (EDIT-144): one picture
+  with the buttons below it; the cursor in the quote shows its lines as written, and ← and → work under the pointer while the text has no keyboard.
 
 ![A picture with its resize buttons](userguide/z_media/screenshots/image-resize.png)
 

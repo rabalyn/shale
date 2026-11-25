@@ -3,6 +3,8 @@
 //! names after `[[`.
 
 #[cfg(test)]
+mod carousel_ui_tests;
+#[cfg(test)]
 mod citation_ui_tests;
 mod cite;
 mod format;
@@ -611,6 +613,8 @@ enum Art {
     /// a file that is still looked up or decoded on a worker: a quiet strip with its name (MEDIA-024);
     /// `true` when the box has the size the picture will have (MEDIA-029): a faint tile with the name in it
     Loading(String, bool),
+    /// a slide of a carousel that is not the one shown: nothing is painted, its line is hidden (EDIT-144)
+    Hidden,
 }
 
 /// The name of a file, for the strip that stands in for it.
@@ -1808,6 +1812,10 @@ impl NoteEditor {
         // the embeds of files outside the vault, and whether the file is there (their captions say
         // "not synced" and offer "Copy into the vault", MEDIA-021, MEDIA-023)
         let mut outside_embeds: Vec<(Range<usize>, bool)> = Vec::new();
+        // the carousels of the note, the image each shows (none: the cursor is in it, its lines are raw) and the embed of that image (EDIT-144)
+        let cars = if self.inline_images { crate::carousel::find(text) } else { Vec::new() };
+        let mut car_shown: Vec<Option<usize>> = Vec::new();
+        let mut car_links: Vec<(Range<usize>, usize)> = Vec::new();
         // the caption under each shown embed (EDIT-053) is part of its row
         let caption_h = crate::caption::height(base_size);
         // line numbers (EDIT-018): a gutter wide enough for the last number, left of the text
@@ -1849,14 +1857,45 @@ impl NoteEditor {
                 let b = markdown::char_to_byte(text, r.secondary.index.0);
                 a.min(b)..a.max(b)
             });
+            // a carousel shows one of its images; the cursor in it makes all its lines raw (EDIT-144)
+            car_shown = cars
+                .iter()
+                .enumerate()
+                .map(|(k, c)| {
+                    let bytes = crate::table::byte_range(text, &c.lines);
+                    let raw = preview.as_ref().is_some_and(|r| lines_overlap(&c.lines, r)) || (focused && sel.as_ref().is_some_and(|s| s.start <= bytes.end && s.end >= bytes.start));
+                    (!raw).then(|| self.embeds.carousel.get(&k).copied().unwrap_or(0).min(c.slides.len() - 1))
+                })
+                .collect();
             for (l, ok) in &self.cache.links {
-                if !l.embed || !*ok {
+                if !l.embed {
                     continue;
                 }
                 let inside = focused && sel.as_ref().map(|s| s.start <= l.range.end && s.end >= l.range.start).unwrap_or(false);
                 let line = crate::editor_preview::line_of(text, l.range.start);
                 let raw_line = preview.as_ref().is_some_and(|r| r.contains(&line));
                 if inside || raw_line || fold.view.is_hidden(line) {
+                    continue;
+                }
+                let slide_of = cars.iter().enumerate().find_map(|(k, c)| c.slides.iter().position(|s| s.line == line).map(|n| (k, n)));
+                if let Some((k, n)) = slide_of {
+                    match car_shown[k] {
+                        None => continue,
+                        Some(shown) if shown != n => {
+                            images.push((l.range.clone(), 0.0, Art::Hidden, Vec2::ZERO));
+                            continue;
+                        }
+                        Some(_) => {
+                            car_links.push((l.range.clone(), k));
+                            if !*ok {
+                                let size = crate::embed_size::not_downloaded(max_w);
+                                images.push((l.range.clone(), size.y + 6.0 + caption_h, Art::Notice(format!("{} is not in the vault.", l.target)), size));
+                                continue;
+                            }
+                        }
+                    }
+                }
+                if !*ok {
                     continue;
                 }
                 let shown = vault.look_media(ui.ctx(), &l.target, Some(rel));
@@ -1895,6 +1934,10 @@ impl NoteEditor {
                             let size = known.map_or_else(|| crate::embed_size::not_downloaded(max_w), |natural| crate::embed_size::picture(natural, asked, max_w));
                             images.push((l.range.clone(), size.y + 6.0 + caption_h, Art::Loading(file_name_of(&abs), known.is_some()), size));
                         }
+                        crate::media::look::Pic::Broken if slide_of.is_some() => {
+                            let size = crate::embed_size::not_downloaded(max_w);
+                            images.push((l.range.clone(), size.y + 6.0 + caption_h, Art::Notice("This picture can't be shown (unsupported or damaged file).".to_string()), size));
+                        }
                         crate::media::look::Pic::Broken => continue,
                     }
                 } else if crate::drawing::excalidraw_md::is_drawing_path(&p) {
@@ -1916,6 +1959,14 @@ impl NoteEditor {
                         _ => {}
                     }
                 }
+            }
+        }
+        // the image shown of a carousel has the row of its buttons below it: (the embed's number, the carousel's)
+        let mut bars: Vec<(usize, usize)> = Vec::new();
+        for (range, k) in &car_links {
+            if let Some(i) = images.iter().position(|(r, ..)| r == range) {
+                images[i].1 += crate::carousel::BAR_HEIGHT;
+                bars.push((i, *k));
             }
         }
         // the label of a figure after its embed (`{#fig:x}`, EDIT-128) is part of the picture's row: hidden with the link
@@ -1954,6 +2005,8 @@ impl NoteEditor {
                 ranges.extend(table_rows(s, &parse.tables(s), &table_keys, raw, &folds.view).into_iter().flat_map(|g| g.rows));
             }
             ranges.extend(folds.view.byte_ranges(s).into_iter().map(|r| (r, 0.0)));
+            // the slides of a carousel that are not shown (EDIT-144)
+            ranges.extend(crate::carousel::hidden_lines(s, &car_shown).into_iter().map(|r| (r, 0.0)));
             // a folded front matter: its first line hidden, the summary is painted over its row
             ranges.extend(folds.veiled(s, card_h));
             // what the layout depends on, the cursor only by the raw lines it makes (EDIT-105)
@@ -2079,6 +2132,7 @@ impl NoteEditor {
                 let min = output.galley_pos + Vec2::new(c.min.x, c.min.y + 3.0);
                 let rect = Rect::from_min_size(min, *size);
                 match art {
+                    Art::Hidden => continue,
                     Art::Tex(tex) => {
                         painter.image(tex.id(), rect, uv, Color32::WHITE);
                         let shown = crate::media::embed::Shown { rect, at: r.start, aspect: size.y / size.x, min_w: crate::media::embed::MIN_WIDTH, max_w, buttons: rect };
@@ -2147,6 +2201,20 @@ impl NoteEditor {
                     let numbered = self.thesis.labels.entries.iter().find(|e| e.kind == crate::markdown::citations::Kind::Figure && e.source == self.thesis.index && e.line == line).map(|e| crate::thesis::caption_label(e, self.thesis.lang));
                     if let Some(a) = Self::paint_caption(ui, &link, rect, (base_size, max_w), id.with("caption"), found, numbered.as_deref()) {
                         action = Some(a);
+                    }
+                }
+                // the buttons, the position and the dots of a carousel below its image; ← and → while the pointer is over it and the text has no keyboard (EDIT-144)
+                if let Some(&(_, k)) = bars.iter().find(|(i, _)| *i == idx) {
+                    let (len, shown) = (cars[k].slides.len(), car_shown[k].unwrap_or(0));
+                    let bar = Rect::from_min_size(Pos2::new(rect.min.x, rect.max.y + crate::caption::height(base_size) + 3.0), Vec2::new(rect.width().max(260.0).min(max_w), crate::carousel::BAR_HEIGHT));
+                    let bar_id = id.with("carousel-bar");
+                    let mut at = ui.scope_builder(egui::UiBuilder::new().max_rect(bar), |ui| crate::carousel::bar(ui, bar_id, shown, len)).inner;
+                    if !ui.ctx().memory(|m| m.has_focus(self.id)) {
+                        at = crate::carousel::arrow_keys(ui, rect.union(bar), at, len);
+                    }
+                    if at != shown {
+                        self.embeds.carousel.insert(k, at);
+                        ui.ctx().request_repaint();
                     }
                 }
             }

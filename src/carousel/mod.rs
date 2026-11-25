@@ -8,7 +8,7 @@ use crate::markdown::{self, LinkSpan};
 use std::ops::Range;
 
 mod view;
-pub use view::show;
+pub use view::{arrow_keys, bar, show, BAR_HEIGHT};
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -17,6 +17,8 @@ mod ui_tests;
 /// One image of a carousel.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Slide {
+    /// the line number (from 0) of the slide in the note
+    pub line: usize,
     /// the link target (`a.png`)
     pub target: String,
     /// the text under the image: the alias of a wiki embed without its size, the alt text of a `![alt](a.png)`
@@ -50,14 +52,14 @@ fn head(content: &str) -> Option<&str> {
 }
 
 /// The slide a quote line is: one image embed and nothing else.
-fn slide(content: &str) -> Option<Slide> {
+fn slide(content: &str, line: usize) -> Option<Slide> {
     let links = markdown::find_links(content);
     let [l] = links.as_slice() else { return None };
     if !l.embed || l.range != (0..content.len()) || l.target.is_empty() {
         return None;
     }
     let (caption, width, bare) = parts(l, content);
-    Some(Slide { target: l.target.clone(), caption, width, bare })
+    Some(Slide { line, target: l.target.clone(), caption, width, bare })
 }
 
 /// The caption, the asked width and the bare embed of the link `source` (the text of `l`).
@@ -102,7 +104,7 @@ pub fn find(text: &str) -> Vec<Carousel> {
         while j < lines.len() && !fenced[j] {
             let Some(content) = quote_content(lines[j].1) else { break };
             if !content.is_empty() {
-                let Some(s) = slide(content) else { break };
+                let Some(s) = slide(content, j) else { break };
                 slides.push(s);
                 end = j + 1;
             }
@@ -112,6 +114,26 @@ pub fn find(text: &str) -> Vec<Carousel> {
             out.push(Carousel { lines: i..end, title: Some(title.to_string()).filter(|t| !t.is_empty()), slides });
         }
         i = end;
+    }
+    out
+}
+
+/// The lines of `text` the editor hides while it shows one image of each carousel (EDIT-144): the
+/// slides but the one `shown` says, a byte range each with its line break. `shown` has an entry
+/// per carousel of the note, in order: `None` for one that is raw (the cursor is in it), which
+/// hides nothing. A text with another number of carousels (it was edited this frame) hides nothing.
+pub fn hidden_lines(text: &str, shown: &[Option<usize>]) -> Vec<Range<usize>> {
+    let found = find(text);
+    if found.len() != shown.len() {
+        return Vec::new();
+    }
+    let lines = markdown::lines_with_offsets(text);
+    let mut out = Vec::new();
+    for (c, shown) in found.iter().zip(shown) {
+        let Some(shown) = *shown else { continue };
+        for s in c.slides.iter().enumerate().filter(|(n, _)| *n != shown).map(|(_, s)| s) {
+            out.push(lines[s.line].0..lines.get(s.line + 1).map_or(text.len(), |l| l.0));
+        }
     }
     out
 }
