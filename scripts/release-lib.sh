@@ -237,6 +237,23 @@ has_entries() {
     END { exit !found }'
 }
 
+# size_report <worktree> <version> <date>
+# The binary size report of BUILD-045 in the release worktree, before the version commit, so that
+# docs/size-report.md and its charts are part of it. SHALE_SIZE_REPORT_CMD (run by `sh -c` in the
+# worktree, with SHALE_VERSION and SHALE_DATE set) replaces scripts/size-report.sh; the build goes
+# to SIZE_REPORT_TARGET_DIR (default: <git dir>/release/size-target, kept between runs, warm).
+size_report() {
+  local wt=$1 v=$2 date=$3 common
+  echo "size report (BUILD-045) for $v"
+  if [ -n "${SHALE_SIZE_REPORT_CMD:-}" ]; then
+    (cd "$wt" && SHALE_VERSION=$v SHALE_DATE=$date sh -c "$SHALE_SIZE_REPORT_CMD") || die "the size report failed (see above); nothing was landed or tagged"
+  else
+    common=$(git rev-parse --path-format=absolute --git-common-dir)
+    CARGO_TARGET_DIR=${SIZE_REPORT_TARGET_DIR:-$common/release/size-target} bash "$LIB_DIR/size-report.sh" --root "$wt" --date "$date" "$v" \
+      || die "the size report failed (see above); nothing was landed or tagged"
+  fi
+}
+
 # tag_and_push <kind: check|release> <version> <issue|""> <dry-run: yes|no>
 # The whole run of FORGE-013 / FORGE-014 once the version is known.
 tag_and_push() {
@@ -321,6 +338,8 @@ tag_and_push() {
     merge_changelog "$wt" "" ""
     msg="Version $v (check tag, Refs #$issue)"
   fi
+  # the size of the binary at this version: in the version commit (BUILD-045)
+  size_report "$wt" "$v" "${RELEASE_DATE:-$(date +%F)}"
   git -C "$wt" add -A
   git -C "$wt" commit -q -m "$msg" -m "Made by scripts/make-$([ "$kind" = check ] && echo tag || echo release).sh (FORGE-01$([ "$kind" = check ] && echo 3 || echo 4), ADR-0018)."
   # BUILD-013 before anything is landed: the same check Forgejo and GitHub run on the tag

@@ -93,6 +93,8 @@ FAKE
 chmod +x "$TMP/bin/fake-bench-compare"
 export BENCH_BIN="$TMP/bin/fake-shale" BENCH_COMPARE="$TMP/bin/fake-bench-compare" BENCH_LOG="$TMP/bench.log"
 export RELEASE_GH="$TMP/bin/gh" GH_LOG="$TMP/gh.log" RELEASE_DATE=2026-11-17 LAND_CHECK_CMD=true LAND_REPORT_CMD=true
+# the size report (BUILD-045) builds the whole program: a stub that writes what it was given, and notes that it ran
+export SHALE_SIZE_REPORT_CMD='printf "size report of $SHALE_VERSION on $SHALE_DATE\n" > docs/size-report.md; echo run >> "$SIZE_LOG"' SIZE_LOG="$TMP/size.log"
 
 git init -q --bare "$TMP/remote.git"
 git clone -q "$TMP/remote.git" "$TMP/work" 2>/dev/null
@@ -161,12 +163,14 @@ land pend2 docs/changelog-pending/I2.md $'### Added\n\n- Two (#2).\n\n### Tests\
 # check tags (FORGE-013)
 expect "the first check tag needs a level" 1 "say patch, minor or major" make-tag.sh
 expect "a dry run names the tag" 0 "check tag: v0.4.0-rc.1" make-tag.sh --dry-run minor
+check "build_045: a dry run makes no size report" '[ ! -e "$SIZE_LOG" ]'
 check "a dry run changes nothing" '! remote_tag v0.4.0-rc.1 && [ "$(version_on_main)" = 0.3.0 ] && [ ! -s "$GH_LOG" ]'
 expect "a check tag is not a release" 1 "a check tag is a pre-release" make-tag.sh 0.4.0
 expect "minor makes the first rc of the next minor version" 0 "pushed the tag to origin" make-tag.sh minor
 check "the tag is on the remote and points at the landed bump" 'remote_tag v0.4.0-rc.1 && [ "$(git rev-parse "v0.4.0-rc.1^{commit}")" = "$(git rev-parse origin/main)" ]'
 check "main has the version in Cargo.toml and Cargo.lock" '[ "$(version_on_main)" = 0.4.0-rc.1 ] && git show origin/main:Cargo.lock | grep -A1 "name = \"shale\"" | grep -Fq "0.4.0-rc.1" && git show origin/main:Cargo.lock | grep -Fq "version = \"9.9.9\"" && git show origin/main:Cargo.toml | grep -Fq "other = { version = \"9.9.9\" }"'
 check "the tag is annotated" '[ "$(git cat-file -t v0.4.0-rc.1)" = tag ]'
+check "build_045: the size report is in the version commit of a check tag" '[ "$(git show v0.4.0-rc.1:docs/size-report.md)" = "size report of 0.4.0-rc.1 on 2026-11-17" ] && git show --stat --format= "origin/main^2" | grep -Fq docs/size-report.md'
 check "the release issue was made and named in the commit" 'grep -Fq "issue create -R rabalyn/shale --title Release 0.4.0" "$GH_LOG" && git log -1 --format=%B "origin/main^2" | grep -Fq "Version 0.4.0-rc.1 (check tag, Refs #77)"'
 check "a check tag merges the pending files into [Unreleased], without a version section" '[ -z "$(git ls-tree origin/main docs/changelog-pending/)" ] && git show origin/main:CHANGELOG.md | sed -n "/^## \[Unreleased\]/,/^## \[0.3.0\]/p" | grep -Fq -- "- Two (#2)." && ! git show origin/main:CHANGELOG.md | grep -Fq "0.4.0"'
 check "the local main followed and no release branch is left" '[ "$(git rev-parse main)" = "$(git rev-parse origin/main)" ] && ! git rev-parse -q --verify refs/heads/release/v0.4.0-rc.1 >/dev/null'
@@ -204,7 +208,12 @@ GH_RUN_OUT="$R_RED" expect "--ignore-github-check skips the check" 0 "not looked
 GH_RUN_OUT="$R_RED" expect "a dry run reports a red main-check and goes on" 0 "a release would stop here" make-release.sh --dry-run 0.4.0
 GH_RUN_OUT="$R_CANCEL\n$R_GREEN\n$R_RED" expect "a green main-check lets the release go on" 0 "main-check is green for aaaaaaa" make-release.sh --dry-run 0.4.0
 check "the check asked GitHub for the runs of main-check.yml on main" 'grep -Fq "run list -R rabalyn/shale --workflow main-check.yml --branch main" "$GH_LOG"'
+SHALE_SIZE_REPORT_CMD=false expect "build_045: a failing size report stops a release before anything is landed" 1 "the size report failed" make-release.sh
+check "build_045: nothing was landed or tagged after the failing size report" '! remote_tag v0.4.0 && [ "$(version_on_main)" = 0.4.0-rc.2 ] && ! git rev-parse -q --verify refs/heads/release/v0.4.0 >/dev/null'
+SHALE_SIZE_REPORT_CMD=false expect "build_045: a failing size report stops a check tag" 1 "the size report failed" make-tag.sh --issue 5 0.4.0-rc.3
+check "build_045: nothing was landed or tagged after the failing size report of a check tag" '! remote_tag v0.4.0-rc.3 && [ "$(version_on_main)" = 0.4.0-rc.2 ]'
 expect "the release of the rc version" 0 "release tag: v0.4.0" make-release.sh
+check "build_045: the size report is in the release commit" '[ "$(git show v0.4.0:docs/size-report.md)" = "size report of 0.4.0 on 2026-11-17" ]'
 check "main and the tag have version 0.4.0" 'remote_tag v0.4.0 && [ "$(version_on_main)" = 0.4.0 ] && [ "$(git rev-parse "v0.4.0^{commit}")" = "$(git rev-parse origin/main)" ]'
 git show origin/main:CHANGELOG.md > "$TMP/cl"
 cat > "$TMP/want" <<'CL'

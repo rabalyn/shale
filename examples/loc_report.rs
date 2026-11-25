@@ -21,6 +21,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 
+// the helpers that the size report (examples/size_report.rs, BUILD-045) draws its charts with too
+#[path = "report_common/mod.rs"]
+mod report_common;
+use report_common::{nice_scale, spaced, write_if_changed, xml_escape};
+
 /// The pseudo-feature of the test modules that belong to no feature (`ui_test_support`).
 const SHARED: &str = "Shared test support";
 
@@ -1033,21 +1038,6 @@ fn collect_history(root: &Path, cache: &[TagCount]) -> Result<History, String> {
     Ok(history)
 }
 
-/// A step of 1, 2 or 5 times a power of ten and the top of the y axis (a multiple of the step, at
-/// least `peak`), so that there are at most five intervals.
-fn nice_scale(peak: usize) -> (usize, usize) {
-    let raw = peak.div_ceil(5).max(1);
-    let mut step = 1;
-    while step < raw {
-        step = match step.to_string().as_bytes()[0] {
-            b'1' => step * 2,
-            b'2' => step / 2 * 5,
-            _ => step * 2,
-        };
-    }
-    (step, (peak.div_ceil(step) * step).max(step))
-}
-
 /// An axis label: `0`, `20k`, `1.5k`, `700`.
 fn tick_label(n: usize) -> String {
     if n >= 1000 && n.is_multiple_of(1000) {
@@ -1057,23 +1047,6 @@ fn tick_label(n: usize) -> String {
     } else {
         n.to_string()
     }
-}
-
-/// A count with a space between the thousands: `98 754`.
-fn spaced(n: usize) -> String {
-    let digits = n.to_string();
-    let mut out = String::new();
-    for (i, ch) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(' ');
-        }
-        out.push(ch);
-    }
-    out
-}
-
-fn xml_escape(text: &str) -> String {
-    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
 }
 
 const SVG_W: f64 = 960.0;
@@ -1248,14 +1221,6 @@ fn generate(args: &Args) -> Result<Generated, String> {
     let (history, files) = history_for(args)?;
     report.history = history;
     Ok(Generated { report: render(&report), files })
-}
-
-/// Writes `text` unless the file holds it already.
-fn write_if_changed(path: &Path, text: &str) -> Result<(), String> {
-    if fs::read_to_string(path).is_ok_and(|old| old == text) {
-        return Ok(());
-    }
-    fs::write(path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))
 }
 
 fn execute(args: &[String], default_root: &Path) -> Result<(), String> {
