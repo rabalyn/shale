@@ -35,7 +35,7 @@ mod snapshot;
 pub mod worker;
 
 use matcher::{Budget, Run, Stop};
-use query::{Checked, Expr, TermKind};
+use query::{Checked, Expr, Term, TermKind};
 pub use snapshot::{SnapCache, Snapshot};
 pub use worker::{Lease, Request, SearchWorker, Slot};
 
@@ -143,13 +143,15 @@ impl Ctx<'_> {
 fn matches_at(pat: &[char], text: &[char], fuel: &mut u64) -> Option<usize> {
     let (mut p, mut t) = (0, 0);
     let mut star: Option<(usize, usize)> = None;
-    loop {
-        if *fuel == 0 {
-            return None;
+    // counted in a local (it stays in a register) and given back at the end
+    let mut left = *fuel;
+    let found = loop {
+        if left == 0 {
+            break None;
         }
-        *fuel -= 1;
+        left -= 1;
         if p == pat.len() {
-            return Some(t);
+            break Some(t);
         }
         if pat[p] == '*' {
             star = Some((p, t));
@@ -164,10 +166,12 @@ fn matches_at(pat: &[char], text: &[char], fuel: &mut u64) -> Option<usize> {
                     p = sp + 1;
                     t = st + 1;
                 }
-                _ => return None,
+                _ => break None,
             }
         }
-    }
+    };
+    *fuel = left;
+    found
 }
 
 /// The bytes of `line` of the first match of the wildcard pattern, ignoring case (a match is
@@ -215,9 +219,16 @@ pub fn note_hits(vault: &Vault, query: &Query) -> Vec<Hit> {
 /// (QUERY-017) or the budget (QUERY-010); what it found so far is returned and `run.stopped` says why.
 pub fn scan_notes(notes: &Snapshot, query: &Query, expr: &Expr, run: &mut Run) -> Vec<Hit> {
     let texts = expr.positive_texts();
+    // one text term alone: a note matches when a line or its name does, which is what its hits are
+    // looked for with anyway, so the note is read once, not once to match and once for its hits
+    let only_text = matches!(expr, Expr::Term(Term { kind: TermKind::Text(_), .. }));
     let mut out = Vec::new();
     for (idx, s) in notes.notes.iter().enumerate() {
-        let scanned = run.note_matches(expr, idx).and_then(|matched| if matched { note_lines(s, &texts, query, run, &mut out) } else { Ok(()) });
+        let scanned = if only_text {
+            run.begin_note().and_then(|()| note_lines(s, &texts, query, run, &mut out, true))
+        } else {
+            run.note_matches(expr, idx).and_then(|matched| if matched { note_lines(s, &texts, query, run, &mut out, false) } else { Ok(()) })
+        };
         if let Err(stop) = scanned {
             run.stopped = Some(stop);
             break;
@@ -230,8 +241,9 @@ pub fn scan_notes(notes: &Snapshot, query: &Query, expr: &Expr, run: &mut Run) -
 }
 
 /// The hits of one note that matches: the lines of its text terms, else its name when a text
-/// term matches it, else the note itself.
-fn note_lines(s: &snapshot::SnapNote, texts: &[&str], query: &Query, run: &mut Run, out: &mut Vec<Hit>) -> Result<(), Stop> {
+/// term matches it, else the note itself. With `unmatched` it is not known yet that the note
+/// matches: when neither a line nor its name has the text, it has no hit.
+fn note_lines(s: &snapshot::SnapNote, texts: &[&str], query: &Query, run: &mut Run, out: &mut Vec<Hit>, unmatched: bool) -> Result<(), Stop> {
     let f = &s.file;
     let name = f.display_name();
     let before = out.len();
@@ -264,10 +276,11 @@ fn note_lines(s: &snapshot::SnapNote, texts: &[&str], query: &Query, run: &mut R
             }
         }
         let open = Action::Open { rel: f.rel.clone(), new_tab: false };
-        out.push(match found {
-            Some(found) => Hit::new(NOTES, name, "name".into(), open).marked(vec![found]),
-            None => Hit::new(NOTES, name, "note".into(), open),
-        });
+        match found {
+            Some(found) => out.push(Hit::new(NOTES, name, "name".into(), open).marked(vec![found])),
+            None if unmatched => {}
+            None => out.push(Hit::new(NOTES, name, "note".into(), open)),
+        }
     }
     Ok(())
 }
@@ -759,6 +772,54 @@ mod tests {
         assert!(matches!(&name.action, Action::Open { rel, .. } if rel == std::path::Path::new("banana plans.md")));
         assert_eq!(note_hits(&v, &Query::picker("ban*ead")).len(), 1, "a wildcard");
         assert!(note_hits(&v, &Query::picker("*")).is_empty() && note_hits(&v, &Query::picker(" ?? ")).is_empty() && note_hits(&v, &Query::picker("")).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: NAV-022, QUERY-004
+    #[test]
+    fn a_single_text_term_finds_what_the_same_term_in_a_tree_finds() {
+        let (v, dir) = fixture();
+        let rows = |q: &str| note_hits(&v, &Query::picker(q)).into_iter().map(|h| (h.title, h.detail, h.marks)).collect::<Vec<_>>();
+        for word in ["banana", "ban*ead", "cherry", "plans", "nothing", "zzz"] {
+            // two terms make a tree: the notes are matched first, then their lines are read
+            assert_eq!(rows(word), rows(&format!("{word} OR {word}")), "{word}");
+        }
+        assert!(rows("zzz").is_empty(), "a note without the text has no hit, not even for itself");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: QUERY-010
+    #[test]
+    fn a_single_text_term_pays_for_its_notes_and_stops_at_the_budget() {
+        let (v, dir) = fixture();
+        let notes = v.search_snapshot();
+        let query = Query::picker("zzz");
+        let checked = query.check();
+        let expr = checked.expr().unwrap();
+        let cancel = AtomicBool::new(false);
+        let mut run = Run::new(&notes, &cancel, Budget::new(1, Duration::from_secs(60)));
+        assert!(scan_notes(&notes, &query, expr, &mut run).is_empty());
+        assert_eq!(run.stopped, Some(Stop::Budget), "the first note uses up the budget");
+        let cancelled = AtomicBool::new(true);
+        let mut run = Run::new(&notes, &cancelled, Budget::standard());
+        scan_notes(&notes, &query, expr, &mut run);
+        assert_eq!(run.stopped, Some(Stop::Cancelled));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: QUERY-003
+    #[test]
+    fn the_day_is_asked_of_the_clock_only_by_a_query_with_a_due_term() {
+        let (v, dir) = fixture();
+        let notes = v.search_snapshot();
+        for (q, asked) in [("banana", false), ("banana #x status:y path:z", false), ("due:overdue", true), ("banana due:<+3d", true)] {
+            let query = Query::picker(q);
+            let checked = query.check();
+            let cancel = AtomicBool::new(false);
+            let mut run = Run::new(&notes, &cancel, Budget::standard());
+            scan_notes(&notes, &query, checked.expr().unwrap(), &mut run);
+            assert_eq!(run.today.is_some(), asked, "{q}");
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
