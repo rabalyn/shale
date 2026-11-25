@@ -12,7 +12,7 @@ impl ShaleApp {
         anchor(ui, "vault.folder", |ui| {
             ui.label("Vault folder");
             ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(vault_path).desired_width(320.0));
+                ui.add(egui::TextEdit::singleline(vault_path).desired_width(240.0));
                 if ui.button("Choose…").on_hover_text("Choose the folder with the file picker").clicked() {
                     self.ask_vault_folder(crate::vault_menu::Purpose::Open);
                 }

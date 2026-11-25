@@ -244,7 +244,9 @@ fn vault_033_open_asks_for_a_folder_adds_it_to_the_known_vaults_and_opens_it() {
     w.wait_picker();
     w.type_over(&w.dir("nowhere").to_string_lossy());
     w.key(Key::Enter);
-    assert!(w.painted("That folder does not exist."));
+    w.wait_picker();
+    w.hl.frames(&mut w.app, 5);
+    assert!(w.painted("That folder does not exist."), "{:?}", w.all_text());
     assert!(!w.dir("nowhere").exists(), "nothing is created");
 }
 
@@ -277,9 +279,10 @@ fn vault_034_hidden_files_do_not_count_and_the_sample_box_writes_sample_notes() 
     assert!(!crate::vault_menu::is_empty_folder(&w.dir("three")).unwrap());
     w.ask(Purpose::Create);
     assert!(w.painted("Start with sample notes"));
-    w.click_text("Start with sample notes");
     w.type_over(&w.dir("empty").to_string_lossy());
-    w.key(Key::Enter);
+    // a click on the box takes the keyboard from the path field: the button chooses
+    w.click_text("Start with sample notes");
+    w.click_last("Create");
     w.settle();
     assert_eq!(w.root(), Some(w.dir("empty")));
     assert!(w.dir("empty").join("Welcome.md").is_file(), "the sample notes are there");

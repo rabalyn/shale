@@ -305,12 +305,15 @@ impl OwnPicker {
         }
     }
 
-    fn wants(&mut self, f: Field) -> bool {
-        let yes = self.focus == Some(f);
-        if yes {
-            self.focus = None;
+    /// Give the field `f` the keyboard when it is the one asked for. Asked again until it has it:
+    /// the first frame of a new dialog is only the measuring of its size, and takes no focus.
+    fn focus_on(&mut self, f: Field, r: &egui::Response) {
+        if self.focus == Some(f) {
+            r.request_focus();
+            if r.has_focus() {
+                self.focus = None;
+            }
         }
-        yes
     }
 
     /// Draw the dialog and carry out what was asked in it.
@@ -343,9 +346,7 @@ impl OwnPicker {
                 }
             }
             let r = ui.add(egui::TextEdit::singleline(&mut self.text).hint_text("Path of the folder, ~ is your home folder").desired_width(f32::INFINITY));
-            if self.wants(Field::Path) {
-                r.request_focus();
-            }
+            self.focus_on(Field::Path, &r);
             if r.lost_focus() && enter {
                 *intent = Some(Intent::SubmitPath);
             }
@@ -393,9 +394,7 @@ impl OwnPicker {
             ui.horizontal(|ui| {
                 ui.label("File name");
                 let r = ui.add(egui::TextEdit::singleline(&mut self.name).desired_width(f32::INFINITY));
-                if self.wants(Field::Name) {
-                    r.request_focus();
-                }
+                self.focus_on(Field::Name, &r);
                 if r.lost_focus() && enter {
                     *intent = Some(Intent::Choose);
                 }
@@ -405,9 +404,7 @@ impl OwnPicker {
             ui.horizontal(|ui| {
                 ui.label("New folder");
                 let r = ui.add(egui::TextEdit::singleline(&mut self.new_folder).hint_text("Name, made in the folder shown above").desired_width(260.0));
-                if self.wants(Field::NewFolder) {
-                    r.request_focus();
-                }
+                self.focus_on(Field::NewFolder, &r);
                 let go = ui.button("Make and use").on_hover_text("Make the folder inside the folder shown above and use it").clicked();
                 if go || (r.lost_focus() && enter) {
                     *intent = Some(Intent::MakeFolder);
