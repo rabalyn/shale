@@ -19,6 +19,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 mod thesis;
+pub(super) use thesis::{landing_key, Thesis};
 
 pub(super) const MM: f32 = 72.0 / 25.4;
 
@@ -1384,6 +1385,9 @@ impl<'a> Writer<'a> {
         for (page, [x, y, width, height], label) in self.jumps.split_off(first_jump) {
             if let Some(to) = footnote_places.get(&label) {
                 self.doc.page(page).jump(x, y, width, height, *to);
+            } else if label.starts_with('\u{1}') {
+                // a reference or citation of the thesis syntax to a place in another note of a book: the book links it (BOOK-020)
+                self.jumps.push((page, [x, y, width, height], label));
             }
         }
         places

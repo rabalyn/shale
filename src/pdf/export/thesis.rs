@@ -36,7 +36,7 @@ struct Float {
 }
 
 /// The thesis document of the note being laid out and what the layout found out about it.
-pub(super) struct Thesis {
+pub(in crate::pdf) struct Thesis {
     view: Arc<ThesisView>,
     marks: Vec<Mark>,
     /// where the labels and the entries of the bibliography are, by key
@@ -49,13 +49,13 @@ pub(super) struct Thesis {
 }
 
 /// The key of a label in the landings.
-fn key(kind: Kind, id: &str) -> String {
+pub(in crate::pdf) fn landing_key(kind: Kind, id: &str) -> String {
     format!("\u{1}{}:{id}", kind.prefix())
 }
 
 impl Thesis {
     /// The thesis of a note and its text with the marks in it.
-    pub(super) fn of(view: Arc<ThesisView>, text: &str) -> (Thesis, String) {
+    pub(in crate::pdf) fn of(view: Arc<ThesisView>, text: &str) -> (Thesis, String) {
         let mut marks: Vec<Mark> = Vec::new();
         let mut out = String::with_capacity(text.len());
         let mut at = 0;
@@ -71,13 +71,27 @@ impl Thesis {
             match &span.shown {
                 Shown::Label => {}
                 Shown::Citation { text, keys, .. } => mark(text, keys.first().map(|k| format!("\u{1}cite:{k}"))),
-                Shown::Reference { text, targets, .. } => mark(text, targets.first().map(|(k, id)| key(*k, id))),
+                Shown::Reference { text, targets, .. } => mark(text, targets.first().map(|(k, id)| landing_key(*k, id))),
                 Shown::Broken { .. } => out.push_str(&text[span.range.clone()]),
             }
             at = span.range.end;
         }
         out.push_str(&text[at..]);
         (Thesis { view, marks, landings: HashMap::new(), float: Float::default(), lists: Vec::new(), boxes: Vec::new() }, out)
+    }
+
+    /// `text` with the marks it holds replaced by what they say.
+    pub(in crate::pdf) fn unmark(&self, text: &str) -> String {
+        let mut out = String::new();
+        let mut rest = text;
+        while let Some(open) = rest.find(OPEN) {
+            out.push_str(&rest[..open]);
+            let tail = &rest[open + OPEN.len_utf8()..];
+            let Some(close) = tail.find(CLOSE) else { return out };
+            out.push_str(self.mark_at(&tail[..close]).map_or("", |m| m.text.as_str()));
+            rest = &tail[close + CLOSE.len_utf8()..];
+        }
+        out + rest
     }
 
     /// The mark whose number is `digits`.
@@ -89,7 +103,7 @@ impl Thesis {
 /// The key and the number of the numbered equation on `lines`: `(key, "(2.1)")`.
 pub(super) fn equation_number(view: &ThesisView, lines: &Range<usize>) -> Option<(String, String)> {
     let e = view.labels.entries.iter().find(|e| e.kind == Kind::Equation && e.source == view.index && lines.contains(&e.line))?;
-    Some((key(Kind::Equation, &e.id), format!("({})", e.number.as_ref()?)))
+    Some((landing_key(Kind::Equation, &e.id), format!("({})", e.number.as_ref()?)))
 }
 
 impl Writer<'_> {
@@ -100,17 +114,17 @@ impl Writer<'_> {
 
     /// `text` with the marks it holds replaced by what they say.
     pub(super) fn unmark(&self, text: &str) -> String {
-        let Some(t) = &self.thesis else { return text.to_string() };
-        let mut out = String::new();
-        let mut rest = text;
-        while let Some(open) = rest.find(OPEN) {
-            out.push_str(&rest[..open]);
-            let tail = &rest[open + OPEN.len_utf8()..];
-            let Some(close) = tail.find(CLOSE) else { return out };
-            out.push_str(t.mark_at(&tail[..close]).map_or("", |m| m.text.as_str()));
-            rest = &tail[close + CLOSE.len_utf8()..];
-        }
-        out + rest
+        self.thesis.as_ref().map_or_else(|| text.to_string(), |t| t.unmark(text))
+    }
+
+    /// The thesis of the note laid out next (a chapter of a book has its own), none for a note without the syntax.
+    pub(in crate::pdf) fn set_thesis(&mut self, thesis: Option<Thesis>) {
+        self.thesis = thesis;
+    }
+
+    /// The thesis of the note laid out last.
+    pub(in crate::pdf) fn take_thesis(&mut self) -> Option<Thesis> {
+        self.thesis.take()
     }
 
     /// The pieces of a line with the marks in their text put back: a reference is in the colour of
@@ -158,7 +172,7 @@ impl Writer<'_> {
         self.thesis.as_ref().map(|t| t.boxes.clone()).unwrap_or_default()
     }
 
-    pub(super) fn thesis_landings(&self) -> HashMap<String, Dest> {
+    pub(in crate::pdf) fn thesis_landings(&self) -> HashMap<String, Dest> {
         self.thesis.as_ref().map(|t| t.landings.clone()).unwrap_or_default()
     }
 
@@ -185,7 +199,7 @@ impl Writer<'_> {
         let text = view.caption_text(entry);
         let above = view.caption_above(Kind::Figure);
         if let Some(t) = &mut self.thesis {
-            t.float = Float { label: Some(key(Kind::Figure, &entry.id)), above: above.then(|| text.clone()), below: (!above).then_some(text) };
+            t.float = Float { label: Some(landing_key(Kind::Figure, &entry.id)), above: above.then(|| text.clone()), below: (!above).then_some(text) };
         }
     }
 
@@ -244,7 +258,7 @@ impl Writer<'_> {
         let (text, above) = (v.caption_text(entry), v.caption_above(Kind::Table));
         let base = self.opts.font_pt;
         self.need(self.caption_height(&text) + base * 4.0);
-        self.land(key(Kind::Table, &entry.id));
+        self.land(landing_key(Kind::Table, &entry.id));
         if above {
             self.draw_caption(&text);
             self.y += crate::caption::GAP;
@@ -260,7 +274,7 @@ impl Writer<'_> {
     // ------------------------------------------------------------ lists
 
     /// The list at a marker or at the end of the note: gives where its heading is.
-    pub(super) fn thesis_block(&mut self, what: Marker, base: f32) -> Option<Dest> {
+    pub(in crate::pdf) fn thesis_block(&mut self, what: Marker, base: f32) -> Option<Dest> {
         let view = self.thesis_view()?;
         match what {
             Marker::Bibliography => self.bibliography(&view, base),
@@ -326,13 +340,13 @@ impl Writer<'_> {
         let Some(t) = &mut self.thesis else { return };
         for e in view.labels.entries.iter().filter(|e| e.kind == Kind::Section && e.source == view.index) {
             if let Some(at) = places.get(&e.line) {
-                t.landings.entry(key(Kind::Section, &e.id)).or_insert(*at);
+                t.landings.entry(landing_key(Kind::Section, &e.id)).or_insert(*at);
             }
         }
         let lists = std::mem::take(&mut t.lists);
         let landings = t.landings.clone();
         for (kind, slots) in lists {
-            let entries: Vec<Entry> = view.floats(kind).into_iter().map(|e| Entry { level: 1, label: view.caption_text(e), dest: landings.get(&key(kind, &e.id)).copied(), bold: false }).collect();
+            let entries: Vec<Entry> = view.floats(kind).into_iter().map(|e| Entry { level: 1, label: view.caption_text(e), dest: landings.get(&landing_key(kind, &e.id)).copied(), bold: false }).collect();
             self.draw_contents(&entries, &slots);
         }
     }
