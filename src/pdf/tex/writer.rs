@@ -426,7 +426,7 @@ fn write_in_shale(req: &Request) -> Result<Document, String> {
     }
 
     let head = class_and_preamble(kind, &req.set.settings, kind.shows_department_logo(req.set, req.opts.department_logo));
-    let font_lines = fonts::overrides(req.fonts, fonts::Source { vault, set: req.set, note: Values::of_note(req.text), book: false, chapters: Vec::new() });
+    let font_lines = fonts::overrides(req.fonts, fonts::Source { vault, set: req.set, note: req.opts.font_note.clone().unwrap_or_else(|| Values::of_note(req.text)), book: false, chapters: Vec::new() });
     let setup = Setup { fonts: &font_lines.fonts, thesis: thesis.preamble() };
     let tex = document(head, long_tables, family == Family::Poster && kind.columns > 1, toc.then(|| toc_depth(family == Family::Book)), &values, &setup, &main);
     drop(body);

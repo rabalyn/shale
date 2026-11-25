@@ -103,6 +103,9 @@ pub struct ExportOptions {
     pub code_font: FontKind,
     /// notes: what the fonts of PDF-034 are looked up in; none: only the words `sans`, `serif` and `mono`
     pub fonts: Option<std::sync::Arc<FontsAsk>>,
+    /// notes: the fonts the dialog's fields say (PDF-039); they take the place of the `print-font*`
+    /// properties of the note, or of a book's top folder note. None: what the note says.
+    pub font_note: Option<crate::fonts::resolve::Values>,
     /// notes: the line height as a factor of the font's natural line height (`print-line-spacing`,
     /// PDF-015); None: the look of the export before this option, 1.45 text sizes
     pub line_spacing: Option<f32>,
@@ -162,6 +165,7 @@ impl ExportOptions {
             head_font: None,
             code_font: FontKind::Mono,
             fonts: None,
+            font_note: None,
             line_spacing: None,
             paragraph_spacing: None,
             justify: false,
@@ -200,6 +204,7 @@ impl ExportOptions {
             head_font: None,
             code_font: FontKind::Mono,
             fonts: None,
+            font_note: None,
             line_spacing: None,
             paragraph_spacing: None,
             justify: false,
@@ -340,11 +345,6 @@ impl ExportOptions {
         let mut parts: Vec<String> = Vec::new();
         if self.paper_look {
             parts.push("paper look".into());
-        }
-        match self.font {
-            FontKind::Serif => parts.push("serif".into()),
-            FontKind::Mono => parts.push("mono".into()),
-            _ => {}
         }
         if self.justify {
             parts.push("justified".into());
@@ -3964,7 +3964,7 @@ pub(crate) mod tests {
         assert_eq!(label("print-heading-sizes: 1 2 3").as_deref(), Some("paper look"), "a bad value is not shown");
         assert_eq!(
             label("print-font: serif\nprint-heading-color: \"#1F4E79\"\nprint-heading-weight: normal\nprint-heading-sizes: 16 13 12 11 11 11").as_deref(),
-            Some("paper look, serif, headings #1f4e79, headings not bold, heading sizes 16 13 12 11 11 11")
+            Some("paper look, headings #1f4e79, headings not bold, heading sizes 16 13 12 11 11 11")
         );
     }
 

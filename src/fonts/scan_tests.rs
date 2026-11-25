@@ -168,3 +168,36 @@ fn job_040_the_vaults_fonts_are_read_again_when_its_font_files_change_and_the_sy
     let _ = std::fs::remove_dir_all(&root);
     let _ = std::fs::remove_dir_all(&sys);
 }
+
+// spec: CFG-081, JOB-040
+#[test]
+fn cfg_081_a_scan_on_request_reads_the_system_and_the_vault_anew_and_keeps_the_old_result_until_it_is_in() {
+    let root = folder("scan-again");
+    let sys = folder("scan-again-sys");
+    Spec::new("Sysfont", 400, false).write(&sys, "Sysfont.ttf");
+    let vault = vault_in(&root);
+    let busy = Busy::default();
+    let mut scan = FontScan::default().with_system_dirs(vec![sys.clone()]);
+    scan.request();
+    scan.tick(Some(&vault), &busy, || {});
+    finish(&mut scan, Some(&vault), &busy);
+    assert_eq!(families(&scan.catalogue().system), ["Sysfont"]);
+    // a font installed while Shale runs is not seen by itself
+    Spec::new("Newfont", 400, false).write(&sys, "Newfont.ttf");
+    scan.tick(Some(&vault), &busy, || {});
+    assert!(!scan.running());
+    assert_eq!(families(&scan.catalogue().system), ["Sysfont"]);
+    // asked for again: a scan runs, the old result stays in effect until the new one is in
+    scan.rescan();
+    scan.tick(Some(&vault), &busy, || {});
+    assert!(scan.running() && scan.catalogue().system_ready);
+    assert_eq!(families(&scan.catalogue().system), ["Sysfont"]);
+    // a second request while it runs starts no second scan, and none follows it
+    scan.rescan();
+    finish(&mut scan, Some(&vault), &busy);
+    assert_eq!(families(&scan.catalogue().system), ["Newfont", "Sysfont"]);
+    scan.tick(Some(&vault), &busy, || {});
+    assert!(!scan.running(), "one request, one scan");
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&sys);
+}

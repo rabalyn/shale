@@ -249,6 +249,7 @@ fn write_book_in_shale(req: &BookRequest, board: Option<&Resolved>) -> Result<Do
     }
     // one font for the book: the top folder note's, else the set's and the vault's; a chapter's own is ignored (BOOK-022)
     let top = plan.note.as_deref().and_then(|n| vault.notes.get(n)).map(|n| Values::of_note(&n.text)).unwrap_or_default();
+    let top = req.opts.font_note.clone().unwrap_or(top);
     let chapters = secs.iter().filter(|s| s.role != Role::Intro && s.rel.is_some()).map(|s| (s.title.clone(), Values::of_note(&s.text))).collect();
     let font_lines = fonts::overrides(req.fonts, fonts::Source { vault, set: req.set, note: top, book: true, chapters });
     let setup = Setup { fonts: &font_lines.fonts, thesis: thesis.preamble() };

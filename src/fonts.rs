@@ -9,6 +9,9 @@
 
 // The fonts of the exports (ADR-0040, #658): the licence of a font file, the scan of the fonts
 // of the vault and the system, and the resolver that decides which font an export uses.
+pub mod field;
+#[cfg(test)]
+mod field_tests;
 pub mod licence;
 #[cfg(test)]
 mod licence_tests;

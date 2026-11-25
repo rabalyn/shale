@@ -213,15 +213,16 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   the last item you trashed back.
 
   ![The PDF export dialog](userguide/z_media/screenshots/pdf-export-dialog.png)
+  ![The font fields of the export dialog, with a font of the vault and one that is missing](userguide/z_media/screenshots/pdf-export-fonts.png)
 
 - **Print properties of a note** (#339): the front matter of a note can say how its PDF is printed; all
   keys are optional and a bad value is ignored. The export dialog opens with the note's paper, margins,
-  text size, title and contents filled in (and they can be changed there); the font, the spacing, the
+  text size, title, contents and fonts filled in (and they can be changed there); the spacing, the
   alignment, the heading colour, weight and sizes are read from the note at export time. Word imports write them.
   - `print-paper`: `A4`, `A5`, `Letter`, `Legal` or `<W>x<H>mm` (a width larger than the height is landscape)
   - `print-margins`: four numbers in mm, `top right bottom left`
   - `print-font`: `serif` (Liberation Serif, Times-compatible), `sans` (Ubuntu Light) or `mono` (Hack)
-  - `print-font-sans`, `print-font-mono`, and `print-font` with a family name or a vault path to a font file: the built-in PDF sets the text, the headings (`print-font-sans`, else the text font) and the code in them, with the family's real bold and italic faces (a face it lacks is imitated, with a warning), embeds only the characters it uses and respects the font's licence; a missing font is a warning, never a failed export; a folder's book has one font, its top note's. The export dialog says which font such a value (or the vault's `print_font*` settings) resolves to. The LaTeX export uses them too (below)
+  - `print-font-sans`, `print-font-mono`, and `print-font` with a family name or a vault path to a font file: the built-in PDF sets the text, the headings (`print-font-sans`, else the text font) and the code in them, with the family's real bold and italic faces (a face it lacks is imitated, with a warning), embeds only the characters it uses and respects the font's licence; a missing font is a warning, never a failed export; a folder's book has one font, its top note's. The export dialog has three font fields (text, headings, code) that start with the note's values (a folder's: its top note's), offer the families the scan found in a list that takes any typed name, and say which font each value resolves to (or why it cannot be used); what they say is used for that export instead of the note's properties. Settings → Vault has the same three fields as the vault's default (`print_font*`) with the status of each value and a button *Look up fonts again*; the scan of the fonts is a background job. The LaTeX export uses them too (below)
   - `print-font-size`: the body text in points
   - `print-line-spacing`: a factor, 1.0 being the font's own single line height
   - `print-paragraph-spacing`: the space after a body paragraph in points
