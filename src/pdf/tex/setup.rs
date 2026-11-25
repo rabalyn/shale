@@ -162,6 +162,9 @@ impl Details {
             font: base.font.clone(),
             font_sans: base.font_sans.clone(),
             font_mono: base.font_mono.clone(),
+            citation_style: base.citation_style.clone(),
+            table_caption: base.table_caption.clone(),
+            figure_caption: base.figure_caption.clone(),
         }
     }
 }

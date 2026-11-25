@@ -11,10 +11,12 @@ use super::body::Body;
 use super::fonts::{self, FontInput};
 use super::inline::{anchor_named, Files, Look, Targets};
 use super::sets::{class_and_preamble, tex_escape, KindManifest, Mapping, SetInfo};
-use super::writer::{document, drop_title_heading, field_values, heading, nested_levels, toc_depth, Document, SECTION};
+use super::thesis::{self, Input, Thesis};
+use super::writer::{document, drop_title_heading, field_values, heading, nested_levels, toc_depth, Document, Setup, SECTION};
 use crate::board::resolve::Resolved;
 use crate::fonts::resolve::Values;
-use crate::markdown;
+use crate::markdown::labels::{self, Role as LabelRole, Source};
+use crate::markdown::{self, citations};
 use crate::pdf::book::{Item, Plan};
 use crate::pdf::export::ExportOptions;
 use crate::vault::{FileKind, Vault};
@@ -177,9 +179,16 @@ fn write_book_in_shale(req: &BookRequest, board: Option<&Resolved>) -> Result<Do
     let values = field_values(kind, &req.set.settings, &front, &plan.title, req.fields)?;
     let secs = sections(vault, plan, book);
     let targets = targets(&secs);
+    // the thesis syntax of the whole book: one bibliography (the top folder note's), the labels of all its notes (ADR-0039)
+    let top_note = plan.note.as_deref().and_then(|n| vault.notes.get(n).map(|note| (n, note.text.as_str())));
+    let top_text = top_note.map_or("", |(_, t)| t);
+    let sources: Vec<Source> = secs.iter().map(|s| Source { text: &s.text, role: if s.role == Role::Chapter { LabelRole::of_note(&s.text) } else { LabelRole::Other }, title: Some(s.title.as_str()) }).collect();
+    let markers = secs.iter().flat_map(|s| s.blocks.iter()).filter_map(|b| if let Block::Marker(m) = b { Some(*m) } else { None }).collect();
+    let (bib, bib_messages) = if secs.iter().any(|s| s.text.contains('@')) { thesis::load_bib(vault, top_note, &req.opts.thesis.default_bibliography) } else { (None, Vec::new()) };
+    let thesis = Thesis::new(Input { top: top_text, opts: req.opts, set: req.set, kind, book: true, labels: labels::of_book(&sources, top_note.map(|(_, t)| t)), bib, bib_messages, markers });
     // the book's numbering, whatever a note's own front matter says (BOOK-006)
     let (numbered, toc) = (req.opts.numbered_headings, req.opts.toc);
-    let plain = |t: &str| tex_escape(&markdown::heading_plain(t));
+    let plain = |t: &str| tex_escape(&markdown::heading_plain(&labels::without_labels(t)));
     // one list of files for all notes: the work folder's files are named by it, so they never collide
     let files = RefCell::new(Files::default());
     // the headings have the book's anchors, not those of a single note (TEX-032)
@@ -190,10 +199,13 @@ fn write_book_in_shale(req: &BookRequest, board: Option<&Resolved>) -> Result<Do
     }
     if toc {
         main.push_str("\\tableofcontents\n");
-        // the top folder note's text starts a page; a chapter starts one anyway and does not make a second (BOOK-018)
-        if req.opts.toc_break {
-            main.push_str(super::body::NEW_PAGE);
-        }
+    }
+    // the lists of figures and tables follow the contents (TEX-047)
+    let lists = thesis.lists();
+    main.push_str(&lists);
+    // the top folder note's text starts a page; a chapter starts one anyway and does not make a second (BOOK-018)
+    if (toc || !lists.is_empty()) && req.opts.toc_break {
+        main.push_str(super::body::NEW_PAGE);
     }
     for s in &secs {
         match s.role {
@@ -201,7 +213,18 @@ fn write_book_in_shale(req: &BookRequest, board: Option<&Resolved>) -> Result<Do
             _ => main.push_str(&heading(s.rank, numbered, toc, &plain(&s.title), &anchor_named(&s.anchor))),
         }
         let Some(rel) = &s.rel else { continue };
-        let look = Look { vault, rel, text: &s.text, anchors: &no_anchors, embeds: req.opts.embeds, files: &files, notes: blocks::footnote_texts(&s.text), deferred: RefCell::new(None), targets: Some(&targets) };
+        let look = Look {
+            vault,
+            rel,
+            text: &s.text,
+            anchors: &no_anchors,
+            embeds: req.opts.embeds,
+            files: &files,
+            notes: blocks::footnote_texts(&s.text),
+            deferred: RefCell::new(None),
+            targets: Some(&targets),
+            thesis: (!citations::is_foreign(&s.text)).then_some(&thesis),
+        };
         let body = Body::new(look, req.opts, true);
         // a chapter's headings are numbered and listed like it; a folder note's are neither (BOOK-014)
         let chapter = s.role == Role::Chapter;
@@ -211,12 +234,14 @@ fn write_book_in_shale(req: &BookRequest, board: Option<&Resolved>) -> Result<Do
             match b {
                 Block::Heading { text, .. } => {
                     let (n, level) = nested.next().unwrap_or((0, 1));
-                    main.push_str(&heading(s.rank + level, numbered && chapter, toc && chapter, &plain(text), &anchor_named(&s.heading_anchor(n + 1))));
+                    let mark = format!("{}{}", anchor_named(&s.heading_anchor(n + 1)), thesis.heading(text).1);
+                    main.push_str(&heading(s.rank + level, numbered && chapter, toc && chapter, &plain(text), &mark));
                 }
                 b => main.push_str(&body.block(b)),
             }
         }
     }
+    main.push_str(&thesis.bibliography_at_end());
     let mut head = class_and_preamble(kind, &req.set.settings, kind.shows_department_logo(req.set, req.opts.department_logo));
     if board.is_some() {
         // the board is on landscape pages of its own (BOARD-031)
@@ -226,7 +251,10 @@ fn write_book_in_shale(req: &BookRequest, board: Option<&Resolved>) -> Result<Do
     let top = plan.note.as_deref().and_then(|n| vault.notes.get(n)).map(|n| Values::of_note(&n.text)).unwrap_or_default();
     let chapters = secs.iter().filter(|s| s.role != Role::Intro && s.rel.is_some()).map(|s| (s.title.clone(), Values::of_note(&s.text))).collect();
     let font_lines = fonts::overrides(req.fonts, fonts::Source { vault, set: req.set, note: top, book: true, chapters });
-    let tex = document(head, true, false, toc.then(|| toc_depth(book)), &values, &font_lines.fonts, &main);
-    let files = files.into_inner();
+    let setup = Setup { fonts: &font_lines.fonts, thesis: thesis.preamble() };
+    let tex = document(head, true, false, toc.then(|| toc_depth(book)), &values, &setup, &main);
+    let mut files = files.into_inner();
+    files.list.extend(thesis.bib_files());
+    files.warnings.extend(thesis.warnings());
     Ok(Document::new(tex, files, font_lines))
 }

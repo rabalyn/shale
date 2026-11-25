@@ -10,6 +10,7 @@ use super::engine::Engine;
 use super::sets::{self, KindManifest, LogoStatus, Mapping, SetInfo};
 use super::setup::Step;
 use super::writer::{self, Document};
+use crate::bibliography::format::Style;
 use crate::busy::{self, Busy, Key};
 use crate::pdf::export::ExportOptions;
 use crate::theme;
@@ -126,6 +127,10 @@ pub struct TexExport {
     pub installing: Option<String>,
     /// Why the install of the packages failed.
     pub install_error: Option<String>,
+    /// The note (or the folder's top note) names a bibliography file in its properties.
+    own_bibliography: bool,
+    /// The vault has a default bibliography in Settings (set by the window every frame, TEX-047).
+    pub vault_bibliography: bool,
 }
 
 /// The choice a note's properties make: `latex-template: tuda/thesis` (a set and a kind).
@@ -171,6 +176,8 @@ impl TexExport {
             install_requested: false,
             installing: None,
             install_error: None,
+            own_bibliography: !crate::bibliography::resolve::property(text).is_empty(),
+            vault_bibliography: false,
         };
         let (set, kind) = prefer.unzip();
         if let Some(i) = set.and_then(|id| t.sets.iter().position(|s| s.id == id)) {
@@ -260,6 +267,11 @@ impl TexExport {
         self.current_kind().is_some_and(|k| matches!(k.mapping, Mapping::Article | Mapping::Book))
     }
 
+    /// Whether a bibliography can be in effect: the note names a file or the vault has a default (TEX-047).
+    pub fn has_bibliography(&self) -> bool {
+        self.own_bibliography || self.vault_bibliography
+    }
+
     /// Whether the kind has a place for the set's department logo (TEX-035).
     pub fn kind_shows_department_logo(&self) -> bool {
         self.current_kind().is_some_and(|k| !k.department_logo.is_empty())
@@ -347,6 +359,36 @@ impl TexExport {
         }
     }
 
+    /// The boxes of the thesis syntax (TEX-047): lists of figures and tables, the bibliography and
+    /// the citation style; off and greyed for a kind that has no such pages.
+    fn thesis_boxes(&self, ui: &mut Ui, opts: &mut ExportOptions, rec: &mut dyn FnMut(&str, egui::Response) -> egui::Response) {
+        let floats = self.kind_has_toc();
+        let named = self.has_bibliography();
+        let choices = &mut opts.thesis;
+        ui.add_enabled_ui(floats, |ui| {
+            let (mut off_figures, mut off_tables, mut off_bibliography) = (false, false, false);
+            let figures = if floats { &mut choices.list_of_figures } else { &mut off_figures };
+            rec("list-of-figures", ui.checkbox(figures, "List of figures")).on_disabled_hover_text("This kind of document has no lists");
+            let tables = if floats { &mut choices.list_of_tables } else { &mut off_tables };
+            rec("list-of-tables", ui.checkbox(tables, "List of tables")).on_disabled_hover_text("This kind of document has no lists");
+            ui.add_enabled_ui(named, |ui| {
+                let bibliography = if floats && named { &mut choices.bibliography } else { &mut off_bibliography };
+                rec("bibliography", ui.checkbox(bibliography, "Bibliography")).on_disabled_hover_text("No bibliography is named: add the property bibliography: to the note, or choose one in Settings → Vault");
+            });
+        });
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Citation style").size(12.0).color(theme::palette().muted));
+            let shown = choices.style.map_or("from the note or the set", |s| s.name());
+            let combo = egui::ComboBox::from_id_salt("export-tex-style").selected_text(shown).show_ui(ui, |ui| {
+                rec("style:default", ui.selectable_value(&mut choices.style, None, "from the note or the set"));
+                for s in Style::ALL {
+                    rec(&format!("style:{}", s.name()), ui.selectable_value(&mut choices.style, Some(s), s.name()));
+                }
+            });
+            rec("style", combo.response);
+        });
+    }
+
     /// Show the choices: set, kind, fields, contents, the state of TeX and of the export.
     pub fn show(&mut self, ui: &mut Ui, opts: &mut ExportOptions, rec: &mut dyn FnMut(&str, egui::Response) -> egui::Response) {
         let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::palette().muted);
@@ -425,6 +467,7 @@ impl TexExport {
                     crate::pdf::export_dialog::toc_break_box(ui, opts, on, rec);
                     crate::pdf::export_dialog::break_before_box(ui, opts, toc, rec);
                     rec("embeds", ui.checkbox(&mut opts.embeds, "Embedded pictures, drawings and PDFs"));
+                    self.thesis_boxes(ui, opts, rec);
                     // the set's department logo (TEX-035): off and greyed for a kind that has no place for it
                     if self.current_set().is_some_and(|s| s.department_logo.is_some()) {
                         let shows = self.kind_shows_department_logo();

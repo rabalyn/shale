@@ -54,13 +54,23 @@ pub enum Block {
     /// typeset is a [`Block::Code`] of its lines.
     Math(String),
     /// A formula of that kind with the label `{#eq:id}` (TEX-046): its TeX and the id.
-    Equation { tex: String, id: String },
+    Equation {
+        tex: String,
+        id: String,
+    },
     /// An embed alone on its line.
     Embed(markdown::LinkSpan),
     /// An embed alone on its line with the label `{#fig:id}` after it (TEX-045): a numbered figure.
-    Figure { link: markdown::LinkSpan, id: String },
+    Figure {
+        link: markdown::LinkSpan,
+        id: String,
+    },
     /// A pipe table with the caption line `: Caption {#tbl:id}` below it (TEX-045): a numbered table.
-    CaptionedTable { table: crate::table::Block, caption: String, id: String },
+    CaptionedTable {
+        table: crate::table::Block,
+        caption: String,
+        id: String,
+    },
     /// A marker line `<!-- shale: bibliography -->`, `list-of-figures` or `list-of-tables` (TEX-047).
     Marker(Marker),
     Rule,

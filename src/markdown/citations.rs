@@ -160,7 +160,7 @@ pub fn parse_label(s: &str) -> Option<(Kind, String, usize)> {
 }
 
 /// Notes whose text is somebody else's: nothing in them is a citation or a label (rule 1).
-fn is_foreign(text: &str) -> bool {
+pub fn is_foreign(text: &str) -> bool {
     front_matter_values(text).iter().any(|(k, v)| k == "type" && v.first().is_some_and(|t| matches!(t.trim().to_lowercase().as_str(), "email" | "social-post")))
 }
 
