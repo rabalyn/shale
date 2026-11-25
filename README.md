@@ -21,6 +21,9 @@ markdown files. Notes link to each other with `[[wiki links]]`.
   tables and more, and coloured highlights and font colours stored as plain `<mark>` / `<span>` HTML.
 - **Math**: `$E = mc^2$` and `$$…$$` are typeset in the text, the reading view, tables and the PDF export,
   by Shale itself with the bundled font STIX Two Math (no TeX needed).
+- **Image carousel**: a quote `> [!carousel] Title` with one picture per line is a carousel in the reading view (one
+  picture at a time in the reading view and the editor, buttons, dots, caption, ← and → under the pointer); in other editors it is a quote with all the
+  pictures, and the exports show every picture in order.
 - **Themes**: nine built-in light and dark colour themes (Shale, Dracula, Nord, Catppuccin, Gruvbox, Solarized,
   GitHub), one that follows the system's light or dark mode, and any Alacritty terminal theme file you put into
   the themes folder.
@@ -94,10 +97,12 @@ markdown files. Notes link to each other with `[[wiki links]]`.
 
 See **[docs/FEATURES.md](docs/FEATURES.md)** for all features with screenshots.
 
+**Keymap**: every shortcut on a drawn keyboard, by system and layer: <https://rabalyn.github.io/shale/> (interactive), [docs/KEYMAP.md](docs/KEYMAP.md) (pictures), and `shale-keymap-<version>.html` with every release.
+
 **User guide**: `docs/userguide` is a Shale vault: it shows the features it explains. In Shale press **F1**
 (or Settings → Help → **Open user guide**): the guide is built into the program, which unpacks it once per
 version into its data folder (`~/.local/share/shale/userguide-<version>/` on Linux; a copy you edited is never
-overwritten) and opens it as a vault, at "Start here". This works in every build, on every system. Each release also has `shale-userguide-<version>.zip` (with
+overwritten) and opens it as a vault, at "Start here". Its glossary (`Glossary.md`) lists every feature with its keys. This works in every build, on every system. Each release also has `shale-userguide-<version>.zip` (with
 its `.sha256` file) to unpack anywhere and open as a vault (`shale --vault <folder>`, or Settings → Vault folder),
 and `shale-userguide-<version>.pdf`, the same guide as one book to print or read anywhere (made by
 `scripts/userguide-pdf.sh`).
@@ -266,7 +271,7 @@ Other options:
 
 - `--screenshot out.png` starts with a temporary demo vault, draws about 120 frames, saves a
   picture of the window and exits. Automated checks use it.
-- `--view tasks|graph|drawing|reading|calendar|mail|social|social-import|search|keybindings|data-usage` (with `--screenshot`) chooses which
+- `--view tasks|graph|drawing|reading|calendar|mail|social|social-import|search|keybindings|keymap|keymap:<system>:<layer>|data-usage` (with `--screenshot`) chooses which
   view to capture; `mail` uses a made-up mail store (no server, no real mail), `social` and
   `social-import` made-up posts; `search` the vault with the made-up mail and posts indexed, for the search windows; `open:<file>` opens a file of the vault, `read-only:<file>.canvas`
   shows a canvas without the question, and `convert:<file>.canvas` converts it first.
@@ -293,6 +298,7 @@ Other options:
 Ctrl is Cmd on macOS. No default key is one that the system reserves (the app menu's Cmd+H, AltGr on Windows, the workspace keys of the Linux desktops), so macOS has other keys for six actions, named in the rows below; a key you set yourself is never refused for that reason. The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings** (Change replaces the keys of an action, Add gives it one more, Clear leaves it without a key)
 (everywhere, file list, search results, mail view, note view, vim normal mode; a key that another action uses asks whether to overwrite it: Yes takes it from that action, No changes nothing).
 Text editing keys and vim keys are fixed.
+The user guide's [glossary](docs/userguide/Glossary.md) lists every feature from A to Z with its keys and the Keybindings section they are in.
 
 | Keys | Action |
 |---|---|
@@ -335,6 +341,7 @@ Text editing keys and vim keys are fixed.
 | Shift+K | Vim-style editing, normal mode: preview the link under the cursor (a note as in the reading view, a web page's title and text; press it again to move the keyboard into the preview: j / k or ↓ / ↑ scroll, Enter opens the link like `gt`, Ctrl+Enter opens it in a new pane on the right, Esc closes). Definable, e.g. as Space P |
 | Ctrl+, | Settings |
 | Ctrl+Shift+D | Data usage: what Shale keeps on disk, and its caches |
+| Ctrl+Shift+Y | Keymap: the keyboard drawn with every shortcut, by system and layer of modifiers (a main-area tab, also the keyboard icon of the ribbon; the same keyboard is in Settings → Keybindings → Keyboard). Change on a key goes to its row. Definable (macOS: Cmd+Shift+Y) |
 | Ctrl+Shift+PageUp / Ctrl+Shift+PageDown | Previous / next message of the thread of the note (the mails with the same thread-id, by date; nothing happens at the ends, without a thread or in a dialog) |
 | Ctrl+Shift+T | Thread overview: opens the Thread view in the right sidebar and gives it the keyboard (↑ ↓ move, Enter jumps, Esc returns to the note) |
 | F1 | Open the user guide (built into Shale, unpacked into its data folder and opened as a vault) |

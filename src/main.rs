@@ -31,6 +31,7 @@ mod board;
 mod busy;
 mod calendar;
 mod caption;
+mod carousel;
 mod cite_assist;
 mod clickable;
 #[cfg(test)]
@@ -90,6 +91,7 @@ mod inline_picture_ui_tests;
 mod instance;
 mod jobs;
 mod key_badges;
+mod keymap_view;
 mod keys;
 mod keys_ui;
 mod known_vaults;

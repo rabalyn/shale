@@ -113,7 +113,7 @@ impl Section {
 fn sections(vault: &Vault, plan: &Plan, numbered: bool) -> Vec<Section> {
     // (a drawing is no note: a board's drawing card is printed as the picture it embeds, BOARD-030)
     let text_of = |rel: &Path| match vault.notes.get(rel) {
-        Some(n) => n.text.clone(),
+        Some(n) => crate::carousel::flatten(&n.text).into_owned(), // a carousel shows every image (PDF-040)
         None if vault.file(rel).is_some_and(|f| f.kind == FileKind::Drawing) => format!("![[{}]]\n", rel.to_string_lossy()),
         None => String::new(),
     };

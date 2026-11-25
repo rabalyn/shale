@@ -1,0 +1,54 @@
+# The interactive keymap on GitHub Pages (BUILD-046, KEY-060, rabalyn/shale#712): https://rabalyn.github.io/shale/
+# `docs/keymap/index.html` is one file made from the program's own key tables (a test keeps it up to
+# date); this publishes it. It runs for a push of `main` that changes the page (`main` reaches GitHub
+# only from Forgejo's `mirror` job after a green check tag, BUILD-016) and by hand. It builds nothing:
+# it copies the file and deploys it.
+#
+# An owner step, once: in the repository's Settings, Pages, choose the source "GitHub Actions".
+# Until then the deploy job fails and nothing else is affected.
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/keymap/index.html
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions: {}
+
+# one deployment at a time; a newer one waits instead of cancelling a running deploy
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    permissions:
+      contents: read # the checkout
+      pages: write # the deployment
+      id-token: write # proves to Pages that the deployment comes from this workflow
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      # only the page, not the template next to it
+      - name: Stage the page
+        run: |
+          mkdir _site
+          cp docs/keymap/index.html _site/index.html
+          test "$(head -c 15 _site/index.html)" = "<!doctype html>"
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

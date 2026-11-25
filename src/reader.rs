@@ -848,6 +848,7 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
         }
     }
     let tables = crate::table::find_tables(text);
+    let carousels = crate::carousel::find(text);
     let formulas = markdown::find_math(text);
     let page_breaks = markdown::page_break_lines(text);
     let wrappers = markdown::align_blocks(text);
@@ -905,6 +906,19 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
                     thesis::caption(ui, e, t, base);
                 }
                 i = b.lines.end + usize::from(caption.is_some());
+                break 'line;
+            }
+            // a carousel of images: one at a time, the rest of the quote is not drawn (EDIT-143)
+            if let Some(c) = carousels.iter().find(|c| c.lines.start == i) {
+                let id = ui.scope_id().with(("carousel", rel, i));
+                crate::carousel::show(ui, id, c, |ui, slide| {
+                    let drawn = block_embed(ui, (vault, rel), (&slide.target, slide.width), caches, (base, dark_canvas), &mut out, |_| {});
+                    if matches!(drawn, Block::Nothing) {
+                        // a file that is not there: its link in the colour of a missing link, as on a line of its own
+                        ui.label(egui::RichText::new(format!("![[{}]]", slide.target)).color(theme::palette().link_missing));
+                    }
+                });
+                i = c.lines.end;
                 break 'line;
             }
             // a formula on lines of its own: `$$` lines, a `math` fence, `$$…$$` alone (EDIT-046)
@@ -994,42 +1008,24 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
             if alone {
                 let (l, ok) = real[0];
                 if *ok {
-                    let shown = vault.look_media(ui.ctx(), &l.target, Some(rel));
-                    let outside = matches!(shown, crate::vault::Shown::Outside(_));
-                    if let Some((target, abs)) = shown.file(vault) {
-                        if crate::media::is_media(&target) {
-                            // a sound is a player of its own, without the frame (MEDIA-001)
-                            if let Some((t, e)) = figure.filter(|_| caption_above) {
-                                thesis::caption(ui, e, t, base);
-                            }
-                            crate::media::widget::show(ui, caches.media, &abs, rel, l.embed_width());
-                            if outside {
-                                outside_row(ui, &l.target, &mut out);
-                            }
-                            ui.add_space(6.0);
-                        } else {
-                            if let Some((t, e)) = figure.filter(|_| caption_above) {
-                                thesis::caption(ui, e, t, base);
-                            }
-                            embed(ui, vault, (&target, &abs, outside.then_some(l.target.as_str())), l.embed_width(), caches, (base, dark_canvas), &mut out);
-                        }
-                        if let Some((t, e)) = figure.filter(|_| !caption_above) {
+                    let before = |ui: &mut Ui| {
+                        if let Some((t, e)) = figure.filter(|_| caption_above) {
                             thesis::caption(ui, e, t, base);
                         }
-                        i += 1;
-                        break 'line;
-                    }
-                    // a library that is not set up, a file that is not there (MEDIA-016)
-                    if let Some(text) = shown.notice() {
-                        embed_notice(ui, &text);
-                        i += 1;
-                        break 'line;
-                    }
-                    // the first look at the file is on its way (MEDIA-024)
-                    if let Some(abs) = shown.checking() {
-                        embed_loading(ui, abs);
-                        i += 1;
-                        break 'line;
+                    };
+                    match block_embed(ui, (vault, rel), (&l.target, l.embed_width()), caches, (base, dark_canvas), &mut out, before) {
+                        Block::File => {
+                            if let Some((t, e)) = figure.filter(|_| !caption_above) {
+                                thesis::caption(ui, e, t, base);
+                            }
+                            i += 1;
+                            break 'line;
+                        }
+                        Block::Strip => {
+                            i += 1;
+                            break 'line;
+                        }
+                        Block::Nothing => {}
                     }
                 }
             }
@@ -1274,6 +1270,49 @@ fn outside_row(ui: &mut Ui, target: &str, out: &mut Option<ReaderAction>) {
 }
 
 const COPY_HINT: &str = "Copy the file into the vault, in the media folder, and link the copy. Files outside the vault are not synced.";
+
+/// What `block_embed` drew.
+enum Block {
+    /// the file of the embed: a picture, a player, a drawing, ...
+    File,
+    /// a strip: the file is not there, not set up or still being looked at (MEDIA-016, MEDIA-024)
+    Strip,
+    /// nothing: the link is shown as text
+    Nothing,
+}
+
+/// The embed of `target` as a block of its own, the way the reading view shows an embed alone on
+/// its line (EDIT-114) and a slide of a carousel (EDIT-143); `before` draws what goes above a
+/// file (the caption of a figure).
+fn block_embed(ui: &mut Ui, (vault, rel): (&Vault, &Path), (target, width): (&str, Option<f32>), caches: &mut Caches, look: (f32, bool), out: &mut Option<ReaderAction>, before: impl FnOnce(&mut Ui)) -> Block {
+    let shown = vault.look_media(ui.ctx(), target, Some(rel));
+    let outside = matches!(shown, crate::vault::Shown::Outside(_));
+    if let Some((file, abs)) = shown.file(vault) {
+        before(ui);
+        if crate::media::is_media(&file) {
+            // a sound is a player of its own, without the frame (MEDIA-001)
+            crate::media::widget::show(ui, caches.media, &abs, rel, width);
+            if outside {
+                outside_row(ui, target, out);
+            }
+            ui.add_space(6.0);
+        } else {
+            embed(ui, vault, (&file, &abs, outside.then_some(target)), width, caches, look, out);
+        }
+        return Block::File;
+    }
+    // a library that is not set up, a file that is not there (MEDIA-016)
+    if let Some(text) = shown.notice() {
+        embed_notice(ui, &text);
+        return Block::Strip;
+    }
+    // the first look at the file is on its way (MEDIA-024)
+    if let Some(abs) = shown.checking() {
+        embed_loading(ui, abs);
+        return Block::Strip;
+    }
+    Block::Nothing
+}
 
 /// The strip that stands in place of an outside file that cannot be shown (MEDIA-016).
 fn embed_notice(ui: &mut Ui, text: &str) {

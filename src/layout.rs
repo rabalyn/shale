@@ -46,6 +46,7 @@ pub enum Icon {
     CalendarPanel,
     History,
     Thread,
+    Keymap,
     /// the vault switcher (VAULT-030)
     Vault,
 }
@@ -81,6 +82,17 @@ pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
                 let lane = Rect::from_min_size(Pos2::new(x - w * 0.11, cx.y - w * 0.32), Vec2::new(w * 0.22, h * w * 0.8));
                 p.rect_stroke(lane, CornerRadius::same(1), s, StrokeKind::Inside);
             }
+        }
+        Icon::Keymap => {
+            // a keyboard: the case with two rows of keys and the space bar
+            let b = Rect::from_center_size(cx, Vec2::new(w * 0.8, w * 0.5));
+            p.rect_stroke(b, CornerRadius::same(2), s, StrokeKind::Middle);
+            for y in [-0.17_f32, -0.07] {
+                for k in 0..4 {
+                    p.circle_filled(cx + Vec2::new((k as f32 - 1.5) * w * 0.16, y * w), w * 0.035, c);
+                }
+            }
+            p.line_segment([cx + Vec2::new(-w * 0.22, w * 0.12), cx + Vec2::new(w * 0.22, w * 0.12)], s);
         }
         Icon::LocalGraph => {
             // the graph around one note: a ring of neighbours round the note in the middle
@@ -570,6 +582,7 @@ impl ShaleApp {
             Item::Mail => self.actions.push(Action::ShowView(View::Mail)),
             Item::Tasks => self.actions.push(Action::ShowView(View::Tasks)),
             Item::Boards => self.actions.push(Action::ShowView(View::Boards)),
+            Item::Keymap => self.actions.push(Action::ShowView(View::Keymap)),
             Item::Social => self.actions.push(Action::ShowView(View::Social(None))),
             Item::Import => self.open_import(vec![], vec![], None),
             Item::Drawing => {
@@ -602,6 +615,7 @@ impl ShaleApp {
             View::Tasks => "Tasks".into(),
             View::Graph => "Graph".into(),
             View::Boards => "Boards".into(),
+            View::Keymap => "Keymap".into(),
             View::Calendar => "Calendar".into(),
             View::Mail => "Mail".into(),
             View::SettingsFile => "Settings file".into(),
@@ -896,6 +910,7 @@ impl ShaleApp {
             }
             View::Tasks => self.tasks_view(ui),
             View::Boards => self.boards_view(ui),
+            View::Keymap => self.keymap_view_tab(ui),
             View::SettingsFile => self.settings_file_view(ui),
             View::Social(f) => self.social_view(ui, f.clone()),
             View::Calendar => {

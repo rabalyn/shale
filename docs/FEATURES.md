@@ -4,7 +4,8 @@ Shale is a notes app for the Linux, macOS and Windows desktop (what differs per 
 and notes link to each other with `[[wiki links]]`. The screenshots below come from the app's
 built-in demo vault (`shale --screenshot out.png`); `docs/screenshots/regen.sh` makes them all
 again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in the media folder of the
-[user guide](userguide/Start%20here.md), a vault you can open in Shale (`docs/userguide`), which explains every feature too.
+[user guide](userguide/Start%20here.md), a vault you can open in Shale (`docs/userguide`), which explains every feature too; its [glossary](userguide/Glossary.md) lists the features from A to Z with their keys and the
+section of Settings → Keybindings that holds them.
 
 ## Notes and links
 
@@ -19,6 +20,13 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   `![[photo.png|Sea at dusk]]`, else the file's link); a click on the caption opens the file.
   A picture embedded inside a line of text (`an icon ![[icon.png]] here`) is drawn in the line in the reading view and the
   PDF export, 0.9 of the line high and set a little below its baseline like a letter, as in the LaTeX export; the editor shows it as a picture of its own size.
+- **Image carousel** (#711, EDIT-142, EDIT-143): a quote that starts `> [!carousel] Title` and whose other lines are each one
+  picture (`> ![[a.png|Caption]]`, or `> ![alt](a.png)`) is shown in the reading view one picture at a time, at the size of its
+  link, with its caption, the buttons *Previous image* and *Next image*, a dot per picture and "2 / 6"; ← and → go through
+  the pictures while the pointer is over it, and they go round at the ends. The shown picture is not saved in the note. The
+  Markdown stays as written, so other editors show a quote with all the pictures; the PDF, LaTeX, Word and site exports show every
+  picture in order with its caption (PDF-040, TEX-060, DOCX-018, SITE-083). The editor's rendered state has the same carousel (EDIT-144): one picture
+  with the buttons below it; the cursor in the quote shows its lines as written, and ← and → work under the pointer while the text has no keyboard.
 
 ![A picture with its resize buttons](userguide/z_media/screenshots/image-resize.png)
 
@@ -437,6 +445,27 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 ![The Appearance tab of Settings with the theme list open](userguide/z_media/screenshots/settings-appearance.png)
 
 ![The window in the light theme Catppuccin Latte](userguide/z_media/screenshots/theme-latte.png)
+
+## Keymap: every shortcut on the keyboard
+
+The **Keymap** tab (the keyboard icon in the ribbon, after Feeds, or Ctrl+Shift+Y, macOS: Cmd+Shift+Y) draws the keyboard
+with the actions on each key, for a system (Linux, Windows or macOS, the running one first) and a layer: no
+modifier, Shift, Ctrl (Cmd), Alt (Option), Ctrl+Shift, Alt+Shift, Ctrl+Alt and every other combination (click the
+modifier keys of the drawing, or hold them: holding Ctrl, Alt, Shift or Cmd shows that layer while you hold). An ANSI
+or an ISO keyboard can be chosen. Each key shows up to two chips coloured by the kind of action (moving around, notes
+and app, formatting and folding, ribbon and sidebars, mail, text editing, vim, drawing; the legend switches a kind
+off and shows how many actions of it are on this layer), `+n` for more, `»` for the first key of a sequence such as
+`Space f f`; a key you changed has an outline, a fixed key of the program (text editing, vim normal mode, the drawing
+tools, the zoom) a paler chip, and a key the system keeps for itself (Cmd+H on a Mac, Alt+Tab, the Super key) is hatched in
+red and says what takes it. The keys are the live ones: a change you make in Settings is on the keyboard at once.
+A click on a key lists everything on it, on this layer and on every other, with scope and binding, and **Change** goes
+to the row of the action in Settings → Keybindings and starts recording its new keys. The same keyboard is in
+Settings → Keybindings behind the **Keyboard** switch (the **List** switch is the list of the actions).
+
+![The Keymap tab: the Ctrl layer on Linux](userguide/z_media/screenshots/keymap-linux-ctrl.png)
+
+Every layer of every system as a picture is in [KEYMAP.md](KEYMAP.md); the same keyboard as a web page, with your own
+`[keybindings]` pasted into it, is at <https://rabalyn.github.io/shale/> (and a file of every release, `shale-keymap-<version>.html`).
 
 ## Keyboard only: sidebar, file list and vim-style editing
 
@@ -1635,6 +1664,7 @@ Whatever runs longer than a moment says what it does, cannot be started twice an
 Ctrl is Cmd on macOS. No default key is one that the system reserves (the app menu's Cmd+H, AltGr on Windows, the workspace keys of the Linux desktops), so macOS has other keys for six actions, named in the rows below; a key you set yourself is never refused for that reason. The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings** (Change replaces the keys of an action, Add gives it one more, Clear leaves it without a key)
 (everywhere, file list, search results, mail view, note view, vim normal mode; a key that another action uses asks whether to overwrite it: Yes takes it from that action, No changes nothing).
 Text editing keys and vim keys are fixed.
+The user guide's [glossary](userguide/Glossary.md) lists every feature from A to Z with its keys and the Keybindings section they are in.
 
 | Keys | Action |
 |---|---|
@@ -1643,6 +1673,7 @@ Text editing keys and vim keys are fixed.
 | Ctrl+E | Edit / reading view |
 | Ctrl+, | Settings |
 | Ctrl+Shift+D | Data usage: what Shale keeps on disk, and its caches |
+| Ctrl+Shift+Y | Keymap: the keyboard drawn with every shortcut, by system and layer of modifiers (a main-area tab, also the keyboard icon of the ribbon; the same keyboard is in Settings → Keybindings → Keyboard). Change on a key goes to its row. Definable (macOS: Cmd+Shift+Y) |
 | Ctrl+Shift+PageUp / Ctrl+Shift+PageDown | Previous / next message of the thread of the note (the mails with the same thread-id, by date; nothing happens at the ends, without a thread or in a dialog) |
 | Ctrl+Shift+T | Thread overview: opens the Thread view in the right sidebar and gives it the keyboard (↑ ↓ move, Enter jumps, Esc returns to the note) |
 | F1 | Open the user guide (built into Shale, unpacked into its data folder and opened as a vault) |

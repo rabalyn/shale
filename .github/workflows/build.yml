@@ -14,8 +14,8 @@
 #      the files at once and publishes a release page named after the version, with that version's
 #      notes from CHANGELOG.md (the tag must match the version in Cargo.toml), the three
 #      downloads (Linux tarball, macOS arm64 tarball, Windows zip, all unsigned), the zip of the
-#      user guide (DEV-020) and the guide as a PDF (BUILD-023), their .sha256 files and the
-#      build attestation. A red macOS or Windows job stops the release.
+#      user guide (DEV-020), the guide as a PDF (BUILD-023) and the interactive keymap as one
+#      HTML file (BUILD-047), their .sha256 files and the build attestation. A red macOS or Windows job stops the release.
 #    - workflow_dispatch: the same builds and attestation without publishing, to try the
 #      workflow (the files are workflow artifacts). It is not a test run for Linux: see below.
 #    - after the release page is up, the job `bench` (BUILD-041) runs the `full` benchmark profile
@@ -143,8 +143,11 @@ jobs:
           cp shale-userguide.zip "release/$GUIDE"
           PDF="shale-userguide-${LABEL}.pdf"
           cp shale-userguide.pdf "release/$PDF"
+          # BUILD-047: the interactive keymap, the one file of docs/keymap (KEY-060)
+          KEYMAP="shale-keymap-${LABEL}.html"
+          cp docs/keymap/index.html "release/$KEYMAP"
           # the checksum names the file as it is downloaded, so `sha256sum -c` works on it
-          (cd release && for f in "$ASSET" "$GUIDE" "$PDF"; do sha256sum "$f" > "$f.sha256" && sha256sum -c "$f.sha256"; done)
+          (cd release && for f in "$ASSET" "$GUIDE" "$PDF" "$KEYMAP"; do sha256sum "$f" > "$f.sha256" && sha256sum -c "$f.sha256"; done)
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -325,16 +328,17 @@ jobs:
           echo "windows=shale-${LABEL}-windows-x86_64.zip" >> "$GITHUB_OUTPUT"
           echo "guide=shale-userguide-${LABEL}.zip" >> "$GITHUB_OUTPUT"
           echo "pdf=shale-userguide-${LABEL}.pdf" >> "$GITHUB_OUTPUT"
+          echo "keymap=shale-keymap-${LABEL}.html" >> "$GITHUB_OUTPUT"
           ls -l release
 
       # every file is there and matches its checksum (the files come from other jobs)
       - name: Check the files
         env:
-          FILES: ${{ steps.files.outputs.linux }} ${{ steps.files.outputs.macos }} ${{ steps.files.outputs.windows }} ${{ steps.files.outputs.guide }} ${{ steps.files.outputs.pdf }}
+          FILES: ${{ steps.files.outputs.linux }} ${{ steps.files.outputs.macos }} ${{ steps.files.outputs.windows }} ${{ steps.files.outputs.guide }} ${{ steps.files.outputs.pdf }} ${{ steps.files.outputs.keymap }}
         run: |
           cd release
           for f in $FILES; do test -s "$f" && sha256sum -c "$f.sha256"; done
-          test "$(ls | wc -l)" = 10
+          test "$(ls | wc -l)" = 12
 
       - name: Release notes (tags only)
         if: startsWith(github.ref, 'refs/tags/v')
@@ -369,6 +373,8 @@ jobs:
             release/${{ steps.files.outputs.guide }}.sha256
             release/${{ steps.files.outputs.pdf }}
             release/${{ steps.files.outputs.pdf }}.sha256
+            release/${{ steps.files.outputs.keymap }}
+            release/${{ steps.files.outputs.keymap }}.sha256
 
       # the bundle goes next to the files, and is checked the way a downloader checks it, so a
       # release never goes out with an attestation that does not verify
@@ -380,10 +386,11 @@ jobs:
           WINDOWS: ${{ steps.files.outputs.windows }}
           GUIDE: ${{ steps.files.outputs.guide }}
           PDF: ${{ steps.files.outputs.pdf }}
+          KEYMAP: ${{ steps.files.outputs.keymap }}
           BUNDLE: ${{ steps.attest.outputs.bundle-path }}
         run: |
           cp "$BUNDLE" "release/$ASSET.sigstore.json"
-          for f in "$ASSET" "$ASSET.sha256" "$MACOS" "$MACOS.sha256" "$WINDOWS" "$WINDOWS.sha256" "$GUIDE" "$GUIDE.sha256" "$PDF" "$PDF.sha256"; do
+          for f in "$ASSET" "$ASSET.sha256" "$MACOS" "$MACOS.sha256" "$WINDOWS" "$WINDOWS.sha256" "$GUIDE" "$GUIDE.sha256" "$PDF" "$PDF.sha256" "$KEYMAP" "$KEYMAP.sha256"; do
             gh attestation verify "release/$f" --bundle "release/$ASSET.sigstore.json" \
               --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/build.yml" \
               --source-ref "$GITHUB_REF" --deny-self-hosted-runners
@@ -404,6 +411,7 @@ jobs:
           WINDOWS: ${{ steps.files.outputs.windows }}
           GUIDE: ${{ steps.files.outputs.guide }}
           PDF: ${{ steps.files.outputs.pdf }}
+          KEYMAP: ${{ steps.files.outputs.keymap }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           {
@@ -415,6 +423,7 @@ jobs:
             printf 'Against damage, with the file and its .sha256 file in one folder. Linux: `sha256sum -c %s.sha256`. macOS: `shasum -a 256 -c %s.sha256`. Windows: `certutil -hashfile %s SHA256` (or PowerShell `Get-FileHash %s`) and compare the hash with the one in `%s.sha256`. The user guide files `%s` and `%s` are checked like the Linux file.\n\n' "$ASSET" "$MACOS" "$WINDOWS" "$WINDOWS" "$WINDOWS" "$GUIDE" "$PDF"
             printf 'That it was built from the tag `%s` by this repository'"'"'s release workflow on GitHub (needs the GitHub CLI; add `--bundle %s.sigstore.json` to use the attestation file from this page):\n\n' "$GITHUB_REF_NAME" "$ASSET"
             printf '```sh\ngh attestation verify %s --repo %s --signer-workflow %s/.github/workflows/build.yml --source-ref %s\n```\nThe same file attests the macOS file `%s`, the Windows file `%s`, the user guide zip `%s` and its PDF `%s`.\n' "$ASSET" "$GITHUB_REPOSITORY" "$GITHUB_REPOSITORY" "$GITHUB_REF" "$MACOS" "$WINDOWS" "$GUIDE" "$PDF"
+            printf '\n## Keymap\n\n`%s` is the keyboard with every shortcut as one web page that works offline (open it in a browser); it is checked and attested like the other files. The same page is online at https://rabalyn.github.io/shale/.\n' "$KEYMAP"
           } >> release-notes.md
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release edit "$GITHUB_REF_NAME" --title "Shale $VERSION" --notes-file release-notes.md
