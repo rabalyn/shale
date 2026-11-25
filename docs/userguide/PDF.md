@@ -617,8 +617,25 @@ is usually typeset with, for a publication, report, exercise sheet, thesis or do
 - **Lists** of figures and tables follow the contents when the boxes are on, or stand where
   `<!-- shale: list-of-figures -->` and `<!-- shale: list-of-tables -->` are.
 
-A folder with these properties in its top note is one thesis: its notes share the labels and the one
-bibliography. The packages `biblatex`, `caption` and `cleveref` come with the TeX Live of Shale (and
+A folder with these properties in its top note is one thesis, and its export ([[PDF#A folder as one PDF]], and
+the LaTeX export of the folder) is **one document**:
+
+- **Numbers** count in reading order over all the notes: per chapter (`3.1`, `3.2`, the number before the
+  title of the chapter, so `2.1.1` for the first figure of the chapter `2.1` of the second part) or
+  continuously (`1`, `2`, `3`), as the top note's `float-numbering:` (`chapter` or `continuous`, `chapter` when it
+  has none) says. The top note decides the caption positions (`table-caption:`, `figure-caption:`) and the
+  language for every chapter; the same properties in a chapter are ignored.
+- **References** find their label in any note of the book: `@fig:results` in chapter 1 can name a figure of
+  chapter 4 and is written "Figure 4.2" (a link in the PDF).
+- **One bibliography** for all the chapters: the top note's `bibliography:` (or the vault's default). A key cited
+  in several chapters is one entry, only cited keys are printed, and the numbers of a numeric style follow the
+  first citation in the whole book. The list is printed after the last chapter, in the contents, or where a
+  note has the line `<!-- shale: bibliography -->`. A chapter that names a `bibliography:` of its own is
+  ignored, and the export says so.
+- **The export warns** when a label is used in two notes (the first counts), when a reference has no label in
+  any note, when a key is not in the bibliography, and names the notes it is about.
+
+The notes of the folder share the labels and the one bibliography. The packages `biblatex`, `caption` and `cleveref` come with the TeX Live of Shale (and
 `biblatex-apa` and `biblatex-ieee` for those two styles); a managed TeX Live installed earlier lists what
 it misses with an **Install** button.
 

@@ -57,6 +57,10 @@ pub struct Source<'a> {
     pub role: Role,
     /// The chapter's title: a first `# Heading` that says it is the chapter's title line (BOOK-006).
     pub title: Option<&'a str>,
+    /// The number the chapter is printed with, when the exporter decides it (the built-in PDF
+    /// prints `2.1` for the first chapter of the second part); without it chapters are counted 1, 2, 3
+    /// and appendix chapters A, B, C. A note that is no chapter has none.
+    pub number: Option<&'a str>,
 }
 
 /// How the figures, tables and equations are counted.
@@ -144,7 +148,7 @@ impl Labels {
 /// The labels of a single note: numbers continuous unless `float-numbering: chapter` says otherwise.
 pub fn of_note(text: &str) -> Labels {
     let numbering = Numbering::property(text).unwrap_or(Numbering::Continuous);
-    build(&[Source { text, role: Role::Other, title: None }], numbering, false)
+    build(&[Source { text, role: Role::Other, title: None, number: None }], numbering, false)
 }
 
 /// The labels of the notes of a book in reading order. `top` is the text of the top folder note,
@@ -191,6 +195,7 @@ fn chapter_numbers(sources: &[Source], book: bool) -> Vec<Option<String>> {
     sources
         .iter()
         .map(|s| match s.role {
+            Role::Chapter | Role::Appendix if book && s.number.is_some() => s.number.map(str::to_string),
             Role::Chapter if book => {
                 chapters += 1;
                 Some(chapters.to_string())
@@ -361,7 +366,7 @@ mod tests {
     }
 
     fn book<'a>(texts: &'a [(&'a str, Role, Option<&'a str>)], top: Option<&str>) -> Labels {
-        let sources: Vec<Source> = texts.iter().map(|(text, role, title)| Source { text, role: *role, title: *title }).collect();
+        let sources: Vec<Source> = texts.iter().map(|(text, role, title)| Source { text, role: *role, title: *title, number: None }).collect();
         of_book(&sources, top)
     }
 
@@ -409,6 +414,24 @@ mod tests {
         assert_eq!(got[1], ("sec:aim".to_string(), None));
         assert_eq!(&got[2..], n(&[("fig:a", "1.1"), ("sec:extra", "A"), ("sec:more", "A.1"), ("fig:b", "A.1"), ("eq:y", "A.1"), ("sec:second", "B")]).as_slice());
         assert_eq!(l.get(Kind::Section, "extra").map(|e| e.level), Some(Level::Appendix));
+    }
+
+    // spec: EDIT-128, BOOK-020
+    #[test]
+    fn edit_128_a_source_with_a_number_is_that_chapter_and_the_floats_count_below_it() {
+        let sources = [
+            Source { text: "![[p.png|P]]{#fig:p}\n", role: Role::Other, title: None, number: Some("1") },
+            Source { text: "# Methods {#sec:methods}\n\n## Setup {#sec:setup}\n\n![[a.png|A]]{#fig:a}\n\n![[b.png|B]]{#fig:b}\n", role: Role::Chapter, title: Some("Methods"), number: Some("2.1") },
+            Source { text: "![[c.png|C]]{#fig:c}\n", role: Role::Chapter, title: Some("Results"), number: Some("2.2") },
+        ];
+        let l = of_book(&sources, None);
+        assert_eq!(
+            numbers(&l),
+            n(&[("fig:p", "1"), ("sec:methods", "2.1"), ("sec:setup", "2.1.1"), ("fig:a", "2.1.1"), ("fig:b", "2.1.2"), ("fig:c", "2.2.1")]).as_slice(),
+            "a note that is no chapter takes no number, even when it is given one"
+        );
+        let l = of_book(&sources, Some("---\nfloat-numbering: continuous\n---\n"));
+        assert_eq!(numbers(&l)[3..], n(&[("fig:a", "2"), ("fig:b", "3"), ("fig:c", "4")])[..], "continuous counts through whatever the chapters are called");
     }
 
     // spec: EDIT-128

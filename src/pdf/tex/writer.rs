@@ -258,15 +258,19 @@ pub(super) fn field_values<'k>(kind: &'k KindManifest, settings: &SetSettings, f
 }
 
 /// Leave out the heading that only says the title again (PDF-008): the first heading, when it is a
-/// `#` with the title's text.
-pub(super) fn drop_title_heading(blocks: &mut Vec<Block>, title: &str) {
-    let first_heading = blocks.iter().position(|b| matches!(b, Block::Heading { .. }));
-    if let Some(i) = first_heading {
-        if let Block::Heading { level: 1, text, .. } = &blocks[i] {
-            if markdown::heading_plain(text).to_lowercase() == markdown::heading_plain(title).to_lowercase() {
-                blocks.remove(i);
-            }
-        }
+/// `#` with the title's text. A heading with a label (`{#sec:one}`) stays unless `labelled` says it
+/// may go too (a chapter of a book, whose heading carries the label, BOOK-020); gives the text of
+/// the heading that went.
+pub(super) fn drop_title_heading(blocks: &mut Vec<Block>, title: &str, labelled: bool) -> Option<String> {
+    let first_heading = blocks.iter().position(|b| matches!(b, Block::Heading { .. }))?;
+    let Block::Heading { level: 1, text, .. } = &blocks[first_heading] else { return None };
+    let plain = |t: &str| markdown::heading_plain(&if labelled { labels::without_labels(t) } else { t.to_string() }).to_lowercase();
+    if plain(text) != markdown::heading_plain(title).to_lowercase() {
+        return None;
+    }
+    match blocks.remove(first_heading) {
+        Block::Heading { text, .. } => Some(text),
+        _ => None,
     }
 }
 
@@ -327,7 +331,7 @@ fn write_in_shale(req: &Request) -> Result<Document, String> {
 
     // the blocks, without the heading that only says the title again (PDF-008)
     let mut blocks = blocks::parse(req.text);
-    drop_title_heading(&mut blocks, &title);
+    drop_title_heading(&mut blocks, &title, false);
     // a page break means nothing in slides and boxes, where the frames and boxes are the pages (TEX-037)
     if matches!(family, Family::Beamer | Family::Boxes) {
         blocks.retain(|b| *b != Block::PageBreak);
