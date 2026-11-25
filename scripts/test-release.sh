@@ -94,7 +94,8 @@ chmod +x "$TMP/bin/fake-bench-compare"
 export BENCH_BIN="$TMP/bin/fake-shale" BENCH_COMPARE="$TMP/bin/fake-bench-compare" BENCH_LOG="$TMP/bench.log"
 export RELEASE_GH="$TMP/bin/gh" GH_LOG="$TMP/gh.log" RELEASE_DATE=2026-11-17 LAND_CHECK_CMD=true LAND_REPORT_CMD=true
 # the size report (BUILD-045) builds the whole program: a stub that writes what it was given, and notes that it ran
-export SHALE_SIZE_REPORT_CMD='printf "size report of $SHALE_VERSION on $SHALE_DATE\n" > docs/size-report.md; echo run >> "$SIZE_LOG"' SIZE_LOG="$TMP/size.log"
+# shellcheck disable=SC2016
+export SHALE_SIZE_REPORT_CMD='mkdir -p docs; printf "size report of $SHALE_VERSION on $SHALE_DATE\n" > docs/size-report.md; echo run >> "$SIZE_LOG"' SIZE_LOG="$TMP/size.log"
 
 git init -q --bare "$TMP/remote.git"
 git clone -q "$TMP/remote.git" "$TMP/work" 2>/dev/null
