@@ -28,6 +28,6 @@ cyan    = '#93a1a1'
 white   = '#fdf6e3'
 
 # Shale only (CFG-063): Solarized's bright black is almost black, which would make comments as
-# strong as text. This is the grey of Solarized's own comments, a little darker so that it reads.
+# strong as text. This is the grey of Solarized's own comments, darkened until it reads (4.5:1, CFG-082).
 [shale]
-syntax_comment = '#7c8d90'
+syntax_comment = '#55696e'

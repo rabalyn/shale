@@ -1,15 +1,19 @@
 //! The themes of the window (CFG-062 to CFG-065): Shale's own, the built-in ones (Alacritty theme
 //! files in `assets/themes/`) and the files of the user's themes folder; and which one is in use.
 
+#[cfg(test)]
+mod contrast_tests;
 mod format;
 mod mapping;
+#[cfg(test)]
+mod render_tests;
 
 use crate::config::ThemeCfg;
 use crate::theme::{self, Palette};
 use eframe::egui;
 use std::path::{Path, PathBuf};
 
-pub use mapping::palette_of;
+pub use mapping::{lift_all, palette_of, TEXT_CONTRAST};
 
 /// The name of Shale's own theme, the default.
 pub const SHALE: &str = "Shale";
@@ -227,8 +231,8 @@ mod tests {
         for (name, text) in BUILTIN {
             let file = format::parse(text).unwrap();
             if name == "Solarized Light" {
-                assert_eq!(file.slots, [("syntax_comment".to_string(), Color32::from_rgb(0x7c, 0x8d, 0x90))]);
-                assert_eq!(palette_of(&file).syntax_comment, Color32::from_rgb(0x7c, 0x8d, 0x90));
+                assert_eq!(file.slots, [("syntax_comment".to_string(), Color32::from_rgb(0x55, 0x69, 0x6e))]);
+                assert_eq!(palette_of(&file).syntax_comment, Color32::from_rgb(0x55, 0x69, 0x6e));
             } else {
                 assert!(file.slots.is_empty() && file.dark.is_none(), "{name}");
             }
