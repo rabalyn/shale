@@ -158,6 +158,16 @@ pub struct SetSettings {
     pub font_sans: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub font_mono: String,
+    /// The citation style of the documents (`numeric`, `authoryear`, `alphabetic`, `ieee`, `apa`;
+    /// TEX-044) when neither the dialog nor the note names one. Empty: `authoryear`.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub citation_style: String,
+    /// Where the caption of tables and of figures stands, `above` or `below` (TEX-045), when the
+    /// note and the kind say nothing. Empty: tables above, figures below.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub table_caption: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub figure_caption: String,
 }
 
 impl SetSettings {
@@ -171,6 +181,14 @@ impl SetSettings {
     pub fn check(&self) -> Result<(), String> {
         if self.accent.len() > 20 || !self.accent.chars().all(|c| c.is_ascii_alphanumeric() || "-_".contains(c)) {
             return Err(format!("the accent colour {:?} may have only letters, digits, - and _", self.accent));
+        }
+        if !self.citation_style.is_empty() && crate::bibliography::format::Style::named(&self.citation_style).is_none() {
+            return Err(format!("the citation_style {:?} is none of numeric, authoryear, alphabetic, ieee and apa", self.citation_style));
+        }
+        for (what, value) in [("table_caption", &self.table_caption), ("figure_caption", &self.figure_caption)] {
+            if !value.is_empty() && !matches!(value.as_str(), "above" | "below") {
+                return Err(format!("the {what} {value:?} must be above or below"));
+            }
         }
         for (what, file) in [("logo", &self.logo), ("department_logo", &self.department_logo)] {
             if let Some(l) = file.iter().find(|l| !plain_file_name(l)) {
@@ -284,6 +302,12 @@ pub struct KindManifest {
     /// The values of the kind and where they go.
     #[serde(default)]
     pub fields: Vec<Field>,
+    /// Where the caption of tables and of figures stands in this kind, `above` or `below`
+    /// (TEX-045); empty: the set's setting, then tables above and figures below.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub table_caption: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub figure_caption: String,
 }
 
 /// The text of a manifest line with `{accent}`, `{language}` and `{lang}` filled in; none when

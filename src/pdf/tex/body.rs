@@ -6,10 +6,13 @@
 use super::blocks::{Block, Item, ListLine, QuoteLine};
 use super::inline::{cell, inline, lead, one_line, picture_file, Look};
 use super::sets::tex_escape;
+use super::thesis::Thesis;
 use crate::drawing::Scene;
+use crate::markdown::citations::Kind;
 use crate::markdown::LinkSpan;
 use crate::pdf::export::ExportOptions;
 use crate::table::Col;
+use crate::thesis::view::CaptionAt;
 use crate::vault::FileKind;
 use eframe::egui::{Color32, Vec2};
 
@@ -59,9 +62,13 @@ impl<'a> Body<'a> {
             Block::Quote(lines) => self.quote(lines),
             Block::List(lines) => self.list(lines),
             Block::Code { lang, lines } => code(lang, lines),
-            Block::Table(t) => self.table(t),
+            Block::Table(t) => self.table(t, false),
             Block::Math(tex) => format!("\\[\n{}\n\\]\n\n", one_line(tex)),
-            Block::Embed(link) => self.embed(link),
+            Block::Equation { tex, id } => self.equation(tex, id),
+            Block::Embed(link) => self.embed(link, None),
+            Block::Figure { link, id } => self.embed(link, Some(id)),
+            Block::CaptionedTable { table, caption, id } => self.captioned_table(table, caption, id),
+            Block::Marker(m) => self.look.thesis.map(|t| t.marker(*m)).unwrap_or_default(),
             Block::Rule => "\\par\\medskip\\noindent\\hrulefill\\par\\medskip\n\n".into(),
             Block::PageBreak => NEW_PAGE.into(),
             Block::AlignStart(a) => align_env(*a).map_or(String::new(), |e| format!("\\begin{{{e}}}\n")),
@@ -159,7 +166,7 @@ impl<'a> Body<'a> {
     /// A table as `booktabs` rules and `tabularx` (`xltabular` when it may break across pages):
     /// the header row bold, the columns as wide as their text or, when the table has stored sizes
     /// (EDIT-031), in the proportions of those, the alignment of each column as written.
-    fn table(&self, b: &crate::table::Block) -> String {
+    fn table(&self, b: &crate::table::Block, in_float: bool) -> String {
         let t = &b.table;
         let n = t.header.len();
         let column = self.opts.column();
@@ -200,7 +207,9 @@ impl<'a> Body<'a> {
                 (1.0, cols)
             }
         };
-        let env = if self.long_tables { "xltabular" } else { "tabularx" };
+        // a float cannot break across pages, and `xltabular` is made for tables that do
+        let long = self.long_tables && !in_float;
+        let env = if long { "xltabular" } else { "tabularx" };
         let row = |cells: &[String], bold: bool| {
             let cells: Vec<String> = cells.iter().map(|c| cell(&self.look, c)).map(|c| if bold && !c.is_empty() { format!("\\textbf{{{c}}}") } else { c }).collect();
             format!("{} \\\\\n", cells.join(" & "))
@@ -209,7 +218,7 @@ impl<'a> Body<'a> {
         let mut out = format!("\\begingroup\\renewcommand{{\\arraystretch}}{{1.2}}\\par\\medskip\n\\begin{{{env}}}{{{width:.3}\\linewidth}}{{{spec}}}\n\\toprule\n");
         out.push_str(&row(&t.header, true));
         out.push_str("\\midrule\n");
-        if self.long_tables {
+        if long {
             out.push_str("\\endhead\n");
         }
         for r in &t.rows {
@@ -233,26 +242,37 @@ impl<'a> Body<'a> {
 
     /// An embed on its own line: a picture, a drawing (as a vector PDF), the pages of a PDF, each
     /// as big in proportion to the text as in the editor (PDF-005) with the caption below
-    /// (PDF-004); a file that cannot be used is a line of text that says so.
-    fn embed(&self, link: &LinkSpan) -> String {
-        let caption = crate::caption::text(link);
+    /// (PDF-004); a file that cannot be used is a line of text that says so. With a label
+    /// (`{#fig:id}`, TEX-045) it is a numbered figure: a float with `\caption` and `\label`.
+    fn embed(&self, link: &LinkSpan, label: Option<&str>) -> String {
         if !self.opts.embeds {
             return format!("{}\n\n", inline(&self.look, &format!("[[{}]]", link.target)));
         }
+        let caption = tex_escape(&crate::caption::text(link));
+        let float = label.zip(self.look.thesis).filter(|(_, t)| t.has_floats());
+        let pictures = match self.embed_pictures(link) {
+            Ok(p) => p,
+            Err(placeholder) => return float.map_or_else(|| placeholder.clone(), |(id, t)| self.figure_float(t, &placeholder, &caption, id)),
+        };
+        match float {
+            Some((id, t)) => self.figure_float(t, &pictures.join("\\par\n"), &caption, id),
+            None => format!("\\par\\medskip\\noindent\n{}\\par\\nopagebreak\\noindent{{\\footnotesize\\textit{{{caption}}}}}\\par\\medskip\n\n", pictures.join("\\par\n")),
+        }
+    }
+
+    /// The pictures of an embed as `\includegraphics` lines, or the text that stands in place of a
+    /// file that cannot be used.
+    fn embed_pictures(&self, link: &LinkSpan) -> Result<Vec<String>, String> {
         let vault = self.look.vault;
         let Some((rel, abs)) = vault.resolve_media(&link.target, Some(self.look.rel)).file(vault) else {
-            return self.placeholder(&format!("missing: {}", link.target));
+            return Err(self.placeholder(&format!("missing: {}", link.target)));
         };
         let column = self.opts.column();
         let kind = vault.file(&rel).map(|f| f.kind).unwrap_or(FileKind::Other);
         let frame = |file: &str, extra: &str, share: f32| format!("\\includegraphics[{extra}width={:.3}\\linewidth,height=0.8\\textheight,keepaspectratio]{{{file}}}", share.clamp(0.02, 1.0));
-        let figure = |pictures: Vec<String>, caption: &str| {
-            let caption = tex_escape(caption);
-            format!("\\par\\medskip\\noindent\n{}\\par\\nopagebreak\\noindent{{\\footnotesize\\textit{{{caption}}}}}\\par\\medskip\n\n", pictures.join("\\par\n"))
-        };
         if kind == FileKind::Drawing {
-            let Ok(scene) = Scene::read_file(&abs) else { return self.placeholder(&format!("not readable: {}", link.target)) };
-            let Some(b) = scene.bounds() else { return self.placeholder(&format!("empty drawing: {}", link.target)) };
+            let Ok(scene) = Scene::read_file(&abs) else { return Err(self.placeholder(&format!("not readable: {}", link.target))) };
+            let Some(b) = scene.bounds() else { return Err(self.placeholder(&format!("empty drawing: {}", link.target))) };
             let b = b.expand(20.0);
             let share = crate::embed_size::drawing(Vec2::new(b.width(), b.height()), column).x / column;
             let named = self.look.files.borrow().named(&rel);
@@ -261,42 +281,70 @@ impl<'a> Body<'a> {
                 None => {
                     let opts = ExportOptions { margins_mm: [20.0 * 25.4 / 72.0; 4], background: crate::pdf::export::Background::None, ..ExportOptions::for_drawing(&scene) };
                     let pdf = crate::pdf::export::export_drawing(&scene, &link.target, &opts, &crate::drawing::pictures::images(&scene, vault, &rel));
-                    let Ok(pdf) = pdf else { return self.placeholder(&format!("not readable: {}", link.target)) };
+                    let Ok(pdf) = pdf else { return Err(self.placeholder(&format!("not readable: {}", link.target))) };
                     self.keep(&rel, "drawing", "pdf", pdf)
                 }
             };
-            return figure(vec![frame(&name, "", share)], &caption);
+            return Ok(vec![frame(&name, "", share)]);
         }
         if crate::media::is_image(&rel) {
-            let Ok((w, h)) = image::image_dimensions(&abs) else { return self.placeholder(&format!("not readable: {}", link.target)) };
+            let Ok((w, h)) = image::image_dimensions(&abs) else { return Err(self.placeholder(&format!("not readable: {}", link.target))) };
             let share = crate::embed_size::picture(Vec2::new(w as f32, h as f32), link.embed_width(), column).x / column;
             let named = self.look.files.borrow().named(&rel);
             let name = match named {
                 Some(n) => n,
                 None => {
-                    let Some((ext, bytes)) = picture_file(&abs) else { return self.placeholder(&format!("not readable: {}", link.target)) };
+                    let Some((ext, bytes)) = picture_file(&abs) else { return Err(self.placeholder(&format!("not readable: {}", link.target))) };
                     self.keep(&rel, "picture", ext, bytes)
                 }
             };
-            return figure(vec![frame(&name, "", share)], &caption);
+            return Ok(vec![frame(&name, "", share)]);
         }
         if crate::pdf::view::is_pdf(&rel) {
-            let Ok(bytes) = crate::fsutil::read(&abs) else { return self.placeholder(&format!("not readable: {}", link.target)) };
-            let Some(pages) = pdf_pages(&bytes) else { return self.placeholder(&format!("not readable: {}", link.target)) };
+            let Ok(bytes) = crate::fsutil::read(&abs) else { return Err(self.placeholder(&format!("not readable: {}", link.target))) };
+            let Some(pages) = pdf_pages(&bytes) else { return Err(self.placeholder(&format!("not readable: {}", link.target))) };
             let named = self.look.files.borrow().named(&rel);
             let name = named.unwrap_or_else(|| self.keep(&rel, "document", "pdf", bytes));
-            let pictures = pages.iter().enumerate().map(|(n, (w, h))| frame(&name, &format!("page={},", n + 1), crate::embed_size::pdf_page(Vec2::new(*w, *h) * 1.5, column).x / column)).collect();
-            return figure(pictures, &caption);
+            let pictures: Vec<String> = pages.iter().enumerate().map(|(n, (w, h))| frame(&name, &format!("page={},", n + 1), crate::embed_size::pdf_page(Vec2::new(*w, *h) * 1.5, column).x / column)).collect();
+            return Ok(pictures);
         }
         if crate::media::is_media(&abs) {
             // the card of the built-in export (PDF-004, MEDIA-003, MEDIA-009) as a vector PDF
             let card = crate::media::widget::card_size(&abs, column, link.embed_width());
             let named = self.look.files.borrow().named(&rel);
             let name = named.unwrap_or_else(|| self.keep(&rel, "player", "pdf", crate::pdf::export::export_player_card(&abs, card)));
-            return figure(vec![frame(&name, "", card.x / column)], &caption);
+            return Ok(vec![frame(&name, "", card.x / column)]);
         }
         // any other file cannot be on paper
-        self.placeholder(&format!("{}: not in a PDF", link.target))
+        Err(self.placeholder(&format!("{}: not in a PDF", link.target)))
+    }
+
+    /// A figure float (TEX-045): the pictures with `\caption` above or below as the caption
+    /// positions say, and the `\label` right after the caption.
+    fn figure_float(&self, t: &Thesis, body: &str, caption: &str, id: &str) -> String {
+        t.float_written();
+        let label = t.label(Kind::Figure, id).unwrap_or_default();
+        float("figure", body, &format!("\\caption{{{caption}}}{label}"), t.caption_at(Kind::Figure))
+    }
+
+    /// A table with the caption line below it (TEX-045): a `table` float with `\caption` and
+    /// `\label`; where there are no floats, the table alone.
+    fn captioned_table(&self, b: &crate::table::Block, caption: &str, id: &str) -> String {
+        let Some(t) = self.look.thesis.filter(|t| t.has_floats()) else { return self.table(b, false) };
+        t.float_written();
+        let label = t.label(Kind::Table, id).unwrap_or_default();
+        let caption = inline(&self.look, caption);
+        float("table", &self.table(b, true), &format!("\\caption{{{caption}}}{label}"), t.caption_at(Kind::Table))
+    }
+
+    /// Display math with a label (TEX-046): an `equation` with one number, also for several lines
+    /// (`aligned`, `cases`, matrices are one formula); a label that is not written once stays a
+    /// display without a number.
+    fn equation(&self, tex: &str, id: &str) -> String {
+        match self.look.thesis.and_then(|t| t.label(Kind::Equation, id)) {
+            Some(label) => format!("\\begin{{equation}}\n{label}\n{}\n\\end{{equation}}\n\n", one_line(tex)),
+            None => format!("\\[\n{}\n\\]\n\n", one_line(tex)),
+        }
     }
 
     /// A line of red italic text in place of a file that could not be used.
@@ -309,6 +357,12 @@ impl<'a> Body<'a> {
     fn keep(&self, rel: &std::path::Path, what: &str, ext: &str, bytes: Vec<u8>) -> String {
         self.look.files.borrow_mut().keep(rel, what, ext, bytes)
     }
+}
+
+/// A float of the kind `env` with its caption (and label) above or below the body.
+fn float(env: &str, body: &str, caption: &str, at: CaptionAt) -> String {
+    let (before, after) = if at == CaptionAt::Above { (format!("{caption}\n"), String::new()) } else { (String::new(), format!("{caption}\n")) };
+    format!("\\begin{{{env}}}[htbp]\n\\centering\n{before}{}\n{after}\\end{{{env}}}\n\n", body.trim_end())
 }
 
 /// The sizes of the pages (up to [`MAX_PDF_PAGES`]) of a PDF in points; None when it cannot be read.

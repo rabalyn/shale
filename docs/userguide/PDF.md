@@ -481,6 +481,8 @@ Each set has its own `settings.toml`, which a re-import keeps:
 | `author` | used for the `author` field of a kind when a note and the dialog give none |
 | `logo` | the logo file in `logo/`, set by **Choose logo…** |
 | `department_logo` | the department logo file in `logo/` (`department_logo.pdf` or `.png`), set by **Choose department logo…** |
+| `citation_style` | `numeric`, `authoryear`, `alphabetic`, `ieee` or `apa`: the citation style of a thesis when the dialog and the note name none (see "A thesis through LaTeX" below); empty: `authoryear` |
+| `table_caption`, `figure_caption` | `above` or `below`: where the caption of tables and of figures stands when the note says nothing; empty: tables above, figures below. A kind's file can have the same keys and then wins over the set |
 | `font`, `font_sans`, `font_mono` | the fonts of the set for the text, the template's sans and the code: a font family name or a vault path to a font file (see "Fonts of the LaTeX export" below); used when a note names none and before the vault's settings; left out of the file while empty |
 
 ## Fonts of the LaTeX export
@@ -563,6 +565,9 @@ always exported with the built-in engine.
   and so is **Page break after the table of contents** (on: the text starts on a new page after the contents);
   the box for embedded pictures stays. **Department logo** appears when the set has one (see "The
   department logo"): on by default, greyed out for a kind that does not show it.
+  The boxes **List of figures**, **List of tables** and **Bibliography** and the choice **Citation
+  style** are for the thesis syntax (see "A thesis through LaTeX" below); the bibliography box is on
+  when the note, or the vault in Settings, names a `.bib` file.
 - A line under the fields says which TeX is used, or **No TeX: install it in Settings → LaTeX**
   (**Export** is off then). A red warning says that the set's logo is missing: the PDF then has a grey
   placeholder where the logo goes and is not CI-conformant (see "The logo"). Next to the hints for a
@@ -585,6 +590,37 @@ always exported with the built-in engine.
   of that name (or the value has no `/kind`), a red line at the top says what was not found and what the
   dialog uses instead; choosing a set or kind yourself takes it away. The same line appears in the dialog of a folder when the top
   note names a kind a book cannot use (slides, letters and posters take a single note).
+
+## A thesis through LaTeX
+
+The thesis syntax of [[Editor]] ("The bibliography of a thesis") is written as the commands a thesis
+is usually typeset with, for a publication, report, exercise sheet, thesis or doctoral thesis:
+
+- **Citations** become `biblatex` commands (`[@key]` `\autocite`, `@key` `\textcite`, a locator and a
+  prefix as optional arguments) and the list of references is printed at the end, as a chapter in the
+  contents headed "Literaturverzeichnis" or "References", or where the line
+  `<!-- shale: bibliography -->` stands. The `.bib` file travels with the document and **biber**
+  runs on it. The style is, in this order, the dialog's **Citation style**, the property
+  `citation-style:`, the `citation_style` of the set and `authoryear`. A note with citations and no
+  bibliography is written as plain text and the export warns; a key the file lacks is text and a warning.
+- **Figures and tables** with a label (`![[plot.png|Results]]{#fig:results}`, a table followed by
+  `: The caption {#tbl:runs}`) are numbered floats with their caption. Tables have the caption above and
+  figures below, unless the properties `table-caption:` and `figure-caption:` (`above` or `below`), the
+  `table_caption` and `figure_caption` of the kind or the set say otherwise. Numbers count per chapter
+  in a thesis (book class) and continuously in a publication; the property `float-numbering:`
+  (`continuous` or `chapter`) of the note, or of a folder's top note, changes that.
+- **Equations** with a label (`$$ … $$ {#eq:energy}`) get one number, also when they have several lines.
+- **References** (`@fig:results`, `@tbl:runs`, `@eq:energy`, `@sec:method`, several as
+  `[@fig:a; @fig:b]`, the number alone as `[-@fig:a]`) are written with the word and the number in the
+  language of the note ("Abbildung 3", "Figure 3"; the property `language:`, else the set's language). A
+  reference to a label that does not exist stays text, and the export warns.
+- **Lists** of figures and tables follow the contents when the boxes are on, or stand where
+  `<!-- shale: list-of-figures -->` and `<!-- shale: list-of-tables -->` are.
+
+A folder with these properties in its top note is one thesis: its notes share the labels and the one
+bibliography. The packages `biblatex`, `caption` and `cleveref` come with the TeX Live of Shale (and
+`biblatex-apa` and `biblatex-ieee` for those two styles); a managed TeX Live installed earlier lists what
+it misses with an **Install** button.
 
 ## How the note becomes the document
 

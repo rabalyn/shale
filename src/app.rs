@@ -2574,9 +2574,11 @@ impl ShaleApp {
             _ => (false, vec![]),
         };
         let board = d.book.as_ref().is_some_and(|b| b.board);
+        let bibliography = self.vdata.settings.bibliography.clone();
         let installing = self.tex.task.as_ref().filter(|t| t.kind == crate::pdf::tex::settings_ui::TaskKind::Packages).map(|t| t.handle.progress().text());
         let tex = d.tex.as_mut()?;
         tex.status = status;
+        tex.vault_bibliography = !bibliography.trim().is_empty();
         (tex.managed, tex.missing) = (managed, missing);
         tex.needs = if board { crate::pdf::tex::engine::BOARD_NEEDS.iter().map(|n| n.to_string()).collect() } else { vec![] };
         if tex.installing.is_some() && installing.is_none() {
@@ -2636,10 +2638,11 @@ impl ShaleApp {
             }
             Some(book) => {
                 let plan = crate::pdf::book::plan(v, &book.folder)?;
-                crate::pdf::tex::book::write_book(&crate::pdf::tex::book::BookRequest { vault: v, plan: &plan, opts: &d.opts, set, kind, fields: &tex.values, fonts: Some(&fonts) })?
+                let opts = crate::pdf::export::ExportOptions { thesis: crate::pdf::tex::thesis::Choices { default_bibliography: self.vdata.settings.bibliography.clone(), ..d.opts.thesis.clone() }, ..d.opts.clone() };
+                crate::pdf::tex::book::write_book(&crate::pdf::tex::book::BookRequest { vault: v, plan: &plan, opts: &opts, set, kind, fields: &tex.values, fonts: Some(&fonts) })?
             }
             None => {
-                let opts = crate::pdf::export::ExportOptions { column, ..d.opts.clone() };
+                let opts = crate::pdf::export::ExportOptions { column, thesis: crate::pdf::tex::thesis::Choices { default_bibliography: self.vdata.settings.bibliography.clone(), ..d.opts.thesis.clone() }, ..d.opts.clone() };
                 crate::pdf::tex::writer::write(&crate::pdf::tex::writer::Request { vault: v, rel: &d.rel, text: &text, opts: &opts, set, kind, fields: &tex.values, fonts: Some(&fonts) })?
             }
         };

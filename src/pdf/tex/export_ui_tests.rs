@@ -384,6 +384,50 @@ fn put_department_logo(t: &T) {
     std::fs::write(logo.join("department_logo.png"), super::sets_tests::PNG).unwrap();
 }
 
+// spec: TEX-047
+#[test]
+fn tex_047_the_dialog_has_the_boxes_of_the_lists_and_the_bibliography_and_the_citation_style() {
+    let mut t = T::new("dlg-thesis", usable());
+    put_set(&t);
+    open_on(&mut t, "Plan.md", "---\nbibliography: refs.bib\n---\n# Plan\n");
+    click(&mut t, "engine:latex");
+    click(&mut t, "kind");
+    click(&mut t, "kind:pub");
+    for key in ["list-of-figures", "list-of-tables", "bibliography", "style"] {
+        assert!(has(&t, key), "{key}: {:?}", t.painted());
+    }
+    assert!(!dialog(&t).opts.thesis.list_of_figures && dialog(&t).opts.thesis.bibliography, "the lists are off and the bibliography on by default");
+    click(&mut t, "list-of-figures");
+    click(&mut t, "list-of-tables");
+    click(&mut t, "bibliography");
+    let c = &dialog(&t).opts.thesis;
+    assert!(c.list_of_figures && c.list_of_tables && !c.bibliography);
+    click(&mut t, "style");
+    click(&mut t, "style:ieee");
+    assert_eq!(dialog(&t).opts.thesis.style, Some(crate::bibliography::format::Style::Ieee));
+    // a kind without a table of contents has no lists: the boxes are greyed and a click changes nothing
+    click(&mut t, "kind");
+    click(&mut t, "kind:letter");
+    let before = dialog(&t).opts.thesis.clone();
+    click(&mut t, "list-of-figures");
+    assert_eq!(dialog(&t).opts.thesis, before);
+}
+
+// spec: TEX-047
+#[test]
+fn tex_047_a_note_without_a_bibliography_has_the_box_greyed() {
+    let mut t = T::new("dlg-thesis-nobib", usable());
+    put_set(&t);
+    open_on(&mut t, "Plan.md", "# Plan\n");
+    click(&mut t, "engine:latex");
+    click(&mut t, "kind");
+    click(&mut t, "kind:pub");
+    assert!(has(&t, "bibliography"));
+    let before = dialog(&t).opts.thesis.bibliography;
+    click(&mut t, "bibliography");
+    assert_eq!(dialog(&t).opts.thesis.bibliography, before, "no bibliography is named: a click changes nothing");
+}
+
 // spec: TEX-016, TEX-035
 #[test]
 fn the_department_logo_box_is_there_when_the_set_has_one_on_by_default_and_greyed_for_a_kind_without_a_place() {

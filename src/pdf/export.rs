@@ -131,6 +131,8 @@ pub struct ExportOptions {
     pub background: Background,
     /// drawings: scale to fill the page (otherwise 100%, shrunk only if it doesn't fit)
     pub fill_page: bool,
+    /// LaTeX export: the choices for citations, bibliography and lists of figures and tables (TEX-047)
+    pub thesis: crate::pdf::tex::thesis::Choices,
 }
 
 impl ExportOptions {
@@ -165,6 +167,7 @@ impl ExportOptions {
             new_page_each: true,
             background: Background::White,
             fill_page: true,
+            thesis: Default::default(),
         }
     }
     pub fn for_drawing(scene: &Scene) -> Self {
@@ -199,6 +202,7 @@ impl ExportOptions {
             new_page_each: false,
             background: Background::White,
             fill_page: true,
+            thesis: Default::default(),
         }
     }
     /// The font of headings, the title, the contents and the page numbers: `print-font-sans`, else the text's.
