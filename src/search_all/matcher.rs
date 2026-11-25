@@ -379,17 +379,18 @@ mod tests {
                 ("Alone.md", "nothing\n"),
                 ("Myself.md", "see [[Myself]]\n"),
                 ("Red.md", "to [[Nobody]] and ![[@Lib/pic.png]]\n"),
-                ("Pic.md", "![[photo.png]]\n"),
+                ("Pic.md", "![[photo.png]] and [[doc.pdf]]\n"),
                 ("photo.png", "x"),
+                ("doc.pdf", "x"),
                 ("Draw.excalidraw", &scene.to_json()),
                 ("Alone.sync-conflict-20261121-142440-7JJWLPP.md", "to [[Alone]] and [[Red]]\n"),
             ],
         );
         let snap = Snapshot::of(&v);
-        assert_eq!(names(&snap, "orphan"), ["Alone.md", "Myself.md", "Red.md"], "a link to itself, a red link and an outside link are no link; a conflict copy links nothing");
+        assert_eq!(names(&snap, "orphan"), ["Alone.md", "Myself.md", "Pic.md", "Red.md"], "a link to itself, a red link, an outside link and a link to an image or a PDF are no link; a conflict copy links nothing");
         assert_eq!(names(&snap, "no-backlinks"), ["Alone.md", "Draw.excalidraw", "Hub.md", "Myself.md", "Pic.md", "Red.md"], "linking out is fine; a drawing is asked like a note; the image is no note");
-        assert_eq!(names(&snap, "NOT orphan AND no-backlinks"), ["Draw.excalidraw", "Hub.md", "Pic.md"], "a drawing that links to a note is no orphan");
-        assert_eq!(names(&snap, "orphan OR #x"), ["Alone.md", "Myself.md", "Red.md"]);
+        assert_eq!(names(&snap, "NOT orphan AND no-backlinks"), ["Draw.excalidraw", "Hub.md"], "a drawing that links to a note is no orphan");
+        assert_eq!(names(&snap, "orphan OR #x"), ["Alone.md", "Myself.md", "Pic.md", "Red.md"]);
         assert_eq!(names(&snap, "orphan AND NOT no-backlinks"), Vec::<String>::new());
         assert_eq!(names(&snap, "\"orphan\""), Vec::<String>::new(), "quoted it is the word");
         assert!(snap.linkage_made());

@@ -544,7 +544,7 @@ Every layer of every system as a picture is in [KEYMAP.md](KEYMAP.md); the same 
 - **Query language** (#597, user guide: *Search syntax*): the search over everything reads what you type as one language:
   `AND`, `OR`, `NOT` (upper case only; `-x` is NOT), parentheses, two terms side by side are AND. Terms are text (a run of
   plain words is one phrase), `#tag`, `status:doing` (any front-matter property), `path:Folder/`, `due:<+7d` / `due:overdue` /
-  `due:2026-12-01`, `links:[[Note]]`, `blocked` and `blocking` (from `blocked-by: [[A]], [[B]]`), `orphan` (no link in or out) and `no-backlinks` (nothing links to it; a link to itself, a red link and an outside link do not count, drawings count like notes). Fields select notes and
+  `due:2026-12-01`, `links:[[Note]]`, `blocked` and `blocking` (from `blocked-by: [[A]], [[B]]`), `orphan` (no link in or out) and `no-backlinks` (nothing links to it; a link to itself, a red link, an outside link and a link to an image or other non-note file do not count, drawings count like notes). Fields select notes and
   text finds the lines inside them. A query that is not valid (an open parenthesis, `due:soon`, `priority:urgent`, too long)
   is underlined with its reason, nothing runs and the last list stays. Mail and posts take only text and their own fields
   (`from:`, …): for the others the search says "Mail: `status:` not supported" under the source buttons. A search has a

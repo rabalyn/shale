@@ -6,8 +6,9 @@
 //! when the query was asked.
 
 use crate::linkage::Linkage;
-use crate::vault::{FileEntry, NoteIndex, Vault};
-use std::path::PathBuf;
+use crate::vault::{FileEntry, FileKind, NoteIndex, Vault};
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 /// One file of the snapshot: its entry and, for a note, the index that holds its text.
@@ -44,9 +45,11 @@ impl Snapshot {
     /// `no-backlinks`; a view of unlinked notes asks it too (`vault.search_snapshot().linkage()`).
     pub fn linkage(&self) -> &Linkage {
         self.linkage.get_or_init(|| {
+            // (only a link to a note or a drawing is a link: not one to an image, a PDF or another file)
+            let kept: HashSet<&Path> = self.notes.iter().filter(|s| s.file.kind != FileKind::Other).map(|s| s.file.rel.as_path()).collect();
             let notes = self.notes.iter().filter_map(|s| s.note.as_ref().map(|n| (s.file.rel.as_path(), n))).flat_map(|(rel, n)| n.resolved.iter().flatten().map(move |to| (rel, to.as_path())));
             let drawings = self.drawing_links.iter().flat_map(|(rel, links)| links.iter().map(move |to| (rel.as_path(), to.as_path())));
-            Linkage::of_links(notes.chain(drawings))
+            Linkage::of_links(notes.chain(drawings).filter(|(_, to)| kept.contains(to)))
         })
     }
 }

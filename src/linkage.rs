@@ -1,7 +1,7 @@
 //! Which notes and drawings are linked (QUERY-031): the one place of the rule behind the search
 //! words `orphan` and `no-backlinks` (and the view of unlinked notes built on it). A link counts
-//! when it resolves to a file of the vault, as the backlinks and outgoing links of the vault read
-//! it ([`crate::vault::Vault::backlinks`]); a link to the note itself, a red link and a link to
+//! when it resolves to a note or a drawing of the vault, as the backlinks and outgoing links of the vault read
+//! it ([`crate::vault::Vault::backlinks`]); a link to the note itself, a red link, a link to an image or other non-note file and a link to
 //! media outside the vault do not. Conflict copies that have an original are not part of it (NET-015).
 
 use std::collections::HashSet;
