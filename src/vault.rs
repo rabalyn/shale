@@ -214,6 +214,8 @@ pub struct Vault {
     /// The library folders of this device (`@Videos/…` links, MEDIA-014): not part of the vault but
     /// of the global settings, which the app hands over each frame ([`Vault::set_libraries`]).
     libraries: Vec<Library>,
+    /// What a search reads of the notes, kept while nothing changed (QUERY-015, [`Vault::search_snapshot`]).
+    snapshot: crate::search_all::SnapCache,
 }
 
 /// From this many notes on, a vault is parsed on several threads.
@@ -617,6 +619,8 @@ impl Vault {
     }
 
     fn merge(&mut self, mut scan: Scan) -> Vec<PathBuf> {
+        // before the notes are touched: a snapshot still holding them would make every edit a copy
+        self.snapshot.clear();
         self.rescan_epoch += 1;
         let files = std::mem::take(&mut scan.files);
         let folders = std::mem::take(&mut scan.folders);
@@ -695,6 +699,7 @@ impl Vault {
     }
 
     fn rebuild_name_index(&mut self) {
+        self.snapshot.clear();
         self.name_index.clear();
         self.path_index.clear();
         self.file_pos = self.files.iter().enumerate().map(|(i, f)| (f.rel.clone(), i)).collect();
@@ -777,6 +782,7 @@ impl Vault {
     }
 
     fn reparse_all(&mut self) {
+        self.snapshot.clear();
         // the notes are independent: many of them are parsed on several threads (PERF-008)
         let mut keys: Vec<&PathBuf> = self.notes.keys().collect();
         let threads = if keys.len() >= PARALLEL_FROM { std::thread::available_parallelism().map_or(1, |n| n.get()).min(8) } else { 1 };
@@ -832,6 +838,7 @@ impl Vault {
     }
 
     fn reparse(&mut self, rel: &Path) {
+        self.snapshot.clear();
         let parsed = self.parse_note(rel);
         if let Some(n) = self.notes.get_mut(rel) {
             parsed.store(Arc::make_mut(n));
@@ -857,9 +864,16 @@ impl Vault {
         if self.notes.get(rel).is_some_and(|n| n.text == text) {
             return;
         }
+        self.snapshot.clear();
         Arc::make_mut(self.notes.entry(rel.to_path_buf()).or_default()).text = text.to_string();
         self.reparse(rel);
         self.generation += 1;
+    }
+
+    /// The notes as a search reads them (QUERY-015), made once and handed out again until the
+    /// files or a note change: a search of an unchanged vault copies nothing.
+    pub fn search_snapshot(&self) -> Arc<crate::search_all::Snapshot> {
+        self.snapshot.get(self)
     }
 
     pub fn file(&self, rel: &Path) -> Option<&FileEntry> {
@@ -1258,6 +1272,7 @@ impl Vault {
         }
         let mtime = FileStamp::of(&self.abs(rel));
         self.set_note_text(rel, text);
+        self.snapshot.clear();
         if let Some(n) = self.notes.get_mut(rel).map(Arc::make_mut) {
             n.mtime = mtime;
             n.unreadable = None;

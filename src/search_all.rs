@@ -36,7 +36,7 @@ pub mod worker;
 
 use matcher::{Budget, Run, Stop};
 use query::{Checked, Expr, TermKind};
-pub use snapshot::Snapshot;
+pub use snapshot::{SnapCache, Snapshot};
 pub use worker::{Lease, Request, SearchWorker, Slot};
 
 /// How many hits one group of the picker lists at most.
@@ -201,7 +201,7 @@ fn find_wild(line: &str, pat: &str, fuel: &mut u64) -> Option<Range<usize>> {
 /// a budget.
 #[cfg(any(test, feature = "bench"))]
 pub fn note_hits(vault: &Vault, query: &Query) -> Vec<Hit> {
-    let notes = Snapshot::of(vault);
+    let notes = vault.search_snapshot();
     let checked = query.check();
     let Some(expr) = checked.expr() else { return vec![] };
     scan_notes(&notes, query, expr, &mut Run::new(&notes, &AtomicBool::new(false), Budget::new(u64::MAX, Duration::from_secs(3600))))
