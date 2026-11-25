@@ -464,57 +464,8 @@ Settings → Keybindings behind the **Keyboard** switch (the **List** switch is 
 
 ![The Keymap tab: the Ctrl layer on Linux](userguide/z_media/screenshots/keymap-linux-ctrl.png)
 
-![The Keymap tab in a light theme](userguide/z_media/screenshots/keymap-linux-none-light.png)
-
-![The Cmd layer on macOS in a light theme](userguide/z_media/screenshots/keymap-macos-cmd-light.png)
-
-<details><summary>Linux: every layer</summary>
-
-![Linux, layer none](userguide/z_media/screenshots/keymap-linux-none.png)
-
-![Linux, layer shift](userguide/z_media/screenshots/keymap-linux-shift.png)
-
-![Linux, layer ctrl](userguide/z_media/screenshots/keymap-linux-ctrl.png)
-
-![Linux, layer alt](userguide/z_media/screenshots/keymap-linux-alt.png)
-
-![Linux, layer ctrl-shift](userguide/z_media/screenshots/keymap-linux-ctrl-shift.png)
-
-![Linux, layer alt-shift](userguide/z_media/screenshots/keymap-linux-alt-shift.png)
-
-</details>
-
-<details><summary>Windows: every layer</summary>
-
-![Windows, layer none](userguide/z_media/screenshots/keymap-windows-none.png)
-
-![Windows, layer shift](userguide/z_media/screenshots/keymap-windows-shift.png)
-
-![Windows, layer ctrl](userguide/z_media/screenshots/keymap-windows-ctrl.png)
-
-![Windows, layer alt](userguide/z_media/screenshots/keymap-windows-alt.png)
-
-![Windows, layer ctrl-shift](userguide/z_media/screenshots/keymap-windows-ctrl-shift.png)
-
-![Windows, layer alt-shift](userguide/z_media/screenshots/keymap-windows-alt-shift.png)
-
-</details>
-
-<details><summary>macOS: every layer</summary>
-
-![macOS, layer none](userguide/z_media/screenshots/keymap-macos-none.png)
-
-![macOS, layer shift](userguide/z_media/screenshots/keymap-macos-shift.png)
-
-![macOS, layer cmd](userguide/z_media/screenshots/keymap-macos-cmd.png)
-
-![macOS, layer option](userguide/z_media/screenshots/keymap-macos-option.png)
-
-![macOS, layer cmd-shift](userguide/z_media/screenshots/keymap-macos-cmd-shift.png)
-
-![macOS, layer option-shift](userguide/z_media/screenshots/keymap-macos-option-shift.png)
-
-</details>
+Every layer of every system as a picture is in [KEYMAP.md](KEYMAP.md); the same keyboard as a web page, with your own
+`[keybindings]` pasted into it, is at <https://rabalyn.github.io/shale/> (and a file of every release, `shale-keymap-<version>.html`).
 
 ## Keyboard only: sidebar, file list and vim-style editing
 
