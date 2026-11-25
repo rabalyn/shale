@@ -4,6 +4,7 @@
 # the real check: it builds with MSVC, runs real Windows, and runs the macOS tests.
 # Note (FORGE-011, #415): the tests for macOS and Windows run only on GitHub, when it builds a
 # release; land.sh runs just clippy for them, so a test that fails there shows up at release time.
+# It is also the check before every commit that DEV-049 (portable code and tests) asks for.
 #
 #   sh scripts/cross-check.sh                  clippy for Windows and macOS
 #   sh scripts/cross-check.sh windows          clippy for Windows only (or: macos)
