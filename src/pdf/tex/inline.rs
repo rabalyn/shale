@@ -5,6 +5,7 @@
 //! through [`tex_escape`], so no text of a note is ever read as a command.
 
 use super::sets::tex_escape;
+use super::thesis::Thesis;
 use crate::markdown;
 use crate::pdf::export::{over_white, print_bg, print_color};
 use crate::theme;
@@ -136,6 +137,9 @@ pub struct Look<'a> {
     pub deferred: RefCell<Option<Vec<String>>>,
     /// In a book: where its wiki links go (BOOK-016), in the place of the headings of this note.
     pub targets: Option<&'a Targets>,
+    /// The thesis syntax (citations, references, labels, TEX-044 to TEX-047); none in a note that is
+    /// somebody else's text (ADR-0039 §4).
+    pub thesis: Option<&'a Thesis>,
 }
 
 impl<'a> Look<'a> {
@@ -233,6 +237,9 @@ fn write_line(look: &Look, text: &str, in_cell: bool) -> String {
     if text.is_empty() {
         return String::new();
     }
+    // the citations and references are written as TeX after the line is (TEX-044, TEX-045)
+    let (text, thesis_tex) = look.thesis.map_or_else(|| (text.to_string(), Vec::new()), |t| t.substitute(text));
+    let text = text.as_str();
     let _defined = markdown::DefinedFootnotes::set(look.notes.keys().cloned().collect());
     let links: Vec<(markdown::LinkSpan, bool)> = markdown::find_links(text).into_iter().map(|l| (look.vault.exists(&l.target, Some(look.rel)), l)).map(|(ok, l)| (l, ok)).collect();
     let (job, spans, paints, maths) = if in_cell { crate::reader::cell_painted(text, &links, 14.0, theme::Palette::shale().text) } else { crate::reader::inline_painted(text, &links, 14.0, theme::Palette::shale().text, false) };
@@ -340,7 +347,7 @@ fn write_line(look: &Look, text: &str, in_cell: bool) -> String {
             out.push_str(&style(shown));
         }
     }
-    lead(out)
+    lead(Thesis::restore(out, &thesis_tex))
 }
 
 /// Inline code: its text in the monospaced font, spaces kept.

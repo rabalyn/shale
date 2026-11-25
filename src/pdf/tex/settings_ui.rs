@@ -106,7 +106,7 @@ impl TexState {
     /// data folder named after `tag` and no `PATH`, so nothing of the machine is touched or found.
     pub fn new(persist: bool, tag: &str) -> TexState {
         let (data, path_var) = if persist {
-            (dirs::data_dir(), std::env::var_os("PATH"))
+            (crate::userdirs::data_dir(), std::env::var_os("PATH"))
         } else {
             static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
             // screenshots name a data folder to show (SHALE_FAKE_DATA_DIR, like SHALE_FAKE_NOW); nothing is written there

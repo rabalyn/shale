@@ -32,7 +32,7 @@ pub struct Places {
 impl Places {
     /// The places of a program that runs on its own: the embedded guide, the copy in Shale's data folder.
     pub fn system() -> Places {
-        Places { files: EMBEDDED, root: dirs::data_dir().map(|d| d.join("shale")) }
+        Places { files: EMBEDDED, root: crate::userdirs::data_dir().map(|d| d.join("shale")) }
     }
 
     /// Nowhere to copy the guide to (tests and screenshots, which never touch the real data folder).

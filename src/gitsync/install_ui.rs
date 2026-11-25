@@ -130,7 +130,7 @@ impl ManagedState {
     /// screenshots) a temporary data folder named after `tag` and nothing is selected or checked by itself.
     pub fn new(persist: bool, tag: &str) -> ManagedState {
         let data = if persist {
-            dirs::data_dir()
+            crate::userdirs::data_dir()
         } else {
             static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
             // screenshots name a data folder to show (SHALE_FAKE_DATA_DIR); nothing is written there

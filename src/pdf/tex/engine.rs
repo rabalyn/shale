@@ -130,6 +130,11 @@ pub const CHECKED: &[(&str, &str)] = &[
     ("luaotfload", "luaotfload.sty"),
     ("unicode-math", "unicode-math.sty"),
     ("biblatex", "biblatex.sty"),
+    // the thesis syntax of the TeX export (TEX-044, TEX-045): the styles of the dialog, captions and references
+    ("biblatex-apa", "apa.bbx"),
+    ("biblatex-ieee", "ieee.bbx"),
+    ("caption", "caption.sty"),
+    ("cleveref", "cleveref.sty"),
     ("csquotes", "csquotes.sty"),
     ("hyperref", "hyperref.sty"),
     ("microtype", "microtype.sty"),

@@ -6,7 +6,7 @@
 
 use super::vocab::Vocab;
 use crate::link_assist::{down_key, up_key};
-use crate::search_all::{Lease, Request, SearchWorker, Snapshot};
+use crate::search_all::{Lease, Request, SearchWorker};
 use crate::theme;
 use crate::vault::Vault;
 use eframe::egui::{self, Id, Key, Modifiers, Rect, RichText, Ui};
@@ -115,7 +115,7 @@ impl Complete {
         let stamp = (vault.uid, vault.generation);
         let queue = self.queue.get_or_insert_with(|| worker.lease()).slot;
         if self.asked.is_some_and(|(at, _)| at != stamp) || (self.asked.is_none() && self.vocab.as_ref().map(|v| v.0) != Some(stamp)) {
-            let id = worker.submit(queue, Request::vocabulary(Snapshot::of(vault)));
+            let id = worker.submit(queue, Request::vocabulary(vault.search_snapshot()));
             self.asked = Some((stamp, id));
         }
         let Some((at, id)) = self.asked else { return };

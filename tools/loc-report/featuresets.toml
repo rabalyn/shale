@@ -23,7 +23,7 @@ features = ["drawing", "media"]
 [[set]]
 name = "Vault & files"
 features = [
-    "vault", "vault_cache", "vault_check", "vault_menu", "vault_path", "vault_state", "fsutil",
+    "vault", "vault_cache", "vault_check", "vault_menu", "vault_path", "vault_state", "fsutil", "userdirs",
     "known_vaults", "device_local", "data_usage", "recovery", "tree_rows",
 ]
 

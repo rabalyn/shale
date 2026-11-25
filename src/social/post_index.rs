@@ -26,7 +26,7 @@ pub(crate) const FIELDS: [(&str, &str); 7] = [("from", "author"), ("text", "text
 
 /// Where the index lives: `<user data folder>/shale/social-posts.db` (SOC-034).
 pub fn default_path() -> std::path::PathBuf {
-    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("social-posts.db")
+    crate::userdirs::data_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("social-posts.db")
 }
 
 /// One search result: a row to show and what is needed to open it.

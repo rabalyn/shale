@@ -53,8 +53,26 @@ pub enum Block {
     /// A formula on lines of its own that Shale can typeset: its TeX (TEX-029). One it cannot
     /// typeset is a [`Block::Code`] of its lines.
     Math(String),
+    /// A formula of that kind with the label `{#eq:id}` (TEX-046): its TeX and the id.
+    Equation {
+        tex: String,
+        id: String,
+    },
     /// An embed alone on its line.
     Embed(markdown::LinkSpan),
+    /// An embed alone on its line with the label `{#fig:id}` after it (TEX-045): a numbered figure.
+    Figure {
+        link: markdown::LinkSpan,
+        id: String,
+    },
+    /// A pipe table with the caption line `: Caption {#tbl:id}` below it (TEX-045): a numbered table.
+    CaptionedTable {
+        table: crate::table::Block,
+        caption: String,
+        id: String,
+    },
+    /// A marker line `<!-- shale: bibliography -->`, `list-of-figures` or `list-of-tables` (TEX-047).
+    Marker(Marker),
     Rule,
     /// A page-break marker line (TEX-037).
     PageBreak,
@@ -62,6 +80,27 @@ pub enum Block {
     /// is the blocks in between.
     AlignStart(markdown::Align),
     AlignEnd(markdown::Align),
+}
+
+/// What a marker line `<!-- shale: … -->` asks for (ADR-0039 §5).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Marker {
+    Bibliography,
+    ListOfFigures,
+    ListOfTables,
+}
+
+impl Marker {
+    /// The marker a trimmed line is: `<!-- shale: bibliography -->`, `list-of-figures`, `list-of-tables`.
+    pub fn of_line(trimmed: &str) -> Option<Marker> {
+        let inner = trimmed.strip_prefix("<!--")?.strip_suffix("-->")?;
+        match inner.split_whitespace().collect::<Vec<_>>().as_slice() {
+            ["shale:", "bibliography"] => Some(Marker::Bibliography),
+            ["shale:", "list-of-figures"] => Some(Marker::ListOfFigures),
+            ["shale:", "list-of-tables"] => Some(Marker::ListOfTables),
+            _ => None,
+        }
+    }
 }
 
 /// How far a line is indented, a tab counting four.
@@ -79,6 +118,12 @@ pub fn parse(text: &str) -> Vec<Block> {
     let notes = markdown::find_footnotes(text);
     let page_breaks = markdown::page_break_lines(text);
     let wrappers = markdown::align_blocks(text);
+    // the labels of equations (`{#eq:x}` after a display formula, EDIT-122)
+    let equation_labels: Vec<(std::ops::Range<usize>, String)> = if text.contains("{#eq:") {
+        markdown::citations::scan(text, None).into_iter().filter_map(|t| if let markdown::citations::Token::Label(l) = t { (l.kind == markdown::citations::Kind::Equation).then_some((l.range, l.id)) } else { None }).collect()
+    } else {
+        Vec::new()
+    };
     let mut out: Vec<Block> = Vec::new();
     let mut i = markdown::front_matter_lines(text);
     // lines of a paragraph, of a list and of a quote that are not yet closed
@@ -110,7 +155,16 @@ pub fn parse(text: &str) -> Vec<Block> {
         if let Some(m) = maths.iter().find(|m| m.block && m.lines.start == i) {
             close!();
             let tex = text[m.tex.clone()].trim();
-            out.push(if crate::math::typeset(tex, 14.0, true).is_ok() { Block::Math(tex.to_string()) } else { Block::Code { lang: String::new(), lines: lines[m.lines.clone()].iter().map(|l| l.1.to_string()).collect() } });
+            // the label of the equation stands on the closing line (or the opening line of a fence)
+            let (from, to) = (lines[m.lines.start].0, lines[m.lines.end - 1].0 + lines[m.lines.end - 1].1.len());
+            let id = equation_labels.iter().find(|(r, _)| r.start >= from && r.end <= to).map(|(_, id)| id.clone());
+            out.push(if crate::math::typeset(tex, 14.0, true).is_err() {
+                Block::Code { lang: String::new(), lines: lines[m.lines.clone()].iter().map(|l| l.1.to_string()).collect() }
+            } else if let Some(id) = id {
+                Block::Equation { tex: tex.to_string(), id }
+            } else {
+                Block::Math(tex.to_string())
+            });
             i = m.lines.end.max(i + 1);
             continue;
         }
@@ -122,8 +176,14 @@ pub fn parse(text: &str) -> Vec<Block> {
         }
         if let Some(b) = tables.iter().find(|b| b.lines.start == i) {
             close!();
-            out.push(Block::Table(b.clone()));
             i = b.lines.end;
+            match lines.get(i).and_then(|l| table_caption(l.1)) {
+                Some((caption, id)) => {
+                    out.push(Block::CaptionedTable { table: b.clone(), caption, id });
+                    i += 1;
+                }
+                None => out.push(Block::Table(b.clone())),
+            }
             continue;
         }
         let line = lines[i].1;
@@ -151,6 +211,12 @@ pub fn parse(text: &str) -> Vec<Block> {
         if links.len() == 1 && links[0].embed && trimmed.len() == links[0].range.len() {
             close!();
             out.push(Block::Embed(links[0].clone()));
+        } else if let Some(id) = links.first().filter(|l| links.len() == 1 && l.embed).and_then(|l| figure_label(line, l)) {
+            close!();
+            out.push(Block::Figure { link: links[0].clone(), id });
+        } else if let Some(marker) = Marker::of_line(trimmed) {
+            close!();
+            out.push(Block::Marker(marker));
         } else if trimmed.is_empty() {
             close!();
         } else if trimmed == "---" || trimmed == "***" || trimmed == "___" {
@@ -192,6 +258,27 @@ pub fn parse(text: &str) -> Vec<Block> {
     }
     close!();
     out
+}
+
+/// The caption line below a table: `: The caption {#tbl:runs}` gives the caption and the id (ADR-0039 §2).
+fn table_caption(line: &str) -> Option<(String, String)> {
+    let rest = line.trim().strip_prefix(':')?;
+    let at = rest.rfind("{#")?;
+    let (kind, id, len) = markdown::citations::parse_label(&rest[at..])?;
+    (kind == markdown::citations::Kind::Table && at + len == rest.len()).then(|| (rest[..at].trim().to_string(), id))
+}
+
+/// The label after an embed that stands first on its line: `![[a.png|Caption]]{#fig:x}`, with no or
+/// one space between (ADR-0039 §2).
+fn figure_label(line: &str, link: &markdown::LinkSpan) -> Option<String> {
+    let lead = line.len() - line.trim_start().len();
+    if link.range.start != lead {
+        return None;
+    }
+    let rest = line[link.range.end..].trim_end();
+    let rest = rest.strip_prefix(' ').unwrap_or(rest);
+    let (kind, id, len) = markdown::citations::parse_label(rest)?;
+    (kind == markdown::citations::Kind::Figure && len == rest.len()).then_some(id)
 }
 
 /// The footnotes a note defines: label → the text of the definition, its first line after the label

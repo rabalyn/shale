@@ -26,7 +26,7 @@ report a security problem there, see Security below.
   while planned and becomes `IS NOW`, with the test name, in the change that makes it true. A test
   that checks a rule carries its ID in the name or in a `// spec: ID` comment.
 - **No warnings** (DEV-001, BUILD-004). `cargo fmt --check`,
-  `cargo clippy --all-targets --locked -- -D warnings` and `cargo test --locked` must be clean.
+  `cargo clippy --all-targets --locked -- -D warnings` and `cargo test --locked` must be clean. Run tests with empty XDG folders (DEV-047): `T=$(mktemp -d); XDG_CONFIG_HOME=$T/config XDG_DATA_HOME=$T/data XDG_CACHE_HOME=$T/cache XDG_STATE_HOME=$T/state cargo test --locked`; test builds never use your real folders either way.
   Do not silence a warning with `#[allow]`; ask instead.
 - **Every code path gets a sensible test** (DEV-003). Mail and CalDAV are tested against real
   servers in podman test stacks (DEV-005). If a good test is hard to write, propose developer

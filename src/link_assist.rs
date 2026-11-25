@@ -188,7 +188,7 @@ impl LinkAssist {
         out.picking = self.ac_pick.is_some() || self.tags.pick.is_some() || self.cites.pick.is_some();
 
         // `[!path` file picker: Tab completes, arrows choose, Enter picks, Esc closes.
-        let home = dirs::home_dir().unwrap_or_default();
+        let home = crate::userdirs::home_dir().unwrap_or_default();
         // the question "copy or link?" for a file that was just picked: C, L, Esc and nothing else
         if let Some(src) = self.media.asking.clone() {
             let (copy, link, esc) = ui.input_mut(|i| {
@@ -295,7 +295,7 @@ impl LinkAssist {
         let mut changed = false;
         let mut action = None;
         let resp = &output.response.response;
-        let home = dirs::home_dir().unwrap_or_default();
+        let home = crate::userdirs::home_dir().unwrap_or_default();
         let mut media_handled = handled;
         if media_handled && self.media.active && !resp.has_focus() {
             ui.ctx().memory_mut(|m| m.request_focus(self.id));

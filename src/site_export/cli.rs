@@ -174,7 +174,7 @@ pub fn publish(args: &PublishArgs, git: &Git, libraries: &[Library], base: &Path
 
 /// The git of this device as the window runs it (SYNC-024) with Shale as its askpass helper (SYNC-054).
 pub(super) fn device_git(choice: managed::GitChoice) -> Git {
-    let mut git = managed::selected_git(choice, dirs::data_dir().as_deref(), std::env::var_os("PATH").as_deref());
+    let mut git = managed::selected_git(choice, crate::userdirs::data_dir().as_deref(), std::env::var_os("PATH").as_deref());
     if let Ok(exe) = std::env::current_exe() {
         credentials::attach(&mut git, &exe);
     }

@@ -519,11 +519,11 @@ fn a_damaged_file_says_so_and_a_machine_without_sound_output_keeps_the_player_wo
     fx.app.media.use_no_output();
     fx.reading(true);
     fx.click_label("Play");
-    fx.until("the message shows", |a| a.media.current().is_some());
-    fx.hl.frames(&mut fx.app, 5);
-    std::thread::sleep(Duration::from_millis(100));
-    fx.hl.frames(&mut fx.app, 3);
-    assert!(fx.hl.text.iter().any(|(t, _)| t == "No sound output"));
+    fx.until("the click started the file", |a| a.media.current().is_some());
+    // the sound output is opened on a thread (MEDIA-013): wait for its answer to be on the screen,
+    // however long a loaded machine takes for it, instead of a fixed number of frames and a sleep
+    let shown = fx.until_text("No sound output");
+    assert!(shown.iter().any(|t| t == "No sound output"), "the message names the missing sound output: {shown:?}");
     fx.label("Position");
     fx.label("Mute");
 }

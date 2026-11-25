@@ -10,7 +10,7 @@ use std::path::Path;
 
 /// `<data folder>/shale/cache-cleanup.json`
 pub fn default_path() -> std::path::PathBuf {
-    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("cache-cleanup.json")
+    crate::userdirs::data_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("cache-cleanup.json")
 }
 
 /// The last clear or prune of one cache.
