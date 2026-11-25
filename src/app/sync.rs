@@ -981,7 +981,9 @@ mod tests {
         crate::fsutil::write_atomic(&v.join("Note.md"), b"hi\n").unwrap();
         let mut app = app_on(&v);
         let mut h = H { ctx: egui::Context::default(), t: 0.0 };
-        h.frame(&mut app, vec![]);
+        // the page has its final layout before the first click (#680, as #659): the look for git ends
+        // after the first frame and changes the lines above the buttons, on a loaded machine late
+        h.settle(&mut app);
         assert!(!app.sync.rects.iter().any(|r| r.0 == "enabled"), "no sync settings before there is a repository");
         assert!(app.sync.rects.iter().any(|r| r.0 == "turn-on") && !app.sync.rects.iter().any(|r| r.0 == "url"), "the wizard is the way in, the address field is under Advanced");
         h.click(&mut app, "advanced");
@@ -994,7 +996,7 @@ mod tests {
         let o = std::process::Command::new("git").arg("-C").arg(&remote).args(["show", "main:Note.md"]).envs(git.env.iter().cloned()).output().unwrap();
         assert_eq!(String::from_utf8_lossy(&o.stdout), "hi\n");
 
-        h.frame(&mut app, vec![]);
+        h.settle(&mut app);
         assert!(h.click(&mut app, "enabled"));
         assert!(!app.vdata.settings.sync.enabled);
         assert!(h.typ(&mut app, "prefix", "[n] "));
