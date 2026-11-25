@@ -106,8 +106,9 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, entry: &SocialAccountEntry, tab: 
                 let (near_from, near_to) = (ui.clip_rect().min.y - super::feed_ui::FAR, ui.clip_rect().max.y + super::feed_ui::FAR);
                 for (i, item) in list.iter().enumerate() {
                     let indent = (item.level.min(MAX_LEVELS) as f32 * INDENT).min((width - MIN_CARD).max(0.0));
-                    let look = Look { idx: i, width: width - indent, highlight: item.highlight, show_thread: !item.highlight };
-                    let card = list_card(ui, &mut cx, heights, &item.post, look, indent, (near_from, near_to));
+                    let look = Look { idx: i, width: width - indent, indent, highlight: item.highlight, show_thread: !item.highlight };
+                    let k = post_key(&item.post);
+                    let card = list_card(ui, &mut cx, heights, &item.post, &k, look, (near_from, near_to));
                     if card.save {
                         save_post = Some(card.target(&item.post).clone());
                     }
@@ -120,7 +121,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, entry: &SocialAccountEntry, tab: 
                     if item.highlight {
                         cx.rects.push(("highlight".into(), card.rect));
                     }
-                    post_rects.push((post_key(&item.post), card.rect));
+                    post_rects.push((k, card.rect));
                 }
                 if let Some(e) = &error {
                     inset(ui, |ui| {

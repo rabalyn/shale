@@ -27,7 +27,7 @@ pub struct Threads {
     pub map: HashMap<(String, String), ThreadEntry>,
     /// how high each post was drawn at a width (as `SocialState::card_heights`; separate because
     /// the opened post is drawn with a frame)
-    pub heights: HashMap<(String, u32), (f32, bool)>,
+    pub heights: super::feed_ui::Heights,
     /// where each tab's conversation is held still while posts above the opened post change in
     /// height (SOC-046); a new conversation starts with the opened post at the top
     pub anchors: HashMap<u64, super::feed_ui::Anchor>,

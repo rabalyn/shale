@@ -59,8 +59,9 @@ pub struct Run<'a> {
     snapshot: &'a Snapshot,
     cancel: &'a AtomicBool,
     pub budget: Budget,
-    /// the day `due:` compares with
-    pub today: i64,
+    /// the day `due:` compares with, asked of the clock when a query first needs it (the local
+    /// time zone is looked up for it, which costs more than a short search)
+    pub today: Option<i64>,
     deps: Option<Deps>,
     /// how often the run was checked: the clock is read every 64th time, not per line
     ticks: std::cell::Cell<u32>,
@@ -70,7 +71,7 @@ pub struct Run<'a> {
 
 impl<'a> Run<'a> {
     pub fn new(snapshot: &'a Snapshot, cancel: &'a AtomicBool, budget: Budget) -> Run<'a> {
-        Run { snapshot, cancel, budget, today: time::today(), deps: None, ticks: std::cell::Cell::new(0), stopped: None }
+        Run { snapshot, cancel, budget, today: None, deps: None, ticks: std::cell::Cell::new(0), stopped: None }
     }
 
     /// Stop here when a newer query came or the budget is used up.
@@ -106,10 +107,16 @@ impl<'a> Run<'a> {
         Ok(found)
     }
 
-    /// Does the note at `idx` of the snapshot match the query? It is looked at as a whole.
-    pub fn note_matches(&mut self, expr: &Expr, idx: usize) -> Result<bool, Stop> {
+    /// A note is looked at: stop here when it is time to, else pay for the note.
+    pub fn begin_note(&mut self) -> Result<(), Stop> {
         self.check()?;
         self.spend(1);
+        Ok(())
+    }
+
+    /// Does the note at `idx` of the snapshot match the query? It is looked at as a whole.
+    pub fn note_matches(&mut self, expr: &Expr, idx: usize) -> Result<bool, Stop> {
+        self.begin_note()?;
         self.matches(expr, idx)
     }
 
@@ -183,7 +190,8 @@ impl<'a> Run<'a> {
             TermKind::Path(prefix) => note.file.rel.to_string_lossy().replace('\\', "/").to_lowercase().starts_with(prefix.as_str()),
             TermKind::Due(due) => {
                 self.spend(FIELD_COST);
-                index.and_then(|n| due_day(&n.text)).is_some_and(|day| self.due_matches(*due, day))
+                let today = *self.today.get_or_insert_with(time::today);
+                index.and_then(|n| due_day(&n.text)).is_some_and(|day| due_matches(*due, day, today))
             }
             TermKind::Links(key) => index.is_some_and(|n| n.links.iter().any(|l| link_key(&l.target) == *key)),
             TermKind::Blocked | TermKind::Blocking => {
@@ -197,22 +205,23 @@ impl<'a> Run<'a> {
             }
         })
     }
+}
 
-    fn due_matches(&self, due: Due, day: i64) -> bool {
-        match due {
-            Due::Overdue => day < self.today,
-            Due::Is(cmp, at) => {
-                let at = match at {
-                    Day::Date(d) => d,
-                    Day::FromToday(n) => self.today + n,
-                };
-                match cmp {
-                    Cmp::On => day == at,
-                    Cmp::Before => day < at,
-                    Cmp::OnOrBefore => day <= at,
-                    Cmp::After => day > at,
-                    Cmp::OnOrAfter => day >= at,
-                }
+/// Does the day a note is due on satisfy `due`, with `today` as the day number of today?
+fn due_matches(due: Due, day: i64, today: i64) -> bool {
+    match due {
+        Due::Overdue => day < today,
+        Due::Is(cmp, at) => {
+            let at = match at {
+                Day::Date(d) => d,
+                Day::FromToday(n) => today + n,
+            };
+            match cmp {
+                Cmp::On => day == at,
+                Cmp::Before => day < at,
+                Cmp::OnOrBefore => day <= at,
+                Cmp::After => day > at,
+                Cmp::OnOrAfter => day >= at,
             }
         }
     }
@@ -261,7 +270,7 @@ mod tests {
         let expr = checked.expr().unwrap_or_else(|| panic!("{query:?}: {:?}", checked.tree));
         let cancel = AtomicBool::new(false);
         let mut run = Run::new(snap, &cancel, Budget::standard());
-        run.today = time::parse_ymd("2026-11-23").unwrap();
+        run.today = time::parse_ymd("2026-11-23");
         let found = run.match_notes(expr);
         assert_eq!(run.stopped, None);
         let mut found: Vec<String> = found.iter().map(|p| crate::vault::rel_to_string(p)).collect();

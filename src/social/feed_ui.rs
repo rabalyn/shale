@@ -399,6 +399,8 @@ pub(super) fn short(s: &str, n: usize) -> String {
 pub(super) struct Look {
     pub idx: usize,
     pub width: f32,
+    /// how far from the left of the list the card is drawn (a reply in a conversation)
+    pub indent: f32,
     pub highlight: bool,
     pub show_thread: bool,
 }
@@ -503,7 +505,7 @@ fn quote_actions(ui: &mut Ui, cx: &mut Cx, q: &Post, idx: usize, show_thread: bo
 
 /// One post. Returns what was clicked, and where the card is.
 pub(super) fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, look: Look) -> CardOut {
-    let Look { idx, width, highlight, show_thread } = look;
+    let Look { idx, width, highlight, show_thread, .. } = look;
     let key = post_key(p);
     let mut save = false;
     let mut thread = None;
@@ -666,15 +668,28 @@ pub(super) fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, look: Look) -> CardO
     CardOut { save, thread, act, on_quote, rect: card.response.rect }
 }
 
+/// How high a post was drawn, at which width (`f32::to_bits`), and whether it came out the same
+/// twice (PERF-006); by `post_key`, so that a lookup does not make a key.
+#[derive(Clone, Copy)]
+pub struct CardHeight {
+    width: u32,
+    height: f32,
+    steady: bool,
+}
+
+/// The heights of the posts of a list, by `post_key`.
+pub type Heights = HashMap<String, CardHeight>;
+
 /// A post of a list: drawn, or, when it is far from the view (`near`: the part of the list that
 /// counts as near) and was drawn before at this width, kept as an empty space of its height
-/// (PERF-006). A post is drawn `indent` points from the left.
-pub(super) fn list_card(ui: &mut Ui, cx: &mut Cx, heights: &mut HashMap<(String, u32), (f32, bool)>, p: &Post, look: Look, indent: f32, near: (f32, f32)) -> CardOut {
-    let k = post_key(p);
+/// (PERF-006). A post is drawn `look.indent` points from the left.
+pub(super) fn list_card(ui: &mut Ui, cx: &mut Cx, heights: &mut Heights, p: &Post, k: &str, look: Look, near: (f32, f32)) -> CardOut {
     let at = ui.cursor().min;
     let gap = ui.spacing().item_spacing.y;
-    let width = look.width;
-    let kept = heights.get(&(k.clone(), width.to_bits())).filter(|(_, steady)| *steady).map(|(h, _)| *h).filter(|h| at.y + h < near.0 || at.y > near.1);
+    let (width, indent) = (look.width, look.indent);
+    let bits = width.to_bits();
+    let before = heights.get(k).filter(|h| h.width == bits);
+    let kept = before.filter(|h| h.steady).map(|h| h.height).filter(|h| at.y + h < near.0 || at.y > near.1);
     if let Some(h) = kept {
         // (`add_space` adds no spacing after itself; a drawn card is followed by `gap`)
         ui.add_space(h);
@@ -691,8 +706,14 @@ pub(super) fn list_card(ui: &mut Ui, cx: &mut Cx, heights: &mut HashMap<(String,
     };
     // only a height that came out the same twice is trusted: the first frames lay text out differently
     let height = ui.cursor().min.y - at.y;
-    let steady = heights.get(&(k.clone(), width.to_bits())).is_some_and(|(before, _)| (before - height).abs() < 0.5);
-    heights.insert((k, width.to_bits()), (height, steady));
+    let steady = before.is_some_and(|b| (b.height - height).abs() < 0.5);
+    let now = CardHeight { width: bits, height, steady };
+    match heights.get_mut(k) {
+        Some(h) => *h = now,
+        None => {
+            heights.insert(k.to_owned(), now);
+        }
+    }
     out
 }
 
@@ -1001,7 +1022,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
                 let (near_from, near_to) = (ui.clip_rect().min.y - FAR, ui.clip_rect().max.y + FAR);
                 for (i, p) in posts.iter().enumerate() {
                     let k = post_key(p);
-                    let card = list_card(ui, &mut cx, card_heights, p, Look { idx: i, width, highlight: false, show_thread: true }, 0.0, (near_from, near_to));
+                    let card = list_card(ui, &mut cx, card_heights, p, &k, Look { idx: i, width, indent: 0.0, highlight: false, show_thread: true }, (near_from, near_to));
                     if card.save {
                         save_post = Some(card.target(p).clone());
                     }
