@@ -96,6 +96,28 @@ This file is read by opencode and by Claude desktop alike; several sessions of b
 - **No dead code**, no unused dependencies.
 - **Every code path gets a sensible test.** External behaviour (IMAP, CalDAV, …) is tested
   against real servers in podman test stacks with seeded data (`tests/mail-env/`).
+- **Portable code and tests** (DEV-049). Shale is built and tested on Linux, macOS and Windows,
+  x86_64 and arm64, but macOS and Windows tests only run at a release. So never hardcode what
+  differs between systems:
+  - **Paths:** build them with `Path`/`PathBuf` (`join`, `parent`, `display()`), never by gluing
+    strings with `/`. In a test, build the expected value **the same way the code builds it**, not
+    as a literal like `"/a/notes"` or `"/work/x.lua"`. Vault-relative paths (always `/`):
+    `vault::rel_to_string`; a path as stored: `known_vaults::canonical` / `fsutil::plain_path`
+    (they handle `\\?\`, 8.3 short names and `/private/var`).
+  - **Absolute paths:** `Path::is_absolute` / `has_root`, not `starts_with('/')`. File addresses:
+    `media::testdata::file_address`.
+  - **Temporary files:** `std::env::temp_dir()` with a unique name (pid + counter), never
+    `/tmp/...`. Test ports: `closed_port()` (`calendar::dav::tests`).
+  - **File names:** none that Windows forbids (`: * ? " < > |`, trailing dot or space, `CON`...),
+    and no assumptions about case sensitivity.
+  - **Users and processes:** don't assume a non-root user (CI runs as root), a Unix shell or Unix
+    permissions; code that needs them goes in `#[cfg(unix)]` / `#[cfg(windows)]` with a
+    counterpart or a reason.
+  - **Downloaded tools** (Hugo, Pagefind...): pick by OS **and** CPU (`uname -s`/`uname -m`,
+    `cfg!(target_arch)`) with a pinned checksum per target, never a fixed x86_64 build.
+  - **Before committing:** `scripts/cross-check.sh`. It only catches compile and clippy errors for
+    macOS and Windows, not wrong expected values in tests, so check every new path test against
+    this list.
 - **If a good test is hard to write**, first think about developer tooling (a test server,
   fixture generator, debug setting or helper tool) and propose it to the owner as a side track
   (an issue) before writing a shallow test.
