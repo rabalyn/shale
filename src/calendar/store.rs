@@ -144,7 +144,7 @@ fn write_to(target: &Target, parts: &[Event], in_place: bool, before: &[Event]) 
 
 /// Where the copy of a deleted event goes by default (`~/.local/share/shale/calendar-trash`).
 pub fn default_trash_dir() -> PathBuf {
-    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("calendar-trash")
+    crate::userdirs::data_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("calendar-trash")
 }
 
 /// Keep the full text of an event (every part of its series) in `<trash>/<date>/<uid>.ics` before
@@ -744,7 +744,7 @@ impl CalendarStore {
 
 /// Where local calendar files go (`~/.config/shale/calendars`).
 pub fn default_local_dir() -> PathBuf {
-    dirs::config_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("calendars")
+    crate::userdirs::config_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("calendars")
 }
 
 fn timed(uid: &str, day: i64, h: i64, m: i64, mins: i64, summary: &str) -> Event {
@@ -867,7 +867,7 @@ pub(crate) mod tests {
     fn local_calendars_are_files_in_the_shale_folder_of_the_config_directory() {
         let dir = default_local_dir();
         assert!(dir.ends_with(std::path::Path::new("shale").join("calendars")), "{}", dir.display());
-        assert_eq!(dir.parent().and_then(|p| p.parent()), dirs::config_dir().as_deref().or(Some(&std::env::temp_dir())));
+        assert_eq!(dir.parent().and_then(|p| p.parent()), crate::userdirs::config_dir().as_deref().or(Some(&std::env::temp_dir())));
         let store = CalendarStore::new(vec![], dir.clone());
         // a new local calendar is one .ics file of that folder
         let src = store.new_local_source("Home", &[]);

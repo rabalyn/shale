@@ -56,7 +56,7 @@ pub fn claim(dir: &Path, grace: Duration) -> Claim {
 
 /// The folder of the lock: next to the mail store, under the user's data folder.
 pub fn default_dir() -> std::path::PathBuf {
-    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("shale")
+    crate::userdirs::data_dir().unwrap_or_else(std::env::temp_dir).join("shale")
 }
 
 /// Where the running Shale says how to reach it: its port and a secret, owner-only (DATA-014).

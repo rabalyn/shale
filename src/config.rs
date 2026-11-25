@@ -611,7 +611,7 @@ pub fn input_log_path() -> PathBuf {
     if let Some(p) = INPUT_LOG_TEST_PATH.with(|c| c.borrow().clone()) {
         return p;
     }
-    dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("input-debug.log")
+    crate::userdirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("input-debug.log")
 }
 
 /// When this program was built, as "YYYY-MM-DD HH:MM UTC".
@@ -647,7 +647,9 @@ pub fn write_private(path: &Path, data: &[u8]) -> std::io::Result<()> {
 
 #[cfg(test)]
 thread_local! {
-    /// Tests: the settings file of this thread (never the real one in ~/.config).
+    /// Tests: the settings file of this thread. A thread without one (another thread of the same
+    /// test, or a test that set none) gets the file in the folder of the test process
+    /// (`userdirs`, DEV-047), never the real one in ~/.config (raba/shale#685).
     pub static CONFIG_TEST_PATH: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
 }
 
@@ -656,7 +658,7 @@ pub fn config_path() -> Option<PathBuf> {
     if let Some(p) = CONFIG_TEST_PATH.with(|c| c.borrow().clone()) {
         return Some(p);
     }
-    dirs::config_dir().map(|d| d.join("shale").join("config.toml"))
+    crate::userdirs::config_dir().map(|d| d.join("shale").join("config.toml"))
 }
 
 /// The settings file of the versions before CFG-009, next to the current one.

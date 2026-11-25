@@ -740,6 +740,8 @@ mod tests {
     // spec: SYNC-002
     #[test]
     fn sync_002_a_sync_starts_when_the_vault_opens_and_every_interval_but_only_while_enabled() {
+        // this test saves the settings (`persist_config`): into a file of its own, never the real one (#685)
+        let _cfg = crate::config::testing::TestConfig::new("sync-timer");
         let root = std::env::temp_dir().join(format!("shale-app-sync-timer-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let git = hermetic();

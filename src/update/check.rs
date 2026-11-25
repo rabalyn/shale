@@ -302,7 +302,7 @@ pub struct Staged {
 
 /// Where the downloads of updates are kept: `<cache>/shale/updates`.
 pub fn staging_root() -> PathBuf {
-    dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("updates")
+    crate::userdirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("updates")
 }
 
 /// Whether `archive` has the SHA-256 that `sum_file` names for `name`; a file that does not is deleted.

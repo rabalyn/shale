@@ -16,6 +16,9 @@
 # --example loc_report -- --out docs/loc-report.md`) and, when `docs/loc-report.md`, `docs/loc-history.svg`
 # or `docs/loc-history.tsv` (the chart per tag and its counts, DEV-046) changed, commits them on
 # top of the merge as `no-issue: lines-of-code report for <branch> (DEV-045)`; it is pushed with the merge.
+# The checks (and the podman suites) run with XDG_CONFIG_HOME, XDG_DATA_HOME, XDG_CACHE_HOME and
+# XDG_STATE_HOME pointed at a fresh empty folder in `<git dir>/land/xdg-sandbox`, and a last step fails the landing when
+# a `shale` folder is in it (DEV-047, #685): tests never touch the owner's real settings, data, cache or secrets.
 # A report that cannot be made fails the landing like a failed check. A merge conflict is not resolved here: merge `origin/main` into the branch, resolve
 # it there and run land.sh again. After the push the local branch `main` is fast-forwarded to
 # the landed commit (in the worktree that has it checked out, when that one is clean), so new
@@ -24,7 +27,7 @@
 #
 # The worktree and the build folder stay in `<git dir>/land/`, so the next landing builds only
 # what changed. Environment, for the test of this script: LAND_REMOTE (default origin),
-# LAND_CHECK_CMD (a shell command run in the worktree instead of the checks above),
+# LAND_CHECK_CMD (a shell command run in the worktree instead of the checks above; the user's-folders check still follows),
 # LAND_REPORT_CMD (a shell command run in the worktree instead of the report command of DEV-045),
 # SHALE_LAND_LOCK_HELD=<pid of the parent> (the parent holds the lock already: release scripts).
 #
@@ -192,9 +195,38 @@ step() {
   fi
 }
 
+# The checks run with the user's folders of the XDG standard (settings, data, cache, state) pointed
+# at a fresh empty folder, and afterwards nothing may be in its `shale` folders (DEV-047, #685): a
+# test or a program a test starts that wrote the owner's real settings, mail store or cache would
+# write there instead and fail the landing. HOME stays (cargo and rustup need it). The unit tests
+# are kept away from the real folders by `src/userdirs.rs` as well; this is the second net, for what
+# bypasses it (a test that starts the real program, a new way to name a folder).
+XDG_SANDBOX="$HOME_DIR/xdg-sandbox"
+no_user_folders_touched() {
+  local d found=""
+  for d in config data cache state; do
+    [ ! -e "$XDG_SANDBOX/$d/shale" ] || found="$found $XDG_SANDBOX/$d/shale"
+  done
+  if [ -n "$found" ]; then
+    echo "land.sh: the tests wrote into the user's own folders (they would have been the real ones):$found" >&2
+    find $found -maxdepth 3 >&2
+    return 1
+  fi
+}
+
+# The checks of FORGE-011 on the merged tree in the current folder, then the check of the user's
+# folders (DEV-047). Every test runs in the environment of XDG_SANDBOX.
+checks() {
+  rm -rf "$XDG_SANDBOX"
+  mkdir -p "$XDG_SANDBOX/config" "$XDG_SANDBOX/data" "$XDG_SANDBOX/cache" "$XDG_SANDBOX/state"
+  export XDG_CONFIG_HOME="$XDG_SANDBOX/config" XDG_DATA_HOME="$XDG_SANDBOX/data" XDG_CACHE_HOME="$XDG_SANDBOX/cache" XDG_STATE_HOME="$XDG_SANDBOX/state"
+  run_checks "$1" || return 1
+  step "the tests left the user's folders alone (DEV-047)" no_user_folders_touched || return 1
+}
+
 # The checks of FORGE-011 on the merged tree in the current folder. LAND_CHECK_CMD replaces them
 # with its lines, each one a step run by `sh -c` (the test of this script).
-checks() {
+run_checks() {
   local base=$1 line
   if [ -n "${LAND_CHECK_CMD:-}" ]; then
     while IFS= read -r line; do

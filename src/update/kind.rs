@@ -57,7 +57,7 @@ impl Facts {
     pub fn gather(exe: &Path) -> Facts {
         let dir = exe.parent().unwrap_or(Path::new("."));
         let prefix = dir.parent().unwrap_or(Path::new("."));
-        Facts { os: Os::current(), home: dirs::home_dir(), install_sh_next_to_it: dir.join("install.sh").is_file(), desktop_file_in_prefix: prefix.join("share").join("applications").join("shale.desktop").is_file() }
+        Facts { os: Os::current(), home: crate::userdirs::home_dir(), install_sh_next_to_it: dir.join("install.sh").is_file(), desktop_file_in_prefix: prefix.join("share").join("applications").join("shale.desktop").is_file() }
     }
 }
 

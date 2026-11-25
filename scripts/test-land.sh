@@ -110,6 +110,19 @@ check "history: only the steps that ran are recorded" 'hist_is failed broken fal
 export LAND_CHECK_CMD='test -f d.txt'
 expect "the checks run in the merged tree" 0 "landed broken" broken
 
+# DEV-047, #685: the checks see the user's folders of the XDG standard as fresh empty ones, and a
+# landing fails when something writes a `shale` folder into them
+branch xdg1 x1.txt x1
+export LAND_CHECK_CMD='case "$XDG_CONFIG_HOME" in */land/xdg-sandbox/config) ;; *) exit 1;; esac; [ -z "$(find "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME" -mindepth 1)" ]'
+expect "dev_047: the checks run with empty user folders of their own" 0 "landed xdg1" xdg1
+branch xdg2 x2.txt x2
+before=$(git rev-parse origin/main)
+export LAND_CHECK_CMD='mkdir -p "$XDG_CONFIG_HOME/shale" && echo "vault = \"/tmp/x\"" > "$XDG_CONFIG_HOME/shale/config.toml"'
+expect "dev_047: a check that writes the user's settings folder fails the landing" 1 "the tests wrote into the user's own folders" xdg2
+check "dev_047: and names what it wrote, and pushes nothing" "main_is $before"
+export LAND_CHECK_CMD='mkdir -p "$XDG_DATA_HOME/shale-dev/other"'
+expect "dev_047: a folder of another name (shale-dev) is not the app's" 0 "landed xdg2" xdg2
+
 export LAND_CHECK_CMD=true
 branch moved e.txt e
 git checkout -q moved && printf 'e2\n' > e.txt && git commit -qam "moved again (Refs #1)" && git checkout -q --detach
