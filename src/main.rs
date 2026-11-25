@@ -90,6 +90,7 @@ mod inline_picture_ui_tests;
 mod instance;
 mod jobs;
 mod key_badges;
+mod keymap_view;
 mod keys;
 mod keys_ui;
 mod known_vaults;
