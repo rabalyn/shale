@@ -47,7 +47,7 @@ starts with no context, so its prompt says:
 - the issue number and its text, and the spec rows by ID;
 - "follow `CLAUDE.md` in the worktree": spec first, tests named after the rule, no warnings, docs,
   user guide, screenshots and a `docs/changelog-pending/I<N>.md` entry;
-- portable code and tests (DEV-048 in `CLAUDE.md`): no hardcoded paths, `/tmp`, ports or tools of one system;
+- portable code and tests (DEV-049 in `CLAUDE.md`): no hardcoded paths, `/tmp`, ports or tools of one system;
 - commit with `Closes #N` (or `Refs #N` when the issue stays open), **do not run `land.sh`, do not
   push**, and report: the worktree path and branch, the commits, what was checked (`cargo fmt
   --check`, clippy, `cargo nextest run`), what is left open.

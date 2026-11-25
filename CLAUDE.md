@@ -96,7 +96,7 @@ This file is read by opencode and by Claude desktop alike; several sessions of b
 - **No dead code**, no unused dependencies.
 - **Every code path gets a sensible test.** External behaviour (IMAP, CalDAV, …) is tested
   against real servers in podman test stacks with seeded data (`tests/mail-env/`).
-- **Portable code and tests** (DEV-048). Shale is built and tested on Linux, macOS and Windows,
+- **Portable code and tests** (DEV-049). Shale is built and tested on Linux, macOS and Windows,
   x86_64 and arm64, but macOS and Windows tests only run at a release. So never hardcode what
   differs between systems:
   - **Paths:** build them with `Path`/`PathBuf` (`join`, `parent`, `display()`), never by gluing

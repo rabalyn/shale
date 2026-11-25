@@ -144,6 +144,14 @@ fn an_embed_that_resolves_has_the_vault_path_of_its_file_with_what_follows_the_t
     assert_eq!(prepare_text("a [[Other]] link and ![[Other\n", &resolver), "a [[Other]] link and ![[Other\n", "a link is no embed; an embed without its end stays");
 }
 
+// spec: DOCX-018
+#[test]
+fn docx_018_a_carousel_is_every_image_in_order_each_alone_with_its_caption() {
+    let text = "> [!carousel] Layers\n> ![[a b.png|First|300]]\n> ![[a b.png|Second]]\n";
+    assert_eq!(prepare_text(text, &resolver), "**Layers**\n\n![[z_media/a b.png|300]]\n\n*First*\n\n![[z_media/a b.png]]\n\n*Second*\n");
+    assert_eq!(prepare_text("> [!note] Layers\n> ![[a b.png]]\n", &resolver), "> [!note] Layers\n> ![[z_media/a b.png]]\n", "any other quote stays");
+}
+
 // spec: DOCX-003
 #[test]
 fn nothing_in_code_is_changed() {

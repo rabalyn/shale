@@ -111,6 +111,8 @@ fn indent_of(line: &str) -> usize {
 /// The lines of the note below its front matter as blocks. `plain_tables` is the built-in
 /// export's switch and not used here: tables are always tables.
 pub fn parse(text: &str) -> Vec<Block> {
+    // a carousel of images shows every image, with its caption (TEX-060)
+    let text = &*crate::carousel::flatten(text);
     let lines = markdown::lines_with_offsets(text);
     let fenced = markdown::fenced_code_lines(text);
     let tables = crate::table::find_tables(text);

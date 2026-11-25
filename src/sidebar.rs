@@ -21,6 +21,8 @@ pub enum Item {
     /// the Kanban boards (BOARD-007)
     Boards,
     Social,
+    /// the keyboard with every shortcut (KEY-058)
+    Keymap,
     Import,
     Drawing,
     NewNote,
@@ -30,7 +32,7 @@ pub enum Item {
 
 impl Item {
     /// All items in their default order: the ribbon's, then the panels'.
-    pub const ALL: [Item; 20] = [
+    pub const ALL: [Item; 21] = [
         Item::Files,
         Item::Search,
         Item::Tags,
@@ -41,6 +43,7 @@ impl Item {
         Item::Tasks,
         Item::Boards,
         Item::Social,
+        Item::Keymap,
         Item::Import,
         Item::Drawing,
         Item::NewNote,
@@ -86,6 +89,7 @@ impl Item {
             Item::Import => "import",
             Item::Drawing => "drawing",
             Item::NewNote => "new-note",
+            Item::Keymap => "keymap",
             Item::Panel(RightPanel::Backlinks) => "panel:backlinks",
             Item::Panel(RightPanel::Outgoing) => "panel:outgoing",
             Item::Panel(RightPanel::Outline) => "panel:outline",
@@ -115,6 +119,7 @@ impl Item {
             Item::Import => Icon::Import,
             Item::Drawing => Icon::Drawing,
             Item::NewNote => Icon::NewNote,
+            Item::Keymap => Icon::Keymap,
             Item::Panel(RightPanel::Backlinks) => Icon::Backlinks,
             Item::Panel(RightPanel::Outgoing) => Icon::Outgoing,
             Item::Panel(RightPanel::Outline) => Icon::Outline,
@@ -141,6 +146,7 @@ impl Item {
             Item::Import => "Import",
             Item::Drawing => "New drawing",
             Item::NewNote => "New note",
+            Item::Keymap => "Keymap",
             Item::Panel(RightPanel::Backlinks) => "Backlinks panel",
             Item::Panel(RightPanel::Outgoing) => "Outgoing links panel",
             Item::Panel(RightPanel::Outline) => "Outline panel",
@@ -166,6 +172,7 @@ impl Item {
             Item::Import => "Import e-mails, events and files (or drop them on the window)",
             Item::Drawing => "New drawing",
             Item::NewNote => "New note (Ctrl+N)",
+            Item::Keymap => "Keymap: the keyboard with every shortcut (Ctrl+Shift+Y)",
             Item::Panel(RightPanel::Backlinks) => "Backlinks and unlinked mentions",
             Item::Panel(RightPanel::Outgoing) => "Outgoing links",
             Item::Panel(RightPanel::Outline) => "Outline of the note",
@@ -496,7 +503,7 @@ mod tests {
     fn lay_002_a_stored_order_with_unknown_missing_and_double_ids_is_repaired() {
         assert_eq!(Layout::from_config(&Config::default()), Layout::default(), "nothing stored: the default");
         let d = Layout::default();
-        assert_eq!((d.ribbon.len(), d.views.len(), d.views[0].icons.len(), d.views[0].active), (13, 1, 7, p(Backlinks)), "default: all seven panels in one view");
+        assert_eq!((d.ribbon.len(), d.views.len(), d.views[0].icons.len(), d.views[0].active), (14, 1, 7, p(Backlinks)), "default: all seven panels in one view");
         let l = Layout::from_config(&cfg_with(&["mail", "bogus", "files", "mail", "", "new-note", "panel:outline"], &[]));
         assert_eq!(&l.ribbon[..4], [Item::Mail, Item::Files, Item::NewNote, p(Outline)], "the stored order is kept");
         let rest: Vec<Item> = Item::ALL.into_iter().filter(|i| !i.is_panel() && ![Item::Mail, Item::Files, Item::NewNote].contains(i)).collect();
@@ -534,7 +541,7 @@ mod tests {
         let before = l.clone();
         mv(&mut l, Item::NewNote, Dest::Ribbon(1)).unwrap();
         assert_eq!(l, before, "dropping an icon right after itself changes nothing");
-        assert_eq!(l.ribbon.len(), 13);
+        assert_eq!(l.ribbon.len(), 14);
     }
 
     // spec: LAY-005

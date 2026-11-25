@@ -98,11 +98,11 @@ pub struct ExportOptions {
     /// notes: the font of the text (a note's `print-font`, PDF-014): Sans, Serif or Mono
     pub font: FontKind,
     /// notes: the font of headings, the title, the contents and the page numbers (`print-font-sans`,
-    /// PDF-034); none: the text font
+    /// PDF-040); none: the text font
     pub head_font: Option<FontKind>,
-    /// notes: the font of code (`print-font-mono`, PDF-034): Hack
+    /// notes: the font of code (`print-font-mono`, PDF-040): Hack
     pub code_font: FontKind,
-    /// notes: what the fonts of PDF-034 are looked up in; none: only the words `sans`, `serif` and `mono`
+    /// notes: what the fonts of PDF-040 are looked up in; none: only the words `sans`, `serif` and `mono`
     pub fonts: Option<std::sync::Arc<FontsAsk>>,
     /// notes: the fonts the dialog's fields say (PDF-039); they take the place of the `print-font*`
     /// properties of the note, or of a book's top folder note. None: what the note says.
@@ -1862,6 +1862,8 @@ pub fn export_note_until(vault: &Vault, rel: &Path, text: &str, opts: &ExportOpt
 }
 
 fn export_note_in_shale(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions, cancel: Option<&Cancel>) -> Result<Made, String> {
+    // a carousel of images shows every image, with its caption (PDF-040)
+    let text = &*crate::carousel::flatten(text);
     let (opts, mut warnings) = crate::pdf::export_fonts::apply(&opts.clone().with_note_text_properties(text), &vault.root, crate::fonts::resolve::Values::of_note(text), None);
     let opts = &opts;
     // the title line's text: no `.md`, no date prefix (VAULT-025)
@@ -2484,6 +2486,18 @@ pub(crate) mod tests {
         assert!(!red_rows.is_empty(), "the red picture is drawn");
         let picture_bottom = *red_rows.last().unwrap();
         assert!((picture_bottom + 1..picture_bottom + 14).any(inked), "caption text is right below the picture (it ends at row {picture_bottom})");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-040
+    #[test]
+    fn pdf_040_a_carousel_has_every_image_in_order_with_its_caption() {
+        let (v, d) = media_vault();
+        let (bytes, c) = export_text(&v, "> [!carousel] Layers\n> ![[pic.png|First|120]]\n> ![[pic.png|Second|60]]\n> ![[pic.png|Third]]\n");
+        assert_eq!(image_sizes(&bytes).len(), 3, "an image for each");
+        let at = |s: &str| c.find(&hex(s)).unwrap_or_else(|| panic!("{s:?} is not in the page"));
+        assert!(at("Layers") < at("First") && at("First") < at("Second") && at("Second") < at("Third"), "title and captions in order");
+        assert!(!c.contains(&hex("carousel")), "the callout word is not printed");
         let _ = std::fs::remove_dir_all(&d);
     }
 

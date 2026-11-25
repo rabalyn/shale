@@ -59,6 +59,8 @@ struct Drag {
 pub struct Embeds {
     drag: Option<Drag>,
     pub full: Option<Full>,
+    /// the image shown of each carousel of the note, by the carousel's number (EDIT-144)
+    pub carousel: std::collections::HashMap<usize, usize>,
 }
 
 impl Embeds {

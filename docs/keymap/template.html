@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Shale Keymap</title>
+<style>
+/* Layout: a keyboard "overlay sheet" in the spirit of colour-coded app keyboards: case, caps with coloured command chips, controls above, the key inspector and the full list below. */
+:root {
+  --bg: #eef0f3; --surface: #ffffff; --fg: #1d232b; --muted: #5d6773; --line: #d3d8df;
+  --case: #c9ced6; --case-edge: #b3b9c3; --cap: #fbfcfd; --cap-edge: #d9dde3; --cap-shadow: #a9b0bb; --mod-cap: #e7eaef;
+  --accent: #2b6fd6; --sys: #c2413b; --sys-a: rgba(194,65,59,.16); --warn: #b7791f;
+  /*CAT_LIGHT*/
+  --f-display: "Arial Narrow", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-body: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --u: clamp(2.35rem, 4.55vw, 3.45rem);
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #14171c; --surface: #1c2027; --fg: #e6e9ee; --muted: #9aa4b1; --line: #2e343d;
+  --case: #0d0f13; --case-edge: #000; --cap: #2a2f37; --cap-edge: #353b45; --cap-shadow: #0a0c0f; --mod-cap: #23272e;
+  --accent: #6ea4ff; --sys: #ff7a70; --sys-a: rgba(255,122,112,.18); --warn: #f0b44c;
+  /*CAT_DARK*/
+  color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #14171c; --surface: #1c2027; --fg: #e6e9ee; --muted: #9aa4b1; --line: #2e343d;
+  --case: #0d0f13; --case-edge: #000; --cap: #2a2f37; --cap-edge: #353b45; --cap-shadow: #0a0c0f; --mod-cap: #23272e;
+  --accent: #6ea4ff; --sys: #ff7a70; --sys-a: rgba(255,122,112,.18); --warn: #f0b44c;
+  /*CAT_DARK*/
+  color-scheme: dark; }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--f-body); font-size: 14px; line-height: 1.5; }
+.wrap { max-width: 1180px; margin: 0 auto; padding-block: 28px 56px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 22px; }
+header h1 { font-family: var(--f-display); font-weight: 700; font-size: 2.1rem; letter-spacing: .01em; margin: 0; line-height: 1.1; text-wrap: balance; }
+header p { margin: 6px 0 0; color: var(--muted); max-width: 70ch; }
+.controls { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: flex-end; }
+.ctl { display: grid; gap: 5px; }
+.ctl > span { font-family: var(--f-display); font-weight: 600; text-transform: uppercase; letter-spacing: .08em; font-size: .72rem; color: var(--muted); }
+.seg { display: inline-flex; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 2px; flex-wrap: wrap; }
+.seg button, .chip { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+.seg button { padding: 5px 11px; border-radius: 6px; font-weight: 500; font-size: .85rem; }
+.seg button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+.seg button:focus-visible, .chip:focus-visible, .key:focus-visible, .row:focus-visible, textarea:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.toggle { display: inline-flex; align-items: center; gap: 7px; font-size: .85rem; padding: 6px 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; user-select: none; }
+.toggle input { margin: 0; accent-color: var(--accent); }
+.swatch-sys { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--sys); background: repeating-linear-gradient(135deg, var(--sys-a) 0 3px, transparent 3px 6px); }
+
+.layerbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.layerbar .now { font-family: var(--f-mono); font-size: .9rem; padding: 4px 10px; border-radius: 6px; background: var(--surface); border: 1px solid var(--line); min-width: 8ch; }
+.hint { color: var(--muted); font-size: .82rem; }
+.modchip { font-family: var(--f-display); font-weight: 600; font-size: .95rem; padding: 5px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--surface); }
+.modchip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+.board { overflow-x: auto; padding: 4px 0 10px; }
+.case { width: max-content; margin: 0 auto; background: var(--case); border-radius: 16px; padding: calc(var(--u) * .28); box-shadow: inset 0 -3px 0 var(--case-edge), 0 10px 30px rgba(0,0,0,.12); display: flex; gap: calc(var(--u) * .5); }
+.block { display: grid; gap: calc(var(--u) * .07); align-content: start; }
+.krow { display: flex; gap: calc(var(--u) * .07); height: calc(var(--u) * 1.02); }
+.krow.frow { margin-bottom: calc(var(--u) * .22); }
+.gap { flex: none; }
+.key { flex: none; position: relative; height: 100%; border-radius: 6px; background: var(--cap); border: 1px solid var(--cap-edge); box-shadow: 0 2px 0 var(--cap-shadow); padding: 3px 4px 4px; display: flex; flex-direction: column; gap: 2px; overflow: hidden; cursor: pointer; text-align: left; font: inherit; color: inherit; }
+.key.mod { background: var(--mod-cap); }
+.key.dead { cursor: default; opacity: .55; }
+.key .leg { font-family: var(--f-display); font-weight: 600; font-size: calc(var(--u) * .25); line-height: 1; color: var(--muted); white-space: nowrap; }
+.key.mod .leg { font-size: calc(var(--u) * .23); }
+.key.on { background: var(--accent); border-color: var(--accent); }
+.key.on .leg { color: #fff; }
+.key.sel { outline: 2.5px solid var(--fg); outline-offset: 1px; z-index: 1; }
+.key.sys { background-image: repeating-linear-gradient(135deg, var(--sys-a) 0 4px, transparent 4px 8px); border-color: var(--sys); }
+.key.dim .cmd { opacity: .25; }
+.cmd { font-family: var(--f-display); font-weight: 600; font-size: calc(var(--u) * .205); line-height: 1.08; padding: 1px 3px 1px 4px; border-radius: 3px; border-left: 3px solid var(--cc); background: color-mix(in oklab, var(--cc) 20%, var(--cap)); color: var(--fg); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word; }
+.cmd.changed { box-shadow: inset 0 0 0 1px var(--fg); }
+.cmd.fixed { background: color-mix(in oklab, var(--cc) 10%, var(--cap)); }
+.more { font-family: var(--f-mono); font-size: calc(var(--u) * .16); color: var(--muted); margin-top: auto; }
+.oslbl { font-family: var(--f-display); font-weight: 600; font-size: calc(var(--u) * .19); line-height: 1.05; color: var(--sys); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { display: inline-flex; align-items: center; gap: 7px; padding: 5px 10px 5px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); font-size: .83rem; }
+.chip .dot { width: 10px; height: 10px; border-radius: 3px; background: var(--cc); }
+.chip .n { font-family: var(--f-mono); font-size: .75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.chip[aria-pressed="false"] { opacity: .45; }
+.chip.scope[aria-pressed="true"] { border-color: var(--fg); }
+.split { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 820px) { .split { grid-template-columns: minmax(0, 1fr); } }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; min-width: 0; }
+.panel h2 { font-family: var(--f-display); font-weight: 700; font-size: 1.15rem; margin: 0 0 4px; letter-spacing: .01em; }
+.panel h3 { font-family: var(--f-display); font-weight: 600; text-transform: uppercase; letter-spacing: .08em; font-size: .72rem; color: var(--muted); margin: 16px 0 6px; }
+.panel p { margin: 4px 0; }
+.chord { font-family: var(--f-mono); font-weight: 600; }
+.big { font-size: 1.35rem; }
+.ent { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 4px 10px; align-items: baseline; padding: 7px 0; border-top: 1px solid var(--line); }
+.ent:first-of-type { border-top: 0; }
+.ent .dot { width: 10px; height: 10px; border-radius: 3px; background: var(--cc); align-self: center; }
+.ent .sub { grid-column: 2 / 4; color: var(--muted); font-size: .8rem; }
+.badge { font-family: var(--f-display); font-weight: 600; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.badge.changed { border-color: var(--accent); color: var(--accent); }
+.badge.sys { border-color: var(--sys); color: var(--sys); }
+.layers { display: grid; gap: 2px; }
+.layers button { display: grid; grid-template-columns: 9ch minmax(0, 1fr); gap: 10px; text-align: left; font: inherit; color: inherit; background: none; border: 0; padding: 3px 4px; border-radius: 5px; cursor: pointer; }
+.layers button:hover { background: var(--bg); }
+.layers .chord { font-size: .82rem; }
+.layers .what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tray { display: flex; flex-wrap: wrap; gap: 6px; }
+.tray .cmd { -webkit-line-clamp: 1; font-size: .82rem; padding: 3px 7px 3px 6px; }
+.tray .cmd .chord { font-size: .75rem; margin-right: 6px; }
+textarea { width: 100%; min-height: 120px; font-family: var(--f-mono); font-size: .8rem; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; resize: vertical; }
+textarea.drag { border-color: var(--accent); }
+.btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; align-items: center; }
+.btn { font: inherit; font-size: .85rem; padding: 6px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); cursor: pointer; }
+.btn.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.status { font-size: .82rem; color: var(--muted); }
+.tablewrap { overflow-x: auto; }
+.search { width: min(100%, 320px); font: inherit; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
+table { width: 100%; border-collapse: collapse; font-size: .85rem; min-width: 720px; }
+th { text-align: left; font-family: var(--f-display); font-weight: 600; text-transform: uppercase; letter-spacing: .07em; font-size: .72rem; color: var(--muted); padding: 8px 8px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--surface); }
+td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+td.k { font-family: var(--f-mono); font-size: .8rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+tr.grp td { font-family: var(--f-display); font-weight: 700; font-size: .95rem; padding-top: 14px; border-bottom: 2px solid var(--cc); }
+tr.row { cursor: pointer; }
+tr.row:hover td { background: var(--bg); }
+.none { color: var(--muted); }
+.note { font-size: .8rem; color: var(--muted); }
+footer { color: var(--muted); font-size: .8rem; max-width: 80ch; }
+@media (prefers-reduced-motion: no-preference) { .key { transition: background-color .12s, border-color .12s; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <h1>Shale Keymap</h1>
+    <p>Every shortcut Shale binds, laid out on a keyboard and coloured by what it does. Choose modifiers to see a layer, or hold them on your own keyboard. Click a key to see everything on it. Hatched keys belong to the operating system.</p>
+  </header>
+
+  <div class="controls">
+    <div class="ctl"><span>System</span><div class="seg" id="plat"></div></div>
+    <div class="ctl"><span>Keyboard</span><div class="seg" id="layout"></div></div>
+    <div class="ctl"><span>Show</span><div style="display:flex;gap:8px;flex-wrap:wrap">
+      <label class="toggle"><input type="checkbox" id="ovSys" checked><span class="swatch-sys"></span>System keys</label>
+      <label class="toggle"><input type="checkbox" id="ovFixed" checked>Built-in keys</label>
+    </div></div>
+  </div>
+
+  <div class="layerbar">
+    <span class="ctl"><span>Layer</span></span>
+    <div id="mods" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+    <span class="now chord" id="layerNow"></span>
+    <span class="hint">Hold Ctrl, Alt, Shift (⌘ ⌥ ⇧ ⌃ on a Mac) to peek at a layer</span>
+  </div>
+
+  <div class="board"><div class="case" id="kb"></div></div>
+
+  <div style="display:grid;gap:10px">
+    <div class="legend" id="legend"></div>
+    <div class="legend" id="scopes"></div>
+  </div>
+
+  <div class="split">
+    <section class="panel" id="detail" aria-live="polite"></section>
+    <div style="display:grid;gap:18px;min-width:0">
+      <section class="panel" id="offboard"></section>
+      <section class="panel" id="mine">
+        <h2>Your settings</h2>
+        <p class="note" id="mineNote"></p>
+        <h3>Load other bindings</h3>
+        <p class="note">Paste your <span class="chord">config.toml</span>, or only its <span class="chord">[keybindings]</span> section, or drop the file here. Linux: <span class="chord">~/.config/shale/config.toml</span>. The page keeps it in this browser only.</p>
+        <textarea id="cfg" spellcheck="false" placeholder='[keybindings]
+"global.focus_sidebar" = ["Ctrl+Shift+H"]
+"note.bold" = ["Ctrl+B"]'></textarea>
+        <div class="btns"><button class="btn primary" id="apply" type="button">Apply</button><button class="btn" id="reset" type="button">Back to the defaults</button><span class="status" id="cfgStatus"></span></div>
+      </section>
+    </div>
+  </div>
+
+  <section class="panel">
+    <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center">
+      <h2>All shortcuts</h2>
+      <input class="search" id="q" type="search" placeholder="Filter: bold, mail, Ctrl+Shift…" aria-label="Filter the list">
+    </div>
+    <p class="note">Click a row to show its key on the keyboard. 🔒 means built in, not changeable in Settings → Keybindings.</p>
+    <div class="tablewrap"><table><thead><tr><th>Action</th><th>Where</th><th>Linux &amp; Windows</th><th>macOS</th><th>Yours</th></tr></thead><tbody id="tbody"></tbody></table></div>
+  </section>
+
+  <footer id="foot"></footer>
+</div>
+
+<script>
+/*DATA*/
+const ACTIONS = DATA.actions;
+const CATS = Object.fromEntries(DATA.cats.map(c => [c.id, { name: c.name, v: "--c-" + c.id.toLowerCase() }]));
+const SCOPES = Object.fromEntries(DATA.scopes.map(c => [c.id, c.label]));
+const SCOPE_ORDER = DATA.scopes.map(c => c.id);
+/* Keys that are not in Settings → Keybindings: egui's text editing, hard-coded keys of Shale's widgets, vim-lite and the drawing tools.
+   p: systems (l Linux, w Windows, m macOS). Chords are written like the keys of the settings; Ctrl is Cmd on a Mac, Super is the key
+   that is Win on Windows, Super on Linux and Control on a Mac. */
+const BUILTIN = DATA.builtin;
+/* Reserved by the system. A family is any chord that holds all of its modifiers (w), or only those with a key that types a character. */
+function sysList(rows) {
+  return rows.map(r => {
+    if (r.kind === "exact") return [r.keys, r.label];
+    const w = r.keys.split("+").map(m => NAMEMAP[m]).join("");
+    return r.kind === "char" ? { w, label: r.label, chars: true } : { w, label: r.label };
+  });
+}
+
+/* Keyboard layouts: [key id or null, legend, width in key units]. Modifier keys use "@P" style ids. */
+const NAVBLOCK = [
+  [["PrintScreen", "PrtSc", 1], [null, "ScrLk", 1], [null, "Pause", 1]],
+  [["Insert", "Ins", 1], ["Home", "Home", 1], ["PageUp", "PgUp", 1]],
+  [["Delete", "Del", 1], ["End", "End", 1], ["PageDown", "PgDn", 1]],
+  [], [["", "", 1], ["Up", "↑", 1], ["", "", 1]],
+  [["Left", "←", 1], ["Down", "↓", 1], ["Right", "→", 1]],
+];
+const FROW = [["Escape", "Esc", 1], ["", "", 1], ["F1", "F1", 1], ["F2", "F2", 1], ["F3", "F3", 1], ["F4", "F4", 1], ["", "", .5], ["F5", "F5", 1], ["F6", "F6", 1], ["F7", "F7", 1], ["F8", "F8", 1], ["", "", .5], ["F9", "F9", 1], ["F10", "F10", 1], ["F11", "F11", 1], ["F12", "F12", 1]];
+const L = (s) => s.split("").map(c => [c, c, 1]);
+const DIG = "1234567890".split("").map(c => [c, c, 1]);
+const LAYOUTS = {
+  us: [
+    [["Backtick", "`", 1], ...DIG, ["Minus", "-", 1], ["Equals", "=", 1], ["Backspace", "Backspace", 2]],
+    [["Tab", "Tab", 1.5], ...L("QWERTYUIOP"), ["OpenBracket", "[", 1], ["CloseBracket", "]", 1], ["Backslash", "\\", 1.5]],
+    [[null, "Caps", 1.75], ...L("ASDFGHJKL"), ["Semicolon", ";", 1], ["Quote", "'", 1], ["Enter", "Enter", 2.25]],
+    [["@S", "Shift", 2.25], ...L("ZXCVBNM"), ["Comma", ",", 1], ["Period", ".", 1], ["Slash", "/", 1], ["@S", "Shift", 2.75]],
+  ],
+  de: [
+    [[null, "^", 1], ...DIG, [null, "ß", 1], [null, "´", 1], ["Backspace", "Backspace", 2]],
+    [["Tab", "Tab", 1.5], ...L("QWERTZUIOP"), [null, "Ü", 1], ["Plus", "+", 1], ["Enter", "Enter", 1.5]],
+    [[null, "Caps", 1.75], ...L("ASDFGHJKL"), [null, "Ö", 1], [null, "Ä", 1], [null, "#", 1], ["Enter", "↵", 1.25]],
+    [["@S", "Shift", 1.25], [null, "<", 1], ...L("YXCVBNM"), ["Comma", ",", 1], ["Period", ".", 1], ["Minus", "-", 1], ["@S", "Shift", 2.75]],
+  ],
+};
+const BOTTOM = {
+  lw: (p) => [["@P", "Ctrl", 1.25], ["@X", p === "w" ? "Win" : "Super", 1.25], ["@A", "Alt", 1.25], ["Space", "Space", 6.25], [null, "AltGr", 1.25], ["@X", p === "w" ? "Win" : "Super", 1.25], ["Menu", "Menu", 1.25], ["@P", "Ctrl", 1.25]],
+  m: () => [[null, "fn", 1], ["@X", "⌃ control", 1.25], ["@A", "⌥ option", 1.25], ["@P", "⌘ cmd", 1.5], ["Space", "Space", 6], ["@P", "⌘ cmd", 1.5], ["@A", "⌥ option", 1.25], ["@X", "⌃", 1.25]],
+};
+
+const MODS = ["X", "P", "A", "S"];
+const ST = { plat: guessPlat(), layout: "us", layer: new Set(["P"]), peek: null, sel: "K", cats: new Set(Object.keys(CATS)), scopes: new Set(SCOPE_ORDER), sys: true, fixed: true, q: "", overrides: {}, overridesFrom: "none" };
+function guessPlat() { const p = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || ""; return /mac/i.test(p) ? "m" : /win/i.test(p) ? "w" : "l"; }
+
+/* ---------- chords ---------- */
+const NAMEMAP = { Ctrl: "P", Alt: "A", Shift: "S", Super: "X" };
+const SYS = { l: sysList(DATA.reservedLinux), w: sysList(DATA.reservedWindows), m: sysList(DATA.reservedMacos) };
+function parseChord(s) { const parts = s.split("+"); const key = parts.pop(); const mods = new Set(parts.map(m => NAMEMAP[m] || m)); return { mods, key }; }
+function cid(mods, key) { return MODS.filter(m => mods.has(m)).join("") + "|" + key; }
+const KEYSYM = { Comma: ",", Period: ".", Slash: "/", Backslash: "\\", OpenBracket: "[", CloseBracket: "]", Semicolon: ";", Quote: "'", Backtick: "`", Minus: "-", Equals: "=", Plus: "+", Left: "←", Right: "→", Up: "↑", Down: "↓", PageUp: "PgUp", PageDown: "PgDn", Escape: "Esc", Insert: "Ins", PrintScreen: "PrtSc" };
+const MACSYM = { Enter: "↩", Backspace: "⌫", Delete: "⌦", Tab: "⇥", Escape: "⎋", PageUp: "⇞", PageDown: "⇟", Home: "↖", End: "↘" };
+function keyName(k, plat) { if (plat === "m" && MACSYM[k]) return MACSYM[k]; if (KEYSYM[k]) return KEYSYM[k]; if (k === "Delete") return "Del"; return k; }
+function modName(m, plat) { if (plat === "m") return { X: "⌃", A: "⌥", S: "⇧", P: "⌘" }[m]; return { X: plat === "w" ? "Win" : "Super", P: "Ctrl", A: "Alt", S: "Shift" }[m]; }
+function fmt(mods, key, plat) {
+  if (plat === "m") return ["X", "A", "S", "P"].filter(m => mods.has(m)).map(m => modName(m, plat)).join("") + keyName(key, plat);
+  return [...MODS.filter(m => mods.has(m)).map(m => modName(m, plat)), keyName(key, plat)].join("+");
+}
+function fmtBinding(str, plat) {
+  const chords = str.split(" ").map(parseChord);
+  if (chords.length > 1) return chords.map((c, i) => (i && !c.mods.size && c.key.length === 1) ? c.key.toLowerCase() : fmt(c.mods, c.key, plat)).join(" ");
+  return fmt(chords[0].mods, chords[0].key, plat);
+}
+function fmtLayer(plat) { const L = layerNow(); return L.size ? fmt(L, "", plat).replace(/\+$/, "") : "no modifier"; }
+
+/* ---------- data for the current view ---------- */
+function bindingsOf(a, plat) {
+  const def = plat === "m" ? a.mac : a.lin;
+  if (Object.prototype.hasOwnProperty.call(ST.overrides, a.id)) return { keys: ST.overrides[a.id], changed: JSON.stringify(ST.overrides[a.id]) !== JSON.stringify(def) };
+  return { keys: def, changed: false };
+}
+function entries(plat) {
+  const out = [];
+  for (const a of ACTIONS) {
+    const { keys, changed } = bindingsOf(a, plat);
+    for (const k of keys) {
+      const chords = k.split(" ").map(parseChord);
+      out.push({ mods: chords[0].mods, key: chords[0].key, seq: chords.length > 1 ? k : null, label: a.label, short: a.short, scope: a.scope, cat: a.cat, kind: changed ? "changed" : "default", id: a.id });
+    }
+  }
+  if (ST.fixed) for (const b of BUILTIN) if (b.p.includes(plat)) { const c = parseChord(b.c); out.push({ mods: c.mods, key: c.key, seq: null, label: b.label, short: b.label, scope: b.scope, cat: b.cat, kind: "fixed", note: b.note }); }
+  return out;
+}
+function visible(e) { return ST.cats.has(e.cat) && ST.scopes.has(e.scope); }
+function sysFor(plat, mods, key) {
+  if (!ST.sys) return null;
+  for (const s of SYS[plat]) {
+    if (Array.isArray(s)) { const c = parseChord(s[0]); if (cid(c.mods, c.key) === cid(mods, key)) return s[1]; }
+    else if ([...s.w].every(m => mods.has(m)) && !(key === "" )) { if (s.chars && !/^([A-Z0-9]|Comma|Period|Minus|Equals|Plus|Slash|Backslash|OpenBracket|CloseBracket|Semicolon|Quote|Backtick)$/.test(key)) continue; return s.label; }
+  }
+  return null;
+}
+const SCOPE_RANK = Object.fromEntries(SCOPE_ORDER.map((s, i) => [s, i]));
+function sortEnt(a, b) { return (a.kind === "fixed") - (b.kind === "fixed") || SCOPE_RANK[a.scope] - SCOPE_RANK[b.scope]; }
+
+/* ---------- rendering ---------- */
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const ccv = (cat) => `--cc: var(${CATS[cat].v})`;
+function layerNow() { return ST.peek || ST.layer; }
+
+function seg(el, opts, cur, on) {
+  el.innerHTML = opts.map(([v, l]) => `<button type="button" aria-pressed="${v === cur}" data-v="${v}">${l}</button>`).join("");
+  el.onclick = (ev) => { const b = ev.target.closest("button"); if (b) on(b.dataset.v); };
+}
+function renderControls() {
+  seg($("plat"), [["l", "Linux · KDE"], ["w", "Windows 11"], ["m", "macOS"]], ST.plat, v => { ST.plat = v; render(); });
+  seg($("layout"), [["us", "US"], ["de", "German"]], ST.layout, v => { ST.layout = v; render(); });
+  const p = ST.plat, order = p === "m" ? ["X", "A", "S", "P"] : ["P", "A", "S", "X"];
+  $("mods").innerHTML = order.map(m => `<button type="button" class="modchip" data-m="${m}" aria-pressed="${ST.layer.has(m)}">${modName(m, p)}${p === "m" ? " " + { X: "control", A: "option", S: "shift", P: "command" }[m] : ""}</button>`).join("");
+  $("layerNow").textContent = fmtLayer(p) + (ST.peek ? " · held" : "");
+}
+function toggleMod(m) { ST.layer.has(m) ? ST.layer.delete(m) : ST.layer.add(m); render(); }
+$("mods").addEventListener("click", ev => { const b = ev.target.closest("[data-m]"); if (b) toggleMod(b.dataset.m); });
+
+let INDEX = new Map(), ALL = [];
+function buildIndex() {
+  ALL = entries(ST.plat); INDEX = new Map();
+  for (const e of ALL) { const k = cid(e.mods, e.key); if (!INDEX.has(k)) INDEX.set(k, []); INDEX.get(k).push(e); }
+  for (const l of INDEX.values()) l.sort(sortEnt);
+}
+function onLayout() { const ids = new Set(); for (const r of [...LAYOUTS[ST.layout], FROW, ...NAVBLOCK]) for (const k of r) if (k[0] && k[0][0] !== "@") ids.add(k[0]); ids.add("Space"); if (ST.plat !== "m") ids.add("Menu"); return ids; }
+
+function capHTML(k) {
+  const [id, leg, w] = k;
+  const style = `width: calc(var(--u) * ${w} + var(--u) * .07 * ${w - 1})`;
+  if (id === "") return `<span class="gap" style="${style}"></span>`;
+  if (id === null) return `<span class="key dead" style="${style}"><span class="leg">${esc(leg)}</span></span>`;
+  if (id[0] === "@") { const m = id.slice(1); return `<button type="button" class="key mod${layerNow().has(m) ? " on" : ""}" data-m="${m}" style="${style}" aria-pressed="${layerNow().has(m)}"><span class="leg">${esc(leg)}</span></button>`; }
+  const L = layerNow(), key = id;
+  const list = (INDEX.get(cid(L, key)) || []).filter(visible);
+  const sys = sysFor(ST.plat, L, key);
+  let inner = `<span class="leg">${esc(leg)}</span>`;
+  const shown = list.slice(0, 2);
+  for (const e of shown) inner += `<span class="cmd ${e.kind}" style="${ccv(e.cat)}">${esc(e.seq ? fmtBinding(e.seq, ST.plat) + " " + e.short : e.short)}</span>`;
+  if (list.length > 2) inner += `<span class="more">+${list.length - 2} more</span>`;
+  if (sys && !list.length) inner += `<span class="oslbl">${esc(sys)}</span>`;
+  const cls = ["key", sys ? "sys" : "", ST.sel === key ? "sel" : ""].join(" ");
+  const tip = [fmt(L, key, ST.plat), ...list.map(e => e.label), sys ? "System: " + sys : ""].filter(Boolean).join("\n");
+  return `<button type="button" class="${cls}" data-k="${key}" style="${style}" title="${esc(tip)}">${inner}</button>`;
+}
+function renderKeyboard() {
+  const rows = LAYOUTS[ST.layout], bottom = ST.plat === "m" ? BOTTOM.m() : BOTTOM.lw(ST.plat);
+  const main = [FROW, ...rows, bottom].map((r, i) => `<div class="krow${i === 0 ? " frow" : ""}">${r.map(capHTML).join("")}</div>`).join("");
+  const nav = NAVBLOCK.map((r, i) => r.length ? `<div class="krow${i === 0 ? " frow" : ""}">${r.map(capHTML).join("")}</div>` : `<div class="krow"></div>`).join("");
+  $("kb").innerHTML = `<div class="block">${main}</div><div class="block">${nav}</div>`;
+}
+$("kb").addEventListener("click", ev => {
+  const m = ev.target.closest("[data-m]"); if (m) { toggleMod(m.dataset.m); return; }
+  const k = ev.target.closest("[data-k]"); if (k) { ST.sel = k.dataset.k; renderKeyboard(); renderDetail(); }
+});
+
+function renderLegend() {
+  const L = layerNow(), keys = onLayout(), plat = ST.plat;
+  const layerCount = {}, total = {};
+  for (const e of ALL) { if (!ST.scopes.has(e.scope)) continue; total[e.cat] = (total[e.cat] || 0) + 1; if (cid(e.mods, "") === cid(L, "") && keys.has(e.key)) layerCount[e.cat] = (layerCount[e.cat] || 0) + 1; }
+  $("legend").innerHTML = Object.entries(CATS).map(([c, d]) => `<button type="button" class="chip" data-c="${c}" aria-pressed="${ST.cats.has(c)}" style="${ccv(c)}"><span class="dot"></span>${d.name}<span class="n" title="on this layer / in total">${layerCount[c] || 0} / ${total[c] || 0}</span></button>`).join("");
+  const sc = {}; for (const e of ALL) sc[e.scope] = (sc[e.scope] || 0) + 1;
+  $("scopes").innerHTML = `<span class="hint" style="align-self:center">Where:</span>` + SCOPE_ORDER.filter(s => sc[s]).map(s => `<button type="button" class="chip scope" data-s="${s}" aria-pressed="${ST.scopes.has(s)}">${SCOPES[s]}<span class="n">${sc[s]}</span></button>`).join("") + `<button type="button" class="chip" id="allScopes">All</button>`;
+}
+$("legend").addEventListener("click", ev => { const b = ev.target.closest("[data-c]"); if (!b) return; const c = b.dataset.c; if (ev.altKey || ev.metaKey) { ST.cats = new Set([c]); } else ST.cats.has(c) ? ST.cats.delete(c) : ST.cats.add(c); render(); });
+$("scopes").addEventListener("click", ev => {
+  if (ev.target.closest("#allScopes")) { ST.scopes = new Set(SCOPE_ORDER); render(); return; }
+  const b = ev.target.closest("[data-s]"); if (!b) return; const s = b.dataset.s;
+  if (ST.scopes.size === SCOPE_ORDER.length) ST.scopes = new Set([s]); else ST.scopes.has(s) ? ST.scopes.delete(s) : ST.scopes.add(s);
+  if (!ST.scopes.size) ST.scopes = new Set(SCOPE_ORDER); render();
+});
+
+function entHTML(e) {
+  const badge = e.kind === "changed" ? `<span class="badge changed">your key</span>` : e.kind === "fixed" ? `<span class="badge">built in 🔒</span>` : `<span class="badge">default</span>`;
+  const seq = e.seq ? `<span class="chord">${esc(fmtBinding(e.seq, ST.plat))}</span> · ` : "";
+  return `<div class="ent" style="${ccv(e.cat)}"><span class="dot"></span><span>${seq}${esc(e.label)}</span>${badge}<span class="sub">${CATS[e.cat].name} · ${SCOPES[e.scope]}${e.note ? " · " + esc(e.note) : ""}</span></div>`;
+}
+function renderDetail() {
+  const plat = ST.plat, L = layerNow(), key = ST.sel;
+  const list = (INDEX.get(cid(L, key)) || []);
+  const sys = sysFor(plat, L, key);
+  let h = `<h2><span class="chord big">${esc(fmt(L, key, plat))}</span></h2>`;
+  if (sys) h += `<div class="ent" style="--cc: var(--sys)"><span class="dot"></span><span>${esc(sys)}</span><span class="badge sys">system</span><span class="sub">The operating system or desktop takes this key. Shale must not bind it.</span></div>`;
+  h += list.length ? list.map(entHTML).join("") : `<p class="none">${sys ? "" : "Free: nothing in Shale uses this key on this layer."}</p>`;
+  const layers = new Map();
+  for (const e of ALL) if (e.key === key) { const id = cid(e.mods, ""); if (!layers.has(id)) layers.set(id, { mods: e.mods, list: [] }); layers.get(id).list.push(e); }
+  for (const s of SYS[plat]) if (Array.isArray(s)) { const c = parseChord(s[0]); if (c.key === key) { const id = cid(c.mods, ""); if (!layers.has(id)) layers.set(id, { mods: c.mods, list: [] }); layers.get(id).list.push({ short: "System: " + s[1], sys: true }); } }
+  const rows = [...layers.values()].sort((a, b) => a.mods.size - b.mods.size || cid(a.mods, "").localeCompare(cid(b.mods, "")));
+  h += `<h3>This key on every layer</h3><div class="layers">` + rows.map(r => `<button type="button" data-layer="${MODS.filter(m => r.mods.has(m)).join("")}"><span class="chord">${esc(fmt(r.mods, key, plat))}</span><span class="what">${esc([...new Set(r.list.sort(sortEnt).map(e => e.short))].join(" · "))}</span></button>`).join("") + `</div>`;
+  $("detail").innerHTML = h;
+}
+$("detail").addEventListener("click", ev => { const b = ev.target.closest("[data-layer]"); if (!b) return; ST.layer = new Set(b.dataset.layer.split("").filter(Boolean)); render(); });
+
+function renderOffboard() {
+  const keys = onLayout(), plat = ST.plat;
+  const off = ALL.filter(e => !keys.has(e.key) && visible(e));
+  const seqs = ALL.filter(e => e.seq && visible(e));
+  let h = `<h2>Not on this keyboard</h2>`;
+  h += off.length ? `<p class="note">${ST.layout === "de" ? "A German keyboard has no own key for these: [ ] \\ / ; ' ` and = need Shift or AltGr there, which changes the shortcut." : plat === "m" ? "Mac keyboards have no Menu key." : "These keys need Shift on a US keyboard."}</p><div class="tray">` + off.map(e => `<span class="cmd" style="${ccv(e.cat)}"><span class="chord">${esc(fmt(e.mods, e.key, plat))}</span>${esc(e.short)}</span>`).join("") + `</div>` : `<p class="none">Every key Shale binds is on this keyboard.</p>`;
+  h += `<h3>Sequences (press one key after the other)</h3><div class="tray">` + seqs.map(e => `<span class="cmd" style="${ccv(e.cat)}"><span class="chord">${esc(fmtBinding(e.seq, plat))}</span>${esc(e.short)}</span>`).join("") + `</div>`;
+  $("offboard").innerHTML = h;
+}
+
+function renderMine() {
+  const n = Object.keys(ST.overrides).length;
+  $("mineNote").innerHTML = n ? `Loaded from the text below: ${n} action${n > 1 ? "s" : ""} changed. Their keys have a dark outline, and the list shows them in the Yours column.` : `These are Shale's default keys. Paste your <span class="chord">[keybindings]</span> section below to see your own.`;
+}
+
+function renderTable() {
+  const plat = ST.plat, q = ST.q.trim().toLowerCase();
+  const rows = [];
+  for (const a of ACTIONS) rows.push({ cat: a.cat, label: a.label, scope: a.scope, lin: a.lin.map(k => fmtBinding(k, "l")).join(", ") || "—", mac: a.mac.map(k => fmtBinding(k, "m")).join(", ") || "none", mine: Object.prototype.hasOwnProperty.call(ST.overrides, a.id) ? (ST.overrides[a.id].map(k => fmtBinding(k, plat)).join(", ") || "unbound") : "", first: (plat === "m" ? a.mac : a.lin)[0], fixed: false });
+  for (const b of BUILTIN) { const c = b.c; rows.push({ cat: b.cat, label: b.label + (b.note ? " — " + b.note : ""), scope: b.scope, lin: /[lw]/.test(b.p) ? fmtBinding(c, "l") : "—", mac: b.p.includes("m") ? fmtBinding(c, "m") : "—", mine: "", first: b.p.includes(plat) ? c : null, fixed: true }); }
+  let h = "";
+  for (const [c, d] of Object.entries(CATS)) {
+    const rs = rows.filter(r => r.cat === c && (!q || (r.label + " " + SCOPES[r.scope] + " " + r.lin + " " + r.mac + " " + d.name).toLowerCase().includes(q)));
+    if (!rs.length) continue;
+    h += `<tr class="grp" style="${ccv(c)}"><td colspan="5">${d.name} <span class="note">${rs.length}</span></td></tr>`;
+    h += rs.map(r => `<tr class="row" tabindex="0" data-first="${esc(r.first || "")}"><td>${r.fixed ? "🔒 " : ""}${esc(r.label)}</td><td>${SCOPES[r.scope]}</td><td class="k">${esc(r.lin)}</td><td class="k">${esc(r.mac)}</td><td class="k">${r.mine ? esc(r.mine) : '<span class="none">default</span>'}</td></tr>`).join("");
+  }
+  $("tbody").innerHTML = h || `<tr><td colspan="5" class="none">Nothing matches “${esc(ST.q)}”.</td></tr>`;
+}
+function jumpTo(first) {
+  if (!first) return; const c = parseChord(first.split(" ")[0]);
+  ST.layer = new Set(c.mods); ST.sel = c.key; ST.cats = new Set(Object.keys(CATS)); ST.scopes = new Set(SCOPE_ORDER); render();
+  $("kb").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+}
+$("tbody").addEventListener("click", ev => { const r = ev.target.closest("tr.row"); if (r) jumpTo(r.dataset.first); });
+$("tbody").addEventListener("keydown", ev => { if (ev.key === "Enter") { const r = ev.target.closest("tr.row"); if (r) jumpTo(r.dataset.first); } });
+$("q").addEventListener("input", ev => { ST.q = ev.target.value; renderTable(); });
+
+function render() { buildIndex(); renderControls(); renderKeyboard(); renderLegend(); renderDetail(); renderOffboard(); renderMine(); renderTable(); }
+
+/* ---------- your settings ---------- */
+function parseCfg(text) {
+  const i = text.search(/^\s*\[keybindings\]\s*$/m);
+  let sec = text;
+  if (i >= 0) { sec = text.slice(i).replace(/^\s*\[keybindings\]\s*$/m, ""); const j = sec.search(/^\s*\[\[?[^\]]+\]\]?\s*$/m); if (j >= 0) sec = sec.slice(0, j); }
+  else if (/^\s*\[/m.test(text) && !/=\s*\[/.test(text)) return { err: "No [keybindings] section found." };
+  const out = {}, known = new Set(ACTIONS.map(a => a.id)), unknown = [];
+  const re = /^\s*"?([\w.]+)"?\s*=\s*\[([^\]]*)\]/gm; let m;
+  while ((m = re.exec(sec))) { const keys = [...m[2].matchAll(/"([^"]*)"/g)].map(x => x[1]).filter(Boolean); if (known.has(m[1])) out[m[1]] = keys; else unknown.push(m[1]); }
+  return { out, unknown };
+}
+const STORE = "shale-keymap-cfg";
+function applyCfg(text, quiet) {
+  const r = parseCfg(text);
+  if (r.err) { $("cfgStatus").textContent = r.err; return; }
+  ST.overrides = r.out; ST.overridesFrom = "pasted";
+  $("cfgStatus").textContent = `${Object.keys(r.out).length} binding${Object.keys(r.out).length === 1 ? "" : "s"} loaded${r.unknown.length ? `, ${r.unknown.length} unknown action id${r.unknown.length > 1 ? "s" : ""} skipped (${r.unknown.slice(0, 3).join(", ")})` : ""}.`;
+  if (!quiet) try { localStorage.setItem(STORE, text); } catch (e) {}
+  render();
+}
+$("apply").onclick = () => applyCfg($("cfg").value);
+$("reset").onclick = () => { ST.overrides = {}; ST.overridesFrom = "none"; $("cfg").value = ""; $("cfgStatus").textContent = "Back to the defaults."; try { localStorage.removeItem(STORE); } catch (e) {} render(); };
+const ta = $("cfg");
+ta.addEventListener("dragover", ev => { ev.preventDefault(); ta.classList.add("drag"); });
+ta.addEventListener("dragleave", () => ta.classList.remove("drag"));
+ta.addEventListener("drop", ev => { ev.preventDefault(); ta.classList.remove("drag"); const f = ev.dataTransfer.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => { ta.value = rd.result; applyCfg(rd.result); }; rd.readAsText(f); });
+
+/* ---------- overlays ---------- */
+for (const [id, k] of [["ovSys", "sys"], ["ovFixed", "fixed"]]) $(id).addEventListener("change", ev => { ST[k] = ev.target.checked; render(); });
+
+/* ---------- the real keyboard: hold modifiers to peek, press a key to select it ---------- */
+function heldMods(ev) { const s = new Set(); const mac = ST.plat === "m"; if (mac ? ev.metaKey : ev.ctrlKey) s.add("P"); if (mac ? ev.ctrlKey : ev.metaKey) s.add("X"); if (ev.altKey) s.add("A"); if (ev.shiftKey) s.add("S"); return s; }
+const CODEMAP = { Comma: "Comma", Period: "Period", Slash: "Slash", Backslash: "Backslash", BracketLeft: "OpenBracket", BracketRight: "CloseBracket", Semicolon: "Semicolon", Quote: "Quote", Backquote: "Backtick", Minus: "Minus", Equal: "Equals", ArrowLeft: "Left", ArrowRight: "Right", ArrowUp: "Up", ArrowDown: "Down", Escape: "Escape", Tab: "Tab", Space: "Space", Enter: "Enter", Backspace: "Backspace", Delete: "Delete", Insert: "Insert", Home: "Home", End: "End", PageUp: "PageUp", PageDown: "PageDown", ContextMenu: "Menu", PrintScreen: "PrintScreen" };
+function typing(ev) { const t = ev.target; return t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT"); }
+document.addEventListener("keydown", ev => {
+  if (typing(ev)) return;
+  if (["Control", "Alt", "Shift", "Meta"].includes(ev.key)) { ST.peek = heldMods(ev); if (!ST.peek.size) ST.peek = null; renderControls(); renderKeyboard(); renderLegend(); renderDetail(); return; }
+  let k = null;
+  if (/^Key[A-Z]$/.test(ev.code)) k = ST.layout === "de" && /^[a-z]$/i.test(ev.key) ? ev.key.toUpperCase() : ev.code.slice(3);
+  else if (/^Digit\d$/.test(ev.code)) k = ev.code.slice(5);
+  else if (/^F\d{1,2}$/.test(ev.code)) k = ev.code;
+  else if (CODEMAP[ev.code]) k = CODEMAP[ev.code];
+  if (k && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !["Tab", "Enter", "Space", "Escape"].includes(k) || (k && /^F\d/.test(k))) { ST.sel = k; renderKeyboard(); renderDetail(); }
+});
+document.addEventListener("keyup", ev => { if (["Control", "Alt", "Shift", "Meta"].includes(ev.key)) { const s = heldMods(ev); ST.peek = s.size ? s : null; renderControls(); renderKeyboard(); renderLegend(); renderDetail(); } });
+window.addEventListener("blur", () => { if (ST.peek) { ST.peek = null; render(); } });
+
+/* ---------- start ---------- */
+try { const saved = localStorage.getItem(STORE); if (saved) { $("cfg").value = saved; applyCfg(saved, true); } } catch (e) {}
+$("foot").innerHTML = `Made from the program's own tables: the ${ACTIONS.length} definable actions of <span class="chord">src/keys.rs</span> with their defaults (macOS has its own), the fixed keys of egui and of Shale's widgets, and the keys the systems keep for themselves (KEY-019). On macOS, Ctrl in Shale's settings is ⌘. The pictures of every layer are in <span class="chord">docs/KEYMAP.md</span>.`;
+render();
+</script>
+</body>
+</html>
+

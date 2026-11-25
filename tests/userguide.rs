@@ -251,3 +251,16 @@ fn dev_018_the_headings_of_every_guide_note_start_at_level_1_and_skip_no_level()
     assert!(with_headings > 10, "the headings of the guide are read ({with_headings})");
     assert!(bad.is_empty(), "headings of the user guide must start at level 1 and skip no level: {bad:?}");
 }
+
+// spec: DEV-048
+#[test]
+fn dev_048_the_glossary_links_every_note_that_names_a_feature() {
+    let all = notes();
+    let note = |name: &str| all.iter().find(|(p, _)| p.file_name().is_some_and(|n| n == name)).unwrap_or_else(|| panic!("docs/userguide/{name}")).1.clone();
+    let links: BTreeSet<String> = link_targets(&note("Glossary.md")).into_iter().collect();
+    let missing: Vec<String> = all.iter().filter(|(_, t)| !features_of(t).is_empty()).map(|(p, _)| p.file_stem().unwrap().to_string_lossy().to_string()).filter(|n| !links.contains(n)).collect();
+    assert!(missing.is_empty(), "the Glossary does not link these notes, which name features in their front matter: {missing:?}");
+    for entry in ["Start here.md", "Keyboard shortcuts.md"] {
+        assert!(link_targets(&note(entry)).iter().any(|t| t == "Glossary"), "{entry} does not link the Glossary");
+    }
+}
