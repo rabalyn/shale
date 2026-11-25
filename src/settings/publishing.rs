@@ -39,7 +39,7 @@ impl ShaleApp {
             self.publishing.site_address_text = None;
             self.publishing.looked_once = false;
         }
-        let mut changed = anchor(ui, "publishing.enabled", |ui| ui.checkbox(&mut self.vdata.settings.publish.enabled, "Publish this vault as a website").changed());
+        let mut changed = anchor(ui, "publishing.enabled", |ui| crate::clickable::pointer(ui.checkbox(&mut self.vdata.settings.publish.enabled, "Publish this vault as a website")).changed());
         theme::hint(ui, "Off by default. Only the notes chosen below, with the media they show, are written as a Hugo site and pushed to the address below as one snapshot; the rest of the vault never leaves this computer.");
         if !self.vdata.settings.publish.enabled {
             theme::hint(ui, "Publishing is off for this vault: no note is published.");
@@ -61,14 +61,14 @@ impl ShaleApp {
         theme::section(ui, "Which notes");
         let mut changed = false;
         let s = &mut self.vdata.settings.publish;
-        changed |= anchor(ui, "publishing.all_notes", |ui| ui.checkbox(&mut s.all_notes, "All notes (not e-mails, events, posts and contacts, unless ticked below)").changed());
+        changed |= anchor(ui, "publishing.all_notes", |ui| crate::clickable::pointer(ui.checkbox(&mut s.all_notes, "All notes (not e-mails, events, posts and contacts, unless ticked below)")).changed());
         anchor(ui, "publishing.private_types", |ui| {
             ui.add_enabled_ui(s.all_notes, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     ui.label("Also publish");
                     for (kind, label) in PRIVATE {
                         let mut on = s.private_types.iter().any(|t| crate::site_export::rules::kind_of(&t.trim().to_lowercase()) == kind);
-                        if ui.checkbox(&mut on, label).changed() {
+                        if crate::clickable::pointer(ui.checkbox(&mut on, label)).changed() {
                             s.private_types.retain(|t| crate::site_export::rules::kind_of(&t.trim().to_lowercase()) != kind);
                             if on {
                                 s.private_types.push(kind.to_string());

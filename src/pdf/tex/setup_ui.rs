@@ -13,6 +13,7 @@ use super::sets_ui::Slot;
 use super::settings_ui::{consent_text, Notice, TaskKind, TexState};
 use super::setup::{Choice, Outcome, Step, TexFact};
 use crate::app::muted;
+use crate::clickable::CollapsingPointer;
 use crate::theme;
 use eframe::egui::{self, Color32, Context, Ui};
 use std::path::Path;
@@ -157,18 +158,18 @@ fn templates_step(ui: &mut Ui, st: &mut TexState, acts: &mut Vec<Act>) {
     }
     let existing: Vec<(String, String)> = st.usable_sets().iter().map(|s| (s.id.clone(), s.meta.name.clone())).collect();
     for (id, name) in existing {
-        ui.radio_value(&mut st.setup.choice, Choice::Existing(id), format!("Use “{name}” (already in your vault)"));
+        crate::clickable::pointer(ui.radio_value(&mut st.setup.choice, Choice::Existing(id), format!("Use “{name}” (already in your vault)")));
     }
-    ui.radio_value(&mut st.setup.choice, Choice::Preset, "TU Darmstadt (tested version)  — recommended");
+    crate::clickable::pointer(ui.radio_value(&mut st.setup.choice, Choice::Preset, "TU Darmstadt (tested version)  — recommended"));
     crate::theme::hint(ui, format!("tuda-ci 4.06 from GitHub ({PRESET_REPO} at {}), the version Shale was tested with.", PRESET_COMMIT.chars().take(7).collect::<String>()));
-    ui.radio_value(&mut st.setup.choice, Choice::Ctan, "The newest version from CTAN");
+    crate::clickable::pointer(ui.radio_value(&mut st.setup.choice, Choice::Ctan, "The newest version from CTAN"));
     crate::theme::hint(ui, "Whatever CTAN has today: newer, but Shale was not tested with it.");
-    ui.radio_value(&mut st.setup.choice, Choice::File, "From a file or a folder (a .zip or .tar.gz, or a folder of templates)");
+    crate::clickable::pointer(ui.radio_value(&mut st.setup.choice, Choice::File, "From a file or a folder (a .zip or .tar.gz, or a folder of templates)"));
     if st.setup.choice == Choice::File {
         ui.add(egui::TextEdit::singleline(&mut st.setup.file).hint_text("~/Downloads/templates.zip").desired_width(380.0));
         crate::theme::hint(ui, "You can also drag the file or folder onto this window.");
     }
-    ui.radio_value(&mut st.setup.choice, Choice::Github, "From a GitHub repository");
+    crate::clickable::pointer(ui.radio_value(&mut st.setup.choice, Choice::Github, "From a GitHub repository"));
     if st.setup.choice == Choice::Github {
         ui.add(egui::TextEdit::singleline(&mut st.setup.github_url).hint_text("https://github.com/owner/repository").desired_width(380.0));
         ui.add(egui::TextEdit::singleline(&mut st.setup.github_ref).hint_text("branch, tag or commit (empty: the default branch)").desired_width(380.0));
@@ -288,8 +289,8 @@ fn details_step(ui: &mut Ui, st: &mut TexState) {
     }
     theme::section(ui, "Language of your documents");
     ui.horizontal(|ui| {
-        ui.radio_value(&mut st.setup.details.language, Language::De, "German (de)");
-        ui.radio_value(&mut st.setup.details.language, Language::En, "English (en)");
+        crate::clickable::pointer(ui.radio_value(&mut st.setup.details.language, Language::De, "German (de)"));
+        crate::clickable::pointer(ui.radio_value(&mut st.setup.details.language, Language::En, "English (en)"));
     });
     theme::section(ui, "Department");
     ui.add(egui::TextEdit::singleline(&mut st.setup.details.department).hint_text("for example your department's name").desired_width(300.0));
@@ -332,7 +333,7 @@ fn test_step(ui: &mut Ui, st: &mut TexState, acts: &mut Vec<Act>) {
                 ui.label(egui::RichText::new(p).monospace().size(12.0));
             }
             if !f.log_tail.is_empty() {
-                egui::CollapsingHeader::new("The end of the log").id_salt("setup-log").show(ui, |ui| {
+                egui::CollapsingHeader::new("The end of the log").id_salt("setup-log").show_pointer(ui, |ui| {
                     ui.add(egui::Label::new(egui::RichText::new(&f.log_tail).monospace().size(11.0)).wrap());
                 });
             }

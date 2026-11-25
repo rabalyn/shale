@@ -69,7 +69,7 @@ impl ShaleApp {
         let mut changed = false;
         ui.add_space(8.0);
         ui.label(egui::RichText::new("File history").color(theme::palette().muted));
-        let r = ui.checkbox(&mut self.cfg.history.enabled, "Keep earlier versions of my notes, so that I can go back");
+        let r = crate::clickable::pointer(ui.checkbox(&mut self.cfg.history.enabled, "Keep earlier versions of my notes, so that I can go back"));
         crate::settings::anchor::mark(ui, "history.enabled", r.rect);
         self.sync.rects.push(("history-enabled", r.rect));
         changed |= r.changed();

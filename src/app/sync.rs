@@ -601,7 +601,7 @@ impl ShaleApp {
         let lfs_installed = self.sync.lfs.version.is_some();
         let rects = ui.add_enabled_ui(writable, |ui| {
             let s = &mut self.vdata.settings.sync;
-            let r = ui.checkbox(&mut s.enabled, "Sync this vault automatically");
+            let r = crate::clickable::pointer(ui.checkbox(&mut s.enabled, "Sync this vault automatically"));
             changed |= r.changed();
             let enabled_rect = r.rect;
             let mut prefix_rect = egui::Rect::NOTHING;
@@ -625,7 +625,7 @@ impl ShaleApp {
             if lfs_installed {
                 // SYNC-020: `sync.lfs_download`
                 let mut always = s.lfs_download == LfsDownload::Always;
-                let r = ui.checkbox(&mut always, "Download media files after every sync (otherwise when you play or open them)");
+                let r = crate::clickable::pointer(ui.checkbox(&mut always, "Download media files after every sync (otherwise when you play or open them)"));
                 if r.changed() {
                     s.lfs_download = if always { LfsDownload::Always } else { LfsDownload::OnDemand };
                     changed = true;

@@ -7,7 +7,7 @@ use crate::properties::{self, Card, Kind, Person};
 use crate::reader::ReaderAction;
 use crate::theme;
 use crate::vault::Vault;
-use eframe::egui::{self, Align, CornerRadius, Layout, RichText, Sense, Ui};
+use eframe::egui::{self, Align, CornerRadius, Layout, RichText, Ui};
 use std::path::Path;
 
 /// The filled, rounded box the front matter is drawn in.
@@ -88,7 +88,7 @@ pub fn card_height(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, width: f3
 
 /// The ▸/▾ button; true when it was clicked.
 fn toggle(ui: &mut Ui, open: bool) -> bool {
-    let r = ui.add(egui::Label::new(RichText::new(if open { "▾" } else { "▸" }).color(theme::palette().muted)).sense(Sense::click()));
+    let r = crate::clickable::clickable(ui, egui::Label::new(RichText::new(if open { "▾" } else { "▸" }).color(theme::palette().muted)));
     r.on_hover_text(if open { "Hide all properties" } else { "Show all properties" }).clicked()
 }
 
@@ -123,15 +123,12 @@ fn person(ui: &mut Ui, p: &Person, strong: bool, vault: &Vault, rel: &Path, out:
     if strong {
         t = t.strong();
     }
-    let mut r = ui.add(egui::Label::new(t).sense(if known { Sense::click() } else { Sense::hover() }));
+    let mut r = crate::clickable::clickable_if(ui, egui::Label::new(t), known);
     if !p.email.is_empty() {
         r = r.on_hover_text(&p.email);
     }
-    if known {
-        r = r.on_hover_cursor(egui::CursorIcon::PointingHand);
-        if r.clicked() || r.middle_clicked() {
-            *out = Some(ReaderAction::OpenLink { target: p.name.clone(), heading: None, new_tab: r.middle_clicked() || ui.input(|i| i.modifiers.command) });
-        }
+    if known && (r.clicked() || r.middle_clicked()) {
+        *out = Some(ReaderAction::OpenLink { target: p.name.clone(), heading: None, new_tab: r.middle_clicked() || ui.input(|i| i.modifiers.command) });
     }
 }
 
@@ -147,7 +144,7 @@ fn date(ui: &mut Ui, text: &str, stamp: &str, strong: bool, out: &mut Option<Rea
     if strong {
         t = t.strong();
     }
-    let r = ui.add(egui::Label::new(t).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Show this day in the calendar");
+    let r = crate::clickable::clickable(ui, egui::Label::new(t)).on_hover_text("Show this day in the calendar");
     if r.clicked() {
         *out = Some(ReaderAction::OpenDay(day));
     }

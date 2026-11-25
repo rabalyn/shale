@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 /// How long the physics may take in one frame.
+/// The accessible name of the drawing area of the graph: pan, zoom and click on a node are its own handling.
+pub(crate) const CANVAS: &str = "Graph canvas";
 const STEP_BUDGET: Duration = Duration::from_millis(6);
 
 pub struct GraphView {
@@ -194,8 +196,8 @@ impl GraphView {
         if !compact {
             ui.horizontal(|ui| {
                 let mut changed = false;
-                changed |= ui.checkbox(&mut self.show_missing, "Show missing notes").changed();
-                changed |= ui.checkbox(&mut self.show_orphans, "Show unlinked notes").changed();
+                changed |= crate::clickable::pointer(ui.checkbox(&mut self.show_missing, "Show missing notes")).changed();
+                changed |= crate::clickable::pointer(ui.checkbox(&mut self.show_orphans, "Show unlinked notes")).changed();
                 if changed {
                     self.generation = u64::MAX;
                 }
@@ -206,6 +208,7 @@ impl GraphView {
             });
         }
         let (rect, resp) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::GenericContainer, true, CANVAS));
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0.0, theme::palette().bg_primary);
 

@@ -5,6 +5,7 @@ use super::diff::{self, Change, Kind, Mark, Row, Shown, Side, Span};
 use super::labels::{day_time, source_label};
 use super::state::{Changes, Data, Mode};
 use crate::app::ShaleApp;
+use crate::clickable::ComboBoxPointer;
 use crate::gitsync::history::Version;
 use crate::theme;
 use eframe::egui::{self, text::LayoutJob, Align, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, TextFormat, Ui, Vec2};
@@ -193,7 +194,7 @@ fn body(ui: &mut Ui, ch: &mut Changes, versions: &[Version], now: i64, this_devi
         }
         ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
             let to_text = to_pos.map_or("Now".to_string(), |p| day_time(versions[p].time, now));
-            let combo = egui::ComboBox::from_id_salt("history-to").selected_text(to_text).show_ui(ui, |ui| {
+            let combo = egui::ComboBox::from_id_salt("history-to").selected_text(to_text).show_pointer(ui, |ui| {
                 if ui.selectable_label(to_pos.is_none(), "Now").clicked() {
                     asked.push(Do::To(None));
                 }

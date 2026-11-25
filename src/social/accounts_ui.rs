@@ -425,7 +425,7 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
                     ui.end_row();
                 }
             });
-            if rec("use-token".into(), ui.checkbox(&mut d.use_token, "I already have an access token")).changed() {
+            if rec("use-token".into(), crate::clickable::pointer(ui.checkbox(&mut d.use_token, "I already have an access token"))).changed() {
                 d.error = None;
             }
             crate::theme::prose(ui, muted("Shale only asks for permission to read. The code or token is not kept; the access token goes to your system keyring."));

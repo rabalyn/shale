@@ -5,6 +5,7 @@
 //! index, so a steady frame costs no query. The reading pane shows plain text only.
 
 use crate::app::muted;
+use crate::clickable::CollapsingPointer;
 use crate::config::Config;
 use crate::keys::{Action as KeyAction, Keymap, Scope};
 use crate::mail::compose::Kind;
@@ -565,7 +566,7 @@ impl MailView {
                 crate::busy::ui::status(ui, &self.busy, &MAIL_SEND.with(&a.id));
                 crate::busy::ui::status(ui, &self.busy, &MAIL_SIGNIN.with(&a.id));
                 let folders = self.account_folders(&a.id);
-                egui::CollapsingHeader::new(RichText::new(title).color(theme::palette().text_strong)).id_salt(("mail-account", a.id.clone())).default_open(true).show(ui, |ui| {
+                egui::CollapsingHeader::new(RichText::new(title).color(theme::palette().text_strong)).id_salt(("mail-account", a.id.clone())).default_open(true).show_pointer(ui, |ui| {
                     if folders.is_empty() {
                         ui.label(muted("No folders yet. Press Sync, or “Test connection” in the account settings.").size(crate::fonts::px(12.0)));
                     }
@@ -1247,6 +1248,7 @@ pub(crate) struct RowState {
 /// Draw one row of a message list; the same row is the sidebar's (LAY-030).
 pub(crate) fn paint_message_row(ui: &mut Ui, i: usize, m: &MessageSummary, state: RowState, now: i64, rects: &mut Vec<(String, Rect)>) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_H), Sense::click());
+    let resp = crate::clickable::pointer(resp);
     let p = ui.painter_at(rect);
     let RowState { cursor, opened, marked, folder_prefix } = state;
     if cursor {

@@ -133,6 +133,7 @@ pub fn copy_button(ui: &Ui, id: Id, right: f32, y: f32, shown: bool, code: impl 
     // it takes drags too: a button that only senses clicks leaves the drag to the text box under it, which then
     // moves its cursor to the pointer for as long as the button is held (EDIT-094)
     let resp = ui.interact(rect, id, Sense::click_and_drag());
+    let resp = crate::clickable::pointer(resp);
     let colour = if resp.hovered() || copied { theme::palette().text } else { theme::palette().muted };
     let painter = ui.painter();
     let c = Pos2::new(rect.right() - 8.0, y);

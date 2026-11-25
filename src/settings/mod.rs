@@ -202,10 +202,10 @@ impl ShaleApp {
                             ui.scope(|ui| {
                                 ui.spacing_mut().indent = SettingsTab::SUB_INDENT;
                                 ui.visuals_mut().indent_has_left_vline = false;
-                                ui.indent(("settings-sub-tab", t.label()), |ui| ui.selectable_value(tab, t, t.label()));
+                                ui.indent(("settings-sub-tab", t.label()), |ui| crate::clickable::pointer(ui.selectable_value(tab, t, t.label())));
                             });
                         } else {
-                            ui.selectable_value(tab, t, t.label());
+                            crate::clickable::pointer(ui.selectable_value(tab, t, t.label()));
                         }
                     }
                 });

@@ -107,14 +107,14 @@ pub fn show(ui: &mut Ui, d: &mut DocxDialog) {
             ui.vertical(|ui| {
                 if let Some(original) = &d.original {
                     let hint = format!("Its styles, fonts, headers and footers come from {}", crate::vault::rel_to_string(original));
-                    rec("use-original", ui.checkbox(&mut d.use_original, "Use the original Word file as the template")).on_hover_text(hint);
+                    rec("use-original", crate::clickable::pointer(ui.checkbox(&mut d.use_original, "Use the original Word file as the template"))).on_hover_text(hint);
                 }
-                rec("toc", ui.checkbox(&mut d.toc, "Table of contents"));
-                ui.add_enabled_ui(d.toc, |ui| rec("toc-break", ui.checkbox(&mut d.toc_break, "Page break after the table of contents")));
+                rec("toc", crate::clickable::pointer(ui.checkbox(&mut d.toc, "Table of contents")));
+                ui.add_enabled_ui(d.toc, |ui| rec("toc-break", crate::clickable::pointer(ui.checkbox(&mut d.toc_break, "Page break after the table of contents"))));
             });
             ui.end_row();
         });
-        rec("open-after", ui.checkbox(&mut d.open_after, "Open the file afterwards"));
+        rec("open-after", crate::clickable::pointer(ui.checkbox(&mut d.open_after, "Open the file afterwards")));
     });
     match &d.pandoc {
         Some(p) => rec("pandoc", ui.label(muted(&format!("pandoc: {}", p.display())))),

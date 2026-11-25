@@ -2,6 +2,7 @@
 //! chosen with the Import button): what to import, the folder, tags and a few options.
 
 use crate::busy::{self, Busy, Key};
+use crate::clickable::ComboBoxPointer;
 use crate::import::{self, docx, Item, Source};
 use crate::media::intake::Choice;
 use crate::theme;
@@ -224,13 +225,13 @@ fn continues_line(ui: &mut Ui, i: usize, c: &mut import::Continues, in_import: O
     let label = |p: &std::path::Path| format!("[[{}]]", name(p));
     let (was_on, was) = (c.on, c.chosen);
     ui.horizontal_wrapped(|ui| {
-        rec(format!("continues:{i}"), ui.checkbox(&mut c.on, egui::RichText::new("Continues").size(12.5)))
+        rec(format!("continues:{i}"), crate::clickable::pointer(ui.checkbox(&mut c.on, egui::RichText::new("Continues").size(12.5))))
             .on_hover_text("Found by the reply headers of the mail or the reply ids of the post (never the subject or the text). Ticked: the new note is linked into the thread (previous and next) and goes in the folder of that note. Unticked: it gets its ids only and no other note is touched");
         if c.candidates.len() > 1 {
             let shown = c.anchor().map(label).unwrap_or_default();
-            egui::ComboBox::from_id_salt(format!("continues-pick:{i}")).selected_text(shown).show_ui(ui, |ui| {
+            egui::ComboBox::from_id_salt(format!("continues-pick:{i}")).selected_text(shown).show_pointer(ui, |ui| {
                 for (k, cand) in c.candidates.iter().enumerate() {
-                    rec(format!("continues-pick:{i}:{k}"), ui.selectable_value(&mut c.chosen, k, format!("{}  {}", label(&cand.rel), cand.date_key))).on_hover_text(cand.rel.to_string_lossy());
+                    rec(format!("continues-pick:{i}:{k}"), crate::clickable::pointer(ui.selectable_value(&mut c.chosen, k, format!("{}  {}", label(&cand.rel), cand.date_key)))).on_hover_text(cand.rel.to_string_lossy());
                 }
             });
         } else if let Some(a) = c.anchor() {
@@ -276,7 +277,7 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
         egui::Frame::new().fill(theme::palette().bg_secondary).corner_radius(6).inner_margin(8).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                rec(format!("include:{i}"), ui.checkbox(&mut it.include, "")).on_hover_text("Import this one");
+                rec(format!("include:{i}"), crate::clickable::pointer(ui.checkbox(&mut it.include, ""))).on_hover_text("Import this one");
                 ui.label(egui::RichText::new(it.kind()).size(11.0).color(theme::palette().accent));
                 let linked = outside_media && matches!(it.source, Source::Media { how: Choice::Link, .. });
                 let tip = if linked {
@@ -319,18 +320,18 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
                         let what = if p.existing.is_some() { "" } else { " (new)" };
                         let label = egui::RichText::new(format!("{}{what}", p.name)).size(12.5).color(if p.existing.is_some() { theme::palette().link } else { theme::palette().text });
                         let tip = format!("{} · {}{}", p.role.label(), if p.email.is_empty() { "no address" } else { p.email.as_str() }, if p.existing.is_some() { " · has a contact note" } else { " · a contact note will be made" });
-                        rec(format!("person:{i}:{k}"), ui.checkbox(&mut p.on, label)).on_hover_text(tip);
+                        rec(format!("person:{i}:{k}"), crate::clickable::pointer(ui.checkbox(&mut p.on, label))).on_hover_text(tip);
                     }
                 });
             }
             if let Source::Markdown { text, lift, .. } = &mut it.source {
                 if crate::markdown::lift_headings(text).is_some() {
-                    rec(format!("lift:{i}"), ui.checkbox(lift, egui::RichText::new("Lift headings (## → #, ### → ##, …)").size(12.5)))
+                    rec(format!("lift:{i}"), crate::clickable::pointer(ui.checkbox(lift, egui::RichText::new("Lift headings (## → #, ### → ##, …)").size(12.5))))
                         .on_hover_text("The text has no # heading: every heading moves up by the same number of levels so that the highest becomes #");
                 }
             }
             if let Source::Docx { lift, pandoc: Some(_), .. } = &mut it.source {
-                rec(format!("lift:{i}"), ui.checkbox(lift, egui::RichText::new("Lift headings (## → #, ### → ##, …)").size(12.5)))
+                rec(format!("lift:{i}"), crate::clickable::pointer(ui.checkbox(lift, egui::RichText::new("Lift headings (## → #, ### → ##, …)").size(12.5))))
                     .on_hover_text("When the document has no # heading: every heading moves up by the same number of levels so that the highest becomes #");
             }
             let mut follow = false;
@@ -344,17 +345,17 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
             if let Source::Email { mail, .. } = &it.source {
                 for (k, (a, on)) in mail.attachments.iter().zip(it.att_on.iter_mut()).enumerate() {
                     let label = format!("{}  ({}, {}{}{})", a.name, a.mime, size_text(a.data.len()), if a.inline { ", in the text" } else { "" }, crate::mail::signature::reason(a).map(|r| format!(", {r}")).unwrap_or_default());
-                    rec(format!("att:{i}:{k}"), ui.checkbox(on, egui::RichText::new(label).size(12.5)));
+                    rec(format!("att:{i}:{k}"), crate::clickable::pointer(ui.checkbox(on, egui::RichText::new(label).size(12.5))));
                 }
             }
             if let Source::Social { saved, replies, .. } = &mut it.source {
                 if !saved.replies.is_empty() {
-                    rec(format!("replies:{i}"), ui.checkbox(replies, egui::RichText::new(format!("Include replies from others ({})", saved.replies.len())).size(12.5)))
+                    rec(format!("replies:{i}"), crate::clickable::pointer(ui.checkbox(replies, egui::RichText::new(format!("Include replies from others ({})", saved.replies.len())).size(12.5))))
                         .on_hover_text("Adds a Replies section with other people's answers to the thread, nested; their pictures are only linked");
                 }
                 for (k, (m, on)) in saved.media.iter().zip(it.att_on.iter_mut()).enumerate() {
                     let label = format!("{}  ({})", m.file_name, size_text(m.data.len()));
-                    rec(format!("att:{i}:{k}"), ui.checkbox(on, egui::RichText::new(label).size(12.5))).on_hover_text("Untick to leave this file out; the note then links to its web address");
+                    rec(format!("att:{i}:{k}"), crate::clickable::pointer(ui.checkbox(on, egui::RichText::new(label).size(12.5)))).on_hover_text("Untick to leave this file out; the note then links to its web address");
                 }
             }
         });
@@ -397,7 +398,7 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
             if rec("folder".into(), ui.add(egui::TextEdit::singleline(&mut d.folder).hint_text("Projects/New lecture hall").desired_width(380.0))).on_hover_text("A new folder is made if needed").changed() {
                 d.folder_follows = false;
             }
-            let combo = egui::ComboBox::from_id_salt("import-folder").selected_text("Pick…").width(90.0).show_ui(ui, |ui| {
+            let combo = egui::ComboBox::from_id_salt("import-folder").selected_text("Pick…").width(90.0).show_pointer(ui, |ui| {
                 if rec("folder-pick:/".into(), ui.selectable_label(d.folder.is_empty(), "(vault root)")).clicked() {
                     d.folder.clear();
                     d.folder_follows = false;
@@ -454,25 +455,25 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
         }
     });
     if d.items.iter().any(|i| matches!(i.source, Source::Email { .. } | Source::Event { .. })) {
-        rec("keep".into(), ui.checkbox(&mut d.keep_original, "Keep the original message / calendar file with the attachments"));
+        rec("keep".into(), crate::clickable::pointer(ui.checkbox(&mut d.keep_original, "Keep the original message / calendar file with the attachments")));
     }
     if d.items.iter().any(|i| matches!(i.source, Source::Email { .. }))
-        && rec("skip-signatures".into(), ui.checkbox(&mut d.skip_signatures, "Skip signatures"))
+        && rec("skip-signatures".into(), crate::clickable::pointer(ui.checkbox(&mut d.skip_signatures, "Skip signatures")))
             .on_hover_text("Leave out the signature text of the message and of the mails it quotes (the quoted text stays), the signature parts of signed mail (smime.p7s, signature.asc) and the pictures of signature blocks (logos, social icons); you can still tick each attachment below. Only what is clearly a signature goes. Settings → Import sets the start value")
             .changed()
     {
         import::apply_skip_signatures(&mut d.items, d.skip_signatures);
     }
     if d.items.iter().any(|i| matches!(i.source, Source::Email { .. })) {
-        rec("leave-out-quoted".into(), ui.checkbox(&mut d.leave_out_quoted, "Leave out quoted mails"))
+        rec("leave-out-quoted".into(), crate::clickable::pointer(ui.checkbox(&mut d.leave_out_quoted, "Leave out quoted mails")))
             .on_hover_text("Keep only what the sender wrote in each message and drop the earlier mails it quotes (the reply header lines too). A thread is often imported mail by mail. Settings → Import sets the start value");
     }
     if d.items.iter().any(|i| matches!(i.source, Source::Email { .. } | Source::Event { .. } | Source::Social { .. })) {
-        rec("header-list".into(), ui.checkbox(&mut d.header_list, "Header list in the note body"))
+        rec("header-list".into(), crate::clickable::pointer(ui.checkbox(&mut d.header_list, "Header list in the note body")))
             .on_hover_text("From, To, Date, When, Where, Author, Source … are always in the note's properties; this also writes them as a list below the title, for programs that do not show properties");
     }
     if d.items.iter().any(|i| matches!(i.source, Source::Docx { pandoc: Some(_), .. })) {
-        rec("keep-docx".into(), ui.checkbox(&mut d.keep_docx, "Keep the original .docx")).on_hover_text("Copies each Word file into its import folder and names it in the note's properties");
+        rec("keep-docx".into(), crate::clickable::pointer(ui.checkbox(&mut d.keep_docx, "Keep the original .docx"))).on_hover_text("Copies each Word file into its import folder and names it in the note's properties");
     }
     if d.converting.is_some() {
         ui.horizontal(|ui| {
@@ -503,7 +504,7 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
         } else {
             "notes and files"
         };
-        rec("link".into(), ui.checkbox(&mut d.link_on, format!("Add links to the new {new} in “{name}”")));
+        rec("link".into(), crate::clickable::pointer(ui.checkbox(&mut d.link_on, format!("Add links to the new {new} in “{name}”"))));
     }
     crate::theme::prose(ui, muted("Drag messages from your mail program, events from a calendar (also Shale's own), or any files onto the window to add more."));
     d.rects = rects;

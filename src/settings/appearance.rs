@@ -2,6 +2,7 @@
 
 use super::anchor::anchor;
 use crate::app::ShaleApp;
+use crate::clickable::ComboBoxPointer;
 use crate::theme;
 use eframe::egui::{self, Ui};
 
@@ -9,11 +10,12 @@ impl ShaleApp {
     pub(super) fn appearance_tab(&mut self, ui: &mut Ui) -> bool {
         let mut changed = self.theme_section(ui);
         theme::section_break(ui);
-        changed |= anchor(ui, "appearance.readable_width", |ui| ui.checkbox(&mut self.cfg.readable_width, "Readable line length").changed());
-        changed |= anchor(ui, "appearance.dark_canvas", |ui| ui.checkbox(&mut self.cfg.dark_canvas, "Dark drawing canvas").changed());
+        changed |= anchor(ui, "appearance.readable_width", |ui| crate::clickable::pointer(ui.checkbox(&mut self.cfg.readable_width, "Readable line length")).changed());
+        changed |= anchor(ui, "appearance.dark_canvas", |ui| crate::clickable::pointer(ui.checkbox(&mut self.cfg.dark_canvas, "Dark drawing canvas")).changed());
         changed |= anchor(ui, "appearance.properties_editor", |ui| properties_combo(ui, "Properties in the editor", "properties-editor", &mut self.cfg.properties_in_editor));
         changed |= anchor(ui, "appearance.properties_reader", |ui| properties_combo(ui, "Properties in the reading view", "properties-reader", &mut self.cfg.properties_in_reader));
-        changed |= anchor(ui, "appearance.inline_images", |ui| ui.checkbox(&mut self.cfg.inline_images, "Show embedded images and players inside the editor (the link text appears while the cursor is on it)").changed());
+        changed |=
+            anchor(ui, "appearance.inline_images", |ui| crate::clickable::pointer(ui.checkbox(&mut self.cfg.inline_images, "Show embedded images and players inside the editor (the link text appears while the cursor is on it)")).changed());
         changed |= anchor(ui, "appearance.play_button", |ui| {
             ui.horizontal(|ui| {
                 ui.label("Play button over the artwork of a sound or video");
@@ -45,11 +47,11 @@ fn theme_combo(ui: &mut Ui, id: &str, themes: &crate::themes::Themes, name: &mut
         None => format!("{name} (not found)"),
     };
     // tall enough for every theme without a scroll bar
-    egui::ComboBox::from_id_salt(id).selected_text(shown).height(520.0).show_ui(ui, |ui| {
+    egui::ComboBox::from_id_salt(id).selected_text(shown).height(520.0).show_pointer(ui, |ui| {
         for (dark, title) in [(true, "Dark"), (false, "Light")] {
             ui.label(egui::RichText::new(title).color(theme::palette().muted));
             for t in themes.list.iter().filter(|t| t.palette.dark == dark) {
-                changed |= ui.selectable_value(name, t.name.clone(), theme_label(t)).changed();
+                changed |= crate::clickable::pointer(ui.selectable_value(name, t.name.clone(), theme_label(t))).changed();
             }
         }
     });
@@ -85,7 +87,7 @@ impl ShaleApp {
         let themes = self.themes.themes().clone();
         let cfg = &mut self.cfg.theme;
         changed |= anchor(ui, "appearance.follow_system", |ui| {
-            ui.checkbox(&mut cfg.follow_system, "Follow the system's light or dark mode").on_hover_text("Use one theme while the system is in light mode and another while it is in dark mode").changed()
+            crate::clickable::pointer(ui.checkbox(&mut cfg.follow_system, "Follow the system's light or dark mode")).on_hover_text("Use one theme while the system is in light mode and another while it is in dark mode").changed()
         });
         if cfg.follow_system {
             changed |= anchor(ui, "appearance.theme_light", |ui| {
@@ -141,9 +143,9 @@ fn properties_combo(ui: &mut Ui, label: &str, id: &str, view: &mut crate::config
     let mut changed = false;
     ui.horizontal(|ui| {
         ui.label(label);
-        egui::ComboBox::from_id_salt(id).selected_text(view.label()).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt(id).selected_text(view.label()).show_pointer(ui, |ui| {
             for v in crate::config::PropertiesView::ALL {
-                changed |= ui.selectable_value(view, v, v.label()).changed();
+                changed |= crate::clickable::pointer(ui.selectable_value(view, v, v.label())).changed();
             }
         });
     })

@@ -32,6 +32,9 @@ mod busy;
 mod calendar;
 mod caption;
 mod cite_assist;
+mod clickable;
+#[cfg(test)]
+mod clickable_ui_tests;
 mod code_box;
 mod colour_tags;
 mod config;

@@ -561,6 +561,7 @@ impl CalendarView {
             let r = Rect::from_min_size(grid.min + Vec2::new(cw * (i % 7) as f32, ch * (i / 7) as f32), Vec2::new(cw, ch)).shrink(1.0);
             let in_month = civil_from_days(d).1 == m;
             let resp = ui.interact(r, ui.scope_id().with(("cal-day", d)), Sense::click());
+            let resp = crate::clickable::pointer(resp);
             self.rec(format!("day:{d}"), r);
             let p = ui.painter();
             let bg = if self.size == Size::Small {
@@ -617,6 +618,7 @@ impl CalendarView {
                     if list.len() > shown {
                         let mr = Rect::from_min_size(Pos2::new(r.min.x + 2.0, r.min.y + 19.0 + shown as f32 * (chip_h + 2.0)), Vec2::new(r.width() - 4.0, chip_h));
                         let more = ui.interact(mr, ui.scope_id().with(("more", d)), Sense::click()).on_hover_text("Show this day");
+                        let more = crate::clickable::pointer(more);
                         ui.painter().text(mr.left_center() + Vec2::new(4.0, 0.0), Align2::LEFT_CENTER, format!("+{} more", list.len() - shown), crate::fonts::font(11.0), theme::palette().muted);
                         self.rec(format!("more:{d}"), mr);
                         if more.clicked() {
@@ -665,6 +667,7 @@ impl CalendarView {
             let (_, _, dd) = civil_from_days(*d);
             let label = format!("{} {dd}", WEEKDAYS[t::weekday(*d) as usize]);
             let resp = ui.interact(r, ui.scope_id().with(("cal-head", *d)), Sense::click()).on_hover_text("Show this day");
+            let resp = crate::clickable::pointer(resp);
             self.rec(format!("day:{d}"), r);
             if *d == today {
                 ui.painter().rect_filled(r.shrink(2.0), CornerRadius::same(4), theme::palette().accent.gamma_multiply(0.35));
@@ -704,6 +707,7 @@ impl CalendarView {
         }
         sa.show(ui, |ui| {
             let (gr, grid_resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.0 * hour_h), Sense::click());
+            let grid_resp = crate::clickable::pointer(grid_resp);
             let col_w = (gr.width() - gutter) / n as f32;
             self.rec("hours", gr);
             // double-click an empty spot: a new event from the next half hour there

@@ -9,6 +9,7 @@ use super::compose_pictures as pictures;
 use super::feed_ui::{inset, short, TabCtx};
 use super::state::SocialState;
 use super::{Network, SocialAccountEntry};
+use crate::clickable::ComboBoxPointer;
 use crate::theme;
 use eframe::egui::{self, Key, Modifiers, Rect, RichText, Ui, Vec2};
 
@@ -141,11 +142,11 @@ fn edit(ui: &mut Ui, c: &mut Compose, entry: &SocialAccountEntry, info: &super::
         match network {
             Network::Mastodon => {
                 ui.horizontal(|ui| {
-                    let r = ui.checkbox(&mut c.cw_on, "Content warning");
+                    let r = crate::clickable::pointer(ui.checkbox(&mut c.cw_on, "Content warning"));
                     rects.push(("compose:cw-toggle".into(), r.rect));
-                    let combo = egui::ComboBox::from_id_salt("compose-visibility").selected_text(c.visibility.label()).show_ui(ui, |ui| {
+                    let combo = egui::ComboBox::from_id_salt("compose-visibility").selected_text(c.visibility.label()).show_pointer(ui, |ui| {
                         for v in Visibility::ALL {
-                            ui.selectable_value(&mut c.visibility, v, v.label());
+                            crate::clickable::pointer(ui.selectable_value(&mut c.visibility, v, v.label()));
                         }
                     });
                     rects.push(("compose:visibility".into(), combo.response.rect));

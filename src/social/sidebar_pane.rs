@@ -17,6 +17,7 @@ use super::feed_ui::{account_label, age_text, short};
 use super::state::{FeedsState, SocialState};
 use super::{markup, Feed, FeedRef, MediaKind, Post, SocialAccountEntry};
 use crate::app::muted;
+use crate::clickable::ComboBoxPointer;
 use crate::theme;
 use eframe::egui::{self, text::LayoutJob, Color32, Pos2, Rect, RichText, Sense, Stroke, Ui, Vec2};
 
@@ -90,7 +91,7 @@ impl SocialPane {
             return None;
         };
         if list.len() > 1 {
-            let c = egui::ComboBox::from_id_salt("feeds-pane-feed").selected_text(feed.title.clone()).width(ui.available_width() - 8.0).show_ui(ui, |ui| {
+            let c = egui::ComboBox::from_id_salt("feeds-pane-feed").selected_text(feed.title.clone()).width(ui.available_width() - 8.0).show_pointer(ui, |ui| {
                 for f in &list {
                     let r = ui.selectable_label(f.id == feed.id, &f.title);
                     rects.push((format!("feedpane:feed:{}", f.id), r.rect));

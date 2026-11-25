@@ -21,6 +21,6 @@ impl ShaleApp {
                 crate::theme::hint(ui, format!("{} configured", self.cfg.calendars.len()));
             });
         });
-        anchor(ui, "calendar.week_start", |ui| ui.checkbox(&mut self.cfg.week_starts_monday, "Calendar weeks start on Monday (otherwise Sunday)").changed())
+        anchor(ui, "calendar.week_start", |ui| crate::clickable::pointer(ui.checkbox(&mut self.cfg.week_starts_monday, "Calendar weeks start on Monday (otherwise Sunday)")).changed())
     }
 }

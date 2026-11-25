@@ -558,7 +558,7 @@ fn body(ui: &mut Ui, w: &mut Wizard, cx: &Cx, managed: &mut ManagedState, gitcfg
                 (Choice::Server, "Sync with a server", "Forgejo, Gitea, GitHub, GitLab or any git address. Your notes are sent to the server and to your other computers; this vault gets a .git folder."),
             ] {
                 ui.add_space(6.0);
-                if ui.radio(w.choice == Some(choice), egui::RichText::new(title).strong()).clicked() {
+                if crate::clickable::pointer(ui.radio(w.choice == Some(choice), egui::RichText::new(title).strong())).clicked() {
                     w.choice = Some(choice);
                 }
                 ui.indent(title, |ui| theme::hint(ui, text));
@@ -583,7 +583,7 @@ fn body(ui: &mut Ui, w: &mut Wizard, cx: &Cx, managed: &mut ManagedState, gitcfg
                 ui.label("What kind of server is it?");
                 ui.horizontal_wrapped(|ui| {
                     for k in [Kind::Forgejo, Kind::GitHub, Kind::GitLab, Kind::Other] {
-                        ui.radio_value(&mut w.kind, k, k.label());
+                        crate::clickable::pointer(ui.radio_value(&mut w.kind, k, k.label()));
                     }
                 });
                 theme::hint(ui, "Forgejo, Gitea and GitHub let Shale list and create repositories for you. For any other server you paste the address of a repository.");
@@ -597,8 +597,8 @@ fn body(ui: &mut Ui, w: &mut Wizard, cx: &Cx, managed: &mut ManagedState, gitcfg
             ui.label(egui::RichText::new(format!("Sign in to {}", server.host)).strong().size(15.0));
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                ui.radio_value(&mut w.method, Method::Token, "A personal access token");
-                ui.radio_value(&mut w.method, Method::Ssh, "An SSH key");
+                crate::clickable::pointer(ui.radio_value(&mut w.method, Method::Token, "A personal access token"));
+                crate::clickable::pointer(ui.radio_value(&mut w.method, Method::Ssh, "An SSH key"));
             });
             ui.add_space(4.0);
             match w.method {
@@ -628,7 +628,7 @@ fn body(ui: &mut Ui, w: &mut Wizard, cx: &Cx, managed: &mut ManagedState, gitcfg
                 Method::Ssh => {
                     theme::hint(ui, "An SSH key is a pair of files: you keep the private one on this computer and put the public one on the server.");
                     for (i, k) in w.keys.clone().iter().enumerate() {
-                        if ui.radio(w.key == Some(i), k.name()).clicked() {
+                        if crate::clickable::pointer(ui.radio(w.key == Some(i), k.name())).clicked() {
                             w.key = Some(i);
                         }
                     }
@@ -666,7 +666,7 @@ fn body(ui: &mut Ui, w: &mut Wizard, cx: &Cx, managed: &mut ManagedState, gitcfg
                     egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
                         for (i, r) in w.repos.clone().iter().enumerate() {
                             let label = format!("{}{}", r.full_name(), if r.empty { "  (empty)" } else { "" });
-                            if ui.radio(w.repo == Some(i), label).clicked() {
+                            if crate::clickable::pointer(ui.radio(w.repo == Some(i), label)).clicked() {
                                 w.repo = Some(i);
                             }
                         }

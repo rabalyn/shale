@@ -4,6 +4,7 @@
 //! indicator lists it with its own Cancel.
 
 use crate::busy::{self, Busy, Key};
+use crate::clickable::CollapsingPointer;
 use crate::pdf::board::{self, export_board};
 use crate::pdf::book::{self, Plan};
 use crate::pdf::book_export::{export_book_made, Progress};
@@ -124,7 +125,7 @@ impl BookExport {
                 rec("no-book", crate::theme::problem(ui, e));
             }
             Ok(plan) => {
-                let head = egui::CollapsingHeader::new("Reading order").id_salt("book-order").default_open(false).show(ui, |ui| {
+                let head = egui::CollapsingHeader::new("Reading order").id_salt("book-order").default_open(false).show_pointer(ui, |ui| {
                     egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
                         for (n, l) in plan.lines().iter().enumerate() {
                             let indent = l.depth as f32 * 14.0;

@@ -91,7 +91,7 @@ impl ShaleApp {
             egui::Popup::menu(&sort_resp).show(|ui| {
                 ui.set_min_width(200.0);
                 for m in crate::config::FileSort::ALL {
-                    if ui.radio(self.cfg.file_sort == m, m.label()).clicked() {
+                    if crate::clickable::pointer(ui.radio(self.cfg.file_sort == m, m.label())).clicked() {
                         self.cfg.file_sort = m;
                         self.save_config();
                         ui.close();
@@ -127,6 +127,7 @@ impl ShaleApp {
             self.tree(ui);
             // right-click on empty space
             let rest = ui.allocate_response(Vec2::new(ui.available_width(), (ui.available_height()).max(40.0)), Sense::click());
+            rest.widget_info(|| egui::WidgetInfo::labeled(egui::Role::GenericContainer, true, EMPTY_LIST_SPACE));
             rest.context_menu(|ui| {
                 if ui.button("New note").clicked() {
                     self.actions.push(Action::NewNote { folder: PathBuf::new() });
@@ -379,7 +380,7 @@ impl ShaleApp {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             for (tag, n) in tags {
                 ui.horizontal(|ui| {
-                    if ui.add(egui::Label::new(egui::RichText::new(format!("#{tag}")).color(theme::palette().tag)).sense(Sense::click())).on_hover_text("Search for this tag").clicked() {
+                    if crate::clickable::clickable(ui, egui::Label::new(egui::RichText::new(format!("#{tag}")).color(theme::palette().tag))).on_hover_text("Search for this tag").clicked() {
                         self.search.query = format!("#{tag}");
                         self.side.left = LeftPanel::Search;
                     }
@@ -448,7 +449,7 @@ impl ShaleApp {
                     section_header(ui, &format!("Links  {}", ok.len()));
                     for (display, _target, r) in ok {
                         if let Some(r) = r {
-                            let resp = ui.add(egui::Label::new(egui::RichText::new(display).color(theme::palette().link)).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand);
+                            let resp = crate::clickable::clickable(ui, egui::Label::new(egui::RichText::new(display).color(theme::palette().link)));
                             if resp.clicked() {
                                 self.actions.push(Action::Open { rel: r, new_tab: false });
                             }
@@ -459,10 +460,7 @@ impl ShaleApp {
                         ui.add_space(10.0);
                         section_header(ui, &format!("Outside the vault  {}", outside.len()));
                         for (display, target) in outside {
-                            let resp = ui
-                                .add(egui::Label::new(egui::RichText::new(display).color(theme::palette().link)).sense(Sense::click()))
-                                .on_hover_text("Click to open it with your system's program")
-                                .on_hover_cursor(egui::CursorIcon::PointingHand);
+                            let resp = crate::clickable::clickable(ui, egui::Label::new(egui::RichText::new(display).color(theme::palette().link))).on_hover_text("Click to open it with your system's program");
                             if resp.clicked() {
                                 self.actions.push(Action::OpenLink { target, heading: None, from: Some(rel.clone()), new_tab: false });
                             }
@@ -474,8 +472,7 @@ impl ShaleApp {
                         // a path link whose name exists in other places: offer them (LINK-012)
                         let candidates = v.fix_candidates(&target, Some(&rel));
                         ui.horizontal_wrapped(|ui| {
-                            let resp =
-                                ui.add(egui::Label::new(egui::RichText::new(display).color(theme::palette().link_missing)).sense(Sense::click())).on_hover_text("Click to create this note").on_hover_cursor(egui::CursorIcon::PointingHand);
+                            let resp = crate::clickable::clickable(ui, egui::Label::new(egui::RichText::new(display).color(theme::palette().link_missing))).on_hover_text("Click to create this note");
                             if resp.clicked() {
                                 self.actions.push(Action::OpenLink { target: target.clone(), heading: None, from: Some(rel.clone()), new_tab: false });
                             }
@@ -551,7 +548,7 @@ impl ShaleApp {
     fn mention_block(&mut self, ui: &mut Ui, src: &Path, lines: &[(usize, String)]) {
         let Some(v) = &self.vault else { return };
         let name = v.file(src).map(|f| f.display_name()).unwrap_or_default();
-        if ui.add(egui::Label::new(egui::RichText::new(&name).color(theme::palette().text_strong)).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+        if crate::clickable::clickable(ui, egui::Label::new(egui::RichText::new(&name).color(theme::palette().text_strong))).clicked() {
             self.actions.push(Action::Open { rel: src.to_path_buf(), new_tab: false });
         }
         for (line, text) in lines.iter().take(5) {
@@ -592,8 +589,8 @@ impl ShaleApp {
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
                         ui.add(egui::TextEdit::singleline(&mut self.tasks.query).hint_text("Filter tasks or #tags…").desired_width(260.0));
-                        ui.checkbox(&mut self.tasks.show_done, "Show done");
-                        ui.checkbox(&mut self.tasks.only_due, "Only with due date");
+                        crate::clickable::pointer(ui.checkbox(&mut self.tasks.show_done, "Show done"));
+                        crate::clickable::pointer(ui.checkbox(&mut self.tasks.only_due, "Only with due date"));
                     });
                     ui.add_space(10.0);
                     let q = self.tasks.query.to_lowercase();
@@ -626,7 +623,7 @@ impl ShaleApp {
                             let name = v.file(rel).map(|f| f.display_name()).unwrap_or_default();
                             let folder = rel.parent().map(rel_to_string).filter(|s| !s.is_empty());
                             ui.horizontal(|ui| {
-                                if ui.add(egui::Label::new(egui::RichText::new(&name).size(15.0).color(theme::palette().text_strong)).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                                if crate::clickable::clickable(ui, egui::Label::new(egui::RichText::new(&name).size(15.0).color(theme::palette().text_strong))).clicked() {
                                     actions.push(Action::Open { rel: rel.clone(), new_tab: false });
                                 }
                                 if let Some(f) = folder {
@@ -639,11 +636,17 @@ impl ShaleApp {
                             let row = ui.horizontal(|ui| {
                                 ui.add_space(t.indent as f32 * 8.0);
                                 let mut d = t.done;
-                                if ui.checkbox(&mut d, "").on_hover_text("Tick off (saved to the note)").clicked() {
+                                if crate::clickable::pointer(ui.checkbox(&mut d, "")).on_hover_text("Tick off (saved to the note)").clicked() {
                                     actions.push(Action::ToggleTask { rel: rel.clone(), offset: t.check_offset });
                                 }
                                 let shown = strip_due(&t.text);
+                                let text_from = ui.cursor().min.x;
                                 let (link, plain) = crate::reader::inline_line(ui, &shown, v, rel, 14.0, t.done);
+                                // a click on the text goes to its line: the pointing hand all over it
+                                let text = Rect::from_min_max(Pos2::new(text_from, ui.min_rect().min.y), ui.min_rect().max);
+                                if ui.rect_contains_pointer(text) {
+                                    ui.set_cursor_icon(egui::CursorIcon::PointingHand);
+                                }
                                 if let Some(a) = link {
                                     crate::app::handle_reader_action(actions, a, rel);
                                 } else if plain {
@@ -905,7 +908,7 @@ impl ShaleApp {
                             crate::theme::paragraph(ui, format!("Converting makes the drawing “{}” next to it (Obsidian opens it with the Excalidraw plugin). The canvas file is not changed.", crate::drawing::canvas::drawing_name_for(rel)))
                         }
                     };
-                    ui.checkbox(always, "Always convert canvases when opening them").on_hover_text("Also in Settings → Drawings");
+                    crate::clickable::pointer(ui.checkbox(always, "Always convert canvases when opening them")).on_hover_text("Also in Settings → Drawings");
                     ui.horizontal(|ui| {
                         let convert = if existing.is_some() { "Open the drawing" } else { "Convert" };
                         if ui.button(convert).clicked() {
@@ -1270,6 +1273,8 @@ pub struct TreeDrag(pub PathBuf);
 
 /// The height of a row of the file list.
 const TREE_ROW_H: f32 = 26.0;
+/// The accessible name of the empty space below the file list, which only has a context menu (not a button).
+pub(crate) const EMPTY_LIST_SPACE: &str = "Empty space below the file list (right-click for the menu)";
 /// How far above and below the view rows are drawn too, so a scroll step finds them ready.
 const TREE_MARGIN: f32 = 150.0;
 
@@ -1277,8 +1282,10 @@ fn tree_row(ui: &mut Ui, depth: usize, name: &str, open: Option<bool>, active: b
     let h = TREE_ROW_H;
     // click to open, drag to move into another folder
     let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::click_and_drag());
+    let resp = crate::clickable::pointer(resp);
     if active {
         ui.painter().rect_filled(r, CornerRadius::same(5), theme::palette().bg_active);
+        crate::clickable::hover_ring(ui, &resp);
     } else if resp.hovered() {
         ui.painter().rect_filled(r, CornerRadius::same(5), theme::palette().bg_hover);
     }

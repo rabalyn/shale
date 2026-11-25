@@ -573,6 +573,7 @@ fn inline_block_aligned(ui: &mut Ui, job: LayoutJob, spans: &[(Range<usize>, Lin
     let aligned = matches!(align, Some(markdown::Align::Center | markdown::Align::Right | markdown::Align::Justify));
     let size = if aligned { Vec2::new(ui.available_width().max(galley.size().x), galley.size().y) } else { galley.size() };
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::GenericContainer, true, TEXT_WITH_LINKS));
     // where the galley's origin is: its middle or its right edge when it is laid out around them
     let anchor = match align {
         Some(markdown::Align::Center) => Pos2::new(rect.center().x, rect.min.y),
@@ -695,6 +696,10 @@ fn follow_span(ui: &Ui, resp: &egui::Response, byte: usize, spans: &[(Range<usiz
 
 /// One line of markdown with clickable links (used by the task list).
 /// Returns a link action, and whether the text outside links was clicked.
+/// The accessible name of a paragraph that senses clicks for the links inside it: the links are
+/// the buttons (`follow_span` shows the pointing hand over one), the text between them is not.
+pub(crate) const TEXT_WITH_LINKS: &str = "Text (its links are clickable)";
+
 pub fn inline_line(ui: &mut Ui, text: &str, vault: &Vault, from: &Path, base: f32, done: bool) -> (Option<ReaderAction>, bool) {
     let links: Vec<(LinkSpan, bool)> = markdown::find_links(text)
         .into_iter()
@@ -1085,7 +1090,7 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
                         ui.label(egui::RichText::new(format!("{}.", &t[..digits])).size(base).color(theme::palette().accent));
                     }
                     let mut d = done;
-                    if ui.checkbox(&mut d, "").clicked() {
+                    if crate::clickable::pointer(ui.checkbox(&mut d, "")).clicked() {
                         out = Some(ReaderAction::ToggleTask(off + check));
                     }
                     let (job, spans, maths) = inline_job(rest, &shift(&line_links, rest_off), base, theme::palette().text, done);
@@ -1325,6 +1330,7 @@ fn embed(ui: &mut Ui, vault: &Vault, (target, abs, outside): (&Path, &Path, Opti
             FileKind::Drawing => {
                 let h = 240.0;
                 let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::click());
+                let resp = crate::clickable::pointer(resp);
                 let bg = if dark { Color32::from_rgb(18, 18, 18) } else { Color32::WHITE };
                 ui.painter().rect_filled(rect, CornerRadius::same(6), bg);
                 if let Some(scene) = caches.scenes.get(vault, target) {

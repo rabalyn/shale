@@ -5,6 +5,7 @@ use super::anchor::anchor;
 use super::editor::cursor_combo;
 use super::SettingsTab;
 use crate::app::ShaleApp;
+use crate::clickable::ComboBoxPointer;
 use crate::link_preview::{DEFAULT_HEIGHT, DEFAULT_WIDTH, MIN_HEIGHT, MIN_WIDTH};
 use crate::vim::EscCursor;
 use eframe::egui::{self, Ui};
@@ -12,7 +13,7 @@ use eframe::egui::{self, Ui};
 impl ShaleApp {
     pub(super) fn vim_tab(&mut self, ui: &mut Ui, tab: &mut SettingsTab) -> bool {
         let mut changed = false;
-        changed |= anchor(ui, "vim.mode", |ui| ui.checkbox(&mut self.cfg.vim_mode, "Vim-style editing").changed());
+        changed |= anchor(ui, "vim.mode", |ui| crate::clickable::pointer(ui.checkbox(&mut self.cfg.vim_mode, "Vim-style editing")).changed());
         crate::theme::hint(ui, "Notes open in normal mode (h j k l w b, :line, /search, v / V, d y p); i a o to type, Esc back.");
         crate::theme::section(ui, "Cursor");
         ui.add_enabled_ui(self.cfg.vim_mode, |ui| {
@@ -20,9 +21,9 @@ impl ShaleApp {
             anchor(ui, "vim.esc_cursor", |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Esc from insert mode");
-                    egui::ComboBox::from_id_salt("esc-cursor").selected_text(self.cfg.esc_cursor.label()).show_ui(ui, |ui| {
+                    egui::ComboBox::from_id_salt("esc-cursor").selected_text(self.cfg.esc_cursor.label()).show_pointer(ui, |ui| {
                         for e in EscCursor::ALL {
-                            changed |= ui.selectable_value(&mut self.cfg.esc_cursor, e, e.label()).changed();
+                            changed |= crate::clickable::pointer(ui.selectable_value(&mut self.cfg.esc_cursor, e, e.label())).changed();
                         }
                     });
                 });

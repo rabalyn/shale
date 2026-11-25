@@ -99,7 +99,7 @@ pub fn settings_page(ui: &mut Ui, state: &mut UpdateState, cfg: &mut UpdateConfi
     theme::section(ui, "When an update is found");
     crate::settings::anchor::anchor(ui, "updates.mode", |ui| {
         for m in [UpdateMode::Ask, UpdateMode::Off, UpdateMode::Notify, UpdateMode::Download, UpdateMode::Install] {
-            if ui.radio_value(&mut cfg.mode, m, m.label()).changed() {
+            if crate::clickable::pointer(ui.radio_value(&mut cfg.mode, m, m.label())).changed() {
                 changed = true;
                 if m == UpdateMode::Off {
                     state.hidden = true;

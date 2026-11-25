@@ -189,6 +189,7 @@ fn handle_rect(r: Rect, sx: i8, sy: i8) -> Rect {
 /// and fully opaque under the mouse. True when it was clicked.
 fn round_button(ui: &Ui, painter: &Painter, at: Pos2, id: Id, opacity: f32, label: &str, mark: impl FnOnce(&Painter, Pos2, Color32)) -> bool {
     let r = ui.interact(Rect::from_center_size(at, Vec2::splat(BUTTON_R * 2.0)), id, Sense::click_and_drag());
+    let r = crate::clickable::pointer(r);
     r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     let alpha = button_alpha(opacity, r.hovered());
     painter.circle_filled(at, BUTTON_R, Color32::from_black_alpha(alpha));

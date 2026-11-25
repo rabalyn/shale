@@ -18,7 +18,7 @@ impl ShaleApp {
             for kind in Kind::ALL {
                 let mut on = selection.contains(kind);
                 // the last source stays: a search with no source finds nothing
-                let r = ui.add_enabled(!on || selection.toggled(kind).is_some(), egui::Checkbox::new(&mut on, kind.group()));
+                let r = crate::clickable::pointer(ui.add_enabled(!on || selection.toggled(kind).is_some(), egui::Checkbox::new(&mut on, kind.group())));
                 if r.changed() {
                     if let Some(sel) = selection.toggled(kind) {
                         self.cfg.search.set_selection(sel);
@@ -32,7 +32,7 @@ impl ShaleApp {
         let shown = self.cfg.search.display();
         anchor(ui, "search.hit_display", |ui| {
             for display in HitDisplay::ALL {
-                if ui.radio(shown == display, display.label()).clicked() && shown != display {
+                if crate::clickable::pointer(ui.radio(shown == display, display.label())).clicked() && shown != display {
                     self.cfg.search.hit_display = display.id().into();
                     changed = true;
                 }

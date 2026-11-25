@@ -471,6 +471,7 @@ pub fn outline_label(ui: &mut Ui, job: LayoutJob, base: f32) -> egui::Response {
     job.wrap.max_width = ui.available_width();
     let galley = ui.ctx().fonts_mut(|f| f.layout_job(job));
     let (rect, resp) = ui.allocate_exact_size(galley.size(), egui::Sense::click());
+    let resp = crate::clickable::button_like(ui, resp);
     ui.painter().galley(rect.min, galley.clone(), theme::palette().text);
     // a formula is two sections: its first character, and the rest with the room before it
     let sections = &galley.job.sections;
@@ -1331,7 +1332,7 @@ impl NoteEditor {
         let galley = ui.painter().layout_no_wrap(shown, font, theme::palette().muted);
         let rect = Rect::from_min_size(Pos2::new(art.min.x, art.max.y + crate::caption::GAP), galley.size());
         // click and drag, as the player's controls: the text box under it would take a plain click
-        let mut resp = ui.interact(rect, id, egui::Sense::click_and_drag());
+        let mut resp = crate::clickable::pointer(ui.interact(rect, id, egui::Sense::click_and_drag()));
         if outside.is_some() {
             resp = resp.on_hover_text(crate::media::outside::NOT_SYNCED);
         }
@@ -1345,6 +1346,7 @@ impl NoteEditor {
         if let Some(g) = copy {
             let rect = Rect::from_min_size(Pos2::new(art.min.x + room - g.size().x, art.max.y + crate::caption::GAP), g.size());
             let button = ui.interact(rect, id.with("copy-into-vault"), egui::Sense::click_and_drag());
+            let button = crate::clickable::pointer(button);
             button.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::media::outside::COPY_LABEL));
             let button = button.on_hover_text("Copy the file into the vault, in the media folder, and link the copy. Files outside the vault are not synced.");
             if button.hovered() {

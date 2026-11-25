@@ -619,14 +619,14 @@ fn strip(ui: &mut Ui, st: &mut State, data: &Data, acts: &mut Vec<Act>) {
                 ui.add_space(8.0);
                 ui.menu_button("Board", |ui| {
                     let mut every = data.props.every_lane;
-                    if ui.checkbox(&mut every, "A card in every lane it matches").on_hover_text("cards: every-lane. Off: a card is in the first lane that matches it").changed() {
+                    if crate::clickable::pointer(ui.checkbox(&mut every, "A card in every lane it matches")).on_hover_text("cards: every-lane. Off: a card is in the first lane that matches it").changed() {
                         acts.push(Act::SetEveryLane(every));
                     }
                     ui.separator();
                     ui.label(RichText::new("Cards show").color(theme::palette().muted));
                     for chip in Chip::ALL {
                         let mut on = data.props.shows.contains(&chip);
-                        if ui.checkbox(&mut on, chip.word()).changed() {
+                        if crate::clickable::pointer(ui.checkbox(&mut on, chip.word())).changed() {
                             let mut shows = data.props.shows.clone();
                             shows.retain(|c| *c != chip);
                             if on {
@@ -756,7 +756,7 @@ fn header(ui: &mut Ui, i: usize, lane: &LaneView, st: &mut State, data: &Data, e
                 st.rename = None;
             }
         } else {
-            let name = ui.add(egui::Label::new(RichText::new(&lane.name).strong().size(15.0).color(theme::palette().text_strong)).sense(Sense::click()).truncate().selectable(false));
+            let name = crate::clickable::clickable(ui, egui::Label::new(RichText::new(&lane.name).strong().size(15.0).color(theme::palette().text_strong)).truncate().selectable(false));
             if name.double_clicked() {
                 st.open_settings(i);
             }
@@ -844,7 +844,7 @@ fn settings(anchor: &egui::Response, st: &mut State, data: &Data, i: usize, env:
         let r = ui.add(egui::TextEdit::singleline(&mut s.drop).id(ui.scope_id().with("lane-drop")).hint_text(hint).desired_width(f32::INFINITY));
         typing |= r.changed();
         let mut done = lane.done;
-        if ui.checkbox(&mut done, "Cards here are done").changed() {
+        if crate::clickable::pointer(ui.checkbox(&mut done, "Cards here are done")).changed() {
             asked.push(Act::SetDone(i, done));
         }
     });

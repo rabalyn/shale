@@ -4,6 +4,7 @@
 //! where to save, and whether to open the PDF afterwards.
 
 use crate::busy::Busy;
+use crate::clickable::ComboBoxPointer;
 use crate::pdf::book_dialog::{BookExport, PDF_EXPORT};
 use crate::pdf::export::{Background, ExportOptions, Paper};
 use crate::pdf::note_export::NoteExport;
@@ -161,7 +162,7 @@ pub(crate) fn break_before_box(ui: &mut Ui, opts: &mut ExportOptions, enabled: b
     ui.horizontal(|ui| {
         ui.add_enabled_ui(enabled, |ui| {
             let mut on = enabled && opts.break_before > 0;
-            if rec("break-before", ui.checkbox(&mut on, "Start each # heading on a new page")).on_disabled_hover_text("This kind of document has no pages for headings to start").changed() {
+            if rec("break-before", crate::clickable::pointer(ui.checkbox(&mut on, "Start each # heading on a new page"))).on_disabled_hover_text("This kind of document has no pages for headings to start").changed() {
                 opts.break_before = u8::from(on);
             }
             if on {
@@ -176,7 +177,7 @@ pub(crate) fn break_before_box(ui: &mut Ui, opts: &mut ExportOptions, enabled: b
 /// table of contents (`enabled` false: the box is off or the kind of document has none).
 pub(crate) fn toc_break_box(ui: &mut Ui, opts: &mut ExportOptions, enabled: bool, rec: &mut dyn FnMut(&str, egui::Response) -> egui::Response) {
     ui.add_enabled_ui(enabled, |ui| {
-        rec("toc-break", ui.checkbox(&mut opts.toc_break, "Page break after the table of contents")).on_disabled_hover_text("There is no table of contents");
+        rec("toc-break", crate::clickable::pointer(ui.checkbox(&mut opts.toc_break, "Page break after the table of contents"))).on_disabled_hover_text("There is no table of contents");
     });
 }
 
@@ -184,15 +185,15 @@ pub(crate) fn toc_break_box(ui: &mut Ui, opts: &mut ExportOptions, enabled: bool
 /// (a marker line in the note puts a list where it stands instead), and the citation style, which
 /// takes the place of the note's `citation-style:`.
 pub(crate) fn thesis_boxes(ui: &mut Ui, opts: &mut ExportOptions, rec: &mut dyn FnMut(&str, egui::Response) -> egui::Response) {
-    rec("list-of-figures", ui.checkbox(&mut opts.list_of_figures, "List of figures")).on_hover_text("After the contents; a line <!-- shale: list-of-figures --> in the note puts it there instead");
-    rec("list-of-tables", ui.checkbox(&mut opts.list_of_tables, "List of tables")).on_hover_text("After the contents; a line <!-- shale: list-of-tables --> in the note puts it there instead");
+    rec("list-of-figures", crate::clickable::pointer(ui.checkbox(&mut opts.list_of_figures, "List of figures"))).on_hover_text("After the contents; a line <!-- shale: list-of-figures --> in the note puts it there instead");
+    rec("list-of-tables", crate::clickable::pointer(ui.checkbox(&mut opts.list_of_tables, "List of tables"))).on_hover_text("After the contents; a line <!-- shale: list-of-tables --> in the note puts it there instead");
     ui.horizontal(|ui| {
         ui.label("Citation style");
         let shown = opts.citation_style.map_or("From the note", |s| s.name());
-        let combo = egui::ComboBox::from_id_salt("citation-style").selected_text(shown).show_ui(ui, |ui| {
-            rec("citation-style:note", ui.selectable_value(&mut opts.citation_style, None, "From the note"));
+        let combo = egui::ComboBox::from_id_salt("citation-style").selected_text(shown).show_pointer(ui, |ui| {
+            rec("citation-style:note", crate::clickable::pointer(ui.selectable_value(&mut opts.citation_style, None, "From the note")));
             for style in crate::bibliography::format::Style::ALL {
-                rec(&format!("citation-style:{}", style.name()), ui.selectable_value(&mut opts.citation_style, Some(style), style.name()));
+                rec(&format!("citation-style:{}", style.name()), crate::clickable::pointer(ui.selectable_value(&mut opts.citation_style, Some(style), style.name())));
             }
         });
         rec("citation-style", combo.response);
@@ -234,7 +235,7 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
         if let Some(book) = d.book.as_deref_mut() {
             book.show(ui, &mut rec);
         }
-        rec("open-after", ui.checkbox(&mut d.open_after, "Open the PDF after exporting"));
+        rec("open-after", crate::clickable::pointer(ui.checkbox(&mut d.open_after, "Open the PDF after exporting")));
         d.rects = rects;
         return;
     }
@@ -244,7 +245,7 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
         // a note can bring a paper size of its own (`print-paper: 215.9x279.4mm`, PDF-018)
         let custom = d.opts.custom_mm.map(|[w, h]| format!("Custom ({} × {} mm)", trim_mm(w), trim_mm(h)));
         let shown = custom.clone().unwrap_or_else(|| d.opts.paper.label().to_string());
-        let combo = egui::ComboBox::from_id_salt("export-paper").width(250.0).selected_text(shown).show_ui(ui, |ui| {
+        let combo = egui::ComboBox::from_id_salt("export-paper").width(250.0).selected_text(shown).show_pointer(ui, |ui| {
             if let Some(label) = &custom {
                 rec("paper:custom", ui.selectable_label(true, label));
             }
@@ -326,20 +327,20 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
             }
             ui.label(muted("Include"));
             ui.vertical(|ui| {
-                rec("title", ui.checkbox(&mut d.opts.title, if d.book.is_some() { "Title page" } else { "The note's name as a title" }));
-                rec("toc", ui.checkbox(&mut d.opts.toc, "Table of contents"));
+                rec("title", crate::clickable::pointer(ui.checkbox(&mut d.opts.title, if d.book.is_some() { "Title page" } else { "The note's name as a title" })));
+                rec("toc", crate::clickable::pointer(ui.checkbox(&mut d.opts.toc, "Table of contents")));
                 let on = d.opts.toc;
                 toc_break_box(ui, &mut d.opts, on, &mut rec);
                 if d.book.is_some() {
-                    rec("new-page-each", ui.checkbox(&mut d.opts.new_page_each, "Each note on a new page"));
+                    rec("new-page-each", crate::clickable::pointer(ui.checkbox(&mut d.opts.new_page_each, "Each note on a new page")));
                 }
                 if d.book.is_none() {
                     break_before_box(ui, &mut d.opts, true, &mut rec);
                     thesis_boxes(ui, &mut d.opts, &mut rec);
                 }
-                rec("pagenumbers", ui.checkbox(&mut d.opts.page_numbers, "Page numbers"));
-                rec("embeds", ui.checkbox(&mut d.opts.embeds, "Embedded pictures, drawings, PDFs, videos and sounds"));
-                rec("plain-tables", ui.checkbox(&mut d.opts.plain_tables, "Export plain text (tables as raw text lines)"));
+                rec("pagenumbers", crate::clickable::pointer(ui.checkbox(&mut d.opts.page_numbers, "Page numbers")));
+                rec("embeds", crate::clickable::pointer(ui.checkbox(&mut d.opts.embeds, "Embedded pictures, drawings, PDFs, videos and sounds")));
+                rec("plain-tables", crate::clickable::pointer(ui.checkbox(&mut d.opts.plain_tables, "Export plain text (tables as raw text lines)")));
             });
             ui.end_row();
         }
@@ -363,7 +364,7 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
             rec("working", ui.label(muted("Exporting to PDF… Cancel stops it.")));
         });
     }
-    rec("open-after", ui.checkbox(&mut d.open_after, "Open the PDF after exporting"));
+    rec("open-after", crate::clickable::pointer(ui.checkbox(&mut d.open_after, "Open the PDF after exporting")));
     d.rects = rects;
 }
 

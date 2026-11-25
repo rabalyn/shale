@@ -1959,6 +1959,7 @@ impl DrawingDoc {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
                 let (lr, lresp) = ui.allocate_exact_size(Vec2::splat(34.0), Sense::click());
+                let lresp = crate::clickable::pointer(lresp);
                 if self.tool_locked {
                     ui.painter().rect_filled(lr, CornerRadius::same(6), ACCENT.gamma_multiply(0.3));
                 }
@@ -1970,6 +1971,7 @@ impl DrawingDoc {
                 ui.separator();
                 for t in Tool::ALL {
                     let (tr, tresp) = ui.allocate_exact_size(Vec2::new(36.0, 34.0), Sense::click());
+                    let tresp = crate::clickable::pointer(tresp);
                     self.ui_rects.push((format!("tool:{t:?}"), tr));
                     let active = self.tool == t;
                     if active {
