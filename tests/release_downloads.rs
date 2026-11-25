@@ -34,7 +34,7 @@ fn build_024_windows_packs_its_zip_after_the_tests_and_checks_it() {
     let j = job(&wf, "windows");
     assert!(j.contains("ASSET=\"shale-${LABEL}-windows-x86_64.zip\""));
     assert!(j.contains("sha256sum -c \"$ASSET.sha256\""), "the checksum is not checked");
-    assert!(j.contains("cp target/release/shale.exe ") && j.contains("scripts/userguide-dist.sh dist/shale/docs/userguide"), "program or guide missing");
+    assert!(j.contains("cp target/dist/shale.exe ") && j.contains("scripts/userguide-dist.sh dist/shale/docs/userguide"), "program or guide missing");
     assert!(j.contains("assets/icon/shale.svg") && !j.contains(".desktop"), "the icon, and no desktop file");
     assert!(!j.contains("codesign") && !j.contains("notar"), "unsigned");
     assert!(j.contains("shell: bash"), "the packing runs in bash");
@@ -51,7 +51,7 @@ fn build_024_macos_packs_an_ad_hoc_signed_app_in_a_dmg_after_the_tests_and_check
     let j = job(&wf, "macos");
     assert!(j.contains("ASSET=\"shale-${LABEL}-macos-arm64.dmg\""), "the file is a dmg");
     assert!(!j.contains("macos-arm64.tar.gz"), "no tarball any more");
-    assert!(j.contains("sh scripts/macos-app.sh target/release/shale dist \"$VERSION\""), "the bundle comes from the script");
+    assert!(j.contains("sh scripts/macos-app.sh target/dist/shale dist \"$VERSION\""), "the bundle comes from the script");
     assert!(j.contains("shale.icns"), "the icon is checked");
     // signed ad hoc, then verified, before the dmg is made; no developer id, no notarisation
     let sign = j.find("codesign --force --deep --sign - dist/Shale.app").expect("ad-hoc signature");
@@ -234,7 +234,7 @@ fn build_012_github_does_not_repeat_checks_that_ran_before() {
     assert!(!code.contains("cargo clippy") && !code.contains("cargo fmt"), "land.sh and cross-check.sh run these before main");
     let linux = job(&wf, "linux");
     assert!(!linux.contains("cargo test"), "Forgejo's build job tested this commit before the tag was mirrored");
-    assert!(linux.contains("cargo build --release --locked") && linux.contains("name: Package"), "the Linux build and download stay");
+    assert!(linux.contains("cargo build --profile dist --locked") && linux.contains("name: Package"), "the Linux build and download stay");
     assert!(linux.contains("check-release.sh"), "the release check stays");
     for name in ["macos", "windows"] {
         assert!(job(&wf, name).contains("cargo test --release --locked"), "{name} is tested nowhere else");
@@ -261,9 +261,11 @@ fn build_039_main_check_tests_macos_and_windows_on_pushes_of_main() {
     let build = workflow();
     for name in ["macos", "windows"] {
         let (m, b) = (job(&mc, name), job(&build, name));
-        for cmd in ["cargo build --release --locked", "cargo test --release --locked", "RUSTFLAGS: -D warnings", "toolchain: 1.100.0"] {
+        for cmd in ["cargo test --release --locked", "RUSTFLAGS: -D warnings", "toolchain: 1.100.0"] {
             assert!(m.contains(cmd) && b.contains(cmd), "{name}: `{cmd}` differs between main-check.yml and build.yml");
         }
+        // main-check builds the plain release profile, the shipped build is the dist profile (BUILD-044)
+        assert!(m.contains("cargo build --release --locked") && b.contains("cargo build --profile dist --locked"), "{name}: the builds");
         assert!(m.contains("permissions:\n      contents: read"), "{name}: read-only");
     }
     assert!(job(&mc, "macos").contains("brew install ffmpeg") && job(&mc, "windows").contains("choco install ffmpeg"), "the video tests run");
@@ -385,4 +387,22 @@ fn build_016_mirror_needs_every_check_job_of_a_tag_push() {
     for expected in ["build", "unused-deps", "coverage", "env-tests"] {
         assert!(needs.iter().any(|n| n == expected), "mirror must need `{expected}`");
     }
+}
+
+// spec: BUILD-044
+#[test]
+fn build_044_the_shipped_builds_use_the_dist_profile_and_the_bench_build_keeps_its_symbols() {
+    let toml = read("Cargo.toml");
+    assert!(toml.contains("[profile.release]\nstrip = \"symbols\""), "release strips the symbols");
+    assert!(toml.contains("[profile.dist]\ninherits = \"release\"\nlto = \"fat\"\ncodegen-units = 1"), "dist: fat LTO, one codegen unit");
+    assert!(toml.contains("[profile.bench-release]\ninherits = \"release\"\ndebug = \"line-tables-only\"\nstrip = \"none\""), "the benchmark build keeps its symbols");
+    let wf = workflow();
+    for name in ["linux", "macos", "windows"] {
+        let j = job(&wf, name);
+        assert!(j.contains("cargo build --profile dist --locked") && !j.contains("cargo build --release"), "{name} ships the dist profile");
+        assert!(!j.contains("target/release"), "{name} reads the binary from target/dist");
+    }
+    // the benchmark job measures a build with symbols, never the shipped one
+    assert!(job(&wf, "bench").contains("scripts/bench-github.sh") && !job(&wf, "bench").contains("--profile dist"), "bench stays on bench-release");
+    assert!(read("scripts/bench-github.sh").contains("--profile bench-release"));
 }

@@ -213,7 +213,6 @@ fn lay_038_the_dialogs_have_button_cursors_and_hover_looks() {
         SettingsTab::Vim,
         SettingsTab::Appearance,
         SettingsTab::Fonts,
-        SettingsTab::Sync,
         SettingsTab::Publishing,
         SettingsTab::Calendar,
         SettingsTab::Mail,
@@ -315,4 +314,47 @@ fn lay_038_every_allow_listed_site_still_has_a_raw_clickable_label() {
         let src = &all.iter().find(|(f, _)| f == file).unwrap_or_else(|| panic!("{file} is gone: drop it from the allow-list")).1;
         assert!(!raw_clickable_labels(src).is_empty(), "{file} has no raw clickable label any more: drop it from the allow-list");
     }
+}
+
+/// The Sync settings page in a state of its own (LAY-038): what the page shows depends on the
+/// git of the computer, on what the look for git found (a job that ends at an unpredictable
+/// moment and moves the widgets below it) and on the vault, so the test sets all of them and the
+/// page has the same widgets on every machine.
+#[cfg(unix)]
+fn check_sync_page(scene: &str, git_missing: bool, detection: crate::gitsync::managed::Detection, managed_folder: bool, remote: Option<&str>, advanced: bool) {
+    use crate::gitsync::install_ui::ManagedState;
+    use crate::gitsync::managed::{managed_root, GitChoice};
+    use crate::gitsync::sources::{Platform, Sources};
+    check(scene, |w| {
+        let data = w.dir.join("data");
+        if managed_folder {
+            std::fs::create_dir_all(managed_root(&data)).unwrap();
+        }
+        if git_missing {
+            w.app.sync.git = crate::gitsync::Git { program: "/nonexistent/shale-no-git".into(), env: vec![] };
+        }
+        w.app.sync.forget_git_version();
+        let mut managed = ManagedState::for_test(data.clone(), Some(data.join("no-bin").into_os_string()), Sources::real(), Platform::new("linux", "x86_64"));
+        managed.busy = w.app.busy.clone();
+        managed.set_detection(detection, GitChoice::Auto);
+        w.app.sync.managed = managed;
+        w.app.sync.remote = remote.map(String::from);
+        w.app.sync.setup.advanced = advanced;
+        w.app.open_settings(SettingsTab::Sync);
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn lay_038_the_sync_page_has_button_cursors_and_hover_looks_in_each_of_its_states() {
+    use crate::gitsync::managed::{Detection, Installed, ManagedInfo, Origin, Part};
+    let found = |git: &str| Detection { system_git: Some(git.into()), system_lfs: None, managed: None, git_in_use: Some((git.into(), Origin::System)), lfs_in_use: None };
+    let none = Detection { system_git: None, system_lfs: None, managed: None, git_in_use: None, lfs_in_use: None };
+    let part = Part { tag: "v2.56.1".into(), version: "2.56.1".into(), program: "bin/git".into(), path: vec!["bin".into()] };
+    let own = Detection { managed: Some(ManagedInfo { installed: Installed { git: Some(part), lfs: None }, bytes: 1000 }), ..found("git version 2.47.0") };
+    check_sync_page("sync page without git", true, none, false, None, false);
+    check_sync_page("sync page with git, no remote", false, found("git version 2.47.0"), false, None, false);
+    check_sync_page("sync page with git, advanced", false, found("git version 2.47.0"), false, None, true);
+    check_sync_page("sync page with a remote", false, found("git version 2.47.0"), false, Some("https://example.org/notes.git"), true);
+    check_sync_page("sync page with Shale's own git", false, own, true, None, false);
 }
