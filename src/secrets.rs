@@ -82,19 +82,67 @@ pub fn clear_mail_secret(account_id: &str, kind: MailSecret) {
     backend::clear(MAIL, account_id, kind.name());
 }
 
-/// Passwords this run knows to be in the keyring (read from or written to it).
-static IN_KEYRING: Mutex<Option<HashMap<(String, String), Secret>>> = Mutex::new(None);
-/// Accounts whose password the keyring refused this run (e.g. the unlock prompt was cancelled):
-/// not asked again until the password changes, so saving the settings doesn't keep prompting.
-static REFUSED: Mutex<Option<HashMap<(String, String), Secret>>> = Mutex::new(None);
+/// A map of per-run secret state. In the app one process-wide map; in tests one per test thread, so
+/// that a test's `for_file` (which removes the keyring entries of accounts it was not given) cannot
+/// remove an account another test, running at the same time in the same process, has set up
+/// (raba/shale#659).
+type Accounts = Option<HashMap<(String, String), Secret>>;
 
-/// Passwords that came out of the settings file of an earlier version and are still only there.
-/// If the keyring refuses them they must stay in the file: it is the only copy.
-static IN_FILE: Mutex<Option<HashMap<(String, String), Secret>>> = Mutex::new(None);
+#[cfg(not(test))]
+macro_rules! per_run {
+    ($(#[$doc:meta])* $name:ident) => {
+        $(#[$doc])*
+        static $name: PerRun = PerRun(Mutex::new(None));
+    };
+}
+#[cfg(test)]
+macro_rules! per_run {
+    ($(#[$doc:meta])* $name:ident) => {
+        $(#[$doc])*
+        static $name: PerRun = PerRun(|| {
+            thread_local! { static MAP: &'static Mutex<Accounts> = Box::leak(Box::new(Mutex::new(None))); }
+            MAP.with(|m| *m)
+        });
+    };
+}
+
+#[cfg(not(test))]
+struct PerRun(Mutex<Accounts>);
+#[cfg(not(test))]
+impl PerRun {
+    fn lock(&self) -> std::sync::LockResult<std::sync::MutexGuard<'_, Accounts>> {
+        self.0.lock()
+    }
+}
+#[cfg(test)]
+struct PerRun(fn() -> &'static Mutex<Accounts>);
+#[cfg(test)]
+impl PerRun {
+    fn lock(&self) -> std::sync::LockResult<std::sync::MutexGuard<'static, Accounts>> {
+        (self.0)().lock()
+    }
+}
+
+per_run! {
+    /// Passwords this run knows to be in the keyring (read from or written to it).
+    IN_KEYRING
+}
+per_run! {
+    /// Accounts whose password the keyring refused this run (e.g. the unlock prompt was cancelled):
+    /// not asked again until the password changes, so saving the settings doesn't keep prompting.
+    REFUSED
+}
+per_run! {
+    /// Passwords that came out of the settings file of an earlier version and are still only there.
+    /// If the keyring refuses them they must stay in the file: it is the only copy.
+    IN_FILE
+}
 /// Messages for the person, shown by the app as toasts (taken with `take_notices`).
 static NOTICES: Mutex<Vec<String>> = Mutex::new(Vec::new());
-/// Secrets of social accounts the keyring refused: kept for this run only.
-static SOCIAL_SESSION: Mutex<Option<HashMap<(String, String), Secret>>> = Mutex::new(None);
+per_run! {
+    /// Secrets of social accounts the keyring refused: kept for this run only.
+    SOCIAL_SESSION
+}
 
 /// Tests: every notice ever given, which app frames never take (headless app tests running at
 /// the same time empty `NOTICES` with `take_notices`, raba/shale#80).
@@ -112,7 +160,7 @@ pub fn take_notices() -> Vec<String> {
     std::mem::take(&mut *NOTICES.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
-fn known() -> std::sync::MutexGuard<'static, Option<HashMap<(String, String), Secret>>> {
+fn known() -> impl std::ops::DerefMut<Target = Accounts> {
     IN_KEYRING.lock().unwrap_or_else(|e| e.into_inner())
 }
 
