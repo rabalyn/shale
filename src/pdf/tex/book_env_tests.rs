@@ -44,7 +44,7 @@ fn compile_book(kind_id: &str) -> (String, usize, usize, String) {
     let plan = crate::pdf::book::plan(&v, Path::new("")).unwrap();
     let set = the_set();
     let kind = &set.kinds.iter().find(|(i, _)| i == kind_id).unwrap().1;
-    let doc = write_book(&BookRequest { vault: &v, plan: &plan, opts: &ExportOptions::for_note(), set: &set, kind, fields: &fields(&[]) }).unwrap_or_else(|e| panic!("{kind_id}: the writer failed: {e}"));
+    let doc = write_book(&BookRequest { vault: &v, plan: &plan, opts: &ExportOptions::for_note(), set: &set, kind, fields: &fields(&[]), fonts: None }).unwrap_or_else(|e| panic!("{kind_id}: the writer failed: {e}"));
     assert_eq!(doc.files.len(), 2, "{kind_id}: the two pictures of the same name are two files");
     let engine = container_engine(&mounted_root());
     let owned: Vec<(&str, &[u8])> = doc.files.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();

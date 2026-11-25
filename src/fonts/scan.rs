@@ -207,6 +207,18 @@ impl FontScan {
         self.catalogue.clone()
     }
 
+    /// The catalogue for an export of this vault: the vault's own fonts (its `fonts/` and the sets')
+    /// are read here at once when the background scan has not got them yet, since they are a few
+    /// files of the vault and an export must not drop the person's own font because it was started
+    /// early. The system part is whatever the scan has (an export that needs it waits for it, PDF-037).
+    pub fn catalogue_for(&self, vault: &Vault) -> Catalogue {
+        let mut c = self.catalogue.clone();
+        if self.vault_key.as_ref().is_none_or(|(root, _)| *root != vault.root) {
+            c.vault = Arc::new(scan_vault(&vault.root));
+        }
+        c
+    }
+
     /// One step: take in a finished scan, and start one when the fonts are wanted and the system
     /// was never read or the vault's font files differ from the ones last read. `notify`
     /// repaints the window when the job ends.

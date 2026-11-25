@@ -25,7 +25,7 @@ pub(super) fn vault(tag: &str, files: &[(&str, &[u8])]) -> (Vault, PathBuf) {
 fn write_as(v: &Vault, kind_id: &str, opts: &ExportOptions) -> Result<Document, String> {
     let set = tuda_set(SetSettings::default());
     let board = resolve(v, Path::new("Board.md"))?;
-    write_board(&BoardRequest { vault: v, board: &board, opts, set: &set, kind: kind(&set, kind_id), fields: &fields(&[("author", "Ada")]) })
+    write_board(&BoardRequest { vault: v, board: &board, opts, set: &set, kind: kind(&set, kind_id), fields: &fields(&[("author", "Ada")]), fonts: None })
 }
 
 fn tex_of(v: &Vault, kind_id: &str) -> String {

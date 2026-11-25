@@ -520,7 +520,7 @@ fn compile_job(engine: &Engine, set: &SetInfo, doc: &Arc<Document>, cancel: Arc<
         }
         Failure { headline: e.headline.clone(), problems: e.problems.iter().map(|p| p.text()).collect(), log_tail: e.log_tail, document: doc.clone(), set_dir: set.dir.clone(), missing: missing.into() }
     };
-    match sets::compile_with_set(engine, set, "main.tex", &doc.tex, &files, Options { cancel: Some(cancel), ..Options::default() }) {
+    match sets::compile_with_set(engine, set, "main.tex", &doc.tex, &files, Options { cancel: Some(cancel), fonts: doc.fonts.clone(), ..Options::default() }) {
         Ok(out) => {
             let warnings = doc.warnings.iter().cloned().chain(out.output.warnings).collect();
             Ok(Made { pdf: out.output.pdf, placeholder_logo: out.placeholder_logo, warnings })

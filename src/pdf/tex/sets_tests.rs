@@ -113,7 +113,15 @@ fn the_settings_have_defaults_are_checked_and_survive_a_save() {
     assert_eq!(load_settings(&d).unwrap(), SetSettings::default(), "no file: the defaults");
     assert_eq!((SetSettings::default().language, SetSettings::default().accent.as_str(), SetSettings::default().logo), (Language::En, "", None));
     assert_eq!(SetSettings::default().department_logo, None);
-    let s = SetSettings { accent: "9c".into(), language: Language::De, department: "Fachbereich Informatik".into(), author: "Ada Lovelace".into(), logo: Some("tuda_logo.pdf".into()), department_logo: Some("department_logo.png".into()) };
+    let s = SetSettings {
+        accent: "9c".into(),
+        language: Language::De,
+        department: "Fachbereich Informatik".into(),
+        author: "Ada Lovelace".into(),
+        logo: Some("tuda_logo.pdf".into()),
+        department_logo: Some("department_logo.png".into()),
+        ..SetSettings::default()
+    };
     save_settings(&d, &s).unwrap();
     assert_eq!(load_settings(&d).unwrap(), s);
     let text = std::fs::read_to_string(d.join("settings.toml")).unwrap();
@@ -502,4 +510,27 @@ mod fake {
         assert!(e.headline.contains("page.tex could not be written"), "{e}");
         std::fs::remove_dir_all(&v).unwrap();
     }
+}
+
+// spec: TEX-059
+#[test]
+fn tex_059_the_font_keys_are_read_left_out_while_empty_and_kept_by_the_details_of_the_setup() {
+    let v = vault("fontkeys");
+    let d = v.join("set");
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::write(d.join("settings.toml"), "accent = \"9c\"\nfont = \"Libertinus Serif\"\nfont_sans = \"fonts/Heros-Regular.otf\"\n").unwrap();
+    let s = load_settings(&d).unwrap();
+    assert_eq!((s.font.as_str(), s.font_sans.as_str(), s.font_mono.as_str()), ("Libertinus Serif", "fonts/Heros-Regular.otf", ""));
+    let values = s.fonts();
+    assert_eq!((values.text.as_deref(), values.sans.as_deref(), values.mono), (Some("Libertinus Serif"), Some("fonts/Heros-Regular.otf"), None), "an empty key is a missing one");
+    // a file the person saved without fonts has no font lines, so a vault without them is not changed
+    save_settings(&d, &SetSettings { accent: "9c".into(), ..SetSettings::default() }).unwrap();
+    let text = std::fs::read_to_string(d.join("settings.toml")).unwrap();
+    assert!(!text.lines().any(|l| l.starts_with("font")), "{text}");
+    assert!(text.contains("font_sans and font_mono"), "the comment names the keys: {text}");
+    // the keys come back from the file they were saved to
+    let with = SetSettings { accent: "9c".into(), font: "A".into(), font_sans: "B".into(), font_mono: "C".into(), ..SetSettings::default() };
+    save_settings(&d, &with).unwrap();
+    assert_eq!(load_settings(&d).unwrap(), with);
+    std::fs::remove_dir_all(&v).unwrap();
 }

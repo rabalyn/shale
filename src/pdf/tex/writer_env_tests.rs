@@ -4,14 +4,20 @@
 //! must exist, have pages and say what the note says (TEX-008 to TEX-015, TEX-027). A failure
 //! names the kind and the language and carries the document and the end of the log.
 
+use super::book::{write_book, BookRequest};
+use super::compile::Options;
 use super::compile_tests::container_engine;
-use super::pdf_text::{fills_with, links_inside, outline_entries, page_texts, pictures_drawn, squashed};
+use super::fonts::FontInput;
+use super::pdf_text::{fills_with, font_names, links_inside, outline_entries, page_texts, pictures_drawn, squashed};
 use super::sets::*;
 use super::sets_env_tests::{mounted_root, patient, the_set, the_set_with_a_department_logo};
 use super::writer::*;
 use super::writer_tests::{fields, rich_assets, temp_vault, RICH_NOTE};
+use crate::fonts::resolve::Values;
+use crate::fonts::scan::{scan_vault, Catalogue};
 use crate::pdf::export::ExportOptions;
 use std::path::Path;
+use std::sync::Arc;
 
 /// Export a note as a kind of the imported set, in a language, and compile it. Returns the PDF.
 fn export(note: &str, kind_id: &str, lang: Language, given: &[(&str, &str)], toc: bool) -> (Vec<u8>, Document) {
@@ -25,7 +31,7 @@ fn export(note: &str, kind_id: &str, lang: Language, given: &[(&str, &str)], toc
     set.settings.language = lang;
     let kind = &set.kinds.iter().find(|(i, _)| i == kind_id).unwrap().1;
     let opts = ExportOptions { toc, ..ExportOptions::for_note() };
-    let doc = write(&Request { vault: &v, rel: Path::new("Rich sample note.md"), text: note, opts: &opts, set: &set, kind, fields: &fields(given) }).unwrap_or_else(|e| panic!("{what}: the writer failed: {e}"));
+    let doc = write(&Request { vault: &v, rel: Path::new("Rich sample note.md"), text: note, opts: &opts, set: &set, kind, fields: &fields(given), fonts: None }).unwrap_or_else(|e| panic!("{what}: the writer failed: {e}"));
     let engine = container_engine(&mounted_root());
     let owned: Vec<(&str, &[u8])> = doc.files.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();
     let out = compile_with_set(&engine, &set, "main.tex", &doc.tex, &owned, patient()).unwrap_or_else(|e| panic!("{what}: LuaLaTeX failed: {e}\n{}\n--- main.tex:\n{}", e.log_tail, doc.tex));
@@ -133,7 +139,7 @@ fn tex_env_a_note_exported_with_a_department_logo_shows_it_in_every_kind_that_ha
         let (v, dir) = temp_vault("dept", &[("Plan.md", note.as_bytes())]);
         let pictures = |wanted: bool| {
             let opts = ExportOptions { department_logo: wanted, ..ExportOptions::for_note() };
-            let doc = write(&Request { vault: &v, rel: Path::new("Plan.md"), text: note, opts: &opts, set: &set, kind, fields: &fields(&[AUTHOR, &[("reviewer", "Prof. Grace Hopper")]].concat()) })
+            let doc = write(&Request { vault: &v, rel: Path::new("Plan.md"), text: note, opts: &opts, set: &set, kind, fields: &fields(&[AUTHOR, &[("reviewer", "Prof. Grace Hopper")]].concat()), fonts: None })
                 .unwrap_or_else(|e| panic!("kind {id}: the writer failed: {e}"));
             assert_eq!(doc.tex.contains("department_logo"), wanted && !kind.department_logo.is_empty(), "kind {id}: the lines are written only when asked for and when the kind has a place");
             let owned: Vec<(&str, &[u8])> = doc.files.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();
@@ -275,7 +281,7 @@ fn tex_env_media_cards_emoji_tags_and_quotes_compile_with_their_look() {
     let engine = container_engine(&mounted_root());
     for kind_id in ["pub", "thesis", "beamer"] {
         let kind = &set.kinds.iter().find(|(i, _)| i == kind_id).unwrap().1;
-        let doc = write(&Request { vault: &v, rel: Path::new("Plan.md"), text: note, opts: &ExportOptions::for_note(), set: &set, kind, fields: &fields(&[AUTHOR, &[("reviewer", "Prof. A")]].concat()) })
+        let doc = write(&Request { vault: &v, rel: Path::new("Plan.md"), text: note, opts: &ExportOptions::for_note(), set: &set, kind, fields: &fields(&[AUTHOR, &[("reviewer", "Prof. A")]].concat()), fonts: None })
             .unwrap_or_else(|e| panic!("{kind_id}: {e}"));
         let owned: Vec<(&str, &[u8])> = doc.files.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();
         let out = compile_with_set(&engine, &set, "main.tex", &doc.tex, &owned, patient()).unwrap_or_else(|e| panic!("{kind_id}: LuaLaTeX failed: {e}\n{}\n--- main.tex:\n{}", e.log_tail, doc.tex));
@@ -288,5 +294,115 @@ fn tex_env_media_cards_emoji_tags_and_quotes_compile_with_their_look() {
         assert!(fills_with(&pdf, [149, 121, 215]), "{kind_id}: the bar of the quote");
         assert_eq!(pictures_drawn(pdf), 1, "{kind_id}: the cover of the sound");
     }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+// ---------------------------------------------------------------- fonts (TEX-054 to TEX-058, #658)
+
+/// A set with one article kind of KOMA-Script, which the image has: the fonts do not depend on the
+/// templates of a university, so the test needs no download.
+fn font_test_set() -> SetInfo {
+    let kind = KindManifest::parse("name = \"Article\"\nmapping = \"article\"\nclass = \"scrartcl\"\n[[fields]]\nkey = \"title\"\ncommand = \"title\"\nrequired = true\n[[fields]]\nkey = \"author\"\ncommand = \"author\"\n").unwrap();
+    let meta = SetMeta { name: "Fonts".into(), version: None, imported_at: "2026-11-24".into(), source: Source::Local { path: "x".into() }, logo_file: None };
+    SetInfo {
+        id: "fonts".into(),
+        dir: std::env::temp_dir().join("shale-font-test-set-never-read"),
+        meta,
+        settings: SetSettings::default(),
+        kinds: vec![("article".into(), kind)],
+        problems: vec![],
+        logo: LogoStatus::NotNeeded,
+        department_logo: None,
+    }
+}
+
+/// A vault with Liberation Serif in its `fonts/` (the font of `assets/fonts/`, with its licence file beside it),
+/// and the fonts it knows: never the machine's.
+fn font_vault(tag: &str, files: &[(&str, &[u8])]) -> (crate::vault::Vault, std::path::PathBuf, FontInput) {
+    let assets = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/fonts");
+    let (v, dir) = temp_vault(tag, files);
+    std::fs::create_dir_all(dir.join("fonts")).unwrap();
+    for f in ["LiberationSerif-Regular.ttf", "LiberationSerif-LICENSE.txt"] {
+        std::fs::copy(assets.join(f), dir.join("fonts").join(f)).unwrap();
+    }
+    let catalogue = Catalogue { vault: Arc::new(scan_vault(&dir)), system: Arc::default(), system_ready: true, generation: 1 };
+    (v, dir, FontInput { catalogue, vault: Values::default() })
+}
+
+fn compile_font_doc(doc: &Document, set: &SetInfo) -> Result<SetOutput, String> {
+    let engine = container_engine(&mounted_root());
+    let owned: Vec<(&str, &[u8])> = doc.files.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();
+    compile_with_set(&engine, set, "main.tex", &doc.tex, &owned, Options { fonts: doc.fonts.clone(), ..patient() }).map_err(|e| format!("LuaLaTeX failed: {e}\n{}\n--- main.tex:\n{}", e.log_tail, doc.tex))
+}
+
+fn write_font_note(v: &crate::vault::Vault, input: &FontInput, set: &SetInfo, note: &str) -> Document {
+    write(&Request { vault: v, rel: Path::new("Plan.md"), text: note, opts: &ExportOptions::for_note(), set, kind: &set.kinds[0].1, fields: &fields(&[("author", "Ada")]), fonts: Some(input) })
+        .unwrap_or_else(|e| panic!("the writer failed: {e}"))
+}
+
+// spec: TEX-058, TEX-056, TEX-057, BOOK-022
+#[test]
+#[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
+fn tex_env_a_vault_font_is_embedded_a_texlive_font_compiles_and_an_unknown_one_warns_and_retries() {
+    crate::env_lock::hold();
+    let set = font_test_set();
+    let pdf_has = |pdf: &[u8], name: &str| font_names(pdf).iter().any(|n| n.contains(name));
+
+    // a font file of the vault is copied into the work folder and embedded; the emoji are still drawn by their own font
+    let note = "---\nprint-font: Liberation Serif\n---\n# Plan\n\nA text \u{1F4C5} 2026-12-01 with an emoji.\n";
+    let (v, dir, input) = font_vault("font-env-vault", &[("Plan.md", note.as_bytes())]);
+    let doc = write_font_note(&v, &input, &set, note);
+    assert!(doc.tex.contains("\\setmainfont{LiberationSerif-Regular.ttf}[Path=./]"), "{}", doc.tex);
+    let out = compile_font_doc(&doc, &set).unwrap_or_else(|e| panic!("{e}"));
+    let names = font_names(&out.output.pdf);
+    assert!(pdf_has(&out.output.pdf, "LiberationSerif"), "the vault font is embedded: {names:?}");
+    assert!(pdf_has(&out.output.pdf, "Emoji"), "the emoji font is embedded: {names:?}");
+    assert!(squashed(out.output.pdf.clone()).contains('\u{1F4C5}'), "the calendar is a glyph of the emoji font, not a box");
+    assert!(out.output.warnings.is_empty() && doc.warnings.is_empty(), "{:?} {:?}", out.output.warnings, doc.warnings);
+    assert_eq!(out.output.runs, 1);
+
+    // the sans and mono roles too, and without the font the template's own is used
+    let plain = write_font_note(&v, &input, &set, "# Plan\n\ntext\n");
+    let plain_out = compile_font_doc(&plain, &set).unwrap_or_else(|e| panic!("{e}"));
+    assert!(!pdf_has(&plain_out.output.pdf, "LiberationSerif"), "{:?}", font_names(&plain_out.output.pdf));
+
+    // a name that TeX Live knows is passed through
+    let note = "---\nprint-font: XCharter\nprint-font-sans: Roboto\n---\n# Plan\n\ntext\n";
+    let doc = write_font_note(&v, &input, &set, note);
+    assert!(doc.tex.contains("\\setmainfont{XCharter}") && doc.tex.contains("\\setsansfont{Roboto}") && doc.files.is_empty(), "{}", doc.tex);
+    let out = compile_font_doc(&doc, &set).unwrap_or_else(|e| panic!("{e}"));
+    assert!(pdf_has(&out.output.pdf, "XCharter") && out.output.warnings.is_empty(), "{:?} {:?}", font_names(&out.output.pdf), out.output.warnings);
+
+    // an unknown name: the warning, the font of the template and a PDF; the vault font of the other role stays
+    let note = "---\nprint-font: No_Such Font 4U\nprint-font-mono: Liberation Serif\n---\n# Plan\n\n`code` and text\n";
+    let doc = write_font_note(&v, &input, &set, note);
+    let out = compile_font_doc(&doc, &set).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(out.output.warnings, ["the font “No_Such Font 4U” was not found by TeX; the template's font is used"]);
+    assert_eq!(out.output.runs, 2, "the run that stopped, and the one without the font");
+    assert!(out.output.pdf.starts_with(b"%PDF") && !pdf_has(&out.output.pdf, "No_Such"), "{:?}", font_names(&out.output.pdf));
+    assert!(pdf_has(&out.output.pdf, "LiberationSerif"), "the mono font that was found stays: {:?}", font_names(&out.output.pdf));
+
+    // two unknown names: fontspec stops at the first, so each costs a run, and the export is still a PDF with two warnings
+    let note = "---\nprint-font: No Such Text\nprint-font-sans: No Such Sans\n---\n# Plan\n\ntext\n";
+    let doc = write_font_note(&v, &input, &set, note);
+    let out = compile_font_doc(&doc, &set).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(out.output.warnings.len(), 2, "{:?}", out.output.warnings);
+    assert_eq!(out.output.runs, 3);
+    assert!(out.output.pdf.starts_with(b"%PDF"));
+
+    // a book: the top folder note sets one font for all of it, and a chapter's own is ignored
+    let book_files: Vec<(&str, &[u8])> =
+        vec![("Book/index.md", b"---\ntitle: Handbook\nprint-font: Liberation Serif\n---\nIntro text\n"), ("Book/One.md", b"---\nprint-font: XCharter\n---\n# One\nFirst chapter\n"), ("Book/Two.md", b"# Two\nSecond chapter\n")];
+    for (name, bytes) in &book_files {
+        let path = dir.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+    }
+    let vb = crate::vault::Vault::open(&dir).unwrap();
+    let plan = crate::pdf::book::plan(&vb, Path::new("Book")).unwrap();
+    let doc = write_book(&BookRequest { vault: &vb, plan: &plan, opts: &ExportOptions::for_note(), set: &set, kind: &set.kinds[0].1, fields: &fields(&[("author", "Ada")]), fonts: Some(&input) }).unwrap();
+    assert!(doc.warnings.iter().any(|w| w.contains("sets its own font")), "{:?}", doc.warnings);
+    let out = compile_font_doc(&doc, &set).unwrap_or_else(|e| panic!("{e}"));
+    assert!(pdf_has(&out.output.pdf, "LiberationSerif") && !pdf_has(&out.output.pdf, "XCharter"), "{:?}", font_names(&out.output.pdf));
     let _ = std::fs::remove_dir_all(dir);
 }

@@ -192,6 +192,33 @@ pub(super) fn links_inside(pdf: &[u8], prefix: &str) -> usize {
     count(pdf, needle.as_bytes()) + streams(pdf).iter().map(|s| count(s, needle.as_bytes())).sum::<usize>()
 }
 
+/// The names of the fonts a PDF embeds (`/BaseFont /ABCDEF+Name`, without the tag of a subset), in
+/// the file and in its compressed object streams, each once.
+pub(super) fn font_names(pdf: &[u8]) -> Vec<String> {
+    fn scan(hay: &[u8], names: &mut Vec<String>) {
+        let mut rest = hay;
+        while let Some(p) = rest.windows(9).position(|w| w == b"/BaseFont") {
+            rest = &rest[p + 9..];
+            let Some(name) = rest.trim_ascii_start().strip_prefix(b"/") else { continue };
+            let end = name.iter().position(|b| b.is_ascii_whitespace() || b"/<>[]()".contains(b)).unwrap_or(name.len());
+            let name = String::from_utf8_lossy(&name[..end]).into_owned();
+            let name = match name.split_once('+') {
+                Some((tag, base)) if tag.len() == 6 && tag.chars().all(|c| c.is_ascii_uppercase()) => base.to_string(),
+                _ => name,
+            };
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+    }
+    let mut names = Vec::new();
+    scan(pdf, &mut names);
+    for s in streams(pdf) {
+        scan(&s, &mut names);
+    }
+    names
+}
+
 /// Whether a page fills something with this colour: `r g b rg` in its contents, or `c m y k k`
 /// for a class that sets xcolor to CMYK (the leaflet), converted as xcolor does; to 0.002.
 pub(super) fn fills_with(pdf: &[u8], rgb: [u8; 3]) -> bool {
@@ -236,6 +263,17 @@ mod tests {
         assert_eq!(z.last(), Some(&b'\r'));
         let pdf = pdf_with(&z.len().to_string(), &z);
         assert_eq!(streams(&pdf), vec![text.into_bytes()]);
+    }
+
+    // spec: TEX-058
+    #[test]
+    fn the_fonts_of_a_pdf_are_named_without_the_tag_of_a_subset_in_the_file_and_in_its_streams() {
+        let z = miniz_oxide::deflate::compress_to_vec_zlib(b"<< /Type /Font /BaseFont /QRSTUV+LiberationSerif /Subtype /TrueType >>", 6);
+        let mut pdf = pdf_with(&z.len().to_string(), &z);
+        pdf.extend(b"<< /BaseFont /ABCDEF+Noto-Emoji >> << /BaseFont /Plain-Font>> << /BaseFont /ZZZZZZ+Noto-Emoji >> /BaseFont 7");
+        let mut names = font_names(&pdf);
+        names.sort();
+        assert_eq!(names, ["LiberationSerif", "Noto-Emoji", "Plain-Font"], "each once");
     }
 
     // spec: TEX-030

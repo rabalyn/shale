@@ -481,6 +481,47 @@ Each set has its own `settings.toml`, which a re-import keeps:
 | `author` | used for the `author` field of a kind when a note and the dialog give none |
 | `logo` | the logo file in `logo/`, set by **Choose logo…** |
 | `department_logo` | the department logo file in `logo/` (`department_logo.pdf` or `.png`), set by **Choose department logo…** |
+| `font`, `font_sans`, `font_mono` | the fonts of the set for the text, the template's sans and the code: a font family name or a vault path to a font file (see "Fonts of the LaTeX export" below); used when a note names none and before the vault's settings; left out of the file while empty |
+
+## Fonts of the LaTeX export
+
+A template brings its own fonts (the TU Darmstadt classes Roboto and XCharter). If your university, a
+publisher or you require another typeface, name it in the note's properties and the export uses it
+instead of the template's:
+
+| Key | What it sets |
+| --- | --- |
+| `print-font` | the text (the template's main font) |
+| `print-font-sans` | the template's sans: headings, the title, page numbers |
+| `print-font-mono` | code |
+
+```
+---
+print-font: Libertinus Serif
+print-font-mono: fonts/Hack-Regular.ttf
+---
+```
+
+A value is a font **family name** or a **vault path** to one font file (`fonts/Garamond.otf`, or a link
+`[[Garamond.otf]]`). The words `sans`, `serif` and `mono` are the fonts of the built-in export; the LaTeX
+export ignores them and keeps the template's font. The same three keys can be set once for a template set
+(`font`, `font_sans`, `font_mono` in its `settings.toml`, above) or for the whole vault
+(`print_font`, `print_font_sans`, `print_font_mono` in `.shale/settings.json`); the note wins over the set,
+and the set over the vault, each of the three on its own. A folder exported as a book has **one font**: the
+top folder note's (or the set's and the vault's); a chapter note's own `print-font*` is ignored, and the
+export says so.
+
+Where the font comes from, in this order: a file in the vault's `fonts/` folder (`.ttf`, `.otf`, `.ttc`; a
+set's own `templates/tex/<set>/fonts/` after it), a font installed on your computer, then a font of the TeX
+Live that is used. A font file of the vault travels with the export, so the vault stays reproducible on
+another computer; put its licence file beside it. A family gives its regular, bold, italic and bold italic
+faces; a font named by its path gives only that one face. A font whose licence (the embedding flags of the
+file) forbids embedding is not used, with a warning.
+
+A font that TeX cannot find is not a failed export: the export says "the font … was not found by TeX; the
+template's font is used" and the PDF is made with the template's font (the document is compiled once more
+without it, which costs one more run). The emoji of a note are still drawn with their own font, whatever font
+you choose.
 
 ## Adding or changing a document kind: `kinds/<kind>.toml`
 

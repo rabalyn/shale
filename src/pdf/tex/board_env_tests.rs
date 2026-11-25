@@ -55,7 +55,9 @@ fn tex_env_board_031_a_board_compiles_with_real_landscape_pages_parts_and_chapte
     // the thesis kind (tudapub with its own margins) and the report kind (tudapub with geometry's margins)
     for id in ["thesis", "report"] {
         let kind = &set.kinds.iter().find(|(i, _)| i == id).unwrap().1;
-        let doc = write_board(&BoardRequest { vault: &v, board: &resolved, opts: &ExportOptions::for_note(), set: &set, kind, fields: &fields(&[("author", "Ada Lovelace"), ("reviewer", "Prof. Babbage"), ("department", "ce")]) }).unwrap();
+        let doc =
+            write_board(&BoardRequest { vault: &v, board: &resolved, opts: &ExportOptions::for_note(), set: &set, kind, fields: &fields(&[("author", "Ada Lovelace"), ("reviewer", "Prof. Babbage"), ("department", "ce")]), fonts: None })
+                .unwrap();
         let owned: Vec<(&str, &[u8])> = doc.files.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();
         let out = compile_with_set(&engine, &set, "main.tex", &doc.tex, &owned, patient()).unwrap_or_else(|e| panic!("{id}: LuaLaTeX failed: {e}\n{}\n--- main.tex:\n{}", e.log_tail, doc.tex));
         let pdf = out.output.pdf;

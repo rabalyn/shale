@@ -148,9 +148,25 @@ pub struct SetSettings {
     /// The name that fills a kind's `author` field when the note and the dialog give none (the
     /// guided setup asks for it, TEX-017).
     pub author: String,
+    /// The set's own fonts (TEX-059): `font` is the text, `font_sans` the template's sans and
+    /// `font_mono` the code, each a family name or a path to a font file of the vault (PDF-034).
+    /// Used when neither the note nor a book's top folder note names one, before the vault's
+    /// setting. Empty: the template's own font.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub font: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub font_sans: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub font_mono: String,
 }
 
 impl SetSettings {
+    /// The set's font keys as the resolver's values of one entry of its precedence (TEX-059).
+    pub fn fonts(&self) -> crate::fonts::resolve::Values {
+        let clean = |v: &str| Some(v.trim()).filter(|v| !v.is_empty()).map(String::from);
+        crate::fonts::resolve::Values { text: clean(&self.font), sans: clean(&self.font_sans), mono: clean(&self.font_mono) }
+    }
+
     /// An accent that cannot add an option or end a command.
     pub fn check(&self) -> Result<(), String> {
         if self.accent.len() > 20 || !self.accent.chars().all(|c| c.is_ascii_alphanumeric() || "-_".contains(c)) {
@@ -185,7 +201,7 @@ pub fn load_settings(set_dir: &Path) -> Result<SetSettings, String> {
 /// Write `settings.toml` (atomically).
 pub fn save_settings(set_dir: &Path, s: &SetSettings) -> Result<(), String> {
     let text = toml::to_string_pretty(s).map_err(|e| e.to_string())?;
-    let text = format!("# The choices for this template set. Shale keeps this file when the set is updated.\n# accent: the accent colour of the templates (tuda-ci: 0a to 9d); language: en or de;\n# department and author: used when a note does not name one; logo and department_logo: set by\n# \"Choose logo…\" and \"Choose department logo…\".\n{text}");
+    let text = format!("# The choices for this template set. Shale keeps this file when the set is updated.\n# accent: the accent colour of the templates (tuda-ci: 0a to 9d); language: en or de;\n# department and author: used when a note does not name one; logo and department_logo: set by\n# \"Choose logo…\" and \"Choose department logo…\"; font, font_sans and font_mono: the fonts of this\n# set (a family name or a path to a font file of the vault), used when a note names none.\n{text}");
     crate::fsutil::write_atomic(&set_dir.join("settings.toml"), text.as_bytes()).map_err(|e| format!("settings.toml could not be written ({e})"))
 }
 

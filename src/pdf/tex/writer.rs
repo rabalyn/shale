@@ -6,8 +6,10 @@
 
 use super::blocks::{self, Block};
 use super::body::{Body, NEW_PAGE};
+use super::fonts::{self, FontInput, FontOverride, Overrides};
 use super::inline::{anchor, Files, Look};
 use super::sets::{class_and_preamble, emoji_font, tex_escape, Field, KindManifest, Mapping, SetInfo, SetSettings, EMOJI_FONT_FILE};
+use crate::fonts::resolve::Values;
 use crate::markdown;
 use crate::pdf::export::ExportOptions;
 use crate::vault::Vault;
@@ -22,6 +24,9 @@ pub struct Document {
     pub tex: String,
     pub files: Vec<(String, Vec<u8>)>,
     pub warnings: Vec<String>,
+    /// The font lines of the document (TEX-054): the compile takes one out when TeX cannot find
+    /// its font (TEX-057).
+    pub fonts: Vec<FontOverride>,
 }
 
 /// What `main.tex` says when a run of emoji is in the text (TEX-041).
@@ -33,14 +38,15 @@ const QUOTE_BAR: (u8, u8, u8) = (149, 121, 215);
 const QUOTE_INK: (u8, u8, u8) = (85, 85, 85);
 
 impl Document {
-    /// The document of `tex` with the files its embeds needed, and the emoji font (TEX-041) when
-    /// the text has a run of emoji.
-    pub(super) fn new(tex: String, files: Files) -> Self {
+    /// The document of `tex` with the files its embeds needed, the emoji font (TEX-041) when the
+    /// text has a run of emoji, and the font files and warnings of the font overrides (TEX-055).
+    pub(super) fn new(tex: String, files: Files, fonts: Overrides) -> Self {
         let mut list = files.list;
         if tex.contains(EMOJI_COMMAND) {
             list.push((EMOJI_FONT_FILE.to_string(), emoji_font().to_vec()));
         }
-        Document { tex, files: list, warnings: files.warnings }
+        list.extend(fonts.files);
+        Document { tex, files: list, warnings: fonts.warnings.into_iter().chain(files.warnings).collect(), fonts: fonts.fonts }
     }
 }
 
@@ -54,6 +60,8 @@ pub struct Request<'a> {
     pub kind: &'a KindManifest,
     /// The values of the dialog's fields by key; an empty one is as good as none.
     pub fields: &'a BTreeMap<String, String>,
+    /// What the fonts of the document are decided from (PDF-034); none: the template's own fonts.
+    pub fonts: Option<&'a FontInput>,
 }
 
 /// The title of a note: its name without `.md` and without a date prefix (VAULT-025).
@@ -172,7 +180,7 @@ fn bold_line(plain: &str, mark: &str) -> String {
 }
 
 /// The helpers every document has: the packages the body needs, the box of a task, the block of code.
-fn helpers(long_tables: bool, columns: bool, emoji: bool) -> String {
+fn helpers(long_tables: bool, columns: bool, emoji: bool, fonts: &[FontOverride]) -> String {
     let mut t = String::from("\\usepackage{graphicx}\n\\usepackage{xcolor}\n\\usepackage[normalem]{ulem}\n\\usepackage{booktabs}\n\\usepackage{tabularx}\n");
     // math (TEX-029): amsmath for matrices, cases, \\dfrac and \\binom, the symbols and \\mathbb of amssymb
     // unless unicode-math (the template's) has them
@@ -208,10 +216,17 @@ fn helpers(long_tables: bool, columns: bool, emoji: bool) -> String {
         if long_tables { "breakable," } else { "" }
     ));
     // emoji (TEX-041): a run of them is set in the emoji font that travels in the work folder
+    if emoji || !fonts.is_empty() {
+        t.push_str("\\IfPackageLoadedTF{fontspec}{}{\\usepackage{fontspec}}\n");
+    }
     if emoji {
-        t.push_str(&format!(
-            "\\IfPackageLoadedTF{{fontspec}}{{}}{{\\usepackage{{fontspec}}}}\n\\newfontface\\shaleemojiface[Path=./]{{{EMOJI_FONT_FILE}}}\n\\DeclareRobustCommand{{\\shaleemoji}}[1]{{{{\\shaleemojiface #1}}}}\n\\pdfstringdefDisableCommands{{\\renewcommand{{\\shaleemoji}}[1]{{#1}}}}\n"
-        ));
+        t.push_str(&format!("\\newfontface\\shaleemojiface[Path=./]{{{EMOJI_FONT_FILE}}}\n\\DeclareRobustCommand{{\\shaleemoji}}[1]{{{{\\shaleemojiface #1}}}}\n\\pdfstringdefDisableCommands{{\\renewcommand{{\\shaleemoji}}[1]{{#1}}}}\n"));
+    }
+    // the fonts the note, the book, the set or the vault names (TEX-054): last, so they override what
+    // the class and the template set up, and independent of the emoji face above (TEX-056)
+    for f in fonts {
+        t.push_str(&f.line);
+        t.push('\n');
     }
     t
 }
@@ -257,10 +272,10 @@ pub(super) fn drop_title_heading(blocks: &mut Vec<Block>, title: &str) {
 /// The whole document around `main` (what is between `\begin{document}` and `\end{document}`): the
 /// kind's lines (`head`, from `class_and_preamble`), the writer's helpers, the depth of the
 /// contents when there are any, the fields.
-pub(super) fn document(head: String, long_tables: bool, columns: bool, toc_depth: Option<usize>, values: &[(&Field, Option<String>)], main: &str) -> String {
+pub(super) fn document(head: String, long_tables: bool, columns: bool, toc_depth: Option<usize>, values: &[(&Field, Option<String>)], fonts: &[FontOverride], main: &str) -> String {
     let mut tex = head;
     let emoji = main.contains(EMOJI_COMMAND) || values.iter().any(|(_, v)| v.as_ref().is_some_and(|v| v.contains(EMOJI_COMMAND)));
-    tex.push_str(&helpers(long_tables, columns, emoji));
+    tex.push_str(&helpers(long_tables, columns, emoji, fonts));
     if let Some(depth) = toc_depth {
         tex.push_str(&format!("\\setcounter{{tocdepth}}{{{depth}}}\n"));
     }
@@ -382,10 +397,11 @@ fn write_in_shale(req: &Request) -> Result<Document, String> {
     }
 
     let head = class_and_preamble(kind, &req.set.settings, kind.shows_department_logo(req.set, req.opts.department_logo));
-    let tex = document(head, long_tables, family == Family::Poster && kind.columns > 1, toc.then(|| toc_depth(family == Family::Book)), &values, &main);
+    let font_lines = fonts::overrides(req.fonts, fonts::Source { vault, set: req.set, note: Values::of_note(req.text), book: false, chapters: Vec::new() });
+    let tex = document(head, long_tables, family == Family::Poster && kind.columns > 1, toc.then(|| toc_depth(family == Family::Book)), &values, &font_lines.fonts, &main);
     drop(body);
     let files = files.into_inner();
-    Ok(Document::new(tex, files))
+    Ok(Document::new(tex, files, font_lines))
 }
 
 /// Slides: `#` is a section for the navigation and `##` a frame; deeper headings are bold lines

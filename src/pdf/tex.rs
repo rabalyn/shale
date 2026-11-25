@@ -12,6 +12,7 @@ pub mod compile;
 mod ctan;
 pub mod dialog;
 pub mod engine;
+pub mod fonts;
 pub mod import;
 mod inline;
 pub mod install;
@@ -45,6 +46,8 @@ mod engine_tests;
 mod env_tests;
 #[cfg(test)]
 mod export_ui_tests;
+#[cfg(test)]
+mod fonts_tests;
 #[cfg(test)]
 mod import_tests;
 #[cfg(test)]
