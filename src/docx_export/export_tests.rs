@@ -1045,7 +1045,7 @@ fn word(md: &str, toc: bool) -> Option<Made> {
     let dir = temp_dir("filter");
     put_picture(&dir, "a.png");
     put_picture(&dir, "B.PNG");
-    let job = Job { pandoc, root: dir.clone(), text: md.to_string(), look: PrintLook::default(), original: None, toc, timeout: TIMEOUT };
+    let job = Job { pandoc, root: dir.clone(), text: md.to_string(), look: PrintLook::default(), original: None, toc, timeout: TIMEOUT, thesis: None, warnings: vec![] };
     let bytes = export_valid(&job);
     let _ = std::fs::remove_dir_all(&dir);
     Some(Made { document: part(&bytes, "word/document.xml"), styles: part(&bytes, "word/styles.xml"), numbering: part(&bytes, "word/numbering.xml") })
@@ -1224,7 +1224,7 @@ fn pandocs_table_of_contents_is_followed_by_a_page_break_by_default_and_not_when
     let run = |toc: bool, toc_break: bool| {
         let dir = temp_dir("tocbreak-run");
         let look = PrintLook { toc_page_break: Some(toc && toc_break), ..PrintLook::default() };
-        let job = Job { pandoc: pandoc.clone(), root: dir.clone(), text: md.to_string(), look, original: None, toc, timeout: TIMEOUT };
+        let job = Job { pandoc: pandoc.clone(), root: dir.clone(), text: md.to_string(), look, original: None, toc, timeout: TIMEOUT, thesis: None, warnings: vec![] };
         let bytes = export_valid(&job);
         let _ = std::fs::remove_dir_all(&dir);
         part(&bytes, "word/document.xml")
@@ -1370,7 +1370,7 @@ fn fake_pandoc(dir: &Path, body: &str) -> PathBuf {
 }
 
 fn job_with(pandoc: PathBuf, root: &Path, text: &str) -> Job {
-    Job { pandoc, root: root.to_path_buf(), text: text.to_string(), look: PrintLook::default(), original: None, toc: false, timeout: Duration::from_secs(30) }
+    Job { pandoc, root: root.to_path_buf(), text: text.to_string(), look: PrintLook::default(), original: None, toc: false, timeout: Duration::from_secs(30), thesis: None, warnings: vec![] }
 }
 
 // spec: DOCX-002

@@ -3,6 +3,7 @@
 //! weight, file and licence. It runs in a quiet background job of the busy registry and is cached
 //! for the session; the vault's part is read again when its font files change.
 
+use super::field::{family_names, FamilyList};
 use super::licence::{self, Licence};
 use crate::busy::{Busy, Job, Key, LISTED_AFTER};
 use crate::vault::Vault;
@@ -176,6 +177,9 @@ struct Scanned {
 #[derive(Default)]
 pub struct FontScan {
     wanted: bool,
+    /// The person asked to look the fonts up again (CFG-081): the next scan reads the system and
+    /// the vault anew; the old result stays in effect until the new one is in.
+    again: bool,
     /// a test reads these folders instead of the installed fonts
     system_dirs: Option<Vec<PathBuf>>,
     catalogue: Catalogue,
@@ -183,6 +187,8 @@ pub struct FontScan {
     /// (the vault's `uid`, its `generation`, [`signature`]) of the last look at the index
     signed: Option<(u64, u64, u64)>,
     job: Option<Job<Scanned>>,
+    /// The family names of the catalogue, made when a result is taken in (CFG-080, PDF-039).
+    list: FamilyList,
 }
 
 impl FontScan {
@@ -198,9 +204,23 @@ impl FontScan {
         self.wanted = true;
     }
 
+    /// Look the fonts up again (CFG-081), for a font installed while Shale runs. Nothing happens
+    /// while a scan runs: its result is the newest there is.
+    pub fn rescan(&mut self) {
+        self.wanted = true;
+        if self.job.is_none() {
+            self.again = true;
+        }
+    }
+
     /// Whether a scan job runs.
     pub fn running(&self) -> bool {
         self.job.is_some()
+    }
+
+    /// The families the scan found, for the font fields; made once per scan result.
+    pub fn families(&self) -> FamilyList {
+        self.list.clone()
     }
 
     pub fn catalogue(&self) -> Catalogue {
@@ -241,6 +261,7 @@ impl FontScan {
                 self.vault_key = Some((root, sig));
             }
             self.catalogue.generation += 1;
+            self.list = FamilyList { names: Arc::new(family_names(&self.catalogue)), pending: !self.catalogue.system_ready };
         }
         if !self.wanted {
             return;
@@ -256,18 +277,23 @@ impl FontScan {
             };
             (v.root.clone(), sig)
         });
-        let need_system = !self.catalogue.system_ready;
-        let need_vault = vault.is_some() && vault != self.vault_key;
+        let again = std::mem::take(&mut self.again);
+        let need_system = again || !self.catalogue.system_ready;
+        let need_vault = vault.is_some() && (again || vault != self.vault_key);
         if vault.is_none() && self.vault_key.is_some() {
             // another vault closed: its fonts are not this one's
             self.catalogue.vault = Arc::default();
             self.vault_key = None;
             self.catalogue.generation += 1;
+            self.list = FamilyList { names: Arc::new(family_names(&self.catalogue)), pending: !self.catalogue.system_ready };
         }
         if !need_system && !need_vault {
             return;
         }
-        let Some(task) = busy.begin_listed_after(FONT_SCAN, "Looking up fonts...", LISTED_AFTER) else { return };
+        let Some(task) = busy.begin_listed_after(FONT_SCAN, "Looking up fonts...", LISTED_AFTER) else {
+            self.again |= again;
+            return;
+        };
         let dirs = self.system_dirs.clone();
         // a test never reads the machine's fonts (a scan takes seconds and every test that opens an
         // export dialog would start one, in parallel): it reads the folders it names, or none

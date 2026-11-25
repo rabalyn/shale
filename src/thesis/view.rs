@@ -137,7 +137,8 @@ impl View {
             Some(b) => {
                 // a chapter's title for BOOK-006's rule that a first `# Title` says it
                 let titles: Vec<String> = b.notes.iter().zip(texts).map(|((rel, _), text)| plan::property(text, "title").unwrap_or_else(|| crate::vault::title_of(&rel.to_string_lossy()).to_string())).collect();
-                let sources: Vec<Source> = texts.iter().zip(&b.notes).zip(&titles).map(|((text, (_, chapter)), title)| Source { text, role: if *chapter { Role::of_note(text) } else { Role::Other }, title: Some(title.as_str()) }).collect();
+                let sources: Vec<Source> =
+                    texts.iter().zip(&b.notes).zip(&titles).map(|((text, (_, chapter)), title)| Source { text, role: if *chapter { Role::of_note(text) } else { Role::Other }, title: Some(title.as_str()), number: None }).collect();
                 labels::of_book(&sources, Some(top))
             }
             None => labels::of_note(texts.first().copied().unwrap_or("")),
@@ -146,6 +147,25 @@ impl View {
         let style = style.or_else(|| Style::property(top)).unwrap_or_default();
         let formatted = format.then(|| format_document(texts, index, &bib, style, lang));
         View { book, index, labels, lang, captions: Captions::of(top), bib, formatted }
+    }
+
+    /// The views of all the notes of a book as the exports lay it out (BOOK-020, BOOK-021): one
+    /// per source, in reading order, with the same numbers (per chapter, or continuous as the top
+    /// folder note says), the same bibliography and the citations formatted over the whole book, so
+    /// that a numeric style numbers by the first citation in the book and every note lists the same
+    /// entries. `top` is the text of the top folder note; `style` takes the place of its
+    /// `citation-style:` (the export dialog).
+    pub fn of_book(book: Arc<Book>, sources: &[Source], top: &str, bib: Effect, style: Option<Style>) -> Vec<View> {
+        let labels = labels::of_book(sources, Some(top));
+        let lang = Lang::property(top).unwrap_or_default();
+        let style = style.or_else(|| Style::property(top)).unwrap_or_default();
+        let texts: Vec<&str> = sources.iter().map(|s| s.text).collect();
+        let (groups, references) = format_all(&texts, &bib, style, lang);
+        groups
+            .into_iter()
+            .enumerate()
+            .map(|(index, groups)| View { book: Some(book.clone()), index, labels: labels.clone(), lang, captions: Captions::of(top), bib: bib.clone(), formatted: Some(Formatted { groups, references: references.clone() }) })
+            .collect()
     }
 
     /// Whether a bibliography is in effect.
@@ -321,11 +341,9 @@ impl View {
     /// Where the document prints its lists: the bibliography (at its marker, else at the end of
     /// `text`, given as the number of its lines), the list of figures and the list of tables (at
     /// their markers). A list with nothing in it is left out. In a book the lists belong to the
-    /// book, so a note has none.
+    /// book: a note has none, except the bibliography where its marker stands (BOOK-021).
     pub fn blocks(&self, text: &str) -> Vec<Block> {
-        if self.book.is_some() {
-            return Vec::new();
-        }
+        let in_book = self.book.is_some();
         let lines = crate::markdown::lines_with_offsets(text);
         let fenced = crate::markdown::fenced_code_lines(text);
         let front = crate::markdown::front_matter_lines(text);
@@ -335,8 +353,8 @@ impl View {
             Marker::ListOfTables => !self.floats(Kind::Table).is_empty(),
         };
         let marked = |n: usize, l: &str| Marker::of(l.trim()).filter(|_| n >= front && !fenced.get(n).copied().unwrap_or(false));
-        let mut out: Vec<Block> = lines.iter().enumerate().filter_map(|(n, (_, l))| marked(n, l).filter(|m| has(*m)).map(|what| Block { line: n, what })).collect();
-        if has(Marker::Bibliography) && !lines.iter().enumerate().any(|(n, (_, l))| marked(n, l) == Some(Marker::Bibliography)) {
+        let mut out: Vec<Block> = lines.iter().enumerate().filter_map(|(n, (_, l))| marked(n, l).filter(|m| has(*m) && (!in_book || *m == Marker::Bibliography)).map(|what| Block { line: n, what })).collect();
+        if !in_book && has(Marker::Bibliography) && !lines.iter().enumerate().any(|(n, (_, l))| marked(n, l) == Some(Marker::Bibliography)) {
             out.push(Block { line: lines.len(), what: Marker::Bibliography });
         }
         out
@@ -371,6 +389,17 @@ impl View {
 /// Format the citations of a document: all the groups of the notes in reading order go through the
 /// style at once, so that numbers follow the first citation in the document; those of `index` are returned.
 fn format_document(texts: &[&str], index: usize, bib: &Effect, style: Style, lang: Lang) -> Formatted {
+    let (mut groups, references) = format_all(texts, bib, style, lang);
+    let groups = if index < groups.len() { groups.swap_remove(index) } else { Vec::new() };
+    Formatted { groups, references }
+}
+
+/// The bytes of a citation group and its text.
+type Cited = (Range<usize>, String);
+
+/// The citations of every note of a document as the style formats them (the bytes of each group
+/// and its text, a note at a time), and the entries cited in the document.
+fn format_all(texts: &[&str], bib: &Effect, style: Style, lang: Lang) -> (Vec<Vec<Cited>>, Vec<Reference>) {
     let has = |k: &str| bib.has_key(k);
     let all: Vec<Vec<Group>> = texts
         .iter()
@@ -387,9 +416,19 @@ fn format_document(texts: &[&str], index: usize, bib: &Effect, style: Style, lan
     let groups: Vec<&Group> = all.iter().flatten().collect();
     let entry = |k: &str| bib.entry(k).and_then(|e| e.csl.clone());
     let rendered = format::render(&groups, &entry, style, lang);
-    let before: usize = all[..index.min(all.len())].iter().map(Vec::len).sum();
-    let groups = all.get(index).map_or_else(Vec::new, |mine| mine.iter().enumerate().filter_map(|(n, g)| rendered.citations.get(before + n).cloned().flatten().map(|t| (g.range.clone(), t))).collect());
-    Formatted { groups, references: rendered.references }
+    let mut next = 0;
+    let per_note = all
+        .iter()
+        .map(|mine| {
+            mine.iter()
+                .filter_map(|g| {
+                    next += 1;
+                    rendered.citations.get(next - 1).cloned().flatten().map(|t| (g.range.clone(), t))
+                })
+                .collect()
+        })
+        .collect();
+    (per_note, rendered.references)
 }
 
 /// The bibliography in effect that a `.bib` text gives, for the tests of the editor and the reading view.
@@ -443,6 +482,23 @@ mod tests {
         let f = v.formatted.expect("formatted");
         assert_eq!(f.groups.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>(), ["[2]", "[1]"], "b was cited first, in chapter one");
         assert_eq!(f.references.iter().map(|r| r.key.as_str()).collect::<Vec<_>>(), ["b", "a"]);
+    }
+
+    // spec: BOOK-021
+    #[test]
+    fn book_021_every_note_of_a_book_has_the_formatted_citations_of_the_whole_book_and_the_same_references() {
+        let book = Arc::new(Book { dir: PathBuf::from("T"), top: PathBuf::from("T/T.md"), notes: vec![(PathBuf::from("T/one.md"), true), (PathBuf::from("T/two.md"), true)] });
+        let (one, two) = ("# One\n\nSee [@b].\n", "# Two\n\nSee [@a] and [@b].\n");
+        let top = "---\ncitation-style: numeric\n---\n";
+        let sources = [Source { text: one, role: Role::Chapter, title: Some("One"), number: None }, Source { text: two, role: Role::Chapter, title: Some("Two"), number: None }];
+        let views = View::of_book(book, &sources, top, effect_with(BIB), None);
+        let shown = |v: &View| v.formatted.as_ref().unwrap().groups.iter().map(|(_, t)| t.clone()).collect::<Vec<_>>();
+        assert_eq!(shown(&views[0]), ["[1]"]);
+        assert_eq!(shown(&views[1]), ["[2]", "[1]"]);
+        let keys = |v: &View| v.references().iter().map(|r| r.key.clone()).collect::<Vec<_>>();
+        assert_eq!(keys(&views[0]), ["b", "a"]);
+        assert_eq!(keys(&views[0]), keys(&views[1]));
+        assert_eq!(views[1].index, 1);
     }
 
     // spec: EDIT-127

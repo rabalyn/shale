@@ -787,6 +787,72 @@ fn cfg_079_the_vault_tab_has_the_bibliography_setting_and_says_what_the_file_and
     assert!(p.shows(Show::Modals, "The bibliography “gone.bib” is not a file of the vault."));
 }
 
+/// Frames of the Vault tab until the font scan has been taken in.
+fn wait_for_font_scan(p: &mut P) {
+    let start = std::time::Instant::now();
+    while p.app.font_scan.running() || !p.app.font_scan.catalogue().system_ready {
+        p.look(Show::Modals);
+        assert!(start.elapsed() < std::time::Duration::from_secs(40), "the font scan ends");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    p.look(Show::Modals);
+}
+
+// spec: CFG-080, CFG-071
+#[test]
+fn cfg_080_the_vault_tab_has_the_fonts_of_the_exports_and_says_what_each_value_comes_to() {
+    let mut p = P::with_files("settings-export-fonts", &[]);
+    crate::fonts::test_fonts::Spec::new("Vault Serif", 400, false).write(&p.dir, "fonts/VaultSerif.ttf");
+    p.app.vault.as_mut().unwrap().rescan();
+    p.app.open_settings(SettingsTab::Vault);
+    wait_for_font_scan(&mut p);
+    for label in ["Fonts of the exports", "Text", "Headings", "Code", "Look up fonts again"] {
+        assert!(p.shows(Show::Modals, label), "{label} is on the Vault tab");
+    }
+    // nothing is set: no status under the fields; the default is a file of the settings only when it has a value
+    assert!(p.app.vdata.settings.print_font.is_empty() && !p.shows(Show::Modals, "Found: Vault Serif (vault, VaultSerif.ttf, bold and italic imitated)"));
+    // a family of the vault's fonts/: found, and where from
+    p.app.vdata.settings.print_font = "vault serif".into();
+    assert!(p.shows(Show::Modals, "Found: Vault Serif (vault, VaultSerif.ttf, bold and italic imitated)"));
+    // a font file that is not there, and a name that only TeX Live may know
+    p.app.vdata.settings.print_font_mono = "fonts/Nothing.ttf".into();
+    p.app.vdata.settings.print_font_sans = "XCharter".into();
+    assert!(p.shows(Show::Modals, "the vault's `print_font_mono`: the font file “fonts/Nothing.ttf” was not found; using the template's font."));
+    assert!(p.shows(Show::Modals, "“XCharter” is not installed and not in the vault: the built-in PDF will not find it; the LaTeX export asks TeX Live when exporting."));
+    // the words of the built-in PDF
+    p.app.vdata.settings.print_font = "serif".into();
+    assert!(p.shows(Show::Modals, "Liberation Serif (built into the PDF; the LaTeX export keeps the template's font)"));
+    // the families the scan found are the list of every field
+    assert!(p.app.font_scan.families().names.iter().any(|n| n == "Vault Serif"));
+    // the settings search finds it
+    let keymap = crate::keys::Keymap::default();
+    for query in ["fonts of the exports", "print-font", "typeface"] {
+        assert!(crate::settings::registry::search(query, &keymap).iter().any(|h| h.id == "vault.fonts"), "{query}");
+    }
+}
+
+// spec: CFG-081, JOB-040
+#[test]
+fn cfg_081_look_up_fonts_again_reads_the_installed_fonts_anew() {
+    let mut p = P::with_files("settings-fonts-again", &[]);
+    let sys = crate::fonts::test_fonts::folder("settings-fonts-again-sys");
+    crate::fonts::test_fonts::Spec::new("Oldfont", 400, false).write(&sys, "Oldfont.ttf");
+    p.app.font_scan = std::mem::take(&mut p.app.font_scan).with_system_dirs(vec![sys.clone()]);
+    p.app.open_settings(SettingsTab::Vault);
+    wait_for_font_scan(&mut p);
+    assert_eq!(p.app.font_scan.families().names.as_slice(), ["Oldfont"]);
+    // a font installed while Shale runs is not there until the person asks
+    crate::fonts::test_fonts::Spec::new("Newfont", 400, false).write(&sys, "Newfont.ttf");
+    p.look(Show::Modals);
+    assert_eq!(p.app.font_scan.families().names.as_slice(), ["Oldfont"]);
+    let before = p.app.font_scan.catalogue().generation;
+    p.click(Show::Modals, "Look up fonts again");
+    wait_for_font_scan(&mut p);
+    assert_eq!(p.app.font_scan.families().names.as_slice(), ["Newfont", "Oldfont"]);
+    assert_eq!(p.app.font_scan.catalogue().generation, before + 1, "one click, one scan");
+    let _ = std::fs::remove_dir_all(&sys);
+}
+
 // spec: CFG-021
 #[test]
 fn set_002_settings_open_on_a_short_page() {
