@@ -10,6 +10,28 @@ its section from this file.
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-25
+
+### Added
+
+- **A thesis written as a folder of notes is one document, in the built-in PDF and in the LaTeX export**: figures, tables and equations are numbered in reading order per chapter (`3.1`) or continuously as the top note's `float-numbering:` says; a reference such as `@fig:results` finds its label in any chapter and links to it; the one bibliography of the top note (a chapter's own `bibliography:` is ignored with a warning) lists every cited key once, after the last chapter or at `<!-- shale: bibliography -->`, in the contents and the bookmarks; a label used in two notes, a reference no note answers and a key the bibliography lacks are warnings that name the notes (#649).
+- A binary size report: every check tag and release makes `docs/size-report.md` with what occupies the Linux release binary by crate group (a pie chart, the biggest crates, the sections) and a history chart per version (`scripts/size-report.sh`, called by `make-tag.sh` and `make-release.sh`; #697).
+- The user guide has a **Glossary**: every feature from A to Z with one line, its guide note, its default keys (macOS where they differ) and its section in Settings → Keybindings. A test fails when a key action is missing from it (#709).
+- **Keymap view** (#710): the keyboard drawn with the actions on each key, coloured by the kind of action, for Linux, Windows or macOS (yours first) and a layer of modifiers (none, Shift, Ctrl or Cmd, Alt or Option, Ctrl+Shift, Alt+Shift, Ctrl+Alt, any combination; holding the modifiers peeks at their layer). It shows your own keys, the fixed keys of the program (text editing, vim, drawing, zoom), sequences such as `Space f f` on their first key, and hatches the keys the system keeps for itself. Click a key to see every action on it on every layer, and **Change** to go to the row of the action in **Settings → Keybindings** and record its new keys. The view is the **Keymap** tab (the new keyboard icon in the ribbon, after Feeds, or the new definable action **Keymap**, Ctrl+Shift+Y, Cmd+Shift+Y on macOS) and the **Keyboard** switch next to the list in Settings → Keybindings. The screenshot option `--view keymap:<system>:<layer>` makes pictures of it.
+- **Image carousel** (#711): a quote that starts with `> [!carousel] Title` and whose other lines are each one picture (`> ![[layer1.png|Caption]]` or `> ![alt](layer1.png)`) shows its pictures one at a time in the reading view, with the caption, the buttons *Previous image* and *Next image*, a dot per picture and "2 / 6". ← and → go through the pictures while the pointer is over it, and go round at the ends. The note stays plain Markdown (other editors show a quote with all the pictures); the PDF, LaTeX, Word and site exports show every picture in order with its caption. The user guide's *Reading view* note has an example.
+- The keymap as a web page: the keyboard with every shortcut for Linux, Windows and macOS, by layer of modifiers, with the keys you hold shown meanwhile, the list of all shortcuts to filter, and your own `[keybindings]` pasted in. It is online at https://rabalyn.github.io/shale/, every release carries it as `shale-keymap-<version>.html` (works offline), and its data is made from the program's own key tables, so it cannot drift (#712).
+- `docs/KEYMAP.md` shows the keyboard of every system and layer as pictures for GitHub and Forgejo, and the user guide's *Keyboard shortcuts* note shows them as one carousel per system (#712).
+- **Image carousel in the editor** (#713): a `> [!carousel]` quote (#711) is a carousel in the editor too, where it draws embeds: one picture at a time with its caption, the buttons *Previous image* and *Next image*, "2 / 6" and a dot per picture below it, and the lines of the other pictures hidden. With the cursor in the quote its lines are shown as written for editing; ← and → go through the pictures under the pointer while the text does not have the keyboard.
+
+### Changed
+
+- **The vault switcher is always visible**: it is a framed dropdown button at the bottom of the left sidebar, whichever pane is open (Files, Tags, Search), with the vault icon, the name and a ▾, a hover look and the pointing hand. A long name is shortened with … (the tooltip has the full name and the folder). While the left sidebar is hidden, the switcher is an icon at the bottom of the ribbon that opens the same dropdown (#693).
+
+### Fixed
+
+- The Windows build is tested again: a test of the Word export of a thesis wrote paths with `/` where Windows uses `\` (#684).
+- A note without code is no longer laid out again in the editor when a code block of another note or window is coloured in the background (#714).
+
 ## [0.8.0] - 2026-11-25
 
 ### Added
@@ -2139,7 +2161,8 @@ First public version (published before releases were tagged).
 - Ctrl+Shift+F always focuses the search box and selects the previous search.
 - File names with `#` work in links.
 
-[Unreleased]: https://github.com/rabalyn/shale/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/rabalyn/shale/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/rabalyn/shale/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/rabalyn/shale/compare/v0.7.6...v0.8.0
 [0.7.6]: https://github.com/rabalyn/shale/compare/v0.7.5...v0.7.6
 [0.7.5]: https://github.com/rabalyn/shale/compare/v0.7.4...v0.7.5
