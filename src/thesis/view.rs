@@ -7,7 +7,8 @@
 use super::Lang;
 use crate::bibliography::format::{self, Reference, Style};
 use crate::bibliography::Effect;
-use crate::markdown::citations::{self, Group, Target, Token};
+use crate::markdown::citations::{self, Group, Kind, Target, Token};
+use crate::markdown::labels::Entry;
 use crate::markdown::labels::{self, Labels, Role, Source};
 use crate::pdf::book as plan;
 use crate::vault::Vault;
@@ -126,6 +127,12 @@ impl View {
     /// of the top folder note (the open note itself when it stands alone). `format` asks for the
     /// citations to be formatted too (the reading view).
     pub fn build(book: Option<Arc<Book>>, texts: &[&str], index: usize, top: &str, bib: Effect, format: bool) -> View {
+        View::build_styled(book, texts, index, top, bib, format, None)
+    }
+
+    /// [`View::build`] with a citation style that takes the place of the property `citation-style:`
+    /// (the export dialog, ADR-0039 §5).
+    pub fn build_styled(book: Option<Arc<Book>>, texts: &[&str], index: usize, top: &str, bib: Effect, format: bool, style: Option<Style>) -> View {
         let labels = match &book {
             Some(b) => {
                 // a chapter's title for BOOK-006's rule that a first `# Title` says it
@@ -136,7 +143,7 @@ impl View {
             None => labels::of_note(texts.first().copied().unwrap_or("")),
         };
         let lang = Lang::property(top).unwrap_or_default();
-        let style = Style::property(top).unwrap_or_default();
+        let style = style.or_else(|| Style::property(top)).unwrap_or_default();
         let formatted = format.then(|| format_document(texts, index, &bib, style, lang));
         View { book, index, labels, lang, captions: Captions::of(top), bib, formatted }
     }
@@ -157,6 +164,207 @@ impl View {
             items.push((self.labels.get(*kind, id)?, item.suppress_author));
         }
         (!items.is_empty()).then(|| super::group(&items, self.lang))
+    }
+}
+
+/// What stands for a span of the note text in a document that is not edited (the reading view,
+/// the built-in PDF, the site): the thesis syntax of ADR-0039 §1 to §4, resolved.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Shown {
+    /// `{#fig:x}`: it is no text
+    Label,
+    /// a citation group: the text the style gives it, the entries it cites as the style writes them (one to a line) and their keys
+    Citation { text: String, tip: String, keys: Vec<String> },
+    /// a reference group: the word and number, the captions it names and the labels
+    Reference { text: String, tip: String, targets: Vec<(Kind, String)> },
+    /// a group that does not resolve stays as written; the tip says why
+    Broken { tip: String },
+}
+
+/// A span of the note text and what stands for it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Span {
+    pub range: Range<usize>,
+    pub shown: Shown,
+}
+
+/// The lists a document prints where a marker line (`<!-- shale: bibliography -->`) stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Marker {
+    Bibliography,
+    ListOfFigures,
+    ListOfTables,
+}
+
+impl Marker {
+    /// The marker a trimmed line is, if it is one.
+    pub fn of(trimmed: &str) -> Option<Marker> {
+        let inner = trimmed.strip_prefix("<!--")?.strip_suffix("-->")?;
+        match inner.split_whitespace().collect::<Vec<_>>().as_slice() {
+            ["shale:", "bibliography"] => Some(Marker::Bibliography),
+            ["shale:", "list-of-figures"] => Some(Marker::ListOfFigures),
+            ["shale:", "list-of-tables"] => Some(Marker::ListOfTables),
+            _ => None,
+        }
+    }
+}
+
+/// A list the document prints at `line` (the marker's line; the number of lines for the end of the note).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Block {
+    pub line: usize,
+    pub what: Marker,
+}
+
+impl View {
+    /// The spans of the citations, references and labels of `text` (the open note) with what stands
+    /// for each, in the order of the text. A group that has nothing to show (a citation without a
+    /// bibliography) is no span.
+    pub fn spans(&self, text: &str) -> Vec<Span> {
+        let has = |k: &str| self.bib.has_key(k);
+        let formatted = self.formatted.as_ref();
+        let mut out = Vec::new();
+        for token in citations::scan(text, self.bib.in_effect().then_some(&has as &dyn Fn(&str) -> bool)) {
+            match token {
+                Token::Label(l) => out.push(Span { range: l.range, shown: Shown::Label }),
+                Token::Group(g) => {
+                    let range = g.range.clone();
+                    if g.items.iter().any(|i| matches!(i.target, Target::Citation(_))) {
+                        if let Some(shown) = formatted.and_then(|f| f.groups.iter().find(|(r, _)| *r == range)).map(|(_, t)| t.clone()) {
+                            let keys = g.items.iter().filter_map(|i| if let Target::Citation(k) = &i.target { Some(k.clone()) } else { None }).collect();
+                            out.push(Span { range, shown: Shown::Citation { text: shown, tip: self.entries_of(&g), keys } });
+                        } else if let Some(Target::Citation(key)) = g.items.iter().find(|i| i.known == Some(false)).map(|i| &i.target) {
+                            out.push(Span { range, shown: Shown::Broken { tip: format!("“{key}” is not in the bibliography") } });
+                        }
+                    } else if g.items.iter().any(|i| matches!(&i.target, Target::Reference { kind, .. } if kind.is_labelled())) {
+                        match self.reference_text(&g) {
+                            Some(shown) => {
+                                let targets = g.items.iter().filter_map(|i| if let Target::Reference { kind, id } = &i.target { Some((*kind, id.clone())) } else { None }).collect();
+                                out.push(Span { range, shown: Shown::Reference { text: shown, tip: self.captions_of(&g), targets } });
+                            }
+                            None => {
+                                let missing = g.items.iter().find_map(|i| match &i.target {
+                                    Target::Reference { kind, id } if kind.is_labelled() && self.labels.get(*kind, id).is_none() => Some(format!("There is no label {{#{}:{id}}} in the document", kind.prefix())),
+                                    _ => None,
+                                });
+                                out.push(Span { range, shown: Shown::Broken { tip: missing.unwrap_or_default() } });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// The entries a citation group cites, as the style writes them, one to a line.
+    fn entries_of(&self, g: &Group) -> String {
+        let Some(f) = &self.formatted else { return String::new() };
+        g.items
+            .iter()
+            .filter_map(|i| match &i.target {
+                Target::Citation(key) => f.references.iter().find(|r| r.key == *key).map(|r| format!("{}{}", r.label.as_deref().map(|l| format!("{l} ")).unwrap_or_default(), r.text)),
+                Target::Reference { .. } => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The captions of the labels a group of references names, one to a line.
+    fn captions_of(&self, g: &Group) -> String {
+        g.items
+            .iter()
+            .filter_map(|i| match &i.target {
+                Target::Reference { kind, id } => self.labels.get(*kind, id).filter(|e| !e.caption.is_empty()).map(|e| e.caption.clone()),
+                Target::Citation(_) => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The label of `kind` that ends the line `line` of the open note (a figure's embed has it after
+    /// it, a table's caption line has it), if the document has it.
+    pub fn label_on(&self, kind: Kind, line: usize) -> Option<&Entry> {
+        self.labels.entries.iter().find(|e| e.kind == kind && e.source == self.index && e.line == line)
+    }
+
+    /// The number of the display equation on `lines`, in brackets, as it stands at the right margin.
+    pub fn equation_number(&self, lines: &Range<usize>) -> Option<String> {
+        self.labels.entries.iter().find(|e| e.kind == Kind::Equation && e.source == self.index && lines.contains(&e.line)).and_then(|e| e.number.as_ref()).map(|n| format!("({n})"))
+    }
+
+    /// The line of text a figure's or table's caption is: "Figure 3: Results of run 2".
+    pub fn caption_text(&self, entry: &Entry) -> String {
+        let label = super::caption_label(entry, self.lang);
+        if entry.caption.is_empty() {
+            label
+        } else {
+            format!("{label}: {}", entry.caption)
+        }
+    }
+
+    /// Whether the captions of `kind` (figures or tables) stand above (the properties `figure-caption:` and `table-caption:`).
+    pub fn caption_above(&self, kind: Kind) -> bool {
+        (if kind == Kind::Table { self.captions.table } else { self.captions.figure }) == CaptionAt::Above
+    }
+
+    /// The labelled figures or tables of the open note, in the order of the text.
+    pub fn floats(&self, kind: Kind) -> Vec<&Entry> {
+        self.labels.entries.iter().filter(|e| e.kind == kind && e.source == self.index).collect()
+    }
+
+    /// The entries cited in the document, as the style writes them; empty when none is.
+    pub fn references(&self) -> &[Reference] {
+        self.formatted.as_ref().map_or(&[], |f| &f.references)
+    }
+
+    /// Where the document prints its lists: the bibliography (at its marker, else at the end of
+    /// `text`, given as the number of its lines), the list of figures and the list of tables (at
+    /// their markers). A list with nothing in it is left out. In a book the lists belong to the
+    /// book, so a note has none.
+    pub fn blocks(&self, text: &str) -> Vec<Block> {
+        if self.book.is_some() {
+            return Vec::new();
+        }
+        let lines = crate::markdown::lines_with_offsets(text);
+        let fenced = crate::markdown::fenced_code_lines(text);
+        let front = crate::markdown::front_matter_lines(text);
+        let has = |m: Marker| match m {
+            Marker::Bibliography => !self.references().is_empty(),
+            Marker::ListOfFigures => !self.floats(Kind::Figure).is_empty(),
+            Marker::ListOfTables => !self.floats(Kind::Table).is_empty(),
+        };
+        let marked = |n: usize, l: &str| Marker::of(l.trim()).filter(|_| n >= front && !fenced.get(n).copied().unwrap_or(false));
+        let mut out: Vec<Block> = lines.iter().enumerate().filter_map(|(n, (_, l))| marked(n, l).filter(|m| has(*m)).map(|what| Block { line: n, what })).collect();
+        if has(Marker::Bibliography) && !lines.iter().enumerate().any(|(n, (_, l))| marked(n, l) == Some(Marker::Bibliography)) {
+            out.push(Block { line: lines.len(), what: Marker::Bibliography });
+        }
+        out
+    }
+
+    /// What an export of the note has to say about its thesis syntax: a label used twice, a
+    /// reference to a label nobody has, a key the bibliography lacks, citations without a bibliography.
+    pub fn warnings(&self, text: &str) -> Vec<String> {
+        let mut out: Vec<String> = self.bib.messages.clone();
+        out.extend(self.labels.duplicates.iter().filter(|d| d.source == self.index).map(|d| format!("The label {{#{}:{}}} is used twice; the first one counts", d.kind.prefix(), d.id)));
+        out.extend(self.labels.unresolved.iter().filter(|u| u.source == self.index).map(|u| format!("There is no label {{#{0}:{1}}} for the reference @{0}:{1}", u.kind.prefix(), u.id)));
+        let has = |k: &str| self.bib.has_key(k);
+        let mut cited = false;
+        for token in citations::scan(text, self.bib.in_effect().then_some(&has as &dyn Fn(&str) -> bool)) {
+            let Token::Group(g) = token else { continue };
+            for item in &g.items {
+                if let Target::Citation(key) = &item.target {
+                    cited = true;
+                    if item.known == Some(false) {
+                        out.push(format!("The key “{key}” is not in the bibliography"));
+                    }
+                }
+            }
+        }
+        if cited && !self.has_bibliography() {
+            out.push("The note has citations and no bibliography is in effect (bibliography: or the vault's setting), so they are printed as written".to_string());
+        }
+        out
     }
 }
 

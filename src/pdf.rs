@@ -18,3 +18,5 @@ mod book_tests;
 mod compare_tests;
 #[cfg(test)]
 mod export_fonts_tests;
+#[cfg(test)]
+mod thesis_tests;
