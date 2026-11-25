@@ -92,7 +92,7 @@ impl Picker {
     fn poll(&mut self, worker: &mut SearchWorker, vault: &Vault) {
         let stamp = (vault.uid, vault.generation);
         if self.snapshot.as_ref().is_none_or(|(s, _)| *s != stamp) {
-            self.snapshot = Some((stamp, Arc::new(Snapshot::of(vault))));
+            self.snapshot = Some((stamp, vault.search_snapshot()));
             self.asked = None;
             self.shown_for = None;
         }

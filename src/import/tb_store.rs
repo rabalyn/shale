@@ -91,7 +91,7 @@ pub fn parse_link(link: &str) -> Option<MsgRef> {
 
 /// Where Thunderbird keeps its profiles.
 pub fn default_roots() -> Vec<PathBuf> {
-    let Some(home) = dirs::home_dir() else { return vec![] };
+    let Some(home) = crate::userdirs::home_dir() else { return vec![] };
     [".thunderbird", ".var/app/org.mozilla.Thunderbird/.thunderbird", ".var/app/net.thunderbird.Thunderbird/.thunderbird", "snap/thunderbird/common/.thunderbird", ".mozilla-thunderbird"]
         .iter()
         .map(|p| home.join(p))

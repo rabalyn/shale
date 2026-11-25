@@ -22,7 +22,7 @@ pub struct RecoveryState {
 
 /// The default recovery folder.
 pub fn default_root() -> PathBuf {
-    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("recovery")
+    crate::userdirs::data_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("recovery")
 }
 
 /// Keep only the normal parts of a vault-relative path, so a rescue can never leave its folder.

@@ -669,7 +669,7 @@ impl ShaleApp {
             }
             (None, None) => last_vault(&cfg),
         };
-        let default_welcome = dirs::document_dir().or_else(dirs::home_dir).unwrap_or_default().join("Notes");
+        let default_welcome = crate::userdirs::document_dir().or_else(crate::userdirs::home_dir).unwrap_or_default().join("Notes");
         // where the data lives: the user's folders, or temporary ones for tests and screenshots
         let n = NEXT_MAIL_ROOT.fetch_add(1, Ordering::SeqCst);
         // tests: one folder per process (and app; the calendar folder per app too, because a window deletes
@@ -683,7 +683,7 @@ impl ShaleApp {
         } else {
             std::env::temp_dir().join(format!("shale-mail-{tag}-{n}"))
         };
-        let social_dir = if persist { dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("social") } else { std::env::temp_dir().join(format!("shale-social-{tag}")) };
+        let social_dir = if persist { crate::userdirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("social") } else { std::env::temp_dir().join(format!("shale-social-{tag}")) };
         let calendar_dir = if persist { crate::calendar::store::default_local_dir() } else { std::env::temp_dir().join(if screenshot.is_some() { format!("shale-calendars-{tag}") } else { format!("shale-calendars-{tag}-{n}") }) };
         let recovery_root = if persist { crate::recovery::default_root() } else { std::env::temp_dir().join(format!("shale-recovery-{tag}")) };
         if screenshot.is_some() {
@@ -2574,9 +2574,11 @@ impl ShaleApp {
             _ => (false, vec![]),
         };
         let board = d.book.as_ref().is_some_and(|b| b.board);
+        let bibliography = self.vdata.settings.bibliography.clone();
         let installing = self.tex.task.as_ref().filter(|t| t.kind == crate::pdf::tex::settings_ui::TaskKind::Packages).map(|t| t.handle.progress().text());
         let tex = d.tex.as_mut()?;
         tex.status = status;
+        tex.vault_bibliography = !bibliography.trim().is_empty();
         (tex.managed, tex.missing) = (managed, missing);
         tex.needs = if board { crate::pdf::tex::engine::BOARD_NEEDS.iter().map(|n| n.to_string()).collect() } else { vec![] };
         if tex.installing.is_some() && installing.is_none() {
@@ -2636,10 +2638,11 @@ impl ShaleApp {
             }
             Some(book) => {
                 let plan = crate::pdf::book::plan(v, &book.folder)?;
-                crate::pdf::tex::book::write_book(&crate::pdf::tex::book::BookRequest { vault: v, plan: &plan, opts: &d.opts, set, kind, fields: &tex.values, fonts: Some(&fonts) })?
+                let opts = crate::pdf::export::ExportOptions { thesis: crate::pdf::tex::thesis::Choices { default_bibliography: self.vdata.settings.bibliography.clone(), ..d.opts.thesis.clone() }, ..d.opts.clone() };
+                crate::pdf::tex::book::write_book(&crate::pdf::tex::book::BookRequest { vault: v, plan: &plan, opts: &opts, set, kind, fields: &tex.values, fonts: Some(&fonts) })?
             }
             None => {
-                let opts = crate::pdf::export::ExportOptions { column, ..d.opts.clone() };
+                let opts = crate::pdf::export::ExportOptions { column, thesis: crate::pdf::tex::thesis::Choices { default_bibliography: self.vdata.settings.bibliography.clone(), ..d.opts.thesis.clone() }, ..d.opts.clone() };
                 crate::pdf::tex::writer::write(&crate::pdf::tex::writer::Request { vault: v, rel: &d.rel, text: &text, opts: &opts, set, kind, fields: &tex.values, fonts: Some(&fonts) })?
             }
         };
@@ -3603,7 +3606,7 @@ pub(crate) mod tests {
         let (mut app, d) = test_app("usage");
         let ctx = egui::Context::default();
         app.ctx = Some(ctx.clone());
-        assert!(!app.usage.places.pictures.starts_with(dirs::cache_dir().unwrap_or_default()) || app.usage.places.pictures.starts_with(std::env::temp_dir()), "a test never sees the real caches");
+        assert!(!app.usage.places.pictures.starts_with(crate::userdirs::cache_dir().unwrap_or_default()) || app.usage.places.pictures.starts_with(std::env::temp_dir()), "a test never sees the real caches");
         assert_eq!(app.usage.places.post_index, None);
         std::fs::create_dir_all(d.join(".shale")).unwrap();
         crate::fsutil::write_atomic(&crate::import::tagwords::file_in(&d), b"{}").unwrap();

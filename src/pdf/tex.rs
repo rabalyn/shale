@@ -22,6 +22,7 @@ pub mod sets_ui;
 pub mod settings_ui;
 pub mod setup;
 pub mod setup_ui;
+pub mod thesis;
 pub mod writer;
 
 pub use engine::TexConfig;
@@ -68,6 +69,10 @@ mod setup_env_tests;
 mod setup_tests;
 #[cfg(test)]
 mod setup_ui_tests;
+#[cfg(test)]
+mod thesis_env_tests;
+#[cfg(test)]
+mod thesis_tests;
 #[cfg(test)]
 mod writer_env_tests;
 #[cfg(test)]

@@ -405,7 +405,7 @@ fn form_buttons(ui: &mut Ui, go: &str) -> (bool, bool) {
 /// `~/x` as the home folder's `x`.
 pub(super) fn expand_home(text: &str) -> PathBuf {
     let text = text.trim();
-    match (text.strip_prefix("~/"), dirs::home_dir()) {
+    match (text.strip_prefix("~/"), crate::userdirs::home_dir()) {
         (Some(rest), Some(home)) => home.join(rest),
         _ => PathBuf::from(text),
     }

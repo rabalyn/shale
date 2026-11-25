@@ -204,7 +204,7 @@ pub fn private_temp_root(prefix: &str) -> io::Result<PathBuf> {
     // Windows: the system temp folder is the user's own (`%TEMP%` inside the profile, DATA-014)
     #[cfg(not(unix))]
     let who = String::from("user");
-    let base = dirs::runtime_dir().unwrap_or_else(std::env::temp_dir);
+    let base = crate::userdirs::runtime_dir().unwrap_or_else(std::env::temp_dir);
     let dir = base.join(format!("{prefix}-{who}"));
     if let Ok(m) = fs::symlink_metadata(&dir) {
         #[cfg(unix)]
@@ -1290,9 +1290,10 @@ mod tests {
         // administrators have access by default
         // (compared after canonicalize: the temp folder may be spelled with 8.3 short names)
         let real = |p: PathBuf| fs::canonicalize(&p).unwrap_or(p);
-        let home = real(dirs::home_dir().unwrap());
-        assert!(real(dirs::config_dir().unwrap()).starts_with(&home), "the config folder is in the profile");
-        assert!(real(dirs::data_dir().unwrap()).starts_with(&home), "the data folder is in the profile");
+        let (home, config, data) = crate::userdirs::real_folders();
+        let home = real(home);
+        assert!(real(config).starts_with(&home), "the config folder is in the profile");
+        assert!(real(data).starts_with(&home), "the data folder is in the profile");
         assert!(real(std::env::temp_dir()).starts_with(&home), "the temp folder is in the profile");
         for path in [&p, p.parent().unwrap(), &root] {
             let out = std::process::Command::new("icacls").arg(path).output().expect("icacls");

@@ -9,8 +9,9 @@ use super::body::{Body, NEW_PAGE};
 use super::fonts::{self, FontInput, FontOverride, Overrides};
 use super::inline::{anchor, Files, Look};
 use super::sets::{class_and_preamble, emoji_font, tex_escape, Field, KindManifest, Mapping, SetInfo, SetSettings, EMOJI_FONT_FILE};
+use super::thesis::{self, Input, Thesis};
 use crate::fonts::resolve::Values;
-use crate::markdown;
+use crate::markdown::{self, citations, labels};
 use crate::pdf::export::ExportOptions;
 use crate::vault::Vault;
 use std::cell::RefCell;
@@ -269,13 +270,21 @@ pub(super) fn drop_title_heading(blocks: &mut Vec<Block>, title: &str) {
     }
 }
 
+/// What goes into the preamble after the class and the helpers: the font lines (TEX-054) and what
+/// the thesis syntax needs (TEX-044, TEX-045).
+pub(super) struct Setup<'a> {
+    pub fonts: &'a [FontOverride],
+    pub thesis: String,
+}
+
 /// The whole document around `main` (what is between `\begin{document}` and `\end{document}`): the
 /// kind's lines (`head`, from `class_and_preamble`), the writer's helpers, the depth of the
 /// contents when there are any, the fields.
-pub(super) fn document(head: String, long_tables: bool, columns: bool, toc_depth: Option<usize>, values: &[(&Field, Option<String>)], fonts: &[FontOverride], main: &str) -> String {
+pub(super) fn document(head: String, long_tables: bool, columns: bool, toc_depth: Option<usize>, values: &[(&Field, Option<String>)], setup: &Setup, main: &str) -> String {
     let mut tex = head;
     let emoji = main.contains(EMOJI_COMMAND) || values.iter().any(|(_, v)| v.as_ref().is_some_and(|v| v.contains(EMOJI_COMMAND)));
-    tex.push_str(&helpers(long_tables, columns, emoji, fonts));
+    tex.push_str(&helpers(long_tables, columns, emoji, setup.fonts));
+    tex.push_str(&setup.thesis);
     if let Some(depth) = toc_depth {
         tex.push_str(&format!("\\setcounter{{tocdepth}}{{{depth}}}\n"));
     }
@@ -332,9 +341,23 @@ fn write_in_shale(req: &Request) -> Result<Document, String> {
     // every heading that is written has an anchor, so a link to it can go there (TEX-032)
     let anchors: HashSet<usize> = blocks.iter().filter_map(|b| if let Block::Heading { line, .. } = b { Some(*line) } else { None }).collect();
     let files = RefCell::new(Files::default());
-    let look = Look { vault, rel: req.rel, text: req.text, anchors: &anchors, embeds: req.opts.embeds, files: &files, notes: blocks::footnote_texts(req.text), deferred: RefCell::new(None), targets: None };
+    let markers = blocks.iter().filter_map(|b| if let Block::Marker(m) = b { Some(*m) } else { None }).collect();
+    let (bib, bib_messages) = if req.text.contains('@') { thesis::load_bib(vault, Some((req.rel, req.text)), &req.opts.thesis.default_bibliography) } else { (None, Vec::new()) };
+    let thesis = Thesis::new(Input { top: req.text, opts: req.opts, set: req.set, kind, book: false, labels: labels::of_note(req.text), bib, bib_messages, markers });
+    let look = Look {
+        vault,
+        rel: req.rel,
+        text: req.text,
+        anchors: &anchors,
+        embeds: req.opts.embeds,
+        files: &files,
+        notes: blocks::footnote_texts(req.text),
+        deferred: RefCell::new(None),
+        targets: None,
+        thesis: (!citations::is_foreign(req.text)).then_some(&thesis),
+    };
     let body = Body::new(look, req.opts, long_tables);
-    let plain = |t: &str| tex_escape(&markdown::heading_plain(t));
+    let plain = |t: &str| tex_escape(&markdown::heading_plain(&labels::without_labels(t)));
 
     // everything between \begin{document} and \end{document}
     let mut main = String::new();
@@ -345,10 +368,13 @@ fn write_in_shale(req: &Request) -> Result<Document, String> {
             main.push_str("\\maketitle\n");
             if toc {
                 main.push_str("\\tableofcontents\n");
-                // what follows the contents starts a page, which a first page break or heading does not repeat (TEX-040)
-                if req.opts.toc_break {
-                    main.push_str(NEW_PAGE);
-                }
+            }
+            // the lists of figures and tables follow the contents (TEX-047)
+            let lists = thesis.lists();
+            main.push_str(&lists);
+            // what follows the contents starts a page, which a first page break or heading does not repeat (TEX-040)
+            if (toc || !lists.is_empty()) && req.opts.toc_break {
+                main.push_str(NEW_PAGE);
             }
             if family == Family::Poster && kind.columns > 1 {
                 main.push_str(&format!("\\begin{{multicols}}{{{}}}\n", kind.columns));
@@ -363,14 +389,17 @@ fn write_in_shale(req: &Request) -> Result<Document, String> {
                     Block::PageBreak => {}
                     Block::Heading { text, line, .. } => {
                         let level = nested.next().unwrap_or(1);
+                        // the label of the heading (`{#sec:x}`) follows its anchor (TEX-045)
+                        let mark = format!("{}{}", anchor(*line), thesis.heading(text).1);
                         main.push_str(&match family {
-                            Family::Poster => heading(rank_of(false, level), false, false, &plain(text), &anchor(*line)),
-                            f => heading(rank_of(f == Family::Book, level), numbered, toc, &plain(text), &anchor(*line)),
+                            Family::Poster => heading(rank_of(false, level), false, false, &plain(text), &mark),
+                            f => heading(rank_of(f == Family::Book, level), numbered, toc, &plain(text), &mark),
                         });
                     }
                     b => main.push_str(&body.block(b)),
                 }
             }
+            main.push_str(&thesis.bibliography_at_end());
             if family == Family::Poster && kind.columns > 1 {
                 main.push_str("\\end{multicols}\n");
             }
@@ -398,9 +427,12 @@ fn write_in_shale(req: &Request) -> Result<Document, String> {
 
     let head = class_and_preamble(kind, &req.set.settings, kind.shows_department_logo(req.set, req.opts.department_logo));
     let font_lines = fonts::overrides(req.fonts, fonts::Source { vault, set: req.set, note: Values::of_note(req.text), book: false, chapters: Vec::new() });
-    let tex = document(head, long_tables, family == Family::Poster && kind.columns > 1, toc.then(|| toc_depth(family == Family::Book)), &values, &font_lines.fonts, &main);
+    let setup = Setup { fonts: &font_lines.fonts, thesis: thesis.preamble() };
+    let tex = document(head, long_tables, family == Family::Poster && kind.columns > 1, toc.then(|| toc_depth(family == Family::Book)), &values, &setup, &main);
     drop(body);
-    let files = files.into_inner();
+    let mut files = files.into_inner();
+    files.list.extend(thesis.bib_files());
+    files.warnings.extend(thesis.warnings());
     Ok(Document::new(tex, files, font_lines))
 }
 

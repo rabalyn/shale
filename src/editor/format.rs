@@ -111,6 +111,8 @@ pub(crate) struct FormatCache {
     blocks: HashMap<u64, Entry>,
     /// `syntax::generation` when the blocks were last looked at (EDIT-121)
     syntax_gen: u64,
+    /// `theme::generation` when the blocks were formatted: their formats hold the palette's colours (CFG-062)
+    palette_gen: u64,
     /// the last coloured code blocks that were drawn, to show an edited one with the colours of its unchanged lines until the worker is done (EDIT-121)
     coloured: Vec<Coloured>,
     min_block: usize,
@@ -125,6 +127,7 @@ impl Default for FormatCache {
             fonts: None,
             blocks: HashMap::new(),
             syntax_gen: 0,
+            palette_gen: 0,
             coloured: Vec::new(),
             min_block: MIN_BLOCK,
             #[cfg(test)]
@@ -151,6 +154,12 @@ impl FormatCache {
         if self.fonts.as_ref() != Some(fonts) {
             self.blocks.clear();
             self.fonts = Some(fonts.clone());
+        }
+        // the formats hold the colours of the palette: a theme switch formats every block again (CFG-062)
+        let palette_gen = crate::theme::generation();
+        if palette_gen != self.palette_gen {
+            self.blocks.clear();
+            self.palette_gen = palette_gen;
         }
         // a block that was drawn with plain code is formatted again once the worker has finished a block (EDIT-121)
         let syntax_gen = syntax::generation();

@@ -42,7 +42,7 @@ macro_rules! osv {
 
 /// Where the histories of the vaults without `.git` live: `<data folder>/shale/history`.
 pub fn default_root() -> PathBuf {
-    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("history")
+    crate::userdirs::data_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("history")
 }
 
 /// The vault's ID, relative to the vault: 128 random bits in hex, one line. Synced with the vault

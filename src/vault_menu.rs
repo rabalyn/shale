@@ -66,7 +66,7 @@ impl FolderPicker {
     pub fn new(purpose: Purpose) -> Self {
         let start = match &purpose {
             Purpose::Locate(old) => old.ancestors().find(|a| a.is_dir()).map(Path::to_path_buf),
-            _ => dirs::home_dir(),
+            _ => crate::userdirs::home_dir(),
         };
         let mut p = FolderPicker { purpose, text: String::new(), dir: PathBuf::new(), subfolders: Vec::new(), sample: false, error: None, offer_open: false };
         p.go(start.unwrap_or_else(|| PathBuf::from("/")));

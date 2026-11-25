@@ -253,9 +253,10 @@ mod tests {
         k.add(Path::new("/a/notes"));
         k.add(Path::new("/b/notes"));
         k.add(Path::new("/a/other"));
-        // the parent is a folder of the machine, shown as the system writes it
-        assert_eq!(k.label_of(Path::new("/a/notes")), format!("notes ({})", Path::new("/a").display()));
-        assert_eq!(k.label_of(Path::new("/b/notes")), format!("notes ({})", Path::new("/b").display()));
+        // the parent of the stored path, as the system writes it (`add` normalises the separators)
+        let parent = |p: &str| canonical(Path::new(p)).parent().unwrap().display().to_string();
+        assert_eq!(k.label_of(Path::new("/a/notes")), format!("notes ({})", parent("/a/notes")));
+        assert_eq!(k.label_of(Path::new("/b/notes")), format!("notes ({})", parent("/b/notes")));
         assert_eq!(k.label_of(Path::new("/a/other")), "other");
         assert_eq!(k.label_of(Path::new("/c/unlisted")), "unlisted");
     }

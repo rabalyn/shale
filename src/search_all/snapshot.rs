@@ -6,7 +6,7 @@
 //! when the query was asked.
 
 use crate::vault::{FileEntry, NoteIndex, Vault};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 /// One file of the snapshot: its entry and, for a note, the index that holds its text.
 pub struct SnapNote {
@@ -25,6 +25,34 @@ impl Snapshot {
     pub fn of(vault: &Vault) -> Snapshot {
         let notes = vault.files.iter().filter(|f| !vault.is_shadow_copy(&f.rel)).map(|f| SnapNote { file: f.clone(), note: vault.notes.get(&f.rel).cloned() }).collect();
         Snapshot { notes }
+    }
+}
+
+/// The snapshot of a vault, kept for the state of the vault it was made at ([`Vault::search_snapshot`]).
+/// The vault empties it before every change of its notes or files (so that an edit does not copy a
+/// note the cache still holds); the stamp is a second check for a change that did not.
+#[derive(Default)]
+pub struct SnapCache(Mutex<Option<Kept>>);
+
+/// A snapshot and the state of the vault (scans merged, generation) it was made at.
+type Kept = ((u64, u64), Arc<Snapshot>);
+
+impl SnapCache {
+    pub fn get(&self, vault: &Vault) -> Arc<Snapshot> {
+        let stamp = (vault.tree_state().1, vault.generation);
+        let mut held = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        match &*held {
+            Some((at, snap)) if *at == stamp => snap.clone(),
+            _ => {
+                let snap = Arc::new(Snapshot::of(vault));
+                *held = Some((stamp, snap.clone()));
+                snap
+            }
+        }
+    }
+
+    pub fn clear(&mut self) {
+        *self.0.get_mut().unwrap_or_else(PoisonError::into_inner) = None;
     }
 }
 
@@ -74,6 +102,39 @@ mod tests {
         let v = Vault::open(&d).unwrap();
         let rels: Vec<String> = Snapshot::of(&v).notes.iter().map(|n| n.file.rel.to_string_lossy().into_owned()).collect();
         assert_eq!(rels, ["Plan.md"]);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: QUERY-015
+    #[test]
+    fn a_search_of_an_unchanged_vault_reuses_the_snapshot_and_every_change_makes_a_new_one() {
+        let (mut v, d) = vault("cache");
+        let first = v.search_snapshot();
+        assert!(Arc::ptr_eq(&first, &v.search_snapshot()), "nothing changed: the same snapshot");
+        v.set_note_text(Path::new("A.md"), "alpha edited\n");
+        let second = v.search_snapshot();
+        assert!(!Arc::ptr_eq(&first, &second));
+        assert_eq!(note(&second, "A.md").text, "alpha edited\n");
+        assert_eq!(note(&first, "A.md").text, "alpha\n", "the old snapshot keeps its text");
+        // the cache does not hold the note, so the next edit of it is not a copy
+        let held = Arc::strong_count(&v.notes[Path::new("A.md")]);
+        assert_eq!(held, 2, "the vault and the snapshot the test holds");
+        drop(second);
+        v.set_note_text(Path::new("A.md"), "alpha again\n");
+        assert_eq!(note(&v.search_snapshot(), "A.md").text, "alpha again\n");
+        // a rescan that finds a new file
+        std::fs::write(d.join("C.md"), "gamma\n").unwrap();
+        v.rescan();
+        assert!(v.search_snapshot().notes.iter().any(|n| n.file.rel == Path::new("C.md")));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_change_the_vault_did_not_clear_is_caught_by_the_stamp() {
+        let (mut v, d) = vault("stamp");
+        let first = v.search_snapshot();
+        v.generation += 1;
+        assert!(!Arc::ptr_eq(&first, &v.search_snapshot()));
         let _ = std::fs::remove_dir_all(&d);
     }
 }

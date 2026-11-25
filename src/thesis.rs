@@ -64,7 +64,7 @@ impl Lang {
 }
 
 /// The word of a kind in front of its number, in the singular or the plural.
-fn word(kind: Kind, level: Level, plural: bool, lang: Lang) -> &'static str {
+pub(crate) fn word(kind: Kind, level: Level, plural: bool, lang: Lang) -> &'static str {
     match (lang, kind, level, plural) {
         (Lang::De, Kind::Figure, _, false) => "Abbildung",
         (Lang::De, Kind::Figure, _, true) => "Abbildungen",
