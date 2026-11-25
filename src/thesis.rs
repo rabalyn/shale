@@ -5,7 +5,9 @@
 
 pub mod view;
 
-pub use view::{Book, CaptionAt, View};
+pub mod export;
+
+pub use view::{Block, Book, CaptionAt, Marker, Shown, Span, View};
 
 use crate::markdown::citations::Kind;
 use crate::markdown::labels::{Entry, Level};
@@ -40,6 +42,16 @@ impl Lang {
         match self {
             Lang::De => "Literaturverzeichnis",
             Lang::En => "References",
+        }
+    }
+
+    /// The heading of the list of figures or of tables (`Kind::Figure`, `Kind::Table`).
+    pub const fn list_heading(self, kind: Kind) -> &'static str {
+        match (self, kind) {
+            (Lang::De, Kind::Table) => "Tabellenverzeichnis",
+            (Lang::De, _) => "Abbildungsverzeichnis",
+            (Lang::En, Kind::Table) => "List of Tables",
+            (Lang::En, _) => "List of Figures",
         }
     }
 
