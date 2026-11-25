@@ -89,8 +89,8 @@ impl W {
     }
 
     fn open_dropdown(&mut self) {
-        let label = self.hl.text.iter().find(|(t, _)| t.starts_with("▣  ") && t.ends_with("  ▾")).map(|(t, _)| t.clone()).expect("the vault label");
-        self.click_text(&label);
+        let at = self.app.side.vault_button.expect("the vault switcher is drawn").center();
+        self.hl.click(&mut self.app, at, PointerButton::Primary);
         // the folders are looked up on a worker: wait for the answers
         self.settle();
         assert!(matches!(self.app.modal, Some(Modal::Vaults(_))), "the label opens the dropdown");
@@ -115,7 +115,7 @@ impl Drop for W {
 #[test]
 fn vault_030_the_label_opens_a_list_of_the_known_vaults_with_the_open_one_marked() {
     let mut w = W::new("list");
-    assert!(w.painted("▣  one  ▾"), "the label is at the bottom left: {:?}", w.all_text());
+    assert!(w.painted("one") && w.painted("▾"), "the switcher shows the name and the arrow: {:?}", w.all_text());
     w.open_dropdown();
     assert!(w.painted("✓ one") && w.painted("two"), "{:?}", w.all_text());
     assert!(!w.painted("✓ two"), "only the open vault is marked");
@@ -179,7 +179,7 @@ fn vault_032_a_right_click_renames_a_vault_and_the_name_shows_in_the_window() {
     // the open vault's name is the one on the label
     w.app.cfg.vaults.rename(&w.dir("one"), "Main").unwrap();
     w.hl.frames(&mut w.app, 2);
-    assert!(w.painted("▣  Main  ▾"), "{:?}", w.all_text());
+    assert!(w.painted("Main"), "{:?}", w.all_text());
 }
 
 // spec: VAULT-032
@@ -465,8 +465,8 @@ fn vault_038_a_folder_that_has_not_been_looked_up_yet_is_checking_and_cannot_be_
         }
         p.is_dir()
     });
-    let label = "▣  one  ▾";
-    w.click_text(label);
+    let at = switcher(&w).center();
+    w.hl.click(&mut w.app, at, PointerButton::Primary);
     w.hl.frames(&mut w.app, 3);
     assert!(w.painted("checking…"), "{:?}", w.all_text());
     w.click_text("two");
@@ -581,4 +581,103 @@ fn vault_044_the_quick_switcher_has_a_switch_vault_command_that_opens_the_list()
         }
         assert!(!w.painted_start("Switch vault"), "{typed:?}: {:?}", w.all_text());
     }
+}
+
+/// The switcher button of the sidebar or, while the sidebar is hidden, the ribbon icon.
+fn switcher(w: &W) -> egui::Rect {
+    w.app.side.vault_button.expect("the vault switcher is drawn")
+}
+
+// spec: VAULT-030
+#[test]
+fn vault_030_the_switcher_is_at_the_bottom_of_the_left_sidebar_with_every_pane_open() {
+    use crate::app::{LeftPanel, View};
+    let mut w = W::new("always");
+    let mut seen = vec![];
+    for (what, setup) in [
+        ("Files", Box::new(|a: &mut ShaleApp| a.side.left = LeftPanel::Files) as Box<dyn Fn(&mut ShaleApp)>),
+        ("Tags", Box::new(|a: &mut ShaleApp| a.side.left = LeftPanel::Tags)),
+        ("Search", Box::new(|a: &mut ShaleApp| a.side.left = LeftPanel::Search)),
+        ("Mail", Box::new(|a: &mut ShaleApp| a.show_view(View::Mail, false))),
+        ("Calendar", Box::new(|a: &mut ShaleApp| a.show_view(View::Calendar, false))),
+        ("Feeds", Box::new(|a: &mut ShaleApp| a.show_view(View::Social(None), false))),
+    ] {
+        setup(&mut w.app);
+        w.settle();
+        let r = switcher(&w);
+        let screen_bottom = 900.0 - 24.0;
+        assert!(w.app.cfg.show_left && r.min.x > 44.0 && r.max.x < 44.0 + 400.0, "{what}: in the left sidebar: {r:?}");
+        assert!(screen_bottom - r.max.y < 20.0 && r.height() > 20.0, "{what}: at the bottom, above the status bar: {r:?}");
+        assert!(w.painted("one") && w.painted("▾"), "{what}: {:?}", w.all_text());
+        seen.push(r);
+    }
+    assert!(seen.windows(2).all(|p| p[0] == p[1]), "it stays where it is whatever the pane: {seen:?}");
+}
+
+// spec: VAULT-030
+#[test]
+fn vault_030_with_the_left_sidebar_hidden_the_switcher_is_an_icon_of_the_ribbon_that_opens_the_dropdown() {
+    let mut w = W::new("hidden");
+    w.app.cfg.show_left = false;
+    w.settle();
+    let r = switcher(&w);
+    assert!(r.max.x <= 44.0 && r.width() < 40.0, "an icon in the ribbon: {r:?}");
+    w.open_dropdown();
+    assert!(w.painted("✓ one"), "{:?}", w.all_text());
+}
+
+// spec: VAULT-030
+#[test]
+fn vault_030_a_click_opens_the_dropdown_above_the_button_and_enter_does_too() {
+    let mut w = W::new("open");
+    w.open_dropdown();
+    let button = switcher(&w);
+    let window = w.hl.text.iter().find(|(t, _)| t == "Vaults").map(|(_, p)| *p).expect("the dropdown's title");
+    assert!(window.y < button.min.y && window.x < button.max.x + 40.0, "the dropdown opens at the button: {window:?} / {button:?}");
+    w.key(Key::Escape);
+    assert!(w.app.modal.is_none());
+    // by keyboard: Tab to the button, then Enter (Space does the same)
+    let id_rect = |w: &W| w.hl.ctx().memory(|m| m.focused()).and_then(|id| w.hl.ctx().read_response(id)).map(|r| r.rect);
+    crate::ui_test_support::poll_until("the focus reaches the switcher", || {
+        w.key(Key::Tab);
+        id_rect(&w) == Some(switcher(&w))
+    });
+    w.key(Key::Enter);
+    w.settle();
+    assert!(matches!(w.app.modal, Some(Modal::Vaults(_))), "Enter on the focused switcher opens the dropdown");
+}
+
+// spec: VAULT-030, LAY-038
+#[test]
+fn vault_030_the_switcher_shows_the_pointing_hand_and_a_hover_look() {
+    let mut w = W::new("hover");
+    let r = switcher(&w);
+    w.hl.frame(&mut w.app, vec![Event::PointerGone]);
+    let rest = w.hl.frame(&mut w.app, vec![]);
+    let look = |out: &egui::FullOutput| out.shapes.iter().filter(|c| c.shape.visual_bounding_rect().intersects(r)).map(|c| format!("{:?}", c.shape)).collect::<Vec<_>>().join("\n");
+    let before = look(&rest);
+    w.hl.frame(&mut w.app, vec![Event::PointerMoved(r.center())]);
+    let hovered = w.hl.frame(&mut w.app, vec![]);
+    assert_eq!(w.hl.cursor, egui::CursorIcon::PointingHand);
+    assert_ne!(before, look(&hovered), "the button looks different under the pointer");
+}
+
+// spec: VAULT-030
+#[test]
+fn vault_030_a_long_name_is_shortened_and_the_tooltip_has_the_full_name_and_the_folder() {
+    let mut w = W::new("long");
+    let long = "A very long vault name that cannot fit into the narrow sidebar of the window at all";
+    let path = w.dir("one");
+    w.app.cfg.vaults.rename(&canonical(&path), long).unwrap();
+    w.settle();
+    let r = switcher(&w);
+    assert!(r.width() < 400.0, "the button keeps the width of the sidebar: {r:?}");
+    // the tooltip comes after the pointer rests on the button for a moment
+    w.hl.frame(&mut w.app, vec![Event::PointerMoved(r.center())]);
+    crate::ui_test_support::poll_until("the tooltip", || {
+        w.hl.frame(&mut w.app, vec![]);
+        let found = w.hl.text.iter().any(|(t, _)| t.contains(long) && t.contains(&*path.to_string_lossy()));
+        found
+    });
+    assert!(w.hl.text.iter().any(|(t, _)| t.starts_with(long) && t.contains(&*path.to_string_lossy()) && t.contains('\n')), "the name, then the folder: {:?}", w.all_text());
 }

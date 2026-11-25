@@ -23,7 +23,11 @@ Shale keeps settings in two places:
   the same name, the folder they are in follows the name. A vault is added when it has opened
   (also one given with `--vault` or passed on by a second start). The list replaces the old
   "recent" list, which is converted at the first start.
-- The vault name at the bottom left of the window, with a ▾, opens the list of known vaults. Click
+- The vault switcher is the button at the bottom of the left sidebar, whichever pane is open (Files, Tags,
+  Search): the vault icon, the vault name (shortened with … when it is long; hover it for the full
+  name and the folder) and a ▾. Click it, or press Enter or Space when it has the keyboard focus, to open the list of
+  known vaults. While the left sidebar is hidden, the switcher is the vault icon at the bottom of the ribbon, above
+  Settings. Click
   one (or move with the arrows and press Enter) to open it; **Open…** and **Create…** add a
   folder, and Create only takes an empty folder (hidden files such as `.DS_Store` do not count; a
   folder that does not exist yet is made) and can start with sample notes. Right-click a vault and
