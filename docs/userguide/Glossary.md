@@ -93,6 +93,7 @@ the settings themselves in [[Settings reference]].
 |---|---|---|---|
 | Kanban | See Boards ([[Boards]]) | `Space b` | Main views (search and find) |
 | Keybindings | Change, add, clear and reset the keys of every action ([[Keyboard shortcuts]]) | none | all sections |
+| Keymap | The keyboard drawn with every shortcut by system and layer, in a tab of the ribbon (macOS: `Cmd+Shift+Y`) ([[Keyboard shortcuts]]) | `Ctrl+Shift+Y` | Everywhere |
 
 # L
 
