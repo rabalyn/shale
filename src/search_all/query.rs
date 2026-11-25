@@ -703,8 +703,8 @@ mod tests {
         assert_eq!(sh("a NOT b c"), "(and 'a' (not 'b') 'c')", "NOT takes one term, the words after it are another");
         assert_eq!(sh("NOT \"x y\""), "(not 'x y')");
     }
+
     // spec: QUERY-002, QUERY-031
-    // spec: QUERY-002
     #[test]
     fn query_002_fields() {
         assert_eq!(sh("#Todo"), "#todo");
