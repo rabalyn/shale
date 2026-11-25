@@ -324,3 +324,83 @@ fn book_022_a_book_has_one_font_the_top_notes_and_a_chapters_own_is_ignored_with
     assert!(plain.tex.contains("\\setmainfont{Libertinus Serif}") && !plain.tex.contains("\\setmonofont"), "{}", plain.tex);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+// ---------------------------------------------------------------- the thesis syntax of a book (#649)
+
+/// The thesis `Thesis` of the vault as a book of the thesis kind of the tuda set.
+fn thesis_doc(v: &Vault) -> Document {
+    let set = tuda_set(SetSettings::default());
+    let plan = book::plan(v, Path::new("Thesis")).unwrap();
+    write_book(&BookRequest { vault: v, plan: &plan, opts: &ExportOptions::for_note(), set: &set, kind: kind(&set, "thesis"), fields: &fields(&[("author", "Ada")]), fonts: None }).unwrap_or_else(|e| panic!("{e}"))
+}
+
+// spec: BOOK-020
+#[test]
+fn book_020_the_tex_book_counts_per_chapter_or_continuously_and_warns_with_the_names_of_the_notes() {
+    use super::thesis_tests::three_chapters;
+    let (v, dir) = three_chapters("tex-numbers", "", &[]);
+    let d = thesis_doc(&v);
+    // the labels of every chapter and the references across them, in the words of the document
+    for want in [
+        "\\label{sec:one}",
+        "\\label{fig:one}",
+        "\\label{fig:two}",
+        "\\label{tbl:t}",
+        "\\label{eq:e}",
+        "\\label{sec:method}",
+        "\\cref{fig:two}",
+        "\\cref{tbl:t}",
+        "\\cref{sec:three}",
+        "\\cref{fig:one}",
+        "\\labelcref{fig:one}",
+        "\\cref{sec:two}",
+        "\\cref{eq:e}",
+    ] {
+        assert!(d.tex.contains(want), "{want} in\n{}", d.tex);
+    }
+    assert!(!d.tex.contains("\\counterwithout") && !d.tex.contains("\\counterwithin"), "a book class counts per chapter already");
+    assert!(d.warnings.is_empty(), "{:?}", d.warnings);
+    // continuous: the top folder note says so; a chapter's own property says nothing
+    let (v2, dir2) = three_chapters("tex-continuous", "float-numbering: continuous\n", &[("Thesis/Two.md", "---\nfloat-numbering: chapter\ntable-caption: below\n---\n# Two {#sec:two}\n\n![[plot.png|Second plot]]{#fig:two}\n")]);
+    let d = thesis_doc(&v2);
+    assert!(d.tex.contains("\\counterwithout{figure}{chapter}") && d.tex.contains("\\counterwithout{equation}{chapter}"), "{}", d.tex);
+    assert!(!d.tex.contains("\\counterwithin"), "{}", d.tex);
+    assert!(d.tex.contains("\\captionsetup[table]{position=above}") || d.tex.contains("position=top"), "the top note's caption positions: {}", d.tex);
+    // what does not resolve in the book names the note
+    let two = "# Two\n\n![[plot.png|Again]]{#fig:one}\n\nSee @fig:nowhere and [@zzz].\n";
+    let (v3, dir3) = three_chapters("tex-warn", "", &[("Thesis/Two.md", two)]);
+    let w = thesis_doc(&v3).warnings;
+    for want in [
+        "The label {#fig:one} is in “One” and again in “Two”: the first one counts",
+        "The note “Two” refers to @fig:nowhere and no note of the book has {#fig:nowhere}: it stays text",
+        "The key “zzz” cited in the note “Two” is not in the bibliography: the citation stays text",
+    ] {
+        assert!(w.iter().any(|m| m == want), "{want} in {w:?}");
+    }
+    for d in [dir, dir2, dir3] {
+        let _ = std::fs::remove_dir_all(d);
+    }
+}
+
+// spec: BOOK-021
+#[test]
+fn book_021_the_tex_book_prints_one_bibliography_and_a_chapters_own_is_a_warning() {
+    use super::thesis_tests::three_chapters;
+    let (v, dir) = three_chapters("tex-bib", "citation-style: numeric\n", &[("Thesis/Three.md", "---\nbibliography: other.bib\n---\n# Three {#sec:three}\n\nCited [@lamport1994].\n")]);
+    let d = thesis_doc(&v);
+    assert_eq!(d.tex.matches("\\printbibliography").count(), 1, "{}", d.tex);
+    assert_eq!(d.tex.matches("\\addbibresource{").count(), 1, "{}", d.tex);
+    assert_eq!(d.files.iter().filter(|(n, _)| n.ends_with(".bib")).count(), 1, "the top note's file only");
+    assert_eq!(d.tex.matches("\\autocite{lamport1994}").count(), 2, "a key cited in two chapters is written in both and printed once");
+    assert!(d.tex.contains("\\autocite{knuth1984}"), "the top note's citation: {}", d.tex);
+    assert!(d.warnings.iter().any(|w| w == "The note “Three” names a bibliography of its own: a book has one, the top folder note's or the vault's default, so it is ignored"), "{:?}", d.warnings);
+    // the marker of a chapter puts it there, once
+    let two = "# Two {#sec:two}\n\nBack to [@lamport1994].\n\n<!-- shale: bibliography -->\n\nAfter.\n";
+    let (v2, dir2) = three_chapters("tex-marker", "", &[("Thesis/Two.md", two)]);
+    let d = thesis_doc(&v2);
+    assert_eq!(d.tex.matches("\\printbibliography").count(), 1, "{}", d.tex);
+    assert!(d.tex.find("\\printbibliography").unwrap() < d.tex.find("After.").unwrap(), "at the marker: {}", d.tex);
+    for d in [dir, dir2] {
+        let _ = std::fs::remove_dir_all(d);
+    }
+}

@@ -34,6 +34,30 @@ pub(super) fn sample_vault(tag: &str) -> (crate::vault::Vault, std::path::PathBu
     (crate::vault::Vault::open(&dir).unwrap(), dir)
 }
 
+/// A thesis of three chapters (BOOK-020, BOOK-021): the top folder note has the book's properties
+/// and cites `knuth1984`; every chapter has a figure and refers to the others; chapter three has a
+/// table, an equation and a section; `lamport1994` is cited in two chapters. `extra` replaces files.
+pub(super) fn three_chapters(tag: &str, top_properties: &str, extra: &[(&str, &str)]) -> (crate::vault::Vault, std::path::PathBuf) {
+    let top = format!("---\ntitle: Thesis\norder: [One, Two, Three]\nbibliography: refs.bib\nlanguage: en\n{top_properties}---\nThe book starts with [@knuth1984].\n");
+    let one = "# One {#sec:one}\n\n![[plot.png|First plot]]{#fig:one}\n\nSee @fig:two, and @tbl:t of @sec:three. Cited [@lamport1994].\n";
+    let two = "# Two {#sec:two}\n\n![[plot.png|Second plot]]{#fig:two}\n\nBack to @fig:one and [-@fig:one], as [@lamport1994; @knuth1984] say.\n";
+    let three = "# Three {#sec:three}\n\n## Method {#sec:method}\n\n| x | y |\n|---|---|\n| cellone | celltwo |\n: Runs of the day {#tbl:t}\n\n$$ E = mc^2 $$ {#eq:e}\n\nBack in @sec:two, @eq:e and @fig:two. See @sec:method.\n";
+    let png = plot();
+    let mut files: Vec<(&str, &[u8])> =
+        vec![("refs.bib", BIB.as_bytes()), ("plot.png", &png), ("Thesis/Thesis.md", top.as_bytes()), ("Thesis/One.md", one.as_bytes()), ("Thesis/Two.md", two.as_bytes()), ("Thesis/Three.md", three.as_bytes())];
+    for (name, text) in extra {
+        files.retain(|(n, _)| n != name);
+        files.push((name, text.as_bytes()));
+    }
+    let (_, dir) = temp_vault(tag, &[]);
+    for (name, bytes) in files {
+        let path = dir.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+    }
+    (crate::vault::Vault::open(&dir).unwrap(), dir)
+}
+
 /// The sample thesis as a kind of the tuda set.
 pub(super) fn sample_as(kind_id: &str, opts: &ExportOptions, settings: SetSettings) -> Document {
     sample_in(&tuda_set(settings), kind_id, opts)

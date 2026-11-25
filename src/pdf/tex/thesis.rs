@@ -92,6 +92,8 @@ pub struct Thesis {
     figure_caption: CaptionAt,
     table_caption: CaptionAt,
     numbering: Numbering,
+    /// the document is a book: what does not resolve is said by [`Thesis::book_warnings`], naming the notes
+    book: bool,
     /// a chapter class (`\chapter`) rather than an article class
     chapters: bool,
     /// the kind has floats and sections to label: the article and the book family
@@ -153,11 +155,14 @@ impl Thesis {
         let (k, s) = (i.kind, &i.set.settings);
         let numbering = Numbering::property(i.top).unwrap_or(if i.book { Numbering::PerChapter } else { Numbering::Continuous });
         let mut warnings = i.bib_messages;
-        for d in &i.labels.duplicates {
-            warnings.push(format!("The label {{#{}:{}}} is used twice: the first one counts", d.kind.prefix(), d.id));
-        }
-        for u in i.labels.unresolved.iter().filter(|u| u.kind.is_labelled()) {
-            warnings.push(format!("The reference @{}:{} has no label: it stays text", u.kind.prefix(), u.id));
+        // a book says it with the names of its notes (BOOK-020, `Thesis::book_warnings`)
+        if !i.book {
+            for d in &i.labels.duplicates {
+                warnings.push(format!("The label {{#{}:{}}} is used twice: the first one counts", d.kind.prefix(), d.id));
+            }
+            for u in i.labels.unresolved.iter().filter(|u| u.kind.is_labelled()) {
+                warnings.push(format!("The reference @{}:{} has no label: it stays text", u.kind.prefix(), u.id));
+            }
         }
         Thesis {
             lang,
@@ -165,6 +170,7 @@ impl Thesis {
             figure_caption: caption_at(i.top, "figure-caption", &k.figure_caption, &s.figure_caption, CaptionAt::Below),
             table_caption: caption_at(i.top, "table-caption", &k.table_caption, &s.table_caption, CaptionAt::Above),
             numbering,
+            book: i.book,
             chapters: k.mapping == Mapping::Book,
             floats: matches!(k.mapping, Mapping::Article | Mapping::Book),
             labels: i.labels,
@@ -199,6 +205,14 @@ impl Thesis {
         if !w.contains(&text) {
             w.push(text);
         }
+    }
+
+    /// What a book has to say about the thesis syntax of its notes (BOOK-020, BOOK-021), naming
+    /// them: a label in two notes, a reference no note answers, a key the bibliography lacks, a
+    /// chapter with a bibliography of its own. The messages of the bibliography files are in [`Thesis::warnings`].
+    pub fn book_warnings(&self, notes: &[crate::thesis::book::Note]) -> Vec<String> {
+        let none = Effect::default();
+        crate::thesis::book::warnings(notes, &self.labels, self.bib.as_ref().map_or(&none, |b| &b.effect))
     }
 
     /// What the export has to say about the thesis syntax.
@@ -285,13 +299,17 @@ impl Thesis {
 
     fn cite(&self, g: &Group) -> Option<String> {
         if self.bib.is_none() {
-            self.warn("The text has citations and no bibliography is in effect: they are written as text (add the property bibliography: to the note)".into());
+            if !self.book {
+                self.warn("The text has citations and no bibliography is in effect: they are written as text (add the property bibliography: to the note)".into());
+            }
             return None;
         }
         let keys: Vec<(&citations::Item, &str)> = g.items.iter().filter_map(|i| if let Target::Citation(k) = &i.target { Some((i, k.as_str())) } else { None }).collect();
         let unknown: Vec<&str> = keys.iter().filter(|(i, _)| i.known != Some(true)).map(|(_, k)| *k).collect();
         if !unknown.is_empty() {
-            self.warn(format!("The bibliography has no entry for {}: the citation is written as text", unknown.join(", ")));
+            if !self.book {
+                self.warn(format!("The bibliography has no entry for {}: the citation is written as text", unknown.join(", ")));
+            }
             return None;
         }
         self.cited.set(true);

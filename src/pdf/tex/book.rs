@@ -65,6 +65,8 @@ struct Section {
     text: String,
     /// The note's blocks, the heading that says the title again left out (PDF-008).
     blocks: Vec<Block>,
+    /// The heading that was left out, as written: it may carry the chapter's label (`{#sec:one}`).
+    title_heading: Option<String>,
     anchor: String,
 }
 
@@ -118,11 +120,9 @@ impl Sections<'_> {
             None => rel.as_deref().and_then(|r| self.vault.notes.get(r)).map(|n| n.text.clone()).unwrap_or_default(),
         };
         let mut blocks = blocks::parse(&text);
-        if role != Role::Intro {
-            drop_title_heading(&mut blocks, &title);
-        }
+        let title_heading = if role != Role::Intro { drop_title_heading(&mut blocks, &title, true) } else { None };
         let anchor = format!("shale-{}", self.out.len() + 1);
-        self.out.push(Section { role, rank, title, rel, text, blocks, anchor });
+        self.out.push(Section { role, rank, title, rel, text, blocks, title_heading, anchor });
     }
 
     fn walk(&mut self, items: &[Item], depth: usize) {
@@ -182,7 +182,7 @@ fn write_book_in_shale(req: &BookRequest, board: Option<&Resolved>) -> Result<Do
     // the thesis syntax of the whole book: one bibliography (the top folder note's), the labels of all its notes (ADR-0039)
     let top_note = plan.note.as_deref().and_then(|n| vault.notes.get(n).map(|note| (n, note.text.as_str())));
     let top_text = top_note.map_or("", |(_, t)| t);
-    let sources: Vec<Source> = secs.iter().map(|s| Source { text: &s.text, role: if s.role == Role::Chapter { LabelRole::of_note(&s.text) } else { LabelRole::Other }, title: Some(s.title.as_str()) }).collect();
+    let sources: Vec<Source> = secs.iter().map(|s| Source { text: &s.text, role: if s.role == Role::Chapter { LabelRole::of_note(&s.text) } else { LabelRole::Other }, title: Some(s.title.as_str()), number: None }).collect();
     let markers = secs.iter().flat_map(|s| s.blocks.iter()).filter_map(|b| if let Block::Marker(m) = b { Some(*m) } else { None }).collect();
     let (bib, bib_messages) = if secs.iter().any(|s| s.text.contains('@')) { thesis::load_bib(vault, top_note, &req.opts.thesis.default_bibliography) } else { (None, Vec::new()) };
     let thesis = Thesis::new(Input { top: top_text, opts: req.opts, set: req.set, kind, book: true, labels: labels::of_book(&sources, top_note.map(|(_, t)| t)), bib, bib_messages, markers });
@@ -210,7 +210,11 @@ fn write_book_in_shale(req: &BookRequest, board: Option<&Resolved>) -> Result<Do
     for s in &secs {
         match s.role {
             Role::Intro => main.push_str(&format!("{}\n", anchor_named(&s.anchor))),
-            _ => main.push_str(&heading(s.rank, numbered, toc, &plain(&s.title), &anchor_named(&s.anchor))),
+            _ => {
+                // the chapter's own label, when its title line carried one (BOOK-020)
+                let label = s.title_heading.as_deref().map(|h| thesis.heading(h).1).unwrap_or_default();
+                main.push_str(&heading(s.rank, numbered, toc, &plain(&s.title), &format!("{}{label}", anchor_named(&s.anchor))));
+            }
         }
         let Some(rel) = &s.rel else { continue };
         let look = Look {
@@ -249,6 +253,7 @@ fn write_book_in_shale(req: &BookRequest, board: Option<&Resolved>) -> Result<Do
     }
     // one font for the book: the top folder note's, else the set's and the vault's; a chapter's own is ignored (BOOK-022)
     let top = plan.note.as_deref().and_then(|n| vault.notes.get(n)).map(|n| Values::of_note(&n.text)).unwrap_or_default();
+    let top = req.opts.font_note.clone().unwrap_or(top);
     let chapters = secs.iter().filter(|s| s.role != Role::Intro && s.rel.is_some()).map(|s| (s.title.clone(), Values::of_note(&s.text))).collect();
     let font_lines = fonts::overrides(req.fonts, fonts::Source { vault, set: req.set, note: top, book: true, chapters });
     let setup = Setup { fonts: &font_lines.fonts, thesis: thesis.preamble() };
@@ -256,5 +261,7 @@ fn write_book_in_shale(req: &BookRequest, board: Option<&Resolved>) -> Result<Do
     let mut files = files.into_inner();
     files.list.extend(thesis.bib_files());
     files.warnings.extend(thesis.warnings());
+    let notes: Vec<crate::thesis::book::Note> = secs.iter().map(|s| crate::thesis::book::Note { name: &s.title, text: &s.text, top: s.role == Role::Intro }).collect();
+    files.warnings.extend(thesis.book_warnings(&notes));
     Ok(Document::new(tex, files, font_lines))
 }

@@ -58,7 +58,8 @@ impl ShaleApp {
         let (close_asked, result) = (resp.should_close(), st.1);
         match finished {
             Some(Ok(out)) => {
-                self.toast(format!("Exported to {}", out.display()));
+                let said = if d.warnings.is_empty() { String::new() } else { format!(" ({} warning(s): {})", d.warnings.len(), d.warnings.join(", ")) };
+                self.toast(format!("Exported to {}{said}", out.display()));
                 if d.open_after {
                     if let Err(e) = crate::opener::open_exported_docx(&out) {
                         self.toast(e);

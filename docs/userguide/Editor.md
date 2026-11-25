@@ -291,7 +291,8 @@ follow in the next parts of thesis writing.
   `<!-- shale: list-of-tables -->`, print the lists of figures and tables with their captions (the PDF with the pages)
   where they stand; a list with nothing in it prints nothing. A key the bibliography lacks, a reference to a label
   nobody has, a label used twice and citations without a bibliography are warnings of the export, and what does not
-  resolve is printed as written. A book of several notes is exported as one document in a later phase.
+  resolve is printed as written. The [[Import#Export to Word]] of a note takes the same syntax: pandoc formats the
+  citations (`--citeproc`, with the same style as the PDF), Shale writes the numbers, captions and references. A book of several notes is exported as one document in a later phase.
 
 # Code
 

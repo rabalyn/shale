@@ -52,6 +52,7 @@ pub const ENTRIES: &[Entry] = &[
     e("vault.close", Vault, "Close this vault", &[], "start screen"),
     e("vault.people_dir", Vault, "People folder", &[], "contacts people notes link [[p"),
     e("vault.bibliography", Vault, "Bibliography file", &[], "references citations bib bibtex biblatex thesis zotero jabref citavi"),
+    e("vault.fonts", Vault, "Fonts of the exports", &[], "pdf latex export print-font text headings code family typeface look up fonts again scan"),
     e("vault.names", Vault, "Check names for Windows and macOS", &[], "file names rename compatible other systems"),
     e("editor.cursor_shape", Editor, "Cursor while typing", &["cursor_shape"], "caret bar block underline"),
     e("editor.cursor_blink", Editor, "Blinking cursor", &["cursor_blink"], "caret blink"),

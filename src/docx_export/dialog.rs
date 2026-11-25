@@ -32,6 +32,8 @@ pub struct DocxDialog {
     /// a page break after the table of contents (DOCX-013)
     pub toc_break: bool,
     pub open_after: bool,
+    /// what the running export says about the thesis syntax of the note (DOCX-016), told when the file is saved
+    pub warnings: Vec<String>,
     pub error: Option<String>,
     job: Option<Running>,
     busy: Busy,
@@ -48,7 +50,22 @@ pub enum DialogResult {
 
 impl DocxDialog {
     pub fn new(rel: PathBuf, name: String, path: PathBuf, pandoc: Option<PathBuf>, original: Option<PathBuf>, toc: bool, toc_break: bool) -> Self {
-        DocxDialog { rel, name, path: path.to_string_lossy().into_owned(), pandoc, use_original: original.is_some(), original, toc, toc_break, open_after: false, error: None, job: None, busy: Busy::default(), rects: vec![] }
+        DocxDialog {
+            rel,
+            name,
+            path: path.to_string_lossy().into_owned(),
+            pandoc,
+            use_original: original.is_some(),
+            original,
+            toc,
+            toc_break,
+            open_after: false,
+            warnings: Vec::new(),
+            error: None,
+            job: None,
+            busy: Busy::default(),
+            rects: vec![],
+        }
     }
 
     /// The registry the export is a task of (the window's; a dialog made without one has its own).
@@ -71,6 +88,7 @@ impl DocxDialog {
     /// repaint the window). False: a Word export already runs, and nothing starts.
     pub fn start(&mut self, job: Job, notify: impl FnOnce() + Send + 'static) -> bool {
         let Some(mut task) = self.busy.begin(DOCX_EXPORT, format!("Exporting “{}” to Word…", self.name)) else { return false };
+        self.warnings = job.warnings.clone();
         let cancel = task.cancellable().flag();
         self.job = Some(Running(task.run(move || super::export(&job, &cancel), notify)));
         true
