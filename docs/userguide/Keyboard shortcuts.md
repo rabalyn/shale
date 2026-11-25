@@ -2,7 +2,7 @@
 features:
   - "Keyboard"
 ---
-Back to [[Start here]]. Editing keys are in [[Editor]], the settings window is in [[Settings reference]].
+Back to [[Start here]]. Editing keys are in [[Editor]], the settings window is in [[Settings reference]]. The [[Glossary]] lists every feature with its keys and the section of Settings → Keybindings that holds them.
 
 ![[keybindings.png]]
 
