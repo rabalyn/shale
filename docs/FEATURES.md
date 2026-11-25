@@ -19,6 +19,13 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   `![[photo.png|Sea at dusk]]`, else the file's link); a click on the caption opens the file.
   A picture embedded inside a line of text (`an icon ![[icon.png]] here`) is drawn in the line in the reading view and the
   PDF export, 0.9 of the line high and set a little below its baseline like a letter, as in the LaTeX export; the editor shows it as a picture of its own size.
+- **Image carousel** (#711, EDIT-142, EDIT-143): a quote that starts `> [!carousel] Title` and whose other lines are each one
+  picture (`> ![[a.png|Caption]]`, or `> ![alt](a.png)`) is shown in the reading view one picture at a time, at the size of its
+  link, with its caption, the buttons *Previous image* and *Next image*, a dot per picture and "2 / 6"; ← and → go through
+  the pictures while the pointer is over it, and they go round at the ends. The shown picture is not saved in the note. The
+  Markdown stays as written, so other editors show a quote with all the pictures; the PDF, LaTeX, Word and site exports show every
+  picture in order with its caption (PDF-040, TEX-060, DOCX-018, SITE-083). The editor draws the lines with their pictures
+  one below the other.
 
 ![A picture with its resize buttons](userguide/z_media/screenshots/image-resize.png)
 

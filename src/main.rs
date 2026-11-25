@@ -31,6 +31,7 @@ mod board;
 mod busy;
 mod calendar;
 mod caption;
+mod carousel;
 mod cite_assist;
 mod clickable;
 #[cfg(test)]

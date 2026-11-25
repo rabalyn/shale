@@ -351,6 +351,8 @@ fn neutralize_shortcodes(text: &str) -> String {
 
 /// The Markdown Hugo builds for the text `body` of the note `from` (without its front matter).
 pub fn convert(env: &Env, st: &mut State, from: &Path, body: &str) -> String {
+    // a carousel of images shows every image, with its caption (SITE-083)
+    let body = &*crate::carousel::flatten(body);
     let math = markdown::find_math(body);
     let lines = markdown::lines_with_offsets(body);
     let mut edits: Vec<(Range<usize>, String)> = Vec::new();
