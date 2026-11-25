@@ -416,6 +416,20 @@ fn a_scientific_poster_has_a_box_for_each_top_level_heading_in_two_columns() {
     assert!(one.contains("columns=1,rows=1,spacing=1cm") && one.contains("name=box1,column=1,row=1"), "{one}");
 }
 
+// spec: TEX-060
+#[test]
+fn tex_060_a_carousel_has_every_image_in_order_with_its_caption() {
+    let assets = rich_assets();
+    let files: Vec<(&str, &[u8])> = assets.iter().map(|(n, b)| (*n, b.as_slice())).collect();
+    let note = "## S\n> [!carousel] Layers\n> ![[pic.png|First|200]]\n> ![[Sketch.excalidraw|Second]]\n> ![[doc.pdf|Third]]\n";
+    let b = body_of(&doc_with(note, "pub", &ExportOptions::for_note(), &[("author", "A")], &files).unwrap().tex);
+    assert!(b.contains("Layers"), "the title: {b}");
+    let at = |s: &str| b.find(s).unwrap_or_else(|| panic!("{s:?} is not in {b}"));
+    assert!(at("picture-1.png") < at("drawing-2.pdf") && at("drawing-2.pdf") < at("document-3.pdf"), "in order: {b}");
+    assert!(at("textit{First}") < at("textit{Second}") && at("textit{Second}") < at("textit{Third}"), "with their captions: {b}");
+    assert!(!b.contains("carousel"), "the callout word is not printed: {b}");
+}
+
 // spec: TEX-015
 #[test]
 fn a_picture_a_drawing_and_a_pdf_are_files_in_the_work_folder_sized_like_the_editor_with_a_caption() {

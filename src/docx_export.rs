@@ -106,6 +106,8 @@ fn embeds(line: &str, resolve: &dyn Fn(&str) -> Option<String>) -> String {
 /// knows (the vault path of the file it opens) written with that path, so that pandoc finds it below the
 /// vault folder. An embed that does not resolve, and anything in a fenced code block or in inline code, stays.
 pub fn prepare_text(text: &str, resolve: &dyn Fn(&str) -> Option<String>) -> String {
+    // a carousel of images shows every image, with its caption (DOCX-018)
+    let text = &*crate::carousel::flatten(text);
     let mut out = String::with_capacity(text.len());
     let mut open: Option<(char, usize)> = None;
     for line in text.split_inclusive('\n').skip(crate::markdown::front_matter_lines(text)) {

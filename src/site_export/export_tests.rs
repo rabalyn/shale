@@ -510,6 +510,20 @@ fn site_033_a_picture_embed_shows_its_picture_with_its_width_and_alias() {
     assert!(matches!(&e.files.iter().find(|f| f.path == "static/media/files/x.png").unwrap().content, Content::Copy(p) if p.ends_with("x.png")));
 }
 
+// spec: SITE-083
+#[test]
+fn site_083_a_carousel_is_every_image_in_order_with_its_caption() {
+    let f = Fixture::with("s083", "\"all_notes\": true", &[("N.md", "> [!carousel] Layers\n> ![[x.png|First|300]]\n> ![[y.png|Second]]\n> ![Third](img/z.png)\n\nAfter\n")]);
+    for p in ["x.png", "y.png", "img/z.png"] {
+        f.bytes(p, b"png");
+    }
+    let e = f.export();
+    let b = body(&page(&e, "n.md"));
+    let want = "**Layers**\n\n![](/media/files/x.png \"shale:width=300\")\n\n*First*\n\n![](/media/files/y.png)\n\n*Second*\n\n![](/media/files/img/z.png)\n\n*Third*\n\nAfter";
+    assert!(b.trim().starts_with(want), "{b}");
+    assert_eq!(e.media, ["static/media/files/img/z.png", "static/media/files/x.png", "static/media/files/y.png"]);
+}
+
 // spec: SITE-035, SITE-034
 #[test]
 fn site_035_audio_video_and_pdf_embeds_show_a_player_and_a_link_is_a_link() {

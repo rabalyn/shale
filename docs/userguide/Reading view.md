@@ -13,4 +13,24 @@ alternative while you edit is the Markdown preview in [[Editor]].
 
 ![[math-reading.png]]
 
+# Image carousel
+
+Several pictures that belong together, such as the layers of a keyboard or the steps of a setup, can be a carousel: a quote whose first line is `[!carousel]` and whose other lines are each one picture. In the reading view it shows **one picture at a time**, at the size its link gives it, with its caption (the text after the `|` of the link, or the alt text of `![alt](file.png)`), the buttons **Previous image** and **Next image**, a dot per picture and "2 / 3". Click a dot to go to that picture. **← and → work while the pointer is over the carousel**, and the pictures go round: after the last comes the first. Which picture is shown is not saved in the note, and each carousel of a note has its own.
+
+```markdown
+> [!carousel] Calendar views
+> ![[calendar-month.png|Month]]
+> ![[calendar-week.png|Week]]
+> ![[calendar-sidebar.png|In the sidebar]]
+```
+
+Here it is, made from the pictures of this guide:
+
+> [!carousel] Calendar views
+> ![[calendar-month.png|Month]]
+> ![[calendar-week.png|Week]]
+> ![[calendar-sidebar.png|In the sidebar]]
+
+The note stays plain Markdown: Obsidian and GitHub show the same lines as a quote with all the pictures, and Shale's exports (PDF, LaTeX, Word and the Hugo site, see [[PDF]] and [[Publishing a vault]]) print or publish every picture in order, the title in bold and each caption below its picture. A `[!carousel]` line with no picture after it, and any other quote or callout, stays an ordinary quote. The editor shows the lines as written, with their pictures one below the other; only the reading view has the carousel.
+
 #userguide #reading
