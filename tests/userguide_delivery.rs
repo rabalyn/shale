@@ -98,10 +98,14 @@ fn dev_020_both_release_workflows_pack_the_guide_with_the_script_and_check_the_z
 // spec: BUILD-023
 #[test]
 fn build_023_every_release_has_the_guide_as_a_pdf_made_by_the_release_build() {
-    for (wf, program) in [(".forgejo/workflows/ci.yml", "SHALE=\"$CARGO_TARGET_DIR/release/shale\""), (".github/workflows/build.yml", "SHALE=target/release/shale")] {
+    for (wf, program, build_cmd) in [
+        (".forgejo/workflows/ci.yml", "SHALE=\"$CARGO_TARGET_DIR/release/shale\"", "cargo build --release --locked"),
+        // the shipped build is the dist profile (BUILD-044)
+        (".github/workflows/build.yml", "SHALE=target/dist/shale", "cargo build --profile dist --locked"),
+    ] {
         let text = fs::read_to_string(root().join(wf)).unwrap();
         // made once, by the release build of the same run (no window, no second build), and checked
-        let build = text.find("cargo build --release --locked").unwrap_or_else(|| panic!("{wf}: no release build"));
+        let build = text.find(build_cmd).unwrap_or_else(|| panic!("{wf}: no release build"));
         let made = text.find(&format!("{program} scripts/userguide-pdf.sh shale-userguide.pdf")).unwrap_or_else(|| panic!("{wf}: the guide's PDF is not made by the script with the release build"));
         assert!(build < made, "{wf}: the PDF is made before the release build");
         assert_eq!(text.matches("scripts/userguide-pdf.sh").count(), 1, "{wf}: the PDF is made once");
