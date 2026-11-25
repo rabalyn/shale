@@ -1038,6 +1038,14 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   out, compressed). Docx → note → docx keeps what the import kept: the words of the fixtures come back (all of them, 95 % of `text.docx`);
   merged cells, figure and table numbers, tab stops, line spacing of single paragraphs, small caps and all but the last section's page are lost
   at import. `scripts/roundtrip-docx.sh <file.docx>` prints the share of the words of any Word file that comes back.
+  **The thesis syntax** (DOCX-014 to DOCX-017, ADR-0041, rabalyn/shale#650): the `bibliography:` file and the style (one of the five
+  of `citation-style:`, written as CSL from the same archive the built-in PDF formats with, or a `.csl` file of the vault) go to
+  pandoc's `--citeproc`, so citations come out as the style writes them with the list of references at the end under its heading
+  in the language of the note, or at `<!-- shale: bibliography -->`; Shale writes the numbers itself with the model of the other
+  exports (labelled figures, tables and equations with captions in Word's *Image Caption* and *Table Caption* styles above or below,
+  an equation's number at its end, a labelled heading's number before its title, references as "Abbildung 3" / "Figure 3"), so
+  no pandoc-crossref is needed; a key or label that does not resolve is a warning in the toast and stays as written; a pandoc older
+  than 2.11 says so.
   `scripts/validate-docx.sh <file.docx>…` checks a Word file against Microsoft's WordprocessingML schema (the export tests do it for every file they
   write) and `scripts/docx-corpus.sh` runs the round trip, the schema check and a page count on 50 real-world Word files (developer tools). A Word
   file whose XML is nested more than 256 levels is refused at import with a message instead of crashing the program. Every pandoc run of

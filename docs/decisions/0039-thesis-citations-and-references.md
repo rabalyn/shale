@@ -2,7 +2,7 @@
 
 - **Status**: Accepted (2026-11-24; owner: "sounds kinda fine", with the changes of §3, caption positions, and §9, the toolbar, which the owner confirmed on 2026-11-24). Only the points of "To confirm" at the end are open. The reader of `.bib` files was decided in #645 (§6).
 - **Date**: 2026-11-24
-- **Specs**: TEX-043 to TEX-051 ([`docs/spec/tex-export.md`](../spec/tex-export.md)), BOOK-020, BOOK-021 ([`docs/spec/book-export.md`](../spec/book-export.md)), EDIT-122 to EDIT-132, CFG-078 ([`docs/spec/links-and-editor.md`](../spec/links-and-editor.md)), PDF-032, PDF-033 ([`docs/spec/features.md`](../spec/features.md)), SITE-077 ([`docs/spec/site-export.md`](../spec/site-export.md)), DOCX-014 ([`docs/spec/word-export.md`](../spec/word-export.md))
+- **Specs**: TEX-043 to TEX-051 ([`docs/spec/tex-export.md`](../spec/tex-export.md)), BOOK-020, BOOK-021 ([`docs/spec/book-export.md`](../spec/book-export.md)), EDIT-122 to EDIT-132, CFG-078 ([`docs/spec/links-and-editor.md`](../spec/links-and-editor.md)), PDF-032, PDF-033 ([`docs/spec/features.md`](../spec/features.md)), SITE-077 ([`docs/spec/site-export.md`](../spec/site-export.md)), DOCX-014 to DOCX-017 ([`docs/spec/word-export.md`](../spec/word-export.md))
 - **Issues**: #642 (epic), #643 (this ADR); phases #644 to #654; #656 (toolbar)
 - **Builds on**: [ADR-0019](0019-latex-export-managed-texlive.md) (managed TeX Live), [ADR-0001](0001-spec-driven-development.md) (spec-driven)
 
@@ -155,7 +155,7 @@ mentions, SOC-*), and as plain words (`@todo`). The rules, applied by one scanne
 |---|---|---|
 | TeX | **biblatex with biber**, and `cleveref`, `caption`, `glossaries-extra` | the standard of theses; biber is in the managed TeX Live. TEX-004's compile becomes multi-pass: LuaLaTeX, biber when the run wrote citations, LuaLaTeX until labels are stable (at most 4 runs). (#644) |
 | Built-in PDF and site | **the `biblatex` crate for reading** (#645, below) and **the `hayagriva` crate for formatting** with CSL (both Typst's, MIT or Apache-2.0; hayagriva is built on biblatex) | no TeX needed. **Decided in #645**: the key index and the reader of `.bib` files use `biblatex` 0.12 directly; `hayagriva` is added where the formatting is built (#648), with its `biblatex` feature, which uses the same reader, so the entries are the same. The syntax and the numbering do not change. See "The evaluation of hayagriva" below. |
-| Word | **pandoc `--citeproc`** with the same `.bib` and the CSL file of the chosen style, on top of #487 | pandoc is already the user's program (BUILD-018). Cross-references through Shale's own Lua filter (DOCX-004 to DOCX-006), as pandoc-crossref would be a second program to install; confirmed in #650. |
+| Word | **pandoc `--citeproc`** with the same `.bib` and the CSL file of the chosen style, on top of #487 | pandoc is already the user's program (BUILD-018). Cross-references and numbers are resolved by Shale itself (the scanner and `src/thesis.rs`, written into the text; pandoc-crossref would be a second program to install and would number differently): [ADR-0041](0041-word-export-citations-and-references.md), #650. |
 
 The editor and the reading view use the same reader and index as the built-in export (#645, #646).
 
