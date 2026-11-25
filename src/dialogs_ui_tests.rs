@@ -464,7 +464,66 @@ fn pdf_019_the_export_dialog_says_which_fonts_the_note_gets_and_why_one_is_not_u
     until(&mut p, Show::Modals, "the fonts line is made", |p| matches!(&p.app.modal, Some(Modal::Export(d)) if d.fonts.is_some()));
     let Some(Modal::Export(d)) = &p.app.modal else { panic!("the dialog closed") };
     assert!(d.fonts.as_ref().is_some_and(|f| f.line.is_empty() && f.warnings.is_empty() && !f.pending));
-    assert!(!p.shows(Show::Modals, "Fonts"));
+    assert!(d.font_fields.values.iter().all(String::is_empty), "the fields are empty: the note says nothing");
+    assert!(!p.shows(Show::Modals, "Looking up fonts..."));
+}
+
+// spec: PDF-039, PDF-019, PDF-037, JOB-040
+#[test]
+fn pdf_039_the_export_dialog_has_font_fields_that_start_with_the_note_offer_the_found_families_and_say_what_is_missing() {
+    let mut p =
+        P::new("export-font-fields", &[("Fonty.md", "---\nprint-font: Vault Serif\nprint-font-sans: Zzz Missing Face\n---\nText\n"), ("Book/Book.md", "---\nprint-font: Vault Serif\n---\n# Book\n"), ("Book/Chapter.md", "# Chapter\n")]);
+    crate::fonts::test_fonts::Spec::new("Vault Serif", 400, false).write(&p.dir, "fonts/VaultSerif.ttf");
+    crate::fonts::test_fonts::Spec::new("Tiny Mono", 400, false).write(&p.dir, "fonts/Mono.ttf");
+    p.app.vdata.settings.print_font_mono = "Tiny Mono".into();
+    p.app.vault.as_mut().unwrap().rescan();
+    p.app.open_export_dialog(Path::new("Fonty.md"));
+    // until the scan is in the list says so, then it offers the families of the vault
+    p.look(Show::Modals);
+    let Some(Modal::Export(d)) = &p.app.modal else { panic!("the dialog opened") };
+    assert_eq!(d.font_fields.values, ["Vault Serif", "Zzz Missing Face", ""], "the fields start with what the note says");
+    assert!(d.font_fields.loaded && d.font_values().is_some());
+    assert_eq!(d.font_fields.hints[2], "Tiny Mono", "an empty field says what applies: the vault's font");
+    until(&mut p, Show::Modals, "the scan is in", |p| matches!(&p.app.modal, Some(Modal::Export(d)) if d.fonts.as_ref().is_some_and(|f| !f.pending && !f.warnings.is_empty())));
+    let Some(Modal::Export(d)) = &p.app.modal else { panic!("the dialog closed") };
+    assert!(d.font_fields.list.names.iter().any(|n| n == "Vault Serif") && d.font_fields.list.names.iter().any(|n| n == "Tiny Mono"), "{:?}", d.font_fields.list.names);
+    // a value that cannot be used is said under the fields, and the dialog shows it
+    let warning = d.fonts.as_ref().unwrap().warnings[0].clone();
+    assert!(warning.starts_with("`print-font-sans`: the font “Zzz Missing Face” was not found"), "{warning}");
+    assert!(p.shows(Show::Modals, &warning));
+    // a family is picked from the list ...
+    click_control(&mut p, "font:headings:list");
+    p.look(Show::Modals);
+    click_control(&mut p, "font:headings:pick:Tiny Mono");
+    let Some(Modal::Export(d)) = &p.app.modal else { panic!("the dialog closed") };
+    assert_eq!(d.font_fields.values[1], "Tiny Mono");
+    // ... and the line follows the field: the headings now come from the field, which is the note's entry
+    until(&mut p, Show::Modals, "the line is made again", |p| matches!(&p.app.modal, Some(Modal::Export(d)) if d.fonts.as_ref().is_some_and(|f| f.warnings.is_empty() && f.line.contains("headings Tiny Mono"))));
+    // ... a typed name is a value too, and a missing one is the warning of PDF-037
+    fill(&mut p, "font:code", "Nowhere Mono");
+    until(
+        &mut p,
+        Show::Modals,
+        "the missing code font is said",
+        |p| matches!(&p.app.modal, Some(Modal::Export(d)) if d.fonts.as_ref().is_some_and(|f| f.warnings.iter().any(|w| w.starts_with("`print-font-mono`: the font “Nowhere Mono” was not found")))),
+    );
+    // the exported PDF uses the fields, not the properties: with the text field cleared it is Ubuntu Light
+    let out = p.dir.join("out/fonty.pdf");
+    if let Some(Modal::Export(d)) = &mut p.app.modal {
+        d.font_fields.values[0].clear();
+        d.path = out.to_string_lossy().into_owned();
+    }
+    p.click(Show::Modals, "Export");
+    until(&mut p, Show::Modals, "the export is done", |p| p.app.modal.is_none() && out.is_file());
+    let pdf = std::fs::read(&out).unwrap();
+    let text = String::from_utf8_lossy(&pdf);
+    assert!(text.contains("UbuntuLight") && !text.contains("VaultSerif"), "the fields, not the properties, set the fonts");
+    // a folder's dialog has the fields too and starts with its top note's values (BOOK-022)
+    p.app.open_export_folder_dialog(Path::new("Book"));
+    p.look(Show::Modals);
+    let Some(Modal::Export(d)) = &p.app.modal else { panic!("the dialog opened") };
+    assert_eq!(d.font_fields.values, ["Vault Serif", "", ""]);
+    assert!(d.rects.iter().any(|(k, _)| k == "font:text"), "a folder's dialog has the font fields");
 }
 
 // spec: IMP-002, IMP-056

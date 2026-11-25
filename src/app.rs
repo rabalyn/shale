@@ -2446,12 +2446,13 @@ impl ShaleApp {
         self.flush_all();
         let root = self.vault.as_ref().ok_or("No vault is open")?.root.clone();
         // the fonts are those of the top folder note (BOOK-022)
-        let top = d.book.as_ref().and_then(|b| b.plan.as_ref().ok()).and_then(|p| p.note.clone().or_else(|| p.intro.clone()));
+        let top = Self::book_top_note(d);
         let top = top.map(|rel| crate::fonts::resolve::Values::of_note(&self.note_text(&rel))).unwrap_or_default();
         let Some(fonts) = self.export_fonts_ask(d, top) else { return Ok(()) };
+        let font_note = d.font_values();
         let book = d.book.as_mut().ok_or("This is not the export of a folder")?;
         let ctx = ctx.clone();
-        if !book.start(root, crate::pdf::export::ExportOptions { fonts: Some(fonts), ..d.opts.clone() }, move || ctx.request_repaint()) {
+        if !book.start(root, crate::pdf::export::ExportOptions { fonts: Some(fonts), font_note, ..d.opts.clone() }, move || ctx.request_repaint()) {
             return Err("Another PDF export is still running".into());
         }
         self.remember_export_engine(false, d);
@@ -2493,7 +2494,7 @@ impl ShaleApp {
             };
             (What::Drawing(Box::new(scene)), d.opts.clone())
         } else {
-            (What::Note(self.note_text(&d.rel)), crate::pdf::export::ExportOptions { column: self.editor_column(&d.rel), fonts, ..d.opts.clone() })
+            (What::Note(self.note_text(&d.rel)), crate::pdf::export::ExportOptions { column: self.editor_column(&d.rel), fonts, font_note: d.font_values(), ..d.opts.clone() })
         };
         let work = Work { root: v.root.clone(), rel: d.rel.clone(), name: d.name.clone(), opts, what };
         let ctx = ctx.clone();
@@ -2624,6 +2625,8 @@ impl ShaleApp {
         let v = self.vault.as_ref().ok_or("No vault is open")?;
         let fonts = crate::pdf::tex::fonts::FontInput { catalogue: self.font_scan.catalogue_for(v), vault: crate::fonts::resolve::Values::of_settings(&self.vdata.settings) };
         let busy = d.busy().clone();
+        // the fields of the dialog say what the note says (PDF-039)
+        d.opts.font_note = d.font_values();
         let tex = d.tex.as_mut().ok_or("This note has no LaTeX choices")?;
         if let Some(n) = tex.blocked_by().first() {
             return Err(format!("The managed TeX Live misses the package {n}, which this document needs: press Install, then export"));

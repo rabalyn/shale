@@ -32,6 +32,8 @@ pub struct Made {
 pub fn apply(opts: &ExportOptions, vault_root: &Path, note: Values, chapters: Option<Vec<(String, Values)>>) -> (ExportOptions, Vec<String>) {
     let Some(ask) = opts.fonts.clone() else { return (opts.clone(), Vec::new()) };
     let book = chapters.is_some();
+    // the fields of the dialog say what the note says (PDF-039)
+    let note = opts.font_note.clone().unwrap_or(note);
     let request = Request { engine: Engine::Pdf, vault_root, note, book, chapters: chapters.unwrap_or_default(), set: None, vault: ask.vault.clone() };
     let resolved = resolve::resolve(&request, &ask.catalogue);
     let mut warnings = resolved.warnings.clone();
@@ -39,6 +41,10 @@ pub fn apply(opts: &ExportOptions, vault_root: &Path, note: Values, chapters: Op
         warnings.push("The installed fonts were not looked up in time: a font that only the system has was not used.".into());
     }
     let mut out = opts.clone();
+    if opts.font_note.is_some() {
+        // a field that was cleared is not the note's `print-font: serif` any more
+        out.font = FontKind::Sans;
+    }
     let mut kinds: Vec<Option<FontKind>> = Vec::new();
     for role in Role::ALL {
         kinds.push(match &resolved.pick(role).chosen {
