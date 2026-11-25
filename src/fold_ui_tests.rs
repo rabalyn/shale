@@ -1243,6 +1243,26 @@ fn edit_105_the_laid_out_note_is_kept_until_the_text_the_raw_lines_or_the_previe
     assert!(w.layouts() > off, "and on again");
 }
 
+// spec: EDIT-105 (#714: the flake of the test above)
+#[test]
+fn edit_105_a_block_the_syntax_worker_colours_in_another_note_does_not_lay_this_one_out_again() {
+    // `syntax::generation` counts the blocks of every note and view of the process (and of every
+    // test running beside this one): a note without code does not depend on it
+    let mut w = W::new("layout-syntax-gen", LAYOUT_NOTE, true);
+    w.cursor_in("Third");
+    let kept = w.layouts();
+    let before = crate::syntax::generation();
+    let code: String = (0..40).map(|n| format!("let unique_714_{n} = {n};\n")).collect();
+    crate::syntax::highlight_shown("rust", &code);
+    let start = std::time::Instant::now();
+    while crate::syntax::generation() == before && start.elapsed() < std::time::Duration::from_secs(20) {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(crate::syntax::generation() > before, "the worker coloured the block");
+    w.hl.frames(&mut w.app, 3);
+    assert_eq!(w.layouts(), kept, "a note with no code block is not laid out again for it");
+}
+
 // spec: EDIT-105
 #[test]
 fn edit_105_a_note_with_numbered_headings_and_the_kept_layout_shows_the_same_as_before() {
