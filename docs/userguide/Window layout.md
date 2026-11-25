@@ -11,6 +11,7 @@ of **views**.
 
 - Drag the icons into any order; a line shows where the icon lands. Esc, or letting go anywhere
   else, cancels. The sidebar toggles and the settings button stay where they are.
+- The keyboard icon after Feeds opens the **Keymap** tab: every shortcut on a drawn keyboard (see [[Keyboard shortcuts]]).
 - A middle click on **Mail**, **Feeds** or **Calendar** opens that view in a new tab
   ([[Mail]], [[Feeds]], [[Calendar]]).
 - The settings button at the bottom opens Settings; its **Help** section has **Open user guide**

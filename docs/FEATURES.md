@@ -446,6 +446,76 @@ section of Settings → Keybindings that holds them.
 
 ![The window in the light theme Catppuccin Latte](userguide/z_media/screenshots/theme-latte.png)
 
+## Keymap: every shortcut on the keyboard
+
+The **Keymap** tab (the keyboard icon in the ribbon, after Feeds, or Ctrl+Shift+Y, macOS: Cmd+Shift+Y) draws the keyboard
+with the actions on each key, for a system (Linux, Windows or macOS, the running one first) and a layer: no
+modifier, Shift, Ctrl (Cmd), Alt (Option), Ctrl+Shift, Alt+Shift, Ctrl+Alt and every other combination (click the
+modifier keys of the drawing, or hold them: holding Ctrl, Alt, Shift or Cmd shows that layer while you hold). An ANSI
+or an ISO keyboard can be chosen. Each key shows up to two chips coloured by the kind of action (moving around, notes
+and app, formatting and folding, ribbon and sidebars, mail, text editing, vim, drawing; the legend switches a kind
+off and shows how many actions of it are on this layer), `+n` for more, `»` for the first key of a sequence such as
+`Space f f`; a key you changed has an outline, a fixed key of the program (text editing, vim normal mode, the drawing
+tools, the zoom) a paler chip, and a key the system keeps for itself (Cmd+H on a Mac, Alt+Tab, the Super key) is hatched in
+red and says what takes it. The keys are the live ones: a change you make in Settings is on the keyboard at once.
+A click on a key lists everything on it, on this layer and on every other, with scope and binding, and **Change** goes
+to the row of the action in Settings → Keybindings and starts recording its new keys. The same keyboard is in
+Settings → Keybindings behind the **Keyboard** switch (the **List** switch is the list of the actions).
+
+![The Keymap tab: the Ctrl layer on Linux](userguide/z_media/screenshots/keymap-linux-ctrl.png)
+
+![The Keymap tab in a light theme](userguide/z_media/screenshots/keymap-linux-none-light.png)
+
+![The Cmd layer on macOS in a light theme](userguide/z_media/screenshots/keymap-macos-cmd-light.png)
+
+<details><summary>Linux: every layer</summary>
+
+![Linux, layer none](userguide/z_media/screenshots/keymap-linux-none.png)
+
+![Linux, layer shift](userguide/z_media/screenshots/keymap-linux-shift.png)
+
+![Linux, layer ctrl](userguide/z_media/screenshots/keymap-linux-ctrl.png)
+
+![Linux, layer alt](userguide/z_media/screenshots/keymap-linux-alt.png)
+
+![Linux, layer ctrl-shift](userguide/z_media/screenshots/keymap-linux-ctrl-shift.png)
+
+![Linux, layer alt-shift](userguide/z_media/screenshots/keymap-linux-alt-shift.png)
+
+</details>
+
+<details><summary>Windows: every layer</summary>
+
+![Windows, layer none](userguide/z_media/screenshots/keymap-windows-none.png)
+
+![Windows, layer shift](userguide/z_media/screenshots/keymap-windows-shift.png)
+
+![Windows, layer ctrl](userguide/z_media/screenshots/keymap-windows-ctrl.png)
+
+![Windows, layer alt](userguide/z_media/screenshots/keymap-windows-alt.png)
+
+![Windows, layer ctrl-shift](userguide/z_media/screenshots/keymap-windows-ctrl-shift.png)
+
+![Windows, layer alt-shift](userguide/z_media/screenshots/keymap-windows-alt-shift.png)
+
+</details>
+
+<details><summary>macOS: every layer</summary>
+
+![macOS, layer none](userguide/z_media/screenshots/keymap-macos-none.png)
+
+![macOS, layer shift](userguide/z_media/screenshots/keymap-macos-shift.png)
+
+![macOS, layer cmd](userguide/z_media/screenshots/keymap-macos-cmd.png)
+
+![macOS, layer option](userguide/z_media/screenshots/keymap-macos-option.png)
+
+![macOS, layer cmd-shift](userguide/z_media/screenshots/keymap-macos-cmd-shift.png)
+
+![macOS, layer option-shift](userguide/z_media/screenshots/keymap-macos-option-shift.png)
+
+</details>
+
 ## Keyboard only: sidebar, file list and vim-style editing
 
 ![The Keybindings tab of the settings](userguide/z_media/screenshots/keybindings.png)
@@ -1650,6 +1720,7 @@ The user guide's [glossary](userguide/Glossary.md) lists every feature from A to
 | Ctrl+E | Edit / reading view |
 | Ctrl+, | Settings |
 | Ctrl+Shift+D | Data usage: what Shale keeps on disk, and its caches |
+| Ctrl+Shift+Y | Keymap: the keyboard drawn with every shortcut, by system and layer of modifiers (a main-area tab, also the keyboard icon of the ribbon; the same keyboard is in Settings → Keybindings → Keyboard). Change on a key goes to its row. Definable (macOS: Cmd+Shift+Y) |
 | Ctrl+Shift+PageUp / Ctrl+Shift+PageDown | Previous / next message of the thread of the note (the mails with the same thread-id, by date; nothing happens at the ends, without a thread or in a dialog) |
 | Ctrl+Shift+T | Thread overview: opens the Thread view in the right sidebar and gives it the keyboard (↑ ↓ move, Enter jumps, Esc returns to the note) |
 | F1 | Open the user guide (built into Shale, unpacked into its data folder and opened as a vault) |

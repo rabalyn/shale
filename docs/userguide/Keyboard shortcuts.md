@@ -1,6 +1,7 @@
 ---
 features:
   - "Keyboard"
+  - "Keymap: every shortcut on the keyboard"
 ---
 Back to [[Start here]]. Editing keys are in [[Editor]], the settings window is in [[Settings reference]]. The [[Glossary]] lists every feature with its keys and the section of Settings → Keybindings that holds them.
 
@@ -14,6 +15,19 @@ search at the top of Settings finds an action too and pulses its row, see [[Sett
 
 ![[keybindings-filter.png]]
 
+# The keyboard
+
+The **Keymap** tab shows the same keys on a drawn keyboard: open it with the keyboard icon of the ribbon (after Feeds) or with
+**Ctrl+Shift+Y** (Cmd+Shift+Y on a Mac), or in Settings → Keybindings with the **Keyboard** switch above the list. Pick a
+system (Linux, Windows or macOS, yours first), an ANSI or an ISO keyboard and a layer: none, Shift, Ctrl (Cmd), Alt (Option),
+Ctrl+Shift, Alt+Shift, Ctrl+Alt, or click the modifier keys of the drawing, or hold them to look at their layer for a moment.
+The chips on a key are coloured by the kind of action; **a hatched red key is one the system keeps**
+for itself, a chip with an outline is a key you changed, a paler chip is a fixed key (text editing, vim, drawing), `»` is the
+first key of a sequence such as `Space f f`. The legend switches a kind of action off, the **Where** buttons a place.
+Click a key to see all its actions on every layer, and **Change** to go to the row of an action in the list.
+
+![[keymap-linux-ctrl.png]]
+
 Ctrl is Cmd on macOS. No default key is one that the system reserves (the app menu's Cmd+H, AltGr on Windows, the workspace keys of the Linux desktops), so macOS has other keys for six actions, named in the rows below; a key you set yourself is never refused for that reason. The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings** (Change replaces the keys of an action, Add gives it one more, Clear leaves it without a key)
 (everywhere, file list, search results, mail view, note view, vim normal mode; a key that another action uses asks whether to overwrite it: Yes takes it from that action, No changes nothing).
 Text editing keys and vim keys are fixed.
@@ -25,6 +39,7 @@ Text editing keys and vim keys are fixed.
 | Ctrl+E | Edit / reading view |
 | Ctrl+, | Settings |
 | Ctrl+Shift+D | Data usage: what Shale keeps on disk, and its caches |
+| Ctrl+Shift+Y | Keymap: the keyboard with every shortcut, by system and layer, in a tab (macOS: Cmd+Shift+Y); Change on a key goes to its row in Settings → Keybindings. Definable (Everywhere) |
 | Ctrl+Shift+PageUp / Ctrl+Shift+PageDown | Previous / next mail of the thread of the note, by date (see [[Thread view]]) |
 | Ctrl+Shift+T | Thread overview: opens the Thread view in the right sidebar and gives it the keyboard (↑ ↓, Enter, Esc) |
 | F1 | Open the user guide (built into Shale, unpacked into its data folder and opened as a vault) |

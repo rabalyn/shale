@@ -55,7 +55,7 @@ features = ["import", "docx_export", "pdf", "site_export", "pandoc_limit", "thre
 name = "Settings, themes & UI shell"
 features = [
     "app", "config", "settings", "settings_file", "theme", "themes", "fonts", "font_list", "dialog",
-    "panels", "clickable", "sidebar", "sidebar_ui", "layout", "keys", "keys_ui", "key_badges", "virtual_list",
+    "panels", "clickable", "sidebar", "sidebar_ui", "layout", "keys", "keys_ui", "keymap_view", "key_badges", "virtual_list",
     "userguide",
 ]
 

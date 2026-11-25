@@ -7,8 +7,20 @@ use crate::settings::registry::{action_anchor, action_matches, bound_keys, terms
 use crate::theme;
 use eframe::egui::{self, Event, Key, Modifiers, Rect, RichText, Ui};
 
+/// What the Keybindings tab shows (KEY-057): the list of the actions, or the keyboard.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Mode {
+    #[default]
+    List,
+    Keyboard,
+}
+
 #[derive(Default)]
 pub struct KeyDialog {
+    /// The list or the keyboard (KEY-057).
+    pub mode: Mode,
+    /// The state of the keyboard view.
+    pub board: crate::keymap_view::State,
     /// The action whose binding is being recorded, and the chords pressed so far.
     pub recording: Option<(Action, Vec<Chord>)>,
     /// The recording adds a binding (keeping the others) instead of replacing them.
@@ -55,9 +67,18 @@ impl KeyDialog {
     /// Make sure the row of `a` is in the list: a filter that hides it is cleared (a result of the
     /// search of the whole dialog goes to the action, CFG-072).
     pub fn reveal(&mut self, a: Action, keymap: &Keymap) {
+        self.mode = Mode::List;
         if !action_matches(a.def().label, &bound_keys(keymap, a), &terms(&self.filter)) {
             self.filter.clear();
         }
+    }
+
+    /// Show the row of `a` in the list, pulse a box round it and start recording its new keys: what the
+    /// Change button of the keyboard view does (KEY-057, KEY-058).
+    pub fn go_to(&mut self, ctx: &egui::Context, a: Action, keymap: &Keymap) {
+        self.reveal(a, keymap);
+        anchor::start(ctx, &action_anchor(a.def()));
+        self.start(a, false);
     }
 
     fn start(&mut self, a: Action, adding: bool) {
@@ -200,6 +221,23 @@ pub fn show(ui: &mut Ui, d: &mut KeyDialog, keys: &mut Keymap) -> bool {
         let clashes = if keys.check_rules(*a, &b).is_ok() { keys.clashes_of(*a, &b) } else { vec![] };
         (!clashes.is_empty()).then(|| format!("{} would clash with {}. Enter then asks whether to overwrite it.", b.display(), names(&clashes)))
     });
+    // the list or the keyboard (KEY-057)
+    ui.horizontal(|ui| {
+        for (mode, name) in [(Mode::List, "List"), (Mode::Keyboard, "Keyboard")] {
+            let r = ui.add_enabled(!d.capturing(), egui::Button::selectable(d.mode == mode, name));
+            d.rects.push((format!("mode:{}", name.to_lowercase()), r.rect));
+            if r.clicked() {
+                d.mode = mode;
+            }
+        }
+    });
+    if d.mode == Mode::Keyboard {
+        if let Some(a) = crate::keymap_view::show(ui, &mut d.board, keys) {
+            d.go_to(ui.ctx(), a, keys);
+        }
+        keys.recording = d.recording.is_some() || d.confirm.is_some();
+        return changed;
+    }
     crate::theme::prose(ui, muted("Press Change (replaces the keys) or Add (one more), then the keys: one key or chord, or several in a row (a sequence). Enter saves, Esc cancels."));
     if let Some(n) = note {
         crate::theme::prose(ui, muted(n));

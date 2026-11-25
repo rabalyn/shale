@@ -241,6 +241,7 @@ actions! {
     Save => "global.save", "Save now", Global, ["Ctrl+S"];
     Settings => "global.settings", "Settings", Global, ["Ctrl+Comma"];
     DataUsage => "global.data_usage", "Data usage (what Shale keeps on disk, its caches)", Global, ["Ctrl+Shift+D"];
+    KeymapView => "global.keymap", "Keymap (the keyboard with every shortcut, in a tab)", Global, ["Ctrl+Shift+Y"];
     UserGuide => "global.user_guide", "Open the user guide", Global, ["F1"];
     PrevTab => "global.prev_tab", "Previous tab", Global, ["Ctrl+PageUp", "Ctrl+Shift+Tab"];
     NextTab => "global.next_tab", "Next tab", Global, ["Ctrl+PageDown", "Ctrl+Tab"];
@@ -526,6 +527,11 @@ impl Keymap {
         Some(if c.shift { format!("{SHIFT_MARK}{key}") } else { key })
     }
 
+    /// Does the keymap start from the defaults of macOS (KEY-019).
+    pub fn is_mac(&self) -> bool {
+        self.mac
+    }
+
     pub fn is_default(&self, a: Action) -> bool {
         !self.custom.contains_key(&a)
     }
@@ -763,7 +769,7 @@ mod tests {
         }
     }
 
-    // spec: KEY-002, MAIL-061, KEY-012, KEY-013
+    // spec: KEY-002, MAIL-061, KEY-012, KEY-013, KEY-058
     #[test]
     fn the_definable_actions_are_the_listed_ones() {
         let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/spec/links-and-editor.md")).unwrap();
@@ -781,7 +787,7 @@ mod tests {
             assert_eq!(mac.display(d.action), on_mac, "{}", d.id);
         }
         assert_eq!(DEFS.iter().filter(|d| d.scope == Scope::NoteView).count(), 26 + 5);
-        assert_eq!(DEFS.len(), 32 + 37 + 7 + 12 + 7 + 26 + 5 + 4 + 2);
+        assert_eq!(DEFS.len(), 33 + 37 + 7 + 12 + 7 + 26 + 5 + 4 + 2);
     }
 
     // spec: KEY-014
@@ -1073,7 +1079,7 @@ mod tests {
         assert!(k.check(Action::Save, &b("Space g")).is_err());
         assert!(k.check(Action::Save, &b("Ctrl+C")).unwrap_err().contains("reserved"));
         assert!(k.check(Action::Save, &b("Ctrl+Shift+Z")).unwrap_err().contains("reserved"));
-        assert_eq!(k.check(Action::Save, &b("Ctrl+Shift+Y")), Ok(()));
+        assert_eq!(k.check(Action::Save, &b("Ctrl+Shift+E")), Ok(()));
         assert!(k.check(Action::TreeNextFile, &b("Enter")).unwrap_err().contains("fixed"));
         assert!(k.check(Action::HitNext, &b("Slash")).unwrap_err().contains("fixed"));
         assert_eq!(k.check(Action::TreeNextFile, &b("Slash")), Ok(()));
@@ -1545,7 +1551,7 @@ mod tests {
         }
     }
 
-    // spec: KEY-019
+    // spec: KEY-019, KEY-058
     #[test]
     fn no_default_key_is_one_the_system_reserves_on_linux_windows_or_macos() {
         for (os, mac) in [(Os::Linux, false), (Os::Windows, false), (Os::Mac, true)] {

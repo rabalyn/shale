@@ -41,7 +41,7 @@ animations are off, the box stands still for the same time. **Esc** closes the l
 closes the window. A setting that is not shown at the moment (the font of one area while one font is
 used for all) pulses the control that makes it appear instead.
 
-On the Keybindings tab the field of the tab filters the list, see [[Keyboard shortcuts]].
+On the Keybindings tab the field of the tab filters the list, and the switch **List** / **Keyboard** at its top shows the keys on a drawn keyboard instead (the same view as the Keymap tab), see [[Keyboard shortcuts]].
 
 # The settings file
 
@@ -137,7 +137,7 @@ size of the two editor areas when you updated.
 | `normal_cursor_shape` | `block` (the same four words) | Vim, "Cursor in normal mode"; used only with Vim-style editing |
 | `cursor_blink` | on | Editor, "Blinking cursor"; off keeps the cursor steady |
 | `esc_cursor` | `stay` (`stay` or `step_back`; another word is `stay`) | Vim, "Esc from insert mode": where the cursor lands when Esc leaves insert mode, on the character after the typing or one back like Vim; used only with Vim-style editing |
-| `keybindings` | empty (the defaults of [[Keyboard shortcuts]]; macOS has other defaults for some actions) | Settings → Keybindings; only the actions you changed are stored |
+| `keybindings` | empty (the defaults of [[Keyboard shortcuts]]; macOS has other defaults for some actions) | Settings → Keybindings (the list, or the Keyboard view whose Change goes to a row of the list); only the actions you changed are stored; `global.keymap` opens the Keymap tab (Ctrl+Shift+Y) |
 
 ## Window and vault
 
@@ -151,7 +151,7 @@ size of the two editor areas when you updated.
 | `show_left` | on | the left sidebar toggle of the ribbon |
 | `show_right` | on | the right sidebar toggle of the ribbon |
 | `sidebars` | empty (default icons and layout) | dragging icons, see [[Window layout]] |
-| `sidebars.ribbon` | empty: default order | drag the icons of the ribbon; `files`, `search`, `tags`, `mail`, `calendar` and `social` in this list and in `sidebars.right` at once are a copy (see [[Window layout]]) |
+| `sidebars.ribbon` | empty: default order; `keymap` is the keyboard icon after Feeds | drag the icons of the ribbon; `files`, `search`, `tags`, `mail`, `calendar` and `social` in this list and in `sidebars.right` at once are a copy (see [[Window layout]]) |
 | `sidebars.right` | empty: one view with all panels | drag panel icons, and Files, Search, Tags, Mail, Calendar and Feeds (`files`, `search`, `tags`, `mail`, `calendar`, `social`), into views |
 | `sidebars.hidden` | empty | right-click an icon: Remove / Restore |
 | `right[].icons`, `right[].active`, `right[].weight` | per view: its icons, the shown icon, its share of the height (0 = equal) | the right sidebar's views |
