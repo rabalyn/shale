@@ -35,6 +35,7 @@ Organising:
 - [[Window layout]]: ribbon, sidebars and dialogs.
 - [[Background work]]: spinners, Cancel and the indicator at the top right.
 - [[Keyboard shortcuts]]: all keys, all changeable.
+- [[Glossary]]: every feature from A to Z, with its note, its keys and where to change them.
 
 Your other data:
 

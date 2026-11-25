@@ -4,7 +4,8 @@ Shale is a notes app for the Linux, macOS and Windows desktop (what differs per 
 and notes link to each other with `[[wiki links]]`. The screenshots below come from the app's
 built-in demo vault (`shale --screenshot out.png`); `docs/screenshots/regen.sh` makes them all
 again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in the media folder of the
-[user guide](userguide/Start%20here.md), a vault you can open in Shale (`docs/userguide`), which explains every feature too.
+[user guide](userguide/Start%20here.md), a vault you can open in Shale (`docs/userguide`), which explains every feature too; its [glossary](userguide/Glossary.md) lists the features from A to Z with their keys and the
+section of Settings → Keybindings that holds them.
 
 ## Notes and links
 
@@ -1633,6 +1634,7 @@ Whatever runs longer than a moment says what it does, cannot be started twice an
 Ctrl is Cmd on macOS. No default key is one that the system reserves (the app menu's Cmd+H, AltGr on Windows, the workspace keys of the Linux desktops), so macOS has other keys for six actions, named in the rows below; a key you set yourself is never refused for that reason. The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings** (Change replaces the keys of an action, Add gives it one more, Clear leaves it without a key)
 (everywhere, file list, search results, mail view, note view, vim normal mode; a key that another action uses asks whether to overwrite it: Yes takes it from that action, No changes nothing).
 Text editing keys and vim keys are fixed.
+The user guide's [glossary](userguide/Glossary.md) lists every feature from A to Z with its keys and the Keybindings section they are in.
 
 | Keys | Action |
 |---|---|

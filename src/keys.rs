@@ -1421,6 +1421,36 @@ mod tests {
         assert_eq!(poll(&mut k, Key::Tab), Some(Action::NormalAlternate));
     }
 
+    // spec: NAV-071
+    #[test]
+    fn nav_071_the_glossary_of_the_user_guide_names_every_definable_action() {
+        let text = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/userguide/Glossary.md")).unwrap();
+        let mut missing = vec![];
+        let (linux, mac) = (linux(), Keymap::for_os(true));
+        for d in DEFS {
+            // by its id, or by every default key, each written as inline code (`Ctrl+W`)
+            let by_id = text.contains(&format!("`{}`", d.id));
+            let keys: Vec<String> = linux.bindings(d.action).iter().map(Binding::display).collect();
+            if !by_id && !keys.iter().all(|k| text.contains(&format!("`{k}`"))) {
+                missing.push(format!("{} ({}): {}", d.id, d.label, keys.join(" / ")));
+            }
+            // the keys macOS has instead, written the Mac way
+            if d.action.mac_defaults().is_some() && !by_id {
+                for b in mac.bindings(d.action) {
+                    let shown = b.display().replace("Ctrl+", "Cmd+").replace("Alt+", "Opt+");
+                    if !text.contains(&format!("`{shown}`")) {
+                        missing.push(format!("{} on macOS: {shown}", d.id));
+                    }
+                }
+            }
+            // the section of Settings → Keybindings it is listed in
+            if !text.contains(d.scope.label()) {
+                missing.push(format!("{}: the section {:?}", d.id, d.scope.label()));
+            }
+        }
+        assert!(missing.is_empty(), "docs/userguide/Glossary.md does not name: {missing:#?}");
+    }
+
     // spec: NAV-006
     #[test]
     fn the_docs_list_every_default_binding() {

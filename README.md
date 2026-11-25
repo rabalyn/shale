@@ -97,7 +97,7 @@ See **[docs/FEATURES.md](docs/FEATURES.md)** for all features with screenshots.
 **User guide**: `docs/userguide` is a Shale vault: it shows the features it explains. In Shale press **F1**
 (or Settings → Help → **Open user guide**): the guide is built into the program, which unpacks it once per
 version into its data folder (`~/.local/share/shale/userguide-<version>/` on Linux; a copy you edited is never
-overwritten) and opens it as a vault, at "Start here". This works in every build, on every system. Each release also has `shale-userguide-<version>.zip` (with
+overwritten) and opens it as a vault, at "Start here". Its glossary (`Glossary.md`) lists every feature with its keys. This works in every build, on every system. Each release also has `shale-userguide-<version>.zip` (with
 its `.sha256` file) to unpack anywhere and open as a vault (`shale --vault <folder>`, or Settings → Vault folder),
 and `shale-userguide-<version>.pdf`, the same guide as one book to print or read anywhere (made by
 `scripts/userguide-pdf.sh`).
@@ -292,6 +292,7 @@ Other options:
 Ctrl is Cmd on macOS. No default key is one that the system reserves (the app menu's Cmd+H, AltGr on Windows, the workspace keys of the Linux desktops), so macOS has other keys for six actions, named in the rows below; a key you set yourself is never refused for that reason. The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings** (Change replaces the keys of an action, Add gives it one more, Clear leaves it without a key)
 (everywhere, file list, search results, mail view, note view, vim normal mode; a key that another action uses asks whether to overwrite it: Yes takes it from that action, No changes nothing).
 Text editing keys and vim keys are fixed.
+The user guide's [glossary](docs/userguide/Glossary.md) lists every feature from A to Z with its keys and the Keybindings section they are in.
 
 | Keys | Action |
 |---|---|
