@@ -11,8 +11,10 @@ use std::path::{Path, PathBuf};
 /// The files of a guide: path relative to the guide (with `/`) and content.
 pub type Files = &'static [(&'static str, &'static [u8])];
 
-/// The guide of this program, `docs/userguide` without what Shale writes into a vault.
-pub const EMBEDDED: Files = include!(concat!(env!("OUT_DIR"), "/userguide_files.rs"));
+/// The guide of this program, `docs/userguide` without what Shale writes into a vault. A `static`,
+/// not a `const`: a const is copied into every codegen unit that uses it, which put the whole
+/// guide into the executable twice (BUILD-044).
+pub static EMBEDDED: Files = include!(concat!(env!("OUT_DIR"), "/userguide_files.rs"));
 
 /// What of the guide is never bundled: what Shale writes into a vault it opens (`build.rs` leaves
 /// the same names out of the table, and `scripts/userguide-dist.sh` out of the zip of the
