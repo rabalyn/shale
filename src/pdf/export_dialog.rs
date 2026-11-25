@@ -185,15 +185,15 @@ pub(crate) fn toc_break_box(ui: &mut Ui, opts: &mut ExportOptions, enabled: bool
 /// (a marker line in the note puts a list where it stands instead), and the citation style, which
 /// takes the place of the note's `citation-style:`.
 pub(crate) fn thesis_boxes(ui: &mut Ui, opts: &mut ExportOptions, rec: &mut dyn FnMut(&str, egui::Response) -> egui::Response) {
-    rec("list-of-figures", ui.checkbox(&mut opts.list_of_figures, "List of figures")).on_hover_text("After the contents; a line <!-- shale: list-of-figures --> in the note puts it there instead");
-    rec("list-of-tables", ui.checkbox(&mut opts.list_of_tables, "List of tables")).on_hover_text("After the contents; a line <!-- shale: list-of-tables --> in the note puts it there instead");
+    rec("list-of-figures", crate::clickable::pointer(ui.checkbox(&mut opts.list_of_figures, "List of figures"))).on_hover_text("After the contents; a line <!-- shale: list-of-figures --> in the note puts it there instead");
+    rec("list-of-tables", crate::clickable::pointer(ui.checkbox(&mut opts.list_of_tables, "List of tables"))).on_hover_text("After the contents; a line <!-- shale: list-of-tables --> in the note puts it there instead");
     ui.horizontal(|ui| {
         ui.label("Citation style");
         let shown = opts.citation_style.map_or("From the note", |s| s.name());
-        let combo = egui::ComboBox::from_id_salt("citation-style").selected_text(shown).show_ui(ui, |ui| {
-            rec("citation-style:note", ui.selectable_value(&mut opts.citation_style, None, "From the note"));
+        let combo = egui::ComboBox::from_id_salt("citation-style").selected_text(shown).show_pointer(ui, |ui| {
+            rec("citation-style:note", crate::clickable::pointer(ui.selectable_value(&mut opts.citation_style, None, "From the note")));
             for style in crate::bibliography::format::Style::ALL {
-                rec(&format!("citation-style:{}", style.name()), ui.selectable_value(&mut opts.citation_style, Some(style), style.name()));
+                rec(&format!("citation-style:{}", style.name()), crate::clickable::pointer(ui.selectable_value(&mut opts.citation_style, Some(style), style.name())));
             }
         });
         rec("citation-style", combo.response);
