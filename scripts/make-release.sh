@@ -20,6 +20,8 @@
 # stops the release unless --allow-perf-regression, but a flagged time regression is first measured again
 # alone, interleaved, and counts only if it shows again (#408; its numbers are commented on the release
 # issue); --skip-bench leaves the step out.
+# It also makes the binary size report (scripts/size-report.sh, BUILD-045: docs/size-report.md, its charts and
+# history) in the release worktree, so it is in the release commit; a dry run does not build it.
 # Before anything is changed it looks at GitHub's workflow main-check (BUILD-039, ADR-0025, #453):
 # when its latest run on `main` is red or still running (macOS or Windows fail there at the check tag,
 # before a release is made) the release stops; --ignore-github-check skips that, and a gh that

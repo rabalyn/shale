@@ -1,0 +1,3 @@
+# size-history
+version	date	total	Shale	Rust std	UI	GPU	Text and fonts	PDF	Citations and Unicode data	SQLite	TLS and crypto	D-Bus	Syntax highlighting	Images, audio and regex	Embedded files	Strings and unwind data	Other
+0.8.0-rc.5	2026-11-25	78928522	10655707	5707616	8481643	4299038	4255806	3543422	5440637	1945532	1265068	1294589	1209789	3658112	13812737	7427399	5931427

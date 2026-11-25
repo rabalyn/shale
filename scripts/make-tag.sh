@@ -12,7 +12,8 @@
 # 0.4.0-rc.1, or the next rc when Cargo.toml has a pre-release of that version already).
 # It stops with "the changelog needs an update first" when CHANGELOG.md and docs/changelog-pending/
 # did not change since the previous tag. It bumps Cargo.toml and Cargo.lock on a branch
-# `release/vX.Y.Z-rc.N`, merges docs/changelog-pending/ into [Unreleased], commits naming the issue
+# `release/vX.Y.Z-rc.N`, merges docs/changelog-pending/ into [Unreleased], makes the binary size report
+# (scripts/size-report.sh, BUILD-045; it builds, so a first run is slow; `--dry-run` does not), commits naming the issue
 # "Release X.Y.Z" (made with gh when there is none; --issue N names another), lands it with
 # `scripts/land.sh --release`, checks the landed merge (BUILD-013), tags it and pushes only the tag
 # to `origin`. The landing lock is held for the whole run (a landing meanwhile waits); an
