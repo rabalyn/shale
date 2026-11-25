@@ -666,6 +666,14 @@ The settings stay open until closed (✕, Esc or the ⋯ button; a click outside
 
 ![The peek of a card with its Blocked by and Blocks lines and the field that finds a blocker](userguide/z_media/screenshots/board-blockers.png)
 
+## Notes and drawings without links
+
+![Unlinked notes](userguide/z_media/screenshots/unlinked.png)
+
+- The **Unlinked notes** tab (the ribbon icon of two circles with a broken line, after Keymap) lists the notes and drawings that no link connects (NAV-072, #725). A switch shows one group at a time: **Orphans** (no link in or out) and **No backlinks** (nothing links to the file; it may link out). It uses the rule of the search words `orphan` and `no-backlinks` (QUERY-031): a link to itself, a red link and a link to an image, a PDF or another file do not count, a link from a drawing does.
+- The sort button orders by **date changed** (the default, newest first, or oldest first) or by **name** (NAV-073). *Date changed* is the `modified:` property of the note (the day its body was last changed, VAULT-046), else the file's time; a drawing uses the file's time.
+- A click on a name opens the note or the drawing; with none, the view says so. The list is made once per state of the vault and only the rows in view are drawn. The tab comes back after a restart with its switch and sort (NAV-074).
+
 ## Linked notes and the graph
 
 ![Graph](userguide/z_media/screenshots/graph.png)

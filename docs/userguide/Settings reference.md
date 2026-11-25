@@ -151,7 +151,7 @@ size of the two editor areas when you updated.
 | `show_left` | on | the left sidebar toggle of the ribbon |
 | `show_right` | on | the right sidebar toggle of the ribbon |
 | `sidebars` | empty (default icons and layout) | dragging icons, see [[Window layout]] |
-| `sidebars.ribbon` | empty: default order; `keymap` is the keyboard icon after Feeds | drag the icons of the ribbon; `files`, `search`, `tags`, `mail`, `calendar` and `social` in this list and in `sidebars.right` at once are a copy (see [[Window layout]]) |
+| `sidebars.ribbon` | empty: default order; `keymap` is the keyboard icon after Feeds, `unlinked` the Unlinked notes icon after it | drag the icons of the ribbon; `files`, `search`, `tags`, `mail`, `calendar` and `social` in this list and in `sidebars.right` at once are a copy (see [[Window layout]]) |
 | `sidebars.right` | empty: one view with all panels | drag panel icons, and Files, Search, Tags, Mail, Calendar and Feeds (`files`, `search`, `tags`, `mail`, `calendar`, `social`), into views |
 | `sidebars.hidden` | empty | right-click an icon: Remove / Restore |
 | `right[].icons`, `right[].active`, `right[].weight` | per view: its icons, the shown icon, its share of the height (0 = equal) | the right sidebar's views |

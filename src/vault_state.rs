@@ -466,6 +466,9 @@ pub struct SavedTab {
     /// The switches of the graph when they are not the default (NAV-047), on a `graph` tab.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub graph: Option<SavedGraph>,
+    /// The switch and the sort of the Unlinked notes view when they are not the default (NAV-074), on an `unlinked` tab.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unlinked: Option<SavedUnlinked>,
     /// The board the boards view showed (BOARD-007, vault-relative, '/' separated), on a `boards` tab.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub board: Option<String>,
@@ -480,6 +483,7 @@ impl SavedTab {
     pub const GRAPH: &'static str = "graph";
     pub const BOARDS: &'static str = "boards";
     pub const KEYMAP: &'static str = "keymap";
+    pub const UNLINKED: &'static str = "unlinked";
     pub const SETTINGS_FILE: &'static str = "settings_file";
 }
 
@@ -517,6 +521,19 @@ pub struct SavedTasks {
     pub query: String,
     pub show_done: bool,
     pub only_due: bool,
+    #[serde(flatten)]
+    pub other: Map<String, Value>,
+}
+
+/// The switch and the sort of the Unlinked notes view (NAV-074): the names of `unlinked::Mode` and
+/// `unlinked::Sort`, each empty while it is the default.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct SavedUnlinked {
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub mode: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub sort: String,
     #[serde(flatten)]
     pub other: Map<String, Value>,
 }
@@ -872,7 +889,7 @@ mod tests {
         assert_eq!(old.version, VaultState::CURRENT);
     }
 
-    // spec: NAV-044, NAV-045, NAV-046, NAV-047
+    // spec: NAV-044, NAV-045, NAV-046, NAV-047, NAV-074
     #[test]
     fn the_view_of_a_tab_round_trips_a_file_without_it_loads_and_an_unknown_view_is_kept() {
         let view = |v: &str| SavedTab { view: Some(v.into()), ..SavedTab::default() };
@@ -881,12 +898,14 @@ mod tests {
             SavedTab { calendar: Some(SavedCalendar { mode: "week".into(), day: 20_000, ..Default::default() }), ..view(SavedTab::CALENDAR) },
             SavedTab { tasks: Some(SavedTasks { query: "#home".into(), show_done: true, only_due: false, ..Default::default() }), ..view(SavedTab::TASKS) },
             SavedTab { graph: Some(SavedGraph { hide_missing: true, hide_orphans: false, ..Default::default() }), ..view(SavedTab::GRAPH) },
+            SavedTab { unlinked: Some(SavedUnlinked { mode: "no-backlinks".into(), sort: String::new(), ..Default::default() }), ..view(SavedTab::UNLINKED) },
             view(SavedTab::SETTINGS_FILE),
             file_tab("a.md", false),
         ];
         let s = VaultState { tabs, ..VaultState::default() };
         let text = String::from_utf8(to_bytes(&s)).unwrap();
-        assert_eq!(text.matches("\"view\"").count(), 5, "only the tabs of a view have one: {text}");
+        assert_eq!(text.matches("\"view\"").count(), 6, "only the tabs of a view have one: {text}");
+        assert_eq!(text.matches("\"mode\": \"no-backlinks\"").count() + text.matches("\"sort\"").count(), 1, "an empty name (the default) is not written: {text}");
         assert_eq!(text.matches("\"mail\": {").count(), 1);
         let (back, newer) = parse::<VaultState>(text.as_bytes()).unwrap();
         assert!(!newer);

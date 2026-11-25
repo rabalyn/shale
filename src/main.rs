@@ -194,6 +194,7 @@ mod ui_test_support;
 mod undo;
 #[cfg(test)]
 mod undo_tests;
+mod unlinked;
 mod update;
 mod userdirs;
 mod userguide;

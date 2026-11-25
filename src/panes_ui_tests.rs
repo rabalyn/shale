@@ -419,7 +419,7 @@ fn the_selection_and_scroll_of_notes_in_both_panes_and_the_reading_view_come_bac
     assert_eq!(again.pane_bar(1).tabs[0].editor.selection_chars(hl.ctx()).map(ordered), Some((40, 40)));
 }
 
-// spec: NAV-044, NAV-046, NAV-047
+// spec: NAV-044, NAV-046, NAV-047, NAV-074
 #[test]
 fn every_kind_of_tab_comes_back_in_its_pane_with_its_pin_and_place() {
     use crate::calendar::ui::Mode;
@@ -440,6 +440,10 @@ fn every_kind_of_tab_comes_back_in_its_pane_with_its_pin_and_place() {
     w.app.show_view(View::SettingsFile, true);
     w.app.show_view(View::Graph, true);
     w.app.graphs.global.show_orphans = false;
+    w.app.show_view(View::Unlinked, true);
+    w.app.unlinked.mode = crate::unlinked::Mode::NoBacklinks;
+    w.app.unlinked.sort = crate::unlinked::Sort::NameDesc;
+    w.app.show_view(View::Graph, true);
     w.frames(3);
     w.app.save_config();
     w.app.vdata.save().unwrap();
@@ -463,6 +467,8 @@ fn every_kind_of_tab_comes_back_in_its_pane_with_its_pin_and_place() {
     assert_eq!((again.cal.main.mode, again.cal.main.anchor), (Mode::Day, 20_500));
     assert_eq!((again.tasks.query.as_str(), again.tasks.only_due, again.tasks.show_done), ("#home", true, false));
     assert!(!again.graphs.global.show_orphans && again.graphs.global.show_missing);
+    assert!(kinds(&again, 1).contains(&View::Unlinked));
+    assert_eq!((again.unlinked.mode, again.unlinked.sort), (crate::unlinked::Mode::NoBacklinks, crate::unlinked::Sort::NameDesc), "the Unlinked tab comes back with its switch and sort");
 
     // a view this version does not know is skipped, a saved mail place of an account that is gone is dropped
     let mut w2 = W::new("views-odd");

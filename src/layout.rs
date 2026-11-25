@@ -47,6 +47,7 @@ pub enum Icon {
     History,
     Thread,
     Keymap,
+    Unlinked,
     /// the vault switcher (VAULT-030)
     Vault,
 }
@@ -93,6 +94,14 @@ pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
                 }
             }
             p.line_segment([cx + Vec2::new(-w * 0.22, w * 0.12), cx + Vec2::new(w * 0.22, w * 0.12)], s);
+        }
+        Icon::Unlinked => {
+            // two notes with a broken line between them
+            for dx in [-0.27f32, 0.27] {
+                p.circle_stroke(cx + Vec2::new(w * dx, 0.0), w * 0.14, s);
+            }
+            p.line_segment([cx + Vec2::new(-w * 0.1, 0.0), cx + Vec2::new(-w * 0.03, 0.0)], s);
+            p.line_segment([cx + Vec2::new(w * 0.03, 0.0), cx + Vec2::new(w * 0.1, 0.0)], s);
         }
         Icon::LocalGraph => {
             // the graph around one note: a ring of neighbours round the note in the middle
@@ -583,6 +592,7 @@ impl ShaleApp {
             Item::Tasks => self.actions.push(Action::ShowView(View::Tasks)),
             Item::Boards => self.actions.push(Action::ShowView(View::Boards)),
             Item::Keymap => self.actions.push(Action::ShowView(View::Keymap)),
+            Item::Unlinked => self.actions.push(Action::ShowView(View::Unlinked)),
             Item::Social => self.actions.push(Action::ShowView(View::Social(None))),
             Item::Import => self.open_import(vec![], vec![], None),
             Item::Drawing => {
@@ -616,6 +626,7 @@ impl ShaleApp {
             View::Graph => "Graph".into(),
             View::Boards => "Boards".into(),
             View::Keymap => "Keymap".into(),
+            View::Unlinked => "Unlinked notes".into(),
             View::Calendar => "Calendar".into(),
             View::Mail => "Mail".into(),
             View::SettingsFile => "Settings file".into(),
@@ -911,6 +922,7 @@ impl ShaleApp {
             View::Tasks => self.tasks_view(ui),
             View::Boards => self.boards_view(ui),
             View::Keymap => self.keymap_view_tab(ui),
+            View::Unlinked => self.unlinked_view(ui),
             View::SettingsFile => self.settings_file_view(ui),
             View::Social(f) => self.social_view(ui, f.clone()),
             View::Calendar => {
