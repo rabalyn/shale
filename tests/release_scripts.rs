@@ -43,7 +43,7 @@ fn forge_016_test_dev_metrics_script_passes() {
     run("scripts/test-dev-metrics.sh");
 }
 
-// spec: FORGE-013, FORGE-014, BUILD-034, BUILD-037, FORGE-020, DEV-045
+// spec: FORGE-013, FORGE-014, BUILD-034, BUILD-037, FORGE-020, DEV-045, BUILD-045
 #[test]
 fn forge_013_forge_014_test_release_script_passes() {
     run("scripts/test-release.sh");
