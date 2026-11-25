@@ -2026,7 +2026,7 @@ impl NoteEditor {
                 scope: markdown::defined_footnotes_in_scope(),
                 raw: preview.clone(),
                 ranges,
-                syntax_gen: crate::syntax::generation(),
+                syntax_gen: if s.contains("```") || s.contains("~~~") { crate::syntax::generation() } else { 0 },
                 palette_gen: crate::theme::generation(),
             };
             let laid = layout_cache.get(key, settled.is_some(), |key, formats| {

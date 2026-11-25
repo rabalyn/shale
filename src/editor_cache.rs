@@ -72,7 +72,9 @@ pub struct LayoutKey {
     pub raw: Option<Range<usize>>,
     /// the rows the embeds, tables and folds change: byte range and height
     pub ranges: Vec<(Range<usize>, f32)>,
-    /// [`crate::syntax::generation`]: a layout with plain code is made again when the worker has coloured some (EDIT-121)
+    /// [`crate::syntax::generation`] for a text with a fenced code block, else 0: a layout with plain code is made
+    /// again when the worker has coloured some (EDIT-121). The count is the process's, so a text with no code
+    /// does not hold it, or a block coloured for another note or window would lay this one out again (#714)
     pub syntax_gen: u64,
     /// [`crate::theme::generation`]: the colours of the palette are baked into the galley (CFG-062)
     pub palette_gen: u64,
