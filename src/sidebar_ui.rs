@@ -32,6 +32,9 @@ pub struct SideState {
     pub(crate) reset_widths: [bool; 2],
     /// where things were drawn this frame (and the frame before the next one)
     pub(crate) ribbon_rect: Option<Rect>,
+    /// where the vault switcher is drawn this frame: the strip of the left sidebar, or the ribbon
+    /// icon while that is hidden (VAULT-030); the dropdown opens at it
+    pub(crate) vault_button: Option<Rect>,
     pub(crate) ribbon_icons: Vec<(Item, Rect)>,
     pub(crate) bars: Vec<Bar>,
     /// the content of each view and the place a new view would get if an icon is dropped there
@@ -117,6 +120,7 @@ impl SideState {
     /// Forget where things were drawn (before a frame draws them again).
     pub(crate) fn clear_geometry(&mut self) {
         self.ribbon_rect = None;
+        self.vault_button = None;
         self.ribbon_icons.clear();
         self.bars.clear();
         self.bodies.clear();

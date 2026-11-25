@@ -6,10 +6,14 @@ use crate::board::resolve::Resolved;
 use crate::busy::Cancel;
 use crate::fonts::resolve::Values;
 use crate::markdown;
+use crate::markdown::citations::Kind as FloatKind;
+use crate::markdown::labels::{Level, Role, Source};
 use crate::pdf::book::{self, Item, Plan};
-use crate::pdf::export::{book_scale, finish_from, fit_text, pdf_image, wrap_pieces, Entry, ExportOptions, Piece, Writer};
+use crate::pdf::export::{book_scale, finish_from, fit_text, landing_key, pdf_image, wrap_pieces, Entry, ExportOptions, Piece, Thesis, Writer};
 use crate::pdf::export_fonts::Made;
 use crate::pdf::write::{styled_width, text_width, Bookmark, Dest, Rgba, TextStyle};
+use crate::thesis::export::{Bibliographies, BookViews};
+use crate::thesis::{Book, Marker};
 use crate::vault::{FileKind, Vault};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -78,12 +82,24 @@ struct Section {
     title: String,
     /// the note's text (the first heading that says the title blanked, BOOK-006)
     text: String,
+    /// the note's text as it is in the vault, which the thesis syntax is read from (BOOK-020)
+    raw: String,
+    /// the number the plan gives the part or chapter, `2.1`, whether headings are numbered or not
+    count: Option<String>,
     numbers: HashMap<usize, String>,
     levels: HashMap<usize, usize>,
     heads: Vec<Head>,
 }
 
 impl Section {
+    /// The section with another text (the thesis syntax of the note replaced by marks, BOOK-020):
+    /// its headings are read again, the text it is read from stays.
+    fn remark(&mut self, text: String) {
+        let (raw, count) = (std::mem::take(&mut self.raw), self.count.take());
+        *self = section(self.kind, self.rel.take(), self.level, self.number.take(), std::mem::take(&mut self.title), text);
+        (self.raw, self.count) = (raw, count);
+    }
+
     /// `2.1 Lists`: how the section is called in the contents, the bookmarks and the running header.
     fn label(&self) -> String {
         match &self.number {
@@ -116,7 +132,8 @@ fn sections(vault: &Vault, plan: &Plan, numbered: bool) -> Vec<Section> {
             n += 1;
             let number = if prefix.is_empty() { n.to_string() } else { format!("{prefix}.{n}") };
             let text = rel.as_deref().map(text_of).unwrap_or_default();
-            let s = section(kind, rel, level, numbered.then(|| number.clone()), title, text);
+            let mut s = section(kind, rel, level, numbered.then(|| number.clone()), title, text);
+            s.count = Some(number.clone());
             out.push(s);
             if let Item::Part(p) = item {
                 walk(&p.items, level + 1, &number, numbered, text_of, out);
@@ -130,9 +147,10 @@ fn sections(vault: &Vault, plan: &Plan, numbered: bool) -> Vec<Section> {
 /// A section: its headings by depth below the section (BOOK-006).
 fn section(kind: Kind, rel: Option<PathBuf>, level: usize, number: Option<String>, title: String, text: String) -> Section {
     // a first `# Heading` that says the title is not printed again: the line is blank (PDF-008)
+    let raw = text.clone();
     let mut text = text;
     if let Some((line, 1, first, _)) = markdown::heading_numbers(&text).into_iter().next() {
-        if kind != Kind::Intro && markdown::heading_plain(&first).to_lowercase() == markdown::heading_plain(&title).to_lowercase() {
+        if kind != Kind::Intro && markdown::heading_plain(&markdown::labels::without_labels(&first)).to_lowercase() == markdown::heading_plain(&title).to_lowercase() {
             let lines: Vec<&str> = text.split('\n').collect();
             text = lines.iter().enumerate().map(|(i, l)| if i == line { "" } else { l }).collect::<Vec<_>>().join("\n");
         }
@@ -155,7 +173,26 @@ fn section(kind: Kind, rel: Option<PathBuf>, level: usize, number: Option<String
         levels.insert(line, level + depth);
         heads.push(Head { line, level: level + depth, label, plain, listed: kind == Kind::Chapter && depth == 1 });
     }
-    Section { kind, rel, level, number, title, text, numbers, levels, heads }
+    Section { kind, rel, level, number, title, raw, count: None, text, numbers, levels, heads }
+}
+
+/// The thesis document of the book (BOOK-020, BOOK-021): the numbers of its labels, its one
+/// bibliography and its citations, the same for every note. A chapter counts under the number the
+/// plan prints before its title (`2.1`), also when headings are not numbered. `None` when no note
+/// of the book has anything of the thesis syntax.
+fn thesis_views(vault: &Vault, plan: &Plan, secs: &[Section], opts: &ExportOptions) -> Option<BookViews> {
+    let top_rel = plan.note.as_deref().or(plan.intro.as_deref());
+    let top_text = top_rel.and_then(|rel| vault.notes.get(rel)).map(|n| n.text.as_str());
+    let sources: Vec<Source> = secs
+        .iter()
+        .map(|s| {
+            let chapter = s.kind == Kind::Chapter;
+            Source { text: &s.raw, role: if chapter { Role::Chapter } else { Role::Other }, title: Some(s.title.as_str()), number: s.count.as_deref().filter(|_| chapter) }
+        })
+        .collect();
+    let book = Book { dir: plan.dir.clone(), top: top_rel.map(Path::to_path_buf).unwrap_or_default(), notes: secs.iter().map(|s| (s.rel.clone().unwrap_or_default(), s.kind == Kind::Chapter)).collect() };
+    let top = top_rel.zip(top_text).map(|(rel, text)| (rel, text, secs.iter().position(|s| s.kind == Kind::Intro)));
+    Bibliographies::new(vault).book(vault, book, &sources, top, opts.citation_style)
 }
 
 impl Writer<'_> {
@@ -282,9 +319,32 @@ pub(super) fn lay_out(vault: &Vault, plan: &Plan, opts: &ExportOptions, progress
     let top = plan.note.as_deref().or(plan.intro.as_deref());
     let chapters: Vec<(String, Values)> = plan.notes().iter().filter(|rel| Some(rel.as_path()) != top).map(|rel| (rel.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), Values::of_note(note_of(rel)))).collect();
     let top = top.map(|rel| Values::of_note(note_of(rel))).unwrap_or_default();
-    let (opts, warnings) = crate::pdf::export_fonts::apply(opts, &vault.root, top, Some(chapters));
+    let (opts, mut warnings) = crate::pdf::export_fonts::apply(opts, &vault.root, top, Some(chapters));
     let opts = &opts;
-    let secs = tracing::info_span!("flow.book_export.read_notes", peer = "vault").in_scope(|| sections(vault, plan, opts.numbered_headings));
+    let mut secs = tracing::info_span!("flow.book_export.read_notes", peer = "vault").in_scope(|| sections(vault, plan, opts.numbered_headings));
+    // the thesis syntax of the whole book: the numbers, the citations and the bibliography are the book's (BOOK-020, BOOK-021)
+    let thesis = thesis_views(vault, plan, &secs, opts);
+    let views: Vec<std::sync::Arc<crate::thesis::View>> = thesis.as_ref().map(|t| t.views.clone()).unwrap_or_default();
+    warnings.extend(thesis.map(|t| t.warnings).unwrap_or_default());
+    let mut theses: Vec<Option<Thesis>> = Vec::new();
+    for (i, view) in views.iter().enumerate() {
+        if secs[i].rel.is_none() {
+            theses.push(None);
+            continue;
+        }
+        let (thesis, marked) = Thesis::of(view.clone(), &secs[i].raw);
+        secs[i].remark(marked);
+        theses.push(Some(thesis));
+    }
+    // the bibliography is printed where a chapter has its marker, else after the last chapter
+    let has_bibliography = views.first().is_some_and(|v| !v.references().is_empty());
+    let marker = views.iter().enumerate().find_map(|(i, v)| v.blocks(&secs[i].raw).first().map(|b| (i, b.line)));
+    if let (Some((i, line)), Some(view)) = (marker, views.first()) {
+        // the marker is a line of the contents, where its chapter has it
+        let title = view.lang.bibliography_heading().to_string();
+        let at = secs[i].heads.partition_point(|h| h.line < line);
+        secs[i].heads.insert(at, Head { line, level: 1, label: title.clone(), plain: title, listed: true });
+    }
     if let Some(p) = progress {
         p.total.store(secs.len(), Ordering::SeqCst);
     }
@@ -308,10 +368,15 @@ pub(super) fn lay_out(vault: &Vault, plan: &Plan, opts: &ExportOptions, progress
         listed.push((i, usize::MAX));
         listed.extend(secs[i].heads.iter().enumerate().filter(|(_, h)| h.listed).map(|(n, _)| (i, n)));
     }
+    // after the last chapter: the bibliography (BOOK-021)
+    let bibliography_at_end = has_bibliography && marker.is_none();
+    if bibliography_at_end {
+        listed.push((secs.len(), usize::MAX));
+    }
     // a board is the first line of the contents
     let boarded = board.is_some();
     let slots = if opts.toc && !listed.is_empty() {
-        let mut gaps: Vec<f32> = listed.iter().enumerate().map(|(n, (i, h))| if *h == usize::MAX && secs[*i].kind == Kind::Part && (n > 0 || boarded) { base * 0.9 } else { 0.0 }).collect();
+        let mut gaps: Vec<f32> = listed.iter().enumerate().map(|(n, (i, h))| if *h == usize::MAX && secs.get(*i).is_some_and(|s| s.kind == Kind::Part) && (n > 0 || boarded) { base * 0.9 } else { 0.0 }).collect();
         if boarded {
             gaps.insert(0, 0.0);
         }
@@ -326,7 +391,10 @@ pub(super) fn lay_out(vault: &Vault, plan: &Plan, opts: &ExportOptions, progress
     }
     let mut starts: Vec<Option<Dest>> = vec![None; secs.len()];
     let mut places: Vec<HashMap<usize, Dest>> = Vec::new();
-    for (i, s) in secs.iter().enumerate() {
+    // where the labels of the thesis syntax and the entries of the bibliography are, by key (BOOK-020)
+    let mut landings: HashMap<String, Dest> = HashMap::new();
+    for i in 0..secs.len() {
+        let s = &secs[i];
         if let Some(p) = progress {
             if p.cancel.is_cancelled() {
                 return Err(crate::pdf::export::CANCELLED.into());
@@ -340,17 +408,52 @@ pub(super) fn lay_out(vault: &Vault, plan: &Plan, opts: &ExportOptions, progress
         } else {
             starts[i] = Some(Dest { page: w.page, y: w.y });
         }
+        w.set_thesis(theses.get_mut(i).and_then(Option::take));
         let here = match &s.rel {
             Some(rel) => w.note_body(vault, rel, &s.text, &s.numbers, Some(&s.levels)),
             None => HashMap::new(),
         };
         places.push(here);
+        for (key, at) in w.thesis_landings() {
+            landings.entry(key).or_insert(at);
+        }
+        if let (Some(view), Some(start)) = (views.get(i), starts[i]) {
+            // the title line of a chapter is not a heading of the text: its label lands where the chapter starts
+            for e in view.labels.entries.iter().filter(|e| e.source == i && e.kind == FloatKind::Section && e.level != Level::Section) {
+                landings.entry(landing_key(FloatKind::Section, &e.id)).or_insert(start);
+            }
+        }
+        // the contents and the bookmarks say what the marks of the headings say
+        if let Some(thesis) = w.take_thesis() {
+            for h in &mut secs[i].heads {
+                h.label = thesis.unmark(&h.label);
+                h.plain = thesis.unmark(&h.plain);
+            }
+        }
+    }
+    // the bibliography of the book, once (BOOK-021)
+    let mut bibliography = None;
+    if let (true, Some(view)) = (bibliography_at_end, views.first()) {
+        w.begin(view.lang.bibliography_heading().to_string());
+        w.set_thesis(Some(Thesis::of(view.clone(), "").0));
+        bibliography = w.thesis_block(Marker::Bibliography, base).map(|at| (view.lang.bibliography_heading().to_string(), at));
+        for (key, at) in w.thesis_landings() {
+            landings.entry(key).or_insert(at);
+        }
+        w.set_thesis(None);
+    }
+    // the references and citations of a chapter are links to their place, also in another chapter
+    for (page, [x, y, width, height], label) in std::mem::take(&mut w.jumps) {
+        if let Some(to) = landings.get(&label) {
+            w.doc.page(page).jump(x, y, width, height, *to);
+        }
     }
     // the contents list, now that the pages are known
     let board_entry = drawn.as_ref().map(|d| Entry { level: 1, label: "Board".to_string(), dest: Some(Dest { page: d.first, y: w.top }), bold: false });
     let entries: Vec<Entry> = board_entry
         .into_iter()
         .chain(listed.iter().map(|(i, h)| match h {
+            _ if *i == secs.len() => Entry { level: 1, label: bibliography.as_ref().map(|(t, _)| t.clone()).unwrap_or_default(), dest: bibliography.as_ref().map(|(_, at)| *at), bold: false },
             h if *h == usize::MAX => Entry { level: secs[*i].level, label: secs[*i].label(), dest: starts[*i], bold: secs[*i].kind == Kind::Part },
             h => {
                 let head = &secs[*i].heads[*h];
@@ -374,6 +477,9 @@ pub(super) fn lay_out(vault: &Vault, plan: &Plan, opts: &ExportOptions, progress
                 w.doc.bookmarks.push(Bookmark { level: h.level, title: h.label.clone(), to: *to });
             }
         }
+    }
+    if let Some((title, to)) = &bibliography {
+        w.doc.bookmarks.push(Bookmark { level: 1, title: title.clone(), to: *to });
     }
     // the links between the chapters (BOOK-009): to the heading, else to where the note starts
     let mut by_note: HashMap<&Path, (Dest, HashMap<String, Dest>)> = HashMap::new();

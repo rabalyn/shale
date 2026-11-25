@@ -47,6 +47,8 @@ pub enum Icon {
     History,
     Thread,
     Keymap,
+    /// the vault switcher (VAULT-030)
+    Vault,
 }
 
 pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
@@ -151,6 +153,12 @@ pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
             paint_icon(p, r, Icon::Files, c);
             p.line_segment([cx + Vec2::new(-w * 0.12, w * 0.08), cx + Vec2::new(w * 0.12, w * 0.08)], s);
             p.line_segment([cx + Vec2::new(0.0, -w * 0.04), cx + Vec2::new(0.0, w * 0.2)], s);
+        }
+        Icon::Vault => {
+            // a box with a lid: the vault
+            let b = Rect::from_center_size(cx + Vec2::new(0.0, w * 0.04), Vec2::new(w * 0.78, w * 0.7));
+            p.rect_stroke(b, CornerRadius::same(2), s, StrokeKind::Middle);
+            p.line_segment([b.left_top() + Vec2::new(0.0, w * 0.2), b.right_top() + Vec2::new(0.0, w * 0.2)], s);
         }
         Icon::Settings => {
             p.circle_stroke(cx, w * 0.16, s);
@@ -427,6 +435,7 @@ impl ShaleApp {
             let panel = egui::Panel::left("left-sidebar").default_size(left).size_range(LEFT_RANGE);
             let panel = if std::mem::take(&mut self.side.reset_widths[0]) { panel.exact_size(LEFT_WIDTH) } else { panel };
             let shown = panel.frame(egui::Frame::new().fill(theme::palette().bg_secondary).inner_margin(egui::Margin::symmetric(8, 8)).stroke(Stroke::new(1.0, theme::palette().border))).show(ui, |ui| {
+                self.vault_strip(ui);
                 self.left_sidebar(ui);
             });
             self.keep_width(ui, shown.response.rect.width(), true);
@@ -539,6 +548,7 @@ impl ShaleApp {
                 if icon_button(ui, Icon::Settings, 30.0, false, "Settings and vault (Ctrl+,)").clicked() {
                     self.open_settings(crate::settings::last_tab(ui.ctx()));
                 }
+                self.ribbon_vault(ui);
                 let right = icon_button(ui, Icon::SidebarRight, 30.0, false, "Toggle right sidebar");
                 badges.paint(ui, right.rect, crate::keys::Action::SidebarRight);
                 if right.clicked() {

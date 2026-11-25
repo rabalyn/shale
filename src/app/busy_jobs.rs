@@ -20,6 +20,7 @@ impl ShaleApp {
             ("the data usage jobs", self.usage.any_running()),
             ("the file history", self.history.busy()),
             ("a close or switch waiting for the sync", self.pending_leave.is_some()),
+            ("the look for git, an install or an update of it", self.sync.managed.busy()),
             ("git sync", self.sync.running() || self.sync.lfs_job_running()),
             ("the publish of the site", self.publishing.running()),
             ("the pandoc look-up", self.word.running()),

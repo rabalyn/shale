@@ -59,6 +59,7 @@ pub struct Dialog {
     title: String,
     width: f32,
     modal: bool,
+    anchor: Option<Pos2>,
 }
 
 pub struct DialogResponse {
@@ -75,12 +76,19 @@ impl DialogResponse {
 impl Dialog {
     /// A modal dialog: the rest of the app is dimmed and does not take input.
     pub fn new(id: impl std::hash::Hash + std::fmt::Debug, title: impl Into<String>) -> Self {
-        Self { id: Id::unique(("dialog", id)), title: title.into(), width: 440.0, modal: true }
+        Self { id: Id::unique(("dialog", id)), title: title.into(), width: 440.0, modal: true, anchor: None }
     }
 
     /// The width it opens with (it can be resized from there).
     pub fn width(mut self, width: f32) -> Self {
         self.width = width;
+        self
+    }
+
+    /// Opens with its bottom-left corner at `pos` (a dropdown above its button) instead of
+    /// centred; it is kept on the screen.
+    pub fn anchored_above(mut self, pos: Pos2) -> Self {
+        self.anchor = Some(pos);
         self
     }
 
@@ -117,7 +125,7 @@ impl Dialog {
     }
 
     fn show_inner<S>(self, ctx: &Context, state: &mut S, header: Option<impl FnOnce(&mut Ui, &mut S)>, content: impl FnOnce(&mut Ui, &mut S), footer: Option<impl FnOnce(&mut Ui, &mut S)>) -> DialogResponse {
-        let Self { id, title, width, modal } = self;
+        let Self { id, title, width, modal, anchor } = self;
         let has_footer = footer.is_some();
         let screen = ctx.content_rect();
         let max = (screen.size() - Vec2::splat(2.0 * MARGIN)).max(MIN_SIZE);
@@ -164,7 +172,10 @@ impl Dialog {
         }
         if matches!(sizing, Sizing::Fitting { .. }) {
             // centred while it finds its height; from then on it stays where it is put
-            window = window.pivot(Align2::CENTER_CENTER).default_pos(screen.center());
+            window = match anchor {
+                Some(pos) => window.pivot(Align2::LEFT_BOTTOM).default_pos(pos),
+                None => window.pivot(Align2::CENTER_CENTER).default_pos(screen.center()),
+            };
         }
         let mut overflow = false;
         let mut spare = 0.0;

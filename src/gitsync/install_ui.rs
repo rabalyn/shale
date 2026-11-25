@@ -162,7 +162,7 @@ impl ManagedState {
 
     /// Tests: a job runs (the look for git, an install, update or removal, a check for a new
     /// version); the page changes its height when one ends.
-    #[cfg(all(test, unix))]
+    #[cfg(test)]
     pub(crate) fn busy(&self) -> bool {
         self.detecting.is_some() || self.task.is_some() || self.checking.is_some()
     }

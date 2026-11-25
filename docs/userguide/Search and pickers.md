@@ -2,7 +2,7 @@ Back to [[Start here]].
 
 # Quick switcher
 
-**Ctrl+O** finds a note by name, or creates it when nothing matches. A hint under the field shows the keys that move, open and close, as they are bound now. Typing part of "Switch vault" lists that command too: it shows the list of your vaults (the same as the vault name at the bottom left, see [[Vault settings]]).
+**Ctrl+O** finds a note by name, or creates it when nothing matches. A hint under the field shows the keys that move, open and close, as they are bound now. Typing part of "Switch vault" lists that command too: it shows the list of your vaults (the same as the vault switcher at the bottom of the left sidebar, see [[Vault settings]]).
 
 # Search notes, mail and posts
 
