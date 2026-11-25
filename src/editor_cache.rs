@@ -74,6 +74,8 @@ pub struct LayoutKey {
     pub ranges: Vec<(Range<usize>, f32)>,
     /// [`crate::syntax::generation`]: a layout with plain code is made again when the worker has coloured some (EDIT-121)
     pub syntax_gen: u64,
+    /// [`crate::theme::generation`]: the colours of the palette are baked into the galley (CFG-062)
+    pub palette_gen: u64,
 }
 
 /// A laid-out note and what is painted over it.
@@ -178,6 +180,7 @@ mod tests {
             raw: Some(0..1),
             ranges: vec![(0..1, 0.0)],
             syntax_gen: 0,
+            palette_gen: 0,
         };
         let ctx = eframe::egui::Context::default();
         crate::theme::apply(&ctx);
