@@ -41,6 +41,8 @@ pub enum View {
     Graph,
     /// the Kanban boards of the vault (BOARD-007); the board shown is `ShaleApp::boards.current`
     Boards,
+    /// the keyboard with every shortcut (KEY-058); its state is `ShaleApp::keymap_view`
+    Keymap,
     Calendar,
     Mail,
     /// Mastodon / Bluesky feeds: the feed of this tab (None: not chosen yet, the last one is shown)
@@ -467,6 +469,8 @@ pub struct ShaleApp {
     pub search_worker: crate::search_all::SearchWorker,
     /// the Kanban boards view: the open board, the selected card and the peek (BOARD-007)
     pub boards: crate::board::Boards,
+    /// The keyboard view of the Keymap tab (KEY-058).
+    pub keymap_view: crate::keymap_view::State,
     pub tasks: TasksFilter,
     /// the graph of the whole vault and the local one in the side panel
     pub graphs: Graphs,
@@ -742,6 +746,7 @@ impl ShaleApp {
             search: SearchBox::default(),
             search_worker: Default::default(),
             boards: Default::default(),
+            keymap_view: Default::default(),
             tasks: TasksFilter::default(),
             graphs: Graphs::new(),
             calendar: {
@@ -904,6 +909,11 @@ impl ShaleApp {
             }
             Some("graph") => self.show_view(View::Graph, false),
             Some("boards") => self.show_view(View::Boards, false),
+            // the keyboard of the Keymap tab: `keymap`, or `keymap:<system>:<layer>` (KEY-059)
+            Some(v) if v == "keymap" || v.starts_with("keymap:") => {
+                self.keymap_view = crate::keymap_view::State::from_view(v);
+                self.show_view(View::Keymap, false);
+            }
             // the feed view with made-up posts (no network); "social-import": and the dialog for saving some of them; "social-thread": the conversation of a post
             Some(v @ ("social" | "social-import" | "social-thread" | "social-notifications")) => {
                 let demo = crate::social::demo::account();
@@ -1204,6 +1214,7 @@ impl ShaleApp {
                 }
                 View::Boards
             }
+            SavedTab::KEYMAP => View::Keymap,
             SavedTab::SETTINGS_FILE => View::SettingsFile,
             _ => return,
         };
@@ -3080,6 +3091,9 @@ impl ShaleApp {
         }
         if is(KeyAction::DataUsage) {
             self.open_data_usage();
+        }
+        if is(KeyAction::KeymapView) {
+            self.show_view(View::Keymap, false);
         }
     }
 

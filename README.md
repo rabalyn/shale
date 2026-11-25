@@ -265,7 +265,7 @@ Other options:
 
 - `--screenshot out.png` starts with a temporary demo vault, draws about 120 frames, saves a
   picture of the window and exits. Automated checks use it.
-- `--view tasks|graph|drawing|reading|calendar|mail|social|social-import|search|keybindings|data-usage` (with `--screenshot`) chooses which
+- `--view tasks|graph|drawing|reading|calendar|mail|social|social-import|search|keybindings|keymap|keymap:<system>:<layer>|data-usage` (with `--screenshot`) chooses which
   view to capture; `mail` uses a made-up mail store (no server, no real mail), `social` and
   `social-import` made-up posts; `search` the vault with the made-up mail and posts indexed, for the search windows; `open:<file>` opens a file of the vault, `read-only:<file>.canvas`
   shows a canvas without the question, and `convert:<file>.canvas` converts it first.
@@ -334,6 +334,7 @@ Text editing keys and vim keys are fixed.
 | Shift+K | Vim-style editing, normal mode: preview the link under the cursor (a note as in the reading view, a web page's title and text; press it again to move the keyboard into the preview: j / k or ↓ / ↑ scroll, Enter opens the link like `gt`, Ctrl+Enter opens it in a new pane on the right, Esc closes). Definable, e.g. as Space P |
 | Ctrl+, | Settings |
 | Ctrl+Shift+D | Data usage: what Shale keeps on disk, and its caches |
+| Ctrl+Shift+Y | Keymap: the keyboard drawn with every shortcut, by system and layer of modifiers (a main-area tab, also the keyboard icon of the ribbon; the same keyboard is in Settings → Keybindings → Keyboard). Change on a key goes to its row. Definable (macOS: Cmd+Shift+Y) |
 | Ctrl+Shift+PageUp / Ctrl+Shift+PageDown | Previous / next message of the thread of the note (the mails with the same thread-id, by date; nothing happens at the ends, without a thread or in a dialog) |
 | Ctrl+Shift+T | Thread overview: opens the Thread view in the right sidebar and gives it the keyboard (↑ ↓ move, Enter jumps, Esc returns to the note) |
 | F1 | Open the user guide (built into Shale, unpacked into its data folder and opened as a vault) |

@@ -479,6 +479,7 @@ impl SavedTab {
     pub const TASKS: &'static str = "tasks";
     pub const GRAPH: &'static str = "graph";
     pub const BOARDS: &'static str = "boards";
+    pub const KEYMAP: &'static str = "keymap";
     pub const SETTINGS_FILE: &'static str = "settings_file";
 }
 
