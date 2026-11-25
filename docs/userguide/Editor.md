@@ -282,6 +282,17 @@ follow in the next parts of thesis writing.
 
 ![[thesis-reading.png]]
 
+- **The exports.** The built-in [[PDF]] export and the site ([[Publishing a vault]]) write the same without TeX: the
+  citations as the style formats them (in the PDF and on the site a click on one goes to its entry), figures, tables
+  and equations with their numbers and captions (a table's caption above and a figure's below unless
+  `table-caption:` and `figure-caption:` say otherwise; a table's caption is its `: Caption {#tbl:x}` line, a figure's
+  its alias), references as links to the place ("Figure 3"), and the bibliography at the end or at
+  `<!-- shale: bibliography -->`. Two more lines of their own, `<!-- shale: list-of-figures -->` and
+  `<!-- shale: list-of-tables -->`, print the lists of figures and tables with their captions (the PDF with the pages)
+  where they stand; a list with nothing in it prints nothing. A key the bibliography lacks, a reference to a label
+  nobody has, a label used twice and citations without a bibliography are warnings of the export, and what does not
+  resolve is printed as written. A book of several notes is exported as one document in a later phase.
+
 # Code
 
 Code is coloured: write the language after the opening fence, as in ```` ```js ````

@@ -18,6 +18,8 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+mod thesis;
+
 pub(super) const MM: f32 = 72.0 / 25.4;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -734,6 +736,8 @@ pub(super) struct Writer<'a> {
     inline_images: HashMap<PathBuf, Option<(usize, Vec2)>>,
     /// a note's export as a task: asked between two pictures, the layout ends early (JOB-017)
     cancel: Option<Cancel>,
+    /// the thesis syntax of the note: numbers, captions, citations and lists (PDF-032)
+    thesis: Option<thesis::Thesis>,
 }
 
 impl<'a> Writer<'a> {
@@ -742,7 +746,7 @@ impl<'a> Writer<'a> {
         let mut doc = Doc::new(title);
         let page = doc.add_page(w, h);
         let [top, right, bottom, left] = opts.margins();
-        Writer { doc, opts, w, h, top, right, bottom, left, page, y: top, members: None, book_links: vec![], heads: vec![PageHead::default()], running: None, jumps: Vec::new(), inline_images: HashMap::new(), cancel: None }
+        Writer { doc, opts, w, h, top, right, bottom, left, page, y: top, members: None, book_links: vec![], heads: vec![PageHead::default()], running: None, jumps: Vec::new(), inline_images: HashMap::new(), cancel: None, thesis: None }
     }
     /// Whether Cancel was asked for: the layout stops before the next picture.
     fn stopped(&self) -> bool {
@@ -791,12 +795,19 @@ impl<'a> Writer<'a> {
 
     /// [`Writer::reserve_contents`] with some more room above each line (in points).
     pub(super) fn reserve_contents_gapped(&mut self, gaps: &[f32]) -> Vec<(usize, f32)> {
+        self.reserve_list("Contents", gaps, self.opts.toc_break).1
+    }
+
+    /// A titled list of lines whose page numbers are drawn later, as [`Writer::reserve_contents_gapped`]
+    /// does for the contents; `new_page` starts a page after it. Gives where the title stands too.
+    pub(super) fn reserve_list(&mut self, title: &str, gaps: &[f32], new_page: bool) -> (Dest, Vec<(usize, f32)>) {
         let base = self.opts.font_pt;
         if self.y > self.top + 0.5 {
             self.y += base * 0.8;
         }
+        let at = Dest { page: self.page, y: self.y };
         let head = vec![Piece {
-            text: "Contents".into(),
+            text: title.into(),
             kind: self.opts.headings(),
             size: base * 1.5,
             color: Rgba(0, 0, 0, 255),
@@ -824,12 +835,12 @@ impl<'a> Writer<'a> {
             slots.push((self.page, self.y));
             self.y += base * CONTENTS_LINE;
         }
-        if self.opts.toc_break {
+        if new_page {
             self.new_page();
         } else {
             self.y += base * 0.8;
         }
-        slots
+        (at, slots)
     }
 
     /// The entries of the *Contents* list in the room [`Writer::reserve_contents`] made: each
@@ -1015,6 +1026,9 @@ impl<'a> Writer<'a> {
         let base = opts.font_pt;
         let ink = Color32::from_rgb(30, 30, 30);
         let mut places: HashMap<usize, Dest> = HashMap::new();
+        // the thesis syntax (PDF-032): its numbers, captions, lists and the bibliography
+        let view = self.thesis_view();
+        let blocks = view.as_ref().map(|v| v.blocks(text)).unwrap_or_default();
         let fenced = markdown::fenced_code_lines(text);
         let lines = markdown::lines_with_offsets(text);
         let mut i = 0;
@@ -1081,6 +1095,7 @@ impl<'a> Writer<'a> {
         let mut extra;
         while i < lines.len() {
             extra = 0;
+            self.reset_float();
             if breaks.contains(&i) {
                 pending |= self.y > self.top + 0.5;
                 i += 1;
@@ -1099,9 +1114,22 @@ impl<'a> Writer<'a> {
                 self.new_page();
                 pending = false;
             }
+            // a list of the thesis syntax at its marker; a marker with nothing to list prints nothing (PDF-032)
+            if view.is_some() && !fenced.get(i).copied().unwrap_or(false) {
+                if let Some(marker) = thesis::Marker::of(lines[i].1.trim()) {
+                    if blocks.iter().any(|b| b.line == i) {
+                        if let Some(at) = self.thesis_block(marker, base) {
+                            places.insert(i, at);
+                        }
+                    }
+                    i += 1;
+                    continue;
+                }
+            }
             if let Some(b) = tables.iter().find(|b| b.lines.start == i) {
-                self.table(vault, rel, &b.table, &b.meta.sizes, ink);
-                i = b.lines.end;
+                // a table with a label has its caption line `: Caption {#tbl:x}` drawn as "Table 2: Caption" (PDF-032)
+                let captioned = self.captioned_table(view.as_deref(), b.lines.end, |w| w.table(vault, rel, &b.table, &b.meta.sizes, ink));
+                i = b.lines.end + usize::from(captioned);
                 continue;
             }
             let (off, line) = lines[i];
@@ -1110,7 +1138,8 @@ impl<'a> Writer<'a> {
             let cw = self.cw();
             // a formula on lines of its own: centred, or printed as code when it cannot be typeset (PDF-012)
             if let Some(m) = formulas.iter().find(|m| m.block && m.lines.start == i) {
-                self.display_math(&text[m.tex.clone()], base);
+                let number = view.as_deref().and_then(|v| thesis::equation_number(v, &m.lines));
+                self.display_math(&text[m.tex.clone()], base, number);
                 i = m.lines.end;
                 continue;
             }
@@ -1139,7 +1168,12 @@ impl<'a> Writer<'a> {
                     }
                     let kind = vault.file(&t).map(|f| f.kind).unwrap_or(FileKind::Other);
                     // the link under the thumbnail (PDF-004); the size the editor gives it (PDF-005)
-                    let caption = crate::caption::text(&line_links[0]);
+                    let mut caption = Some(crate::caption::text(&line_links[0]));
+                    // a figure with a label has its number and its caption above or below it (PDF-032)
+                    if let Some(entry) = view.as_deref().and_then(|v| v.label_on(thesis::Kind::Figure, i).map(|e| (v, e))) {
+                        self.set_float(entry.0, entry.1);
+                        caption = None;
+                    }
                     let asked = line_links[0].embed_width();
                     let ref_w = opts.column();
                     if kind == FileKind::Drawing {
@@ -1147,12 +1181,13 @@ impl<'a> Writer<'a> {
                             if let Some(b) = scene.bounds() {
                                 let b = b.expand(20.0);
                                 let size = self.page_size(crate::embed_size::drawing(Vec2::new(b.width(), b.height()), ref_w));
-                                self.need(size.y + 6.0 + self.caption_room(Some(&caption)));
+                                self.need(size.y + 6.0 + self.caption_room(caption.as_deref()) + self.float_room());
+                                self.begin_float();
                                 let (x, y) = (x0, self.y);
                                 let pics = add_pictures(&mut self.doc, &crate::drawing::pictures::images(&scene, vault, &t));
                                 draw_scene(self.p(), &scene, [x, y, size.x, size.y], false, None, &pics);
                                 self.y += size.y;
-                                self.picture_end(Some(&caption));
+                                self.picture_end(caption.as_deref());
                             }
                         }
                         i += 1;
@@ -1161,17 +1196,19 @@ impl<'a> Writer<'a> {
                         if let Ok(img) = image::open(&abs) {
                             let img = img.to_rgba8();
                             let size = self.page_size(crate::embed_size::picture(natural_size(img.width(), img.height()), asked, ref_w));
-                            self.image(&img, size, Some(&caption));
+                            self.image(&img, size, caption.as_deref());
                             i += 1;
                             continue;
                         }
                     } else if crate::media::is_media(&t) && abs.is_file() {
-                        self.player_card(&abs, asked, Some(&caption));
+                        self.player_card(&abs, asked, caption.as_deref());
                         i += 1;
                         continue;
                     } else if crate::pdf::view::is_pdf(&t) {
                         if let Ok(r) = crate::fsutil::read(&abs).map_err(|e| e.to_string()).and_then(|d| crate::pdf::view::render_pages(d, 40, 2.0)) {
                             let last = r.images.len().saturating_sub(1);
+                            // the caption below a labelled figure goes after its last page
+                            let mut below = self.take_float_below();
                             for (n, img) in r.images.iter().enumerate() {
                                 if self.stopped() {
                                     return places;
@@ -1179,7 +1216,10 @@ impl<'a> Writer<'a> {
                                 if let Some(rgba) = rgba_of(img) {
                                     // the editor shows its pages rendered at 1.5; these are at 2.0
                                     let size = self.page_size(crate::embed_size::pdf_page(Vec2::new(img.size[0] as f32, img.size[1] as f32) * 0.75, ref_w));
-                                    self.image(&rgba, size, (n == last).then_some(caption.as_str()));
+                                    if n == last {
+                                        self.put_float_below(below.take());
+                                    }
+                                    self.image(&rgba, size, caption.as_deref().filter(|_| n == last));
                                 }
                             }
                             i += 1;
@@ -1311,7 +1351,15 @@ impl<'a> Writer<'a> {
             let _ = off;
             i += 1 + extra;
         }
+        // the bibliography at the end of the note, when no marker put it elsewhere (PDF-032)
+        if let Some(at) = blocks.iter().find(|b| b.line >= lines.len()).and_then(|b| self.thesis_block(b.what, base)) {
+            places.insert(lines.len(), at);
+        }
+        if let Some(v) = &view {
+            self.finish_thesis(v, &places);
+        }
         // the references of footnotes link to their definitions in this note
+        footnote_places.extend(self.thesis_landings());
         for (page, [x, y, width, height], label) in self.jumps.split_off(first_jump) {
             if let Some(to) = footnote_places.get(&label) {
                 self.doc.page(page).jump(x, y, width, height, *to);
@@ -1545,12 +1593,12 @@ impl<'a> Writer<'a> {
                 picture: None,
             });
         }
-        out
+        self.expand_marks(out)
     }
 
     /// A formula alone on its lines (PDF-012): centred in display style, or its TeX as a code block
     /// when it cannot be typeset (EDIT-049).
-    fn display_math(&mut self, tex: &str, base: f32) {
+    fn display_math(&mut self, tex: &str, base: f32, number: Option<(String, String)>) {
         match crate::math::typeset(tex, base * crate::math::DISPLAY_SCALE, true) {
             Ok(f) => {
                 let l = &f.layout;
@@ -1559,9 +1607,19 @@ impl<'a> Writer<'a> {
                 let y = self.y + base * 0.4 + l.ascent;
                 let ink = print_color(theme::Palette::shale().text);
                 self.p().math(l, x, y, ink);
+                // the number of a labelled equation stands at the right margin (PDF-032)
+                if let Some((key, number)) = number {
+                    self.land(key);
+                    let at = self.left + self.cw() - crate::pdf::write::text_width(self.opts.font, base, &number);
+                    let font = self.opts.font;
+                    self.p().text(TextStyle::plain(font, base, ink), at, y, &number);
+                }
                 self.y += l.height() + base * 0.8;
             }
             Err(_) => {
+                if let Some((key, _)) = number {
+                    self.land(key);
+                }
                 let lines: Vec<&str> = tex.trim_matches('\n').lines().collect();
                 self.code_block("", &lines, base * 0.9);
                 self.y += base * 0.5;
@@ -1632,7 +1690,8 @@ impl<'a> Writer<'a> {
     /// A picture `size` big (PDF points) at the left margin, with its caption below it (PDF-004).
     fn image(&mut self, img: &image::RgbaImage, size: Vec2, caption: Option<&str>) {
         let idx = self.doc.add_image(pdf_image(img));
-        self.need(size.y + 6.0 + self.caption_room(caption));
+        self.need(size.y + 6.0 + self.caption_room(caption) + self.float_room());
+        self.begin_float();
         let (x, y) = (self.left, self.y);
         self.p().image(idx, x, y, size.x, size.y);
         self.y += size.y;
@@ -1646,7 +1705,8 @@ impl<'a> Writer<'a> {
         let look = media_look(abs);
         let card = crate::media::widget::card_size(abs, self.opts.column(), asked);
         let size = self.page_size(card);
-        self.need(size.y + 6.0 + self.caption_room(caption));
+        self.need(size.y + 6.0 + self.caption_room(caption) + self.float_room());
+        self.begin_float();
         let (ox, oy, page) = (self.left, self.y, self.page);
         draw_card(&mut self.doc, page, [ox, oy], size, card, abs, &look);
         self.y += size.y;
@@ -1660,6 +1720,7 @@ impl<'a> Writer<'a> {
 
     /// The end of a picture (its bottom is at `y`): the caption below it, then some space.
     fn picture_end(&mut self, caption: Option<&str>) {
+        self.end_float();
         if let Some(text) = caption {
             let size = crate::caption::size(self.opts.font_pt);
             let shown = crate::caption::fit(text, self.cw(), |s| crate::pdf::write::text_width(FontKind::Sans, size, s));
@@ -1776,16 +1837,41 @@ pub fn export_note_until(vault: &Vault, rel: &Path, text: &str, opts: &ExportOpt
 }
 
 fn export_note_in_shale(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions, cancel: Option<&Cancel>) -> Result<Made, String> {
-    let (opts, warnings) = crate::pdf::export_fonts::apply(&opts.clone().with_note_text_properties(text), &vault.root, crate::fonts::resolve::Values::of_note(text), None);
+    let (opts, mut warnings) = crate::pdf::export_fonts::apply(&opts.clone().with_note_text_properties(text), &vault.root, crate::fonts::resolve::Values::of_note(text), None);
     let opts = &opts;
     // the title line's text: no `.md`, no date prefix (VAULT-025)
     let name = vault.file(rel).map(|f| f.title()).unwrap_or_else(|| crate::vault::title_of(&rel.to_string_lossy()).to_string());
+    // the thesis syntax (PDF-032): numbers, citations and the bibliography come from the same view the reading view has
+    let thesis = crate::thesis::export::Bibliographies::new(vault).view(vault, rel, text);
+    let blocks = thesis.as_ref().map(|v| v.blocks(text)).unwrap_or_default();
+    let (thesis, text) = match thesis {
+        Some(view) => {
+            warnings.extend(view.warnings(text));
+            let (thesis, marked) = thesis::Thesis::of(view, text);
+            (Some(thesis), std::borrow::Cow::Owned(marked))
+        }
+        None => (None, std::borrow::Cow::Borrowed(text)),
+    };
+    let text = &*text;
     let mut w = Writer::new(&name, opts);
     w.cancel = cancel.cloned();
+    w.thesis = thesis;
     let base = opts.font_pt;
-    let heads = markdown::heading_numbers(text);
+    let mut heads = markdown::heading_numbers(text);
     // a first heading `# Title` that says the same as the title makes the title a second print of it (PDF-008)
     let said_by_heading = heads.first().is_some_and(|(_, level, title, _)| *level == 1 && markdown::heading_plain(title).to_lowercase() == markdown::heading_plain(&name).to_lowercase());
+    // the lists of the thesis syntax are entries of the contents where they stand (PDF-032)
+    if let Some(view) = w.thesis_view() {
+        heads.extend(blocks.iter().map(|b| {
+            let title = match b.what {
+                thesis::Marker::Bibliography => view.lang.bibliography_heading(),
+                thesis::Marker::ListOfFigures => view.lang.list_heading(thesis::Kind::Figure),
+                thesis::Marker::ListOfTables => view.lang.list_heading(thesis::Kind::Table),
+            };
+            (b.line, 1, title.to_string(), None)
+        }));
+        heads.sort_by_key(|h| h.0);
+    }
     if opts.title && !said_by_heading {
         let pieces = vec![Piece {
             text: name.clone(),
@@ -1816,9 +1902,11 @@ fn export_note_in_shale(vault: &Vault, rel: &Path, text: &str, opts: &ExportOpti
     if w.stopped() {
         return Err(CANCELLED.into());
     }
-    let label = |line: usize, title: &str| match numbers.get(&line) {
-        Some(n) => format!("{n} {}", markdown::heading_plain(title)),
-        None => markdown::heading_plain(title),
+    // a heading may hold a citation or a reference of the thesis syntax, which is a mark in the text
+    let plain: HashMap<usize, String> = heads.iter().map(|(line, _, title, _)| (*line, w.unmark(&markdown::heading_plain(title)))).collect();
+    let label = |line: usize, _title: &str| match numbers.get(&line) {
+        Some(n) => format!("{n} {}", plain[&line]),
+        None => plain[&line].clone(),
     };
     let entries: Vec<Entry> = contents.iter().map(|(line, level, title, _)| Entry { level: *level, label: label(*line, title), dest: places.get(line).copied(), bold: false }).collect();
     w.draw_contents(&entries, &slots);

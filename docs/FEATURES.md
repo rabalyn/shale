@@ -1311,7 +1311,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   note (`language:` `de` or `en`: "Abbildung 3", "Figure 3"), figures, tables and equations with their number and caption
   (above or below as `figure-caption:` and `table-caption:` say; continuous or per chapter as `float-numbering:` says,
   the chapters of a book counted in reading order, appendix chapters lettered), and the list of references at the end or
-  at `<!-- shale: bibliography -->`. The exports (LaTeX, PDF, site, Word) are the next phases.
+  at `<!-- shale: bibliography -->`. **The built-in PDF and the site** write the same without TeX (PDF-032, SITE-077): formatted citations, numbered figures, tables and equations with captions above or below, references as links, the bibliography and, at `<!-- shale: list-of-figures -->` and `<!-- shale: list-of-tables -->`, the lists of figures and tables; a key or label that does not resolve is a warning of the export. A thesis of several notes in one PDF and the Word export are the next phases.
 
   ![Completion of a citation key in the editor](userguide/z_media/screenshots/thesis-editor.png)
   ![A thesis note in the reading view](userguide/z_media/screenshots/thesis-reading.png)

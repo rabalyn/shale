@@ -150,6 +150,7 @@ pub fn build(vault: &Vault) -> Result<Export, String> {
     let mut files: Vec<OutFile> = Vec::new();
     let mut notes = Vec::new();
     let mut board_data: BTreeMap<String, Value> = BTreeMap::new();
+    let mut bibliographies = crate::thesis::export::Bibliographies::new(vault);
     for rel in &published {
         let text = text_of(rel);
         let place = &layout.notes[rel];
@@ -161,7 +162,13 @@ pub fn build(vault: &Vault) -> Result<Export, String> {
         let tags = if is_board { boards::tags(text, &intro) } else { vault.notes[rel].tags.clone() };
         let page = Page { title: &titles[rel], tags: &tags, lastmod };
         let head = front::front_matter(&page, text, &|v| body::flatten_links(&env, rel, v));
-        let converted = body::convert(&env, &mut st, rel, if is_board { &intro } else { body_of(text) });
+        // citations, numbered figures, tables and equations, and the bibliography (SITE-077)
+        let thesis = if is_board { None } else { bibliographies.view(vault, rel, text) };
+        let marked = thesis.as_ref().map(|view| {
+            st.warnings.extend(view.warnings(text).into_iter().map(|w| format!("{}: {w}", rel_to_string(rel))));
+            super::thesis::apply(view, text)
+        });
+        let converted = body::convert(&env, &mut st, rel, if is_board { &intro } else { body_of(marked.as_deref().unwrap_or(text)) });
         if is_board {
             let (snap, warnings) = boards::snapshot(&env, rel);
             board_data.insert(place.content.clone(), snap);

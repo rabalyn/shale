@@ -7,7 +7,7 @@ pub mod view;
 
 pub mod export;
 
-pub use view::{Block, Book, CaptionAt, Marker, Shown, Span, View};
+pub use view::{Book, Marker, Shown, View};
 
 use crate::markdown::citations::Kind;
 use crate::markdown::labels::{Entry, Level};
