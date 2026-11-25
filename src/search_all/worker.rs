@@ -118,7 +118,7 @@ impl Request {
         // (a mail connection that is not a file has nothing another connection could read)
         let mail = ctx.mail.and_then(|c| c.path()).filter(|p| !p.is_empty()).map(PathBuf::from);
         Request {
-            snapshot: Arc::new(Snapshot::of(ctx.vault)),
+            snapshot: ctx.vault.search_snapshot(),
             lane: false,
             vocab: false,
             text: query.text.to_string(),
@@ -140,20 +140,8 @@ impl Request {
 
     /// The question the lists of the filter form ask (QUERY-030): what the tags and the front matter
     /// of the notes of `snapshot` say.
-    pub fn vocabulary(snapshot: Snapshot) -> Request {
-        Request {
-            snapshot: Arc::new(snapshot),
-            lane: false,
-            vocab: true,
-            text: String::new(),
-            note_lines: 0,
-            limit: 0,
-            prefixes: Prefixes::default(),
-            shown: Selection::ALL,
-            checked: None,
-            mail: None,
-            posts: Home::Memory("vocabulary".into()),
-        }
+    pub fn vocabulary(snapshot: Arc<Snapshot>) -> Request {
+        Request { snapshot, lane: false, vocab: true, text: String::new(), note_lines: 0, limit: 0, prefixes: Prefixes::default(), shown: Selection::ALL, checked: None, mail: None, posts: Home::Memory("vocabulary".into()) }
     }
 
     fn query(&self) -> Query<'_> {

@@ -10,7 +10,6 @@ use super::lanes::Search;
 use super::LaneView;
 use crate::search_all::matcher::{Budget, Run, Stop};
 use crate::search_all::query::Checked;
-use crate::search_all::Snapshot;
 use crate::search_sources::Prefixes;
 use crate::vault::Vault;
 use std::collections::HashSet;
@@ -36,7 +35,7 @@ pub fn resolve(vault: &Vault, rel: &Path) -> Result<Resolved, String> {
     }
     let board = Board::parse(text);
     let props = file::props(text);
-    let snapshot = Snapshot::of(vault);
+    let snapshot = vault.search_snapshot();
     let never = AtomicBool::new(false);
     let checked: Vec<Checked> = board.lanes.iter().map(|l| Checked::lane(l.query(), Prefixes::default())).collect();
     // what each lane matched, and whether the work budget ended its search early (QUERY-010)

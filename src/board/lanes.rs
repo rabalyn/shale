@@ -188,7 +188,7 @@ impl Runs {
         self.lanes.truncate(queries.len());
         let stamp = (vault.uid, vault.generation);
         let changed = if self.stamp != Some(stamp) {
-            let new = Arc::new(Snapshot::of(vault));
+            let new = vault.search_snapshot();
             let changed = self.snapshot.as_deref().map(|old| changes(old, &new));
             self.snapshot = Some(new);
             self.stamp = Some(stamp);
