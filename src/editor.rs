@@ -1972,6 +1972,7 @@ impl NoteEditor {
                 raw: preview.clone(),
                 ranges,
                 syntax_gen: crate::syntax::generation(),
+                palette_gen: crate::theme::generation(),
             };
             let laid = layout_cache.get(key, settled.is_some(), |key, formats| {
                 // The cached links belong to the text from the start of the frame; if the text box

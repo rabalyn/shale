@@ -211,6 +211,8 @@ thread_local! {
     /// The palette of this thread, which is the UI thread: the one that draws. Another thread
     /// (a job, a worker) starts with Shale and must be handed a palette if it needs one.
     static PALETTE: std::cell::Cell<Palette> = const { std::cell::Cell::new(Palette::shale()) };
+    /// How many times the palette of this thread was changed ([`generation`]).
+    static GENERATION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 /// The palette of the current theme on this (the UI) thread (CFG-061).
@@ -221,7 +223,16 @@ pub fn palette() -> Palette {
 /// Make `palette` the one of this (the UI) thread; [`apply`] or [`apply_palette`] puts it into
 /// egui's visuals (CFG-061).
 pub fn set_palette(palette: Palette) {
-    PALETTE.with(|p| p.set(palette));
+    if PALETTE.with(|p| p.replace(palette)) != palette {
+        GENERATION.with(|g| g.set(g.get() + 1));
+    }
+}
+
+/// A number that changes whenever the palette of this (the UI) thread does (CFG-062). What bakes
+/// the palette's colours into something it keeps (a laid-out galley, formatted blocks) keeps the
+/// generation with it and builds again when it differs, like [`crate::syntax::generation`].
+pub fn generation() -> u64 {
+    GENERATION.with(std::cell::Cell::get)
 }
 
 /// Font family name of the bundled hand-drawn font (Virgil, SIL Open Font License).
@@ -493,6 +504,19 @@ mod tests {
         for (kind, (r, g, b)) in want {
             assert_eq!(p.syntax(kind), Color32::from_rgb(r, g, b), "{kind:?}");
         }
+    }
+
+    // spec: CFG-062
+    #[test]
+    fn cfg_062_the_generation_counts_the_changes_of_the_palette() {
+        let start = generation();
+        set_palette(palette());
+        assert_eq!(generation(), start, "the same palette is no change");
+        let mut other = palette();
+        other.text = Color32::from_rgb(9, 8, 7);
+        set_palette(other);
+        assert_eq!(generation(), start + 1);
+        assert_eq!(std::thread::spawn(generation).join().expect("thread"), 0, "each thread counts its own palette");
     }
 
     // spec: CFG-061

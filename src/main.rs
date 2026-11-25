@@ -173,6 +173,8 @@ mod test_exec;
 #[cfg(all(test, unix))]
 mod test_exec_tests;
 mod theme;
+#[cfg(test)]
+mod theme_switch_ui_tests;
 mod themes;
 mod thesis;
 mod thread;
