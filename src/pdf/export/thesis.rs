@@ -44,6 +44,8 @@ pub(super) struct Thesis {
     float: Float,
     /// the lists of figures or tables reserved, with the room for their lines
     lists: Vec<(Kind, Vec<(usize, f32)>)>,
+    /// the lists the boxes of the dialog ask for, each with the line it has in the contents
+    pub(super) boxes: Vec<(Marker, usize)>,
 }
 
 /// The key of a label in the landings.
@@ -75,7 +77,7 @@ impl Thesis {
             at = span.range.end;
         }
         out.push_str(&text[at..]);
-        (Thesis { view, marks, landings: HashMap::new(), float: Float::default(), lists: Vec::new() }, out)
+        (Thesis { view, marks, landings: HashMap::new(), float: Float::default(), lists: Vec::new(), boxes: Vec::new() }, out)
     }
 
     /// The mark whose number is `digits`.
@@ -150,6 +152,10 @@ impl Writer<'_> {
         if let Some(t) = &mut self.thesis {
             t.landings.entry(key).or_insert(at);
         }
+    }
+
+    pub(super) fn thesis_boxes(&self) -> Vec<(Marker, usize)> {
+        self.thesis.as_ref().map(|t| t.boxes.clone()).unwrap_or_default()
     }
 
     pub(super) fn thesis_landings(&self) -> HashMap<String, Dest> {

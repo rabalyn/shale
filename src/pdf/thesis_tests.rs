@@ -177,3 +177,54 @@ fn pdf_032_a_note_without_the_syntax_is_printed_as_before() {
     assert!(warnings.is_empty(), "{warnings:?}");
     clean(&d);
 }
+
+const WITH_FLOATS: &str = "---\nbibliography: refs.bib\n---\nIntro text.\n\n![[plot.png|Plot of runs]]{#fig:p}\n\n| x |\n|---|\n| cell |\n: Runs {#tbl:t}\n";
+
+// spec: PDF-032
+#[test]
+fn pdf_032_the_boxes_print_the_lists_after_the_contents_and_off_they_print_none() {
+    let (v, d) = vault_with("boxes", &[("N.md", WITH_FLOATS)]);
+    let on = ExportOptions { toc: true, toc_break: false, list_of_figures: true, list_of_tables: true, ..plain() };
+    let t = drawn(&export(&v, "N.md", &on).0);
+    assert!(t.contains("List of Figures") && t.contains("List of Tables"), "{t}");
+    assert!(t.find("List of Tables").unwrap() < t.find("Intro text.").unwrap(), "after the contents, before the text: {t}");
+    assert_eq!(t.matches("Figure 1: Plot of runs").count(), 2, "in the list and at the figure: {t}");
+    assert_eq!(t.matches("List of Figures").count(), 2, "heading, and its entry in the contents: {t}");
+    let only_figures = ExportOptions { list_of_tables: false, ..on.clone() };
+    let t = drawn(&export(&v, "N.md", &only_figures).0);
+    assert!(t.contains("List of Figures") && !t.contains("List of Tables"), "{t}");
+    let off = ExportOptions { list_of_figures: false, list_of_tables: false, ..on };
+    let t = drawn(&export(&v, "N.md", &off).0);
+    assert!(!t.contains("List of"), "{t}");
+    clean(&d);
+}
+
+// spec: PDF-032
+#[test]
+fn pdf_032_a_marker_wins_over_its_box_so_a_list_is_never_printed_twice() {
+    let note = WITH_FLOATS.replace("Intro text.", "Intro text.\n\n<!-- shale: list-of-figures -->\n\nMiddle text.");
+    let (v, d) = vault_with("boxes-marker", &[("N.md", &note)]);
+    let on = ExportOptions { list_of_figures: true, list_of_tables: true, ..plain() };
+    let t = drawn(&export(&v, "N.md", &on).0);
+    assert_eq!(t.matches("List of Figures").count(), 1, "the marker's list only: {t}");
+    assert!(t.find("Intro text.").unwrap() < t.find("List of Figures").unwrap() && t.find("List of Figures").unwrap() < t.find("Middle text.").unwrap(), "{t}");
+    assert!(t.contains("List of Tables"), "the other list has no marker, so its box counts: {t}");
+    assert!(t.find("List of Tables").unwrap() < t.find("Intro text.").unwrap(), "{t}");
+    // a box for a list with nothing in it prints nothing
+    let (v2, d2) = vault_with("boxes-empty", &[("E.md", "---\nbibliography: refs.bib\n---\nText @a.\n")]);
+    let t = drawn(&export(&v2, "E.md", &on).0);
+    assert!(!t.contains("List of"), "{t}");
+    clean(&d);
+    clean(&d2);
+}
+
+// spec: PDF-032
+#[test]
+fn pdf_032_the_citation_style_of_the_dialog_wins_over_the_property_of_the_note() {
+    let note = "---\nbibliography: refs.bib\ncitation-style: apa\n---\nSee [@a].\n";
+    let (v, d) = vault_with("style", &[("N.md", note)]);
+    assert!(drawn(&export(&v, "N.md", &plain()).0).contains("(Meier, 2020)"), "the note's style");
+    let numeric = ExportOptions { citation_style: Some(crate::bibliography::format::Style::Numeric), ..plain() };
+    assert!(drawn(&export(&v, "N.md", &numeric).0).contains("See [1]."), "the dialog's style");
+    clean(&d);
+}

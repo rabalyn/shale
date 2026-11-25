@@ -127,6 +127,11 @@ pub struct ExportOptions {
     /// a page break after the table of contents (`print-toc-page-break`, PDF-031): what follows the
     /// contents starts on a new page; false: it follows on the same page
     pub toc_break: bool,
+    /// notes: print the list of figures, or of tables, after the contents when the note has no marker line for it (PDF-032)
+    pub list_of_figures: bool,
+    pub list_of_tables: bool,
+    /// notes: the citation style of the dialog, which wins over the note's `citation-style:` (PDF-032)
+    pub citation_style: Option<crate::bibliography::format::Style>,
     /// a book (BOOK-005): every part and chapter starts on a new page
     pub new_page_each: bool,
     /// drawings
@@ -164,6 +169,9 @@ impl ExportOptions {
             paper_look: false,
             break_before: 0,
             toc_break: true,
+            list_of_figures: false,
+            list_of_tables: false,
+            citation_style: None,
             new_page_each: true,
             background: Background::White,
             fill_page: true,
@@ -198,6 +206,9 @@ impl ExportOptions {
             paper_look: false,
             break_before: 0,
             toc_break: true,
+            list_of_figures: false,
+            list_of_tables: false,
+            citation_style: None,
             new_page_each: false,
             background: Background::White,
             fill_page: true,
@@ -1092,6 +1103,12 @@ impl<'a> Writer<'a> {
             }
             (text, n)
         };
+        // the lists the boxes of the dialog ask for come first (PDF-032)
+        for (marker, line) in self.thesis_boxes() {
+            if let Some(at) = self.thesis_block(marker, base) {
+                places.insert(line, at);
+            }
+        }
         let mut extra;
         while i < lines.len() {
             extra = 0;
@@ -1842,12 +1859,22 @@ fn export_note_in_shale(vault: &Vault, rel: &Path, text: &str, opts: &ExportOpti
     // the title line's text: no `.md`, no date prefix (VAULT-025)
     let name = vault.file(rel).map(|f| f.title()).unwrap_or_else(|| crate::vault::title_of(&rel.to_string_lossy()).to_string());
     // the thesis syntax (PDF-032): numbers, citations and the bibliography come from the same view the reading view has
-    let thesis = crate::thesis::export::Bibliographies::new(vault).view(vault, rel, text);
+    let thesis = crate::thesis::export::Bibliographies::new(vault).view(vault, rel, text, opts.citation_style);
     let blocks = thesis.as_ref().map(|v| v.blocks(text)).unwrap_or_default();
+    // the boxes of the dialog print a list after the contents, unless the note has a marker line for it (PDF-032)
+    let boxes: Vec<(thesis::Marker, usize)> = thesis.as_ref().map_or_else(Vec::new, |v| {
+        [(opts.list_of_figures, thesis::Marker::ListOfFigures, thesis::Kind::Figure), (opts.list_of_tables, thesis::Marker::ListOfTables, thesis::Kind::Table)]
+            .into_iter()
+            .filter(|(on, marker, kind)| *on && !blocks.iter().any(|b| b.what == *marker) && !v.floats(*kind).is_empty())
+            .enumerate()
+            .map(|(n, (_, marker, _))| (marker, usize::MAX - n))
+            .collect()
+    });
     let (thesis, text) = match thesis {
         Some(view) => {
             warnings.extend(view.warnings(text));
-            let (thesis, marked) = thesis::Thesis::of(view, text);
+            let (mut thesis, marked) = thesis::Thesis::of(view, text);
+            thesis.boxes = boxes.clone();
             (Some(thesis), std::borrow::Cow::Owned(marked))
         }
         None => (None, std::borrow::Cow::Borrowed(text)),
@@ -1870,7 +1897,17 @@ fn export_note_in_shale(vault: &Vault, rel: &Path, text: &str, opts: &ExportOpti
             };
             (b.line, 1, title.to_string(), None)
         }));
-        heads.sort_by_key(|h| h.0);
+        // the lists of the boxes come first, before the text (their line is out of the text)
+        let first = markdown::front_matter_lines(text);
+        let listed: Vec<_> = boxes
+            .iter()
+            .map(|(marker, line)| {
+                let kind = if *marker == thesis::Marker::ListOfFigures { thesis::Kind::Figure } else { thesis::Kind::Table };
+                (*line, 1, view.lang.list_heading(kind).to_string(), None)
+            })
+            .collect();
+        heads.splice(0..0, listed);
+        heads.sort_by_key(|h| if h.0 > usize::MAX / 2 { first } else { h.0 });
     }
     if opts.title && !said_by_heading {
         let pieces = vec![Piece {

@@ -89,6 +89,23 @@ fn site_077_a_heading_with_a_label_keeps_the_anchor_of_its_text() {
 
 // spec: SITE-077
 #[test]
+fn site_077_hugo_builds_the_markup_into_figures_captions_equations_and_a_bibliography() {
+    if !super::hugo_tests::hugo_here() {
+        return;
+    }
+    let f = fixture("hugo", NOTE);
+    let (public, _) = super::hugo_tests::build(&f);
+    let h = super::hugo_tests::html(&public, "thesis");
+    assert!(h.contains("<figure id=\"fig-p\" class=\"shale-figure\">") && h.contains("<figcaption>Figure 1: Plot of runs</figcaption>"), "{h}");
+    assert!(h.contains("<figure id=\"tbl-t\" class=\"shale-table\">") && h.contains("<table>"), "{h}");
+    assert!(h.contains("class=\"eq-number\">(1)</span>"), "{h}");
+    assert!(h.contains("<a class=\"thesis-ref\" href=\"#fig-p\">Figure 1</a>") && h.contains("href=\"#cite-a\""), "{h}");
+    assert!(h.contains("<div class=\"shale-bibliography\">") && h.contains("<p class=\"bib-entry\" id=\"cite-a\">"), "{h}");
+    assert!(h.contains("id=\"sec-m\"") && h.contains("<h2 id=\"method\">"), "the heading keeps the anchor of its text: {h}");
+}
+
+// spec: SITE-077
+#[test]
 fn site_077_the_export_warns_of_what_does_not_resolve_and_a_note_without_the_syntax_is_unchanged() {
     let (_, warnings) = thesis_page("---\nbibliography: refs.bib\n---\nSee [@nokey] and @fig:zz.\n");
     let all = warnings.join("\n");

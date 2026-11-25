@@ -3,6 +3,7 @@
 //! [`View`] the reading view has, so the numbers, the citations and the bibliography are the same.
 
 use super::View;
+use crate::bibliography::format::Style;
 use crate::bibliography::reader::{self, FileIndex};
 use crate::bibliography::{resolve, Effect};
 use crate::vault::Vault;
@@ -37,11 +38,11 @@ impl Bibliographies {
 
     /// The thesis document of a note that stands alone, with its citations formatted; `None` for a
     /// note with no `@` and no `{#`, which has nothing the thesis rules read.
-    pub fn view(&mut self, vault: &Vault, rel: &Path, text: &str) -> Option<Arc<View>> {
+    pub fn view(&mut self, vault: &Vault, rel: &Path, text: &str, style: Option<Style>) -> Option<Arc<View>> {
         if !text.contains('@') && !text.contains("{#") {
             return None;
         }
         let effect = self.effect(vault, rel, text);
-        Some(Arc::new(View::build(None, &[text], 0, text, effect, true)))
+        Some(Arc::new(View::build_styled(None, &[text], 0, text, effect, true, style)))
     }
 }

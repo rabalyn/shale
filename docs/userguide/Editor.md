@@ -287,7 +287,7 @@ follow in the next parts of thesis writing.
   and equations with their numbers and captions (a table's caption above and a figure's below unless
   `table-caption:` and `figure-caption:` say otherwise; a table's caption is its `: Caption {#tbl:x}` line, a figure's
   its alias), references as links to the place ("Figure 3"), and the bibliography at the end or at
-  `<!-- shale: bibliography -->`. Two more lines of their own, `<!-- shale: list-of-figures -->` and
+  `<!-- shale: bibliography -->`. In the export dialog of a note, the boxes **List of figures** and **List of tables** (off by default) print the lists after the contents, and **Citation style** chooses the style for this export instead of the note's `citation-style:`; a marker line puts its list where it stands and the box then adds no second one. Two more lines of their own, `<!-- shale: list-of-figures -->` and
   `<!-- shale: list-of-tables -->`, print the lists of figures and tables with their captions (the PDF with the pages)
   where they stand; a list with nothing in it prints nothing. A key the bibliography lacks, a reference to a label
   nobody has, a label used twice and citations without a bibliography are warnings of the export, and what does not

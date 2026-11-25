@@ -127,6 +127,12 @@ impl View {
     /// of the top folder note (the open note itself when it stands alone). `format` asks for the
     /// citations to be formatted too (the reading view).
     pub fn build(book: Option<Arc<Book>>, texts: &[&str], index: usize, top: &str, bib: Effect, format: bool) -> View {
+        View::build_styled(book, texts, index, top, bib, format, None)
+    }
+
+    /// [`View::build`] with a citation style that takes the place of the property `citation-style:`
+    /// (the export dialog, ADR-0039 §5).
+    pub fn build_styled(book: Option<Arc<Book>>, texts: &[&str], index: usize, top: &str, bib: Effect, format: bool, style: Option<Style>) -> View {
         let labels = match &book {
             Some(b) => {
                 // a chapter's title for BOOK-006's rule that a first `# Title` says it
@@ -137,7 +143,7 @@ impl View {
             None => labels::of_note(texts.first().copied().unwrap_or("")),
         };
         let lang = Lang::property(top).unwrap_or_default();
-        let style = Style::property(top).unwrap_or_default();
+        let style = style.or_else(|| Style::property(top)).unwrap_or_default();
         let formatted = format.then(|| format_document(texts, index, &bib, style, lang));
         View { book, index, labels, lang, captions: Captions::of(top), bib, formatted }
     }

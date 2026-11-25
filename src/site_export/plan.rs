@@ -163,7 +163,7 @@ pub fn build(vault: &Vault) -> Result<Export, String> {
         let page = Page { title: &titles[rel], tags: &tags, lastmod };
         let head = front::front_matter(&page, text, &|v| body::flatten_links(&env, rel, v));
         // citations, numbered figures, tables and equations, and the bibliography (SITE-077)
-        let thesis = if is_board { None } else { bibliographies.view(vault, rel, text) };
+        let thesis = if is_board { None } else { bibliographies.view(vault, rel, text, None) };
         let marked = thesis.as_ref().map(|view| {
             st.warnings.extend(view.warnings(text).into_iter().map(|w| format!("{}: {w}", rel_to_string(rel))));
             super::thesis::apply(view, text)
