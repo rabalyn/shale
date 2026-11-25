@@ -51,9 +51,14 @@ background = '#44475a'
 
 Colours are written `'#rrggbb'` or `'0xrrggbb'`. Shale makes the grey levels of the window from the
 background and the text colour, takes the accent from magenta, links from blue, problems from red and
-code from the other colours, and moves a colour toward the text colour when it would be hard to read on
-the background (a contrast under 3 to 1, or 4.5 to 1 for text). The details are in the specification
-(CFG-064).
+code from the other colours, and makes every pair of colours that the window draws easy to read: a colour that is hard to read on
+its background is moved toward white or black until its contrast is 4.5 to 1 (3 to 1 for the accent and
+the greys of marks), and a tinted background (a selected row, a hovered button, a banner) gets less tint
+until the text reads on it. In a selected row the text is the accent when that reads, else the text
+colour. The details are in the specification (CFG-064, CFG-082).
+
+Colours you set in the `[shale]` table below are not corrected, but the window still draws the text of
+selected and hovered rows in a colour that reads.
 
 A file that cannot be read is skipped, and the reason is listed under the theme list ("Theme file
 skipped: Mine.toml: [colors.normal] is missing `red`").
