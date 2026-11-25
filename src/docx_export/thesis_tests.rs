@@ -80,7 +80,8 @@ fn docx_014_pandoc_gets_citeproc_after_the_filter_with_the_bibliography_files_th
     assert!(csl.contains("<style") && csl.contains("<citation"), "{csl:.200}");
     let work = Path::new("/work");
     let args: Vec<String> = thesis::args(s, work).iter().map(|a| a.to_string_lossy().into_owned()).collect();
-    assert_eq!(args, ["-M", "shale-thesis=/work/thesis.lua", "-M", "lang=de-DE", "--citeproc", "--bibliography=/work/bibliography-1.bib", "--csl=/work/style.csl"]);
+    let at = |name: &str| work.join(name).display().to_string();
+    assert_eq!(args, ["-M".to_string(), format!("shale-thesis={}", at("thesis.lua")), "-M".into(), "lang=de-DE".into(), "--citeproc".into(), format!("--bibliography={}", at("bibliography-1.bib")), format!("--csl={}", at("style.csl"))]);
     // the filter comes first in the argument list of pandoc, so that it has made the citations when citeproc runs
     let all: Vec<String> = args_of(&p, Path::new("/work")).iter().map(|a| a.to_string_lossy().into_owned()).collect();
     let (filter, citeproc) = (all.iter().position(|a| a.starts_with("--lua-filter=")).unwrap(), all.iter().position(|a| a == "--citeproc").unwrap());
