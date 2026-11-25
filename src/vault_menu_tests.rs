@@ -8,6 +8,7 @@ use crate::ui_test_support::Headless;
 use crate::vault_menu::{Purpose, VaultModal};
 use eframe::egui::{self, Event, Key, Modifiers, PointerButton};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 struct W {
     app: ShaleApp,
@@ -287,6 +288,31 @@ fn vault_034_hidden_files_do_not_count_and_the_sample_box_writes_sample_notes() 
     assert_eq!(w.root(), Some(w.dir("empty")));
     assert!(w.dir("empty").join("Welcome.md").is_file(), "the sample notes are there");
     assert_eq!(w.app.cfg.vaults.entries()[0].path, w.dir("empty"));
+}
+
+// spec: VAULT-034, PICK-011
+#[test]
+fn vault_034_with_the_system_dialog_the_sample_box_is_asked_in_the_step_after_it() {
+    let mut w = W::new("create-system");
+    std::fs::create_dir_all(w.dir("empty")).unwrap();
+    std::fs::create_dir_all(w.dir("plain")).unwrap();
+    for (folder, sample) in [("empty", true), ("plain", false)] {
+        w.app.pick = crate::file_picker::Host::with_native(Arc::new(crate::file_picker::Answers(vec![w.dir(folder)])));
+        w.app.ask_vault_folder(Purpose::Create);
+        poll_until("the step after the system's dialog", || {
+            w.hl.frame(&mut w.app, vec![]);
+            w.app.pick.confirm_open()
+        });
+        w.hl.frames(&mut w.app, 4);
+        assert!(w.painted("Start with sample notes") && w.painted(&w.dir(folder).to_string_lossy()), "{:?}", w.all_text());
+        if sample {
+            w.click_text("Start with sample notes");
+        }
+        w.click_last("Create");
+        w.settle();
+        assert_eq!(w.root(), Some(w.dir(folder)));
+        assert_eq!(w.dir(folder).join("Welcome.md").is_file(), sample, "{folder}: sample notes only when the box is ticked");
+    }
 }
 
 // spec: VAULT-034

@@ -332,7 +332,14 @@ impl ShaleApp {
                     ui.label(egui::RichText::new("Open a folder as vault").size(16.0).color(theme::palette().text));
                     ui.label(muted("Any folder works, including an existing markdown vault. Type its path:"));
                     ui.add_space(6.0);
-                    ui.add_enabled(!self.vault_load.is_loading(), egui::TextEdit::singleline(&mut self.welcome_path).desired_width(f32::INFINITY));
+                    ui.horizontal(|ui| {
+                        let width = (ui.available_width() - 100.0).max(120.0);
+                        ui.add_enabled(!self.vault_load.is_loading(), egui::TextEdit::singleline(&mut self.welcome_path).desired_width(width));
+                        // the same choice as Open… in the vault dropdown (VAULT-033, PICK-001)
+                        if ui.add_enabled(!self.vault_load.is_loading(), egui::Button::new("Choose…")).on_hover_text("Choose the folder with the file picker").clicked() {
+                            self.ask_vault_folder(crate::vault_menu::Purpose::Open);
+                        }
+                    });
                     ui.add_space(8.0);
                     ui.add_enabled_ui(!self.vault_load.is_loading(), |ui| {
                         ui.horizontal(|ui| {

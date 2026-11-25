@@ -119,7 +119,8 @@ impl ShaleApp {
                     changed |= lib.path.to_string_lossy() != path.as_str();
                     lib.path = PathBuf::from(path);
                 }
-                let key = format!("library:{i}");
+                // the row is known by its name and folder, not its place: a row that is removed or moved while the dialog is open does not get the answer of another (PICK-007)
+                let key = format!("library:{}\u{1}{}", lib.name, lib.path.display());
                 if ui.button("Browse…").on_hover_text("Choose the folder").clicked() {
                     let mut req = Request::folder("Choose the folder of the library").button("Choose");
                     if lib.path.is_dir() {

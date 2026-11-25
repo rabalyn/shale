@@ -9,6 +9,7 @@
 //! answers (no portal). The system's dialog is behind the [`Native`] trait, so that the tests run
 //! the code around it with a pretend dialog.
 
+pub mod confirm;
 pub mod names;
 pub mod own;
 pub mod places;
@@ -212,6 +213,17 @@ impl Native for System {
     }
 }
 
+/// A pretend system dialog for the tests: it answers these paths.
+#[cfg(test)]
+pub(crate) struct Answers(pub Vec<PathBuf>);
+
+#[cfg(test)]
+impl Native for Answers {
+    fn pick(&self, _: &Request) -> Outcome {
+        Outcome::Picked(self.0.clone())
+    }
+}
+
 /// No system dialog: what a test build has, so that no test ever opens a real dialog.
 pub struct NoSystem;
 
@@ -274,18 +286,16 @@ pub fn take(ctx: &Context, key: &str) -> Option<Picked> {
 
 /// A **Browse** button for a text field that holds a path (PICK-001): a click asks the picker with
 /// the request `req` makes from the text of the field, and the answer, on a later frame, replaces
-/// that text. Returns whether the field was changed by an answer.
-pub fn browse_button(ui: &mut egui::Ui, key: &str, label: &str, req: impl FnOnce(&str) -> Request, field: &mut String) -> bool {
-    if ui.button(label).clicked() {
+/// that text. Returns the button.
+pub fn browse_button(ui: &mut egui::Ui, key: &str, label: &str, req: impl FnOnce(&str) -> Request, field: &mut String) -> egui::Response {
+    let button = ui.button(label);
+    if button.clicked() {
         ask(ui.ctx(), key, req(field));
     }
-    match take(ui.ctx(), key).and_then(|p| p.paths.into_iter().next()) {
-        Some(p) => {
-            *field = p.to_string_lossy().into_owned();
-            true
-        }
-        None => false,
+    if let Some(p) = take(ui.ctx(), key).and_then(|p| p.paths.into_iter().next()) {
+        *field = p.to_string_lossy().into_owned();
     }
+    button
 }
 
 /// The request for a file that is written to the path typed in `field` (an export): its folder is
@@ -305,6 +315,20 @@ enum Stage {
     /// the system's dialog is open on a worker thread
     System(Receiver<Result<Outcome, String>>),
     Own(Box<own::OwnPicker>),
+    /// the system's dialog chose, and the box of the request is asked (PICK-011)
+    Confirm(Box<confirm::Confirm>),
+}
+
+/// What a step of a dialog of Shale's means for the ask: it goes on, is dropped, or is answered.
+fn finish(hub: &Hub, key: &str, step: own::Step) -> After {
+    match step {
+        own::Step::Keep => After::Stay,
+        own::Step::Cancel => After::Done,
+        own::Step::Done(picked) => {
+            hub.answer(key, picked);
+            After::Done
+        }
+    }
 }
 
 struct Active {
@@ -317,6 +341,8 @@ struct Active {
 enum After {
     Stay,
     Done,
+    /// the system's dialog chose these paths, and the request has a box to ask
+    Confirm(Vec<PathBuf>),
     /// the system's dialog could not be shown
     Own,
 }
@@ -361,7 +387,7 @@ impl Host {
         match &self.active {
             Some(Active { stage: Stage::System(_), .. }) => true,
             Some(Active { stage: Stage::Own(p), .. }) => p.scanning(),
-            None => false,
+            _ => false,
         }
     }
 
@@ -372,6 +398,12 @@ impl Host {
             Some(Active { stage: Stage::Own(p), .. }) => Some(p),
             _ => None,
         }
+    }
+
+    /// Whether the step after the system's dialog (the box of the request) is open (the tests look).
+    #[cfg(test)]
+    pub(crate) fn confirm_open(&self) -> bool {
+        matches!(&self.active, Some(Active { stage: Stage::Confirm(_), .. }))
     }
 
     /// One frame: take in new asks, start the next one, and carry the open one on. `system` is the
@@ -392,6 +424,8 @@ impl Host {
         let Some(mut active) = self.active.take() else { return };
         let next = match &mut active.stage {
             Stage::System(rx) => match rx.try_recv() {
+                // a request with a box the system's dialog cannot hold asks it in a step of Shale's own (PICK-011)
+                Ok(Ok(Outcome::Picked(paths))) if active.req.option.is_some() => After::Confirm(paths),
                 Ok(Ok(Outcome::Picked(paths))) => {
                     self.hub.answer(&active.key, Picked { paths, ..Picked::default() });
                     After::Done
@@ -401,18 +435,17 @@ impl Host {
                 Ok(Ok(Outcome::Unavailable)) | Ok(Err(_)) | Err(TryRecvError::Disconnected) => After::Own,
                 Err(TryRecvError::Empty) => After::Stay,
             },
-            Stage::Own(p) => match p.show(ctx) {
-                own::Step::Keep => After::Stay,
-                own::Step::Cancel => After::Done,
-                own::Step::Done(picked) => {
-                    self.hub.answer(&active.key, picked);
-                    After::Done
-                }
-            },
+            Stage::Own(p) => finish(&self.hub, &active.key, p.show(ctx)),
+            Stage::Confirm(c) => finish(&self.hub, &active.key, c.show(ctx)),
         };
         match next {
             After::Stay => self.active = Some(active),
             After::Done => {}
+            After::Confirm(paths) => {
+                ctx.request_repaint();
+                active.stage = Stage::Confirm(Box::new(confirm::Confirm::new(active.req.clone(), paths)));
+                self.active = Some(active);
+            }
             After::Own => {
                 let Active { key, req, .. } = active;
                 self.active = Some(self.start_own(ctx, key, req, &mut places));

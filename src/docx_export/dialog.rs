@@ -119,7 +119,11 @@ pub fn show(ui: &mut Ui, d: &mut DocxDialog) {
     ui.add_enabled_ui(!busy, |ui| {
         egui::Grid::new("export-docx-grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
             ui.label(muted("Save as"));
-            rec("path", ui.add(egui::TextEdit::singleline(&mut d.path).desired_width(250.0)));
+            ui.horizontal(|ui| {
+                rec("path", ui.add(egui::TextEdit::singleline(&mut d.path).desired_width(180.0)));
+                let browse = crate::file_picker::browse_button(ui, "docx-save", "Browse…", |typed| crate::file_picker::save_request("Save the Word file as", typed, crate::file_picker::Filter::new("Word files", &["docx"])), &mut d.path);
+                rec("browse", browse);
+            });
             ui.end_row();
             ui.label(muted("Include"));
             ui.vertical(|ui| {

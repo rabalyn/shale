@@ -43,8 +43,8 @@ Shale keeps settings in two places:
   the folders and files of the shown folder, several files at once and the kinds of file. A
   **New folder** field makes a folder inside the shown one and uses it; a name that Windows would
   not accept (`/`, `\`, `:`, `CON`, a trailing dot, …) is refused with the reason, and a name that
-  exists offers **Use that folder**. Create… with the system's dialog makes an empty vault; the
-  box "Start with sample notes" is in Shale's own picker.
+  exists offers **Use that folder**. Create… asks for "Start with sample notes" in the picker, or,
+  with the system's dialog, in a small step after it.
 
   ![[file-picker.png]]
 - **Close** takes a vault off the list; its notes stay where they are. Right-click the vault in the

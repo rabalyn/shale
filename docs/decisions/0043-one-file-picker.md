@@ -2,7 +2,7 @@
 
 - **Status**: Accepted (2026-11-25; the owner's go on #690 and #688, with the recommendation of #690)
 - **Date**: 2026-11-25
-- **Specs**: PICK-001 to PICK-010 ([`docs/spec/file-picker.md`](../spec/file-picker.md)), CFG-083, IMP-075, MAIL-243, VAULT-033, VAULT-034
+- **Specs**: PICK-001 to PICK-011 ([`docs/spec/file-picker.md`](../spec/file-picker.md)), CFG-084, IMP-075, MAIL-243, VAULT-033, VAULT-034
 - **Issues**: #690 (one picker everywhere, a picker in the Import dialog), #688 (New folder, folded into #690)
 - **Builds on**: [ADR-0001](0001-spec-driven-development.md) (spec-driven)
 
@@ -21,7 +21,7 @@ a file dialog with the shortcuts, recent files, search and previews of their sys
    window keeps drawing. It has its own New folder button, so Shale adds none to it.
 2. **Shale's own picker is the fallback and a setting.** It opens when no system dialog can be
    shown, when the setting "Use the system's file dialog" (`system_file_dialog`, on by default,
-   CFG-083) is off, and when a choice was refused and comes back with its reason (the system's dialog
+   CFG-084) is off, and when a choice was refused and comes back with its reason (the system's dialog
    cannot show one). It is the former folder picker, grown: files, several files, kinds of file,
    a file name for a file to write, shortcuts (PICK-006), and the **New folder** field of #688 (PICK-008).
 3. **"No dialog" is detected as in SOC-058.** `rfd` answers `None` for Cancel and for a dialog that
@@ -44,10 +44,10 @@ a file dialog with the shortcuts, recent files, search and previews of their sys
 8. **A name that exists in New folder** (the point #688 left to the spec) is not an error: the
    picker says it is there and offers **Use that folder**, which uses it without touching it. A file of
    that name, a refused name and a failure show their reason and choose nothing.
-9. **Create… with the system's dialog makes an empty vault.** The box "Start with sample notes" is
-   Shale's own picker's: the system's dialog cannot hold a box. The start screen still has "Create
-   vault with sample notes". Accepted as the smaller loss; a follow-up question after the dialog was
-   considered and left out.
+9. **A box of the request is asked after the system's dialog.** The system's dialog cannot hold the
+   box "Start with sample notes" of Create… (VAULT-034). When it has chosen the folder, a small step
+   of Shale's shows the folder, the box and Create or Cancel (PICK-011), so both pickers offer the
+   same choice. A request without such a box is answered at once.
 
 ## Consequences
 
@@ -55,7 +55,7 @@ a file dialog with the shortcuts, recent files, search and previews of their sys
   dropdown closes and asks, and `vault_pick_tick` takes the answer.
 - `userdirs.rs` has the folders Desktop, Downloads, Pictures, Videos and Music (the only place that
   asks `dirs`, DEV-047).
-- Left as they were: the feed compose box keeps its own use of `rfd` (SOC-058); the Word export
-  dialog and the book export dialog keep a typed path (#649, #650 add their Browse button with
-  `file_picker::browse_button` and `save_request`); the start screen's typed path (#686); the user guide
+- Left as it was: the feed compose box keeps its own use of `rfd` (SOC-058). The export dialogs of a
+  note, a book and a Word file, and the start screen's path field have a button too (PICK-010,
+  VAULT-021); the user guide
   folder (#687) asks with `Request::folder`.

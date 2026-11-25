@@ -261,7 +261,8 @@ pub(crate) fn thesis_boxes(ui: &mut Ui, opts: &mut ExportOptions, rec: &mut dyn 
 fn path_field(ui: &mut Ui, path: &mut String, rec: &mut impl FnMut(&str, egui::Response) -> egui::Response) {
     ui.horizontal(|ui| {
         rec("path", ui.add(egui::TextEdit::singleline(path).desired_width(180.0)));
-        crate::file_picker::browse_button(ui, "export-save", "Browse…", |typed| crate::file_picker::save_request("Save the PDF as", typed, crate::file_picker::Filter::new("PDF files", &["pdf"])), path);
+        let browse = crate::file_picker::browse_button(ui, "export-save", "Browse…", |typed| crate::file_picker::save_request("Save the PDF as", typed, crate::file_picker::Filter::new("PDF files", &["pdf"])), path);
+        rec("browse", browse);
     });
 }
 

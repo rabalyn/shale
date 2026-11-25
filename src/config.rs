@@ -393,7 +393,7 @@ pub struct Config {
     /// What a pick, paste or import does with a picture, PDF, sound or video from outside the vault
     /// (MEDIA-019, CFG-070): ask (the default), copy it into `z_media/` or link it where it is.
     pub outside_files: crate::media::intake::OutsideFiles,
-    /// Choosing a file or folder opens the system's own dialog first (PICK-002, CFG-083); off: Shale's own picker.
+    /// Choosing a file or folder opens the system's own dialog first (PICK-002, CFG-084); off: Shale's own picker.
     pub system_file_dialog: bool,
     /// Calendars shown in the calendar panel (local .ics files and CalDAV calendars).
     pub calendars: Vec<crate::calendar::store::CalendarSource>,
@@ -1046,9 +1046,9 @@ mod tests {
         assert!(!Config::parse_text(&text).unwrap().0.import_skip_signatures);
     }
 
-    // spec: CFG-083, CFG-001
+    // spec: CFG-084, CFG-001
     #[test]
-    fn cfg_083_the_system_file_dialog_setting_is_on_by_default_loads_from_old_files_and_round_trips() {
+    fn cfg_084_the_system_file_dialog_setting_is_on_by_default_loads_from_old_files_and_round_trips() {
         let (c, _) = crate::vault_state::parse::<Config>(br#"{"toolbar_size": 120}"#).unwrap();
         assert!(c.system_file_dialog, "an old file: on");
         assert!(Config::default().system_file_dialog);
