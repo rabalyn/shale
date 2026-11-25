@@ -3,11 +3,14 @@
 //! bindings of the user, the fixed keys of the program and the keys the system reserves.
 //!
 //! * `model` and `tables`: pure data (no egui widgets), unit-tested; the two tables are in one place
-//!   so that a later export can read them (rabalyn/shale#712).
+//!   so that the export reads them: `export` makes the web page `docs/keymap/index.html` from them
+//!   (KEY-060, rabalyn/shale#712).
 //! * `layout`: the rows of keys of an ANSI and an ISO keyboard and the block of the navigation keys.
 //! * `ui`: the widget, used by the Keybindings tab of the Settings (List | Keyboard) and by the
 //!   Keymap tab of the main area.
 
+#[cfg(test)]
+mod export;
 mod host;
 mod layout;
 pub mod model;

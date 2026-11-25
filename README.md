@@ -97,6 +97,8 @@ markdown files. Notes link to each other with `[[wiki links]]`.
 
 See **[docs/FEATURES.md](docs/FEATURES.md)** for all features with screenshots.
 
+**Keymap**: every shortcut on a drawn keyboard, by system and layer: <https://rabalyn.github.io/shale/> (interactive), [docs/KEYMAP.md](docs/KEYMAP.md) (pictures), and `shale-keymap-<version>.html` with every release.
+
 **User guide**: `docs/userguide` is a Shale vault: it shows the features it explains. In Shale press **F1**
 (or Settings → Help → **Open user guide**): the guide is built into the program, which unpacks it once per
 version into its data folder (`~/.local/share/shale/userguide-<version>/` on Linux; a copy you edited is never

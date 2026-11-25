@@ -28,6 +28,36 @@ Click a key to see all its actions on every layer, and **Change** to go to the r
 
 ![[keymap-linux-ctrl.png]]
 
+# The keyboard, layer by layer
+
+Each system has its own keys (see below), so here is the keyboard for each of the three, one picture per layer of modifiers. Use the buttons, the dots or **← and →** under the pointer to go from layer to layer (see [[Reading view]]).
+
+> [!carousel] Keyboard layers: Linux
+> ![[keymap-linux-none.png|No modifier|900]]
+> ![[keymap-linux-shift.png|Shift|900]]
+> ![[keymap-linux-ctrl.png|Ctrl|900]]
+> ![[keymap-linux-alt.png|Alt|900]]
+> ![[keymap-linux-ctrl-shift.png|Ctrl+Shift|900]]
+> ![[keymap-linux-alt-shift.png|Alt+Shift|900]]
+
+> [!carousel] Keyboard layers: Windows
+> ![[keymap-windows-none.png|No modifier|900]]
+> ![[keymap-windows-shift.png|Shift|900]]
+> ![[keymap-windows-ctrl.png|Ctrl|900]]
+> ![[keymap-windows-alt.png|Alt|900]]
+> ![[keymap-windows-ctrl-shift.png|Ctrl+Shift|900]]
+> ![[keymap-windows-alt-shift.png|Alt+Shift|900]]
+
+> [!carousel] Keyboard layers: macOS
+> ![[keymap-macos-none.png|No modifier|900]]
+> ![[keymap-macos-shift.png|Shift|900]]
+> ![[keymap-macos-cmd.png|Cmd|900]]
+> ![[keymap-macos-option.png|Option|900]]
+> ![[keymap-macos-cmd-shift.png|Cmd+Shift|900]]
+> ![[keymap-macos-option-shift.png|Option+Shift|900]]
+
+The same keyboard as a web page, where you can hold the modifiers on your own keyboard and paste your own `[keybindings]` to see your keys, is at https://rabalyn.github.io/shale/ and comes as one file, `shale-keymap-<version>.html`, with every release; the pictures are also in `docs/KEYMAP.md` of the source.
+
 Ctrl is Cmd on macOS. No default key is one that the system reserves (the app menu's Cmd+H, AltGr on Windows, the workspace keys of the Linux desktops), so macOS has other keys for six actions, named in the rows below; a key you set yourself is never refused for that reason. The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings** (Change replaces the keys of an action, Add gives it one more, Clear leaves it without a key)
 (everywhere, file list, search results, mail view, note view, vim normal mode; a key that another action uses asks whether to overwrite it: Yes takes it from that action, No changes nothing).
 Text editing keys and vim keys are fixed.
