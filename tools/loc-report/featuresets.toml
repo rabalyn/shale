@@ -33,7 +33,7 @@ features = ["gitsync", "history", "conflict"]
 
 [[set]]
 name = "Search & navigation"
-features = ["search_all", "search_panel", "search_render", "search_sources", "search_form", "picker", "graph", "graph_tree"]
+features = ["search_all", "search_panel", "search_render", "search_sources", "search_form", "linkage", "picker", "graph", "graph_tree"]
 
 [[set]]
 name = "Mail"

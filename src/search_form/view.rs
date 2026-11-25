@@ -97,7 +97,7 @@ fn fields(ui: &mut Ui, what: &mut What, i: usize, comp: &mut Complete, vault: &V
             }
             changed
         }
-        What::Blocked | What::Blocking => false,
+        What::Blocked | What::Blocking | What::Orphan | What::NoBacklinks => false,
         What::Folder(v) => {
             let width = (ui.available_width() - 8.0).max(110.0);
             comp.field(ui, vault, worker, &spec(i, Slot::Folder, "", "Folder/", width), v)
@@ -552,7 +552,7 @@ mod tests {
             let _ = std::fs::remove_dir_all(&self.vault.root);
         }
     }
-
+    // spec: QUERY-021, QUERY-031
     // spec: QUERY-021
     #[test]
     fn query_021_the_menu_adds_each_kind_of_row_and_a_row_has_a_not_switch() {
@@ -564,19 +564,19 @@ mod tests {
             assert_eq!(std::mem::discriminant(&added.what), std::mem::discriminant(&what), "{}", what.label());
             assert!(!added.not);
         }
-        assert_eq!(h.st.rows.len(), 8);
-        assert_eq!(h.text, "due:<=+7d AND blocked AND blocking", "only the rows that are complete are in the text");
-        for label in ["tag is", "property is", "due", "is blocked", "is blocking", "in folder", "links to", "text contains"] {
+        assert_eq!(h.st.rows.len(), 10);
+        assert_eq!(h.text, "due:<=+7d AND blocked AND blocking AND orphan AND no-backlinks", "only the rows that are complete are in the text");
+        for label in ["tag is", "property is", "due", "is blocked", "is blocking", "is an orphan", "has no backlinks", "in folder", "links to", "text contains"] {
             assert!(h.has(label), "{label} is a row");
         }
-        assert_eq!(h.all("not").len(), 8, "every row has a not switch");
+        assert_eq!(h.all("not").len(), 10, "every row has a not switch");
         h.click_nth("not", 3);
         assert!(h.st.rows[3].not);
-        assert_eq!(h.text, "due:<=+7d AND NOT blocked AND blocking");
+        assert_eq!(h.text, "due:<=+7d AND NOT blocked AND blocking AND orphan AND no-backlinks");
         h.click_nth("not", 3);
-        assert_eq!(h.text, "due:<=+7d AND blocked AND blocking", "the switch turns back");
+        assert_eq!(h.text, "due:<=+7d AND blocked AND blocking AND orphan AND no-backlinks", "the switch turns back");
         h.click_nth("not", 2);
-        assert_eq!(h.text, "NOT due:<=+7d AND blocked AND blocking");
+        assert_eq!(h.text, "NOT due:<=+7d AND blocked AND blocking AND orphan AND no-backlinks");
     }
 
     // spec: QUERY-021

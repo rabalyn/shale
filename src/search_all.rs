@@ -355,6 +355,8 @@ fn foreign_text(checked: &Checked, expr: &Expr, fields: &[(&str, &str)]) -> Resu
             TermKind::Links(_) => return Err("links:".into()),
             TermKind::Blocked => return Err("blocked".into()),
             TermKind::Blocking => return Err("blocking".into()),
+            TermKind::Orphan => return Err("orphan".into()),
+            TermKind::NoBacklinks => return Err("no-backlinks".into()),
         }
         parts.push(checked.source(term));
     }
@@ -792,6 +794,29 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    // spec: QUERY-031
+    #[test]
+    fn query_031_the_sidebar_and_the_picker_find_orphans_and_notes_without_backlinks() {
+        let dir = std::env::temp_dir().join(format!("shale-orphan-hits-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, text) in [("Hub.md", "to [[Leaf]]\n"), ("Leaf.md", "leaf\n"), ("Alone.md", "alone\n")] {
+            std::fs::write(dir.join(name), text).unwrap();
+        }
+        let v = Vault::open(&dir).unwrap();
+        for picker in [true, false] {
+            let titles = |q: &str| {
+                let mut t: Vec<String> = note_hits(&v, &if picker { Query::picker(q) } else { Query::sidebar(q) }).into_iter().map(|h| h.title).collect();
+                t.sort();
+                t
+            };
+            assert_eq!(titles("orphan"), ["Alone"]);
+            assert_eq!(titles("no-backlinks"), ["Alone", "Hub"]);
+            assert_eq!(titles("NOT orphan AND NOT no-backlinks"), ["Leaf"]);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     // spec: QUERY-005
     #[test]
     fn query_005_a_prefix_still_chooses_the_sources_and_the_rest_is_the_language() {
@@ -806,7 +831,7 @@ mod tests {
         assert_eq!(all_hits(&ctx, &Query::picker("m: subject:banana")).iter().map(|h| h.title.as_str()).collect::<Vec<_>>(), ["Banana order"], "a prefix, then a field of mail");
         let _ = std::fs::remove_dir_all(&dir);
     }
-
+    // spec: QUERY-006, QUERY-031
     // spec: QUERY-006
     #[test]
     fn query_006_a_source_without_the_field_is_skipped_and_says_so() {
@@ -826,6 +851,8 @@ mod tests {
         assert_eq!(skipped("path:Fruit/ x"), ["Mail: `path:` not supported", "Posts: `path:` not supported"]);
         assert_eq!(skipped("due:overdue"), ["Mail: `due:` not supported", "Posts: `due:` not supported"]);
         assert_eq!(skipped("blocked"), ["Mail: `blocked` not supported", "Posts: `blocked` not supported"]);
+        assert_eq!(skipped("orphan"), ["Mail: `orphan` not supported", "Posts: `orphan` not supported"]);
+        assert_eq!(skipped("no-backlinks"), ["Mail: `no-backlinks` not supported", "Posts: `no-backlinks` not supported"]);
         assert_eq!(skipped("banana OR cherry"), ["Mail: `OR` not supported", "Posts: `OR` not supported"], "the operators too");
         assert_eq!(skipped("banana -cherry"), ["Mail: `NOT` not supported", "Posts: `NOT` not supported"]);
         assert!(skipped("banana").is_empty() && skipped("banana AND republic").is_empty(), "text, side by side or ANDed, they all take");

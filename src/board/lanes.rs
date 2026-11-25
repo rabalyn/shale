@@ -127,7 +127,7 @@ fn reads_other_notes(expr: &Expr) -> bool {
     match expr {
         Expr::And(v) | Expr::Or(v) => v.iter().any(reads_other_notes),
         Expr::Not(e) => reads_other_notes(e),
-        Expr::Term(t) => matches!(t.kind, TermKind::Blocked | TermKind::Blocking),
+        Expr::Term(t) => matches!(t.kind, TermKind::Blocked | TermKind::Blocking | TermKind::Orphan | TermKind::NoBacklinks),
     }
 }
 

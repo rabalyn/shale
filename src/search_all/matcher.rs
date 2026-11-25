@@ -15,6 +15,7 @@ use super::query::{Cmp, Day, Due, Expr, TermKind};
 use super::{find_wild, Snapshot, CHAR_BUDGET, TIME_BUDGET};
 use crate::calendar::time;
 use crate::markdown;
+use crate::vault::FileKind;
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -186,6 +187,12 @@ impl<'a> Run<'a> {
                 index.and_then(|n| due_day(&n.text)).is_some_and(|day| self.due_matches(*due, day))
             }
             TermKind::Links(key) => index.is_some_and(|n| n.links.iter().any(|l| link_key(&l.target) == *key)),
+            TermKind::Orphan | TermKind::NoBacklinks => {
+                // (one pass over the links when the snapshot has not made its linkage yet)
+                self.spend(FIELD_COST + if snapshot.linkage_made() { 0 } else { snapshot.notes.len() as u64 * FIELD_COST });
+                let linked = snapshot.linkage();
+                note.file.kind != FileKind::Other && if matches!(kind, TermKind::Orphan) { linked.is_orphan(&note.file.rel) } else { linked.has_no_backlinks(&note.file.rel) }
+            }
             TermKind::Blocked | TermKind::Blocking => {
                 self.spend(snapshot.notes.len() as u64 * FIELD_COST);
                 let deps = self.deps.get_or_insert_with(|| Deps::of(snapshot));
@@ -356,6 +363,47 @@ mod tests {
         let snap = Snapshot::of(&v);
         assert_eq!(names(&snap, "blocked"), Vec::<String>::new());
         assert_eq!(names(&snap, "blocking"), Vec::<String>::new());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: QUERY-031
+    #[test]
+    fn query_031_orphan_and_no_backlinks_follow_the_resolved_links_in_and_out() {
+        let scene = crate::drawing::Scene::parse(&crate::drawing::SAMPLE_SCENE.replace("\"Idea\"", "\"see [[Linked]]\"")).unwrap();
+        let (v, d) = vault(
+            "linkage",
+            &[
+                ("Hub.md", "to [[Linked]] and [[Folder/Deep]]\n"),
+                ("Linked.md", "plain\n"),
+                ("Folder/Deep.md", "no links\n"),
+                ("Alone.md", "nothing\n"),
+                ("Myself.md", "see [[Myself]]\n"),
+                ("Red.md", "to [[Nobody]] and ![[@Lib/pic.png]]\n"),
+                ("Pic.md", "![[photo.png]]\n"),
+                ("photo.png", "x"),
+                ("Draw.excalidraw", &scene.to_json()),
+                ("Alone.sync-conflict-20261121-142440-7JJWLPP.md", "to [[Alone]] and [[Red]]\n"),
+            ],
+        );
+        let snap = Snapshot::of(&v);
+        assert_eq!(names(&snap, "orphan"), ["Alone.md", "Myself.md", "Red.md"], "a link to itself, a red link and an outside link are no link; a conflict copy links nothing");
+        assert_eq!(names(&snap, "no-backlinks"), ["Alone.md", "Draw.excalidraw", "Hub.md", "Myself.md", "Pic.md", "Red.md"], "linking out is fine; a drawing is asked like a note; the image is no note");
+        assert_eq!(names(&snap, "NOT orphan AND no-backlinks"), ["Draw.excalidraw", "Hub.md", "Pic.md"], "a drawing that links to a note is no orphan");
+        assert_eq!(names(&snap, "orphan OR #x"), ["Alone.md", "Myself.md", "Red.md"]);
+        assert_eq!(names(&snap, "orphan AND NOT no-backlinks"), Vec::<String>::new());
+        assert_eq!(names(&snap, "\"orphan\""), Vec::<String>::new(), "quoted it is the word");
+        assert!(snap.linkage_made());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: QUERY-031
+    #[test]
+    fn query_031_a_note_linked_only_by_a_drawing_has_a_backlink() {
+        let scene = crate::drawing::Scene::parse(&crate::drawing::SAMPLE_SCENE.replace("\"Idea\"", "\"see [[Target]]\"")).unwrap();
+        let (v, d) = vault("linkage-drawing", &[("Target.md", "x\n"), ("D.excalidraw", &scene.to_json())]);
+        let snap = Snapshot::of(&v);
+        assert_eq!(names(&snap, "orphan"), Vec::<String>::new());
+        assert_eq!(names(&snap, "no-backlinks"), ["D.excalidraw"]);
         let _ = std::fs::remove_dir_all(&d);
     }
 

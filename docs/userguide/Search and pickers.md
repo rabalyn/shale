@@ -15,7 +15,7 @@ the fields `from:`, `subject:`, `in:`, `date:` of mail and posts) is in [[Search
 
 The search reads a small **query language**: `AND`, `OR`, `NOT` (upper case), parentheses, `-word`,
 and the fields `#tag`, `status:doing` (any property of a note), `path:Projects/`, `due:<+7d`,
-`due:overdue`, `links:[[Note]]`, `blocked` and `blocking`. For example `#todo due:overdue NOT status:done`
+`due:overdue`, `links:[[Note]]`, `blocked`, `blocking`, `orphan` and `no-backlinks`. For example `#todo due:overdue NOT status:done`
 lists the notes with the tag whose due date has passed. A query that is not valid (an open parenthesis,
 `due:soon`) is underlined in the box with the reason under it, and the last list stays. Mail and posts
 take only words and their own fields; when a query has something they do not understand, a line under the
@@ -29,7 +29,7 @@ early, narrow the query". The rules are in [[Search syntax]].
 Next to the search box, in the sidebar and in the picker, is a **gear** button. It opens a **filter form** under
 the box, for building a query without remembering the syntax: **All of** (every row must match) or **Any of** (one
 of them), and rows you add with **+ Add filter**: **tag is**, **property is** (a name and a value), **due** (overdue,
-or within, before, on, after or on or after a day: a date, `today` or `+7d`), **is blocked**, **is blocking**,
+or within, before, on, after or on or after a day: a date, `today` or `+7d`), **is blocked**, **is blocking**, **is an orphan**, **has no backlinks**,
 **in folder**, **links to** and **text contains**. Each row has a **not** switch and a ✕ to remove it. The form writes
 the query into the box as you go and the list follows at once; what you type in the box fills the form. A row
 that is not complete yet (an empty tag, a property without a value) is not in the query and says what it needs.

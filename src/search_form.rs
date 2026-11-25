@@ -1,6 +1,6 @@
 //! The filter and sort form (QUERY-021…QUERY-027): one widget that edits a query text, and
 //! beside it the sort text of a lane, for the boards, the sidebar search and the picker. The
-//! rows are tag, property, due, blocked, blocking, folder, link and text, each with a "not"
+//! rows are tag, property, due, blocked, blocking, orphan, no backlinks, folder, link and text, each with a "not"
 //! switch (QUERY-021), joined by All of or Any of (QUERY-022). The form always writes its text; a
 //! text opens in the form only when it is one level of AND or OR of such rows, else the form says
 //! so and leaves it as it is (QUERY-025).
@@ -92,6 +92,10 @@ pub enum What {
     },
     Blocked,
     Blocking,
+    /// `orphan`
+    Orphan,
+    /// `no-backlinks`
+    NoBacklinks,
     /// `path:Folder/`
     Folder(String),
     /// `links:[[Note]]`
@@ -108,6 +112,8 @@ impl What {
             What::Due { cmp: DueCmp::OnOrBefore, day: "+7d".into() },
             What::Blocked,
             What::Blocking,
+            What::Orphan,
+            What::NoBacklinks,
             What::Folder(String::new()),
             What::Links(String::new()),
             What::Text(String::new()),
@@ -122,6 +128,8 @@ impl What {
             What::Due { .. } => "due",
             What::Blocked => "is blocked",
             What::Blocking => "is blocking",
+            What::Orphan => "is an orphan",
+            What::NoBacklinks => "has no backlinks",
             What::Folder(_) => "in folder",
             What::Links(_) => "links to",
             What::Text(_) => "text contains",
@@ -152,7 +160,7 @@ fn quoted(v: &str) -> String {
 
 /// A text as a query word: bare when it reads back as the same text, else in quotes.
 fn text_word(v: &str) -> String {
-    let operator = matches!(v, "AND" | "OR" | "NOT" | "blocked" | "blocking");
+    let operator = matches!(v, "AND" | "OR" | "NOT" | "blocked" | "blocking" | "orphan" | "no-backlinks");
     let field = v.contains(':') || v.contains("[[") || v.starts_with(['-', '#']);
     if operator || field || !one_word(v) {
         format!("\"{v}\"")
@@ -183,6 +191,8 @@ impl Row {
             What::Due { cmp, day } => format!("due:{}{day}", cmp.op()),
             What::Blocked => "blocked".to_string(),
             What::Blocking => "blocking".to_string(),
+            What::Orphan => "orphan".to_string(),
+            What::NoBacklinks => "no-backlinks".to_string(),
             What::Folder(v) if v.trim().is_empty() || v.contains('"') => return Err("a folder is a path"),
             What::Folder(v) => format!("path:{}", quoted(v)),
             What::Links(v) if v.trim().is_empty() || v.contains(['"', '[', ']']) => return Err("a link is the name of a note"),
@@ -241,6 +251,8 @@ fn row_of(checked: &Checked, term: &Term, not: bool) -> Row {
         TermKind::Links(_) => What::Links(after_colon(&src).trim_start_matches("[[").trim_end_matches("]]").to_string()),
         TermKind::Blocked => What::Blocked,
         TermKind::Blocking => What::Blocking,
+        TermKind::Orphan => What::Orphan,
+        TermKind::NoBacklinks => What::NoBacklinks,
     };
     Row { not, what }
 }
@@ -387,6 +399,8 @@ mod tests {
             (due(DueCmp::OnOrAfter, "today"), "due:>=today"),
             (What::Blocked, "blocked"),
             (What::Blocking, "blocking"),
+            (What::Orphan, "orphan"),
+            (What::NoBacklinks, "no-backlinks"),
             (What::Folder("Projects/".into()), "path:Projects/"),
             (What::Folder("My Notes/".into()), "path:\"My Notes/\""),
             (What::Links("Big Plan".into()), "links:[[Big Plan]]"),
@@ -494,7 +508,7 @@ mod tests {
     }
 
     fn value() -> impl Strategy<Value = String> {
-        prop_oneof![3 => "[a-zA-Z0-9][a-zA-Z0-9_/.-]{0,6}", 1 => "[a-z]{1,4} [a-z]{1,4}", 1 => "[a-z]{1,3}  [a-z]{1,3}", 1 => "[a-z]{1,4}\\([a-z]{1,3}\\)", 1 => Just("AND".to_string()), 1 => Just("-a".to_string()), 1 => "[a-z]{1,3}:[a-z0-9]{1,3}", 1 => Just("blocked".to_string())]
+        prop_oneof![3 => "[a-zA-Z0-9][a-zA-Z0-9_/.-]{0,6}", 1 => "[a-z]{1,4} [a-z]{1,4}", 1 => "[a-z]{1,3}  [a-z]{1,3}", 1 => "[a-z]{1,4}\\([a-z]{1,3}\\)", 1 => Just("AND".to_string()), 1 => Just("-a".to_string()), 1 => "[a-z]{1,3}:[a-z0-9]{1,3}", 1 => Just("blocked".to_string()), 1 => Just("orphan".to_string()), 1 => Just("no-backlinks".to_string())]
     }
 
     fn what() -> impl Strategy<Value = What> {
@@ -510,6 +524,8 @@ mod tests {
             (cmp, day).prop_map(|(cmp, day)| What::Due { cmp, day: day.to_string() }),
             Just(What::Blocked),
             Just(What::Blocking),
+            Just(What::Orphan),
+            Just(What::NoBacklinks),
             value().prop_map(What::Folder),
             "[a-zA-Z0-9][a-zA-Z0-9 ]{0,6}".prop_map(What::Links),
             text.prop_map(What::Text),
