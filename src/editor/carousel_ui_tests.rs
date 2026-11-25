@@ -40,9 +40,9 @@ fn click(h: &mut Harness, ed: &mut NoteEditor, text: &mut String, v: &Vault, at:
     h.frame(ed, text, v, rel, vec![Event::PointerMoved(at)]);
     h.frame(ed, text, v, rel, vec![press(at, true)]);
     h.frame(ed, text, v, rel, vec![press(at, false)]);
-    for _ in 0..3 {
-        h.frame(ed, text, v, rel, vec![]);
-    }
+    // wait until the pictures of the slide that is shown now are loaded: an image that arrives later
+    // changes the height of the carousel and moves the buttons the next click is aimed at
+    h.settle(ed, text, v, rel);
 }
 
 /// The centres of the buttons "Previous image" and "Next image" and of the first dot, from the place of the position label.
