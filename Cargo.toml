@@ -84,11 +84,24 @@ debug = "line-tables-only"
 opt-level = 2
 debug = "line-tables-only"
 
-# What scripts/bench.sh builds (BUILD-038): the release profile with line tables, so a flamegraph
-# names functions and lines. The shipped release profile is unchanged.
+# The release profile drops the symbol table (BUILD-044): about 18 MB of the executable.
+[profile.release]
+strip = "symbols"
+
+# What the GitHub release builds ship (BUILD-044): fat LTO and one codegen unit make the executable
+# about 11 MB smaller and the build about four times longer, so `cargo build --release` and
+# `cargo test --release` (scripts/land.sh --release, the checks) stay on the plain release profile.
+[profile.dist]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+
+# What scripts/bench.sh builds (BUILD-038): the release profile with symbols and line tables, so a
+# flamegraph names functions and lines.
 [profile.bench-release]
 inherits = "release"
 debug = "line-tables-only"
+strip = "none"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
