@@ -86,7 +86,7 @@ impl Palette {
             text: Color32::from_rgb(218, 218, 218),
             text_strong: Color32::from_rgb(240, 240, 240),
             muted: Color32::from_rgb(150, 150, 150),
-            faint: Color32::from_rgb(105, 105, 105),
+            faint: Color32::from_rgb(112, 112, 112),
             accent: Color32::from_rgb(138, 124, 247),
             link: Color32::from_rgb(92, 166, 255),
             link_missing: Color32::from_rgb(255, 104, 104),
@@ -100,7 +100,7 @@ impl Palette {
             syntax_keyword: Color32::from_rgb(198, 142, 235),
             syntax_string: Color32::from_rgb(152, 205, 120),
             syntax_number: Color32::from_rgb(240, 150, 100),
-            syntax_comment: Color32::from_rgb(120, 128, 140),
+            syntax_comment: Color32::from_rgb(140, 148, 160),
             syntax_function: Color32::from_rgb(110, 175, 250),
             syntax_type: Color32::from_rgb(230, 200, 110),
             syntax_operator: Color32::from_rgb(110, 205, 210),
@@ -436,23 +436,37 @@ pub fn apply_palette(ctx: &egui::Context, p: &Palette) {
     v.window_stroke = Stroke::new(1.0, p.border);
     v.window_corner_radius = CornerRadius::same(10);
     v.menu_corner_radius = CornerRadius::same(8);
+    // the colour of text on a background that has a colour of its own: the one of the palette
+    // when it reads there, else moved towards black or white until it does (CFG-082), so a
+    // palette made by hand (the `[shale]` table of a theme file) cannot make text unreadable
+    let extreme = if p.dark { Color32::WHITE } else { Color32::BLACK };
+    let on = |fg: Color32, bgs: &[Color32]| Stroke::new(1.0, crate::themes::lift_all(fg, bgs, extreme, crate::themes::TEXT_CONTRAST));
     v.selection.bg_fill = p.selection_bg;
-    v.selection.stroke = Stroke::new(1.0, p.accent);
-    v.hyperlink_color = p.link;
+    // egui draws the text of a selected row in this colour: the accent only when it reads
+    v.selection.stroke = on(p.accent, &[p.selection_bg]);
+    if v.selection.stroke.color != p.accent {
+        v.selection.stroke = on(p.text, &[p.selection_bg]);
+    }
+    v.hyperlink_color = on(p.link, &[p.bg_primary, p.bg_secondary]).color;
     v.override_text_color = None;
-    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, p.text);
+    v.widgets.noninteractive.fg_stroke = on(p.text, &[p.bg_primary, p.bg_secondary]);
     v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, p.border);
     v.widgets.inactive.bg_fill = p.widget_bg;
     v.widgets.inactive.weak_bg_fill = p.widget_weak_bg;
-    v.widgets.inactive.fg_stroke = Stroke::new(1.0, p.text);
+    v.widgets.inactive.fg_stroke = on(p.text, &[p.widget_bg, p.widget_weak_bg, p.bg_secondary]);
     v.widgets.inactive.corner_radius = CornerRadius::same(5);
     v.widgets.hovered.bg_fill = p.bg_hover;
     v.widgets.hovered.weak_bg_fill = p.bg_hover;
     v.widgets.hovered.corner_radius = CornerRadius::same(5);
     v.widgets.hovered.bg_stroke = Stroke::new(1.0, p.hover_stroke);
+    v.widgets.hovered.fg_stroke = on(p.text_strong, &[p.bg_hover]);
     v.widgets.active.bg_fill = p.bg_active;
     v.widgets.active.weak_bg_fill = p.bg_active;
     v.widgets.active.corner_radius = CornerRadius::same(5);
+    v.widgets.active.fg_stroke = on(p.text_strong, &[p.bg_active]);
+    v.widgets.open.bg_fill = p.bg_active;
+    v.widgets.open.weak_bg_fill = p.bg_active;
+    v.widgets.open.fg_stroke = on(p.text_strong, &[p.bg_active]);
     v.widgets.open.corner_radius = CornerRadius::same(5);
     v.text_cursor.stroke = Stroke::new(2.0, p.accent);
     ctx.set_global_style(style);
@@ -496,7 +510,7 @@ mod tests {
             (Kind::String, (152, 205, 120)),
             (Kind::Number, (240, 150, 100)),
             (Kind::Constant, (240, 150, 100)),
-            (Kind::Comment, (120, 128, 140)),
+            (Kind::Comment, (140, 148, 160)),
             (Kind::Function, (110, 175, 250)),
             (Kind::Type, (230, 200, 110)),
             (Kind::Operator, (110, 205, 210)),
@@ -550,7 +564,7 @@ mod tests {
         assert_eq!(v.extreme_bg_color, Color32::from_rgb(30, 30, 30));
         assert_eq!(v.faint_bg_color, Color32::from_rgb(36, 36, 36));
         assert_eq!(v.selection.bg_fill, Color32::from_rgb(70, 64, 130));
-        assert_eq!(v.selection.stroke, Stroke::new(1.0, p.accent));
+        assert_eq!(v.selection.stroke, Stroke::new(1.0, p.text), "the accent does not read on the selection, so the text colour is drawn");
         assert_eq!(v.hyperlink_color, p.link);
         assert_eq!(v.widgets.inactive.bg_fill, Color32::from_rgb(48, 48, 48));
         assert_eq!(v.widgets.inactive.weak_bg_fill, Color32::from_rgb(44, 44, 44));
