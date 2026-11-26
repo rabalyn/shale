@@ -10,6 +10,20 @@ its section from this file.
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-26
+
+### Added
+
+- **One file and folder picker for the whole of Shale**: Open… and Create… for a vault (also on the start screen, with its new **Choose…** button), the library folders, the import of a template set and the logos of the LaTeX export, the attachments of a mail and the place of a PDF, book or Word export (**Browse…**) now choose with the dialog of your system (the xdg-desktop-portal on Linux, the native dialog of Windows and macOS), which has its own shortcuts, search and New folder button. Create… still asks "Start with sample notes", in a small step after the system's dialog. Where there is no system dialog, or when you turn **Use the system's file dialog** off (Settings → Vault), Shale's own picker opens: a path field, shortcuts to your home folder, Desktop, Documents, Downloads, Pictures, Videos and Music, your vaults, your library folders and your drives, folders and files, several files at once, kinds of file, and a **New folder** field that makes a folder inside the shown one and uses it (a name Windows would not accept is refused with the reason; a name that exists offers to use that folder). The **Import** dialog has an **Add files…** button for several files at once, with the kinds of the import as filters; the typed path stays (#690, #688).
+- The search has two new words, `orphan` (a note or drawing with no link in or out) and `no-backlinks` (nothing links to it; it may link out). A link to itself, a red link and a link to an image, a PDF or other media do not count. They work in the sidebar, the full search, the quick switcher and board lanes, combine with `AND`, `OR` and `NOT`, and have the rows **is an orphan** and **has no backlinks** in the filter form (#724).
+- **Unlinked notes** view (#725): a new tab (the ribbon icon of two circles with a broken line, after Keymap) that lists the notes and drawings no link connects. A switch shows one group at a time, **Orphans** (no link in or out) or **No backlinks** (nothing links to the file; it may link out), by the same rule as the search words `orphan` and `no-backlinks`. Sort it by **date changed** (the default, newest first; the `modified:` property of the note, else the file's time) or by **name**; a click opens the note or the drawing. The tab comes back after a restart with its switch and sort.
+
+### Changed
+
+- The feeds list draws faster and with fewer allocations: a post far from the view no longer makes its key a second time and a third time to find its stored height, and the search in all notes reads a note once, not twice, when the query is one word, and no longer asks the clock for the date unless the query has a `due:` term (Refs #699).
+- **Engineering** (#702): the test of the button cursors and hover looks of the Sync settings page (LAY-038) runs on Windows too, not only on Linux and macOS.
+- For developers: a binding rule for portable code and tests (DEV-049, `CLAUDE.md`): paths built with `Path`, expected values built the way the code builds them, no `/tmp`, no Unix-only assumptions, downloaded tools picked by system and CPU, and `scripts/cross-check.sh` before a commit (#722).
+
 ## [0.8.1] - 2026-11-25
 
 ### Added
@@ -2161,7 +2175,8 @@ First public version (published before releases were tagged).
 - Ctrl+Shift+F always focuses the search box and selects the previous search.
 - File names with `#` work in links.
 
-[Unreleased]: https://github.com/rabalyn/shale/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/rabalyn/shale/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/rabalyn/shale/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/rabalyn/shale/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/rabalyn/shale/compare/v0.7.6...v0.8.0
 [0.7.6]: https://github.com/rabalyn/shale/compare/v0.7.5...v0.7.6
