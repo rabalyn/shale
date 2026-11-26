@@ -107,12 +107,14 @@ fn job_040_a_scan_is_a_task_that_the_registry_refuses_twice_and_the_result_is_ca
     assert!(!scan.running(), "the registry refused a second scan");
     drop(held);
     // the scan is a quiet task: running at once, listed in the indicator only after two seconds
+    let gate = scan.hold();
     scan.tick(Some(&vault), &busy, || {});
     assert!(scan.running());
     let info = busy.info(&FONT_SCAN).expect("the task is registered");
     assert_eq!(info.label, "Looking up fonts...");
     assert!(busy.list_at(Instant::now()).is_empty(), "not listed at first");
     assert!(busy.list_at(Instant::now() + Duration::from_secs(3)).iter().any(|t| t.label == "Looking up fonts..."), "listed after 2 s");
+    gate.store(true, std::sync::atomic::Ordering::SeqCst);
     finish(&mut scan, Some(&vault), &busy);
     assert!(!busy.is_running(&FONT_SCAN), "the task ended with the job");
     let cat: Catalogue = scan.catalogue();
